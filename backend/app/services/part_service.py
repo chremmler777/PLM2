@@ -418,7 +418,7 @@ class RevisionService:
         summary: Optional[str] = None,
         created_by: int = None,
     ) -> PartRevision:
-        """Transition from RFQ to Engineering phase (RFQ → ENG1)."""
+        """Transition from RFQ to Engineering phase (RFQ → ENG1, ENG2, etc)."""
         rfq_rev = await session.get(PartRevision, rfq_revision_id)
         if not rfq_rev or rfq_rev.phase != RevisionPhase.RFQ_PHASE.value:
             raise ValueError("Revision is not in RFQ phase")
@@ -437,13 +437,34 @@ class RevisionService:
             performed_by=created_by,
         )
 
-        # Create ENG1 revision with IN_PROGRESS status (major version, not draft)
+        # Calculate next major ENG version (not hardcoded)
+        result = await session.execute(
+            select(PartRevision)
+            .where(
+                (PartRevision.part_id == rfq_rev.part_id)
+                & (PartRevision.phase == RevisionPhase.ENGINEERING_PHASE.value)
+                & (PartRevision.parent_revision_id.is_(None))
+            )
+            .order_by(PartRevision.revision_name.desc())
+            .limit(1)
+        )
+        last_eng = result.scalar_one_or_none()
+
+        if last_eng:
+            last_num = int(last_eng.revision_name.replace("ENG", ""))
+            next_num = last_num + 1
+        else:
+            next_num = 1
+
+        eng_name = f"ENG{next_num}"
+
+        # Create ENG major with IN_PROGRESS status (major version, not draft, no parent)
         eng_revision = PartRevision(
             part_id=rfq_rev.part_id,
-            revision_name="ENG1",
+            revision_name=eng_name,
             phase=RevisionPhase.ENGINEERING_PHASE.value,
             status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=rfq_rev.id,
+            parent_revision_id=None,  # ENG major is standalone, not a child of RFQ
             summary=summary or f"Engineering from {rfq_rev.revision_name}",
             created_by=created_by,
         )
@@ -708,7 +729,7 @@ class RevisionService:
             revision_name=freeze_name,
             phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
             status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=eng_rev.id,
+            parent_revision_id=None,  # IND major is standalone, not a child of ENG
             summary=summary or f"Design freeze from {eng_rev.revision_name}",
             created_by=created_by,
         )
