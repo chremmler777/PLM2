@@ -90,8 +90,9 @@ export default function PartDetail() {
       toast.success('RFQ created!');
       refetch();
     },
-    onError: () => {
-      toast.error('Failed to create RFQ');
+    onError: (error: any) => {
+      const message = error.response?.data?.detail || 'Failed to create RFQ';
+      toast.error(message);
     },
   });
 
@@ -127,6 +128,21 @@ export default function PartDetail() {
     },
     onError: () => {
       toast.error('Failed to promote revision');
+    },
+  });
+
+  // Reject revision mutation
+  const rejectRevisionMutation = useMutation({
+    mutationFn: async (revisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/reject`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Rejected ${data.revision_name}`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to reject revision');
     },
   });
 
@@ -245,12 +261,23 @@ export default function PartDetail() {
                                 Created at {new Date(majorRev.created_at).toLocaleString()}
                               </p>
                             </div>
-                            <button
-                              onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
-                              className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
-                            >
-                              + Proposal
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
+                                className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                              >
+                                + Proposal
+                              </button>
+                              {majorRev.status !== 'rejected' && (
+                                <button
+                                  onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
+                                  disabled={rejectRevisionMutation.isPending}
+                                  className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
+                                >
+                                  Reject
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -273,15 +300,14 @@ export default function PartDetail() {
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
-                                {proposal.status === 'draft' && (
-                                  <button
-                                    onClick={() => promoteRevisionMutation.mutate(proposal.id)}
-                                    disabled={promoteRevisionMutation.isPending}
-                                    className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
-                                  >
-                                    Promote
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => promoteRevisionMutation.mutate(proposal.id)}
+                                  disabled={promoteRevisionMutation.isPending}
+                                  className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
+                                  title={proposal.status === 'rejected' ? 'Re-promote this proposal (creates new major version)' : 'Promote to next major version'}
+                                >
+                                  Promote
+                                </button>
                               </div>
                             </div>
                           ))}
