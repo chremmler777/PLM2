@@ -14,27 +14,40 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    // For testing: hardcoded credentials
-    // In Phase 6, this will call actual API
-    if (email === 'test@example.com' && password === 'password') {
-      console.log('Valid credentials, calling login()');
+    try {
+      // Call backend login API
+      const response = await fetch('http://localhost:8000/api/v1/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
-      // Update auth state
-      login('test-token-12345', 1);
+      if (!response.ok) {
+        throw new Error('Invalid credentials');
+      }
+
+      const data = await response.json();
+      console.log('Login successful:', { token: data.access_token, userId: data.user_id });
+
+      // Update auth state with token from backend
+      login(data.access_token, data.user_id);
       toast.success('Logged in successfully!');
 
-      // Use Promise.resolve() to ensure state updates are batched
-      // then navigate in the next microtask
+      // Navigate after state update
       Promise.resolve().then(() => {
-        console.log('Promise resolved, navigating to /articles');
         navigate('/articles');
       });
-    } else {
-      console.log('Invalid credentials:', { email, password });
+    } catch (error) {
+      console.error('Login error:', error);
       toast.error('Invalid credentials (test: test@example.com / password)');
       setIsLoading(false);
     }
