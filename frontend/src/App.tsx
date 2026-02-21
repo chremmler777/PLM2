@@ -7,6 +7,7 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
+import Dashboard from './pages/Dashboard';
 import ArticlesPage from './pages/ArticlesPage';
 
 const queryClient = new QueryClient();
@@ -23,6 +24,14 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/articles"
         element={
           <ProtectedRoute>
@@ -32,7 +41,7 @@ function AppRoutes() {
       />
       <Route
         path="/"
-        element={isAuthenticated ? <Navigate to="/articles" /> : <Navigate to="/login" />}
+        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />}
       />
     </Routes>
   );
