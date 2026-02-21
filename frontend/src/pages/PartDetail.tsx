@@ -58,6 +58,34 @@ function getPhaseColor(phase: string) {
   }
 }
 
+function canPromote(proposal: Revision, allRevisions: Revision[]): boolean {
+  // Can promote if: draft, OR approved but newer major version is rejected
+  if (proposal.status === 'draft') return true;
+  if (proposal.status === 'approved' && proposal.parent_revision_id) {
+    // Check if parent's parent (the previous major) exists
+    const parent = allRevisions.find((r) => r.id === proposal.parent_revision_id);
+    if (!parent) return false;
+
+    // Extract parent major (e.g., "RFQ2" from parent "RFQ2")
+    const parentMajor = parent.revision_name.split('.')[0];
+    const parentNum = parseInt(parentMajor.replace(/\D/g, ''));
+    const phase = parent.phase;
+
+    // Find newer major versions (e.g., RFQ3 when parent is RFQ2)
+    const newerMajor = allRevisions.find(
+      (r) =>
+        r.phase === phase &&
+        !r.parent_revision_id &&
+        r.revision_name.match(/\D+/)?.[0] === parentMajor.match(/\D+/)?.[0] &&
+        parseInt(r.revision_name.replace(/\D/g, '')) > parentNum
+    );
+
+    // Can re-promote if newer major is rejected
+    return newerMajor ? newerMajor.status === 'rejected' : false;
+  }
+  return false;
+}
+
 export default function PartDetail() {
   const { partId } = useParams<{ partId: string }>();
   const navigate = useNavigate();
@@ -302,7 +330,7 @@ export default function PartDetail() {
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
-                                {proposal.status !== 'rejected' && (
+                                {canPromote(proposal, part.revisions) && (
                                   <button
                                     onClick={() => promoteRevisionMutation.mutate(proposal.id)}
                                     disabled={promoteRevisionMutation.isPending}

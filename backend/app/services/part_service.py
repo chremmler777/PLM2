@@ -304,13 +304,17 @@ class RevisionService:
         )
 
         # Create the new major version (copy of the promoted revision)
+        summary = f"Promoted from {revision.revision_name}"
+        if revision.summary:
+            summary = f"{revision.summary} (promoted from {revision.revision_name})"
+
         new_revision = PartRevision(
             part_id=revision.part_id,
             revision_name=next_major_name,
             phase=phase,
             status=RevisionStatus.IN_PROGRESS.value,  # Active status for major versions
             parent_revision_id=None,  # New major version has no parent
-            summary=revision.summary,  # Inherit summary
+            summary=summary,
             created_by=created_by,
         )
         session.add(new_revision)
