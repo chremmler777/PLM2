@@ -7,6 +7,10 @@ from app.models.entities import (
 from app.models.article import (
     Article, ArticleRevision, ArticleDocument, BOM, BOMItem
 )
+from app.models.part import (
+    Part, PartRevision, RevisionFile, RevisionChangelog,
+    RevisionPhase, RevisionStatus, TestDataStatus
+)
 from app.models.workflow import (
     WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )
@@ -30,6 +34,13 @@ __all__ = [
     "ArticleDocument",
     "BOM",
     "BOMItem",
+    "Part",
+    "PartRevision",
+    "RevisionFile",
+    "RevisionChangelog",
+    "RevisionPhase",
+    "RevisionStatus",
+    "TestDataStatus",
     "WorkflowTemplate",
     "WorkflowStep",
     "WorkflowInstance",
