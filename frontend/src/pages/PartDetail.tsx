@@ -88,6 +88,33 @@ function canAdvance(proposal: Revision, allRevisions: Revision[]): boolean {
   return false;
 }
 
+function hasEngineeringPhase(revisions: Revision[]): boolean {
+  return revisions.some((r) => r.phase === 'engineering');
+}
+
+function getLatestActiveRFQMajor(revisions: Revision[]): Revision | null {
+  // Get the latest RFQ major version that is not rejected
+  const rfqMajors = revisions.filter((r) => r.phase === 'rfq_phase' && !r.parent_revision_id);
+  return rfqMajors
+    .sort((a, b) => {
+      const numA = parseInt(a.revision_name.replace(/\D/g, ''));
+      const numB = parseInt(b.revision_name.replace(/\D/g, ''));
+      return numB - numA;
+    })
+    .find((r) => r.status !== 'rejected') || null;
+}
+
+function getLatestEngineeringMajor(revisions: Revision[]): Revision | null {
+  // Get the latest ENG major version
+  const engMajors = revisions.filter((r) => r.phase === 'engineering' && !r.parent_revision_id);
+  return engMajors
+    .sort((a, b) => {
+      const numA = parseInt(a.revision_name.replace(/\D/g, ''));
+      const numB = parseInt(b.revision_name.replace(/\D/g, ''));
+      return numB - numA;
+    })[0] || null;
+}
+
 export default function PartDetail() {
   const { partId } = useParams<{ partId: string }>();
   const navigate = useNavigate();
@@ -322,13 +349,32 @@ export default function PartDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-gray-900">Revision History</h2>
-            <button
-              onClick={() => createRfqMutation.mutate()}
-              disabled={createRfqMutation.isPending}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
-            >
-              {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
-            </button>
+            <div className="flex gap-2">
+              {!hasEngineeringPhase(part.revisions) && (
+                <button
+                  onClick={() => createRfqMutation.mutate()}
+                  disabled={createRfqMutation.isPending}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
+                >
+                  {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
+                </button>
+              )}
+              {hasEngineeringPhase(part.revisions) && !part.revisions.some((r) => r.phase === 'freeze') && (
+                <button
+                  onClick={() => {
+                    const latestEng = getLatestEngineeringMajor(part.revisions);
+                    if (latestEng) {
+                      // TODO: Create new ENG major endpoint
+                      toast.error('Create new ENG major not yet implemented');
+                    }
+                  }}
+                  disabled
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 text-sm font-medium"
+                >
+                  + New ENG
+                </button>
+              )}
+            </div>
           </div>
 
           {Object.keys(majorVersions).length === 0 ? (
@@ -371,7 +417,7 @@ export default function PartDetail() {
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                                 >
-                                  + Proposal
+                                  + Iterate
                                 </button>
                               )}
                               {majorRev.status !== 'rejected' && majorRev.phase === 'engineering' && (
@@ -379,7 +425,7 @@ export default function PartDetail() {
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                                 >
-                                  + Proposal
+                                  + Iterate
                                 </button>
                               )}
                               {majorRev.status !== 'rejected' && (
@@ -391,7 +437,7 @@ export default function PartDetail() {
                                   Reject
                                 </button>
                               )}
-                              {majorRev.phase === 'rfq_phase' && majorRev.status === 'in_progress' && (
+                              {majorRev.phase === 'rfq_phase' && majorRev === getLatestActiveRFQMajor(part.revisions) && majorRev.status === 'in_progress' && (
                                 <button
                                   onClick={() => transitionToEngineeringMutation.mutate(majorRev.id)}
                                   disabled={transitionToEngineeringMutation.isPending}
@@ -400,7 +446,7 @@ export default function PartDetail() {
                                   {transitionToEngineeringMutation.isPending ? 'Awarding...' : '→ Engineering'}
                                 </button>
                               )}
-                              {majorRev.phase === 'engineering' && majorRev.status === 'in_progress' && (
+                              {majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status === 'in_progress' && (
                                 <button
                                   onClick={() => transitionToFreezeMutation.mutate(majorRev.id)}
                                   disabled={transitionToFreezeMutation.isPending}

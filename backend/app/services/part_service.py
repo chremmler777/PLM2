@@ -426,6 +426,20 @@ class RevisionService:
         if not rfq_rev or rfq_rev.phase != RevisionPhase.RFQ_PHASE.value:
             raise ValueError("Revision is not in RFQ phase")
 
+        # Archive the RFQ major version (awarded, no longer active)
+        rfq_rev.status = RevisionStatus.ARCHIVED.value
+        await ChangelogService.log_action(
+            session=session,
+            part_id=rfq_rev.part_id,
+            revision_id=rfq_rev.id,
+            action="status_changed",
+            action_description=f"Archived {rfq_rev.revision_name} (awarded to engineering)",
+            field_name="status",
+            old_value=RevisionStatus.IN_PROGRESS.value,
+            new_value=RevisionStatus.ARCHIVED.value,
+            performed_by=created_by,
+        )
+
         # Create ENG1 revision with IN_PROGRESS status (major version, not draft)
         eng_revision = PartRevision(
             part_id=rfq_rev.part_id,
@@ -624,6 +638,20 @@ class RevisionService:
             next_freeze_num = 1
 
         freeze_name = f"IND{next_freeze_num}"
+
+        # Archive the ENG major version (frozen, no longer active in engineering)
+        eng_rev.status = RevisionStatus.ARCHIVED.value
+        await ChangelogService.log_action(
+            session=session,
+            part_id=eng_rev.part_id,
+            revision_id=eng_rev.id,
+            action="status_changed",
+            action_description=f"Archived {eng_rev.revision_name} (frozen in design freeze)",
+            field_name="status",
+            old_value=RevisionStatus.IN_PROGRESS.value,
+            new_value=RevisionStatus.ARCHIVED.value,
+            performed_by=created_by,
+        )
 
         freeze_revision = PartRevision(
             part_id=eng_rev.part_id,
