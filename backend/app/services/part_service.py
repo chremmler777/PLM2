@@ -308,7 +308,7 @@ class RevisionService:
             part_id=revision.part_id,
             revision_name=next_major_name,
             phase=phase,
-            status=RevisionStatus.DRAFT.value,
+            status=RevisionStatus.IN_PROGRESS.value,  # Active status for major versions
             parent_revision_id=None,  # New major version has no parent
             summary=revision.summary,  # Inherit summary
             created_by=created_by,
