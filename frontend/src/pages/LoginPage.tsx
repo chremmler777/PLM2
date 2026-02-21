@@ -44,7 +44,7 @@ export default function LoginPage() {
 
       // Navigate after state update
       Promise.resolve().then(() => {
-        navigate('/articles');
+        navigate('/dashboard');
       });
     } catch (error) {
       console.error('Login error:', error);
