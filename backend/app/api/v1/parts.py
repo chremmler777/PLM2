@@ -242,6 +242,29 @@ async def reject_revision(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/{part_id}/revisions/{revision_id}/unreject", response_model=PartRevisionResponse)
+async def unreject_revision(
+    part_id: int,
+    revision_id: int,
+    body: RejectMajorRevisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore a rejected/archived revision back to draft (for proposals) or available status."""
+    try:
+        revision = await RevisionService.unreject_revision(
+            session=db,
+            revision_id=revision_id,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to unreject revision: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.post("/{part_id}/revisions/{rfq_revision_id}/to-engineering", response_model=PartRevisionResponse)
 async def transition_rfq_to_engineering(
     part_id: int,

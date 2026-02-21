@@ -250,6 +250,21 @@ export default function PartDetail() {
     },
   });
 
+  // Unreject revision mutation
+  const unrejectRevisionMutation = useMutation({
+    mutationFn: async (revisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/unreject`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Restored ${data.revision_name} to available`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to restore revision');
+    },
+  });
+
   // Transition to Engineering mutation
   const transitionToEngineeringMutation = useMutation({
     mutationFn: async (rfqRevisionId: number) => {
@@ -562,13 +577,22 @@ export default function PartDetail() {
                                       Advance
                                     </button>
                                   )}
-                                  {proposal.status !== 'rejected' && (
+                                  {proposal.status !== 'rejected' && proposal.status !== 'archived' && (
                                     <button
                                       onClick={() => rejectRevisionMutation.mutate(proposal.id)}
                                       disabled={rejectRevisionMutation.isPending}
                                       className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
                                     >
                                       Reject
+                                    </button>
+                                  )}
+                                  {(proposal.status === 'rejected' || proposal.status === 'archived') && (
+                                    <button
+                                      onClick={() => unrejectRevisionMutation.mutate(proposal.id)}
+                                      disabled={unrejectRevisionMutation.isPending}
+                                      className="px-3 py-1 bg-yellow-100 text-yellow-700 text-sm rounded hover:bg-yellow-200 disabled:bg-gray-100"
+                                    >
+                                      Unreject
                                     </button>
                                   )}
                                 </div>

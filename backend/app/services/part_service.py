@@ -412,6 +412,41 @@ class RevisionService:
         return revision
 
     @staticmethod
+    async def unreject_revision(
+        session: AsyncSession,
+        revision_id: int,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Restore a rejected/archived revision back to draft (for proposals)."""
+        revision = await session.get(PartRevision, revision_id)
+        if not revision:
+            raise ValueError("Revision not found")
+
+        old_status = revision.status
+
+        # Restore to DRAFT for proposals, or IN_PROGRESS for majors
+        if revision.parent_revision_id:
+            revision.status = RevisionStatus.DRAFT.value
+        else:
+            revision.status = RevisionStatus.IN_PROGRESS.value
+
+        # Log the restoration
+        await ChangelogService.log_action(
+            session=session,
+            part_id=revision.part_id,
+            revision_id=revision.id,
+            action="status_changed",
+            action_description=f"Restored {revision.revision_name} from {old_status} to {revision.status}",
+            field_name="status",
+            old_value=old_status,
+            new_value=revision.status,
+            performed_by=created_by,
+        )
+
+        logger.info(f"Restored revision {revision.revision_name} from {old_status} to {revision.status}")
+        return revision
+
+    @staticmethod
     async def transition_rfq_to_engineering(
         session: AsyncSession,
         rfq_revision_id: int,
