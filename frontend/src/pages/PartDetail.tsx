@@ -1,27 +1,76 @@
 /**
- * PartDetail - Show part and its revisions
+ * PartDetail - Show part and its revisions with full lifecycle support
  */
 
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
 
+interface Revision {
+  id: number;
+  revision_name: string;
+  phase: string;
+  status: string;
+  summary?: string;
+  parent_revision_id?: number;
+  created_by: number;
+  created_at: string;
+}
+
+interface Part {
+  id: number;
+  part_number: string;
+  name: string;
+  part_type: string;
+  data_classification: string;
+  revisions: Revision[];
+}
+
+function getStatusColor(status: string) {
+  switch (status) {
+    case 'draft':
+      return 'bg-gray-100 text-gray-800';
+    case 'rejected':
+      return 'bg-red-100 text-red-800';
+    case 'approved':
+      return 'bg-green-100 text-green-800';
+    case 'frozen':
+      return 'bg-blue-100 text-blue-800';
+    default:
+      return 'bg-yellow-100 text-yellow-800';
+  }
+}
+
+function getPhaseColor(phase: string) {
+  switch (phase) {
+    case 'rfq_phase':
+      return 'bg-blue-100 text-blue-700';
+    case 'engineering':
+      return 'bg-purple-100 text-purple-700';
+    case 'freeze':
+      return 'bg-orange-100 text-orange-700';
+    case 'ecn':
+      return 'bg-pink-100 text-pink-700';
+    default:
+      return 'bg-gray-100 text-gray-700';
+  }
+}
+
 export default function PartDetail() {
   const { partId } = useParams<{ partId: string }>();
   const navigate = useNavigate();
-
-  console.log('PartDetail rendering with partId:', partId);
+  const [showProposalForm, setShowProposalForm] = useState<number | null>(null);
+  const [proposalSummary, setProposalSummary] = useState('');
 
   // Fetch part
-  const { data: part, isLoading, error: partError } = useQuery({
+  const { data: part, isLoading, error: partError, refetch } = useQuery({
     queryKey: ['part', partId],
     queryFn: async () => {
       try {
-        console.log(`Fetching /v1/parts/${partId}`);
         const response = await client.get(`/v1/parts/${partId}`);
-        console.log('Part response:', response.data);
-        return response.data;
+        return response.data as Part;
       } catch (error) {
         console.error('Failed to load part:', error);
         return null;
@@ -29,26 +78,11 @@ export default function PartDetail() {
     },
   });
 
-  // Fetch revisions
-  const { data: revisions, refetch } = useQuery({
-    queryKey: ['revisions', partId],
-    queryFn: async () => {
-      try {
-        const response = await client.get(`/v1/parts/${partId}/revisions`);
-        return response.data;
-      } catch (error) {
-        console.error('Failed to load revisions:', error);
-        return [];
-      }
-    },
-  });
-
-  // Create RFQ mutation
+  // Create major RFQ mutation
   const createRfqMutation = useMutation({
     mutationFn: async () => {
       const response = await client.post(`/v1/parts/${partId}/revisions/rfq`, {
-        revision_number: 1,
-        summary: 'First RFQ',
+        summary: 'New RFQ cycle',
       });
       return response.data;
     },
@@ -56,8 +90,43 @@ export default function PartDetail() {
       toast.success('RFQ created!');
       refetch();
     },
-    onError: (error: any) => {
+    onError: () => {
       toast.error('Failed to create RFQ');
+    },
+  });
+
+  // Create RFQ proposal mutation
+  const createProposalMutation = useMutation({
+    mutationFn: async (parentId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/rfq-proposal`, {
+        parent_revision_id: parentId,
+        summary: proposalSummary || 'RFQ proposal',
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Proposal created!');
+      setShowProposalForm(null);
+      setProposalSummary('');
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to create proposal');
+    },
+  });
+
+  // Promote revision mutation
+  const promoteRevisionMutation = useMutation({
+    mutationFn: async (revisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/promote`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Promoted to ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to promote revision');
     },
   });
 
@@ -66,7 +135,6 @@ export default function PartDetail() {
   }
 
   if (partError) {
-    console.error('Part error:', partError);
     return (
       <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-4xl mx-auto">
@@ -92,9 +160,17 @@ export default function PartDetail() {
     );
   }
 
+  // Group revisions by major version
+  const majorVersions = part.revisions.reduce((acc: Record<string, Revision[]>, rev) => {
+    const major = rev.revision_name.split('.')[0];
+    if (!acc[major]) acc[major] = [];
+    acc[major].push(rev);
+    return acc;
+  }, {});
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <button
@@ -119,52 +195,132 @@ export default function PartDetail() {
               <div className="text-sm text-gray-600">Classification</div>
               <div className="font-medium text-gray-900 capitalize">{part.data_classification}</div>
             </div>
-            {part.supplier && (
-              <div>
-                <div className="text-sm text-gray-600">Supplier</div>
-                <div className="font-medium text-gray-900">{part.supplier}</div>
-              </div>
-            )}
-            {part.description && (
-              <div className="col-span-2">
-                <div className="text-sm text-gray-600">Description</div>
-                <div className="font-medium text-gray-900">{part.description}</div>
-              </div>
-            )}
           </div>
         </div>
 
         {/* Revisions */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-gray-900">Revisions</h2>
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Revision History</h2>
             <button
               onClick={() => createRfqMutation.mutate()}
               disabled={createRfqMutation.isPending}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
             >
-              {createRfqMutation.isPending ? 'Creating...' : '+ Create RFQ'}
+              {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
             </button>
           </div>
 
-          {revisions && revisions.length > 0 ? (
-            <div className="space-y-2">
-              {revisions.map((rev: any) => (
-                <div key={rev.id} className="p-4 border border-gray-200 rounded-lg">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="font-bold text-gray-900">{rev.revision_name}</div>
-                    <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full capitalize">
-                      {rev.phase.replace('_phase', '').replace('_', ' ')}
-                    </div>
-                  </div>
-                  <div className="text-sm text-gray-600">{rev.summary}</div>
-                  <div className="text-xs text-gray-500 mt-2">Status: {rev.status}</div>
-                </div>
-              ))}
+          {Object.keys(majorVersions).length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              No revisions yet. Click "New RFQ" to start.
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              No revisions yet. Create an RFQ to start.
+            <div className="space-y-6">
+              {Object.keys(majorVersions)
+                .sort()
+                .map((major) => {
+                  const revisions = majorVersions[major];
+                  const majorRev = revisions.find((r) => !r.parent_revision_id);
+                  const proposals = revisions.filter((r) => r.parent_revision_id);
+
+                  return (
+                    <div key={major} className="border border-gray-200 rounded-lg p-4">
+                      {/* Major Version */}
+                      {majorRev && (
+                        <div className="mb-4 pb-4 border-b border-gray-200">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <div className="font-bold text-lg text-gray-900">{majorRev.revision_name}</div>
+                                <span className={`text-xs px-2 py-1 rounded-full ${getPhaseColor(majorRev.phase)}`}>
+                                  {majorRev.phase.replace('_phase', '').replace('_', ' ')}
+                                </span>
+                                <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(majorRev.status)}`}>
+                                  {majorRev.status}
+                                </span>
+                              </div>
+                              {majorRev.summary && <p className="text-sm text-gray-600">{majorRev.summary}</p>}
+                              <p className="text-xs text-gray-500 mt-1">
+                                Created at {new Date(majorRev.created_at).toLocaleString()}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
+                              className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                            >
+                              + Proposal
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Proposals */}
+                      {proposals.length > 0 && (
+                        <div className="space-y-3 mb-4">
+                          {proposals.map((proposal) => (
+                            <div key={proposal.id} className="pl-4 border-l-2 border-gray-300">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="font-medium text-gray-900">{proposal.revision_name}</div>
+                                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(proposal.status)}`}>
+                                      {proposal.status}
+                                    </span>
+                                  </div>
+                                  {proposal.summary && <p className="text-sm text-gray-600">{proposal.summary}</p>}
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    Created at {new Date(proposal.created_at).toLocaleString()}
+                                  </p>
+                                </div>
+                                {proposal.status === 'draft' && (
+                                  <button
+                                    onClick={() => promoteRevisionMutation.mutate(proposal.id)}
+                                    disabled={promoteRevisionMutation.isPending}
+                                    className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
+                                  >
+                                    Promote
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Create Proposal Form */}
+                      {showProposalForm === majorRev?.id && (
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                          <textarea
+                            value={proposalSummary}
+                            onChange={(e) => setProposalSummary(e.target.value)}
+                            placeholder="Proposal notes..."
+                            className="w-full p-2 border border-gray-300 rounded text-sm mb-2"
+                            rows={3}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => createProposalMutation.mutate(majorRev!.id)}
+                              disabled={createProposalMutation.isPending}
+                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:bg-gray-400"
+                            >
+                              Create Proposal
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowProposalForm(null);
+                                setProposalSummary('');
+                              }}
+                              className="px-3 py-1 bg-gray-300 text-gray-900 text-sm rounded hover:bg-gray-400"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
