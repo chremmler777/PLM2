@@ -142,6 +142,7 @@ class PartRevision(Base):
     children: Mapped[list["PartRevision"]] = relationship(
         back_populates="parent_revision",
         remote_side=[parent_revision_id],
+        foreign_keys=[parent_revision_id],
         cascade="all, delete-orphan"
     )
 
