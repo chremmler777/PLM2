@@ -492,7 +492,7 @@ export default function PartDetail() {
                               </p>
                             </div>
                             <div className="flex gap-2">
-                              {majorRev.status !== 'rejected' && majorRev.phase === 'rfq_phase' && (
+                              {majorRev.status !== 'rejected' && majorRev === getLatestActiveRFQMajor(part.revisions) && majorRev.phase === 'rfq_phase' && (
                                 <button
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
@@ -500,7 +500,7 @@ export default function PartDetail() {
                                   + Sub
                                 </button>
                               )}
-                              {majorRev.status !== 'rejected' && majorRev.phase === 'engineering' && (
+                              {majorRev.status !== 'rejected' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.phase === 'engineering' && (
                                 <button
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
@@ -509,8 +509,19 @@ export default function PartDetail() {
                                 </button>
                               )}
                               {majorRev.status !== 'rejected' &&
-                                ((majorRev.phase === 'rfq_phase' && majorRev === getLatestActiveRFQMajor(part.revisions)) ||
-                                 majorRev.phase === 'engineering') && (
+                                majorRev === getLatestActiveRFQMajor(part.revisions) &&
+                                majorRev.phase === 'rfq_phase' && (
+                                <button
+                                  onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
+                                  disabled={rejectRevisionMutation.isPending}
+                                  className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
+                                >
+                                  Reject
+                                </button>
+                              )}
+                              {majorRev.status !== 'rejected' &&
+                                majorRev === getLatestEngineeringMajor(part.revisions) &&
+                                majorRev.phase === 'engineering' && (
                                 <button
                                   onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
                                   disabled={rejectRevisionMutation.isPending}
