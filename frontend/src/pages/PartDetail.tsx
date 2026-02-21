@@ -126,6 +126,33 @@ function getLatestProposalForParent(parentId: number, revisions: Revision[]): Re
     })[0] || null;
 }
 
+function getActiveRevisionLevel(revisions: Revision[]): string {
+  // Get the latest non-rejected major for current phase
+  // Priority: Freeze > Engineering > RFQ
+  const byPhase = {
+    freeze: revisions.filter((r) => r.phase === 'freeze' && !r.parent_revision_id),
+    engineering: revisions.filter((r) => r.phase === 'engineering' && !r.parent_revision_id),
+    rfq_phase: revisions.filter((r) => r.phase === 'rfq_phase' && !r.parent_revision_id),
+  };
+
+  // Get latest non-rejected in each phase
+  const getLatest = (arr: Revision[]) =>
+    arr
+      .sort((a, b) => parseInt(b.revision_name.replace(/\D/g, '')) - parseInt(a.revision_name.replace(/\D/g, '')))
+      .find((r) => r.status !== 'rejected');
+
+  const activeFreeze = getLatest(byPhase.freeze);
+  if (activeFreeze) return `${activeFreeze.revision_name} (Active)`;
+
+  const activeEng = getLatest(byPhase.engineering);
+  if (activeEng) return `${activeEng.revision_name} (Active)`;
+
+  const activeRfq = getLatest(byPhase.rfq_phase);
+  if (activeRfq) return `${activeRfq.revision_name} (Active)`;
+
+  return 'No active revision';
+}
+
 export default function PartDetail() {
   const { partId } = useParams<{ partId: string }>();
   const navigate = useNavigate();
@@ -354,8 +381,15 @@ export default function PartDetail() {
           >
             ← Back
           </button>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">{part.part_number}</h1>
-          <p className="text-gray-600">{part.name}</p>
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">{part.part_number}</h1>
+              <p className="text-gray-600 mb-2">{part.name}</p>
+              <p className="text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-md w-fit">
+                {getActiveRevisionLevel(part.revisions)}
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Part Info */}
@@ -413,7 +447,16 @@ export default function PartDetail() {
                   const proposals = revisions.filter((r) => r.parent_revision_id);
 
                   return (
-                    <div key={major} className="border border-gray-200 rounded-lg p-4">
+                    <div
+                      key={major}
+                      className={`border rounded-lg p-4 ${
+                        majorRev && majorRev.status !== 'rejected' && majorRev === getLatestActiveRFQMajor(part.revisions)
+                          ? 'border-blue-400 bg-blue-50 shadow-md'
+                          : majorRev && majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status !== 'rejected'
+                          ? 'border-purple-400 bg-purple-50 shadow-md'
+                          : 'border-gray-200'
+                      }`}
+                    >
                       {/* Major Version */}
                       {majorRev && (
                         <div className="mb-4 pb-4 border-b border-gray-200">
@@ -439,7 +482,7 @@ export default function PartDetail() {
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                                 >
-                                  + Iterate
+                                  + Sub
                                 </button>
                               )}
                               {majorRev.status !== 'rejected' && majorRev.phase === 'engineering' && (
@@ -447,7 +490,7 @@ export default function PartDetail() {
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
                                 >
-                                  + Iterate
+                                  + Sub
                                 </button>
                               )}
                               {majorRev.status !== 'rejected' &&
@@ -519,7 +562,7 @@ export default function PartDetail() {
                                       Advance
                                     </button>
                                   )}
-                                  {proposal.status !== 'rejected' && proposal === getLatestProposalForParent(majorRev?.id || 0, part.revisions) && (
+                                  {proposal.status !== 'rejected' && (
                                     <button
                                       onClick={() => rejectRevisionMutation.mutate(proposal.id)}
                                       disabled={rejectRevisionMutation.isPending}
