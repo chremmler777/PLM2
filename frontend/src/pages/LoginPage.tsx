@@ -22,15 +22,19 @@ export default function LoginPage() {
       // For testing: hardcoded credentials
       // In Phase 6, this will call actual API
       if (email === 'test@example.com' && password === 'password') {
+        // Update auth state first
         login('test-token-12345', 1);
-        navigate('/articles');
         toast.success('Logged in successfully');
+        // Navigate after a brief delay to ensure state is updated
+        setTimeout(() => {
+          navigate('/articles');
+        }, 100);
       } else {
         toast.error('Invalid credentials (test: test@example.com / password)');
+        setIsLoading(false);
       }
     } catch (error) {
       toast.error('Login failed');
-    } finally {
       setIsLoading(false);
     }
   };
