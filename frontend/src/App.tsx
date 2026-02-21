@@ -8,6 +8,7 @@ import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
+import PartDetail from './pages/PartDetail';
 import ArticlesPage from './pages/ArticlesPage';
 
 const queryClient = new QueryClient();
@@ -28,6 +29,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/parts/:partId"
+        element={
+          <ProtectedRoute>
+            <PartDetail />
           </ProtectedRoute>
         }
       />

@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import select
+from sqlalchemy import select, cast, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -109,21 +109,58 @@ class RevisionService:
     """Service for managing part revisions and their lifecycle."""
 
     @staticmethod
+    async def get_latest_revision_in_phase(
+        session: AsyncSession,
+        part_id: int,
+        phase: str,
+    ) -> Optional[PartRevision]:
+        """Get the latest major version in a phase (e.g., RFQ1, ENG1, IND1)."""
+        result = await session.execute(
+            select(PartRevision)
+            .where(
+                (PartRevision.part_id == part_id)
+                & (PartRevision.phase == phase)
+                & (PartRevision.parent_revision_id.is_(None))  # Major versions have no parent
+            )
+            .order_by(PartRevision.revision_name.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_next_major_version_name(
+        session: AsyncSession,
+        part_id: int,
+        phase: str,
+        phase_prefix: str,  # "RFQ", "ENG", "IND", "ECR"
+    ) -> str:
+        """Calculate the next major version name (RFQ1 → RFQ2, ENG1 → ENG2, etc)."""
+        latest = await RevisionService.get_latest_revision_in_phase(session, part_id, phase)
+        if not latest:
+            return f"{phase_prefix}1"
+
+        # Extract number from revision_name (e.g., "RFQ1" → 1)
+        current_num = int(latest.revision_name[len(phase_prefix):].split('.')[0])
+        return f"{phase_prefix}{current_num + 1}"
+
+    @staticmethod
     async def create_rfq_revision(
         session: AsyncSession,
         part_id: int,
-        revision_number: int,  # 1 for RFQ1, 2 for RFQ2, etc
         summary: Optional[str] = None,
         created_by: int = None,
     ) -> PartRevision:
-        """Create a new RFQ revision (RFQ1, RFQ2, etc)."""
-        revision_name = f"RFQ{revision_number}"
+        """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
+        # Calculate next major RFQ version
+        revision_name = await RevisionService.get_next_major_version_name(
+            session, part_id, RevisionPhase.RFQ_PHASE.value, "RFQ"
+        )
 
         revision = PartRevision(
             part_id=part_id,
             revision_name=revision_name,
-            phase=RevisionPhase.RFQ_PHASE,
-            status=RevisionStatus.DRAFT,
+            phase=RevisionPhase.RFQ_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
             summary=summary,
             created_by=created_by,
         )
@@ -144,6 +181,144 @@ class RevisionService:
         return revision
 
     @staticmethod
+    async def create_rfq_proposal(
+        session: AsyncSession,
+        part_id: int,
+        parent_revision_id: int,  # Parent RFQ1, RFQ2, etc
+        summary: Optional[str] = None,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Create a minor RFQ proposal (RFQ1.1, RFQ1.2, etc)."""
+        parent = await session.get(PartRevision, parent_revision_id)
+        if not parent or parent.phase != RevisionPhase.RFQ_PHASE.value:
+            raise ValueError("Parent must be an RFQ revision")
+
+        # Find next minor version under this parent
+        result = await session.execute(
+            select(PartRevision)
+            .where(PartRevision.parent_revision_id == parent_revision_id)
+            .order_by(PartRevision.revision_name.desc())
+            .limit(1)
+        )
+        last_proposal = result.scalar_one_or_none()
+
+        if last_proposal:
+            # Extract minor version (e.g., "RFQ1.2" → 2)
+            minor_num = int(last_proposal.revision_name.split('.')[-1])
+            new_minor = minor_num + 1
+        else:
+            new_minor = 1
+
+        revision_name = f"{parent.revision_name}.{new_minor}"
+
+        proposal = PartRevision(
+            part_id=part_id,
+            revision_name=revision_name,
+            phase=RevisionPhase.RFQ_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
+            parent_revision_id=parent_revision_id,
+            summary=summary,
+            created_by=created_by,
+        )
+        session.add(proposal)
+        await session.flush()
+
+        # Log the creation
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=proposal.id,
+            action="created",
+            action_description=f"Created {revision_name} as proposal to {parent.revision_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Created RFQ proposal {revision_name} for part {part_id}")
+        return proposal
+
+    @staticmethod
+    async def promote_revision(
+        session: AsyncSession,
+        revision_id: int,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Promote a revision to the next major version (e.g., RFQ1.2 → RFQ2)."""
+        revision = await session.get(PartRevision, revision_id)
+        if not revision:
+            raise ValueError("Revision not found")
+
+        # Determine which major version to promote from
+        if revision.parent_revision_id:
+            # This is a proposal (RFQ1.1, RFQ1.2, etc) - promote from its parent's phase
+            parent = await session.get(PartRevision, revision.parent_revision_id)
+            if not parent:
+                raise ValueError("Parent revision not found")
+            phase = parent.phase
+            # Extract prefix (RFQ, ENG, IND, ECR) from revision_name like "RFQ2"
+            major_name = parent.revision_name.split('.')[0]  # "RFQ2"
+            phase_prefix = ''.join([c for c in major_name if not c.isdigit()])  # "RFQ"
+            parent_major = major_name
+        else:
+            # This is a major version - promote directly from it
+            phase = revision.phase
+            major_name = revision.revision_name.split('.')[0]  # "RFQ2"
+            phase_prefix = ''.join([c for c in major_name if not c.isdigit()])  # "RFQ"
+            parent_major = major_name
+
+        # Calculate next major version
+        next_major_name = await RevisionService.get_next_major_version_name(
+            session, revision.part_id, phase, phase_prefix
+        )
+
+        # Create the new major version (copy of the promoted revision)
+        new_revision = PartRevision(
+            part_id=revision.part_id,
+            revision_name=next_major_name,
+            phase=phase,
+            status=RevisionStatus.DRAFT.value,
+            parent_revision_id=None,  # New major version has no parent
+            summary=revision.summary,  # Inherit summary
+            created_by=created_by,
+        )
+        session.add(new_revision)
+        await session.flush()
+
+        # Tag the promoted revision
+        await ChangelogService.log_action(
+            session=session,
+            part_id=revision.part_id,
+            revision_id=revision.id,
+            action="promoted",
+            action_description=f"Promoted to {next_major_name}",
+            performed_by=created_by,
+        )
+
+        # Mark all sibling proposals as rejected (if promoting a proposal)
+        if revision.parent_revision_id:
+            siblings = (
+                await session.execute(
+                    select(PartRevision).where(
+                        (PartRevision.parent_revision_id == revision.parent_revision_id)
+                        & (PartRevision.id != revision.id)
+                    )
+                )
+            ).scalars().all()
+
+            for sibling in siblings:
+                sibling.status = RevisionStatus.REJECTED.value
+                await ChangelogService.log_action(
+                    session=session,
+                    part_id=revision.part_id,
+                    revision_id=sibling.id,
+                    action="rejected",
+                    action_description=f"Rejected due to promotion of {revision.revision_name}",
+                    performed_by=created_by,
+                )
+
+        logger.info(f"Promoted {revision.revision_name} to {next_major_name}")
+        return new_revision
+
+    @staticmethod
     async def transition_rfq_to_engineering(
         session: AsyncSession,
         rfq_revision_id: int,
@@ -151,15 +326,15 @@ class RevisionService:
     ) -> PartRevision:
         """Transition from RFQ to Engineering phase (RFQ1 → ENG1)."""
         rfq_rev = await session.get(PartRevision, rfq_revision_id)
-        if not rfq_rev or rfq_rev.phase != RevisionPhase.RFQ_PHASE:
+        if not rfq_rev or rfq_rev.phase != RevisionPhase.RFQ_PHASE.value:
             raise ValueError("Revision is not in RFQ phase")
 
         # Create ENG1 revision
         eng_revision = PartRevision(
             part_id=rfq_rev.part_id,
             revision_name="ENG1",
-            phase=RevisionPhase.ENGINEERING_PHASE,
-            status=RevisionStatus.DRAFT,
+            phase=RevisionPhase.ENGINEERING_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
             parent_revision_id=rfq_rev.id,
             summary="Official engineering release after RFQ award",
             created_by=created_by,
@@ -196,8 +371,8 @@ class RevisionService:
         revision = PartRevision(
             part_id=part_id,
             revision_name=revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE,
-            status=RevisionStatus.DRAFT,
+            phase=RevisionPhase.ENGINEERING_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
             test_data_status=TestDataStatus.UNCONFIRMED,
             parent_revision_id=parent_revision_id,
             summary=summary,
@@ -229,13 +404,13 @@ class RevisionService:
     ) -> PartRevision:
         """Approve an engineering proposal, creating the next major version."""
         proposal = await session.get(PartRevision, proposal_revision_id)
-        if not proposal or proposal.phase != RevisionPhase.ENGINEERING_PHASE:
+        if not proposal or proposal.phase != RevisionPhase.ENGINEERING_PHASE.value:
             raise ValueError("Revision is not in Engineering phase")
         if proposal.test_data_status == TestDataStatus.APPROVED:
             raise ValueError("Revision is already approved")
 
         # Mark proposal as approved
-        proposal.status = RevisionStatus.APPROVED
+        proposal.status = RevisionStatus.APPROVED.value
         proposal.test_data_status = TestDataStatus.APPROVED
         proposal.approved_at = datetime.utcnow()
         proposal.approved_by = approved_by
@@ -247,8 +422,8 @@ class RevisionService:
         new_revision = PartRevision(
             part_id=proposal.part_id,
             revision_name=new_revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE,
-            status=RevisionStatus.DRAFT,
+            phase=RevisionPhase.ENGINEERING_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
             parent_revision_id=proposal_revision_id,
             supersedes_revision_id=proposal_revision_id,
             summary=f"Official release from {proposal.revision_name}",
@@ -280,7 +455,7 @@ class RevisionService:
         if not proposal:
             raise ValueError("Revision not found")
 
-        proposal.status = RevisionStatus.REJECTED
+        proposal.status = RevisionStatus.REJECTED.value
         proposal.test_data_status = TestDataStatus.REJECTED
         await session.flush()
 
@@ -309,7 +484,7 @@ class RevisionService:
             select(PartRevision)
             .where(
                 (PartRevision.part_id == part_id)
-                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE)
+                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
             )
             .order_by(PartRevision.revision_name.desc())
         )
@@ -326,8 +501,8 @@ class RevisionService:
         revision = PartRevision(
             part_id=part_id,
             revision_name=revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE,
-            status=RevisionStatus.FROZEN,
+            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
+            status=RevisionStatus.FROZEN.value,
             parent_revision_id=parent_revision_id,
             summary="Design freeze - locked for production",
             frozen_at=datetime.utcnow(),
@@ -366,8 +541,8 @@ class RevisionService:
         revision = PartRevision(
             part_id=part_id,
             revision_name=revision_name,
-            phase=RevisionPhase.ECN_PHASE,
-            status=RevisionStatus.DRAFT,
+            phase=RevisionPhase.ECN_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
             test_data_status=TestDataStatus.UNCONFIRMED,
             parent_revision_id=parent_freeze_id,
             summary=summary,
@@ -399,11 +574,11 @@ class RevisionService:
     ) -> PartRevision:
         """Approve an ECR proposal, creating the next design freeze level."""
         ecr = await session.get(PartRevision, ecr_revision_id)
-        if not ecr or ecr.phase != RevisionPhase.ECN_PHASE:
+        if not ecr or ecr.phase != RevisionPhase.ECN_PHASE.value:
             raise ValueError("Revision is not in ECN phase")
 
         # Mark ECR as approved
-        ecr.status = RevisionStatus.APPROVED
+        ecr.status = RevisionStatus.APPROVED.value
         ecr.test_data_status = TestDataStatus.APPROVED
         ecr.approved_at = datetime.utcnow()
         ecr.approved_by = approved_by
@@ -415,8 +590,8 @@ class RevisionService:
         new_revision = PartRevision(
             part_id=ecr.part_id,
             revision_name=new_revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE,
-            status=RevisionStatus.FROZEN,
+            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
+            status=RevisionStatus.FROZEN.value,
             parent_revision_id=ecr_revision_id,
             supersedes_revision_id=ecr_revision_id,
             summary=f"Design freeze from {ecr.revision_name}",
@@ -450,7 +625,7 @@ class RevisionService:
         if not ecr:
             raise ValueError("Revision not found")
 
-        ecr.status = RevisionStatus.REJECTED
+        ecr.status = RevisionStatus.REJECTED.value
         ecr.test_data_status = TestDataStatus.REJECTED
         await session.flush()
 

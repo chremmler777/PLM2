@@ -88,11 +88,11 @@ class PartRevision(Base):
     revision_name: Mapped[str] = mapped_column(String(20), index=True)  # RFQ1, ENG1, ENG1.1, IND1, ECR1.1, IND2
 
     # Phase tracking
-    phase: Mapped[str] = mapped_column(Enum(RevisionPhase), index=True)
-    status: Mapped[str] = mapped_column(Enum(RevisionStatus), default=RevisionStatus.DRAFT)
+    phase: Mapped[str] = mapped_column(Enum(RevisionPhase, values_callable=lambda x: [e.value for e in x], native_enum=False), index=True)
+    status: Mapped[str] = mapped_column(Enum(RevisionStatus, values_callable=lambda x: [e.value for e in x], native_enum=False), default=RevisionStatus.DRAFT.value)
 
     # Test data status (for engineering iterations and ECN proposals)
-    test_data_status: Mapped[str | None] = mapped_column(Enum(TestDataStatus), nullable=True)
+    test_data_status: Mapped[str | None] = mapped_column(Enum(TestDataStatus, values_callable=lambda x: [e.value for e in x], native_enum=False), nullable=True)
 
     # Hierarchy - link to parent revision (for ENG1.1→ENG1, IND2→IND1, ECR1.1→IND1, etc)
     parent_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)

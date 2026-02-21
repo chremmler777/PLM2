@@ -5,11 +5,13 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
 import { toast } from 'sonner';
 
 export default function Dashboard() {
-  const [projectId] = useState(1); // Use first project for testing
+  const navigate = useNavigate();
+  const [projectId] = useState(1);
   const [formData, setFormData] = useState({
     part_number: '',
     name: '',
@@ -62,7 +64,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-2xl mx-auto">
         <h1 className="text-4xl font-bold text-gray-900 mb-2">PLM System</h1>
-        <p className="text-gray-600 mb-8">Create parts and manage revisions (RFQ → ENG → FREEZE → ECR)</p>
+        <p className="text-gray-600 mb-8">Create parts and manage revisions</p>
 
         {/* Create Part Form */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
@@ -125,11 +127,15 @@ export default function Dashboard() {
           {parts && parts.length > 0 ? (
             <div className="space-y-2">
               {parts.map((part: any) => (
-                <div key={part.id} className="p-4 border border-gray-200 rounded-lg">
+                <button
+                  key={part.id}
+                  onClick={() => navigate(`/parts/${part.id}`)}
+                  className="w-full text-left px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition"
+                >
                   <div className="font-bold text-gray-900">{part.part_number}</div>
                   <div className="text-sm text-gray-600">{part.name}</div>
                   <div className="text-xs text-gray-500 mt-1">Type: {part.part_type}</div>
-                </div>
+                </button>
               ))}
             </div>
           ) : (
@@ -137,19 +143,6 @@ export default function Dashboard() {
               No parts yet. Create one above.
             </div>
           )}
-        </div>
-
-        {/* Next Steps */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="font-bold text-gray-900 mb-2">Next: Test Workflow</h3>
-          <ol className="text-sm text-gray-700 space-y-1 list-decimal list-inside">
-            <li>✅ Create a part above</li>
-            <li>⏳ Create RFQ revision (coming next)</li>
-            <li>⏳ Transition to Engineering</li>
-            <li>⏳ Create proposals & approve</li>
-            <li>⏳ Design freeze</li>
-            <li>⏳ ECR workflow</li>
-          </ol>
         </div>
       </div>
     </div>

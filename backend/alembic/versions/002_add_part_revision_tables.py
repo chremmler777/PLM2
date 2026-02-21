@@ -23,21 +23,21 @@ def upgrade() -> None:
     revision_phase_enum = sa.Enum(
         'rfq_phase', 'engineering', 'freeze', 'ecn',
         name='revisionphase',
-        native_enum=False
+        native_enum=True
     )
     revision_phase_enum.create(op.get_bind())
 
     revision_status_enum = sa.Enum(
         'draft', 'in_progress', 'in_review', 'approved', 'rejected', 'frozen', 'cancelled',
         name='revisionstatus',
-        native_enum=False
+        native_enum=True
     )
     revision_status_enum.create(op.get_bind())
 
     test_data_status_enum = sa.Enum(
         'unconfirmed', 'approved', 'rejected',
         name='testdatastatus',
-        native_enum=False
+        native_enum=True
     )
     test_data_status_enum.create(op.get_bind())
 
@@ -69,9 +69,9 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('part_id', sa.Integer(), nullable=False),
         sa.Column('revision_name', sa.String(20), nullable=False, index=True),
-        sa.Column('phase', sa.Enum('rfq_phase', 'engineering', 'freeze', 'ecn', name='revisionphase', native_enum=False), nullable=False, index=True),
-        sa.Column('status', sa.Enum('draft', 'in_progress', 'in_review', 'approved', 'rejected', 'frozen', 'cancelled', name='revisionstatus', native_enum=False), nullable=False),
-        sa.Column('test_data_status', sa.Enum('unconfirmed', 'approved', 'rejected', name='testdatastatus', native_enum=False), nullable=True),
+        sa.Column('phase', sa.Enum('rfq_phase', 'engineering', 'freeze', 'ecn', name='revisionphase', native_enum=True), nullable=False, index=True),
+        sa.Column('status', sa.Enum('draft', 'in_progress', 'in_review', 'approved', 'rejected', 'frozen', 'cancelled', name='revisionstatus', native_enum=True), nullable=False),
+        sa.Column('test_data_status', sa.Enum('unconfirmed', 'approved', 'rejected', name='testdatastatus', native_enum=True), nullable=True),
         sa.Column('parent_revision_id', sa.Integer(), nullable=True),
         sa.Column('supersedes_revision_id', sa.Integer(), nullable=True),
         sa.Column('summary', sa.Text(), nullable=True),

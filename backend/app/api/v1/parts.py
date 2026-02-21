@@ -12,7 +12,8 @@ from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
     PartRevisionResponse, PartRevisionDetailResponse,
     ChangelogEntryResponse, RevisionTreeNode,
-    CreateRFQRequest, TransitionToEngineeringRequest, CreateEngineeringProposalRequest,
+    CreateRFQRequest, CreateRFQProposalRequest, PromoteRevisionRequest,
+    TransitionToEngineeringRequest, CreateEngineeringProposalRequest,
     ApproveProposalRequest, RejectProposalRequest, CreateDesignFreezeRequest,
     CreateECRRequest
 )
@@ -153,12 +154,11 @@ async def create_rfq_revision(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new RFQ revision (RFQ1, RFQ2, etc)."""
+    """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
     try:
         revision = await RevisionService.create_rfq_revision(
             session=db,
             part_id=part_id,
-            revision_number=body.revision_number,
             summary=body.summary,
             created_by=current_user.id,
         )
@@ -167,6 +167,53 @@ async def create_rfq_revision(
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to create RFQ revision: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/rfq-proposal", response_model=PartRevisionResponse)
+async def create_rfq_proposal(
+    part_id: int,
+    body: CreateRFQProposalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an RFQ proposal (minor iteration like RFQ1.1, RFQ1.2)."""
+    try:
+        proposal = await RevisionService.create_rfq_proposal(
+            session=db,
+            part_id=part_id,
+            parent_revision_id=body.parent_revision_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return proposal
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create RFQ proposal: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/{revision_id}/promote", response_model=PartRevisionResponse)
+async def promote_revision(
+    part_id: int,
+    revision_id: int,
+    body: PromoteRevisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promote a revision to the next major version (e.g., RFQ1.2 → RFQ2)."""
+    try:
+        new_revision = await RevisionService.promote_revision(
+            session=db,
+            revision_id=revision_id,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return new_revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to promote revision: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 

@@ -148,9 +148,19 @@ class RevisionTreeNode(BaseModel):
 
 # Bulk Operation Schemas
 class CreateRFQRequest(BaseModel):
-    """Request to create RFQ revision."""
-    revision_number: int = Field(default=1, ge=1)
+    """Request to create RFQ revision (auto-increments to next major version)."""
     summary: Optional[str] = None
+
+
+class CreateRFQProposalRequest(BaseModel):
+    """Request to create RFQ proposal (minor iteration like RFQ1.1, RFQ1.2)."""
+    parent_revision_id: int = Field(..., description="Parent RFQ revision ID (e.g., RFQ1)")
+    summary: Optional[str] = None
+
+
+class PromoteRevisionRequest(BaseModel):
+    """Request to promote a revision to next major version."""
+    notes: Optional[str] = Field(None, description="Notes about the promotion")
 
 
 class TransitionToEngineeringRequest(BaseModel):
