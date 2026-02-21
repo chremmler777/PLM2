@@ -53,7 +53,7 @@ async def seed_test_data():
                     organization_id=test_org.id,
                     email="test@example.com",
                     full_name="Test User",
-                    password_hash=get_password_hash("password"),
+                    hashed_password=get_password_hash("password"),
                     role="engineer",
                     is_active=True,
                     mfa_enabled=False,
