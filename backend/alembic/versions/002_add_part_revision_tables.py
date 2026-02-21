@@ -99,8 +99,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['updated_by'], ['users.id']),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_part_revisions_phase'), 'part_revisions', ['phase'])
-    op.create_index(op.f('ix_part_revisions_revision_name'), 'part_revisions', ['revision_name'])
 
     # revision_files table
     op.create_table(
@@ -152,7 +150,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['performed_by'], ['users.id']),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_revision_changelogs_performed_at'), 'revision_changelogs', ['performed_at'])
 
     # Add foreign key constraint for active_revision_id after part_revisions table is created
     with op.batch_alter_table('parts', schema=None) as batch_op:

@@ -19,34 +19,66 @@ logger.debug(f"App settings loaded: debug={settings.debug}")
 async def seed_test_data():
     """Create test data for Phase 1 testing."""
     from sqlalchemy import select
-    from app.models import Organization, User, get_db, AsyncSessionLocal
+    from app.models import Organization, User, Plant, Project, AsyncSessionLocal
     from app.auth.security import get_password_hash
 
     async with AsyncSessionLocal() as session:
         try:
-            # Check if test org exists
+            # Create org
             result = await session.execute(
                 select(Organization).where(Organization.code == "test-org")
             )
             test_org = result.scalar_one_or_none()
-
             if not test_org:
                 logger.info("Creating test organization...")
                 test_org = Organization(
                     name="Test Organization",
                     code="test-org",
-                    description="Test organization for Phase 1",
+                    description="Test organization",
                     is_active=True,
                 )
                 session.add(test_org)
                 await session.flush()
 
-            # Check if test user exists
+            # Create plant
+            result = await session.execute(
+                select(Plant).where(Plant.code == "main-plant")
+            )
+            test_plant = result.scalar_one_or_none()
+            if not test_plant:
+                logger.info("Creating test plant...")
+                test_plant = Plant(
+                    organization_id=test_org.id,
+                    name="Main Factory",
+                    code="main-plant",
+                    location="Germany",
+                    is_active=True,
+                )
+                session.add(test_plant)
+                await session.flush()
+
+            # Create project
+            result = await session.execute(
+                select(Project).where(Project.code == "test-project")
+            )
+            test_project = result.scalar_one_or_none()
+            if not test_project:
+                logger.info("Creating test project...")
+                test_project = Project(
+                    plant_id=test_plant.id,
+                    name="Test Project",
+                    code="test-project",
+                    description="Test project for Phase 1",
+                    status="active",
+                )
+                session.add(test_project)
+                await session.flush()
+
+            # Create user
             result = await session.execute(
                 select(User).where(User.email == "test@example.com")
             )
             test_user = result.scalar_one_or_none()
-
             if not test_user:
                 logger.info("Creating test user...")
                 test_user = User(
