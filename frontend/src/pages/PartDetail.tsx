@@ -185,6 +185,71 @@ export default function PartDetail() {
     },
   });
 
+  // Transition to Engineering mutation
+  const transitionToEngineeringMutation = useMutation({
+    mutationFn: async (rfqRevisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${rfqRevisionId}/to-engineering`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Created ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to transition to engineering');
+    },
+  });
+
+  // Create engineering proposal mutation
+  const createEngineeringProposalMutation = useMutation({
+    mutationFn: async (parentId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/engineering-proposal`, {
+        parent_revision_id: parentId,
+        summary: proposalSummary || 'Engineering proposal',
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Engineering proposal created!');
+      setShowProposalForm(null);
+      setProposalSummary('');
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to create engineering proposal');
+    },
+  });
+
+  // Advance engineering proposal mutation
+  const advanceEngineeringMutation = useMutation({
+    mutationFn: async (revisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/advance-engineering`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Advanced to ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to advance engineering proposal');
+    },
+  });
+
+  // Transition to Freeze mutation
+  const transitionToFreezeMutation = useMutation({
+    mutationFn: async (engRevisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${engRevisionId}/to-freeze`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Created ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to transition to design freeze');
+    },
+  });
+
   if (isLoading) {
     return <div className="p-8 text-center">Loading...</div>;
   }
@@ -301,7 +366,15 @@ export default function PartDetail() {
                               </p>
                             </div>
                             <div className="flex gap-2">
-                              {majorRev.status !== 'rejected' && (
+                              {majorRev.status !== 'rejected' && majorRev.phase === 'rfq_phase' && (
+                                <button
+                                  onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
+                                  className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                                >
+                                  + Proposal
+                                </button>
+                              )}
+                              {majorRev.status !== 'rejected' && majorRev.phase === 'engineering' && (
                                 <button
                                   onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
                                   className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
@@ -316,6 +389,24 @@ export default function PartDetail() {
                                   className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
                                 >
                                   Reject
+                                </button>
+                              )}
+                              {majorRev.phase === 'rfq_phase' && majorRev.status === 'in_progress' && (
+                                <button
+                                  onClick={() => transitionToEngineeringMutation.mutate(majorRev.id)}
+                                  disabled={transitionToEngineeringMutation.isPending}
+                                  className="px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200 disabled:bg-gray-100"
+                                >
+                                  {transitionToEngineeringMutation.isPending ? 'Awarding...' : '→ Engineering'}
+                                </button>
+                              )}
+                              {majorRev.phase === 'engineering' && majorRev.status === 'in_progress' && (
+                                <button
+                                  onClick={() => transitionToFreezeMutation.mutate(majorRev.id)}
+                                  disabled={transitionToFreezeMutation.isPending}
+                                  className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
+                                >
+                                  {transitionToFreezeMutation.isPending ? 'Freezing...' : '→ Freeze'}
                                 </button>
                               )}
                             </div>
@@ -343,10 +434,16 @@ export default function PartDetail() {
                                 </div>
                                 {canAdvance(proposal, part.revisions) && (
                                   <button
-                                    onClick={() => promoteRevisionMutation.mutate(proposal.id)}
-                                    disabled={promoteRevisionMutation.isPending}
+                                    onClick={() => {
+                                      if (proposal.phase === 'engineering') {
+                                        advanceEngineeringMutation.mutate(proposal.id);
+                                      } else {
+                                        promoteRevisionMutation.mutate(proposal.id);
+                                      }
+                                    }}
+                                    disabled={promoteRevisionMutation.isPending || advanceEngineeringMutation.isPending}
                                     className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
-                                    title={proposal.status === 'approved' ? 'Re-promote this proposal (if newer version is rejected)' : 'Advance to next major version'}
+                                    title={proposal.status === 'approved' ? 'Re-advance this proposal (if newer version is rejected)' : 'Advance to next major version'}
                                   >
                                     Advance
                                   </button>
@@ -369,8 +466,14 @@ export default function PartDetail() {
                           />
                           <div className="flex gap-2">
                             <button
-                              onClick={() => createProposalMutation.mutate(majorRev!.id)}
-                              disabled={createProposalMutation.isPending}
+                              onClick={() => {
+                                if (majorRev?.phase === 'engineering') {
+                                  createEngineeringProposalMutation.mutate(majorRev!.id);
+                                } else {
+                                  createProposalMutation.mutate(majorRev!.id);
+                                }
+                              }}
+                              disabled={createProposalMutation.isPending || createEngineeringProposalMutation.isPending}
                               className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:bg-gray-400"
                             >
                               Create Proposal
