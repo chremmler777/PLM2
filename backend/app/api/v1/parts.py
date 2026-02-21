@@ -361,6 +361,54 @@ async def transition_engineering_to_freeze(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/{part_id}/revisions/freeze-proposal", response_model=PartRevisionResponse)
+async def create_freeze_proposal_endpoint(
+    part_id: int,
+    body: CreateRFQProposalRequest,  # Reuse RFQ proposal schema structure
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a freeze phase proposal (IND1.1, IND1.2, etc)."""
+    try:
+        revision = await RevisionService.create_freeze_proposal_simple(
+            session=db,
+            part_id=part_id,
+            parent_revision_id=body.parent_revision_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create freeze proposal: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/{revision_id}/advance-freeze", response_model=PartRevisionResponse)
+async def advance_freeze_proposal(
+    part_id: int,
+    revision_id: int,
+    body: PromoteRevisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Advance a freeze proposal to next major version (IND1.2 → IND2)."""
+    try:
+        revision = await RevisionService.advance_freeze_proposal(
+            session=db,
+            part_id=part_id,
+            proposal_revision_id=revision_id,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to advance freeze proposal: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.post("/{part_id}/revisions/engineering", response_model=PartRevisionResponse)
 async def create_engineering_major(
     part_id: int,

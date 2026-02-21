@@ -784,6 +784,156 @@ class RevisionService:
         return freeze_revision
 
     @staticmethod
+    async def create_freeze_proposal_simple(
+        session: AsyncSession,
+        part_id: int,
+        parent_revision_id: int,  # Parent IND1, IND2, etc
+        summary: Optional[str] = None,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Create a minor freeze proposal (IND1.1, IND1.2, etc) - auto-calculates minor version."""
+        parent = await session.get(PartRevision, parent_revision_id)
+        if not parent or parent.phase != RevisionPhase.DESIGN_FREEZE_PHASE.value:
+            raise ValueError("Parent must be an IND revision")
+
+        # Get existing sub-revisions to find next minor version
+        result = await session.execute(
+            select(PartRevision).where(
+                (PartRevision.parent_revision_id == parent_revision_id)
+                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
+            )
+        )
+        subs = result.scalars().all()
+
+        # Calculate next minor version number
+        max_minor = 0
+        for sub in subs:
+            # Extract minor version from names like "IND1.1", "IND1.2", etc
+            if "." in sub.revision_name:
+                parts = sub.revision_name.split(".")
+                if len(parts) == 2 and parts[1].isdigit():
+                    minor = int(parts[1])
+                    max_minor = max(max_minor, minor)
+
+        next_minor = max_minor + 1
+        revision_name = f"{parent.revision_name}.{next_minor}"
+
+        proposal = PartRevision(
+            part_id=part_id,
+            revision_name=revision_name,
+            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
+            status=RevisionStatus.DRAFT.value,
+            parent_revision_id=parent_revision_id,
+            summary=summary,
+            created_by=created_by,
+        )
+        session.add(proposal)
+        await session.flush()
+
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=proposal.id,
+            action="created",
+            action_description=f"Created {revision_name} as proposal to {parent.revision_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Created freeze proposal {revision_name} for part {part_id}")
+        return proposal
+
+    @staticmethod
+    async def advance_freeze_proposal(
+        session: AsyncSession,
+        part_id: int,
+        proposal_revision_id: int,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Advance (promote) a freeze proposal to next major version (IND1.2 → IND2)."""
+        proposal = await session.get(PartRevision, proposal_revision_id)
+        if not proposal or proposal.phase != RevisionPhase.DESIGN_FREEZE_PHASE.value:
+            raise ValueError("Revision is not in freeze phase")
+        if not proposal.parent_revision_id:
+            raise ValueError("Cannot advance a major version - only proposals can be advanced")
+
+        parent = await session.get(PartRevision, proposal.parent_revision_id)
+        if not parent:
+            raise ValueError("Parent revision not found")
+
+        # Extract major version number (e.g., "IND1" → 1)
+        parent_major_num = int(parent.revision_name.replace("IND", ""))
+        next_major_num = parent_major_num + 1
+        next_major_name = f"IND{next_major_num}"
+
+        # Create new major version
+        summary = f"Promoted from {proposal.revision_name}"
+        if proposal.summary:
+            summary = f"{proposal.summary} (promoted from {proposal.revision_name})"
+
+        new_revision = PartRevision(
+            part_id=proposal.part_id,
+            revision_name=next_major_name,
+            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
+            status=RevisionStatus.IN_PROGRESS.value,
+            parent_revision_id=None,
+            summary=summary,
+            created_by=created_by,
+        )
+        session.add(new_revision)
+        await session.flush()
+
+        # Mark promoted proposal as APPROVED
+        proposal.status = RevisionStatus.APPROVED.value
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=proposal.id,
+            action="status_changed",
+            action_description=f"Advanced {proposal.revision_name} to {next_major_name}",
+            field_name="status",
+            old_value=RevisionStatus.DRAFT.value,
+            new_value=RevisionStatus.APPROVED.value,
+            performed_by=created_by,
+        )
+
+        # Archive sibling proposals
+        result = await session.execute(
+            select(PartRevision).where(
+                (PartRevision.parent_revision_id == proposal.parent_revision_id)
+                & (PartRevision.id != proposal.id)
+                & (PartRevision.status == RevisionStatus.DRAFT.value)
+            )
+        )
+        siblings = result.scalars().all()
+
+        for sibling in siblings:
+            sibling.status = RevisionStatus.ARCHIVED.value
+            await ChangelogService.log_action(
+                session=session,
+                part_id=part_id,
+                revision_id=sibling.id,
+                action="status_changed",
+                action_description=f"Automatically archived {sibling.revision_name} when advancing {proposal.revision_name}",
+                field_name="status",
+                old_value=RevisionStatus.DRAFT.value,
+                new_value=RevisionStatus.ARCHIVED.value,
+                performed_by=created_by,
+            )
+
+        # Log the new major version creation
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=new_revision.id,
+            action="created",
+            action_description=f"Created {next_major_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Advanced freeze proposal {proposal.revision_name} to {next_major_name}")
+        return new_revision
+
+    @staticmethod
     async def create_engineering_proposal(
         session: AsyncSession,
         part_id: int,

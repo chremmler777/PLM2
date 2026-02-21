@@ -115,6 +115,17 @@ function getLatestEngineeringMajor(revisions: Revision[]): Revision | null {
     })[0] || null;
 }
 
+function getLatestFreezeMajor(revisions: Revision[]): Revision | null {
+  // Get the latest freeze/IND major version
+  const freezeMajors = revisions.filter((r) => r.phase === 'freeze' && !r.parent_revision_id);
+  return freezeMajors
+    .sort((a, b) => {
+      const numA = parseInt(a.revision_name.replace(/\D/g, ''));
+      const numB = parseInt(b.revision_name.replace(/\D/g, ''));
+      return numB - numA;
+    })[0] || null;
+}
+
 function getLatestProposalForParent(parentId: number, revisions: Revision[]): Revision | null {
   // Get the latest proposal under a major version
   const proposals = revisions.filter((r) => r.parent_revision_id === parentId);
@@ -347,6 +358,39 @@ export default function PartDetail() {
     },
   });
 
+  // Create freeze proposal mutation
+  const createFreezeProposalMutation = useMutation({
+    mutationFn: async (parentId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/freeze-proposal`, {
+        parent_revision_id: parentId,
+        summary: 'New ECR',
+      });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Created ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to create freeze proposal');
+    },
+  });
+
+  // Advance freeze proposal mutation
+  const advanceFreezeMutation = useMutation({
+    mutationFn: async (revisionId: number) => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/advance-freeze`, {});
+      return response.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Advanced to ${data.revision_name}!`);
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to advance freeze proposal');
+    },
+  });
+
   if (isLoading) {
     return <div className="p-8 text-center">Loading...</div>;
   }
@@ -455,7 +499,23 @@ export default function PartDetail() {
           ) : (
             <div className="space-y-6">
               {Object.keys(majorVersions)
-                .sort()
+                .sort((a, b) => {
+                  // Get first revision to determine phase
+                  const aRev = majorVersions[a][0];
+                  const bRev = majorVersions[b][0];
+
+                  // Phase priority: RFQ → ENG → IND
+                  const phaseOrder = { rfq_phase: 0, engineering: 1, freeze: 2 };
+                  const aPhase = phaseOrder[aRev.phase as keyof typeof phaseOrder] ?? 3;
+                  const bPhase = phaseOrder[bRev.phase as keyof typeof phaseOrder] ?? 3;
+
+                  if (aPhase !== bPhase) return aPhase - bPhase;
+
+                  // Within same phase, sort by version number
+                  const aNum = parseInt(a.replace(/\D/g, '')) || 0;
+                  const bNum = parseInt(b.replace(/\D/g, '')) || 0;
+                  return aNum - bNum;
+                })
                 .map((major) => {
                   const revisions = majorVersions[major];
                   const majorRev = revisions.find((r) => !r.parent_revision_id);
@@ -469,6 +529,8 @@ export default function PartDetail() {
                           ? 'border-blue-400 bg-blue-50 shadow-md'
                           : majorRev && majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status !== 'rejected'
                           ? 'border-purple-400 bg-purple-50 shadow-md'
+                          : majorRev && majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status !== 'rejected'
+                          ? 'border-orange-400 bg-orange-50 shadow-md'
                           : 'border-gray-200'
                       }`}
                     >
@@ -508,6 +570,14 @@ export default function PartDetail() {
                                   + Sub
                                 </button>
                               )}
+                              {majorRev.status !== 'rejected' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.phase === 'freeze' && (
+                                <button
+                                  onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
+                                  className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                                >
+                                  + Sub
+                                </button>
+                              )}
                               {majorRev.status !== 'rejected' &&
                                 majorRev === getLatestActiveRFQMajor(part.revisions) &&
                                 majorRev.phase === 'rfq_phase' && (
@@ -522,6 +592,17 @@ export default function PartDetail() {
                               {majorRev.status !== 'rejected' &&
                                 majorRev === getLatestEngineeringMajor(part.revisions) &&
                                 majorRev.phase === 'engineering' && (
+                                <button
+                                  onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
+                                  disabled={rejectRevisionMutation.isPending}
+                                  className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
+                                >
+                                  Reject
+                                </button>
+                              )}
+                              {majorRev.status !== 'rejected' &&
+                                majorRev === getLatestFreezeMajor(part.revisions) &&
+                                majorRev.phase === 'freeze' && (
                                 <button
                                   onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
                                   disabled={rejectRevisionMutation.isPending}
@@ -577,11 +658,13 @@ export default function PartDetail() {
                                       onClick={() => {
                                         if (proposal.phase === 'engineering') {
                                           advanceEngineeringMutation.mutate(proposal.id);
+                                        } else if (proposal.phase === 'freeze') {
+                                          advanceFreezeMutation.mutate(proposal.id);
                                         } else {
                                           promoteRevisionMutation.mutate(proposal.id);
                                         }
                                       }}
-                                      disabled={promoteRevisionMutation.isPending || advanceEngineeringMutation.isPending}
+                                      disabled={promoteRevisionMutation.isPending || advanceEngineeringMutation.isPending || advanceFreezeMutation.isPending}
                                       className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
                                       title={proposal.status === 'approved' ? 'Re-advance this proposal (if newer version is rejected)' : 'Advance to next major version'}
                                     >
@@ -628,11 +711,13 @@ export default function PartDetail() {
                               onClick={() => {
                                 if (majorRev?.phase === 'engineering') {
                                   createEngineeringProposalMutation.mutate(majorRev!.id);
+                                } else if (majorRev?.phase === 'freeze') {
+                                  createFreezeProposalMutation.mutate(majorRev!.id);
                                 } else {
                                   createProposalMutation.mutate(majorRev!.id);
                                 }
                               }}
-                              disabled={createProposalMutation.isPending || createEngineeringProposalMutation.isPending}
+                              disabled={createProposalMutation.isPending || createEngineeringProposalMutation.isPending || createFreezeProposalMutation.isPending}
                               className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:bg-gray-400"
                             >
                               Create Proposal
