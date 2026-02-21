@@ -432,6 +432,29 @@ async def create_engineering_major(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/{part_id}/revisions/freeze", response_model=PartRevisionResponse)
+async def create_freeze_major(
+    part_id: int,
+    body: CreateRFQRequest,  # Reuse RFQ schema structure
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new major freeze revision (IND2, IND3, etc) - auto-increments."""
+    try:
+        revision = await RevisionService.create_freeze_major_version(
+            session=db,
+            part_id=part_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create freeze major: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 # Engineering Phase Endpoints (legacy)
 @router.post("/revisions/{parent_revision_id}/propose-engineering", response_model=PartRevisionResponse)
 async def create_engineering_proposal(

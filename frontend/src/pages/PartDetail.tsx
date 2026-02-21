@@ -88,10 +88,6 @@ function canAdvance(proposal: Revision, allRevisions: Revision[]): boolean {
   return false;
 }
 
-function hasEngineeringPhase(revisions: Revision[]): boolean {
-  return revisions.some((r) => r.phase === 'engineering');
-}
-
 function getLatestActiveRFQMajor(revisions: Revision[]): Revision | null {
   // Get the latest RFQ major version that is not rejected
   const rfqMajors = revisions.filter((r) => r.phase === 'rfq_phase' && !r.parent_revision_id);
@@ -391,6 +387,23 @@ export default function PartDetail() {
     },
   });
 
+  // Create freeze major mutation
+  const createFreezeMajorMutation = useMutation({
+    mutationFn: async () => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/freeze`, {
+        summary: 'New Freeze version',
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Freeze version created!');
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to create freeze version');
+    },
+  });
+
   if (isLoading) {
     return <div className="p-8 text-center">Loading...</div>;
   }
@@ -470,26 +483,6 @@ export default function PartDetail() {
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-gray-900">Revision History</h2>
-            <div className="flex gap-2">
-              {!hasEngineeringPhase(part.revisions) && (
-                <button
-                  onClick={() => createRfqMutation.mutate()}
-                  disabled={createRfqMutation.isPending}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
-                >
-                  {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
-                </button>
-              )}
-              {hasEngineeringPhase(part.revisions) && !part.revisions.some((r) => r.phase === 'freeze') && (
-                <button
-                  onClick={() => createEngineeringMajorMutation.mutate()}
-                  disabled={createEngineeringMajorMutation.isPending}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 text-sm font-medium"
-                >
-                  {createEngineeringMajorMutation.isPending ? 'Creating...' : '+ New ENG'}
-                </button>
-              )}
-            </div>
           </div>
 
           {Object.keys(majorVersions).length === 0 ? (
@@ -627,6 +620,33 @@ export default function PartDetail() {
                                   className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
                                 >
                                   {transitionToFreezeMutation.isPending ? 'Freezing...' : '→ Freeze'}
+                                </button>
+                              )}
+                              {majorRev.phase === 'rfq_phase' && majorRev === getLatestActiveRFQMajor(part.revisions) && majorRev.status === 'in_progress' && (
+                                <button
+                                  onClick={() => createRfqMutation.mutate()}
+                                  disabled={createRfqMutation.isPending}
+                                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-400"
+                                >
+                                  {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
+                                </button>
+                              )}
+                              {majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status === 'in_progress' && (
+                                <button
+                                  onClick={() => createEngineeringMajorMutation.mutate()}
+                                  disabled={createEngineeringMajorMutation.isPending}
+                                  className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-gray-400"
+                                >
+                                  {createEngineeringMajorMutation.isPending ? 'Creating...' : '+ New ENG'}
+                                </button>
+                              )}
+                              {majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status === 'in_progress' && (
+                                <button
+                                  onClick={() => createFreezeMajorMutation.mutate()}
+                                  disabled={createFreezeMajorMutation.isPending}
+                                  className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:bg-gray-400"
+                                >
+                                  {createFreezeMajorMutation.isPending ? 'Creating...' : '+ New IND'}
                                 </button>
                               )}
                             </div>

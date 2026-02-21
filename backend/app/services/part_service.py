@@ -728,10 +728,13 @@ class RevisionService:
         if not eng_rev or eng_rev.phase != RevisionPhase.ENGINEERING_PHASE.value:
             raise ValueError("Revision is not in engineering phase")
 
-        # Create IND1, IND2, etc based on existing freeze count
+        # Create IND1, IND2, etc based on existing freeze majors (not proposals)
         result = await session.execute(
             select(PartRevision)
-            .where(PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
+            .where(
+                (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
+                & (PartRevision.parent_revision_id.is_(None))
+            )
             .order_by(PartRevision.revision_name.desc())
             .limit(1)
         )
@@ -781,6 +784,59 @@ class RevisionService:
         )
 
         logger.info(f"Created {freeze_name} from {eng_rev.revision_name} for part {eng_rev.part_id}")
+        return freeze_revision
+
+    @staticmethod
+    async def create_freeze_major_version(
+        session: AsyncSession,
+        part_id: int,
+        summary: Optional[str] = None,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Create a new major freeze revision (IND2, IND3, etc) - auto-increments."""
+        # Get the latest freeze major version
+        result = await session.execute(
+            select(PartRevision)
+            .where(
+                (PartRevision.part_id == part_id)
+                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
+                & (PartRevision.parent_revision_id.is_(None))
+            )
+            .order_by(PartRevision.revision_name.desc())
+            .limit(1)
+        )
+        last_freeze = result.scalar_one_or_none()
+
+        if last_freeze:
+            last_num = int(last_freeze.revision_name.replace("IND", ""))
+            next_num = last_num + 1
+        else:
+            next_num = 1
+
+        revision_name = f"IND{next_num}"
+
+        freeze_revision = PartRevision(
+            part_id=part_id,
+            revision_name=revision_name,
+            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
+            status=RevisionStatus.IN_PROGRESS.value,
+            summary=summary,
+            created_by=created_by,
+        )
+        session.add(freeze_revision)
+        await session.flush()
+
+        # Log the creation
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=freeze_revision.id,
+            action="created",
+            action_description=f"Created {revision_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Created freeze major version {revision_name} for part {part_id}")
         return freeze_revision
 
     @staticmethod
