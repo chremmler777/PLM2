@@ -34,6 +34,8 @@ function getStatusColor(status: string) {
       return 'bg-gray-100 text-gray-800';
     case 'rejected':
       return 'bg-red-100 text-red-800';
+    case 'archived':
+      return 'bg-slate-100 text-slate-700';
     case 'approved':
       return 'bg-green-100 text-green-800';
     case 'frozen':
@@ -58,7 +60,7 @@ function getPhaseColor(phase: string) {
   }
 }
 
-function canPromote(proposal: Revision, allRevisions: Revision[]): boolean {
+function canAdvance(proposal: Revision, allRevisions: Revision[]): boolean {
   // Can promote if: draft, OR approved but newer major version is rejected
   if (proposal.status === 'draft') return true;
   if (proposal.status === 'approved' && proposal.parent_revision_id) {
@@ -153,14 +155,14 @@ export default function PartDetail() {
     },
   });
 
-  // Promote revision mutation
+  // Advance revision mutation
   const promoteRevisionMutation = useMutation({
     mutationFn: async (revisionId: number) => {
       const response = await client.post(`/v1/parts/${partId}/revisions/${revisionId}/promote`, {});
       return response.data;
     },
     onSuccess: (data) => {
-      toast.success(`Promoted to ${data.revision_name}!`);
+      toast.success(`Advanced to ${data.revision_name}!`);
       refetch();
     },
     onError: () => {
@@ -339,14 +341,14 @@ export default function PartDetail() {
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
-                                {canPromote(proposal, part.revisions) && (
+                                {canAdvance(proposal, part.revisions) && (
                                   <button
                                     onClick={() => promoteRevisionMutation.mutate(proposal.id)}
                                     disabled={promoteRevisionMutation.isPending}
                                     className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
-                                    title={proposal.status === 'approved' ? 'Re-promote this proposal (if newer version is rejected)' : 'Promote to next major version'}
+                                    title={proposal.status === 'approved' ? 'Re-promote this proposal (if newer version is rejected)' : 'Advance to next major version'}
                                   >
-                                    Promote
+                                    Advance
                                   </button>
                                 )}
                               </div>

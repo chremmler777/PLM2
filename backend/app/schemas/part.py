@@ -52,7 +52,7 @@ class PartRevisionBase(BaseModel):
     """Base revision information."""
     revision_name: str = Field(..., description="RFQ1, ENG1, ENG1.1, IND1, ECR1.1, etc")
     phase: str = Field(..., description="rfq_phase, engineering, freeze, ecn")
-    status: str = Field(default="draft", description="draft, in_progress, in_review, approved, rejected, frozen, cancelled")
+    status: str = Field(default="draft", description="draft, in_progress, in_review, approved, rejected, archived, frozen, cancelled")
     summary: Optional[str] = None
     change_reason: Optional[str] = None
     impact_analysis: Optional[str] = None

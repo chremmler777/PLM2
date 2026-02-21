@@ -192,16 +192,16 @@ class RevisionService:
                 drafts = result.scalars().all()
 
                 for draft in drafts:
-                    draft.status = RevisionStatus.REJECTED.value
+                    draft.status = RevisionStatus.ARCHIVED.value
                     await ChangelogService.log_action(
                         session=session,
                         part_id=part_id,
                         revision_id=draft.id,
                         action="status_changed",
-                        action_description=f"Automatically rejected {draft.revision_name} to create new major version",
+                        action_description=f"Automatically archived {draft.revision_name} when creating new major version",
                         field_name="status",
                         old_value=RevisionStatus.DRAFT.value,
-                        new_value=RevisionStatus.REJECTED.value,
+                        new_value=RevisionStatus.ARCHIVED.value,
                         performed_by=created_by,
                     )
             else:

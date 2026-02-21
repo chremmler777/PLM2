@@ -20,7 +20,8 @@ class RevisionStatus(str, enum.Enum):
     IN_PROGRESS = "in_progress"        # Work in progress
     IN_REVIEW = "in_review"            # Awaiting approval
     APPROVED = "approved"              # Approved and confirmed
-    REJECTED = "rejected"              # Proposal rejected but remains visible
+    REJECTED = "rejected"              # Proposal explicitly rejected by user
+    ARCHIVED = "archived"              # Proposal superseded by new major version
     FROZEN = "frozen"                  # Design freeze locked
     CANCELLED = "cancelled"            # Obsolete or cancelled
 
