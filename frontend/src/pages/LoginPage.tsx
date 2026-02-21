@@ -2,41 +2,41 @@
  * LoginPage - Simple login for testing (Phase 6 will have proper auth)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Navigate to articles after successful login
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('Auth state is now true, navigating to /articles');
+      navigate('/articles');
+    }
+  }, [isAuthenticated, navigate]);
+
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
-    try {
-      // For testing: hardcoded credentials
-      // In Phase 6, this will call actual API
-      if (email === 'test@example.com' && password === 'password') {
-        console.log('Valid credentials, logging in...');
-        // Update auth state - this updates both state and localStorage
-        login('test-token-12345', 1);
-        console.log('Login called, navigating to /articles');
-        toast.success('Logged in successfully!');
-        // Use a small timeout to ensure state updates are processed
-        setTimeout(() => navigate('/articles'), 50);
-      } else {
-        console.log('Invalid credentials:', { email, password });
-        toast.error('Invalid credentials (test: test@example.com / password)');
-        setIsLoading(false);
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      toast.error('Login failed');
+    // For testing: hardcoded credentials
+    // In Phase 6, this will call actual API
+    if (email === 'test@example.com' && password === 'password') {
+      console.log('Valid credentials, calling login()');
+      // Update auth state - useEffect will handle navigation
+      login('test-token-12345', 1);
+      toast.success('Logged in successfully!');
+      // Don't navigate here - let useEffect handle it after state updates
+    } else {
+      console.log('Invalid credentials:', { email, password });
+      toast.error('Invalid credentials (test: test@example.com / password)');
       setIsLoading(false);
     }
   };
