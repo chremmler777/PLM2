@@ -22,18 +22,20 @@ export default function LoginPage() {
       // For testing: hardcoded credentials
       // In Phase 6, this will call actual API
       if (email === 'test@example.com' && password === 'password') {
-        // Update auth state first
+        console.log('Valid credentials, logging in...');
+        // Update auth state - this updates both state and localStorage
         login('test-token-12345', 1);
-        toast.success('Logged in successfully');
-        // Navigate after a brief delay to ensure state is updated
-        setTimeout(() => {
-          navigate('/articles');
-        }, 100);
+        console.log('Login called, navigating to /articles');
+        toast.success('Logged in successfully!');
+        // Use a small timeout to ensure state updates are processed
+        setTimeout(() => navigate('/articles'), 50);
       } else {
+        console.log('Invalid credentials:', { email, password });
         toast.error('Invalid credentials (test: test@example.com / password)');
         setIsLoading(false);
       }
     } catch (error) {
+      console.error('Login error:', error);
       toast.error('Login failed');
       setIsLoading(false);
     }
