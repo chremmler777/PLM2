@@ -338,6 +338,29 @@ async def transition_engineering_to_freeze(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/{part_id}/revisions/engineering", response_model=PartRevisionResponse)
+async def create_engineering_major(
+    part_id: int,
+    body: CreateRFQRequest,  # Reuse RFQ schema structure
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new major ENG revision (ENG2, ENG3, etc) - auto-increments."""
+    try:
+        revision = await RevisionService.create_engineering_major_version(
+            session=db,
+            part_id=part_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create engineering major: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 # Engineering Phase Endpoints (legacy)
 @router.post("/revisions/{parent_revision_id}/propose-engineering", response_model=PartRevisionResponse)
 async def create_engineering_proposal(

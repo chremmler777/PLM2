@@ -390,13 +390,10 @@ class RevisionService:
         revision_id: int,
         created_by: int = None,
     ) -> PartRevision:
-        """Reject a revision (mark as rejected so you can go back to previous)."""
+        """Reject a revision (major or proposal) - mark as rejected."""
         revision = await session.get(PartRevision, revision_id)
         if not revision:
             raise ValueError("Revision not found")
-
-        if revision.parent_revision_id:
-            raise ValueError("Cannot reject a proposal - only major versions can be rejected")
 
         # Mark as rejected
         revision.status = RevisionStatus.REJECTED.value
@@ -609,6 +606,59 @@ class RevisionService:
 
         logger.info(f"Advanced ENG proposal {proposal.revision_name} to {next_major_name}")
         return new_revision
+
+    @staticmethod
+    async def create_engineering_major_version(
+        session: AsyncSession,
+        part_id: int,
+        summary: Optional[str] = None,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Create a new major ENG revision (ENG2, ENG3, etc) - auto-increments."""
+        # Get the latest ENG major version
+        result = await session.execute(
+            select(PartRevision)
+            .where(
+                (PartRevision.part_id == part_id)
+                & (PartRevision.phase == RevisionPhase.ENGINEERING_PHASE.value)
+                & (PartRevision.parent_revision_id.is_(None))
+            )
+            .order_by(PartRevision.revision_name.desc())
+            .limit(1)
+        )
+        last_eng = result.scalar_one_or_none()
+
+        if last_eng:
+            last_num = int(last_eng.revision_name.replace("ENG", ""))
+            next_num = last_num + 1
+        else:
+            next_num = 1
+
+        revision_name = f"ENG{next_num}"
+
+        eng_revision = PartRevision(
+            part_id=part_id,
+            revision_name=revision_name,
+            phase=RevisionPhase.ENGINEERING_PHASE.value,
+            status=RevisionStatus.IN_PROGRESS.value,
+            summary=summary,
+            created_by=created_by,
+        )
+        session.add(eng_revision)
+        await session.flush()
+
+        # Log the creation
+        await ChangelogService.log_action(
+            session=session,
+            part_id=part_id,
+            revision_id=eng_revision.id,
+            action="created",
+            action_description=f"Created {revision_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Created ENG major version {revision_name} for part {part_id}")
+        return eng_revision
 
     @staticmethod
     async def transition_engineering_to_freeze(

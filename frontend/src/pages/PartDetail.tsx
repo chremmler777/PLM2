@@ -115,6 +115,17 @@ function getLatestEngineeringMajor(revisions: Revision[]): Revision | null {
     })[0] || null;
 }
 
+function getLatestProposalForParent(parentId: number, revisions: Revision[]): Revision | null {
+  // Get the latest proposal under a major version
+  const proposals = revisions.filter((r) => r.parent_revision_id === parentId);
+  return proposals
+    .sort((a, b) => {
+      const numA = parseInt(a.revision_name.split('.')[1] || '0');
+      const numB = parseInt(b.revision_name.split('.')[1] || '0');
+      return numB - numA;
+    })[0] || null;
+}
+
 export default function PartDetail() {
   const { partId } = useParams<{ partId: string }>();
   const navigate = useNavigate();
@@ -262,6 +273,23 @@ export default function PartDetail() {
     },
   });
 
+  // Create engineering major mutation
+  const createEngineeringMajorMutation = useMutation({
+    mutationFn: async () => {
+      const response = await client.post(`/v1/parts/${partId}/revisions/engineering`, {
+        summary: 'New Engineering version',
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      toast.success('Engineering version created!');
+      refetch();
+    },
+    onError: () => {
+      toast.error('Failed to create engineering version');
+    },
+  });
+
   // Transition to Freeze mutation
   const transitionToFreezeMutation = useMutation({
     mutationFn: async (engRevisionId: number) => {
@@ -361,17 +389,11 @@ export default function PartDetail() {
               )}
               {hasEngineeringPhase(part.revisions) && !part.revisions.some((r) => r.phase === 'freeze') && (
                 <button
-                  onClick={() => {
-                    const latestEng = getLatestEngineeringMajor(part.revisions);
-                    if (latestEng) {
-                      // TODO: Create new ENG major endpoint
-                      toast.error('Create new ENG major not yet implemented');
-                    }
-                  }}
-                  disabled
+                  onClick={() => createEngineeringMajorMutation.mutate()}
+                  disabled={createEngineeringMajorMutation.isPending}
                   className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 text-sm font-medium"
                 >
-                  + New ENG
+                  {createEngineeringMajorMutation.isPending ? 'Creating...' : '+ New ENG'}
                 </button>
               )}
             </div>
@@ -428,7 +450,9 @@ export default function PartDetail() {
                                   + Iterate
                                 </button>
                               )}
-                              {majorRev.status !== 'rejected' && (
+                              {majorRev.status !== 'rejected' &&
+                                ((majorRev.phase === 'rfq_phase' && majorRev === getLatestActiveRFQMajor(part.revisions)) ||
+                                 majorRev.phase === 'engineering') && (
                                 <button
                                   onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
                                   disabled={rejectRevisionMutation.isPending}
@@ -478,22 +502,33 @@ export default function PartDetail() {
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
-                                {canAdvance(proposal, part.revisions) && (
-                                  <button
-                                    onClick={() => {
-                                      if (proposal.phase === 'engineering') {
-                                        advanceEngineeringMutation.mutate(proposal.id);
-                                      } else {
-                                        promoteRevisionMutation.mutate(proposal.id);
-                                      }
-                                    }}
-                                    disabled={promoteRevisionMutation.isPending || advanceEngineeringMutation.isPending}
-                                    className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
-                                    title={proposal.status === 'approved' ? 'Re-advance this proposal (if newer version is rejected)' : 'Advance to next major version'}
-                                  >
-                                    Advance
-                                  </button>
-                                )}
+                                <div className="flex gap-2">
+                                  {canAdvance(proposal, part.revisions) && (
+                                    <button
+                                      onClick={() => {
+                                        if (proposal.phase === 'engineering') {
+                                          advanceEngineeringMutation.mutate(proposal.id);
+                                        } else {
+                                          promoteRevisionMutation.mutate(proposal.id);
+                                        }
+                                      }}
+                                      disabled={promoteRevisionMutation.isPending || advanceEngineeringMutation.isPending}
+                                      className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
+                                      title={proposal.status === 'approved' ? 'Re-advance this proposal (if newer version is rejected)' : 'Advance to next major version'}
+                                    >
+                                      Advance
+                                    </button>
+                                  )}
+                                  {proposal.status !== 'rejected' && proposal === getLatestProposalForParent(majorRev?.id || 0, part.revisions) && (
+                                    <button
+                                      onClick={() => rejectRevisionMutation.mutate(proposal.id)}
+                                      disabled={rejectRevisionMutation.isPending}
+                                      className="px-3 py-1 bg-red-100 text-red-700 text-sm rounded hover:bg-red-200 disabled:bg-gray-100"
+                                    >
+                                      Reject
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ))}
