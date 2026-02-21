@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { client } from '../api/client';
+import client from '../api/client';
 import { toast } from 'sonner';
 
 export default function Dashboard() {
