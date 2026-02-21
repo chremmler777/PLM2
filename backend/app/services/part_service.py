@@ -316,6 +316,9 @@ class RevisionService:
         session.add(new_revision)
         await session.flush()
 
+        # Mark the promoted revision with status "promoted" for audit trail
+        revision.status = RevisionStatus.APPROVED.value  # Use APPROVED to indicate it was chosen/promoted
+
         # Tag the promoted revision
         await ChangelogService.log_action(
             session=session,

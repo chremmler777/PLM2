@@ -262,12 +262,14 @@ export default function PartDetail() {
                               </p>
                             </div>
                             <div className="flex gap-2">
-                              <button
-                                onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
-                                className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
-                              >
-                                + Proposal
-                              </button>
+                              {majorRev.status !== 'rejected' && (
+                                <button
+                                  onClick={() => setShowProposalForm(showProposalForm === majorRev.id ? null : majorRev.id)}
+                                  className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded hover:bg-green-200"
+                                >
+                                  + Proposal
+                                </button>
+                              )}
                               {majorRev.status !== 'rejected' && (
                                 <button
                                   onClick={() => rejectRevisionMutation.mutate(majorRev.id)}
@@ -300,14 +302,16 @@ export default function PartDetail() {
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
-                                <button
-                                  onClick={() => promoteRevisionMutation.mutate(proposal.id)}
-                                  disabled={promoteRevisionMutation.isPending}
-                                  className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
-                                  title={proposal.status === 'rejected' ? 'Re-promote this proposal (creates new major version)' : 'Promote to next major version'}
-                                >
-                                  Promote
-                                </button>
+                                {proposal.status !== 'rejected' && (
+                                  <button
+                                    onClick={() => promoteRevisionMutation.mutate(proposal.id)}
+                                    disabled={promoteRevisionMutation.isPending}
+                                    className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded hover:bg-purple-200 disabled:bg-gray-100"
+                                    title={proposal.status === 'approved' ? 'Re-promote this proposal (if newer version is rejected)' : 'Promote to next major version'}
+                                  >
+                                    Promote
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
