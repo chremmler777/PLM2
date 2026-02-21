@@ -73,6 +73,25 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown."""
     # Startup
     logger.info("Starting up PLM application...")
+
+    # Run Alembic migrations
+    import subprocess
+    logger.info("Running database migrations...")
+    try:
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            cwd="/app",
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            logger.info("Database migrations completed successfully")
+        else:
+            logger.warning(f"Migration warnings: {result.stderr}")
+    except Exception as e:
+        logger.error(f"Failed to run migrations: {e}")
+
     await init_db()
     logger.info("Database initialized")
     await seed_test_data()
