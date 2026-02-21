@@ -1,0 +1,36 @@
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.25
+asyncpg==0.29.0
+psycopg[binary]==3.1.15
+alembic==1.13.1
+
+# Validation and settings
+pydantic==2.5.3
+pydantic-settings==2.1.0
+email-validator==2.1.0
+
+# Security
+passlib==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+pyotp==2.9.0
+
+# File handling
+aiofiles==23.2.1
+
+# 3D CAD conversion (Phase 2)
+# pythonocc-core installed via conda (see Dockerfile)
+
+# Caching & Rate limiting
+slowapi==0.1.9
+redis==5.0.1
+
+# Development
+pytest==7.4.4
+pytest-asyncio==0.23.3
+httpx==0.26.0

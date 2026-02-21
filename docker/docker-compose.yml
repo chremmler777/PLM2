@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: plm-db
+    environment:
+      POSTGRES_USER: plm
+      POSTGRES_PASSWORD: plm
+      POSTGRES_DB: plm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - data
+
+  redis:
+    image: redis:7-alpine
+    container_name: plm-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass plm --maxmemory 200mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - data
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: plm-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://plm:plm@db:5432/plm
+      REDIS_URL: redis://:plm@redis:6379/0
+      DEBUG: "true"
+      UPLOAD_DIR: /app/storage/uploads
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+      - ../storage/uploads:/app/storage/uploads
+      - ../storage/gltf:/app/storage/gltf
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    networks:
+      - backend
+      - data
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: plm-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    networks:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  data:
+    driver: bridge
