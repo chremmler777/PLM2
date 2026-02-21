@@ -51,6 +51,7 @@ async def seed_test_data():
                 logger.info("Creating test user...")
                 test_user = User(
                     organization_id=test_org.id,
+                    username="testuser",
                     email="test@example.com",
                     full_name="Test User",
                     hashed_password=get_password_hash("password"),
