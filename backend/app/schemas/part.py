@@ -131,6 +131,7 @@ class ChangelogEntryResponse(BaseModel):
     new_value: Optional[str] = None
     file_id: Optional[int] = None
     performed_by: int
+    performed_by_user: Optional[str] = None  # Username, populated from User table
     performed_at: datetime
     notes: Optional[str] = None
     ip_address: Optional[str] = None
@@ -161,6 +162,11 @@ class CreateRFQProposalRequest(BaseModel):
 class PromoteRevisionRequest(BaseModel):
     """Request to promote a revision to next major version."""
     notes: Optional[str] = Field(None, description="Notes about the promotion")
+
+
+class RejectMajorRevisionRequest(BaseModel):
+    """Request to reject a major revision."""
+    reason: Optional[str] = Field(None, description="Reason for rejection")
 
 
 class TransitionToEngineeringRequest(BaseModel):

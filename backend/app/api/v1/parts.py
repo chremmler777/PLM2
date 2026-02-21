@@ -13,6 +13,7 @@ from app.schemas.part import (
     PartRevisionResponse, PartRevisionDetailResponse,
     ChangelogEntryResponse, RevisionTreeNode,
     CreateRFQRequest, CreateRFQProposalRequest, PromoteRevisionRequest,
+    RejectMajorRevisionRequest,
     TransitionToEngineeringRequest, CreateEngineeringProposalRequest,
     ApproveProposalRequest, RejectProposalRequest, CreateDesignFreezeRequest,
     CreateECRRequest
@@ -214,6 +215,29 @@ async def promote_revision(
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to promote revision: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/{revision_id}/reject", response_model=PartRevisionResponse)
+async def reject_revision(
+    part_id: int,
+    revision_id: int,
+    body: RejectMajorRevisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reject a major revision so you can go back to a previous version."""
+    try:
+        revision = await RevisionService.reject_revision(
+            session=db,
+            revision_id=revision_id,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to reject revision: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -432,7 +456,27 @@ async def get_part_changelog(
 ):
     """Get changelog for a part."""
     entries = await ChangelogService.get_part_changelog(db, part_id)
-    return entries
+    # Convert to response with username populated
+    result = []
+    for entry in entries:
+        entry_dict = {
+            'id': entry.id,
+            'part_id': entry.part_id,
+            'revision_id': entry.revision_id,
+            'action': entry.action,
+            'action_description': entry.action_description,
+            'field_name': entry.field_name,
+            'old_value': entry.old_value,
+            'new_value': entry.new_value,
+            'file_id': entry.file_id,
+            'performed_by': entry.performed_by,
+            'performed_by_user': entry.performed_by_user.username if entry.performed_by_user else None,
+            'performed_at': entry.performed_at,
+            'notes': entry.notes,
+            'ip_address': entry.ip_address,
+        }
+        result.append(ChangelogEntryResponse(**entry_dict))
+    return result
 
 
 @router.get("/revisions/{revision_id}/changelog", response_model=List[ChangelogEntryResponse])
@@ -443,4 +487,24 @@ async def get_revision_changelog(
 ):
     """Get changelog for a specific revision."""
     entries = await ChangelogService.get_revision_changelog(db, revision_id)
-    return entries
+    # Convert to response with username populated
+    result = []
+    for entry in entries:
+        entry_dict = {
+            'id': entry.id,
+            'part_id': entry.part_id,
+            'revision_id': entry.revision_id,
+            'action': entry.action,
+            'action_description': entry.action_description,
+            'field_name': entry.field_name,
+            'old_value': entry.old_value,
+            'new_value': entry.new_value,
+            'file_id': entry.file_id,
+            'performed_by': entry.performed_by,
+            'performed_by_user': entry.performed_by_user.username if entry.performed_by_user else None,
+            'performed_at': entry.performed_at,
+            'notes': entry.notes,
+            'ip_address': entry.ip_address,
+        }
+        result.append(ChangelogEntryResponse(**entry_dict))
+    return result

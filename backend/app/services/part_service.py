@@ -5,6 +5,7 @@ from typing import Optional, List
 from sqlalchemy import select, cast, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import joinedload
 from app.models import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, User
@@ -144,6 +145,30 @@ class RevisionService:
         return f"{phase_prefix}{current_num + 1}"
 
     @staticmethod
+    async def has_draft_proposals(
+        session: AsyncSession,
+        part_id: int,
+    ) -> tuple[bool, Optional[PartRevision]]:
+        """Check if there are draft proposals under the latest major RFQ. Returns (has_drafts, latest_major_rfq)."""
+        latest = await RevisionService.get_latest_revision_in_phase(
+            session, part_id, RevisionPhase.RFQ_PHASE.value
+        )
+        if not latest:
+            return False, None
+
+        # Check if there are any draft proposals under this major version
+        result = await session.execute(
+            select(PartRevision)
+            .where(
+                (PartRevision.parent_revision_id == latest.id)
+                & (PartRevision.status == RevisionStatus.DRAFT.value)
+            )
+            .limit(1)
+        )
+        has_drafts = result.scalar_one_or_none() is not None
+        return has_drafts, latest
+
+    @staticmethod
     async def create_rfq_revision(
         session: AsyncSession,
         part_id: int,
@@ -151,6 +176,14 @@ class RevisionService:
         created_by: int = None,
     ) -> PartRevision:
         """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
+        # Check if there are draft proposals that should be promoted first
+        has_drafts, latest = await RevisionService.has_draft_proposals(session, part_id)
+        if has_drafts:
+            raise ValueError(
+                f"Cannot create new RFQ while {latest.revision_name} has draft proposals. "
+                f"Promote one of them first or reject {latest.revision_name}."
+            )
+
         # Calculate next major RFQ version
         revision_name = await RevisionService.get_next_major_version_name(
             session, part_id, RevisionPhase.RFQ_PHASE.value, "RFQ"
@@ -160,7 +193,7 @@ class RevisionService:
             part_id=part_id,
             revision_name=revision_name,
             phase=RevisionPhase.RFQ_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
+            status=RevisionStatus.IN_PROGRESS.value,  # Use IN_PROGRESS instead of DRAFT for major versions
             summary=summary,
             created_by=created_by,
         )
@@ -317,6 +350,36 @@ class RevisionService:
 
         logger.info(f"Promoted {revision.revision_name} to {next_major_name}")
         return new_revision
+
+    @staticmethod
+    async def reject_revision(
+        session: AsyncSession,
+        revision_id: int,
+        created_by: int = None,
+    ) -> PartRevision:
+        """Reject a revision (mark as rejected so you can go back to previous)."""
+        revision = await session.get(PartRevision, revision_id)
+        if not revision:
+            raise ValueError("Revision not found")
+
+        if revision.parent_revision_id:
+            raise ValueError("Cannot reject a proposal - only major versions can be rejected")
+
+        # Mark as rejected
+        revision.status = RevisionStatus.REJECTED.value
+
+        # Log the rejection
+        await ChangelogService.log_action(
+            session=session,
+            part_id=revision.part_id,
+            revision_id=revision.id,
+            action="rejected",
+            action_description=f"Rejected {revision.revision_name}",
+            performed_by=created_by,
+        )
+
+        logger.info(f"Rejected revision {revision.revision_name}")
+        return revision
 
     @staticmethod
     async def transition_rfq_to_engineering(
@@ -717,9 +780,10 @@ class ChangelogService:
         result = await session.execute(
             select(RevisionChangelog)
             .where(RevisionChangelog.part_id == part_id)
+            .options(joinedload(RevisionChangelog.performed_by_user))  # Eager load the user
             .order_by(RevisionChangelog.performed_at)
         )
-        return result.scalars().all()
+        return result.unique().scalars().all()
 
     @staticmethod
     async def get_revision_changelog(
@@ -730,6 +794,7 @@ class ChangelogService:
         result = await session.execute(
             select(RevisionChangelog)
             .where(RevisionChangelog.revision_id == revision_id)
+            .options(joinedload(RevisionChangelog.performed_by_user))  # Eager load the user
             .order_by(RevisionChangelog.performed_at)
         )
-        return result.scalars().all()
+        return result.unique().scalars().all()
