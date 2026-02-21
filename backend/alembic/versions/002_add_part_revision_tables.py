@@ -62,7 +62,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['updated_by'], ['users.id']),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_parts_part_number'), 'parts', ['part_number'])
 
     # part_revisions table
     op.create_table(
