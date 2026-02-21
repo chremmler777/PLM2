@@ -242,8 +242,9 @@ async def reject_revision(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/revisions/{rfq_revision_id}/to-engineering", response_model=PartRevisionResponse)
+@router.post("/{part_id}/revisions/{rfq_revision_id}/to-engineering", response_model=PartRevisionResponse)
 async def transition_rfq_to_engineering(
+    part_id: int,
     rfq_revision_id: int,
     body: TransitionToEngineeringRequest,
     current_user: User = Depends(get_current_user),
@@ -254,6 +255,7 @@ async def transition_rfq_to_engineering(
         revision = await RevisionService.transition_rfq_to_engineering(
             session=db,
             rfq_revision_id=rfq_revision_id,
+            summary=body.summary,
             created_by=current_user.id,
         )
         await db.commit()
@@ -264,7 +266,79 @@ async def transition_rfq_to_engineering(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-# Engineering Phase Endpoints
+@router.post("/{part_id}/revisions/engineering-proposal", response_model=PartRevisionResponse)
+async def create_engineering_proposal_endpoint(
+    part_id: int,
+    body: CreateRFQProposalRequest,  # Reuse RFQ proposal schema structure
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an engineering proposal (ENG1.1, ENG1.2, etc) - auto-increments minor version."""
+    try:
+        revision = await RevisionService.create_engineering_proposal_simple(
+            session=db,
+            part_id=part_id,
+            parent_revision_id=body.parent_revision_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create engineering proposal: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/{revision_id}/advance-engineering", response_model=PartRevisionResponse)
+async def advance_engineering_proposal(
+    part_id: int,
+    revision_id: int,
+    body: PromoteRevisionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Advance (promote) an engineering proposal to next major version (ENG1.2 → ENG2)."""
+    try:
+        revision = await RevisionService.advance_engineering_proposal(
+            session=db,
+            part_id=part_id,
+            proposal_revision_id=revision_id,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to advance engineering proposal: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/revisions/{revision_id}/to-freeze", response_model=PartRevisionResponse)
+async def transition_engineering_to_freeze(
+    part_id: int,
+    revision_id: int,
+    body: CreateDesignFreezeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Transition from Engineering to Design Freeze (IND1, IND2, etc)."""
+    try:
+        revision = await RevisionService.transition_engineering_to_freeze(
+            session=db,
+            eng_revision_id=revision_id,
+            summary=body.summary,
+            created_by=current_user.id,
+        )
+        await db.commit()
+        return revision
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to transition to freeze: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# Engineering Phase Endpoints (legacy)
 @router.post("/revisions/{parent_revision_id}/propose-engineering", response_model=PartRevisionResponse)
 async def create_engineering_proposal(
     parent_revision_id: int,

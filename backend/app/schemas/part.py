@@ -171,8 +171,8 @@ class RejectMajorRevisionRequest(BaseModel):
 
 
 class TransitionToEngineeringRequest(BaseModel):
-    """Request to transition RFQ to Engineering."""
-    pass
+    """Request to transition RFQ to Engineering (award and start ENG1)."""
+    summary: Optional[str] = None
 
 
 class CreateEngineeringProposalRequest(BaseModel):
@@ -195,8 +195,8 @@ class RejectProposalRequest(BaseModel):
 
 
 class CreateDesignFreezeRequest(BaseModel):
-    """Request to create design freeze."""
-    pass
+    """Request to create design freeze (IND1, IND2, etc)."""
+    summary: Optional[str] = None
 
 
 class CreateECRRequest(BaseModel):
