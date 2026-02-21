@@ -162,6 +162,7 @@ async def create_rfq_revision(
             part_id=part_id,
             summary=body.summary,
             created_by=current_user.id,
+            reject_drafts=body.reject_drafts,
         )
         await db.commit()
         return revision

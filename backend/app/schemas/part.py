@@ -151,6 +151,7 @@ class RevisionTreeNode(BaseModel):
 class CreateRFQRequest(BaseModel):
     """Request to create RFQ revision (auto-increments to next major version)."""
     summary: Optional[str] = None
+    reject_drafts: bool = Field(False, description="If true, reject existing draft proposals before creating new major version")
 
 
 class CreateRFQProposalRequest(BaseModel):

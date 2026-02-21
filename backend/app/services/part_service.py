@@ -174,15 +174,40 @@ class RevisionService:
         part_id: int,
         summary: Optional[str] = None,
         created_by: int = None,
+        reject_drafts: bool = False,
     ) -> PartRevision:
         """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
         # Check if there are draft proposals that should be promoted first
         has_drafts, latest = await RevisionService.has_draft_proposals(session, part_id)
         if has_drafts:
-            raise ValueError(
-                f"Cannot create new RFQ while {latest.revision_name} has draft proposals. "
-                f"Promote one of them first or reject {latest.revision_name}."
-            )
+            if reject_drafts:
+                # Reject all draft proposals under the latest major version
+                drafts = session.execute(
+                    select(PartRevision).where(
+                        (PartRevision.part_id == part_id)
+                        & (PartRevision.parent_revision_id == latest.id)
+                        & (PartRevision.status == RevisionStatus.DRAFT.value)
+                    )
+                ).scalars().all()
+
+                for draft in drafts:
+                    draft.status = RevisionStatus.REJECTED.value
+                    await ChangelogService.log_action(
+                        session=session,
+                        part_id=part_id,
+                        revision_id=draft.id,
+                        action="status_changed",
+                        action_description=f"Automatically rejected {draft.revision_name} to create new major version",
+                        field_name="status",
+                        old_value=RevisionStatus.DRAFT.value,
+                        new_value=RevisionStatus.REJECTED.value,
+                        performed_by=created_by,
+                    )
+            else:
+                raise ValueError(
+                    f"Cannot create new RFQ while {latest.revision_name} has draft proposals. "
+                    f"Promote one of them first or reject {latest.revision_name}."
+                )
 
         # Calculate next major RFQ version
         revision_name = await RevisionService.get_next_major_version_name(
