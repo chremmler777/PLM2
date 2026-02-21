@@ -14,14 +14,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Navigate to articles after successful login
-  useEffect(() => {
-    if (isAuthenticated) {
-      console.log('Auth state is now true, navigating to /articles');
-      navigate('/articles');
-    }
-  }, [isAuthenticated, navigate]);
-
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -30,10 +22,17 @@ export default function LoginPage() {
     // In Phase 6, this will call actual API
     if (email === 'test@example.com' && password === 'password') {
       console.log('Valid credentials, calling login()');
-      // Update auth state - useEffect will handle navigation
+
+      // Update auth state
       login('test-token-12345', 1);
       toast.success('Logged in successfully!');
-      // Don't navigate here - let useEffect handle it after state updates
+
+      // Use Promise.resolve() to ensure state updates are batched
+      // then navigate in the next microtask
+      Promise.resolve().then(() => {
+        console.log('Promise resolved, navigating to /articles');
+        navigate('/articles');
+      });
     } else {
       console.log('Invalid credentials:', { email, password });
       toast.error('Invalid credentials (test: test@example.com / password)');
