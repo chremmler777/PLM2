@@ -182,13 +182,14 @@ class RevisionService:
         if has_drafts:
             if reject_drafts:
                 # Reject all draft proposals under the latest major version
-                drafts = session.execute(
+                result = await session.execute(
                     select(PartRevision).where(
                         (PartRevision.part_id == part_id)
                         & (PartRevision.parent_revision_id == latest.id)
                         & (PartRevision.status == RevisionStatus.DRAFT.value)
                     )
-                ).scalars().all()
+                )
+                drafts = result.scalars().all()
 
                 for draft in drafts:
                     draft.status = RevisionStatus.REJECTED.value
