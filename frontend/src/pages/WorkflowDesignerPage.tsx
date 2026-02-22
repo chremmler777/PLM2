@@ -58,11 +58,13 @@ export default function WorkflowDesignerPage() {
 
       // Fetch version history
       try {
+        console.log('Attempting to fetch version history for template:', templateId);
         const history = await workflowApi.getTemplateHistory(templateId);
-        console.log('Fetched version history:', history);
-        setVersionHistory(history);
-      } catch (historyError) {
-        console.warn('Could not fetch version history:', historyError);
+        console.log('✓ Fetched version history:', history, 'Count:', history?.length);
+        setVersionHistory(history || []);
+      } catch (historyError: any) {
+        console.error('✗ Could not fetch version history:', historyError);
+        console.error('Error details:', historyError?.response?.status, historyError?.response?.data);
         setVersionHistory([]);
       }
     } catch (error) {

@@ -46,7 +46,7 @@ export default function WorkflowFlowChart({ template, versions = [] }: WorkflowF
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
 
   // Debug logging
-  console.log('WorkflowFlowChart - versions:', versions);
+  console.log('WorkflowFlowChart rendered - versions.length:', versions?.length, 'versions:', versions);
 
   // Determine which version to display
   let displayedSnapshot: any = template.stages;
