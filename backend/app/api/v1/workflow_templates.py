@@ -9,7 +9,15 @@ from app.dependencies import get_db, get_current_user
 from app.models import (
     User, Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
 )
+from app.schemas.workflow import (
+    DepartmentResponse, WfTemplateResponse, WfTemplateListResponse,
+    WfTemplateSave
+)
 
+router = APIRouter(prefix="/workflow-templates", tags=["workflow-templates"])
+
+
+# Helper function to fetch department name
 async def get_department_name(db: AsyncSession, dept_id: int) -> str:
     """Fetch department name by ID."""
     result = await db.execute(
@@ -17,12 +25,6 @@ async def get_department_name(db: AsyncSession, dept_id: int) -> str:
     )
     name = result.scalar_one_or_none()
     return name or "Unknown"
-from app.schemas.workflow import (
-    DepartmentResponse, WfTemplateResponse, WfTemplateListResponse,
-    WfTemplateSave
-)
-
-router = APIRouter(prefix="/workflow-templates", tags=["workflow-templates"])
 
 
 @router.get("/departments", response_model=list[DepartmentResponse])
