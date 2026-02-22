@@ -793,6 +793,7 @@ class RevisionService:
         part_id: int,
         summary: Optional[str] = None,
         created_by: int = None,
+        reject_drafts: bool = False,
     ) -> PartRevision:
         """Create a new major freeze revision (IND2, IND3, etc) - auto-increments."""
         # Get the latest freeze major version
@@ -807,6 +808,47 @@ class RevisionService:
             .limit(1)
         )
         last_freeze = result.scalar_one_or_none()
+
+        # Check if there are draft proposals under the latest freeze major
+        if last_freeze:
+            draft_result = await session.execute(
+                select(PartRevision).where(
+                    (PartRevision.parent_revision_id == last_freeze.id)
+                    & (PartRevision.status == RevisionStatus.DRAFT.value)
+                )
+                .limit(1)
+            )
+            has_drafts = draft_result.scalar_one_or_none() is not None
+
+            if has_drafts:
+                if reject_drafts:
+                    # Reject all draft proposals under the latest major version
+                    drafts_result = await session.execute(
+                        select(PartRevision).where(
+                            (PartRevision.parent_revision_id == last_freeze.id)
+                            & (PartRevision.status == RevisionStatus.DRAFT.value)
+                        )
+                    )
+                    drafts = drafts_result.scalars().all()
+
+                    for draft in drafts:
+                        draft.status = RevisionStatus.ARCHIVED.value
+                        await ChangelogService.log_action(
+                            session=session,
+                            part_id=part_id,
+                            revision_id=draft.id,
+                            action="status_changed",
+                            action_description=f"Automatically archived {draft.revision_name} when creating new major version",
+                            field_name="status",
+                            old_value=RevisionStatus.DRAFT.value,
+                            new_value=RevisionStatus.ARCHIVED.value,
+                            performed_by=created_by,
+                        )
+                else:
+                    raise ValueError(
+                        f"Cannot create new IND while {last_freeze.revision_name} has draft proposals. "
+                        f"Promote one of them first or reject {last_freeze.revision_name}."
+                    )
 
         if last_freeze:
             last_num = int(last_freeze.revision_name.replace("IND", ""))

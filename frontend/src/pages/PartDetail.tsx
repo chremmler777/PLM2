@@ -166,6 +166,7 @@ export default function PartDetail() {
   const [showProposalForm, setShowProposalForm] = useState<number | null>(null);
   const [proposalSummary, setProposalSummary] = useState('');
   const [showRejectDraftsModal, setShowRejectDraftsModal] = useState(false);
+  const [showRejectFreezeDraftsModal, setShowRejectFreezeDraftsModal] = useState(false);
 
   // Fetch part
   const { data: part, isLoading, error: partError, refetch } = useQuery({
@@ -389,18 +390,27 @@ export default function PartDetail() {
 
   // Create freeze major mutation
   const createFreezeMajorMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (rejectDrafts: boolean = false) => {
       const response = await client.post(`/v1/parts/${partId}/revisions/freeze`, {
         summary: 'New Freeze version',
+        reject_drafts: rejectDrafts,
       });
       return response.data;
     },
     onSuccess: () => {
       toast.success('Freeze version created!');
+      setShowRejectFreezeDraftsModal(false);
       refetch();
     },
-    onError: () => {
-      toast.error('Failed to create freeze version');
+    onError: (error: any) => {
+      const message = error.response?.data?.detail || 'Failed to create freeze version';
+
+      // Check if error is due to draft proposals
+      if (message.includes('draft proposals')) {
+        setShowRejectFreezeDraftsModal(true);
+      } else {
+        toast.error(message);
+      }
     },
   });
 
@@ -792,6 +802,37 @@ export default function PartDetail() {
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
                   >
                     {createRfqMutation.isPending ? 'Creating...' : 'Reject & Create RFQ'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reject Freeze Drafts Confirmation Modal */}
+        {showRejectFreezeDraftsModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg max-w-md w-full mx-4">
+              <div className="p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                  Reject Draft Proposals?
+                </h3>
+                <p className="text-gray-700 mb-6">
+                  There are active draft proposals. Would you like to reject them and create a new IND cycle?
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setShowRejectFreezeDraftsModal(false)}
+                    className="px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => createFreezeMajorMutation.mutate(true)}
+                    disabled={createFreezeMajorMutation.isPending}
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-400 font-medium"
+                  >
+                    {createFreezeMajorMutation.isPending ? 'Creating...' : 'Reject & Create IND'}
                   </button>
                 </div>
               </div>

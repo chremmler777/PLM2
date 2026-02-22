@@ -435,7 +435,7 @@ async def create_engineering_major(
 @router.post("/{part_id}/revisions/freeze", response_model=PartRevisionResponse)
 async def create_freeze_major(
     part_id: int,
-    body: CreateRFQRequest,  # Reuse RFQ schema structure
+    body: CreateRFQRequest,  # Reuse RFQ schema structure (includes reject_drafts)
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -446,6 +446,7 @@ async def create_freeze_major(
             part_id=part_id,
             summary=body.summary,
             created_by=current_user.id,
+            reject_drafts=getattr(body, 'reject_drafts', False),
         )
         await db.commit()
         return revision
