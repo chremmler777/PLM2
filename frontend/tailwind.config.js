@@ -14,6 +14,12 @@ export default {
           600: "#0284c7",
         },
       },
+      backgroundColor: {
+        DEFAULT: "#0f172a", // slate-950
+      },
+      textColor: {
+        DEFAULT: "#f1f5f9", // slate-100
+      },
     },
   },
   plugins: [],
