@@ -486,8 +486,15 @@ export default function PartDetail() {
           </div>
 
           {Object.keys(majorVersions).length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No revisions yet. Click "New RFQ" to start.
+            <div className="text-center py-12">
+              <p className="text-gray-500 mb-4">No revisions yet.</p>
+              <button
+                onClick={() => createRfqMutation.mutate()}
+                disabled={createRfqMutation.isPending}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+              >
+                {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
+              </button>
             </div>
           ) : (
             <div className="space-y-6">
