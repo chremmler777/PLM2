@@ -158,14 +158,20 @@ async def get_template_history(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all versions of a workflow template from history."""
+    # First verify template exists
+    template_result = await db.execute(
+        select(WfTemplate).where(WfTemplate.id == template_id)
+    )
+    if not template_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # Get history (can be empty)
     result = await db.execute(
         select(WfTemplateHistory)
         .where(WfTemplateHistory.template_id == template_id)
         .order_by(WfTemplateHistory.version)
     )
     histories = result.scalars().all()
-    if not histories:
-        raise HTTPException(status_code=404, detail="No history found")
 
     return [
         {
