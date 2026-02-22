@@ -74,7 +74,7 @@ export default function RevisionActions({
       <button
         onClick={handleCreateEngineering}
         disabled={createEngineering.isPending}
-        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 font-medium text-sm"
+        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-slate-600 font-medium text-sm"
       >
         {createEngineering.isPending ? 'Creating...' : 'New Engineering Revision'}
       </button>
@@ -83,7 +83,7 @@ export default function RevisionActions({
         <button
           onClick={handleRelease}
           disabled={releaseRevision.isPending}
-          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 font-medium text-sm"
+          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-slate-600 font-medium text-sm"
         >
           {releaseRevision.isPending ? 'Releasing...' : 'Release to Production'}
         </button>
@@ -93,14 +93,14 @@ export default function RevisionActions({
         <button
           onClick={handleCreateChange}
           disabled={createChangeProposal.isPending}
-          className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:bg-gray-400 font-medium text-sm"
+          className="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:bg-slate-600 font-medium text-sm"
         >
           {createChangeProposal.isPending ? 'Creating...' : 'Create Change Proposal'}
         </button>
       )}
 
       {!canRelease && !canCreateChange && selectedRevision && (
-        <div className="text-sm text-gray-600 py-2">
+        <div className="text-sm text-slate-400 py-2">
           {selectedRevision.revision_type === 'engineering'
             ? 'Approve revision to release'
             : 'Select a revision to perform actions'}

@@ -19,9 +19,9 @@ import RevisionTable from './RevisionTable';
 import RevisionActions from './RevisionActions';
 import ArticleWorkflowSection from './ArticleWorkflowSection';
 
-export default function ArticleDetail() {
-  const { articleId } = useParams<{ articleId: string }>();
-  const id = articleId ? parseInt(articleId, 10) : 0;
+export default function ArticleDetail({ articleId: propArticleId }: { articleId?: number } = {}) {
+  const { articleId: routeArticleId } = useParams<{ articleId: string }>();
+  const id = propArticleId || (routeArticleId ? parseInt(routeArticleId, 10) : 0);
 
   const { data, isLoading, error } = useArticle(id);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
@@ -39,7 +39,7 @@ export default function ArticleDetail() {
   }
 
   if (!data) {
-    return <div className="p-6 text-gray-500">Article not found</div>;
+    return <div className="p-6 text-slate-400">Article not found</div>;
   }
 
   const selectedRevision = selectedRevisionId
@@ -50,11 +50,11 @@ export default function ArticleDetail() {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-full bg-white">
+      <div className="flex h-full bg-slate-900">
         {/* Sidebar: Revision Tree */}
-        <div className="w-64 border-r border-gray-200 overflow-y-auto">
+        <div className="w-64 border-r border-slate-700 overflow-y-auto">
           <div className="p-4">
-            <h3 className="font-semibold text-gray-900 mb-4">Revisions</h3>
+            <h3 className="font-semibold text-slate-100 mb-4">Revisions</h3>
             <RevisionTree
               tree={data.revision_tree}
               selectedRevisionId={selectedRevisionId}

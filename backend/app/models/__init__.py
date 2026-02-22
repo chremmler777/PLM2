@@ -12,6 +12,7 @@ from app.models.part import (
     RevisionPhase, RevisionStatus, TestDataStatus
 )
 from app.models.workflow import (
+    Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )
 
@@ -41,6 +42,14 @@ __all__ = [
     "RevisionPhase",
     "RevisionStatus",
     "TestDataStatus",
+    # New workflow template models
+    "Department",
+    "WfTemplate",
+    "WfStage",
+    "WfStep",
+    "WfStepRasic",
+    "WfTemplateHistory",
+    # Legacy workflow models
     "WorkflowTemplate",
     "WorkflowStep",
     "WorkflowInstance",

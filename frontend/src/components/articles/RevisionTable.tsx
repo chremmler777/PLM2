@@ -64,41 +64,41 @@ export default function RevisionTable({
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
       <table className="w-full">
-        <thead className="bg-gray-50 border-b border-gray-200">
+        <thead className="bg-slate-700 border-b border-slate-600">
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Revision
             </th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Type
             </th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Status
             </th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Created
             </th>
-            <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Actions
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-slate-700">
           {revisions.map((rev) => (
             <tr
               key={rev.id}
-              className={`hover:bg-gray-50 cursor-pointer ${
-                selectedRevisionId === rev.id ? 'bg-blue-50' : ''
+              className={`hover:bg-slate-700 cursor-pointer ${
+                selectedRevisionId === rev.id ? 'bg-blue-900' : ''
               }`}
               onClick={() => onSelectRevision(rev.id)}
             >
               <td className="px-6 py-4 whitespace-nowrap">
-                <span className="font-mono font-semibold text-gray-900">{rev.revision}</span>
+                <span className="font-mono font-semibold text-slate-100">{rev.revision}</span>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm text-gray-600 capitalize">
+                <span className="text-sm text-slate-300 capitalize">
                   {rev.revision_type.replace(/_/g, ' ')}
                 </span>
               </td>
@@ -108,7 +108,7 @@ export default function RevisionTable({
                     value={editingStatus || rev.status}
                     onChange={(e) => setEditingStatus(e.target.value as RevisionStatusEnum)}
                     onClick={(e) => e.stopPropagation()}
-                    className="px-2 py-1 border border-gray-300 rounded text-sm"
+                    className="px-2 py-1 border border-slate-600 rounded text-sm"
                   >
                     <option value={rev.status}>{statusLabels[rev.status]}</option>
                     {validTransitions[rev.status].map((status) => (
@@ -118,12 +118,12 @@ export default function RevisionTable({
                     ))}
                   </select>
                 ) : (
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-700 text-slate-100">
                     {statusLabels[rev.status]}
                   </span>
                 )}
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
                 {new Date(rev.created_at).toLocaleDateString()}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm" onClick={(e) => e.stopPropagation()}>
@@ -144,7 +144,7 @@ export default function RevisionTable({
                             setEditingId(null);
                             setEditingStatus(null);
                           }}
-                          className="px-2 py-1 bg-gray-300 text-gray-900 rounded text-xs hover:bg-gray-400"
+                          className="px-2 py-1 bg-slate-700 text-slate-100 rounded text-xs hover:bg-slate-600"
                         >
                           Cancel
                         </button>
@@ -152,7 +152,7 @@ export default function RevisionTable({
                     ) : (
                       <button
                         onClick={() => setEditingId(rev.id)}
-                        className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
+                        className="px-2 py-1 bg-slate-700 text-slate-200 rounded text-xs hover:bg-slate-600"
                       >
                         Edit Status
                       </button>
@@ -166,7 +166,7 @@ export default function RevisionTable({
       </table>
 
       {revisions.length === 0 && (
-        <div className="px-6 py-8 text-center text-gray-500">
+        <div className="px-6 py-8 text-center text-slate-400">
           No revisions yet. Create one to get started.
         </div>
       )}

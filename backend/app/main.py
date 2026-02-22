@@ -19,7 +19,7 @@ logger.debug(f"App settings loaded: debug={settings.debug}")
 async def seed_test_data():
     """Create test data for Phase 1 testing."""
     from sqlalchemy import select
-    from app.models import Organization, User, Plant, Project, AsyncSessionLocal
+    from app.models import Organization, User, Plant, Project, Department, AsyncSessionLocal
     from app.auth.security import get_password_hash
 
     async with AsyncSessionLocal() as session:
@@ -92,6 +92,31 @@ async def seed_test_data():
                     mfa_enabled=False,
                 )
                 session.add(test_user)
+
+            # Create workflow departments
+            departments_data = [
+                ("Developer", "action", 1),
+                ("Tool Engineer", "action", 2),
+                ("Manufacturing Engineer", "action", 3),
+                ("APQP", "action", 4),
+                ("Sales", "action", 5),
+                ("Project Manager", "action", 6),
+                ("Planner/Scheduler", "info", 7),
+                ("Operations Manager", "info", 8),
+            ]
+            for dept_name, flow_type, sort_order in departments_data:
+                result = await session.execute(
+                    select(Department).where(Department.name == dept_name)
+                )
+                if not result.scalar_one_or_none():
+                    logger.info(f"Creating department: {dept_name}")
+                    dept = Department(
+                        name=dept_name,
+                        flow_type=flow_type,
+                        is_active=True,
+                        sort_order=sort_order,
+                    )
+                    session.add(dept)
 
             await session.commit()
             logger.info("Test data seeded successfully")

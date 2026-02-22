@@ -10,12 +10,18 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import PartDetail from './pages/PartDetail';
 import ArticlesPage from './pages/ArticlesPage';
+import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
+import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+  return isAuthenticated ? (
+    <AppLayout>{children}</AppLayout>
+  ) : (
+    <Navigate to="/login" />
+  );
 }
 
 function AppRoutes() {
@@ -45,6 +51,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ArticlesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/workflows"
+        element={
+          <ProtectedRoute>
+            <WorkflowDesignerPage />
           </ProtectedRoute>
         }
       />

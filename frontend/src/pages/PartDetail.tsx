@@ -366,6 +366,8 @@ export default function PartDetail() {
     },
     onSuccess: (data) => {
       toast.success(`Created ${data.revision_name}!`);
+      setShowProposalForm(null);
+      setProposalSummary('');
       refetch();
     },
     onError: () => {
@@ -459,15 +461,15 @@ export default function PartDetail() {
         <div className="mb-8">
           <button
             onClick={() => navigate('/dashboard')}
-            className="mb-4 px-3 py-1 bg-gray-200 text-gray-900 rounded hover:bg-gray-300 text-sm"
+            className="mb-4 px-3 py-1 bg-slate-700 text-slate-100 rounded hover:bg-slate-600 text-sm"
           >
             ← Back
           </button>
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-4xl font-bold text-gray-900 mb-2">{part.part_number}</h1>
-              <p className="text-gray-600 mb-2">{part.name}</p>
-              <p className="text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-md w-fit">
+              <h1 className="text-4xl font-bold text-slate-100 mb-2">{part.part_number}</h1>
+              <p className="text-slate-300 mb-2">{part.name}</p>
+              <p className="text-sm font-semibold text-blue-300 bg-blue-900 px-3 py-1 rounded-md w-fit">
                 {getActiveRevisionLevel(part.revisions)}
               </p>
             </div>
@@ -475,24 +477,24 @@ export default function PartDetail() {
         </div>
 
         {/* Part Info */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Part Information</h2>
+        <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
+          <h2 className="text-xl font-bold text-slate-100 mb-4">Part Information</h2>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="text-sm text-gray-600">Type</div>
-              <div className="font-medium text-gray-900 capitalize">{part.part_type}</div>
+              <div className="text-sm text-slate-400">Type</div>
+              <div className="font-medium text-slate-100 capitalize">{part.part_type}</div>
             </div>
             <div>
-              <div className="text-sm text-gray-600">Classification</div>
-              <div className="font-medium text-gray-900 capitalize">{part.data_classification}</div>
+              <div className="text-sm text-slate-400">Classification</div>
+              <div className="font-medium text-slate-100 capitalize">{part.data_classification}</div>
             </div>
           </div>
         </div>
 
         {/* Revisions */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+        <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Revision History</h2>
+            <h2 className="text-xl font-bold text-slate-100">Revision History</h2>
           </div>
 
           {Object.keys(majorVersions).length === 0 ? (
@@ -536,11 +538,11 @@ export default function PartDetail() {
                       key={major}
                       className={`border rounded-lg p-4 ${
                         majorRev && majorRev.status !== 'rejected' && majorRev === getLatestActiveRFQMajor(part.revisions)
-                          ? 'border-blue-400 bg-blue-50 shadow-md'
+                          ? 'border-blue-400 bg-blue-900 shadow-md'
                           : majorRev && majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-purple-400 bg-purple-50 shadow-md'
+                          ? 'border-purple-400 bg-purple-900 shadow-md'
                           : majorRev && majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-orange-400 bg-orange-50 shadow-md'
+                          ? 'border-orange-400 bg-orange-900 shadow-md'
                           : 'border-gray-200'
                       }`}
                     >
@@ -550,7 +552,7 @@ export default function PartDetail() {
                           <div className="flex justify-between items-start mb-2">
                             <div>
                               <div className="flex items-center gap-2 mb-1">
-                                <div className="font-bold text-lg text-gray-900">{majorRev.revision_name}</div>
+                                <div className="font-bold text-lg text-slate-100">{majorRev.revision_name}</div>
                                 <span className={`text-xs px-2 py-1 rounded-full ${getPhaseColor(majorRev.phase)}`}>
                                   {majorRev.phase.replace('_phase', '').replace('_', ' ')}
                                 </span>
@@ -558,8 +560,8 @@ export default function PartDetail() {
                                   {majorRev.status}
                                 </span>
                               </div>
-                              {majorRev.summary && <p className="text-sm text-gray-600">{majorRev.summary}</p>}
-                              <p className="text-xs text-gray-500 mt-1">
+                              {majorRev.summary && <p className="text-sm text-slate-300">{majorRev.summary}</p>}
+                              <p className="text-xs text-slate-400 mt-1">
                                 Created at {new Date(majorRev.created_at).toLocaleString()}
                               </p>
                             </div>
@@ -679,13 +681,13 @@ export default function PartDetail() {
                               <div className="flex justify-between items-start">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
-                                    <div className="font-medium text-gray-900">{proposal.revision_name}</div>
+                                    <div className="font-medium text-slate-100">{proposal.revision_name}</div>
                                     <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(proposal.status)}`}>
                                       {proposal.status}
                                     </span>
                                   </div>
-                                  {proposal.summary && <p className="text-sm text-gray-600">{proposal.summary}</p>}
-                                  <p className="text-xs text-gray-500 mt-1">
+                                  {proposal.summary && <p className="text-sm text-slate-300">{proposal.summary}</p>}
+                                  <p className="text-xs text-slate-400 mt-1">
                                     Created at {new Date(proposal.created_at).toLocaleString()}
                                   </p>
                                 </div>
@@ -735,7 +737,7 @@ export default function PartDetail() {
 
                       {/* Create Proposal Form */}
                       {showProposalForm === majorRev?.id && (
-                        <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="mt-4 p-4 bg-slate-900 rounded-lg border border-slate-700">
                           <textarea
                             value={proposalSummary}
                             onChange={(e) => setProposalSummary(e.target.value)}
@@ -764,7 +766,7 @@ export default function PartDetail() {
                                 setShowProposalForm(null);
                                 setProposalSummary('');
                               }}
-                              className="px-3 py-1 bg-gray-300 text-gray-900 text-sm rounded hover:bg-gray-400"
+                              className="px-3 py-1 bg-slate-700 text-slate-100 text-sm rounded hover:bg-slate-600"
                             >
                               Cancel
                             </button>
@@ -781,18 +783,18 @@ export default function PartDetail() {
         {/* Reject Drafts Confirmation Modal */}
         {showRejectDraftsModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div className="bg-slate-800 rounded-lg shadow-lg max-w-md w-full mx-4">
               <div className="p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                <h3 className="text-lg font-bold text-slate-100 mb-2">
                   Reject Draft Proposals?
                 </h3>
-                <p className="text-gray-700 mb-6">
+                <p className="text-slate-300 mb-6">
                   There are active draft proposals. Would you like to reject them and create a new RFQ cycle?
                 </p>
                 <div className="flex gap-3 justify-end">
                   <button
                     onClick={() => setShowRejectDraftsModal(false)}
-                    className="px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 font-medium"
+                    className="px-4 py-2 bg-slate-700 text-slate-100 rounded-lg hover:bg-slate-600 font-medium"
                   >
                     Cancel
                   </button>
@@ -812,18 +814,18 @@ export default function PartDetail() {
         {/* Reject Freeze Drafts Confirmation Modal */}
         {showRejectFreezeDraftsModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-lg max-w-md w-full mx-4">
+            <div className="bg-slate-800 rounded-lg shadow-lg max-w-md w-full mx-4">
               <div className="p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                <h3 className="text-lg font-bold text-slate-100 mb-2">
                   Reject Draft Proposals?
                 </h3>
-                <p className="text-gray-700 mb-6">
+                <p className="text-slate-300 mb-6">
                   There are active draft proposals. Would you like to reject them and create a new IND cycle?
                 </p>
                 <div className="flex gap-3 justify-end">
                   <button
                     onClick={() => setShowRejectFreezeDraftsModal(false)}
-                    className="px-4 py-2 bg-gray-200 text-gray-900 rounded-lg hover:bg-gray-300 font-medium"
+                    className="px-4 py-2 bg-slate-700 text-slate-100 rounded-lg hover:bg-slate-600 font-medium"
                   >
                     Cancel
                   </button>

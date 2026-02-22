@@ -22,6 +22,7 @@ export default function WorkflowDesignerPage() {
   // Local editor state
   const [editorTemplate, setEditorTemplate] = useState<Partial<WfTemplate> | null>(null);
   const [viewMode, setViewMode] = useState<'edit' | 'flowchart'>('edit');
+  const [versionHistory, setVersionHistory] = useState<any[]>([]);
 
   // Step editor modal state
   const [editingStage, setEditingStage] = useState<number | null>(null);
@@ -40,9 +41,10 @@ export default function WorkflowDesignerPage() {
     setSelectedTemplateId(null);
     setSelectedStepId(null);
     setViewMode('edit');
+    setVersionHistory([]);
   };
 
-  // Handle edit - fetch full template data
+  // Handle edit - fetch full template data and version history
   const handleEditTemplate = async (templateId: number) => {
     try {
       const fullTemplate = await workflowApi.getTemplate(templateId);
@@ -53,6 +55,15 @@ export default function WorkflowDesignerPage() {
         stages: JSON.parse(JSON.stringify(fullTemplate.stages)), // Deep copy
       });
       setSelectedStepId(null);
+
+      // Fetch version history
+      try {
+        const history = await workflowApi.getTemplateHistory(templateId);
+        setVersionHistory(history);
+      } catch (historyError) {
+        console.warn('Could not fetch version history:', historyError);
+        setVersionHistory([]);
+      }
     } catch (error) {
       toast.error('Failed to load template');
     }
@@ -112,6 +123,7 @@ export default function WorkflowDesignerPage() {
     setSelectedTemplateId(null);
     setSelectedStepId(null);
     setViewMode('edit');
+    setVersionHistory([]);
   };
 
   // Handle add stage
@@ -382,7 +394,7 @@ export default function WorkflowDesignerPage() {
 
                 {/* Flowchart Mode: Visual Preview */}
                 {viewMode === 'flowchart' && (
-                  <WorkflowFlowChart template={editorTemplate} />
+                  <WorkflowFlowChart template={editorTemplate} versions={versionHistory} />
                 )}
 
                 {/* Actions */}

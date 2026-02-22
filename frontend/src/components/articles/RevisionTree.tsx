@@ -19,15 +19,15 @@ const typeColors = {
 };
 
 const statusColors = {
-  draft: 'bg-gray-100 text-gray-800',
-  rfq: 'bg-yellow-100 text-yellow-800',
-  in_review: 'bg-blue-100 text-blue-800',
-  approved: 'bg-green-100 text-green-800',
-  in_implementation: 'bg-blue-100 text-blue-800',
-  released: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  canceled: 'bg-gray-100 text-gray-800',
-  superseded: 'bg-gray-100 text-gray-800',
+  draft: 'bg-slate-700 text-slate-100',
+  rfq: 'bg-yellow-900 text-yellow-100',
+  in_review: 'bg-blue-900 text-blue-100',
+  approved: 'bg-green-900 text-green-100',
+  in_implementation: 'bg-blue-900 text-blue-100',
+  released: 'bg-green-900 text-green-100',
+  rejected: 'bg-red-900 text-red-100',
+  canceled: 'bg-slate-700 text-slate-100',
+  superseded: 'bg-slate-700 text-slate-100',
 };
 
 export default function RevisionTree({ tree, selectedRevisionId, onSelectRevision }: Props) {
@@ -48,7 +48,7 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
       {/* Engineering Revisions */}
       {tree.engineering.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2 px-2">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 px-2">
             Engineering
           </h4>
           <div className="space-y-1">
@@ -58,8 +58,8 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
                 onClick={() => onSelectRevision(rev.id)}
                 className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                   selectedRevisionId === rev.id
-                    ? 'bg-blue-100 text-blue-900 font-semibold'
-                    : 'hover:bg-gray-100'
+                    ? 'bg-blue-900 text-blue-100 font-semibold'
+                    : 'hover:bg-slate-700'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -79,7 +79,7 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
       {/* Released Indexes */}
       {tree.released_indexes.length > 0 && (
         <div>
-          <h4 className="text-xs font-semibold text-gray-700 uppercase mb-2 px-2">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2 px-2">
             Released
           </h4>
           <div className="space-y-1">
@@ -89,8 +89,8 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
                   onClick={() => onSelectRevision(index.id)}
                   className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                     selectedRevisionId === index.id
-                      ? 'bg-blue-100 text-blue-900 font-semibold'
-                      : 'hover:bg-gray-100'
+                      ? 'bg-blue-900 text-blue-100 font-semibold'
+                      : 'hover:bg-slate-700'
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -112,8 +112,8 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
                         onClick={() => onSelectRevision(change.id)}
                         className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
                           selectedRevisionId === change.id
-                            ? 'bg-blue-100 text-blue-900 font-semibold'
-                            : 'hover:bg-gray-100'
+                            ? 'bg-blue-900 text-blue-100 font-semibold'
+                            : 'hover:bg-slate-700'
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -135,7 +135,7 @@ export default function RevisionTree({ tree, selectedRevisionId, onSelectRevisio
       )}
 
       {tree.engineering.length === 0 && tree.released_indexes.length === 0 && (
-        <p className="text-sm text-gray-500 px-2 py-4">No revisions yet</p>
+        <p className="text-sm text-slate-400 px-2 py-4">No revisions yet</p>
       )}
     </div>
   );
