@@ -9,6 +9,14 @@ from app.dependencies import get_db, get_current_user
 from app.models import (
     User, Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
 )
+
+async def get_department_name(db: AsyncSession, dept_id: int) -> str:
+    """Fetch department name by ID."""
+    result = await db.execute(
+        select(Department.name).where(Department.id == dept_id)
+    )
+    name = result.scalar_one_or_none()
+    return name or "Unknown"
 from app.schemas.workflow import (
     DepartmentResponse, WfTemplateResponse, WfTemplateListResponse,
     WfTemplateSave
@@ -86,33 +94,36 @@ async def create_template(
 
         await db.flush()
 
-        # Build snapshot from request data (don't access lazy-loaded relationships)
+        # Build snapshot with department names
+        snapshot_stages = []
+        for stage_data in request.stages:
+            snapshot_steps = []
+            for step_data in stage_data.steps:
+                snapshot_rasic = []
+                for rasic_data in step_data.rasic_assignments:
+                    dept_name = await get_department_name(db, rasic_data.department_id)
+                    snapshot_rasic.append({
+                        "department_id": rasic_data.department_id,
+                        "rasic_letter": rasic_data.rasic_letter,
+                        "department_name": dept_name,
+                    })
+                snapshot_steps.append({
+                    "step_name": step_data.step_name,
+                    "position_in_stage": step_data.position_in_stage,
+                    "rasic": snapshot_rasic
+                })
+            snapshot_stages.append({
+                "stage_order": stage_data.stage_order,
+                "name": stage_data.name,
+                "steps": snapshot_steps
+            })
+
         snapshot_data = {
             "id": template.id,
             "name": template.name,
             "description": template.description,
             "version": template.version,
-            "stages": [
-                {
-                    "stage_order": stage_data.stage_order,
-                    "name": stage_data.name,
-                    "steps": [
-                        {
-                            "step_name": step_data.step_name,
-                            "position_in_stage": step_data.position_in_stage,
-                            "rasic": [
-                                {
-                                    "department_id": rasic_data.department_id,
-                                    "rasic_letter": rasic_data.rasic_letter,
-                                }
-                                for rasic_data in step_data.rasic_assignments
-                            ]
-                        }
-                        for step_data in stage_data.steps
-                    ]
-                }
-                for stage_data in request.stages
-            ]
+            "stages": snapshot_stages
         }
 
         history = WfTemplateHistory(
@@ -293,33 +304,36 @@ async def update_template(
 
         await db.flush()
 
-        # Build snapshot from request data (don't access lazy-loaded relationships)
+        # Build snapshot with department names
+        snapshot_stages = []
+        for stage_data in request.stages:
+            snapshot_steps = []
+            for step_data in stage_data.steps:
+                snapshot_rasic = []
+                for rasic_data in step_data.rasic_assignments:
+                    dept_name = await get_department_name(db, rasic_data.department_id)
+                    snapshot_rasic.append({
+                        "department_id": rasic_data.department_id,
+                        "rasic_letter": rasic_data.rasic_letter,
+                        "department_name": dept_name,
+                    })
+                snapshot_steps.append({
+                    "step_name": step_data.step_name,
+                    "position_in_stage": step_data.position_in_stage,
+                    "rasic": snapshot_rasic
+                })
+            snapshot_stages.append({
+                "stage_order": stage_data.stage_order,
+                "name": stage_data.name,
+                "steps": snapshot_steps
+            })
+
         snapshot_data = {
             "id": template.id,
             "name": template.name,
             "description": template.description,
             "version": template.version,
-            "stages": [
-                {
-                    "stage_order": stage_data.stage_order,
-                    "name": stage_data.name,
-                    "steps": [
-                        {
-                            "step_name": step_data.step_name,
-                            "position_in_stage": step_data.position_in_stage,
-                            "rasic": [
-                                {
-                                    "department_id": rasic_data.department_id,
-                                    "rasic_letter": rasic_data.rasic_letter,
-                                }
-                                for rasic_data in step_data.rasic_assignments
-                            ]
-                        }
-                        for step_data in stage_data.steps
-                    ]
-                }
-                for stage_data in request.stages
-            ]
+            "stages": snapshot_stages
         }
 
         history = WfTemplateHistory(
