@@ -106,28 +106,39 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up PLM application...")
 
-    # Run Alembic migrations
-    import subprocess
-    logger.info("Running database migrations...")
-    try:
-        result = subprocess.run(
-            ["alembic", "upgrade", "head"],
-            cwd="/app",
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode == 0:
-            logger.info("Database migrations completed successfully")
-        else:
-            logger.warning(f"Migration warnings: {result.stderr}")
-    except Exception as e:
-        logger.error(f"Failed to run migrations: {e}")
+    # Skip Alembic migrations for SQLite (development)
+    # For PostgreSQL (production), migrations are handled separately
+    if "sqlite" not in settings.database_url:
+        import subprocess
+        logger.info("Running database migrations...")
+        try:
+            result = subprocess.run(
+                ["alembic", "upgrade", "head"],
+                cwd="/app",
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                logger.info("Database migrations completed successfully")
+            else:
+                logger.warning(f"Migration warnings: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Failed to run migrations: {e}")
 
-    await init_db()
-    logger.info("Database initialized")
-    await seed_test_data()
-    logger.info("Test data seeded")
+    logger.info(f"Database URL: {settings.database_url}")
+    try:
+        await init_db()
+        logger.info("Database initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
+    try:
+        await seed_test_data()
+        logger.info("Test data seeded")
+    except Exception as e:
+        logger.warning(f"Warning seeding test data: {e}")
     yield
     # Shutdown
     logger.info("Shutting down PLM application...")

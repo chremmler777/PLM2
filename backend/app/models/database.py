@@ -47,7 +47,23 @@ async def get_db():
 
 
 async def init_db():
-    """Initialize database - tables are created via Alembic migrations."""
-    # No-op: All schema changes are managed by Alembic migrations
-    # Never call create_all() in production
-    pass
+    """Initialize database - create tables if they don't exist.
+
+    For SQLite (development), use create_all().
+    For PostgreSQL (production), tables are managed by Alembic migrations.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # For SQLite development, create tables directly
+    if "sqlite" in settings.database_url:
+        try:
+            logger.info("Creating SQLite tables...")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("SQLite tables created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create SQLite tables: {e}")
+            raise
+    # For PostgreSQL, tables are created by Alembic migrations
+    # This function is just a placeholder

@@ -17,15 +17,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set sqlalchemy.url from environment, using sync URL for Alembic
-# Build sync URL from environment variables using psycopg (v3) sync driver
-db_user = os.getenv("DATABASE_USER", "plm")
-db_password = os.getenv("DATABASE_PASSWORD", "plm")
-db_host = os.getenv("DATABASE_HOST", "db")
-db_port = os.getenv("DATABASE_PORT", "5432")
-db_name = os.getenv("DATABASE_NAME", "plm")
+# Set sqlalchemy.url from app settings
+from app.core.config import get_settings
+settings = get_settings()
 
-sync_db_url = f"postgresql+psycopg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+# Convert async URL to sync URL for Alembic
+db_url = settings.database_url
+if "sqlite+aiosqlite" in db_url:
+    # Convert async SQLite to sync
+    sync_db_url = db_url.replace("sqlite+aiosqlite", "sqlite")
+else:
+    # For PostgreSQL, convert async to sync
+    sync_db_url = db_url.replace("asyncpg", "psycopg")
+
 config.set_main_option("sqlalchemy.url", sync_db_url)
 
 # Model's MetaData object for 'autogenerate' support
@@ -64,7 +68,6 @@ def run_migrations_online() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = sync_db_url
 
     connectable = engine_from_config(
         configuration,
@@ -73,8 +76,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Enable batch mode for SQLite to support ALTER operations
+        is_sqlite = "sqlite" in sync_db_url
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=is_sqlite
         )
 
         with context.begin_transaction():
