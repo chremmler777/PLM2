@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # Database
-    database_url: str = "postgresql+asyncpg://plm:plm@localhost:5432/plm"
+    database_url: str = "sqlite+aiosqlite:///./plm.db"
 
     # Redis
     redis_url: str = "redis://:plm@localhost:6379/0"

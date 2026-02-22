@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import client from '../api/client';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
@@ -19,23 +20,13 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // Call backend login API
-      const response = await fetch('http://localhost:8000/api/v1/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+      // Call backend login API using client
+      const response = await client.post('/v1/auth/login', {
+        email,
+        password,
       });
 
-      if (!response.ok) {
-        throw new Error('Invalid credentials');
-      }
-
-      const data = await response.json();
+      const data = response.data;
       console.log('Login successful:', { token: data.access_token, userId: data.user_id });
 
       // Update auth state with token from backend
@@ -43,12 +34,13 @@ export default function LoginPage() {
       toast.success('Logged in successfully!');
 
       // Navigate after state update
-      Promise.resolve().then(() => {
+      setTimeout(() => {
         navigate('/dashboard');
-      });
-    } catch (error) {
+      }, 500);
+    } catch (error: any) {
       console.error('Login error:', error);
-      toast.error('Invalid credentials (test: test@example.com / password)');
+      const errorMsg = error.response?.data?.detail || 'Invalid credentials';
+      toast.error(errorMsg || 'Invalid credentials (test: test@example.com / password)');
       setIsLoading(false);
     }
   };
