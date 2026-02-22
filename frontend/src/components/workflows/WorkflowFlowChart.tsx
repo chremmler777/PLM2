@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { WfTemplate } from '../../types/workflow';
+import { rasicColors } from '../../lib/constants';
 
 interface VersionSnapshot {
   version: number;
@@ -33,14 +34,6 @@ interface WorkflowFlowChartProps {
   versions?: VersionSnapshot[];
 }
 
-// RASIC color mapping
-const rasicColors: Record<string, { bg: string; text: string }> = {
-  R: { bg: 'bg-blue-900', text: 'text-blue-200' },
-  A: { bg: 'bg-green-900', text: 'text-green-200' },
-  S: { bg: 'bg-yellow-900', text: 'text-yellow-200' },
-  I: { bg: 'bg-purple-900', text: 'text-purple-200' },
-  C: { bg: 'bg-red-900', text: 'text-red-200' },
-};
 
 export default function WorkflowFlowChart({ template, versions = [] }: WorkflowFlowChartProps) {
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);

@@ -13,6 +13,7 @@ from app.models.part import (
 )
 from app.models.workflow import (
     Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
+    WfInstance, WfInstanceTask,
     WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )
 
@@ -49,6 +50,9 @@ __all__ = [
     "WfStep",
     "WfStepRasic",
     "WfTemplateHistory",
+    # New workflow instance models (Phase 3c)
+    "WfInstance",
+    "WfInstanceTask",
     # Legacy workflow models
     "WorkflowTemplate",
     "WorkflowStep",

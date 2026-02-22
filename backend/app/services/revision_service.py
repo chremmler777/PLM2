@@ -440,12 +440,14 @@ class RevisionService:
                 engineering.append({
                     "id": rev.id,
                     "revision": rev.revision,
+                    "revision_type": rev.revision_type,
                     "status": rev.status,
                 })
             elif rev.revision_type == "released":
                 released_indexes[rev.revision] = {
                     "id": rev.id,
                     "revision": rev.revision,
+                    "revision_type": rev.revision_type,
                     "status": rev.status,
                     "changes": [],
                 }
@@ -456,6 +458,7 @@ class RevisionService:
                     released_indexes[parent_index]["changes"].append({
                         "id": rev.id,
                         "revision": rev.revision,
+                        "revision_type": rev.revision_type,
                         "status": rev.status,
                     })
 

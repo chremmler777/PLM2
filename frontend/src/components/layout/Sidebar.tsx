@@ -14,6 +14,7 @@ export default function Sidebar() {
     { path: '/dashboard', label: '📊 Dashboard', icon: '📊' },
     { path: '/articles', label: '📄 Articles', icon: '📄' },
     { path: '/workflows', label: '⚙️ Workflows', icon: '⚙️' },
+    { path: '/my-tasks', label: '✅ My Tasks', icon: '✅' },
   ];
 
   const isActive = (path: string) => location.pathname === path;

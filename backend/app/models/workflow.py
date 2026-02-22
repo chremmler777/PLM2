@@ -111,6 +111,62 @@ class WfTemplateHistory(Base):
 
 
 # ============================================================================
+# NEW: Workflow instance execution (Phase 3c)
+# ============================================================================
+
+class WfInstance(Base):
+    """Running workflow instance for a specific article revision."""
+    __tablename__ = "wf_instances"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("wf_templates.id"))
+    revision_id: Mapped[int] = mapped_column(ForeignKey("article_revisions.id"))
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active|completed|canceled|rejected
+    current_stage_order: Mapped[int] = mapped_column(Integer, default=1)
+    started_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    canceled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    canceled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    template: Mapped["WfTemplate"] = relationship()
+    revision: Mapped["ArticleRevision"] = relationship(
+        back_populates="wf_instances",
+        foreign_keys="[WfInstance.revision_id]",
+    )
+    tasks: Mapped[list["WfInstanceTask"]] = relationship(
+        back_populates="instance",
+        cascade="all, delete-orphan"
+    )
+    started_by_user: Mapped["User"] = relationship(foreign_keys=[started_by])
+    canceled_by_user: Mapped["User | None"] = relationship(foreign_keys=[canceled_by])
+
+
+class WfInstanceTask(Base):
+    """Task in a workflow instance (one per RASIC assignment per step)."""
+    __tablename__ = "wf_instance_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    instance_id: Mapped[int] = mapped_column(ForeignKey("wf_instances.id"))
+    stage_order: Mapped[int] = mapped_column(Integer)  # denormalized for quick filtering
+    step_id: Mapped[int] = mapped_column(ForeignKey("wf_steps.id"))
+    department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
+    rasic_letter: Mapped[str] = mapped_column(String(1))  # R|A|S|I|C
+    status: Mapped[str] = mapped_column(String(20))  # pending|active|approved|rejected|noted
+    is_actionable: Mapped[bool] = mapped_column(Boolean)  # False for S/I/C
+    completed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    instance: Mapped["WfInstance"] = relationship(back_populates="tasks")
+    step: Mapped["WfStep"] = relationship()
+    department: Mapped["Department"] = relationship()
+    completed_by_user: Mapped["User | None"] = relationship(foreign_keys=[completed_by])
+
+
+# ============================================================================
 # LEGACY: Old workflow models (kept for compatibility, not used in new design)
 # ============================================================================
 
@@ -218,6 +274,8 @@ __all__ = [
     "WfStep",
     "WfStepRasic",
     "WfTemplateHistory",
+    "WfInstance",
+    "WfInstanceTask",
     "WorkflowTemplate",
     "WorkflowStep",
     "WorkflowInstance",

@@ -81,3 +81,75 @@ export interface WfTemplateSave {
   stages: WfStageCreate[];
   change_note?: string;
 }
+
+// ============================================================================
+// Phase 3c: Workflow instance types
+// ============================================================================
+
+export type WfTaskStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'noted';
+export type WfInstanceStatus = 'active' | 'completed' | 'canceled' | 'rejected';
+export type WfDecision = 'approved' | 'rejected';
+
+export interface WfInstanceTask {
+  id: number;
+  instance_id: number;
+  stage_order: number;
+  step_id: number;
+  step_name: string;
+  department_id: number;
+  department_name: string;
+  rasic_letter: string;
+  status: WfTaskStatus;
+  is_actionable: boolean;
+  completed_by: number | null;
+  completed_at: string | null;
+  decision: WfDecision | null;
+  notes: string | null;
+}
+
+export interface WfInstance {
+  id: number;
+  template_id: number;
+  template_name: string;
+  revision_id: number;
+  status: WfInstanceStatus;
+  current_stage_order: number;
+  started_by: number;
+  started_at: string;
+  completed_at: string | null;
+  canceled_at: string | null;
+  cancel_reason: string | null;
+  tasks: WfInstanceTask[];
+}
+
+export interface MyTask {
+  task_id: number;
+  instance_id: number;
+  status: WfTaskStatus;
+  is_actionable: boolean;
+  rasic_letter: string;
+  department_name: string;
+  step_name: string;
+  stage_order: number;
+  stage_name: string | null;
+  article_id: number;
+  article_number: string;
+  article_name: string;
+  revision_id: number;
+  revision_label: string;
+  instance_started_at: string;
+}
+
+// Instance request types
+export interface StartWorkflowRequest {
+  template_id: number;
+}
+
+export interface CompleteTaskRequest {
+  decision: WfDecision;
+  notes?: string;
+}
+
+export interface CancelWorkflowRequest {
+  reason?: string;
+}

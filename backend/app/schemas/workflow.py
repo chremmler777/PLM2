@@ -116,3 +116,82 @@ class WfTemplateSave(BaseModel):
     description: str | None = None
     stages: list[WfStageCreate] = []
     change_note: str | None = None
+
+
+# ============================================================================
+# Phase 3c: Workflow Instance schemas
+# ============================================================================
+
+class StartWorkflowRequest(BaseModel):
+    """Start a workflow instance for a revision."""
+    template_id: int
+
+
+class CompleteTaskRequest(BaseModel):
+    """Complete an actionable task with a decision."""
+    decision: str  # approved | rejected
+    notes: str | None = None
+
+
+class CancelWorkflowRequest(BaseModel):
+    """Cancel a running workflow instance."""
+    reason: str | None = None
+
+
+class WfInstanceTaskResponse(BaseModel):
+    """Task within a workflow instance."""
+    id: int
+    instance_id: int
+    stage_order: int
+    step_id: int
+    step_name: str
+    department_id: int
+    department_name: str
+    rasic_letter: str
+    status: str
+    is_actionable: bool
+    completed_by: int | None
+    completed_at: datetime | None
+    decision: str | None
+    notes: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class WfInstanceResponse(BaseModel):
+    """Full workflow instance with tasks."""
+    id: int
+    template_id: int
+    template_name: str
+    revision_id: int
+    status: str
+    current_stage_order: int
+    started_by: int
+    started_at: datetime
+    completed_at: datetime | None
+    canceled_at: datetime | None
+    cancel_reason: str | None
+    tasks: list[WfInstanceTaskResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class MyTaskResponse(BaseModel):
+    """A task from the current user's department perspective."""
+    task_id: int
+    instance_id: int
+    status: str
+    is_actionable: bool
+    rasic_letter: str
+    department_name: str
+    step_name: str
+    stage_order: int
+    stage_name: str | None
+    article_id: int
+    article_number: str
+    article_name: str
+    revision_id: int
+    revision_label: str
+    instance_started_at: datetime

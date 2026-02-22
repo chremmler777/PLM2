@@ -92,6 +92,10 @@ class ArticleRevision(Base):
         back_populates="article_revision",
         foreign_keys="[WorkflowInstance.article_revision_id]"
     )
+    wf_instances: Mapped[list["WfInstance"]] = relationship(
+        back_populates="revision",
+        foreign_keys="[WfInstance.revision_id]"
+    )
 
 
 class ArticleDocument(Base):

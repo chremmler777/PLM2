@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import PartDetail from './pages/PartDetail';
 import ArticlesPage from './pages/ArticlesPage';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
+import MyTasksPage from './pages/MyTasksPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -59,6 +60,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <WorkflowDesignerPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-tasks"
+        element={
+          <ProtectedRoute>
+            <MyTasksPage />
           </ProtectedRoute>
         }
       />
