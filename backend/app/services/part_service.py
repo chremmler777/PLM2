@@ -728,11 +728,12 @@ class RevisionService:
         if not eng_rev or eng_rev.phase != RevisionPhase.ENGINEERING_PHASE.value:
             raise ValueError("Revision is not in engineering phase")
 
-        # Create IND1, IND2, etc based on existing freeze majors (not proposals)
+        # Create IND1, IND2, etc based on existing freeze majors (not proposals) for THIS part
         result = await session.execute(
             select(PartRevision)
             .where(
-                (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
+                (PartRevision.part_id == eng_rev.part_id)
+                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
                 & (PartRevision.parent_revision_id.is_(None))
             )
             .order_by(PartRevision.revision_name.desc())
