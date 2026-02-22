@@ -59,6 +59,7 @@ export default function WorkflowDesignerPage() {
       // Fetch version history
       try {
         const history = await workflowApi.getTemplateHistory(templateId);
+        console.log('Fetched version history:', history);
         setVersionHistory(history);
       } catch (historyError) {
         console.warn('Could not fetch version history:', historyError);

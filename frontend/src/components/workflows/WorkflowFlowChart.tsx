@@ -45,6 +45,9 @@ const rasicColors: Record<string, { bg: string; text: string }> = {
 export default function WorkflowFlowChart({ template, versions = [] }: WorkflowFlowChartProps) {
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
 
+  // Debug logging
+  console.log('WorkflowFlowChart - versions:', versions);
+
   // Determine which version to display
   let displayedSnapshot: any = template.stages;
   let currentVersionInfo: VersionSnapshot | null = null;
@@ -77,24 +80,28 @@ export default function WorkflowFlowChart({ template, versions = [] }: WorkflowF
   return (
     <div className="space-y-4">
       {/* Version Selector (if history available) */}
-      {versions.length > 1 && (
+      {versions.length >= 1 && (
         <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
           <div className="flex items-center gap-3 flex-wrap">
-            <label className="text-sm font-semibold text-slate-300">View Version:</label>
+            <label className="text-sm font-semibold text-slate-300">Template Version{versions.length > 1 ? 's' : ''}:</label>
             <div className="flex gap-2 flex-wrap">
-              {versions.map((v: any) => (
-                <button
-                  key={v.version}
-                  onClick={() => setSelectedVersion(v.version)}
-                  className={`px-3 py-1 rounded text-sm font-medium transition ${
-                    selectedVersion === v.version || (selectedVersion === null && v === versions[versions.length - 1])
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  }`}
-                >
-                  v{v.version}
-                </button>
-              ))}
+              {versions.length === 0 ? (
+                <span className="text-xs text-slate-500">No version history yet</span>
+              ) : (
+                versions.map((v: any) => (
+                  <button
+                    key={v.version}
+                    onClick={() => setSelectedVersion(v.version)}
+                    className={`px-3 py-1 rounded text-sm font-medium transition ${
+                      selectedVersion === v.version || (selectedVersion === null && v === versions[versions.length - 1])
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    v{v.version}
+                  </button>
+                ))
+              )}
             </div>
             {currentVersionInfo && (
               <div className="text-xs text-slate-400 ml-auto">
