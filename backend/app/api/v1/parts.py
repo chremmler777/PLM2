@@ -826,6 +826,45 @@ async def get_part_files(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/files/{file_id}/viewer")
+async def view_part_file(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the viewer URL for a part file (returns the file itself for now)."""
+    try:
+        # Get the file record
+        result = await db.execute(
+            select(PartFile).where(PartFile.id == file_id)
+        )
+        part_file = result.scalar_one_or_none()
+
+        if not part_file:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        # Construct file path
+        file_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.saved_filename)
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"File not found on disk: {file_path}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+
+        # For now, return the raw file
+        # Phase 5: Convert STEP/CATIA to glTF for web viewing
+        return FileResponse(
+            path=file_path,
+            filename=part_file.original_filename,
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to view file {file_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.get("/files/{file_id}/download")
 async def download_part_file(
     file_id: int,
