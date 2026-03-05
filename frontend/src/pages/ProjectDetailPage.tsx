@@ -503,6 +503,50 @@ function AddPartModal({
   );
 }
 
+// File List Item Component
+function FileListItemRow({ file }: { file: PartFile }) {
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      await client.delete(`/v1/parts/files/${file.id}`);
+    },
+    onSuccess: () => {
+      toast.success('File deleted');
+      queryClient.invalidateQueries({ queryKey: ['part-files'] });
+    },
+    onError: (error: any) => {
+      const msg = error.response?.data?.detail || 'Failed to delete file';
+      toast.error(msg);
+    },
+  });
+
+  return (
+    <div className="flex items-center justify-between p-1.5 bg-slate-700 rounded border border-slate-600 text-xs">
+      <div className="flex-1 min-w-0">
+        <p className="text-slate-100 truncate font-mono text-xs">{file.original_filename}</p>
+        <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
+      </div>
+      <div className="ml-1 flex gap-1 flex-shrink-0">
+        <a
+          href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
+          download={file.original_filename}
+          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
+        >
+          Download
+        </a>
+        <button
+          onClick={() => deleteMutation.mutate()}
+          disabled={deleteMutation.isPending}
+          className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 disabled:bg-red-700 text-white font-medium text-xs"
+        >
+          {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Main Component
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -625,19 +669,7 @@ export default function ProjectDetailPage() {
                       <h3 className="text-xs font-semibold text-slate-300 mb-2">Uploaded Files</h3>
                       <div className="space-y-1">
                         {partFiles.map((file) => (
-                          <div key={file.id} className="flex items-center justify-between p-1.5 bg-slate-700 rounded border border-slate-600 text-xs">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-slate-100 truncate font-mono text-xs">{file.original_filename}</p>
-                              <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
-                            </div>
-                            <a
-                              href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
-                              download={file.original_filename}
-                              className="ml-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex-shrink-0 text-xs"
-                            >
-                              Download
-                            </a>
-                          </div>
+                          <FileListItemRow key={file.id} file={file} />
                         ))}
                       </div>
                     </div>

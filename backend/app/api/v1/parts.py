@@ -899,3 +899,45 @@ async def download_part_file(
     except Exception as e:
         logger.error(f"Failed to download file {file_id}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.delete("/files/{file_id}")
+async def delete_part_file(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a part file."""
+    try:
+        # Get the file record
+        result = await db.execute(
+            select(PartFile).where(PartFile.id == file_id)
+        )
+        part_file = result.scalar_one_or_none()
+
+        if not part_file:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        # Construct file path
+        file_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.saved_filename)
+
+        # Delete file from disk if it exists
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.error(f"Failed to delete file from disk: {e}")
+
+        # Delete record from database
+        await db.delete(part_file)
+        await db.commit()
+
+        logger.info(f"File deleted: {part_file.saved_filename}")
+
+        return {"status": "success", "message": "File deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete file {file_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
