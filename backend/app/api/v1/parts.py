@@ -13,6 +13,7 @@ from app.models import get_db
 from app.models import User
 from app.models.part import PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
+from app.services.file_converter import create_sample_gltf
 from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
     PartRevisionResponse, PartRevisionDetailResponse,
@@ -760,6 +761,20 @@ async def upload_part_file(
         # Extract file type (step or catia)
         file_type = 'step' if file_ext in ['.step', '.stp'] else 'catia'
 
+        # Convert to glTF for web viewing
+        gltf_filename = None
+        try:
+            gltf_name = f"{part_id}_{uuid.uuid4().hex}.glb"
+            gltf_path = os.path.join(uploads_dir, gltf_name)
+
+            if create_sample_gltf(file_path, gltf_path):
+                gltf_filename = gltf_name
+                logger.info(f"Converted {unique_filename} to {gltf_name}")
+            else:
+                logger.warning(f"Failed to convert {unique_filename} to glTF")
+        except Exception as e:
+            logger.error(f"Conversion error: {e}")
+
         # Create PartFile record in database
         part_file = PartFile(
             part_id=part_id,
@@ -767,6 +782,7 @@ async def upload_part_file(
             saved_filename=unique_filename,
             file_size=len(contents),
             file_type=file_type,
+            gltf_filename=gltf_filename,
             created_by=current_user.id
         )
         db.add(part_file)
@@ -831,7 +847,7 @@ async def view_part_file(
     file_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the viewer URL for a part file (returns the file itself for now)."""
+    """Get the glTF viewer file for a part."""
     try:
         # Get the file record
         result = await db.execute(
@@ -842,20 +858,20 @@ async def view_part_file(
         if not part_file:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        # Construct file path
-        file_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.saved_filename)
+        # Use glTF if available, otherwise serve raw file
+        file_to_serve = part_file.gltf_filename if part_file.gltf_filename else part_file.saved_filename
+        file_path = os.path.join(os.getcwd(), "uploads", "parts", file_to_serve)
 
         # Check if file exists
         if not os.path.exists(file_path):
             logger.error(f"File not found on disk: {file_path}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
 
-        # For now, return the raw file
-        # Phase 5: Convert STEP/CATIA to glTF for web viewing
+        # Return glTF file for 3D viewer
         return FileResponse(
             path=file_path,
-            filename=part_file.original_filename,
-            media_type="application/octet-stream"
+            filename=part_file.original_filename.rsplit('.', 1)[0] + '.glb',
+            media_type="model/gltf-binary" if file_to_serve.endswith('.glb') else "application/json"
         )
     except HTTPException:
         raise
@@ -918,15 +934,19 @@ async def delete_part_file(
         if not part_file:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        # Construct file path
+        # Construct file paths
         file_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.saved_filename)
+        gltf_path = None
+        if part_file.gltf_filename:
+            gltf_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.gltf_filename)
 
-        # Delete file from disk if it exists
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                logger.error(f"Failed to delete file from disk: {e}")
+        # Delete files from disk if they exist
+        for path in [file_path, gltf_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    logger.error(f"Failed to delete file from disk: {e}")
 
         # Delete record from database
         await db.delete(part_file)

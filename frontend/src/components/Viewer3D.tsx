@@ -304,15 +304,14 @@ export default function Viewer3D({
       <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         {error ? (
           <div className="text-center">
-            <p className="text-yellow-600 dark:text-yellow-400 font-semibold">File format not supported yet</p>
-            <p className="text-slate-400 text-sm mt-2">3D viewer coming in Phase 5</p>
-            <p className="text-slate-500 text-xs mt-3">STEP/CATIA files need to be converted to glTF format for web viewing</p>
+            <p className="text-red-600 dark:text-red-400 font-semibold">Error loading 3D model</p>
+            <p className="text-slate-400 text-sm mt-2">{error.message}</p>
             <button
               onClick={() => {
                 setError(null)
                 setLoading(true)
               }}
-              className="mt-4 px-4 py-2 bg-slate-700 text-white rounded-md hover:bg-slate-600 text-sm"
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
             >
               Retry
             </button>

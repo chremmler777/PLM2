@@ -274,6 +274,9 @@ class PartFile(Base):
     file_size: Mapped[int] = mapped_column(Integer)
     file_type: Mapped[str] = mapped_column(String(50))  # step, catia, etc
 
+    # Converted glTF file
+    gltf_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Converted glTF file
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
