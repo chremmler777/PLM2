@@ -92,6 +92,11 @@ class Part(Base):
         cascade="all, delete-orphan",
         foreign_keys="[RevisionChangelog.part_id]"
     )
+    files: Mapped[list["PartFile"]] = relationship(
+        back_populates="part",
+        cascade="all, delete-orphan",
+        foreign_keys="[PartFile.part_id]"
+    )
 
 
 class PartRevision(Base):
@@ -254,6 +259,28 @@ class RevisionChangelog(Base):
     part: Mapped["Part"] = relationship(back_populates="changelog", foreign_keys=[part_id])
     revision: Mapped["PartRevision | None"] = relationship(back_populates="changelog_entries", foreign_keys=[revision_id])
     performed_by_user: Mapped["User"] = relationship(foreign_keys=[performed_by])
+
+
+class PartFile(Base):
+    """CAD files uploaded for a part (STEP, CATIA, etc)."""
+    __tablename__ = "part_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+
+    # File info
+    original_filename: Mapped[str] = mapped_column(String(255))
+    saved_filename: Mapped[str] = mapped_column(String(255))  # Unique name on disk
+    file_size: Mapped[int] = mapped_column(Integer)
+    file_type: Mapped[str] = mapped_column(String(50))  # step, catia, etc
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    # Relationships
+    part: Mapped["Part"] = relationship(back_populates="files", foreign_keys=[part_id])
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
 
 
 # Import needed models for relationships

@@ -82,6 +82,25 @@ function usePartRevisions(partId: number) {
   });
 }
 
+interface PartFile {
+  id: number;
+  original_filename: string;
+  file_type: string;
+  file_size: number;
+  created_at: string;
+}
+
+function usePartFiles(partId: number) {
+  return useQuery<PartFile[]>({
+    queryKey: ['part-files', partId],
+    queryFn: async () => {
+      const res = await client.get(`/v1/parts/${partId}/files`);
+      return res.data;
+    },
+    enabled: !!partId,
+  });
+}
+
 // Build tree structure from flat parts list
 function buildPartTree(parts: Part[]): TreeNode[] {
   const partMap = new Map<number, Part>(parts.map((p) => [p.id, p]));
@@ -496,6 +515,7 @@ export default function ProjectDetailPage() {
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
   const { data: partRevisions } = usePartRevisions(selectedPartId || 0);
+  const { data: partFiles } = usePartFiles(selectedPartId || 0);
 
   if (projectLoading) {
     return <div className="p-6 text-slate-400">Loading project...</div>;
@@ -592,8 +612,41 @@ export default function ProjectDetailPage() {
               </div>
 
               {/* CAD Viewer */}
-              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden flex items-center justify-center">
-                <CADUploader partId={selectedPart.id} />
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
+                {partFiles && partFiles.length > 0 ? (
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-200">Uploaded Files</h3>
+                    <div className="space-y-2">
+                      {partFiles.map((file) => (
+                        <div key={file.id} className="flex items-center justify-between p-3 bg-slate-700/50 rounded border border-slate-600">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-100 truncate">{file.original_filename}</p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {(file.file_size / 1024 / 1024).toFixed(1)} MB · {file.file_type.toUpperCase()}
+                            </p>
+                          </div>
+                          <a
+                            href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
+                            download={file.original_filename}
+                            className="ml-3 px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium flex-shrink-0"
+                          >
+                            Download
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pt-2 border-t border-slate-600">
+                      <CADUploader
+                        partId={selectedPart.id}
+                        onUploadSuccess={() => {
+                          // Files will auto-refetch due to query invalidation
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <CADUploader partId={selectedPart.id} />
+                )}
               </div>
 
               {/* BOM Section (sub_assembly only) */}

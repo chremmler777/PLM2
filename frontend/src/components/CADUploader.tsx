@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 interface CADUploaderProps {
   partId: number;
-  onUploadSuccess?: () => void;
+  onUploadSuccess?: (fileId: number) => void;
 }
 
 export default function CADUploader({ partId, onUploadSuccess }: CADUploaderProps) {
@@ -25,10 +25,11 @@ export default function CADUploader({ partId, onUploadSuccess }: CADUploaderProp
       });
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       toast.success('3D file uploaded successfully');
       queryClient.invalidateQueries({ queryKey: ['part', partId] });
-      onUploadSuccess?.();
+      queryClient.invalidateQueries({ queryKey: ['part-files', partId] });
+      onUploadSuccess?.(data.file_id);
     },
     onError: (error: any) => {
       const msg = error.response?.data?.detail || 'Upload failed';

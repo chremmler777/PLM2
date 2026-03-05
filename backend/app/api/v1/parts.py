@@ -4,11 +4,14 @@ import os
 import uuid
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User
+from app.models.part import PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
 from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
@@ -754,10 +757,26 @@ async def upload_part_file(
         with open(file_path, 'wb') as f:
             f.write(contents)
 
+        # Extract file type (step or catia)
+        file_type = 'step' if file_ext in ['.step', '.stp'] else 'catia'
+
+        # Create PartFile record in database
+        part_file = PartFile(
+            part_id=part_id,
+            original_filename=file.filename,
+            saved_filename=unique_filename,
+            file_size=len(contents),
+            file_type=file_type,
+            created_by=current_user.id
+        )
+        db.add(part_file)
+        await db.commit()
+
         logger.info(f"File uploaded for part {part_id}: {unique_filename}")
 
         return {
             "status": "success",
+            "file_id": part_file.id,
             "filename": file.filename,
             "saved_as": unique_filename,
             "part_id": part_id,
@@ -766,5 +785,79 @@ async def upload_part_file(
     except HTTPException:
         raise
     except Exception as e:
+        await db.rollback()
         logger.error(f"Failed to upload file for part {part_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{part_id}/files", response_model=List[dict])
+async def get_part_files(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all files for a part."""
+    try:
+        # Verify part exists
+        part = await PartService.get_part(db, part_id)
+        if not part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+
+        # Get all files for this part
+        result = await db.execute(
+            select(PartFile).where(PartFile.part_id == part_id)
+        )
+        files = result.scalars().all()
+
+        return [
+            {
+                "id": f.id,
+                "original_filename": f.original_filename,
+                "file_type": f.file_type,
+                "file_size": f.file_size,
+                "created_at": f.created_at.isoformat(),
+            }
+            for f in files
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get files for part {part_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/files/{file_id}/download")
+async def download_part_file(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a part file."""
+    try:
+        # Get the file record
+        result = await db.execute(
+            select(PartFile).where(PartFile.id == file_id)
+        )
+        part_file = result.scalar_one_or_none()
+
+        if not part_file:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        # Construct file path
+        file_path = os.path.join(os.getcwd(), "uploads", "parts", part_file.saved_filename)
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"File not found on disk: {file_path}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+
+        return FileResponse(
+            path=file_path,
+            filename=part_file.original_filename,
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download file {file_id}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
