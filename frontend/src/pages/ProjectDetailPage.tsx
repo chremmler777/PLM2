@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
+import Viewer3D from '../components/Viewer3D';
 
 // Types
 interface Project {
@@ -589,12 +590,9 @@ export default function ProjectDetailPage() {
                 )}
               </div>
 
-              {/* CAD Viewer Placeholder */}
-              <div className="bg-slate-800 rounded-lg border border-dashed border-slate-600 h-48 flex items-center justify-center">
-                <div className="text-center text-slate-400 text-sm">
-                  <p className="mb-1">No CAD file attached</p>
-                  <p className="text-xs">Drop a STEP/IGES file here or use file manager</p>
-                </div>
+              {/* CAD Viewer */}
+              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden">
+                <Viewer3D fileId={null} />
               </div>
 
               {/* BOM Section (sub_assembly only) */}
