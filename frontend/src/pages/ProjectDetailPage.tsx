@@ -506,6 +506,40 @@ function AddPartModal({
 // File List Item Component
 function FileListItemRow({ file }: { file: PartFile }) {
   const queryClient = useQueryClient();
+  const [conversionStatus, setConversionStatus] = useState<string>('completed');
+  const [isChecking, setIsChecking] = useState(false);
+
+  // Poll for conversion status
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    const checkStatus = async () => {
+      try {
+        setIsChecking(true);
+        const res = await client.get(`/v1/parts/files/${file.id}/status`);
+        setConversionStatus(res.data.status);
+
+        // Stop polling once completed or failed
+        if (res.data.status === 'completed' || res.data.status === 'failed') {
+          if (interval) clearInterval(interval);
+        }
+      } catch (error) {
+        // Silent fail on status check
+      } finally {
+        setIsChecking(false);
+      }
+    };
+
+    // Start checking immediately
+    checkStatus();
+
+    // Then poll every 2 seconds while converting
+    interval = setInterval(checkStatus, 2000);
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [file.id]);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -521,27 +555,43 @@ function FileListItemRow({ file }: { file: PartFile }) {
     },
   });
 
+  const isConverting = conversionStatus === 'processing';
+  const isFailed = conversionStatus === 'failed';
+
   return (
     <div className="flex items-center justify-between p-1.5 bg-slate-700 rounded border border-slate-600 text-xs">
       <div className="flex-1 min-w-0">
         <p className="text-slate-100 truncate font-mono text-xs">{file.original_filename}</p>
-        <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
+        <div className="flex items-center gap-2 mt-1">
+          <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
+          {isConverting && (
+            <div className="flex items-center gap-1">
+              <div className="inline-block animate-spin w-2 h-2 border border-blue-500 border-t-transparent rounded-full"></div>
+              <span className="text-blue-400 text-xs">Converting...</span>
+            </div>
+          )}
+          {isFailed && <span className="text-red-400 text-xs">Conversion failed</span>}
+        </div>
       </div>
       <div className="ml-1 flex gap-1 flex-shrink-0">
-        <a
-          href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
-          download={file.original_filename}
-          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
-        >
-          Download
-        </a>
-        <button
-          onClick={() => deleteMutation.mutate()}
-          disabled={deleteMutation.isPending}
-          className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 disabled:bg-red-700 text-white font-medium text-xs"
-        >
-          {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-        </button>
+        {!isConverting && (
+          <>
+            <a
+              href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
+              download={file.original_filename}
+              className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
+            >
+              Download
+            </a>
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 disabled:bg-red-700 text-white font-medium text-xs"
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

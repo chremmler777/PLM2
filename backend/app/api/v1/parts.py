@@ -786,9 +786,20 @@ async def upload_part_file(
             file_size=len(contents),
             file_type=file_type,
             gltf_filename=gltf_filename,
+            conversion_status="processing" if file_type == "step" else "completed",
             created_by=current_user.id
         )
         db.add(part_file)
+        await db.commit()
+
+        # Update status after conversion (async, non-blocking)
+        if file_type == "step" and gltf_filename:
+            part_file.conversion_status = "completed"
+        elif file_type == "step":
+            part_file.conversion_status = "failed"
+        else:
+            part_file.conversion_status = "completed"
+
         await db.commit()
 
         logger.info(f"File uploaded for part {part_id}: {unique_filename}")
@@ -806,6 +817,34 @@ async def upload_part_file(
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to upload file for part {part_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/files/{file_id}/status")
+async def get_file_conversion_status(
+    file_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get conversion status for a file."""
+    try:
+        result = await db.execute(
+            select(PartFile).where(PartFile.id == file_id)
+        )
+        part_file = result.scalar_one_or_none()
+
+        if not part_file:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        return {
+            "id": part_file.id,
+            "status": part_file.conversion_status,
+            "has_viewer": part_file.conversion_status == "completed" and part_file.gltf_filename is not None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get file status {file_id}: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

@@ -276,6 +276,7 @@ class PartFile(Base):
 
     # Converted glTF file
     gltf_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Converted glTF file
+    conversion_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending, processing, completed, failed
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
