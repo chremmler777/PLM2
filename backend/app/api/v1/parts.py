@@ -1,7 +1,9 @@
 """API endpoints for parts and revisions - Phase 1 Redesign."""
 import logging
+import os
+import uuid
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
@@ -702,3 +704,67 @@ async def get_revision_changelog(
         }
         result.append(ChangelogEntryResponse(**entry_dict))
     return result
+
+
+# File Upload Endpoints
+@router.post("/{part_id}/files", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def upload_part_file(
+    part_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a 3D CAD file (STEP or CATIA format) for a part."""
+    try:
+        # Validate file type
+        valid_extensions = ['.step', '.stp', '.catpart', '.catproduct']
+        file_lower = file.filename.lower() if file.filename else ""
+        has_valid_ext = any(file_lower.endswith(ext) for ext in valid_extensions)
+
+        if not has_valid_ext:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only STEP (.step, .stp) and CATIA (.catpart, .catproduct) files are supported"
+            )
+
+        # Check file size (100MB limit)
+        max_size = 100 * 1024 * 1024
+        if file.size and file.size > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File size must be under 100MB"
+            )
+
+        # Verify part exists
+        part = await PartService.get_part(db, part_id)
+        if not part:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+
+        # Create uploads directory if it doesn't exist
+        uploads_dir = os.path.join(os.getcwd(), "uploads", "parts")
+        os.makedirs(uploads_dir, exist_ok=True)
+
+        # Save file with unique name
+        file_ext = os.path.splitext(file.filename)[1]
+        unique_filename = f"{part_id}_{uuid.uuid4().hex}{file_ext}"
+        file_path = os.path.join(uploads_dir, unique_filename)
+
+        # Write file to disk
+        contents = await file.read()
+        with open(file_path, 'wb') as f:
+            f.write(contents)
+
+        logger.info(f"File uploaded for part {part_id}: {unique_filename}")
+
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "saved_as": unique_filename,
+            "part_id": part_id,
+            "size": len(contents)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload file for part {part_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

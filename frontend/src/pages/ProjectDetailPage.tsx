@@ -6,6 +6,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import Viewer3D from '../components/Viewer3D';
+import CADUploader from '../components/CADUploader';
 
 // Types
 interface Project {
@@ -591,8 +592,8 @@ export default function ProjectDetailPage() {
               </div>
 
               {/* CAD Viewer */}
-              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden">
-                <Viewer3D fileId={null} />
+              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden flex items-center justify-center">
+                <CADUploader partId={selectedPart.id} />
               </div>
 
               {/* BOM Section (sub_assembly only) */}
