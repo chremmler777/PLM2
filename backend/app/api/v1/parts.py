@@ -829,7 +829,6 @@ async def get_part_files(
 @router.get("/files/{file_id}/viewer")
 async def view_part_file(
     file_id: int,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the viewer URL for a part file (returns the file itself for now)."""
