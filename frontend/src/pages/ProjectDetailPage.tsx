@@ -613,47 +613,35 @@ export default function ProjectDetailPage() {
               </div>
 
               {/* CAD Viewer */}
-              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden">
+              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden flex flex-col">
                 {partFiles && partFiles.length > 0 ? (
-                  <div className="h-full flex flex-col">
-                    {/* Viewer Placeholder - Phase 5 will have glTF conversion */}
-                    <div className="flex-1 flex items-center justify-center bg-slate-900/50 border-b border-slate-700">
-                      <div className="text-center text-slate-400">
-                        <p className="text-sm mb-1">📁 {partFiles[0].original_filename}</p>
-                        <p className="text-xs text-slate-500">3D viewer coming in Phase 5</p>
-                        <p className="text-xs text-slate-600 mt-2">(File conversion to glTF in progress)</p>
-                      </div>
+                  <>
+                    {/* 3D Viewer */}
+                    <div className="flex-1 overflow-hidden">
+                      <Viewer3D fileId={partFiles[0].id} />
                     </div>
                     {/* Files List */}
-                    <div className="border-t border-slate-700 p-3 bg-slate-700/50">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-sm font-semibold text-slate-200">Files ({partFiles.length})</h3>
-                      </div>
-                      <div className="space-y-1 max-h-20 overflow-y-auto">
+                    <div className="border-t border-slate-700 p-2 bg-slate-700/50 max-h-24 overflow-y-auto">
+                      <h3 className="text-xs font-semibold text-slate-300 mb-2">Uploaded Files</h3>
+                      <div className="space-y-1">
                         {partFiles.map((file) => (
-                          <div key={file.id} className="flex items-center justify-between p-2 bg-slate-700 rounded border border-slate-600 text-xs">
+                          <div key={file.id} className="flex items-center justify-between p-1.5 bg-slate-700 rounded border border-slate-600 text-xs">
                             <div className="flex-1 min-w-0">
-                              <p className="text-slate-100 truncate font-mono">{file.original_filename}</p>
-                              <p className="text-slate-400">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
+                              <p className="text-slate-100 truncate font-mono text-xs">{file.original_filename}</p>
+                              <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
                             </div>
                             <a
                               href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
                               download={file.original_filename}
-                              className="ml-2 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex-shrink-0"
+                              className="ml-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex-shrink-0 text-xs"
                             >
-                              Download
+                              DL
                             </a>
                           </div>
                         ))}
                       </div>
-                      <CADUploader
-                        partId={selectedPart.id}
-                        onUploadSuccess={() => {
-                          // Files will auto-refetch due to query invalidation
-                        }}
-                      />
                     </div>
-                  </div>
+                  </>
                 ) : (
                   <div className="h-full flex items-center justify-center p-4">
                     <CADUploader partId={selectedPart.id} />
