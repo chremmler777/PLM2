@@ -570,7 +570,7 @@ function FileListItemRow({ file }: { file: PartFile }) {
               <span className="text-blue-400 text-xs">Converting...</span>
             </div>
           )}
-          {isFailed && <span className="text-red-400 text-xs">Conversion failed</span>}
+          {isFailed && <span className="text-yellow-400 text-xs">Using placeholder (install pythonocc-core for full conversion)</span>}
         </div>
       </div>
       <div className="ml-1 flex gap-1 flex-shrink-0">
