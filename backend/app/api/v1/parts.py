@@ -13,7 +13,7 @@ from app.models import get_db
 from app.models import User
 from app.models.part import PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
-from app.services.file_converter import create_sample_gltf
+from app.utils.cad_converter import convert_step_to_gltf
 from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
     PartRevisionResponse, PartRevisionDetailResponse,
@@ -763,17 +763,20 @@ async def upload_part_file(
 
         # Convert to glTF for web viewing
         gltf_filename = None
-        try:
-            gltf_name = f"{part_id}_{uuid.uuid4().hex}.glb"
-            gltf_path = os.path.join(uploads_dir, gltf_name)
+        if file_type == 'step':  # Only convert STEP files
+            try:
+                gltf_name = f"{part_id}_{uuid.uuid4().hex}.glb"
+                gltf_path = os.path.join(uploads_dir, gltf_name)
 
-            if create_sample_gltf(file_path, gltf_path):
-                gltf_filename = gltf_name
-                logger.info(f"Converted {unique_filename} to {gltf_name}")
-            else:
-                logger.warning(f"Failed to convert {unique_filename} to glTF")
-        except Exception as e:
-            logger.error(f"Conversion error: {e}")
+                # Run conversion
+                success = await convert_step_to_gltf(file_path, gltf_path)
+                if success:
+                    gltf_filename = gltf_name
+                    logger.info(f"Converted {unique_filename} to {gltf_name}")
+                else:
+                    logger.warning(f"Failed to convert {unique_filename} to glTF")
+            except Exception as e:
+                logger.error(f"Conversion error: {e}")
 
         # Create PartFile record in database
         part_file = PartFile(
