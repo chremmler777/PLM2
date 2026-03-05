@@ -763,20 +763,24 @@ async def upload_part_file(
 
         # Convert to glTF for web viewing
         gltf_filename = None
+        conversion_failed = False
         if file_type == 'step':  # Only convert STEP files
             try:
                 gltf_name = f"{part_id}_{uuid.uuid4().hex}.glb"
                 gltf_path = os.path.join(uploads_dir, gltf_name)
 
+                logger.info(f"Starting conversion for {unique_filename}")
                 # Run conversion
                 success = await convert_step_to_gltf(file_path, gltf_path)
                 if success:
                     gltf_filename = gltf_name
                     logger.info(f"Converted {unique_filename} to {gltf_name}")
                 else:
-                    logger.warning(f"Failed to convert {unique_filename} to glTF")
+                    logger.warning(f"Failed to convert {unique_filename} to glTF - conversion returned False")
+                    conversion_failed = True
             except Exception as e:
-                logger.error(f"Conversion error: {e}")
+                logger.error(f"Conversion error for {unique_filename}: {e}", exc_info=True)
+                conversion_failed = True
 
         # Create PartFile record in database
         part_file = PartFile(
