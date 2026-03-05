@@ -5,7 +5,7 @@ from app.models.entities import (
     UserWorkflowRole, AuditLog, LoginHistory
 )
 from app.models.article import (
-    Article, ArticleRevision, ArticleDocument, BOM, BOMItem
+    Article, ArticleRevision, ArticleDocument, BOM, BOMItem, CatalogPart
 )
 from app.models.part import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
@@ -36,6 +36,7 @@ __all__ = [
     "ArticleDocument",
     "BOM",
     "BOMItem",
+    "CatalogPart",
     "Part",
     "PartRevision",
     "RevisionFile",

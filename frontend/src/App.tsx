@@ -7,11 +7,11 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
-import PartDetail from './pages/PartDetail';
-import ArticlesPage from './pages/ArticlesPage';
+import ProjectsPage from './pages/ProjectsPage';
+import ProjectDetailPage from './pages/ProjectDetailPage';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
+import CatalogPage from './pages/CatalogPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -32,26 +32,18 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route
-        path="/dashboard"
+        path="/projects"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <ProjectsPage />
           </ProtectedRoute>
         }
       />
       <Route
-        path="/parts/:partId"
+        path="/projects/:projectId"
         element={
           <ProtectedRoute>
-            <PartDetail />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/articles"
-        element={
-          <ProtectedRoute>
-            <ArticlesPage />
+            <ProjectDetailPage />
           </ProtectedRoute>
         }
       />
@@ -72,8 +64,16 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/catalog"
+        element={
+          <ProtectedRoute>
+            <CatalogPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/"
-        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />}
+        element={isAuthenticated ? <Navigate to="/projects" /> : <Navigate to="/login" />}
       />
     </Routes>
   );

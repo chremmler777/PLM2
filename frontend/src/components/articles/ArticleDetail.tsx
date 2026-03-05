@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useArticle } from '../../hooks/queries/useArticles';
-import { RevisionResponse } from '../../types/article';
+
 import { LoadingSkeleton } from '../common/LoadingSkeleton';
 import { ErrorBoundary } from '../common/ErrorBoundary';
 
@@ -18,6 +18,9 @@ import RevisionTree from './RevisionTree';
 import RevisionTable from './RevisionTable';
 import RevisionActions from './RevisionActions';
 import ArticleWorkflowSection from './ArticleWorkflowSection';
+import BOMSection from './BOMSection';
+
+type TabType = 'revisions' | 'bom';
 
 export default function ArticleDetail({ articleId: propArticleId }: { articleId?: number } = {}) {
   const { articleId: routeArticleId } = useParams<{ articleId: string }>();
@@ -25,6 +28,7 @@ export default function ArticleDetail({ articleId: propArticleId }: { articleId?
 
   const { data, isLoading, error } = useArticle(id);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('revisions');
 
   if (isLoading) {
     return <LoadingSkeleton count={3} />;
@@ -50,9 +54,9 @@ export default function ArticleDetail({ articleId: propArticleId }: { articleId?
 
   return (
     <ErrorBoundary>
-      <div className="flex h-full bg-slate-900">
+      <div className="flex bg-slate-900">
         {/* Sidebar: Revision Tree */}
-        <div className="w-64 border-r border-slate-700 overflow-y-auto">
+        <div className="w-64 border-r border-slate-700 overflow-y-auto max-h-screen">
           <div className="p-4">
             <h3 className="font-semibold text-slate-100 mb-4">Revisions</h3>
             <RevisionTree
@@ -69,34 +73,69 @@ export default function ArticleDetail({ articleId: propArticleId }: { articleId?
             {/* Article Info */}
             <ArticleInfoCard article={data.article} />
 
-            {/* Actions Bar */}
-            <div className="mt-6 mb-6">
-              <RevisionActions
-                articleId={data.article.id}
-                selectedRevision={selectedRevision}
-                allRevisions={data.revisions}
-              />
+            {/* Tab Bar */}
+            <div className="flex gap-1 mt-6 mb-4 border-b border-slate-700">
+              {(['revisions', 'bom'] as TabType[]).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 text-sm font-medium capitalize transition border-b-2 -mb-px ${
+                    activeTab === tab
+                      ? 'border-blue-500 text-blue-400'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {tab === 'bom' ? 'BOM' : 'Revisions'}
+                </button>
+              ))}
             </div>
 
-            {/* Revisions Table */}
-            <div className="mt-6">
-              <RevisionTable
-                revisions={data.revisions}
-                selectedRevisionId={selectedRevisionId}
-                onSelectRevision={setSelectedRevisionId}
-                articleId={data.article.id}
-              />
-            </div>
+            {activeTab === 'revisions' && (
+              <>
+                {/* Actions Bar */}
+                <div className="mb-6">
+                  <RevisionActions
+                    articleId={data.article.id}
+                    selectedRevision={selectedRevision}
+                    allRevisions={data.revisions}
+                  />
+                </div>
 
-            {/* Workflow Section (Phase 3) */}
-            {selectedRevision && (
-              <div className="mt-6">
-                <ArticleWorkflowSection
+                {/* Revisions Table */}
+                <RevisionTable
+                  revisions={data.revisions}
+                  selectedRevisionId={selectedRevisionId}
+                  onSelectRevision={setSelectedRevisionId}
                   articleId={data.article.id}
-                  revisionId={selectedRevision.id}
+                  activeRevisionId={data.article.active_revision_id}
                 />
-              </div>
+
+                {/* Workflow Section (Phase 3) */}
+                {selectedRevision && (
+                  <div className="mt-6">
+                    <ArticleWorkflowSection
+                      articleId={data.article.id}
+                      revisionId={selectedRevision.id}
+                    />
+                  </div>
+                )}
+              </>
             )}
+
+            {activeTab === 'bom' && (() => {
+              // For BOM: prefer active revision, then selected, then first
+              const bomRevision =
+                (data.article.active_revision_id && data.revisions.find(r => r.id === data.article.active_revision_id)) ||
+                selectedRevision ||
+                data.revisions[0];
+              return bomRevision ? (
+                <BOMSection articleId={data.article.id} revisionId={bomRevision.id} />
+              ) : (
+                <div className="text-center py-12 text-slate-500 text-sm">
+                  Create a revision first (Revisions tab → New Engineering Revision), then add BOM items here.
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

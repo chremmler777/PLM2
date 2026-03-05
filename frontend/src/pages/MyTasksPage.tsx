@@ -61,7 +61,7 @@ export default function MyTasksPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700 bg-slate-900">
-                <th className="text-left px-4 py-3 text-slate-400 font-medium">Article</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">Part</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Revision</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Step</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Stage</th>
@@ -80,10 +80,10 @@ export default function MyTasksPage() {
                     className="border-b border-slate-700 hover:bg-slate-750 last:border-0"
                   >
                     <td className="px-4 py-3">
-                      <div className="text-slate-100 font-medium">{task.article_name}</div>
-                      <div className="text-slate-400 text-xs">{task.article_number}</div>
+                      <div className="text-slate-100 font-medium">{task.part_name}</div>
+                      <div className="text-slate-400 text-xs">{task.part_number}</div>
                     </td>
-                    <td className="px-4 py-3 text-slate-300">{task.revision_label}</td>
+                    <td className="px-4 py-3 text-slate-300">{task.revision_name}</td>
                     <td className="px-4 py-3 text-slate-300">{task.step_name}</td>
                     <td className="px-4 py-3 text-slate-300">
                       <span className="text-slate-400 text-xs mr-1">Stage {task.stage_order}</span>
@@ -101,10 +101,10 @@ export default function MyTasksPage() {
                     <td className="px-4 py-3 text-slate-400 text-xs">{startedDate}</td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => navigate(`/articles?highlight=${task.article_id}`)}
+                        onClick={() => navigate(`/projects/${task.project_id}`)}
                         className="text-xs text-blue-400 hover:text-blue-300 underline"
                       >
-                        View Article
+                        View Part
                       </button>
                     </td>
                   </tr>

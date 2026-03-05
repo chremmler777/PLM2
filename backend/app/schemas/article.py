@@ -63,6 +63,7 @@ class ArticleResponse(BaseModel):
     sourcing_type: SourcingTypeEnum
     data_classification: str
     active_revision_id: int | None
+    project_id: int | None
     created_at: datetime
     created_by: int
 

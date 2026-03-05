@@ -52,6 +52,9 @@ class Part(Base):
     # Data classification
     data_classification: Mapped[str] = mapped_column(String(20), default="confidential")
 
+    # Hierarchy - for sub-assemblies containing other parts
+    parent_part_id: Mapped[int | None] = mapped_column(ForeignKey("parts.id"), nullable=True)
+
     # Current active revision (denormalized for quick access)
     active_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
@@ -65,6 +68,19 @@ class Part(Base):
     project: Mapped["Project"] = relationship(foreign_keys=[project_id])
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
     updated_by_user: Mapped["User | None"] = relationship(foreign_keys=[updated_by])
+
+    parent_part: Mapped["Part | None"] = relationship(
+        back_populates="child_parts",
+        remote_side=[id],
+        foreign_keys=[parent_part_id]
+    )
+    child_parts: Mapped[list["Part"]] = relationship(
+        back_populates="parent_part",
+        remote_side=[parent_part_id],
+        foreign_keys=[parent_part_id],
+        cascade="all, delete-orphan"
+    )
+
     revisions: Mapped[list["PartRevision"]] = relationship(
         back_populates="part",
         cascade="all, delete-orphan",

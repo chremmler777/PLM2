@@ -41,7 +41,7 @@ def _serialize_instance(instance: WfInstance) -> dict:
         "id": instance.id,
         "template_id": instance.template_id,
         "template_name": instance.template.name if instance.template else "",
-        "revision_id": instance.revision_id,
+        "part_revision_id": instance.part_revision_id,
         "status": instance.status,
         "current_stage_order": instance.current_stage_order,
         "started_by": instance.started_by,

@@ -1,8 +1,33 @@
 """Article and revision models - core PLM entities."""
 from datetime import datetime
-from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean, Float
+from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean, Float, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
+
+
+class CatalogPart(Base):
+    """Global org-scoped parts catalog."""
+    __tablename__ = "catalog_parts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    part_number: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    part_type: Mapped[str] = mapped_column(String(20))  # purchased | manufactured
+    supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    unit: Mapped[str] = mapped_column(String(20))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'part_number', name='uq_catalog_part_org_number'),
+    )
+
+    organization: Mapped["Organization"] = relationship(foreign_keys=[organization_id])
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
 
 
 class Article(Base):
@@ -11,6 +36,7 @@ class Article(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
 
     # Identity
     article_number: Mapped[str] = mapped_column(String(100), index=True)  # org-scoped unique
@@ -92,10 +118,6 @@ class ArticleRevision(Base):
         back_populates="article_revision",
         foreign_keys="[WorkflowInstance.article_revision_id]"
     )
-    wf_instances: Mapped[list["WfInstance"]] = relationship(
-        back_populates="revision",
-        foreign_keys="[WfInstance.revision_id]"
-    )
 
 
 class ArticleDocument(Base):
@@ -160,6 +182,7 @@ class BOMItem(Base):
     parent_item_id: Mapped[int | None] = mapped_column(ForeignKey("bom_items.id"), nullable=True)
     child_article_id: Mapped[int | None] = mapped_column(ForeignKey("articles.id"), nullable=True)
 
+    catalog_part_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_parts.id"), nullable=True)
     item_number: Mapped[str] = mapped_column(String(50))
     name: Mapped[str] = mapped_column(String(255))
     quantity: Mapped[float] = mapped_column(Float, default=1.0)
@@ -170,6 +193,7 @@ class BOMItem(Base):
     bom: Mapped["BOM"] = relationship(back_populates="items")
     parent_item: Mapped["BOMItem | None"] = relationship(remote_side=[id])
     child_article: Mapped["Article | None"] = relationship(foreign_keys=[child_article_id])
+    catalog_part: Mapped["CatalogPart | None"] = relationship(foreign_keys=[catalog_part_id])
 
 
 # Import needed models for relationships

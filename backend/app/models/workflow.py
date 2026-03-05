@@ -115,12 +115,12 @@ class WfTemplateHistory(Base):
 # ============================================================================
 
 class WfInstance(Base):
-    """Running workflow instance for a specific article revision."""
+    """Running workflow instance for a specific part revision."""
     __tablename__ = "wf_instances"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     template_id: Mapped[int] = mapped_column(ForeignKey("wf_templates.id"))
-    revision_id: Mapped[int] = mapped_column(ForeignKey("article_revisions.id"))
+    part_revision_id: Mapped[int] = mapped_column(ForeignKey("part_revisions.id"))
     status: Mapped[str] = mapped_column(String(20), default="active")  # active|completed|canceled|rejected
     current_stage_order: Mapped[int] = mapped_column(Integer, default=1)
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -131,9 +131,8 @@ class WfInstance(Base):
     cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     template: Mapped["WfTemplate"] = relationship()
-    revision: Mapped["ArticleRevision"] = relationship(
-        back_populates="wf_instances",
-        foreign_keys="[WfInstance.revision_id]",
+    part_revision: Mapped["PartRevision"] = relationship(
+        foreign_keys="[WfInstance.part_revision_id]",
     )
     tasks: Mapped[list["WfInstanceTask"]] = relationship(
         back_populates="instance",
@@ -265,7 +264,7 @@ class WorkflowTask(Base):
 
 # Forward references for type hints
 from app.models.entities import Organization, User
-from app.models.article import ArticleRevision
+from app.models.part import PartRevision
 
 __all__ = [
     "Department",

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.workflow import (
     WfInstance, WfInstanceTask, WfTemplate, WfStage, WfStep
 )
-from app.models.article import ArticleRevision
+from app.models.part import PartRevision
 
 ACTIONABLE_LETTERS = {"R", "A"}
 
@@ -25,7 +25,7 @@ class WorkflowService:
         # Guard: active instance already exists
         existing = await db.execute(
             select(WfInstance).where(
-                WfInstance.revision_id == revision_id,
+                WfInstance.part_revision_id == revision_id,
                 WfInstance.status == "active",
             )
         )
@@ -53,7 +53,7 @@ class WorkflowService:
         # Create instance
         instance = WfInstance(
             template_id=template_id,
-            revision_id=revision_id,
+            part_revision_id=revision_id,
             status="active",
             current_stage_order=1,
             started_by=started_by_id,
@@ -179,7 +179,7 @@ class WorkflowService:
         """Return the latest workflow instance for a revision, or None."""
         result = await db.execute(
             select(WfInstance)
-            .where(WfInstance.revision_id == revision_id)
+            .where(WfInstance.part_revision_id == revision_id)
             .options(
                 selectinload(WfInstance.tasks).selectinload(WfInstanceTask.step),
                 selectinload(WfInstance.tasks).selectinload(WfInstanceTask.department),
@@ -195,7 +195,7 @@ class WorkflowService:
         db: AsyncSession,
         department_id: int,
     ) -> list[dict]:
-        """Return active actionable tasks for a department, with article/revision info."""
+        """Return active actionable tasks for a department, with part/revision info."""
         result = await db.execute(
             select(WfInstanceTask)
             .where(
@@ -205,8 +205,8 @@ class WorkflowService:
             )
             .options(
                 selectinload(WfInstanceTask.instance)
-                .selectinload(WfInstance.revision)
-                .selectinload(ArticleRevision.article),
+                .selectinload(WfInstance.part_revision)
+                .selectinload(PartRevision.part),
                 selectinload(WfInstanceTask.step)
                 .selectinload(WfStep.stage),
                 selectinload(WfInstanceTask.department),
@@ -217,8 +217,8 @@ class WorkflowService:
         results = []
         for t in tasks:
             instance = t.instance
-            revision = instance.revision
-            article = revision.article
+            revision = instance.part_revision
+            part = revision.part
             stage = t.step.stage
             results.append({
                 "task_id": t.id,
@@ -230,11 +230,12 @@ class WorkflowService:
                 "step_name": t.step.step_name if t.step else "",
                 "stage_order": t.stage_order,
                 "stage_name": stage.name if stage else None,
-                "article_id": article.id,
-                "article_number": article.article_number,
-                "article_name": article.name,
+                "part_id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.name,
+                "project_id": part.project_id,
                 "revision_id": revision.id,
-                "revision_label": revision.revision,
+                "revision_name": revision.revision_name,
                 "instance_started_at": instance.started_at,
             })
         return results

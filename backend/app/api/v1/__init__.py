@@ -7,6 +7,8 @@ from app.api.v1.parts import router as parts_router
 from app.api.v1.plants import router as plants_router
 from app.api.v1.workflow_templates import router as workflow_templates_router
 from app.api.v1.workflow_instances import router as workflow_instances_router
+from app.api.v1.catalog_parts import router as catalog_parts_router
+from app.api.v1.bom import bom_router, project_bom_router
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
@@ -16,5 +18,8 @@ api_router.include_router(parts_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
+api_router.include_router(catalog_parts_router)
+api_router.include_router(bom_router)
+api_router.include_router(project_bom_router)
 
 __all__ = ["api_router"]

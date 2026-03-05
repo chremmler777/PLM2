@@ -3,7 +3,7 @@
  */
 
 import { RevisionResponse, RevisionStatusEnum } from '../../types/article';
-import { useTransitionRevisionStatus } from '../../hooks/queries/useArticles';
+import { useTransitionRevisionStatus, useSetActiveRevision } from '../../hooks/queries/useArticles';
 import { toast } from 'sonner';
 import { useState } from 'react';
 
@@ -12,6 +12,7 @@ interface Props {
   selectedRevisionId: number | null;
   onSelectRevision: (revisionId: number) => void;
   articleId: number;
+  activeRevisionId: number | null;
 }
 
 const statusLabels: Record<RevisionStatusEnum, string> = {
@@ -43,10 +44,12 @@ export default function RevisionTable({
   selectedRevisionId,
   onSelectRevision,
   articleId,
+  activeRevisionId,
 }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingStatus, setEditingStatus] = useState<RevisionStatusEnum | null>(null);
   const transitionStatus = useTransitionRevisionStatus(articleId);
+  const setActive = useSetActiveRevision(articleId);
 
   const handleStatusChange = async (revisionId: number, currentStatus: RevisionStatusEnum, newStatus: RevisionStatusEnum) => {
     try {
@@ -79,6 +82,9 @@ export default function RevisionTable({
             </th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Created
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
+              BOM
             </th>
             <th className="px-6 py-3 text-left text-xs font-semibold text-slate-200 uppercase tracking-wider">
               Actions
@@ -125,6 +131,24 @@ export default function RevisionTable({
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
                 {new Date(rev.created_at).toLocaleDateString()}
+              </td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm" onClick={(e) => e.stopPropagation()}>
+                {activeRevisionId === rev.id ? (
+                  <span className="px-2 py-0.5 bg-green-900/60 text-green-300 rounded text-xs font-medium">Active</span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setActive.mutate(rev.id, {
+                        onSuccess: () => toast.success(`Revision ${rev.revision} set as active`),
+                        onError: () => toast.error('Failed to set active revision'),
+                      });
+                    }}
+                    disabled={setActive.isPending}
+                    className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-50"
+                  >
+                    Set active
+                  </button>
+                )}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm" onClick={(e) => e.stopPropagation()}>
                 {validTransitions[rev.status].length > 0 && (

@@ -13,11 +13,13 @@ class PartBase(BaseModel):
     part_type: str = Field(..., description="purchased, internal_mfg, sub_assembly")
     supplier: Optional[str] = None
     data_classification: str = "confidential"
+    parent_part_id: Optional[int] = None
 
 
 class PartCreate(PartBase):
     """Create a new part."""
     project_id: int
+    parent_part_id: Optional[int] = None  # Can be a child of a sub-assembly
 
 
 class PartUpdate(BaseModel):

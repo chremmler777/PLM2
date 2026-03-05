@@ -140,6 +140,20 @@ export const useCreateChangeProposal = (articleId: number) => {
 };
 
 /**
+ * Hook to set the active revision for BOM aggregation
+ */
+export const useSetActiveRevision = (articleId: number) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (revisionId: number) => articleApi.setActiveRevision(articleId, revisionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.article(articleId) });
+      queryClient.invalidateQueries({ queryKey: ['articles'] });
+    },
+  });
+};
+
+/**
  * Hook to transition revision status
  */
 export const useTransitionRevisionStatus = (articleId: number) => {

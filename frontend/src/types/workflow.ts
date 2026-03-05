@@ -111,7 +111,7 @@ export interface WfInstance {
   id: number;
   template_id: number;
   template_name: string;
-  revision_id: number;
+  part_revision_id: number;
   status: WfInstanceStatus;
   current_stage_order: number;
   started_by: number;
@@ -132,11 +132,12 @@ export interface MyTask {
   step_name: string;
   stage_order: number;
   stage_name: string | null;
-  article_id: number;
-  article_number: string;
-  article_name: string;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  project_id: number;
   revision_id: number;
-  revision_label: string;
+  revision_name: string;
   instance_started_at: string;
 }
 

@@ -109,3 +109,21 @@ export const getRevisionTree = async (articleId: number): Promise<RevisionTreeRe
   const response = await client.get(`/v1/articles/${articleId}/revision-tree`);
   return response.data;
 };
+
+/**
+ * Set a revision as the active revision for BOM aggregation
+ */
+export const setActiveRevision = async (articleId: number, revisionId: number): Promise<void> => {
+  await client.put(`/v1/articles/${articleId}/active-revision/${revisionId}`);
+};
+
+/**
+ * Assign article to a project (or unassign with null)
+ */
+export const setArticleProject = async (
+  articleId: number,
+  projectId: number | null
+): Promise<void> => {
+  const params = projectId !== null ? { project_id: projectId } : {};
+  await client.put(`/v1/articles/${articleId}/project`, null, { params });
+};

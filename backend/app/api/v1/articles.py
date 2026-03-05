@@ -367,6 +367,59 @@ async def transition_revision_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.put("/{article_id}/active-revision/{revision_id}")
+async def set_active_revision(
+    article_id: int,
+    revision_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a specific revision as the active revision for BOM aggregation."""
+    result = await db.execute(
+        select(Article).where(
+            and_(Article.id == article_id, Article.organization_id == current_user.organization_id)
+        )
+    )
+    article = result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    # Verify revision belongs to this article
+    result = await db.execute(
+        select(ArticleRevision).where(
+            and_(ArticleRevision.id == revision_id, ArticleRevision.article_id == article_id)
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+
+    article.active_revision_id = revision_id
+    await db.commit()
+    return {"article_id": article_id, "active_revision_id": revision_id}
+
+
+@router.put("/{article_id}/project")
+async def set_article_project(
+    article_id: int,
+    project_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign (or unassign) an article to a project."""
+    result = await db.execute(
+        select(Article).where(
+            and_(Article.id == article_id, Article.organization_id == current_user.organization_id)
+        )
+    )
+    article = result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    article.project_id = project_id
+    await db.commit()
+    return {"article_id": article_id, "project_id": project_id}
+
+
 @router.get("/{article_id}/revision-tree", response_model=RevisionTreeResponse)
 async def get_revision_tree(
     article_id: int,

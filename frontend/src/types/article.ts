@@ -54,6 +54,7 @@ export interface ArticleResponse {
   sourcing_type: SourcingTypeEnum;
   data_classification: string;
   active_revision_id: number | null;
+  project_id: number | null;
   created_at: string;
   created_by: number;
 }

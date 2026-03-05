@@ -28,6 +28,7 @@ class PartService:
         supplier: Optional[str] = None,
         created_by: int = None,
         data_classification: str = "confidential",
+        parent_part_id: Optional[int] = None,
     ) -> Part:
         """Create a new part."""
         part = Part(
@@ -39,6 +40,7 @@ class PartService:
             supplier=supplier,
             created_by=created_by,
             data_classification=data_classification,
+            parent_part_id=parent_part_id,
         )
         session.add(part)
         await session.flush()

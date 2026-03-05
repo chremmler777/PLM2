@@ -25,3 +25,12 @@ from app.schemas.article import (
 from app.schemas.project import (
     ProjectCreateRequest, ProjectUpdateRequest, ProjectResponse,
 )
+
+# BOM schemas
+from app.schemas.bom import (
+    CatalogPartCreateRequest, CatalogPartUpdateRequest, CatalogPartResponse,
+    DuplicateCheckResponse,
+    BOMItemCreateRequest, BOMItemUpdateRequest, BOMItemResponse, BOMResponse,
+    ProjectBOMResponse, ProjectBOMLineResponse, ProjectBOMSourceResponse,
+    PartTypeEnum,
+)

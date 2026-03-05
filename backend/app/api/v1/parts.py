@@ -43,6 +43,7 @@ async def create_part(
             supplier=body.supplier,
             created_by=current_user.id,
             data_classification=body.data_classification,
+            parent_part_id=body.parent_part_id,
         )
         await db.commit()
         return part
