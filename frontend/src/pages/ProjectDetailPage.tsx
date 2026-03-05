@@ -633,9 +633,9 @@ export default function ProjectDetailPage() {
                             <a
                               href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
                               download={file.original_filename}
-                              className="ml-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex-shrink-0 text-xs"
+                              className="ml-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex-shrink-0 text-xs"
                             >
-                              DL
+                              Download
                             </a>
                           </div>
                         ))}

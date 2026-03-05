@@ -97,7 +97,7 @@ export default function Viewer3D({
   useEffect(() => {
     if (fileId) {
       // Set the model URL
-      const url = `http://localhost:8000/api/files/${fileId}/viewer`
+      const url = `http://localhost:8000/api/v1/parts/files/${fileId}/viewer`
       setModelUrl(url)
       // Keep loading=true until Model component notifies it's done
       setLoading(true)
