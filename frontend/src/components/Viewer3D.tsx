@@ -9,7 +9,6 @@ import { ObjectTree } from './ObjectTree'
 import { MeasurementReadout } from './MeasurementReadout'
 import { SceneNode } from '../hooks/useGLTFLoader'
 import { useTheme } from '../contexts/ThemeContext'
-import RevisionTree from './RevisionTree'
 
 interface Viewer3DProps {
   fileId: number | null  // Allow null to show "no file" state without unmounting
@@ -269,29 +268,8 @@ export default function Viewer3D({
 
       {/* Main Content Area with Sidebar and Canvas */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Revision Tree - shown in fullscreen mode with navigation */}
-        {isFullscreen && articleId && onRevisionSelect && selectedRevisionId && (
-          <div
-            className="w-80 flex-shrink-0 border-r border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm flex flex-col overflow-hidden"
-            onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseUp={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-          >
-            <RevisionTree
-              articleId={articleId}
-              selectedRevisionId={selectedRevisionId}
-              onRevisionSelect={onRevisionSelect}
-              sourcingType={sourcingType}
-              compactMode={false}  // Show navigation buttons
-              expandAll={true}     // Expand all items
-            />
-          </div>
-        )}
-
         {/* Object Tree Sidebar - only shown in fullscreen mode */}
-        {showObjectTree && isFullscreen && !(isFullscreen && articleId) && (
+        {showObjectTree && isFullscreen && (
           <div className="w-64 border-r border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden flex flex-col">
             <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Scene Objects</h3>
@@ -312,7 +290,7 @@ export default function Viewer3D({
         )}
 
         {/* Sidebar Toggle Button - only shown in fullscreen mode */}
-        {!showObjectTree && isFullscreen && !(isFullscreen && articleId) && (
+        {!showObjectTree && isFullscreen && (
           <button
             onClick={() => setShowObjectTree(true)}
             className="w-12 flex items-center justify-center border-r border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
