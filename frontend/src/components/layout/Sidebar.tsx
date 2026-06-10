@@ -5,18 +5,21 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import ChangePasswordModal from '../ChangePasswordModal';
 
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, username, role, isAdmin } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const navItems = [
     { path: '/projects', label: 'Projects', icon: '📁' },
     { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
+    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: '👥' }] : []),
   ];
 
   const isActive = (path: string) => location.pathname === path;
@@ -63,8 +66,31 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Logout */}
-      <div className="p-2 border-t border-slate-700">
+      {/* User block + Logout */}
+      <div className="p-2 border-t border-slate-700 space-y-2">
+        {username && (
+          <div className={`flex items-center gap-2 px-2 py-1.5 ${isCollapsed ? 'justify-center' : ''}`}>
+            <div
+              className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0"
+              title={username}
+            >
+              {username.charAt(0).toUpperCase()}
+            </div>
+            {!isCollapsed && (
+              <div className="min-w-0">
+                <p className="text-sm text-slate-200 font-medium truncate">{username}</p>
+                {role && <p className="text-xs text-slate-400 capitalize">{role}</p>}
+              </div>
+            )}
+          </div>
+        )}
+        <button
+          onClick={() => setShowChangePassword(true)}
+          className="w-full px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-700 font-medium text-sm text-left"
+          title="Change password"
+        >
+          {isCollapsed ? '🔑' : '🔑 Change Password'}
+        </button>
         <button
           onClick={logout}
           className="w-full px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm"
@@ -73,6 +99,8 @@ export default function Sidebar() {
           {isCollapsed ? '↪' : 'Logout'}
         </button>
       </div>
+
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
 }

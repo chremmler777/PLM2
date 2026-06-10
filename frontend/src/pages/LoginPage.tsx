@@ -30,7 +30,7 @@ export default function LoginPage() {
       console.log('Login successful:', { token: data.access_token, userId: data.user_id });
 
       // Update auth state with token from backend
-      login(data.access_token, data.user_id);
+      login(data.access_token, data.user_id, data.username, data.role);
       toast.success('Logged in successfully!');
 
       // Navigate after state update

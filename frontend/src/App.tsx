@@ -14,6 +14,7 @@ import PartDetail from './pages/PartDetail';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
+import UsersPage from './pages/UsersPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -78,6 +79,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CatalogPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <UsersPage />
           </ProtectedRoute>
         }
       />
