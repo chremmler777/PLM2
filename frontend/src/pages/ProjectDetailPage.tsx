@@ -9,6 +9,7 @@ import Viewer3D from '../components/Viewer3D';
 import CADUploader from '../components/CADUploader';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
 import PartBOMSection from '../components/PartBOMSection';
+import PartRelationsSection from '../components/PartRelationsSection';
 import { toast } from 'sonner';
 
 // Types
@@ -1217,6 +1218,14 @@ export default function ProjectDetailPage() {
                   </>
                 )}
               </div>
+
+              {/* Item Relations (tool produces / gauge checks / equipment assembles) */}
+              <PartRelationsSection
+                partId={selectedPart.id}
+                itemCategory={selectedPart.item_category}
+                projectParts={parts ?? []}
+                onSelectPart={setSelectedPartId}
+              />
 
               {/* Workflow (RASIC approval flow for the selected revision) */}
               {selectedRevisionId && (

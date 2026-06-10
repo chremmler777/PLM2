@@ -295,6 +295,28 @@ class PartFile(Base):
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
 
 
+class PartRelation(Base):
+    """Cross-link between controlled items.
+
+    Captures how tools, gauges, and assembly equipment serve articles:
+    a tool *produces* an article, a gauge *checks* it, assembly equipment
+    *assembles* it. Generic *related* covers everything else.
+    """
+    __tablename__ = "part_relations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    to_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    relation_type: Mapped[str] = mapped_column(String(30))  # produces, checks, assembles, related
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    from_part: Mapped["Part"] = relationship(foreign_keys=[from_part_id])
+    to_part: Mapped["Part"] = relationship(foreign_keys=[to_part_id])
+
+
 class PartBOMItem(Base):
     """BOM line item owned by a sub-assembly's revision.
 
