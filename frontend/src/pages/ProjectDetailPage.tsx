@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import Viewer3D from '../components/Viewer3D';
 import CADUploader from '../components/CADUploader';
+import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
 import { toast } from 'sonner';
 
 // Types
@@ -176,8 +177,81 @@ function statusColor(status: string): string {
   return colors[status] || 'text-slate-300';
 }
 
+interface ChangelogEntry {
+  id: number;
+  action: string;
+  action_description: string;
+  performed_by_user: string | null;
+  performed_at: string;
+  revision_id: number | null;
+}
+
+function useChangelog(partId: number) {
+  return useQuery<ChangelogEntry[]>({
+    queryKey: ['part-changelog', partId],
+    queryFn: async () => {
+      const res = await client.get(`/v1/parts/${partId}/changelog`);
+      return res.data;
+    },
+    enabled: !!partId,
+  });
+}
+
+// Changelog Modal
+function ChangelogModal({ partId, onClose }: { partId: number; onClose: () => void }) {
+  const { data: entries, isLoading } = useChangelog(partId);
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center" onClick={onClose}>
+      <div
+        className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-slate-100">Changelog</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 text-xl leading-none">×</button>
+        </div>
+        <div className="overflow-y-auto space-y-2">
+          {isLoading ? (
+            <p className="text-slate-400 text-sm">Loading...</p>
+          ) : !entries || entries.length === 0 ? (
+            <p className="text-slate-500 text-sm">No changelog entries yet</p>
+          ) : (
+            [...entries].reverse().map((entry) => (
+              <div key={entry.id} className="p-3 bg-slate-700/50 rounded border border-slate-600 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-slate-600 text-slate-200">
+                    {entry.action.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-slate-500 text-xs">
+                    {new Date(entry.performed_at).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-slate-200 mt-1.5">{entry.action_description}</p>
+                {entry.performed_by_user && (
+                  <p className="text-slate-500 text-xs mt-1">by {entry.performed_by_user}</p>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Context Menu Component
-function ContextMenuComponent({ menu, onClose }: { menu: ContextMenu | null; onClose: () => void }) {
+function ContextMenuComponent({
+  menu,
+  onClose,
+  onOpenDetails,
+  onViewChangelog,
+}: {
+  menu: ContextMenu | null;
+  onClose: () => void;
+  onOpenDetails: (partId: number) => void;
+  onViewChangelog: (partId: number) => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -209,17 +283,23 @@ function ContextMenuComponent({ menu, onClose }: { menu: ContextMenu | null; onC
       className="fixed z-50 bg-slate-700 border border-slate-600 rounded-lg shadow-lg min-w-max"
       style={{ top: `${menu.y}px`, left: `${menu.x}px` }}
     >
-      <button className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
-        Revisions
+      <button
+        onClick={() => {
+          onOpenDetails(menu.partId);
+          onClose();
+        }}
+        className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600"
+      >
+        Revisions & Lifecycle
       </button>
-      <button className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
+      <button
+        onClick={() => {
+          onViewChangelog(menu.partId);
+          onClose();
+        }}
+        className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600"
+      >
         View Changelog
-      </button>
-      <button className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600">
-        Start ECR
-      </button>
-      <button className="w-full text-left px-4 py-2 text-sm text-slate-200 hover:bg-slate-600 border-t border-slate-600">
-        Create Next Revision
       </button>
     </div>
   );
@@ -608,6 +688,7 @@ export default function ProjectDetailPage() {
   const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
@@ -730,10 +811,26 @@ export default function ProjectDetailPage() {
           onClick={() => setSelectedPartId(null)}
         >
           {selectedPart ? (
-            <div onClick={(e) => e.stopPropagation()}>
+            <div onClick={(e) => e.stopPropagation()} className="space-y-4">
               {/* Part Info Card */}
               <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-                <h2 className="text-lg font-bold text-slate-100">{selectedPart.name}</h2>
+                <div className="flex items-start justify-between">
+                  <h2 className="text-lg font-bold text-slate-100">{selectedPart.name}</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setChangelogPartId(selectedPart.id)}
+                      className="px-3 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
+                    >
+                      Changelog
+                    </button>
+                    <button
+                      onClick={() => navigate(`/parts/${selectedPart.id}`)}
+                      className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
+                    >
+                      Revisions & Lifecycle →
+                    </button>
+                  </div>
+                </div>
                 <div className="text-slate-400 text-sm mt-1 flex items-center gap-2">
                   <span className="font-mono">{selectedPart.part_number}</span>
                   <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(selectedPart.part_type)}`}>
@@ -820,6 +917,14 @@ export default function ProjectDetailPage() {
                 )}
               </div>
 
+              {/* Workflow (RASIC approval flow for the selected revision) */}
+              {selectedRevisionId && (
+                <RevisionWorkflowSection
+                  revisionId={selectedRevisionId}
+                  revisionName={selectedRevision?.revision_name}
+                />
+              )}
+
               {/* BOM Section (sub_assembly only) */}
               {selectedPart.part_type === 'sub_assembly' && (
                 <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
@@ -878,7 +983,15 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Context Menu */}
-      <ContextMenuComponent menu={contextMenu} onClose={() => setContextMenu(null)} />
+      <ContextMenuComponent
+        menu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        onOpenDetails={(partId) => navigate(`/parts/${partId}`)}
+        onViewChangelog={(partId) => setChangelogPartId(partId)}
+      />
+
+      {/* Changelog Modal */}
+      {changelogPartId && <ChangelogModal partId={changelogPartId} onClose={() => setChangelogPartId(null)} />}
 
       {/* Add Part Modal */}
       <AddPartModal projectId={id} parts={parts} isOpen={showAddModal} onClose={() => setShowAddModal(false)} />

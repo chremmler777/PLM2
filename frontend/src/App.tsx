@@ -10,6 +10,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import LoginPage from './pages/LoginPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+import PartDetail from './pages/PartDetail';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
@@ -45,6 +46,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/parts/:partId"
+        element={
+          <ProtectedRoute>
+            <PartDetail />
           </ProtectedRoute>
         }
       />

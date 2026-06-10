@@ -501,7 +501,7 @@ export default function PartDetail() {
             <div className="text-center py-12">
               <p className="text-gray-500 mb-4">No revisions yet.</p>
               <button
-                onClick={() => createRfqMutation.mutate()}
+                onClick={() => createRfqMutation.mutate(false)}
                 disabled={createRfqMutation.isPending}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
               >
@@ -643,7 +643,7 @@ export default function PartDetail() {
                               )}
                               {majorRev.phase === 'rfq_phase' && majorRev === getLatestActiveRFQMajor(part.revisions) && majorRev.status === 'in_progress' && (
                                 <button
-                                  onClick={() => createRfqMutation.mutate()}
+                                  onClick={() => createRfqMutation.mutate(false)}
                                   disabled={createRfqMutation.isPending}
                                   className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-400"
                                 >
@@ -661,7 +661,7 @@ export default function PartDetail() {
                               )}
                               {majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status === 'in_progress' && (
                                 <button
-                                  onClick={() => createFreezeMajorMutation.mutate()}
+                                  onClick={() => createFreezeMajorMutation.mutate(false)}
                                   disabled={createFreezeMajorMutation.isPending}
                                   className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:bg-gray-400"
                                 >
