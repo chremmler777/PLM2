@@ -189,14 +189,25 @@ export default function PartBOMSection({ partId, revisionId, revisionName, locke
           BOM{revisionName ? <span className="text-slate-400 font-normal"> — {revisionName}</span> : null}
           {locked && <span className="ml-2 text-xs text-amber-400">🔒 read-only</span>}
         </h3>
-        {!locked && !showAdd && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
-          >
-            + Add Item
-          </button>
-        )}
+        <div className="flex gap-2">
+          {items && items.length > 0 && (
+            <a
+              href={`http://localhost:8000/api/v1/parts/revisions/${revisionId}/bom/export`}
+              download
+              className="px-3 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
+            >
+              ⬇ Export XLSX
+            </a>
+          )}
+          {!locked && !showAdd && (
+            <button
+              onClick={() => setShowAdd(true)}
+              className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
+            >
+              + Add Item
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (

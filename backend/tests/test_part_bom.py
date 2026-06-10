@@ -106,3 +106,27 @@ async def test_frozen_revision_bom_read_only(client, eng_auth, part, seed, sessi
     res = await client.get(f"/api/v1/parts/revisions/{rid}/bom", headers=eng_auth)
     assert res.status_code == 200
     assert len(res.json()) == 1
+
+
+async def test_bom_export_xlsx(client, eng_auth, part, seed):
+    pid, rid = part["part_id"], part["revision_id"]
+    child_id = await _make_child_part(client, eng_auth, seed, "P-400", "Washer")
+    await client.post(
+        f"/api/v1/parts/{pid}/revisions/{rid}/bom",
+        json={"child_part_id": child_id, "quantity": 8},
+        headers=eng_auth,
+    )
+
+    res = await client.get(f"/api/v1/parts/revisions/{rid}/bom/export")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert res.content[:2] == b"PK"  # xlsx is a zip container
+
+    import io
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(res.content))
+    ws = wb.active
+    rows = list(ws.iter_rows(min_row=5, values_only=True))
+    assert rows[0][:5] == ("Pos", "Item", "Part Number", "Qty", "Unit")
+    assert any(r[1] == "Washer" and r[3] == 8 for r in rows[1:])

@@ -110,6 +110,86 @@ async def list_bom_items(
     return [_item_dict(i, i.child_part, catalog_map.get(i.catalog_part_id)) for i in items]
 
 
+@router.get("/revisions/{revision_id}/bom/export")
+async def export_bom_xlsx(
+    revision_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Export a revision's BOM as an Excel workbook."""
+    import io
+    from datetime import datetime
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    revision = await RevisionService.get_revision(db, revision_id)
+    if not revision:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    part = await PartService.get_part(db, revision.part_id)
+
+    result = await db.execute(
+        select(PartBOMItem)
+        .where(PartBOMItem.revision_id == revision_id)
+        .options(joinedload(PartBOMItem.child_part))
+        .order_by(PartBOMItem.position, PartBOMItem.id)
+    )
+    items = result.unique().scalars().all()
+
+    catalog_ids = [i.catalog_part_id for i in items if i.catalog_part_id]
+    catalog_map = {}
+    if catalog_ids:
+        cat_result = await db.execute(select(CatalogPart).where(CatalogPart.id.in_(catalog_ids)))
+        catalog_map = {c.id: c for c in cat_result.scalars().all()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BOM"
+
+    title_font = Font(bold=True, size=14)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+
+    ws["A1"] = f"Bill of Materials — {part.name} ({part.part_number})"
+    ws["A1"].font = title_font
+    ws["A2"] = f"Revision: {revision.revision_name}"
+    ws["A3"] = f"Exported: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC"
+
+    headers = ["Pos", "Item", "Part Number", "Qty", "Unit", "Supplier", "Notes"]
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(row=5, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+
+    for row, item in enumerate(items, start=6):
+        catalog = catalog_map.get(item.catalog_part_id)
+        ws.cell(row=row, column=1, value=item.item_number)
+        ws.cell(row=row, column=2, value=item.name)
+        ws.cell(row=row, column=3, value=(
+            item.child_part.part_number if item.child_part
+            else catalog.part_number if catalog else ""
+        ))
+        ws.cell(row=row, column=4, value=item.quantity)
+        ws.cell(row=row, column=5, value=item.unit)
+        ws.cell(row=row, column=6, value=catalog.supplier if catalog and catalog.supplier else "")
+        ws.cell(row=row, column=7, value=item.notes or "")
+
+    widths = [8, 32, 18, 8, 8, 20, 36]
+    for col, width in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=5, column=col).column_letter].width = width
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"BOM_{part.part_number}_{revision.revision_name}.xlsx".replace(" ", "_")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/{part_id}/revisions/{revision_id}/bom", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_bom_item(
     part_id: int,
