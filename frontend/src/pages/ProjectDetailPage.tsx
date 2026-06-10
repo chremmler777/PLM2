@@ -326,6 +326,21 @@ function ContextMenuComponent({
   );
 }
 
+// Collect a part's descendant ids (for drag-and-drop cycle prevention)
+function getDescendantIds(parts: Part[], partId: number): Set<number> {
+  const ids = new Set<number>();
+  const walk = (id: number) => {
+    for (const p of parts) {
+      if (p.parent_part_id === id && !ids.has(p.id)) {
+        ids.add(p.id);
+        walk(p.id);
+      }
+    }
+  };
+  walk(partId);
+  return ids;
+}
+
 // Tree Node Component
 function TreeNodeComponent({
   node,
@@ -333,30 +348,67 @@ function TreeNodeComponent({
   onSelect,
   onContextMenu,
   depth = 0,
+  draggingPartId,
+  invalidDropIds,
+  onDragStartPart,
+  onDragEndPart,
+  onDropOnPart,
 }: {
   node: TreeNode;
   selectedPartId: number | null;
   onSelect: (id: number) => void;
   onContextMenu: (e: React.MouseEvent, id: number) => void;
   depth?: number;
+  draggingPartId: number | null;
+  invalidDropIds: Set<number>;
+  onDragStartPart: (id: number) => void;
+  onDragEndPart: () => void;
+  onDropOnPart: (targetId: number) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
   const hasChildren = node.children.length > 0;
   const isRoot = depth === 0;
   const isHeadline = isRoot || hasChildren;
+
+  const isDropTarget =
+    draggingPartId !== null &&
+    draggingPartId !== node.part.id &&
+    node.part.part_type === 'sub_assembly' &&
+    !invalidDropIds.has(node.part.id);
 
   return (
     <div>
       <button
         onClick={() => onSelect(node.part.id)}
         onContextMenu={(e) => onContextMenu(e, node.part.id)}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          onDragStartPart(node.part.id);
+        }}
+        onDragEnd={onDragEndPart}
+        onDragOver={(e) => {
+          if (isDropTarget) {
+            e.preventDefault();
+            setDragOver(true);
+          }
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          if (isDropTarget) onDropOnPart(node.part.id);
+        }}
         className={`text-left px-2 rounded border transition flex items-center gap-2 ${
-          selectedPartId === node.part.id
-            ? 'bg-blue-900/40 border-blue-500'
-            : isHeadline
-              ? 'border-slate-600 bg-slate-700/40 hover:bg-slate-700/60'
-              : 'border-slate-700 bg-slate-800/30 hover:bg-slate-800/50'
-        } ${isHeadline ? 'py-2.5' : 'py-2'}`}
+          dragOver && isDropTarget
+            ? 'bg-green-900/40 border-green-500'
+            : selectedPartId === node.part.id
+              ? 'bg-blue-900/40 border-blue-500'
+              : isHeadline
+                ? 'border-slate-600 bg-slate-700/40 hover:bg-slate-700/60'
+                : 'border-slate-700 bg-slate-800/30 hover:bg-slate-800/50'
+        } ${isHeadline ? 'py-2.5' : 'py-2'} ${draggingPartId === node.part.id ? 'opacity-40' : ''}`}
         style={{ marginLeft: `${depth * 20}px`, width: `calc(100% - ${depth * 20}px)` }}
       >
         {hasChildren ? (
@@ -399,6 +451,11 @@ function TreeNodeComponent({
               onSelect={onSelect}
               onContextMenu={onContextMenu}
               depth={depth + 1}
+              draggingPartId={draggingPartId}
+              invalidDropIds={invalidDropIds}
+              onDragStartPart={onDragStartPart}
+              onDragEndPart={onDragEndPart}
+              onDropOnPart={onDropOnPart}
             />
           ))}
         </div>
@@ -710,6 +767,8 @@ export default function ProjectDetailPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
+  const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
+  const [topLevelDragOver, setTopLevelDragOver] = useState(false);
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
@@ -742,6 +801,33 @@ export default function ProjectDetailPage() {
     const fallback = partRevisions[partRevisions.length - 1].id;
     setSelectedRevisionId(partRevisions.some((r) => r.id === activeId) ? activeId! : fallback);
   }, [selectedPartId, partRevisions, parts]);
+
+  const reparentMutation = useMutation({
+    mutationFn: async ({ partId, parentPartId }: { partId: number; parentPartId: number | null }) => {
+      await client.put(`/v1/parts/${partId}`, { parent_part_id: parentPartId });
+    },
+    onSuccess: () => {
+      toast.success('Part moved');
+      queryClient.invalidateQueries({ queryKey: ['parts', id] });
+      queryClient.invalidateQueries({ queryKey: ['assembly-files'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to move part');
+    },
+  });
+
+  const handleDropOnPart = (targetId: number) => {
+    if (draggingPartId === null) return;
+    const dragged = parts?.find((p) => p.id === draggingPartId);
+    if (dragged?.parent_part_id === targetId) {
+      setDraggingPartId(null);
+      return; // already a child of the target
+    }
+    reparentMutation.mutate({ partId: draggingPartId, parentPartId: targetId });
+    setDraggingPartId(null);
+  };
+
+  const invalidDropIds = draggingPartId !== null && parts ? getDescendantIds(parts, draggingPartId) : new Set<number>();
 
   const createRfqMutation = useMutation({
     mutationFn: async () => {
@@ -818,9 +904,10 @@ export default function ProjectDetailPage() {
       <div className="grid grid-cols-3 gap-6">
         {/* Left: Parts Tree */}
         <div>
-          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-4">
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-1">
             Parts ({parts?.length ?? 0})
           </h2>
+          <p className="text-xs text-slate-500 mb-3">Drag a part onto a ★ sub-assembly to restructure</p>
           {partsLoading ? (
             <p className="text-slate-500 text-sm">Loading...</p>
           ) : (parts?.length ?? 0) === 0 ? (
@@ -834,8 +921,39 @@ export default function ProjectDetailPage() {
                   selectedPartId={selectedPartId}
                   onSelect={setSelectedPartId}
                   onContextMenu={handleContextMenu}
+                  draggingPartId={draggingPartId}
+                  invalidDropIds={invalidDropIds}
+                  onDragStartPart={setDraggingPartId}
+                  onDragEndPart={() => setDraggingPartId(null)}
+                  onDropOnPart={handleDropOnPart}
                 />
               ))}
+              {/* Top-level drop zone, visible while dragging a nested part */}
+              {draggingPartId !== null &&
+                parts?.find((p) => p.id === draggingPartId)?.parent_part_id != null && (
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setTopLevelDragOver(true);
+                    }}
+                    onDragLeave={() => setTopLevelDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setTopLevelDragOver(false);
+                      if (draggingPartId !== null) {
+                        reparentMutation.mutate({ partId: draggingPartId, parentPartId: null });
+                        setDraggingPartId(null);
+                      }
+                    }}
+                    className={`mt-2 px-3 py-3 rounded border-2 border-dashed text-center text-xs font-medium transition ${
+                      topLevelDragOver
+                        ? 'border-green-500 bg-green-900/30 text-green-300'
+                        : 'border-slate-600 text-slate-400'
+                    }`}
+                  >
+                    Drop here to move to top level
+                  </div>
+                )}
             </div>
           )}
         </div>
