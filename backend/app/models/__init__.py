@@ -11,6 +11,7 @@ from app.models.part import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
 )
+from app.models.notification import Notification
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask,

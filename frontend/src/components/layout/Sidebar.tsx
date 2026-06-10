@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import ChangePasswordModal from '../ChangePasswordModal';
 import SearchBox from '../SearchBox';
+import NotificationBell from '../NotificationBell';
 import client from '../../api/client';
 
 export default function Sidebar() {
@@ -107,6 +108,7 @@ export default function Sidebar() {
             )}
           </div>
         )}
+        <NotificationBell collapsed={isCollapsed} />
         <button
           onClick={() => setShowChangePassword(true)}
           className="w-full px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-700 font-medium text-sm text-left"

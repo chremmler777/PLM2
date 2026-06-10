@@ -20,9 +20,10 @@ from app.api.v1.items.part_relations import router as part_relations_router
 from app.api.v1.workflows.workflow_templates import router as workflow_templates_router
 from app.api.v1.workflows.workflow_instances import router as workflow_instances_router
 
-# Module: overview (dashboard, search)
+# Module: overview (dashboard, search, notifications)
 from app.api.v1.overview.dashboard import router as dashboard_router
 from app.api.v1.overview.search import router as search_router
+from app.api.v1.overview.notifications import router as notifications_router
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
@@ -35,6 +36,7 @@ api_router.include_router(part_relations_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(search_router)
+api_router.include_router(notifications_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)

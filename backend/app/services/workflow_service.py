@@ -74,10 +74,14 @@ class WorkflowService:
         instance: WfInstance,
         stage: WfStage,
     ) -> None:
-        """Create tasks for every RASIC assignment in a stage."""
+        """Create tasks for every RASIC assignment in a stage and notify
+        members of the departments that have actionable tasks."""
+        actionable_departments: set[int] = set()
         for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
             for rasic in step.rasic_assignments:
                 is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
+                if is_actionable:
+                    actionable_departments.add(rasic.department_id)
                 task = WfInstanceTask(
                     instance_id=instance.id,
                     stage_order=stage.stage_order,
@@ -89,6 +93,32 @@ class WorkflowService:
                 )
                 db.add(task)
         await db.flush()
+
+        if actionable_departments:
+            from app.services.notification_service import NotificationService
+
+            part, revision = await WorkflowService._instance_part_context(db, instance)
+            stage_label = stage.name or f"stage {stage.stage_order}"
+            await NotificationService.notify_departments(
+                db,
+                list(actionable_departments),
+                title=f"Workflow task: {part.name} {revision.revision_name}",
+                body=f"Your department has a new task in '{stage_label}'.",
+                link="/my-tasks",
+            )
+
+    @staticmethod
+    async def _instance_part_context(db: AsyncSession, instance: WfInstance):
+        """Part and revision belonging to a workflow instance."""
+        from app.models.part import Part
+
+        result = await db.execute(
+            select(PartRevision, Part)
+            .join(Part, Part.id == PartRevision.part_id)
+            .where(PartRevision.id == instance.part_revision_id)
+        )
+        revision, part = result.one()
+        return part, revision
 
     @staticmethod
     async def complete_task(
@@ -132,6 +162,17 @@ class WorkflowService:
             instance.status = "rejected"
             instance.completed_at = datetime.utcnow()
             await db.flush()
+
+            from app.services.notification_service import NotificationService
+
+            part, revision = await WorkflowService._instance_part_context(db, instance)
+            await NotificationService.notify_users(
+                db,
+                [instance.started_by],
+                title=f"Workflow rejected: {part.name} {revision.revision_name}",
+                body=notes or None,
+                link=f"/projects/{part.project_id}?part={part.id}",
+            )
             return instance
 
         # Check if all actionable tasks in the current stage are approved
@@ -162,6 +203,17 @@ class WorkflowService:
             if not next_stages:
                 instance.status = "completed"
                 instance.completed_at = datetime.utcnow()
+
+                from app.services.notification_service import NotificationService
+
+                part, revision = await WorkflowService._instance_part_context(db, instance)
+                await NotificationService.notify_users(
+                    db,
+                    [instance.started_by],
+                    title=f"Workflow completed: {part.name} {revision.revision_name}",
+                    body="All stages approved.",
+                    link=f"/projects/{part.project_id}?part={part.id}",
+                )
             else:
                 next_stage = next_stages[0]
                 instance.current_stage_order = next_stage.stage_order

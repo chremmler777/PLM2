@@ -207,3 +207,60 @@ async def test_set_departments_validates_ids(client, admin_auth, seed):
         headers=admin_auth,
     )
     assert res.status_code == 400
+
+
+async def test_workflow_notifications_fan_out(client, eng_auth, admin_auth, part, wf_template, seed):
+    """Department members get notified on new stage tasks; the starter on completion."""
+    rid = part["revision_id"]
+
+    # Engineer is a member of Engineering; admin a member of Quality
+    await client.put(
+        f"/api/v1/users/{seed['engineer_id']}/departments",
+        json={"department_ids": [wf_template["eng_id"]]},
+        headers=admin_auth,
+    )
+    await client.put(
+        f"/api/v1/users/{seed['admin_id']}/departments",
+        json={"department_ids": [wf_template["quality_id"]]},
+        headers=admin_auth,
+    )
+
+    inst = await _start(client, eng_auth, rid, wf_template["template_id"])
+
+    # Stage-1 task notification reaches the engineer
+    res = await client.get("/api/v1/notifications", headers=eng_auth)
+    titles = [n["title"] for n in res.json()]
+    assert any(t.startswith("Workflow task:") for t in titles)
+    res = await client.get("/api/v1/notifications/unread-count", headers=eng_auth)
+    assert res.json()["count"] >= 1
+
+    # Approve stage 1 -> stage-2 notification reaches the admin (Quality member)
+    eng_task = _tasks_by_dept(inst, wf_template["eng_id"], stage=1)[0]
+    await client.post(
+        f"/api/v1/workflow-instances/{inst['id']}/tasks/{eng_task['id']}/complete",
+        json={"decision": "approved"},
+        headers=eng_auth,
+    )
+    res = await client.get("/api/v1/notifications", headers=admin_auth)
+    assert any(n["title"].startswith("Workflow task:") for n in res.json())
+
+    # Approve stage 2 -> completion notification reaches the starter (engineer)
+    res = await client.get(
+        f"/api/v1/workflow-instances/revisions/{rid}/current", headers=eng_auth
+    )
+    quality_task = [
+        t for t in res.json()["instance"]["tasks"]
+        if t["stage_order"] == 2 and t["is_actionable"] and t["status"] == "active"
+    ][0]
+    await client.post(
+        f"/api/v1/workflow-instances/{inst['id']}/tasks/{quality_task['id']}/complete",
+        json={"decision": "approved"},
+        headers=admin_auth,
+    )
+    res = await client.get("/api/v1/notifications", headers=eng_auth)
+    assert any(n["title"].startswith("Workflow completed:") for n in res.json())
+
+    # Mark all read clears the badge
+    await client.post("/api/v1/notifications/read-all", headers=eng_auth)
+    res = await client.get("/api/v1/notifications/unread-count", headers=eng_auth)
+    assert res.json()["count"] == 0
