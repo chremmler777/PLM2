@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import client from '../api/client';
+import client, { API_BASE_URL } from '../api/client';
 import { toast } from 'sonner';
 
 interface BOMItem {
@@ -192,7 +192,7 @@ export default function PartBOMSection({ partId, revisionId, revisionName, locke
         <div className="flex gap-2">
           {items && items.length > 0 && (
             <a
-              href={`http://localhost:8000/api/v1/parts/revisions/${revisionId}/bom/export`}
+              href={`${API_BASE_URL}/v1/parts/revisions/${revisionId}/bom/export`}
               download
               className="px-3 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
             >

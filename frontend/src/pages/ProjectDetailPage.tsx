@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import client from '../api/client';
+import client, { API_BASE_URL } from '../api/client';
 import Viewer3D from '../components/Viewer3D';
 import CADUploader from '../components/CADUploader';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
@@ -828,7 +828,7 @@ function RevisionFileRow({
           </button>
         )}
         <a
-          href={`http://localhost:8000/api/v1/parts/revision-files/${file.id}/download`}
+          href={`${API_BASE_URL}/v1/parts/revision-files/${file.id}/download`}
           download={file.filename}
           className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
         >
@@ -887,7 +887,7 @@ export default function ProjectDetailPage() {
     () =>
       assemblyFiles?.map((f) => ({
         id: f.file_id,
-        url: `http://localhost:8000/api/v1/parts/revision-files/${f.file_id}/viewer`,
+        url: `${API_BASE_URL}/v1/parts/revision-files/${f.file_id}/viewer`,
         label: `${f.part_name} (${f.revision_name})`,
       })),
     [assemblyFiles]
@@ -985,7 +985,7 @@ export default function ProjectDetailPage() {
   const viewableFiles = revisionFiles?.filter((f) => f.has_viewer) ?? [];
   const viewingFile = viewableFiles.find((f) => f.id === viewingFileId) ?? viewableFiles[0] ?? null;
   const viewerUrl = viewingFile
-    ? `http://localhost:8000/api/v1/parts/revision-files/${viewingFile.id}/viewer`
+    ? `${API_BASE_URL}/v1/parts/revision-files/${viewingFile.id}/viewer`
     : null;
 
   const handleContextMenu = (e: React.MouseEvent, partId: number) => {

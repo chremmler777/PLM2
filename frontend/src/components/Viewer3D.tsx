@@ -10,6 +10,7 @@ import { ObjectTree } from './ObjectTree'
 import { MeasurementReadout } from './MeasurementReadout'
 import { SceneNode } from '../hooks/useGLTFLoader'
 import { useTheme } from '../contexts/ThemeContext'
+import { API_BASE_URL } from '../api/client'
 
 export interface AssemblyModel {
   id: number  // unique per model (e.g. revision file id)
@@ -124,7 +125,7 @@ export default function Viewer3D({
       setModelUrl(null)
       return
     }
-    const url = viewerUrl ?? (fileId ? `http://localhost:8000/api/v1/parts/files/${fileId}/viewer` : null)
+    const url = viewerUrl ?? (fileId ? `${API_BASE_URL}/v1/parts/files/${fileId}/viewer` : null)
     if (url) {
       setModelUrl(url)
       // Keep loading=true until Model component notifies it's done
