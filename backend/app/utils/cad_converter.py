@@ -19,56 +19,79 @@ async def convert_step_to_gltf(
     output_gltf_path: str,
     linear_deflection: float = 0.05,
     angular_deflection: float = 0.3,
+    timeout_seconds: float = 300.0,
 ) -> bool:
     """
-    Convert STEP CAD file to glTF format using pythonocc-core.
+    Convert STEP CAD file to glTF format.
+
+    Runs the conversion in a SUBPROCESS: pythonocc/OpenCASCADE can hard-crash
+    (segfault) on malformed STEP files, which would otherwise kill the whole
+    API server. A subprocess isolates that failure mode.
 
     Args:
         step_file_path: Path to input STEP file
         output_gltf_path: Path to output glTF binary file
         linear_deflection: Mesh quality parameter (lower = higher quality, slower)
         angular_deflection: Angular deflection for meshing
+        timeout_seconds: Kill the conversion if it exceeds this duration
 
     Returns:
         True if conversion successful, False otherwise
     """
-    try:
-        # Import here to handle potential installation issues gracefully
-        from OCC.Core.STEPControl import STEPControl_Reader
-        from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
-        from OCC.Core.TopExp import TopExp_Explorer
-        from OCC.Core.TopAbs import TopAbs_FACE
-        from OCC.Core.BRep import BRep_Tool
+    import sys
 
-        # Verify input file exists
-        if not os.path.exists(step_file_path):
-            logger.error(f"Input STEP file not found: {step_file_path}")
+    if not os.path.exists(step_file_path):
+        logger.error(f"Input STEP file not found: {step_file_path}")
+        return False
+
+    os.makedirs(os.path.dirname(output_gltf_path), exist_ok=True)
+
+    backend_dir = str(Path(__file__).resolve().parents[2])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "app.utils.cad_converter",
+            step_file_path, output_gltf_path,
+            str(linear_deflection), str(angular_deflection),
+            cwd=backend_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            output, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.error(f"Conversion timed out after {timeout_seconds}s: {step_file_path}")
             return False
 
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_gltf_path), exist_ok=True)
+        if proc.returncode == 0 and os.path.exists(output_gltf_path):
+            logger.info(f"Successfully converted {step_file_path} to {output_gltf_path}")
+            return True
 
-        # Run conversion in thread pool to avoid blocking async loop
-        success = await asyncio.to_thread(
-            _perform_conversion,
-            step_file_path,
-            output_gltf_path,
-            linear_deflection,
-            angular_deflection,
+        tail = output.decode(errors="replace")[-2000:] if output else ""
+        logger.error(
+            f"Conversion subprocess failed (exit {proc.returncode}) for {step_file_path}: {tail}"
         )
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error during conversion: {e}", exc_info=True)
+        return False
 
-        if success:
-            logger.info(
-                f"Successfully converted {step_file_path} to {output_gltf_path}"
-            )
-        else:
-            logger.error(f"Conversion failed for {step_file_path}")
 
-        return success
+def convert_step_to_gltf_sync(
+    step_file_path: str,
+    output_gltf_path: str,
+    linear_deflection: float = 0.05,
+    angular_deflection: float = 0.3,
+) -> bool:
+    """Synchronous conversion with fallback chain (pythonocc -> trimesh -> placeholder).
 
+    Runs in the conversion subprocess; do not call from the API event loop.
+    """
+    try:
+        from OCC.Core.STEPControl import STEPControl_Reader  # noqa: F401
     except ImportError as e:
         logger.warning(f"pythonocc-core not available: {e}")
-        # Try fallback: use trimesh if available
         try:
             import trimesh
             logger.info("Attempting fallback conversion with trimesh...")
@@ -78,7 +101,6 @@ async def convert_step_to_gltf(
             return True
         except Exception as trimesh_error:
             logger.error(f"Trimesh fallback also failed: {trimesh_error}")
-            # Create a simple placeholder GLB so viewer at least shows something
             try:
                 _create_placeholder_glb(output_gltf_path)
                 logger.info(f"Created placeholder glTF at {output_gltf_path}")
@@ -86,9 +108,10 @@ async def convert_step_to_gltf(
             except Exception as placeholder_error:
                 logger.error(f"Placeholder creation failed: {placeholder_error}")
                 return False
-    except Exception as e:
-        logger.error(f"Unexpected error during conversion: {e}", exc_info=True)
-        return False
+
+    return _perform_conversion(
+        step_file_path, output_gltf_path, linear_deflection, angular_deflection
+    )
 
 
 def _perform_conversion(
@@ -558,3 +581,17 @@ def _create_placeholder_glb(output_path: str) -> None:
         f.write(binary_chunk_size)
         f.write(binary_chunk_type)
         f.write(binary_data)
+
+
+if __name__ == "__main__":
+    # CLI entry point used by convert_step_to_gltf's subprocess isolation.
+    import sys
+
+    logging.basicConfig(level=logging.INFO)
+    if len(sys.argv) < 3:
+        print("usage: python -m app.utils.cad_converter <input.step> <output.glb> [lin_defl] [ang_defl]")
+        sys.exit(2)
+    _in, _out = sys.argv[1], sys.argv[2]
+    _lin = float(sys.argv[3]) if len(sys.argv) > 3 else 0.05
+    _ang = float(sys.argv[4]) if len(sys.argv) > 4 else 0.3
+    sys.exit(0 if convert_step_to_gltf_sync(_in, _out, _lin, _ang) else 1)

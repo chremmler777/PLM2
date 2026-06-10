@@ -83,24 +83,30 @@ function usePartRevisions(partId: number) {
   });
 }
 
-interface PartFile {
+interface RevisionFile {
   id: number;
-  original_filename: string;
+  revision_id: number;
+  filename: string;
   file_type: string;
+  mime_type: string;
   file_size: number;
-  created_at: string;
+  cad_format: string | null;
+  has_viewer: boolean;
+  uploaded_at: string;
 }
 
-function usePartFiles(partId: number) {
-  return useQuery<PartFile[]>({
-    queryKey: ['part-files', partId],
+function useRevisionFiles(revisionId: number) {
+  return useQuery<RevisionFile[]>({
+    queryKey: ['revision-files', revisionId],
     queryFn: async () => {
-      const res = await client.get(`/v1/parts/${partId}/files`);
+      const res = await client.get(`/v1/parts/revisions/${revisionId}/files`);
       return res.data;
     },
-    enabled: !!partId,
+    enabled: !!revisionId,
   });
 }
+
+const LOCKED_REVISION_STATUSES = ['frozen', 'cancelled', 'archived'];
 
 // Build tree structure from flat parts list
 function buildPartTree(parts: Part[]): TreeNode[] {
@@ -368,6 +374,7 @@ function AddPartModal({
         supplier: '',
         description: '',
         parent_part_id: '',
+        catalog_part_id: '',
       });
       onClose();
     },
@@ -503,51 +510,39 @@ function AddPartModal({
   );
 }
 
-// File List Item Component
-function FileListItemRow({ file }: { file: PartFile }) {
+// File type badge colors
+function fileTypeColor(fileType: string): string {
+  const colors: Record<string, string> = {
+    cad: 'bg-blue-900/50 text-blue-300',
+    drawing: 'bg-purple-900/50 text-purple-300',
+    picture: 'bg-green-900/50 text-green-300',
+    document: 'bg-slate-600 text-slate-200',
+    test_result: 'bg-amber-900/50 text-amber-300',
+  };
+  return colors[fileType] || 'bg-slate-700 text-slate-300';
+}
+
+// Revision File List Item
+function RevisionFileRow({
+  file,
+  isViewing,
+  locked,
+  onView,
+}: {
+  file: RevisionFile;
+  isViewing: boolean;
+  locked: boolean;
+  onView?: () => void;
+}) {
   const queryClient = useQueryClient();
-  const [conversionStatus, setConversionStatus] = useState<string>('completed');
-  const [isChecking, setIsChecking] = useState(false);
-
-  // Poll for conversion status
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-
-    const checkStatus = async () => {
-      try {
-        setIsChecking(true);
-        const res = await client.get(`/v1/parts/files/${file.id}/status`);
-        setConversionStatus(res.data.status);
-
-        // Stop polling once completed or failed
-        if (res.data.status === 'completed' || res.data.status === 'failed') {
-          if (interval) clearInterval(interval);
-        }
-      } catch (error) {
-        // Silent fail on status check
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
-    // Start checking immediately
-    checkStatus();
-
-    // Then poll every 2 seconds while converting
-    interval = setInterval(checkStatus, 2000);
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [file.id]);
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      await client.delete(`/v1/parts/files/${file.id}`);
+      await client.delete(`/v1/parts/revision-files/${file.id}`);
     },
     onSuccess: () => {
       toast.success('File deleted');
-      queryClient.invalidateQueries({ queryKey: ['part-files'] });
+      queryClient.invalidateQueries({ queryKey: ['revision-files', file.revision_id] });
     },
     onError: (error: any) => {
       const msg = error.response?.data?.detail || 'Failed to delete file';
@@ -555,42 +550,47 @@ function FileListItemRow({ file }: { file: PartFile }) {
     },
   });
 
-  const isConverting = conversionStatus === 'processing';
-  const isFailed = conversionStatus === 'failed';
+  const noPreview = file.cad_format === 'step' && !file.has_viewer;
 
   return (
-    <div className="flex items-center justify-between p-1.5 bg-slate-700 rounded border border-slate-600 text-xs">
+    <div className={`flex items-center justify-between p-1.5 rounded border text-xs ${isViewing ? 'bg-blue-900/30 border-blue-600' : 'bg-slate-700 border-slate-600'}`}>
       <div className="flex-1 min-w-0">
-        <p className="text-slate-100 truncate font-mono text-xs">{file.original_filename}</p>
+        <div className="flex items-center gap-2">
+          <span className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${fileTypeColor(file.file_type)}`}>
+            {file.file_type.replace(/_/g, ' ')}
+          </span>
+          <p className="text-slate-100 truncate font-mono text-xs">{file.filename}</p>
+        </div>
         <div className="flex items-center gap-2 mt-1">
           <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
-          {isConverting && (
-            <div className="flex items-center gap-1">
-              <div className="inline-block animate-spin w-2 h-2 border border-blue-500 border-t-transparent rounded-full"></div>
-              <span className="text-blue-400 text-xs">Converting...</span>
-            </div>
-          )}
-          {isFailed && <span className="text-yellow-400 text-xs">Using placeholder (install pythonocc-core for full conversion)</span>}
+          {noPreview && <span className="text-yellow-400 text-xs">No 3D preview available</span>}
         </div>
       </div>
       <div className="ml-1 flex gap-1 flex-shrink-0">
-        {!isConverting && (
-          <>
-            <a
-              href={`http://localhost:8000/api/v1/parts/files/${file.id}/download`}
-              download={file.original_filename}
-              className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
-            >
-              Download
-            </a>
-            <button
-              onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-              className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 disabled:bg-red-700 text-white font-medium text-xs"
-            >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
-            </button>
-          </>
+        {file.has_viewer && onView && (
+          <button
+            onClick={onView}
+            disabled={isViewing}
+            className="px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 disabled:bg-blue-700 text-white font-medium text-xs"
+          >
+            {isViewing ? 'Viewing' : 'View 3D'}
+          </button>
+        )}
+        <a
+          href={`http://localhost:8000/api/v1/parts/revision-files/${file.id}/download`}
+          download={file.filename}
+          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs"
+        >
+          Download
+        </a>
+        {!locked && (
+          <button
+            onClick={() => deleteMutation.mutate()}
+            disabled={deleteMutation.isPending}
+            className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 disabled:bg-red-700 text-white font-medium text-xs"
+          >
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </button>
         )}
       </div>
     </div>
@@ -604,13 +604,45 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
 
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
+  const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
+  const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
   const { data: partRevisions } = usePartRevisions(selectedPartId || 0);
-  const { data: partFiles } = usePartFiles(selectedPartId || 0);
+  const { data: revisionFiles } = useRevisionFiles(selectedRevisionId || 0);
+  const queryClient = useQueryClient();
+
+  // Default revision selection: active revision if known, otherwise the latest
+  useEffect(() => {
+    setViewingFileId(null);
+    if (!partRevisions || partRevisions.length === 0) {
+      setSelectedRevisionId(null);
+      return;
+    }
+    const activeId = parts?.find((p) => p.id === selectedPartId)?.active_revision_id;
+    const fallback = partRevisions[partRevisions.length - 1].id;
+    setSelectedRevisionId(partRevisions.some((r) => r.id === activeId) ? activeId! : fallback);
+  }, [selectedPartId, partRevisions, parts]);
+
+  const createRfqMutation = useMutation({
+    mutationFn: async () => {
+      const res = await client.post(`/v1/parts/${selectedPartId}/revisions/rfq`, {
+        summary: 'Initial revision',
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success('Initial RFQ revision created');
+      queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
+      queryClient.invalidateQueries({ queryKey: ['parts', id] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to create revision');
+    },
+  });
 
   if (projectLoading) {
     return <div className="p-6 text-slate-400">Loading project...</div>;
@@ -629,6 +661,14 @@ export default function ProjectDetailPage() {
 
   const selectedPart = parts?.find((p) => p.id === selectedPartId);
   const partTree = parts ? buildPartTree(parts) : [];
+
+  const selectedRevision = partRevisions?.find((r) => r.id === selectedRevisionId);
+  const revisionLocked = !!selectedRevision && LOCKED_REVISION_STATUSES.includes(selectedRevision.status);
+  const viewableFiles = revisionFiles?.filter((f) => f.has_viewer) ?? [];
+  const viewingFile = viewableFiles.find((f) => f.id === viewingFileId) ?? viewableFiles[0] ?? null;
+  const viewerUrl = viewingFile
+    ? `http://localhost:8000/api/v1/parts/revision-files/${viewingFile.id}/viewer`
+    : null;
 
   const handleContextMenu = (e: React.MouseEvent, partId: number) => {
     e.preventDefault();
@@ -706,28 +746,77 @@ export default function ProjectDetailPage() {
                 )}
               </div>
 
-              {/* CAD Viewer */}
-              <div className="bg-slate-800 rounded-lg border border-slate-700 h-96 overflow-hidden flex flex-col">
-                {partFiles && partFiles.length > 0 ? (
+              {/* Revision Files & CAD Viewer */}
+              <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden flex flex-col">
+                {/* Revision selector header */}
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 bg-slate-700/30">
+                  <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Files & 3D Model</h3>
+                  {partRevisions && partRevisions.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      {revisionLocked && (
+                        <span className="text-xs text-amber-400" title="This revision is locked; files are read-only">🔒 {selectedRevision?.status}</span>
+                      )}
+                      <select
+                        value={selectedRevisionId ?? ''}
+                        onChange={(e) => {
+                          setSelectedRevisionId(parseInt(e.target.value, 10));
+                          setViewingFileId(null);
+                        }}
+                        className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
+                      >
+                        {partRevisions.map((rev) => (
+                          <option key={rev.id} value={rev.id}>
+                            {rev.revision_name} ({rev.status.replace(/_/g, ' ')})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {!partRevisions || partRevisions.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <p className="text-slate-400 text-sm mb-3">
+                      Files are managed per revision. Create the first revision to upload files.
+                    </p>
+                    <button
+                      onClick={() => createRfqMutation.mutate()}
+                      disabled={createRfqMutation.isPending}
+                      className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-sm font-medium"
+                    >
+                      {createRfqMutation.isPending ? 'Creating...' : '+ Create RFQ Revision'}
+                    </button>
+                  </div>
+                ) : (
                   <>
                     {/* 3D Viewer */}
-                    <div className="flex-1 overflow-hidden">
-                      <Viewer3D fileId={partFiles[0].id} />
-                    </div>
-                    {/* Files List */}
-                    <div className="border-t border-slate-700 p-2 bg-slate-700/50 max-h-24 overflow-y-auto">
-                      <h3 className="text-xs font-semibold text-slate-300 mb-2">Uploaded Files</h3>
-                      <div className="space-y-1">
-                        {partFiles.map((file) => (
-                          <FileListItemRow key={file.id} file={file} />
-                        ))}
+                    {viewerUrl && (
+                      <div className="h-80 overflow-hidden border-b border-slate-700">
+                        <Viewer3D fileId={viewingFile?.id ?? null} viewerUrl={viewerUrl} />
                       </div>
+                    )}
+                    {/* Files list + uploader */}
+                    <div className="p-2 bg-slate-700/50 max-h-56 overflow-y-auto space-y-1">
+                      {revisionFiles && revisionFiles.length > 0 ? (
+                        revisionFiles.map((file) => (
+                          <RevisionFileRow
+                            key={file.id}
+                            file={file}
+                            locked={revisionLocked}
+                            isViewing={viewingFile?.id === file.id}
+                            onView={file.has_viewer ? () => setViewingFileId(file.id) : undefined}
+                          />
+                        ))
+                      ) : (
+                        <p className="text-slate-500 text-xs px-1 py-2">
+                          No files on {selectedRevision?.revision_name} yet
+                        </p>
+                      )}
+                      {!revisionLocked && selectedRevisionId && (
+                        <CADUploader partId={selectedPart.id} revisionId={selectedRevisionId} compact />
+                      )}
                     </div>
                   </>
-                ) : (
-                  <div className="h-full flex items-center justify-center p-4">
-                    <CADUploader partId={selectedPart.id} />
-                  </div>
                 )}
               </div>
 
@@ -756,7 +845,18 @@ export default function ProjectDetailPage() {
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto">
                     {partRevisions.map((rev) => (
-                      <div key={rev.id} className="p-3 bg-slate-700/50 rounded border border-slate-600">
+                      <div
+                        key={rev.id}
+                        onClick={() => {
+                          setSelectedRevisionId(rev.id);
+                          setViewingFileId(null);
+                        }}
+                        className={`p-3 rounded border cursor-pointer transition ${
+                          rev.id === selectedRevisionId
+                            ? 'bg-blue-900/30 border-blue-600'
+                            : 'bg-slate-700/50 border-slate-600 hover:bg-slate-700'
+                        }`}
+                      >
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-mono font-semibold text-slate-100 text-sm">{rev.revision_name}</span>
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${phaseColor(rev.phase)}`}>

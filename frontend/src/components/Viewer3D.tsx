@@ -12,6 +12,7 @@ import { useTheme } from '../contexts/ThemeContext'
 
 interface Viewer3DProps {
   fileId: number | null  // Allow null to show "no file" state without unmounting
+  viewerUrl?: string | null  // Explicit glTF URL (e.g. revision files); overrides fileId-derived URL
   onError?: (error: Error) => void
   onLoad?: () => void
   // Revision tree integration for fullscreen mode
@@ -34,6 +35,7 @@ interface CameraState {
 
 export default function Viewer3D({
   fileId,
+  viewerUrl,
   onError,
   onLoad,
   articleId,
@@ -101,9 +103,8 @@ export default function Viewer3D({
   }, [viewMode, showGrid, showObjectTree])
 
   useEffect(() => {
-    if (fileId) {
-      // Set the model URL
-      const url = `http://localhost:8000/api/v1/parts/files/${fileId}/viewer`
+    const url = viewerUrl ?? (fileId ? `http://localhost:8000/api/v1/parts/files/${fileId}/viewer` : null)
+    if (url) {
       setModelUrl(url)
       // Keep loading=true until Model component notifies it's done
       setLoading(true)
@@ -114,7 +115,7 @@ export default function Viewer3D({
       setLoading(false)
       setError(null)
     }
-  }, [fileId])
+  }, [fileId, viewerUrl])
 
   // Fit camera to model's bounding box
   useEffect(() => {
