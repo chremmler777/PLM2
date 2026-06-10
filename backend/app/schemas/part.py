@@ -14,6 +14,10 @@ class PartBase(BaseModel):
     supplier: Optional[str] = None
     data_classification: str = "confidential"
     parent_part_id: Optional[int] = None
+    item_category: str = Field("article", description="article, tool, assembly_equipment, gauge")
+    calibration_interval_months: Optional[int] = Field(None, ge=1, le=120)
+    last_calibrated_at: Optional[datetime] = None
+    next_calibration_due: Optional[datetime] = None
 
 
 class PartCreate(PartBase):
@@ -30,6 +34,9 @@ class PartUpdate(BaseModel):
     part_type: Optional[str] = None
     supplier: Optional[str] = None
     parent_part_id: Optional[int] = None
+    item_category: Optional[str] = None
+    calibration_interval_months: Optional[int] = Field(None, ge=1, le=120)
+    last_calibrated_at: Optional[datetime] = None
 
 
 class PartResponse(PartBase):

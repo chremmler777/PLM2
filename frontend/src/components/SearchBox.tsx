@@ -12,6 +12,7 @@ interface SearchResults {
     part_number: string;
     name: string;
     part_type: string;
+    item_category: string;
     project_id: number;
     project_name: string;
   }[];
@@ -98,7 +99,10 @@ export default function SearchBox() {
                     {part.name}
                     <span className="text-slate-400 text-xs ml-2 font-mono">{part.part_number}</span>
                   </p>
-                  <p className="text-slate-500 text-xs">{part.project_name} · {part.part_type.replace(/_/g, ' ')}</p>
+                  <p className="text-slate-500 text-xs">
+                    {part.project_name} · {part.item_category !== 'article' ? `${part.item_category.replace(/_/g, ' ')} · ` : ''}
+                    {part.part_type.replace(/_/g, ' ')}
+                  </p>
                 </button>
               ))}
             </>

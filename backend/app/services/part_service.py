@@ -1,6 +1,6 @@
 """Service for managing parts and revisions with RFQ/ENG/FREEZE/ECR workflow."""
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 from sqlalchemy import select, cast, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,19 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Controlled item categories (automotive PLM)
+VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "gauge"}
+
+
+def compute_next_calibration(
+    last_calibrated_at: Optional[datetime],
+    interval_months: Optional[int],
+) -> Optional[datetime]:
+    """Next calibration due date from the last calibration and interval."""
+    if last_calibrated_at and interval_months:
+        return last_calibrated_at + timedelta(days=round(interval_months * 30.44))
+    return None
 
 
 class PartService:
@@ -29,8 +42,15 @@ class PartService:
         created_by: int = None,
         data_classification: str = "confidential",
         parent_part_id: Optional[int] = None,
+        item_category: str = "article",
+        calibration_interval_months: Optional[int] = None,
+        last_calibrated_at: Optional[datetime] = None,
     ) -> Part:
-        """Create a new part."""
+        """Create a new controlled item (article, tool, assembly equipment, gauge)."""
+        if item_category not in VALID_ITEM_CATEGORIES:
+            raise ValueError(
+                f"Invalid item_category '{item_category}'. Valid: {', '.join(sorted(VALID_ITEM_CATEGORIES))}"
+            )
         part = Part(
             project_id=project_id,
             part_number=part_number,
@@ -41,10 +61,14 @@ class PartService:
             created_by=created_by,
             data_classification=data_classification,
             parent_part_id=parent_part_id,
+            item_category=item_category,
+            calibration_interval_months=calibration_interval_months,
+            last_calibrated_at=last_calibrated_at,
+            next_calibration_due=compute_next_calibration(last_calibrated_at, calibration_interval_months),
         )
         session.add(part)
         await session.flush()
-        logger.info(f"Created part {part_number} in project {project_id}")
+        logger.info(f"Created {item_category} {part_number} in project {project_id}")
         return part
 
     @staticmethod
@@ -75,6 +99,9 @@ class PartService:
         updated_by: Optional[int] = None,
         parent_part_id: Optional[int] = None,
         update_parent: bool = False,
+        item_category: Optional[str] = None,
+        calibration_interval_months: Optional[int] = None,
+        last_calibrated_at: Optional[datetime] = None,
     ) -> Optional[Part]:
         """Update a part. parent_part_id is only applied when update_parent is True
         (None then means: move to top level)."""
@@ -109,6 +136,20 @@ class PartService:
             part.part_type = part_type
         if supplier is not None:
             part.supplier = supplier
+        if item_category is not None:
+            if item_category not in VALID_ITEM_CATEGORIES:
+                raise ValueError(
+                    f"Invalid item_category '{item_category}'. Valid: {', '.join(sorted(VALID_ITEM_CATEGORIES))}"
+                )
+            part.item_category = item_category
+        if calibration_interval_months is not None:
+            part.calibration_interval_months = calibration_interval_months
+        if last_calibrated_at is not None:
+            part.last_calibrated_at = last_calibrated_at
+        if calibration_interval_months is not None or last_calibrated_at is not None:
+            part.next_calibration_due = compute_next_calibration(
+                part.last_calibrated_at, part.calibration_interval_months
+            )
         if updated_by is not None:
             part.updated_by = updated_by
 

@@ -49,6 +49,14 @@ class Part(Base):
     part_type: Mapped[str] = mapped_column(String(50))  # purchased, internal_mfg, sub_assembly
     supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)  # For purchased parts
 
+    # Controlled item category (automotive PLM): article, tool, assembly_equipment, gauge
+    item_category: Mapped[str] = mapped_column(String(30), default="article", index=True)
+
+    # Gauge calibration control (gauges only)
+    calibration_interval_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_calibrated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_calibration_due: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Data classification
     data_classification: Mapped[str] = mapped_column(String(20), default="confidential")
 

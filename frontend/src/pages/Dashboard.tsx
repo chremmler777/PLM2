@@ -27,6 +27,15 @@ interface DashboardData {
     open_tasks: number;
     started_at: string | null;
   }[];
+  category_counts: Record<string, number>;
+  gauges_due: {
+    part_id: number;
+    part_number: string;
+    name: string;
+    project_id: number;
+    next_calibration_due: string;
+    overdue: boolean;
+  }[];
   department_queues: { department_id: number; name: string; open_tasks: number }[];
   recent_activity: {
     id: number;
@@ -75,13 +84,56 @@ export default function Dashboard() {
       <h1 className="text-3xl font-bold text-slate-100 mb-6">Dashboard</h1>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
         <StatCard label="Projects" value={data.counts.projects} />
-        <StatCard label="Parts" value={data.counts.parts} />
+        <StatCard label="Items" value={data.counts.parts} />
         <StatCard label="Revisions" value={data.counts.revisions} />
         <StatCard label="Frozen" value={data.counts.frozen_revisions} accent="text-green-400" />
         <StatCard label="Active Workflows" value={data.counts.active_workflows} accent="text-blue-400" />
       </div>
+
+      {/* Item categories */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {[
+          ['article', '📄 Articles'],
+          ['tool', '🔧 Tools'],
+          ['assembly_equipment', '🏗️ Equipment'],
+          ['gauge', '📏 Gauges'],
+        ].map(([key, label]) => (
+          <span key={key} className="px-3 py-1.5 bg-slate-800 border border-slate-700 rounded text-sm text-slate-300">
+            {label}: <span className="font-bold text-slate-100">{data.category_counts?.[key] ?? 0}</span>
+          </span>
+        ))}
+      </div>
+
+      {/* Calibration warnings */}
+      {data.gauges_due?.length > 0 && (
+        <div className="mb-6 bg-slate-800 rounded-lg border border-amber-700/50 p-4">
+          <h2 className="text-sm font-semibold text-amber-300 uppercase tracking-wide mb-2">
+            📏 Gauges Due for Calibration
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {data.gauges_due.map((g) => (
+              <button
+                key={g.part_id}
+                onClick={() => navigate(`/projects/${g.project_id}?part=${g.part_id}`)}
+                className={`px-3 py-2 rounded border text-sm text-left transition ${
+                  g.overdue
+                    ? 'bg-red-900/30 border-red-700 hover:bg-red-900/50'
+                    : 'bg-slate-700/50 border-slate-600 hover:bg-slate-700'
+                }`}
+              >
+                <span className="text-slate-100">{g.name}</span>
+                <span className="text-slate-400 text-xs font-mono ml-2">{g.part_number}</span>
+                <span className={`block text-xs mt-0.5 ${g.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
+                  {g.overdue ? 'OVERDUE — ' : 'due '}
+                  {new Date(g.next_calibration_due).toLocaleDateString()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Active workflows */}

@@ -50,6 +50,9 @@ async def create_part(
             created_by=current_user.id,
             data_classification=body.data_classification,
             parent_part_id=body.parent_part_id,
+            item_category=body.item_category,
+            calibration_interval_months=body.calibration_interval_months,
+            last_calibrated_at=body.last_calibrated_at,
         )
         await db.commit()
         return part
@@ -102,6 +105,9 @@ async def update_part(
             updated_by=current_user.id,
             parent_part_id=body.parent_part_id,
             update_parent='parent_part_id' in body.model_fields_set,
+            item_category=body.item_category,
+            calibration_interval_months=body.calibration_interval_months,
+            last_calibrated_at=body.last_calibrated_at,
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")

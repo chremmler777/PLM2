@@ -44,6 +44,7 @@ async def search(
             "part_number": part.part_number,
             "name": part.name,
             "part_type": part.part_type,
+            "item_category": part.item_category,
             "project_id": part.project_id,
             "project_name": project_name,
         }

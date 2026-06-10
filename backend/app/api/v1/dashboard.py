@@ -38,6 +38,43 @@ async def get_dashboard(
         ),
     }
 
+    # Item counts per category (article, tool, assembly_equipment, gauge)
+    category_counts = {
+        category: n
+        for category, n in (
+            await db.execute(
+                select(Part.item_category, func.count(Part.id)).group_by(Part.item_category)
+            )
+        ).all()
+    }
+
+    # Gauges due for calibration within 30 days (or overdue)
+    from datetime import datetime, timedelta
+
+    due_cutoff = datetime.utcnow() + timedelta(days=30)
+    result = await db.execute(
+        select(Part)
+        .where(
+            Part.item_category == "gauge",
+            Part.next_calibration_due != None,  # noqa: E711
+            Part.next_calibration_due <= due_cutoff,
+        )
+        .order_by(Part.next_calibration_due)
+        .limit(10)
+    )
+    now = datetime.utcnow()
+    gauges_due = [
+        {
+            "part_id": g.id,
+            "part_number": g.part_number,
+            "name": g.name,
+            "project_id": g.project_id,
+            "next_calibration_due": g.next_calibration_due.isoformat(),
+            "overdue": g.next_calibration_due < now,
+        }
+        for g in result.scalars().all()
+    ]
+
     # --- Active workflows with part/revision context ---
     result = await db.execute(
         select(WfInstance, WfTemplate.name, PartRevision.revision_name, Part.id, Part.part_number, Part.name, Part.project_id)
@@ -129,6 +166,8 @@ async def get_dashboard(
 
     return {
         "counts": counts,
+        "category_counts": category_counts,
+        "gauges_due": gauges_due,
         "active_workflows": active_workflows,
         "department_queues": department_queues,
         "recent_activity": recent_activity,

@@ -28,7 +28,19 @@ interface Part {
   data_classification?: string;
   active_revision_id: number | null;
   parent_part_id?: number | null;
+  item_category: string;
+  calibration_interval_months?: number | null;
+  last_calibrated_at?: string | null;
+  next_calibration_due?: string | null;
 }
+
+// Controlled item categories (automotive PLM)
+const CATEGORY_META: Record<string, { label: string; icon: string; badge: string }> = {
+  article: { label: 'Article', icon: '📄', badge: 'bg-slate-600 text-slate-200' },
+  tool: { label: 'Tool', icon: '🔧', badge: 'bg-orange-900/50 text-orange-300' },
+  assembly_equipment: { label: 'Equipment', icon: '🏗️', badge: 'bg-cyan-900/50 text-cyan-300' },
+  gauge: { label: 'Gauge', icon: '📏', badge: 'bg-pink-900/50 text-pink-300' },
+};
 
 interface PartRevision {
   id: number;
@@ -436,6 +448,14 @@ function TreeNodeComponent({
           )}
         </div>
         {node.part.part_type === 'sub_assembly' && <span className="text-yellow-400 text-sm flex-shrink-0">★</span>}
+        {node.part.item_category !== 'article' && CATEGORY_META[node.part.item_category] && (
+          <span
+            className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${CATEGORY_META[node.part.item_category].badge}`}
+            title={CATEGORY_META[node.part.item_category].label}
+          >
+            {CATEGORY_META[node.part.item_category].icon}
+          </span>
+        )}
         <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${typeColor(node.part.part_type)}`}>
           {node.part.part_type.replace(/_/g, ' ')}
         </span>
@@ -504,6 +524,8 @@ function AddPartModal({
     description: '',
     parent_part_id: '',
     catalog_part_id: '',
+    item_category: 'article',
+    calibration_interval_months: '',
   });
 
   const createMutation = useMutation({
@@ -516,9 +538,13 @@ function AddPartModal({
         supplier: data.supplier || null,
         description: data.description || null,
         data_classification: 'confidential',
+        item_category: data.item_category,
       };
       if (data.parent_part_id) {
         payload.parent_part_id = parseInt(data.parent_part_id, 10);
+      }
+      if (data.item_category === 'gauge' && data.calibration_interval_months) {
+        payload.calibration_interval_months = parseInt(data.calibration_interval_months, 10);
       }
       const res = await client.post('/v1/parts', payload);
       return res.data;
@@ -533,6 +559,8 @@ function AddPartModal({
         description: '',
         parent_part_id: '',
         catalog_part_id: '',
+        item_category: 'article',
+        calibration_interval_months: '',
       });
       onClose();
     },
@@ -545,9 +573,37 @@ function AddPartModal({
   return (
     <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center">
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-md w-full mx-4">
-        <h2 className="text-xl font-bold text-slate-100 mb-4">Add New Part</h2>
+        <h2 className="text-xl font-bold text-slate-100 mb-4">Add New Item</h2>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Item Category *</label>
+            <select
+              value={formData.item_category}
+              onChange={(e) => setFormData({ ...formData, item_category: e.target.value })}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+            >
+              <option value="article">📄 Article (product part)</option>
+              <option value="tool">🔧 Tool (die, mold, fixture)</option>
+              <option value="assembly_equipment">🏗️ Assembly Equipment</option>
+              <option value="gauge">📏 Gauge (calibration controlled)</option>
+            </select>
+          </div>
+
+          {formData.item_category === 'gauge' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Calibration Interval (months)</label>
+              <input
+                type="number"
+                min="1"
+                max="120"
+                value={formData.calibration_interval_months}
+                onChange={(e) => setFormData({ ...formData, calibration_interval_months: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+                placeholder="e.g., 12"
+              />
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-1">Part Number *</label>
             <input
@@ -778,6 +834,7 @@ export default function ProjectDetailPage() {
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
@@ -810,6 +867,19 @@ export default function ProjectDetailPage() {
     const fallback = partRevisions[partRevisions.length - 1].id;
     setSelectedRevisionId(partRevisions.some((r) => r.id === activeId) ? activeId! : fallback);
   }, [selectedPartId, partRevisions, parts]);
+
+  const markCalibratedMutation = useMutation({
+    mutationFn: async (partId: number) => {
+      await client.put(`/v1/parts/${partId}`, { last_calibrated_at: new Date().toISOString() });
+    },
+    onSuccess: () => {
+      toast.success('Calibration recorded');
+      queryClient.invalidateQueries({ queryKey: ['parts', id] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to record calibration');
+    },
+  });
 
   const reparentMutation = useMutation({
     mutationFn: async ({ partId, parentPartId }: { partId: number; parentPartId: number | null }) => {
@@ -914,16 +984,38 @@ export default function ProjectDetailPage() {
         {/* Left: Parts Tree */}
         <div>
           <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-1">
-            Parts ({parts?.length ?? 0})
+            Items ({parts?.length ?? 0})
           </h2>
-          <p className="text-xs text-slate-500 mb-3">Drag a part onto a ★ sub-assembly to restructure</p>
+          <p className="text-xs text-slate-500 mb-2">Drag a part onto a ★ sub-assembly to restructure</p>
+          <div className="flex flex-wrap gap-1 mb-3">
+            {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`])].map(
+              ([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setCategoryFilter(key)}
+                  className={`px-2 py-1 rounded text-xs font-medium transition ${
+                    categoryFilter === key
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              )
+            )}
+          </div>
           {partsLoading ? (
             <p className="text-slate-500 text-sm">Loading...</p>
           ) : (parts?.length ?? 0) === 0 ? (
             <p className="text-slate-500 text-sm">No parts yet</p>
           ) : (
             <div className="space-y-1">
-              {partTree.map((node) => (
+              {(categoryFilter === 'all'
+                ? partTree
+                : (parts ?? [])
+                    .filter((p) => p.item_category === categoryFilter)
+                    .map((p) => ({ part: p, children: [] }))
+              ).map((node) => (
                 <TreeNodeComponent
                   key={node.part.id}
                   node={node}
@@ -998,7 +1090,37 @@ export default function ProjectDetailPage() {
                   <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(selectedPart.part_type)}`}>
                     {selectedPart.part_type.replace(/_/g, ' ')}
                   </span>
+                  {CATEGORY_META[selectedPart.item_category] && (
+                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${CATEGORY_META[selectedPart.item_category].badge}`}>
+                      {CATEGORY_META[selectedPart.item_category].icon} {CATEGORY_META[selectedPart.item_category].label}
+                    </span>
+                  )}
                 </div>
+                {selectedPart.item_category === 'gauge' && (
+                  <div className="mt-2 flex items-center gap-3 text-sm">
+                    {selectedPart.next_calibration_due ? (
+                      <span
+                        className={
+                          new Date(selectedPart.next_calibration_due) < new Date()
+                            ? 'text-red-400 font-medium'
+                            : 'text-slate-300'
+                        }
+                      >
+                        📏 Calibration due {new Date(selectedPart.next_calibration_due).toLocaleDateString()}
+                        {new Date(selectedPart.next_calibration_due) < new Date() && ' — OVERDUE'}
+                      </span>
+                    ) : (
+                      <span className="text-amber-400">📏 No calibration recorded</span>
+                    )}
+                    <button
+                      onClick={() => markCalibratedMutation.mutate(selectedPart.id)}
+                      disabled={markCalibratedMutation.isPending}
+                      className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium"
+                    >
+                      {markCalibratedMutation.isPending ? 'Saving...' : 'Mark calibrated today'}
+                    </button>
+                  </div>
+                )}
                 {selectedPart.supplier && <p className="text-slate-400 text-sm mt-2">Supplier: {selectedPart.supplier}</p>}
                 {selectedPart.data_classification && (
                   <p className="text-slate-400 text-sm">Classification: {selectedPart.data_classification}</p>
