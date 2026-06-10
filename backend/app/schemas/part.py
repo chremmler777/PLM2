@@ -12,6 +12,7 @@ class PartBase(BaseModel):
     description: Optional[str] = None
     part_type: str = Field(..., description="purchased, internal_mfg, sub_assembly")
     supplier: Optional[str] = None
+    supplier_id: Optional[int] = None
     data_classification: str = "confidential"
     parent_part_id: Optional[int] = None
     item_category: str = Field("article", description="article, tool, assembly_equipment, gauge")
@@ -33,6 +34,7 @@ class PartUpdate(BaseModel):
     description: Optional[str] = None
     part_type: Optional[str] = None
     supplier: Optional[str] = None
+    supplier_id: Optional[int] = None
     parent_part_id: Optional[int] = None
     item_category: Optional[str] = None
     calibration_interval_months: Optional[int] = Field(None, ge=1, le=120)

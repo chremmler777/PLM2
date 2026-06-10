@@ -49,6 +49,8 @@ class Part(Base):
     part_type: Mapped[str] = mapped_column(String(50))  # purchased, internal_mfg, sub_assembly
     supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)  # For purchased parts
 
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
+
     # Controlled item category (automotive PLM): article, tool, assembly_equipment, gauge
     item_category: Mapped[str] = mapped_column(String(30), default="article", index=True)
 

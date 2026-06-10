@@ -53,6 +53,7 @@ async def create_part(
             item_category=body.item_category,
             calibration_interval_months=body.calibration_interval_months,
             last_calibrated_at=body.last_calibrated_at,
+            supplier_id=body.supplier_id,
         )
         await db.commit()
         return part
@@ -108,6 +109,8 @@ async def update_part(
             item_category=body.item_category,
             calibration_interval_months=body.calibration_interval_months,
             last_calibrated_at=body.last_calibrated_at,
+            supplier_id=body.supplier_id,
+            update_supplier='supplier_id' in body.model_fields_set,
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")

@@ -504,6 +504,18 @@ function useCatalogParts() {
   });
 }
 
+interface SupplierOption {
+  id: number;
+  name: string;
+}
+
+function useSuppliers() {
+  return useQuery<SupplierOption[]>({
+    queryKey: ['suppliers', false],
+    queryFn: async () => (await client.get('/v1/suppliers')).data,
+  });
+}
+
 // Add Part Modal
 function AddPartModal({
   projectId,
@@ -518,11 +530,13 @@ function AddPartModal({
 }) {
   const queryClient = useQueryClient();
   const { data: catalogParts } = useCatalogParts();
+  const { data: suppliers } = useSuppliers();
   const [formData, setFormData] = useState({
     part_number: '',
     name: '',
     part_type: 'purchased',
     supplier: '',
+    supplier_id: '',
     description: '',
     parent_part_id: '',
     catalog_part_id: '',
@@ -542,6 +556,9 @@ function AddPartModal({
         data_classification: 'confidential',
         item_category: data.item_category,
       };
+      if (data.supplier_id) {
+        payload.supplier_id = parseInt(data.supplier_id, 10);
+      }
       if (data.parent_part_id) {
         payload.parent_part_id = parseInt(data.parent_part_id, 10);
       }
@@ -558,6 +575,7 @@ function AddPartModal({
         name: '',
         part_type: 'purchased',
         supplier: '',
+        supplier_id: '',
         description: '',
         parent_part_id: '',
         catalog_part_id: '',
@@ -673,6 +691,22 @@ function AddPartModal({
               {!formData.catalog_part_id && (
                 <p className="text-xs text-slate-400 mt-1">Or fill in the details below to create a new part</p>
               )}
+            </div>
+          )}
+
+          {formData.part_type === 'purchased' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1">Supplier</label>
+              <select
+                value={formData.supplier_id}
+                onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })}
+                className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+              >
+                <option value="">— No supplier —</option>
+                {suppliers?.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
             </div>
           )}
 

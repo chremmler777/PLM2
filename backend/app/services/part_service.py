@@ -45,6 +45,7 @@ class PartService:
         item_category: str = "article",
         calibration_interval_months: Optional[int] = None,
         last_calibrated_at: Optional[datetime] = None,
+        supplier_id: Optional[int] = None,
     ) -> Part:
         """Create a new controlled item (article, tool, assembly equipment, gauge)."""
         if item_category not in VALID_ITEM_CATEGORIES:
@@ -61,6 +62,7 @@ class PartService:
             created_by=created_by,
             data_classification=data_classification,
             parent_part_id=parent_part_id,
+            supplier_id=supplier_id,
             item_category=item_category,
             calibration_interval_months=calibration_interval_months,
             last_calibrated_at=last_calibrated_at,
@@ -102,6 +104,8 @@ class PartService:
         item_category: Optional[str] = None,
         calibration_interval_months: Optional[int] = None,
         last_calibrated_at: Optional[datetime] = None,
+        supplier_id: Optional[int] = None,
+        update_supplier: bool = False,
     ) -> Optional[Part]:
         """Update a part. parent_part_id is only applied when update_parent is True
         (None then means: move to top level)."""
@@ -136,6 +140,8 @@ class PartService:
             part.part_type = part_type
         if supplier is not None:
             part.supplier = supplier
+        if update_supplier:
+            part.supplier_id = supplier_id
         if item_category is not None:
             if item_category not in VALID_ITEM_CATEGORIES:
                 raise ValueError(
