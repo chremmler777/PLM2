@@ -23,11 +23,13 @@ class PartCreate(PartBase):
 
 
 class PartUpdate(BaseModel):
-    """Update part information."""
+    """Update part information. parent_part_id only applies when explicitly
+    provided (send null to move the part to top level)."""
     name: Optional[str] = None
     description: Optional[str] = None
     part_type: Optional[str] = None
     supplier: Optional[str] = None
+    parent_part_id: Optional[int] = None
 
 
 class PartResponse(PartBase):

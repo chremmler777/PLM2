@@ -1,4 +1,5 @@
-import { useState, useEffect, Suspense, useRef } from 'react'
+import { useState, useEffect, useMemo, Suspense, useRef } from 'react'
+import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import { Model } from './Model'
@@ -10,9 +11,16 @@ import { MeasurementReadout } from './MeasurementReadout'
 import { SceneNode } from '../hooks/useGLTFLoader'
 import { useTheme } from '../contexts/ThemeContext'
 
+export interface AssemblyModel {
+  id: number  // unique per model (e.g. revision file id)
+  url: string
+  label: string
+}
+
 interface Viewer3DProps {
   fileId: number | null  // Allow null to show "no file" state without unmounting
   viewerUrl?: string | null  // Explicit glTF URL (e.g. revision files); overrides fileId-derived URL
+  models?: AssemblyModel[]  // Assembly mode: render multiple models in one scene
   onError?: (error: Error) => void
   onLoad?: () => void
   // Revision tree integration for fullscreen mode
@@ -36,6 +44,7 @@ interface CameraState {
 export default function Viewer3D({
   fileId,
   viewerUrl,
+  models,
   onError,
   onLoad,
   articleId,
@@ -73,6 +82,14 @@ export default function Viewer3D({
   const cameraStateRef = useRef<CameraState | null>(null)
   const [boundingBox, setBoundingBox] = useState<BoundingBoxInfo | null>(null)
 
+  // Assembly mode state
+  const assemblyMode = !!models && models.length > 0
+  const modelsKey = models?.map((m) => `${m.id}:${m.url}`).join('|') ?? ''
+  const [modelBoxes, setModelBoxes] = useState<Record<number, BoundingBoxInfo>>({})
+  const [modelTrees, setModelTrees] = useState<Record<number, SceneNode>>({})
+  const [loadedModels, setLoadedModels] = useState<Record<number, boolean>>({})
+  const [explodeFactor, setExplodeFactor] = useState(0)
+
   // Load preferences from localStorage
   useEffect(() => {
     try {
@@ -103,6 +120,10 @@ export default function Viewer3D({
   }, [viewMode, showGrid, showObjectTree])
 
   useEffect(() => {
+    if (assemblyMode) {
+      setModelUrl(null)
+      return
+    }
     const url = viewerUrl ?? (fileId ? `http://localhost:8000/api/v1/parts/files/${fileId}/viewer` : null)
     if (url) {
       setModelUrl(url)
@@ -115,7 +136,82 @@ export default function Viewer3D({
       setLoading(false)
       setError(null)
     }
-  }, [fileId, viewerUrl])
+  }, [fileId, viewerUrl, assemblyMode])
+
+  // Reset assembly state whenever the model set changes
+  useEffect(() => {
+    setModelBoxes({})
+    setModelTrees({})
+    setLoadedModels({})
+    setExplodeFactor(0)
+    setBoundingBox(null)
+    if (assemblyMode) {
+      setLoading(true)
+      setError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsKey])
+
+  // Assembly: finish loading and fit camera once all models reported in
+  useEffect(() => {
+    if (!assemblyMode || !models) return
+    if (models.every((m) => loadedModels[m.id])) {
+      setLoading(false)
+    }
+    const boxes = models.map((m) => modelBoxes[m.id]).filter(Boolean)
+    if (boxes.length === models.length && boxes.length > 0) {
+      const min = [Infinity, Infinity, Infinity]
+      const max = [-Infinity, -Infinity, -Infinity]
+      for (const b of boxes) {
+        for (let i = 0; i < 3; i++) {
+          min[i] = Math.min(min[i], b.center[i] - b.size[i] / 2)
+          max[i] = Math.max(max[i], b.center[i] + b.size[i] / 2)
+        }
+      }
+      setBoundingBox({
+        center: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+        size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+      })
+    }
+  }, [assemblyMode, models, loadedModels, modelBoxes])
+
+  // Exploded view: push each model away from the assembly center
+  const explodeOffsets = useMemo(() => {
+    const offsets: Record<number, [number, number, number]> = {}
+    if (!assemblyMode || !models || !boundingBox) return offsets
+    for (const m of models) {
+      const box = modelBoxes[m.id]
+      if (!box) continue
+      const dir = [
+        box.center[0] - boundingBox.center[0],
+        box.center[1] - boundingBox.center[1],
+        box.center[2] - boundingBox.center[2],
+      ]
+      const len = Math.hypot(dir[0], dir[1], dir[2])
+      // Models stacked at the same center get a small vertical separation instead
+      const unit = len > 1e-6 ? dir.map((d) => d / len) : [0, 1, 0]
+      const dist = explodeFactor * Math.max(...boundingBox.size) * 0.35 * (len > 1e-6 ? 1 : models.indexOf(m) / Math.max(models.length - 1, 1))
+      offsets[m.id] = [unit[0] * dist, unit[1] * dist, unit[2] * dist]
+    }
+    return offsets
+  }, [assemblyMode, models, modelBoxes, boundingBox, explodeFactor])
+
+  // Merged scene tree for assembly mode (one branch per model)
+  const assemblyTree = useMemo<SceneNode | null>(() => {
+    if (!assemblyMode || !models) return null
+    const children = models
+      .filter((m) => modelTrees[m.id])
+      .map((m) => ({ ...modelTrees[m.id], id: `model-${m.id}`, name: m.label }))
+    if (children.length === 0) return null
+    return {
+      id: 'assembly-root',
+      name: 'Assembly',
+      type: 'group' as const,
+      object: new THREE.Group(),
+      children,
+      visible: true,
+    }
+  }, [assemblyMode, models, modelTrees])
 
   // Fit camera to model's bounding box
   useEffect(() => {
@@ -302,7 +398,7 @@ export default function Viewer3D({
               </button>
             </div>
             <ObjectTree
-              tree={sceneTree}
+              tree={assemblyMode ? assemblyTree : sceneTree}
               onSelectNode={handleNodeSelect}
               onToggleVisibility={handleToggleVisibility}
               selectedNodeId={selectedNodeId}
@@ -337,9 +433,31 @@ export default function Viewer3D({
               Retry
             </button>
           </div>
-        ) : modelUrl ? (
+        ) : modelUrl || assemblyMode ? (
           <Canvas camera={{ position: [15, 15, 15], fov: 50, near: 0.1, far: 1000 }} gl={{ logarithmicDepthBuffer: true }} className="w-full h-full">
             <Suspense fallback={null}>
+              {assemblyMode && models ? (
+                models.map((m) => (
+                  <group key={m.id} position={explodeOffsets[m.id] ?? [0, 0, 0]}>
+                    <Model
+                      url={m.url}
+                      viewMode={viewMode}
+                      cutPlaneActive={isCutPlaneActive}
+                      cutPlaneAxis={cutPlaneAxis}
+                      cutPlanePosition={cutPlanePosition}
+                      isMeasuring={isMeasuring}
+                      onError={handleModelError}
+                      onLoading={(isL) => {
+                        if (!isL) setLoadedModels((prev) => ({ ...prev, [m.id]: true }))
+                      }}
+                      onSceneTreeReady={(tree) => setModelTrees((prev) => ({ ...prev, [m.id]: tree }))}
+                      onMeasurementUpdate={setMeasurementResult}
+                      onClearMeasurement={() => {}}
+                      onBoundingBoxReady={(bbox) => setModelBoxes((prev) => ({ ...prev, [m.id]: bbox }))}
+                    />
+                  </group>
+                ))
+              ) : modelUrl ? (
               <Model
                 url={modelUrl}
                 viewMode={viewMode}
@@ -354,6 +472,7 @@ export default function Viewer3D({
                 onClearMeasurement={() => {}}
                 onBoundingBoxReady={setBoundingBox}
               />
+              ) : null}
               <CutPlane
                 active={isCutPlaneActive}
                 axis={cutPlaneAxis}
@@ -409,6 +528,31 @@ export default function Viewer3D({
         )}
       </div>
       </div>
+
+      {/* Exploded View Slider (assembly mode with 2+ models) */}
+      {assemblyMode && (models?.length ?? 0) > 1 && !loading && (
+        <div className="absolute bottom-4 left-4 z-20 bg-white/90 dark:bg-gray-800/90 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 flex items-center gap-2 shadow-lg">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-300" title="Exploded view">💥</span>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.05"
+            value={explodeFactor}
+            onChange={(e) => setExplodeFactor(parseFloat(e.target.value))}
+            className="w-32 accent-blue-600"
+            title={`Explode: ${Math.round(explodeFactor * 50)}%`}
+          />
+          {explodeFactor > 0 && (
+            <button
+              onClick={() => setExplodeFactor(0)}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Cut Plane Controls */}
       {isCutPlaneActive && (

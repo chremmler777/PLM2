@@ -1,7 +1,7 @@
 /**
  * ProjectDetailPage - Product-centric project overview with hierarchical tree view of parts
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
@@ -109,6 +109,26 @@ function useRevisionFiles(revisionId: number) {
 }
 
 const LOCKED_REVISION_STATUSES = ['frozen', 'cancelled', 'archived'];
+
+interface AssemblyFileEntry {
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  revision_id: number;
+  revision_name: string;
+  file_id: number;
+}
+
+function useAssemblyFiles(partId: number) {
+  return useQuery<AssemblyFileEntry[]>({
+    queryKey: ['assembly-files', partId],
+    queryFn: async () => {
+      const res = await client.get(`/v1/parts/${partId}/assembly-files`);
+      return res.data;
+    },
+    enabled: !!partId,
+  });
+}
 
 // Build tree structure from flat parts list
 function buildPartTree(parts: Part[]): TreeNode[] {
@@ -697,6 +717,20 @@ export default function ProjectDetailPage() {
   const { data: revisionFiles } = useRevisionFiles(selectedRevisionId || 0);
   const queryClient = useQueryClient();
 
+  const isSubAssembly = parts?.find((p) => p.id === selectedPartId)?.part_type === 'sub_assembly';
+  const { data: assemblyFiles } = useAssemblyFiles(isSubAssembly && selectedPartId ? selectedPartId : 0);
+  const assemblyAvailable = isSubAssembly && (assemblyFiles?.length ?? 0) > 1;
+  const assemblyActive = assemblyAvailable && viewingFileId === null;
+  const assemblyModels = useMemo(
+    () =>
+      assemblyFiles?.map((f) => ({
+        id: f.file_id,
+        url: `http://localhost:8000/api/v1/parts/revision-files/${f.file_id}/viewer`,
+        label: `${f.part_name} (${f.revision_name})`,
+      })),
+    [assemblyFiles]
+  );
+
   // Default revision selection: active revision if known, otherwise the latest
   useEffect(() => {
     setViewingFileId(null);
@@ -887,10 +921,27 @@ export default function ProjectDetailPage() {
                   </div>
                 ) : (
                   <>
-                    {/* 3D Viewer */}
-                    {viewerUrl && (
-                      <div className="h-80 overflow-hidden border-b border-slate-700">
-                        <Viewer3D fileId={viewingFile?.id ?? null} viewerUrl={viewerUrl} />
+                    {/* 3D Viewer (assembly mode shows all child models together) */}
+                    {(viewerUrl || assemblyActive) && (
+                      <div className="h-80 overflow-hidden border-b border-slate-700 relative">
+                        <Viewer3D
+                          fileId={assemblyActive ? null : viewingFile?.id ?? null}
+                          viewerUrl={assemblyActive ? null : viewerUrl}
+                          models={assemblyActive ? assemblyModels : undefined}
+                        />
+                        {assemblyActive && (
+                          <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-blue-900/70 text-blue-200 text-xs font-medium">
+                            Assembly · {assemblyFiles?.length} components
+                          </div>
+                        )}
+                        {assemblyAvailable && !assemblyActive && (
+                          <button
+                            onClick={() => setViewingFileId(null)}
+                            className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 text-xs font-medium"
+                          >
+                            ← Assembly view
+                          </button>
+                        )}
                       </div>
                     )}
                     {/* Files list + uploader */}

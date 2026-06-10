@@ -100,6 +100,8 @@ async def update_part(
             part_type=body.part_type,
             supplier=body.supplier,
             updated_by=current_user.id,
+            parent_part_id=body.parent_part_id,
+            update_parent='parent_part_id' in body.model_fields_set,
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")

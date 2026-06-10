@@ -73,11 +73,33 @@ class PartService:
         part_type: Optional[str] = None,
         supplier: Optional[str] = None,
         updated_by: Optional[int] = None,
+        parent_part_id: Optional[int] = None,
+        update_parent: bool = False,
     ) -> Optional[Part]:
-        """Update a part."""
+        """Update a part. parent_part_id is only applied when update_parent is True
+        (None then means: move to top level)."""
         part = await PartService.get_part(session, part_id)
         if not part:
             return None
+
+        if update_parent:
+            if parent_part_id == part_id:
+                raise ValueError("A part cannot be its own parent")
+            if parent_part_id is not None:
+                new_parent = await PartService.get_part(session, parent_part_id)
+                if not new_parent:
+                    raise ValueError("Parent part not found")
+                if new_parent.project_id != part.project_id:
+                    raise ValueError("Parent part must be in the same project")
+                # Walk up from the new parent to ensure part is not an ancestor (cycle)
+                cursor = new_parent
+                while cursor.parent_part_id is not None:
+                    if cursor.parent_part_id == part_id:
+                        raise ValueError("Cannot move a part under its own descendant")
+                    cursor = await PartService.get_part(session, cursor.parent_part_id)
+                    if cursor is None:
+                        break
+            part.parent_part_id = parent_part_id
 
         if name is not None:
             part.name = name

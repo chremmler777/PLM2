@@ -232,6 +232,66 @@ async def upload_revision_file(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/{part_id}/assembly-files", response_model=List[dict])
+async def get_assembly_files(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Viewable CAD files for a part and all its descendants (assembly view).
+
+    For each part in the hierarchy, picks its display revision (active revision
+    if set, otherwise the latest) and that revision's first viewable CAD file.
+    """
+    from app.models.part import Part, PartRevision
+
+    root = await PartService.get_part(db, part_id)
+    if not root:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+
+    # Collect root + descendants (BFS over parent_part_id)
+    parts = [root]
+    frontier = [root.id]
+    while frontier:
+        result = await db.execute(select(Part).where(Part.parent_part_id.in_(frontier)))
+        children = result.scalars().all()
+        parts.extend(children)
+        frontier = [c.id for c in children]
+
+    entries = []
+    for part in parts:
+        revisions = await RevisionService.get_part_revisions(db, part.id)
+        if not revisions:
+            continue
+        display_rev = next(
+            (r for r in revisions if r.id == part.active_revision_id),
+            revisions[-1],
+        )
+        file_result = await db.execute(
+            select(RevisionFile)
+            .where(
+                RevisionFile.revision_id == display_rev.id,
+                RevisionFile.has_viewer == True,  # noqa: E712
+                RevisionFile.is_deleted == False,  # noqa: E712
+            )
+            .order_by(RevisionFile.uploaded_at)
+            .limit(1)
+        )
+        rev_file = file_result.scalar_one_or_none()
+        if not rev_file:
+            continue
+        entries.append({
+            "part_id": part.id,
+            "part_number": part.part_number,
+            "part_name": part.name,
+            "revision_id": display_rev.id,
+            "revision_name": display_rev.revision_name,
+            "file_id": rev_file.id,
+        })
+
+    return entries
+
+
 @router.get("/revisions/{revision_id}/files", response_model=List[dict])
 async def list_revision_files(
     revision_id: int,
