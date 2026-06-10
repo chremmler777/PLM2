@@ -75,6 +75,26 @@ def _serialize_instance(instance: WfInstance) -> dict:
 # Routes — NOTE: my-tasks MUST be registered before /{instance_id}
 # ---------------------------------------------------------------------------
 
+@router.get("/open-task-count")
+async def get_open_task_count(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Total actionable open tasks across all active workflows (for nav badge)."""
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(func.count(WfInstanceTask.id))
+        .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+        .where(
+            WfInstance.status == "active",
+            WfInstanceTask.status == "active",
+            WfInstanceTask.is_actionable == True,  # noqa: E712
+        )
+    )
+    return {"count": result.scalar() or 0}
+
+
 @router.get("/my-tasks")
 async def get_my_tasks(
     department_id: int = Query(..., description="Department ID to fetch tasks for"),

@@ -4,8 +4,11 @@
 
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import ChangePasswordModal from '../ChangePasswordModal';
+import SearchBox from '../SearchBox';
+import client from '../../api/client';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -13,6 +16,13 @@ export default function Sidebar() {
   const { logout, username, role, isAdmin } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+
+  const { data: taskCount } = useQuery<{ count: number }>({
+    queryKey: ['open-task-count'],
+    queryFn: async () => (await client.get('/v1/workflow-instances/open-task-count')).data,
+    refetchInterval: 60_000,
+  });
+  const openTasks = taskCount?.count ?? 0;
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
@@ -46,6 +56,13 @@ export default function Sidebar() {
         </button>
       </div>
 
+      {/* Search */}
+      {!isCollapsed && (
+        <div className="p-2 border-b border-slate-700">
+          <SearchBox />
+        </div>
+      )}
+
       {/* Navigation Items */}
       <nav className="flex-1 p-2 space-y-2">
         {navItems.map((item) => (
@@ -62,7 +79,12 @@ export default function Sidebar() {
             title={isCollapsed ? item.label : ''}
           >
             <span className="text-lg flex-shrink-0">{item.icon}</span>
-            {!isCollapsed && <span>{item.label}</span>}
+            {!isCollapsed && <span className="flex-1">{item.label}</span>}
+            {item.path === '/my-tasks' && openTasks > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0">
+                {openTasks}
+              </span>
+            )}
           </button>
         ))}
       </nav>

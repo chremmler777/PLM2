@@ -2,7 +2,7 @@
  * ProjectDetailPage - Product-centric project overview with hierarchical tree view of parts
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import Viewer3D from '../components/Viewer3D';
@@ -761,8 +761,17 @@ export default function ProjectDetailPage() {
   const id = projectId ? parseInt(projectId, 10) : 0;
   const navigate = useNavigate();
 
-  const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
+  const [searchParams] = useSearchParams();
+  const initialPartId = searchParams.get('part');
+  const [selectedPartId, setSelectedPartId] = useState<number | null>(
+    initialPartId ? parseInt(initialPartId, 10) : null
+  );
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
+
+  // Follow ?part= deep links from global search while already on the page
+  useEffect(() => {
+    if (initialPartId) setSelectedPartId(parseInt(initialPartId, 10));
+  }, [initialPartId]);
   const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
