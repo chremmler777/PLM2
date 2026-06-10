@@ -15,6 +15,7 @@ import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
 import UsersPage from './pages/UsersPage';
+import Dashboard from './pages/Dashboard';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -34,6 +35,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/projects"
         element={
@@ -92,7 +101,7 @@ function AppRoutes() {
       />
       <Route
         path="/"
-        element={isAuthenticated ? <Navigate to="/projects" /> : <Navigate to="/login" />}
+        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />}
       />
     </Routes>
   );

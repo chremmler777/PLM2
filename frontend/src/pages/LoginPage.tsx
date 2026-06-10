@@ -35,7 +35,7 @@ export default function LoginPage() {
 
       // Navigate after state update
       setTimeout(() => {
-        navigate('/projects');
+        navigate('/dashboard');
       }, 500);
     } catch (error: any) {
       console.error('Login error:', error);

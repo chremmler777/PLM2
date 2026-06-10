@@ -15,6 +15,7 @@ export default function Sidebar() {
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const navItems = [
+    { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
     { path: '/projects', label: 'Projects', icon: '📁' },
     { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
