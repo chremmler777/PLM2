@@ -30,6 +30,7 @@ export default function Sidebar() {
     { path: '/projects', label: 'Projects', icon: '📁' },
     { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
     { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
+    { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
     ...(isAdmin ? [{ path: '/users', label: 'Users', icon: '👥' }] : []),
