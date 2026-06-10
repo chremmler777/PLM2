@@ -18,7 +18,12 @@ depends_on = None
 
 def upgrade() -> None:
     """Add conversion_status field to part_files table."""
-    op.add_column('part_files', sa.Column('conversion_status', sa.String(20), nullable=False, server_default='pending'))
+    # Check if column already exists
+    from sqlalchemy import inspect
+    inspector = inspect(op.get_bind())
+    columns = [c['name'] for c in inspector.get_columns('part_files')]
+    if 'conversion_status' not in columns:
+        op.add_column('part_files', sa.Column('conversion_status', sa.String(20), nullable=False, server_default='pending'))
 
 
 def downgrade() -> None:

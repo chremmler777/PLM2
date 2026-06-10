@@ -929,7 +929,6 @@ async def view_part_file(
 @router.get("/files/{file_id}/download")
 async def download_part_file(
     file_id: int,
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Download a part file."""

@@ -11,6 +11,11 @@ import { SceneNode } from '../hooks/useGLTFLoader'
 
 import { MeasurementResult } from '../hooks/useMeasurement'
 
+interface BoundingBoxInfo {
+  center: [number, number, number]
+  size: [number, number, number]
+}
+
 interface ModelProps {
   url: string
   viewMode?: 'solid' | 'wireframe'
@@ -23,6 +28,7 @@ interface ModelProps {
   onSceneTreeReady?: (tree: SceneNode) => void
   onMeasurementUpdate?: (result: MeasurementResult) => void
   onClearMeasurement?: () => void
+  onBoundingBoxReady?: (bbox: BoundingBoxInfo) => void
 }
 
 export function Model({
@@ -37,6 +43,7 @@ export function Model({
   onSceneTreeReady,
   onMeasurementUpdate,
   onClearMeasurement,
+  onBoundingBoxReady,
 }: ModelProps) {
   const groupRef = useRef<THREE.Group>(null)
   const { scene, sceneTree, isLoading, error } = useGLTFLoader(url)
@@ -84,6 +91,20 @@ export function Model({
       onError?.(error)
     }
   }, [error, onError])
+
+  // Calculate and report bounding box
+  useEffect(() => {
+    if (scene && !isLoading && onBoundingBoxReady) {
+      const bbox = new THREE.Box3().setFromObject(scene)
+      const size = bbox.getSize(new THREE.Vector3())
+      const center = bbox.getCenter(new THREE.Vector3())
+
+      onBoundingBoxReady({
+        center: [center.x, center.y, center.z],
+        size: [size.x, size.y, size.z]
+      })
+    }
+  }, [scene, isLoading, onBoundingBoxReady])
 
   // If there's an error or still loading, render nothing
   // Parent component handles error/loading UI

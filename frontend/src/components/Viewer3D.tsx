@@ -21,6 +21,11 @@ interface Viewer3DProps {
   sourcingType?: string
 }
 
+interface BoundingBoxInfo {
+  center: [number, number, number]
+  size: [number, number, number]
+}
+
 interface CameraState {
   position: [number, number, number]
   target: [number, number, number]
@@ -64,6 +69,7 @@ export default function Viewer3D({
 
   // Camera state preservation
   const cameraStateRef = useRef<CameraState | null>(null)
+  const [boundingBox, setBoundingBox] = useState<BoundingBoxInfo | null>(null)
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -110,22 +116,36 @@ export default function Viewer3D({
     }
   }, [fileId])
 
-  // Restore camera state when file changes and controls are available
+  // Fit camera to model's bounding box
   useEffect(() => {
-    if (orbitControlsRef.current && cameraStateRef.current) {
-      const { position, target, zoom } = cameraStateRef.current
+    if (orbitControlsRef.current && boundingBox && !loading) {
       const controls = orbitControlsRef.current
-      const camera = controls.getCamera?.() || controls.object?.parent?.children?.[0]
+      const camera = controls.object
 
       if (camera) {
-        camera.position.set(...position)
-        controls.target.set(...target)
-        camera.zoom = zoom
-        camera.updateProjectionMatrix?.()
-        controls.update?.()
+        const { center, size } = boundingBox
+        const maxDim = Math.max(size[0], size[1], size[2])
+        const fov = camera.fov * (Math.PI / 180) // Convert to radians
+        let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5
+
+        // Set target to model center
+        controls.target.set(center[0], center[1], center[2])
+
+        // Position camera to view from diagonal
+        const direction = Math.sqrt(2)
+        camera.position.set(
+          center[0] + distance / direction,
+          center[1] + distance / direction,
+          center[2] + distance / direction
+        )
+
+        // Adjust far plane if needed
+        camera.far = distance * 10
+        camera.updateProjectionMatrix()
+        controls.update()
       }
     }
-  }, [fileId])
+  }, [boundingBox, loading])
 
   // Handle model loading completion
   const handleModelLoading = (isLoading: boolean) => {
@@ -331,6 +351,7 @@ export default function Viewer3D({
                 onSceneTreeReady={setSceneTree}
                 onMeasurementUpdate={setMeasurementResult}
                 onClearMeasurement={() => {}}
+                onBoundingBoxReady={setBoundingBox}
               />
               <CutPlane
                 active={isCutPlaneActive}
