@@ -25,6 +25,9 @@ from app.api.v1.overview.dashboard import router as dashboard_router
 from app.api.v1.overview.search import router as search_router
 from app.api.v1.overview.notifications import router as notifications_router
 
+# Module: quality (PPAP)
+from app.api.v1.quality.ppap import router as ppap_router
+
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
 api_router.include_router(health_router)
@@ -37,6 +40,7 @@ api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(search_router)
 api_router.include_router(notifications_router)
+api_router.include_router(ppap_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)

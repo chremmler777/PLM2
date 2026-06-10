@@ -10,6 +10,7 @@ import CADUploader from '../components/CADUploader';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
 import PartBOMSection from '../components/PartBOMSection';
 import PartRelationsSection from '../components/PartRelationsSection';
+import PPAPSection from '../components/PPAPSection';
 import { toast } from 'sonner';
 
 // Types
@@ -1232,6 +1233,15 @@ export default function ProjectDetailPage() {
                 <RevisionWorkflowSection
                   revisionId={selectedRevisionId}
                   revisionName={selectedRevision?.revision_name}
+                />
+              )}
+
+              {/* Quality / PPAP (articles only) */}
+              {selectedRevisionId && selectedPart.item_category === 'article' && (
+                <PPAPSection
+                  revisionId={selectedRevisionId}
+                  revisionName={selectedRevision?.revision_name}
+                  revisionFiles={(revisionFiles ?? []).map((f) => ({ id: f.id, filename: f.filename }))}
                 />
               )}
 

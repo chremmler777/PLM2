@@ -12,6 +12,7 @@ from app.models.part import (
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
 )
 from app.models.notification import Notification
+from app.models.quality import PPAPSubmission, PPAPElement
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask,
