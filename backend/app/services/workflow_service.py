@@ -191,15 +191,27 @@ class WorkflowService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def get_user_department_ids(db: AsyncSession, user_id: int) -> list[int]:
+        """Department ids the user belongs to."""
+        from app.models.workflow import UserDepartment
+
+        result = await db.execute(
+            select(UserDepartment.department_id).where(UserDepartment.user_id == user_id)
+        )
+        return [d for (d,) in result.all()]
+
+    @staticmethod
     async def get_my_tasks(
         db: AsyncSession,
-        department_id: int,
+        department_ids: list[int],
     ) -> list[dict]:
-        """Return active actionable tasks for a department, with part/revision info."""
+        """Return active actionable tasks for the departments, with part/revision info."""
+        if not department_ids:
+            return []
         result = await db.execute(
             select(WfInstanceTask)
             .where(
-                WfInstanceTask.department_id == department_id,
+                WfInstanceTask.department_id.in_(department_ids),
                 WfInstanceTask.status == "active",
                 WfInstanceTask.is_actionable == True,
             )

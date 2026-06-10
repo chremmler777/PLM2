@@ -12,7 +12,7 @@ from app.models.part import (
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
 )
 from app.models.workflow import (
-    Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
+    Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask,
     WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )

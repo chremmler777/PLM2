@@ -80,10 +80,11 @@ async def get_open_task_count(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Total actionable open tasks across all active workflows (for nav badge)."""
+    """Actionable open tasks for the nav badge — scoped to the user's
+    departments when they have memberships, global otherwise."""
     from sqlalchemy import func
 
-    result = await db.execute(
+    stmt = (
         select(func.count(WfInstanceTask.id))
         .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
         .where(
@@ -92,18 +93,26 @@ async def get_open_task_count(
             WfInstanceTask.is_actionable == True,  # noqa: E712
         )
     )
+    dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
+    if dept_ids:
+        stmt = stmt.where(WfInstanceTask.department_id.in_(dept_ids))
+    result = await db.execute(stmt)
     return {"count": result.scalar() or 0}
 
 
 @router.get("/my-tasks")
 async def get_my_tasks(
-    department_id: int = Query(..., description="Department ID to fetch tasks for"),
+    department_id: int | None = Query(None, description="Department ID; omit to use your department memberships"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List active actionable tasks for a department."""
-    tasks = await WorkflowService.get_my_tasks(db, department_id)
-    return tasks
+    """List active actionable tasks for a department, or for all of the
+    current user's departments when department_id is omitted."""
+    if department_id is not None:
+        dept_ids = [department_id]
+    else:
+        dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
+    return await WorkflowService.get_my_tasks(db, dept_ids)
 
 
 @router.post(

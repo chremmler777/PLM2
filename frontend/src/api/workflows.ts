@@ -82,8 +82,10 @@ export const cancelWorkflow = async (
 };
 
 export const getMyTasks = async (departmentId: number): Promise<MyTask[]> => {
+  // departmentId 0 means "my departments" — the backend scopes to the
+  // current user's memberships when the param is omitted.
   const response = await client.get('/v1/workflow-instances/my-tasks', {
-    params: { department_id: departmentId },
+    params: departmentId > 0 ? { department_id: departmentId } : {},
   });
   return response.data;
 };

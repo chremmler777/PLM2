@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.security import get_password_hash
 from app.dependencies import get_current_user, require_role
 from app.models import User, get_db
+from app.models.workflow import Department, UserDepartment
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,67 @@ async def create_user(
     await db.commit()
     logger.info(f"Admin {current_user.email} created user {user.email} ({user.role})")
     return _user_dict(user)
+
+
+class DepartmentAssignment(BaseModel):
+    department_ids: List[int]
+
+
+@router.get("/{user_id}/departments", response_model=List[dict])
+async def get_user_departments(
+    user_id: int,
+    current_user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Departments a user belongs to (admin only)."""
+    result = await db.execute(
+        select(Department)
+        .join(UserDepartment, UserDepartment.department_id == Department.id)
+        .where(UserDepartment.user_id == user_id)
+        .order_by(Department.sort_order)
+    )
+    return [{"id": d.id, "name": d.name} for d in result.scalars().all()]
+
+
+@router.put("/{user_id}/departments", response_model=List[dict])
+async def set_user_departments(
+    user_id: int,
+    body: DepartmentAssignment,
+    current_user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace a user's department memberships (admin only)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if body.department_ids:
+        dept_result = await db.execute(
+            select(Department.id).where(Department.id.in_(body.department_ids))
+        )
+        found = {d for (d,) in dept_result.all()}
+        missing = set(body.department_ids) - found
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown department ids: {sorted(missing)}",
+            )
+
+    existing = await db.execute(select(UserDepartment).where(UserDepartment.user_id == user_id))
+    for membership in existing.scalars().all():
+        await db.delete(membership)
+    for dept_id in set(body.department_ids):
+        db.add(UserDepartment(user_id=user_id, department_id=dept_id))
+    await db.commit()
+
+    logger.info(f"Admin {current_user.email} set departments {body.department_ids} for user {user_id}")
+    result = await db.execute(
+        select(Department)
+        .join(UserDepartment, UserDepartment.department_id == Department.id)
+        .where(UserDepartment.user_id == user_id)
+        .order_by(Department.sort_order)
+    )
+    return [{"id": d.id, "name": d.name} for d in result.scalars().all()]
 
 
 @router.patch("/{user_id}", response_model=dict)

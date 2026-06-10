@@ -120,6 +120,6 @@ export const useMyTasks = (departmentId: number) => {
   return useQuery({
     queryKey: QUERY_KEYS.myTasks(departmentId),
     queryFn: () => workflowApi.getMyTasks(departmentId),
-    enabled: departmentId > 0,
+    enabled: departmentId >= 0,
   });
 };

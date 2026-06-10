@@ -167,3 +167,43 @@ async def test_informed_task_cannot_be_completed(client, eng_auth, part, wf_temp
         headers=eng_auth,
     )
     assert res.status_code == 400
+
+
+async def test_my_tasks_scoped_by_membership(client, eng_auth, admin_auth, part, wf_template, seed):
+    """Without department_id, my-tasks uses the user's department memberships."""
+    rid = part["revision_id"]
+    await _start(client, eng_auth, rid, wf_template["template_id"])
+
+    # No memberships -> empty queue and zero badge
+    res = await client.get("/api/v1/workflow-instances/my-tasks", headers=eng_auth)
+    assert res.json() == []
+
+    # Admin assigns the engineer to Engineering
+    res = await client.put(
+        f"/api/v1/users/{seed['engineer_id']}/departments",
+        json={"department_ids": [wf_template["eng_id"]]},
+        headers=admin_auth,
+    )
+    assert res.status_code == 200
+    assert [d["name"] for d in res.json()] == ["Engineering"]
+
+    # Queue and badge now show the stage-1 Engineering task
+    res = await client.get("/api/v1/workflow-instances/my-tasks", headers=eng_auth)
+    assert len(res.json()) == 1
+    assert res.json()[0]["department_name"] == "Engineering"
+
+    res = await client.get("/api/v1/workflow-instances/open-task-count", headers=eng_auth)
+    assert res.json()["count"] == 1
+
+    # /me reports the membership
+    res = await client.get("/api/v1/auth/me", headers=eng_auth)
+    assert [d["name"] for d in res.json()["departments"]] == ["Engineering"]
+
+
+async def test_set_departments_validates_ids(client, admin_auth, seed):
+    res = await client.put(
+        f"/api/v1/users/{seed['engineer_id']}/departments",
+        json={"department_ids": [9999]},
+        headers=admin_auth,
+    )
+    assert res.status_code == 400

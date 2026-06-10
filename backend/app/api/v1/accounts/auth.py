@@ -107,8 +107,21 @@ async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me")
-async def me(current_user: User = Depends(get_current_user)):
-    """Profile of the authenticated user."""
+async def me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Profile of the authenticated user, including department memberships."""
+    from app.models.workflow import Department, UserDepartment
+
+    result = await db.execute(
+        select(Department)
+        .join(UserDepartment, UserDepartment.department_id == Department.id)
+        .where(UserDepartment.user_id == current_user.id)
+        .order_by(Department.sort_order)
+    )
+    departments = [{"id": d.id, "name": d.name} for d in result.scalars().all()]
+
     return {
         "id": current_user.id,
         "username": current_user.username,
@@ -117,6 +130,7 @@ async def me(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "organization_id": current_user.organization_id,
         "is_active": current_user.is_active,
+        "departments": departments,
     }
 
 

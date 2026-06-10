@@ -21,6 +21,16 @@ class Department(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class UserDepartment(Base):
+    """Membership of a user in a department (drives My Tasks scoping)."""
+    __tablename__ = "user_departments"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"), primary_key=True)
+
+    department: Mapped["Department"] = relationship()
+
+
 class WfTemplate(Base):
     """Workflow template - stage-based with RASIC matrix."""
     __tablename__ = "wf_templates"
@@ -267,6 +277,7 @@ from app.models.entities import Organization, User
 from app.models.part import PartRevision
 
 __all__ = [
+    "UserDepartment",
     "Department",
     "WfTemplate",
     "WfStage",

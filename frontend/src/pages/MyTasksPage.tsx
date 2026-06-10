@@ -35,7 +35,7 @@ export default function MyTasksPage() {
             onChange={(e) => setSelectedDeptId(Number(e.target.value))}
             className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value={0}>— Select a department —</option>
+            <option value={0}>My departments</option>
             {activeDepartments.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
@@ -46,15 +46,15 @@ export default function MyTasksPage() {
       </div>
 
       {/* Task Table */}
-      {selectedDeptId === 0 ? (
-        <div className="text-center py-12 text-slate-400">
-          Select a department to view its active tasks.
-        </div>
-      ) : loadingTasks ? (
+      {loadingTasks ? (
         <LoadingSkeleton count={4} />
       ) : tasks.length === 0 ? (
         <div className="text-center py-12">
-          <p className="text-slate-400">No active tasks for this department.</p>
+          <p className="text-slate-400">
+            {selectedDeptId === 0
+              ? 'No active tasks in your departments — ask an admin to assign you to departments if this looks wrong.'
+              : 'No active tasks for this department.'}
+          </p>
         </div>
       ) : (
         <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">

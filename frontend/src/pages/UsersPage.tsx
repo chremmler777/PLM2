@@ -18,6 +18,91 @@ interface UserRecord {
 
 const ROLES = ['admin', 'engineer', 'viewer'];
 
+interface DepartmentRecord {
+  id: number;
+  name: string;
+  is_active?: boolean;
+}
+
+function DepartmentsModal({ user, onClose }: { user: UserRecord; onClose: () => void }) {
+  const queryClient = useQueryClient();
+
+  const { data: allDepartments } = useQuery<DepartmentRecord[]>({
+    queryKey: ['departments'],
+    queryFn: async () => (await client.get('/v1/workflow-templates/departments')).data,
+  });
+  const { data: memberships } = useQuery<DepartmentRecord[]>({
+    queryKey: ['user-departments', user.id],
+    queryFn: async () => (await client.get(`/v1/users/${user.id}/departments`)).data,
+  });
+
+  const [selected, setSelected] = useState<Set<number> | null>(null);
+  const effective = selected ?? new Set(memberships?.map((d) => d.id) ?? []);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      await client.put(`/v1/users/${user.id}/departments`, {
+        department_ids: Array.from(effective),
+      });
+    },
+    onSuccess: () => {
+      toast.success('Departments updated');
+      queryClient.invalidateQueries({ queryKey: ['user-departments', user.id] });
+      onClose();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to update departments');
+    },
+  });
+
+  const toggle = (id: number) => {
+    const next = new Set(effective);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={onClose}>
+      <div
+        className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-sm w-full mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-bold text-slate-100 mb-1">Departments</h2>
+        <p className="text-slate-400 text-sm mb-4">{user.username} — drives their My Tasks queue</p>
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {allDepartments?.filter((d) => d.is_active !== false).map((d) => (
+            <label key={d.id} className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={effective.has(d.id)}
+                onChange={() => toggle(d.id)}
+                className="accent-blue-600"
+              />
+              {d.name}
+            </label>
+          ))}
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            className="flex-1 px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-sm font-medium"
+          >
+            {saveMutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function roleColor(role: string): string {
   const colors: Record<string, string> = {
     admin: 'bg-purple-900/50 text-purple-300',
@@ -127,6 +212,7 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const { userId } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
+  const [departmentsUser, setDepartmentsUser] = useState<UserRecord | null>(null);
 
   const { data: users, isLoading, error } = useQuery<UserRecord[]>({
     queryKey: ['users'],
@@ -226,6 +312,12 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3 text-right space-x-2">
                       <button
+                        onClick={() => setDepartmentsUser(user)}
+                        className="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
+                      >
+                        Departments
+                      </button>
+                      <button
                         onClick={() => resetPassword(user)}
                         className="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
                       >
@@ -254,6 +346,7 @@ export default function UsersPage() {
       )}
 
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
+      {departmentsUser && <DepartmentsModal user={departmentsUser} onClose={() => setDepartmentsUser(null)} />}
     </div>
   );
 }
