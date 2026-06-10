@@ -150,6 +150,13 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up PLM application...")
 
+    # Refuse to run with the dev secret key outside debug mode
+    if not settings.debug and settings.secret_key == "dev-secret-key-change-in-production":
+        raise RuntimeError(
+            "SECRET_KEY is still the development default. Set SECRET_KEY in the "
+            "environment (or .env) before running with DEBUG=false."
+        )
+
     # Skip Alembic migrations for SQLite (development)
     # For PostgreSQL (production), migrations are handled separately
     if "sqlite" not in settings.database_url:
@@ -195,10 +202,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware (origins configurable via CORS_ORIGINS env)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],  # React dev servers
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

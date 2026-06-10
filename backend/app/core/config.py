@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     conversion_timeout: int = 300  # 5 minutes max
     mesh_quality: float = 0.1  # Linear deflection for meshing (lower = better quality)
 
+    # CORS (override via CORS_ORIGINS env, JSON list)
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+    ]
+
     # Security
     secret_key: str = "dev-secret-key-change-in-production"
     algorithm: str = "HS256"
