@@ -92,5 +92,46 @@ comment from transition; filters (status, unlinked, q); stats endpoint.
 
 ## Out of scope (YAGNI)
 Approval role restrictions (app-wide permissions are flat today), file attachments on
-lessons, per-project lessons panel in ProjectDetailPage, knowledge-base search
-integration. All can layer on later without schema changes.
+lessons, knowledge-base search integration. All can layer on later without schema changes.
+
+---
+
+# v2 — Operational governance (2026-06-10, same day)
+
+Goal: make the system self-managing — trackable, accountable, reused.
+
+## Schema additions (migration 016)
+- `lessons_learned`: `approved_at` (cycle-time KPI), `effectiveness_note`,
+  `effectiveness_verified_by/at` (close gate).
+- `lesson_actions`: `last_reminded_at` (reminder dedupe).
+- New `lesson_references`: lesson reviewed/applied for a project
+  (lesson_id, project_id, milestone_id?, note, created_by) — feeds reuse-rate KPI;
+  duplicate (lesson, project) rejected.
+
+## Rules added (server-enforced)
+1. **Owner gate:** in_review → approved requires `owner_id` (409 otherwise).
+2. **Effectiveness gate:** implemented → closed requires `effectiveness_verified=true`
+   (+ optional note); recorded with verifier and timestamp. Open-actions guard unchanged.
+
+## New API
+- `GET /lessons/my-actions` — open actions assigned to current user (My Tasks).
+- `GET /lessons/kpis` — time-to-review, implementation rate, action completion,
+  overdue by assignee/department, by category/severity/status/month, reuse rate,
+  unlinked backlog, review-queue depth. Aggregated in Python (DB-agnostic, small scale).
+- `GET /lessons/projects/{id}/references`, `POST /lessons/{id}/references`.
+
+## Reminders
+`lesson_reminder_service.send_overdue_action_reminders`: notifies assignees of overdue
+open actions, ≤1 per action per 24h (`last_reminded_at`). Background loop in app
+lifespan runs every 6h.
+
+## Frontend
+- **My Tasks**: Lesson Actions section (deep-links to `/lessons?lesson=ID`, mark-done).
+- **Lessons page**: Review Queue toggle (submitted/in_review oldest-first), effectiveness
+  dialog on close, owner-missing hint, KPI Board button, `?lesson=`/`?project=` params.
+- **KPI board** at `/lessons/kpis`: tile style (big numbers + accent colors), CSS bar
+  breakdowns, overdue-by-assignee/department tables.
+- **Project page**: ProjectLessonsSection strip — project lesson count, reuse-review
+  count, "Gate prep" amber prompt when no review recorded, Review Applicable Lessons
+  modal (search all non-draft lessons from other projects → mark reviewed).
+- **Dashboard**: condensed lessons widget (queue, overdue, implementation %, unlinked).

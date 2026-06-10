@@ -53,7 +53,13 @@ class LessonLearned(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Effectiveness verification, required to close ("did the recommendation work?")
+    effectiveness_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effectiveness_verified_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    effectiveness_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class LessonAction(Base):
@@ -68,6 +74,21 @@ class LessonAction(Base):
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(10), default="open")  # open, done
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LessonReference(Base):
+    """Records that a lesson was reviewed/applied for a project (reuse tracking)."""
+    __tablename__ = "lesson_references"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons_learned.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    milestone_id: Mapped[int | None] = mapped_column(ForeignKey("project_milestones.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

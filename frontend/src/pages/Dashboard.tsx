@@ -83,6 +83,18 @@ export default function Dashboard() {
     refetchInterval: 30_000,
   });
 
+  const { data: lessonKpis } = useQuery<{
+    in_review_queue: number;
+    overdue_actions: number;
+    implementation_rate: number | null;
+    unlinked: number;
+    total_lessons: number;
+  }>({
+    queryKey: ['lesson-kpis'],
+    queryFn: async () => (await client.get('/v1/lessons/kpis')).data,
+    refetchInterval: 60_000,
+  });
+
   if (isLoading || !data) {
     return <div className="p-6 text-slate-400">Loading dashboard...</div>;
   }
@@ -113,6 +125,35 @@ export default function Dashboard() {
           </span>
         ))}
       </div>
+
+      {/* Lessons learned summary */}
+      {lessonKpis && lessonKpis.total_lessons > 0 && (
+        <div className="mb-4 bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">📘 Lessons Learned</h2>
+            <button
+              onClick={() => navigate('/lessons/kpis')}
+              className="text-xs text-blue-400 hover:text-blue-300"
+            >
+              KPI Board →
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
+              Review queue: <span className={`font-bold ${lessonKpis.in_review_queue ? 'text-amber-300' : 'text-slate-100'}`}>{lessonKpis.in_review_queue}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
+              Overdue actions: <span className={`font-bold ${lessonKpis.overdue_actions ? 'text-red-400' : 'text-emerald-400'}`}>{lessonKpis.overdue_actions}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
+              Implementation: <span className="font-bold text-slate-100">{lessonKpis.implementation_rate === null ? '—' : `${Math.round(lessonKpis.implementation_rate * 100)}%`}</span>
+            </span>
+            <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
+              Unlinked: <span className={`font-bold ${lessonKpis.unlinked ? 'text-amber-300' : 'text-emerald-400'}`}>{lessonKpis.unlinked}</span>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Timing gates */}
       {data.milestones?.length > 0 && (

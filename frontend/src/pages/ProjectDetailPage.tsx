@@ -12,6 +12,7 @@ import PartBOMSection from '../components/PartBOMSection';
 import PartRelationsSection from '../components/PartRelationsSection';
 import PPAPSection from '../components/PPAPSection';
 import MilestoneStrip from '../components/MilestoneStrip';
+import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import { toast } from 'sonner';
 
 // Types
@@ -1018,6 +1019,8 @@ export default function ProjectDetailPage() {
           + Add Part
         </button>
       </div>
+
+      <ProjectLessonsSection projectId={id} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">

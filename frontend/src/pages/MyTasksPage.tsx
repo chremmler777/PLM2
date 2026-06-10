@@ -4,9 +4,100 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import { rasicColors } from '../lib/constants';
+import client from '../api/client';
+import { toast } from 'sonner';
+
+interface MyLessonAction {
+  id: number;
+  description: string;
+  due_date: string | null;
+  overdue: boolean;
+  lesson_id: number;
+  lesson_title: string;
+  lesson_status: string;
+  lesson_severity: string;
+}
+
+function LessonActionsSection() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const { data: actions = [] } = useQuery({
+    queryKey: ['my-lesson-actions'],
+    queryFn: async () => (await client.get('/v1/lessons/my-actions')).data as MyLessonAction[],
+    refetchInterval: 60_000,
+  });
+
+  const complete = useMutation({
+    mutationFn: async (actionId: number) =>
+      client.patch(`/v1/lessons/actions/${actionId}`, { status: 'done' }),
+    onSuccess: () => {
+      toast.success('Action completed');
+      queryClient.invalidateQueries({ queryKey: ['my-lesson-actions'] });
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to complete'),
+  });
+
+  if (actions.length === 0) return null;
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+        📘 Lesson Actions ({actions.length})
+      </h2>
+      <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-900">
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Action</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Lesson</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Due</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {actions.map((a) => (
+              <tr key={a.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+                <td className="px-4 py-3 text-slate-100">{a.description}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => navigate(`/lessons?lesson=${a.lesson_id}`)}
+                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                  >
+                    {a.lesson_title}
+                  </button>
+                  <span className="text-xs text-slate-500 ml-2">{a.lesson_status.replace(/_/g, ' ')}</span>
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  {a.due_date ? (
+                    <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
+                      {a.due_date.slice(0, 10)}{a.overdue && ' ⚠ overdue'}
+                    </span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => complete.mutate(a.id)}
+                    disabled={complete.isPending}
+                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                  >
+                    Mark done
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function MyTasksPage() {
   const navigate = useNavigate();
@@ -23,6 +114,8 @@ export default function MyTasksPage() {
         <h1 className="text-2xl font-bold text-slate-100">My Tasks</h1>
         <p className="text-slate-400 text-sm mt-1">Active workflow tasks by department</p>
       </div>
+
+      <LessonActionsSection />
 
       {/* Department Selector */}
       <div className="max-w-xs">

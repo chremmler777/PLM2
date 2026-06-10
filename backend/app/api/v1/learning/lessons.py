@@ -12,9 +12,10 @@ from app.dependencies import get_current_user
 from app.models import get_db, User
 from app.models.entities import Project
 from app.models.lesson import (
-    LessonLearned, LessonAction, LessonComment,
+    LessonLearned, LessonAction, LessonComment, LessonReference,
     LESSON_CATEGORIES, LESSON_TYPES, LESSON_SEVERITIES, LESSON_TRANSITIONS,
 )
+from app.models.workflow import Department
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,14 @@ class LessonUpdate(BaseModel):
 
 class TransitionRequest(BaseModel):
     status: str
+    effectiveness_verified: Optional[bool] = None
+    effectiveness_note: Optional[str] = None
+
+
+class ReferenceCreate(BaseModel):
+    project_id: int
+    milestone_id: Optional[int] = None
+    note: Optional[str] = None
 
 
 class ActionCreate(BaseModel):
@@ -121,7 +130,10 @@ def _lesson_dict(l: LessonLearned, project_name: str | None = None,
         "created_at": l.created_at.isoformat() if l.created_at else None,
         "updated_at": l.updated_at.isoformat() if l.updated_at else None,
         "submitted_at": l.submitted_at.isoformat() if l.submitted_at else None,
+        "approved_at": l.approved_at.isoformat() if l.approved_at else None,
         "closed_at": l.closed_at.isoformat() if l.closed_at else None,
+        "effectiveness_note": l.effectiveness_note,
+        "effectiveness_verified_at": l.effectiveness_verified_at.isoformat() if l.effectiveness_verified_at else None,
         "open_actions": open_actions,
         "total_actions": total_actions,
         "allowed_transitions": list(LESSON_TRANSITIONS.get(l.status, ())),
@@ -273,6 +285,158 @@ async def assignable_users(
     return [{"id": uid, "name": full_name or username} for uid, full_name, username in result.all()]
 
 
+@router.get("/my-actions", response_model=List[dict])
+async def my_actions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Open lesson actions assigned to the current user, for the My Tasks page."""
+    rows = (await db.execute(
+        select(LessonAction, LessonLearned)
+        .join(LessonLearned, LessonAction.lesson_id == LessonLearned.id)
+        .where(LessonAction.assignee_id == current_user.id, LessonAction.status == "open")
+        .order_by(LessonAction.due_date.is_(None), LessonAction.due_date, LessonAction.id)
+    )).all()
+    return [
+        {
+            **_action_dict(a),
+            "lesson_id": l.id,
+            "lesson_title": l.title,
+            "lesson_status": l.status,
+            "lesson_severity": l.severity,
+        }
+        for a, l in rows
+    ]
+
+
+@router.get("/kpis", response_model=dict)
+async def lesson_kpis(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Governance KPIs: review cycle time, implementation, overdue accountability, reuse."""
+    now = datetime.utcnow()
+    lessons = (await db.execute(select(LessonLearned))).scalars().all()
+    actions = (await db.execute(select(LessonAction))).scalars().all()
+    references = (await db.execute(select(LessonReference))).scalars().all()
+
+    # Review cycle time: submitted -> approved
+    review_durations = [
+        (l.approved_at - l.submitted_at).total_seconds() / 86400
+        for l in lessons
+        if l.approved_at and l.submitted_at and l.approved_at >= l.submitted_at
+    ]
+    avg_time_to_review_days = round(sum(review_durations) / len(review_durations), 1) if review_durations else None
+
+    # Implementation rate: of lessons that were approved, how many got implemented/closed
+    reached_approval = [l for l in lessons if l.status in ("approved", "implemented", "closed")]
+    implemented = [l for l in reached_approval if l.status in ("implemented", "closed")]
+    implementation_rate = round(len(implemented) / len(reached_approval), 2) if reached_approval else None
+
+    done_actions = [a for a in actions if a.status == "done"]
+    action_completion_rate = round(len(done_actions) / len(actions), 2) if actions else None
+
+    overdue = [a for a in actions if a.status == "open" and a.due_date and a.due_date < now]
+
+    # Overdue by assignee
+    names = await _user_names(db, {a.assignee_id for a in overdue if a.assignee_id})
+    by_assignee: dict[int | None, int] = {}
+    for a in overdue:
+        by_assignee[a.assignee_id] = by_assignee.get(a.assignee_id, 0) + 1
+    overdue_by_assignee = sorted(
+        (
+            {"assignee_id": uid, "name": names.get(uid, "Unassigned") if uid else "Unassigned", "count": c}
+            for uid, c in by_assignee.items()
+        ),
+        key=lambda x: -x["count"],
+    )
+
+    # Overdue by department (via the action's lesson)
+    lesson_by_id = {l.id: l for l in lessons}
+    dept_counts: dict[int | None, int] = {}
+    for a in overdue:
+        dept_id = lesson_by_id[a.lesson_id].department_id if a.lesson_id in lesson_by_id else None
+        dept_counts[dept_id] = dept_counts.get(dept_id, 0) + 1
+    dept_ids = {d for d in dept_counts if d is not None}
+    dept_names: dict[int, str] = {}
+    if dept_ids:
+        rows = (await db.execute(select(Department.id, Department.name).where(Department.id.in_(dept_ids)))).all()
+        dept_names = dict(rows)
+    overdue_by_department = sorted(
+        (
+            {"department_id": did, "name": dept_names.get(did, "No department") if did else "No department", "count": c}
+            for did, c in dept_counts.items()
+        ),
+        key=lambda x: -x["count"],
+    )
+
+    # Distribution
+    by_category: dict[str, int] = {}
+    by_severity: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    by_month: dict[str, int] = {}
+    for l in lessons:
+        by_category[l.category] = by_category.get(l.category, 0) + 1
+        by_severity[l.severity] = by_severity.get(l.severity, 0) + 1
+        by_status[l.status] = by_status.get(l.status, 0) + 1
+        if l.created_at:
+            month = l.created_at.strftime("%Y-%m")
+            by_month[month] = by_month.get(month, 0) + 1
+
+    # Reuse: distinct lessons referenced on projects / non-draft lessons
+    referenced_lessons = {r.lesson_id for r in references}
+    non_draft = [l for l in lessons if l.status != "draft"]
+    reuse_rate = round(len(referenced_lessons) / len(non_draft), 2) if non_draft else None
+
+    return {
+        "total_lessons": len(lessons),
+        "avg_time_to_review_days": avg_time_to_review_days,
+        "implementation_rate": implementation_rate,
+        "action_completion_rate": action_completion_rate,
+        "open_actions": sum(1 for a in actions if a.status == "open"),
+        "overdue_actions": len(overdue),
+        "overdue_by_assignee": overdue_by_assignee,
+        "overdue_by_department": overdue_by_department,
+        "by_category": by_category,
+        "by_severity": by_severity,
+        "by_status": by_status,
+        "by_month": dict(sorted(by_month.items())),
+        "references_total": len(references),
+        "reuse_rate": reuse_rate,
+        "unlinked": sum(1 for l in lessons if l.project_id is None),
+        "in_review_queue": sum(1 for l in lessons if l.status in ("submitted", "in_review")),
+    }
+
+
+@router.get("/projects/{project_id}/references", response_model=List[dict])
+async def project_references(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lessons that were reviewed/applied for this project (reuse record)."""
+    rows = (await db.execute(
+        select(LessonReference, LessonLearned)
+        .join(LessonLearned, LessonReference.lesson_id == LessonLearned.id)
+        .where(LessonReference.project_id == project_id)
+        .order_by(LessonReference.id.desc())
+    )).all()
+    names = await _user_names(db, {r.created_by for r, _ in rows})
+    return [
+        {
+            "id": r.id,
+            "lesson_id": l.id,
+            "lesson_title": l.title,
+            "lesson_status": l.status,
+            "lesson_category": l.category,
+            "note": r.note,
+            "created_by_name": names.get(r.created_by),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r, l in rows
+    ]
+
+
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     body: LessonCreate,
@@ -417,6 +581,12 @@ async def transition_lesson(
             detail=f"Cannot transition from {lesson.status} to {body.status}; allowed: {list(allowed)}",
         )
 
+    if body.status == "approved" and not lesson.owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Assign an owner before approving — someone must be accountable for implementation",
+        )
+
     if body.status == "closed":
         open_count = (await db.execute(
             select(func.count(LessonAction.id)).where(
@@ -428,13 +598,23 @@ async def transition_lesson(
                 status_code=409,
                 detail=f"Cannot close: {open_count} action(s) still open",
             )
+        if body.effectiveness_verified is not True:
+            raise HTTPException(
+                status_code=409,
+                detail="Effectiveness verification required to close: confirm the recommendation worked (effectiveness_verified=true)",
+            )
 
     old_status = lesson.status
     lesson.status = body.status
     if body.status == "submitted":
         lesson.submitted_at = datetime.utcnow()
+    if body.status == "approved":
+        lesson.approved_at = datetime.utcnow()
     if body.status == "closed":
         lesson.closed_at = datetime.utcnow()
+        lesson.effectiveness_note = body.effectiveness_note
+        lesson.effectiveness_verified_by = current_user.id
+        lesson.effectiveness_verified_at = datetime.utcnow()
 
     actor = current_user.full_name or current_user.username
     db.add(LessonComment(
@@ -547,6 +727,38 @@ async def delete_action(
     await db.delete(action)
     await db.commit()
     return {"status": "success"}
+
+
+@router.post("/{lesson_id}/references", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def create_reference(
+    lesson_id: int,
+    body: ReferenceCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a lesson as reviewed/applied for a project (counts toward reuse rate)."""
+    lesson = await _get_lesson(db, lesson_id)
+    await _check_project(db, body.project_id)
+
+    existing = (await db.execute(
+        select(LessonReference).where(
+            LessonReference.lesson_id == lesson_id,
+            LessonReference.project_id == body.project_id,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="Lesson already referenced for this project")
+
+    ref = LessonReference(
+        lesson_id=lesson_id,
+        project_id=body.project_id,
+        milestone_id=body.milestone_id,
+        note=body.note,
+        created_by=current_user.id,
+    )
+    db.add(ref)
+    await db.commit()
+    return {"id": ref.id, "lesson_id": lesson_id, "project_id": body.project_id, "note": ref.note}
 
 
 @router.post("/{lesson_id}/comments", response_model=dict, status_code=status.HTTP_201_CREATED)

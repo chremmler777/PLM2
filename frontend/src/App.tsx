@@ -18,6 +18,7 @@ import UsersPage from './pages/UsersPage';
 import Dashboard from './pages/Dashboard';
 import SuppliersPage from './pages/SuppliersPage';
 import LessonsLearnedPage from './pages/LessonsLearnedPage';
+import LessonsKpiBoardPage from './pages/LessonsKpiBoardPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -106,6 +107,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <LessonsLearnedPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lessons/kpis"
+        element={
+          <ProtectedRoute>
+            <LessonsKpiBoardPage />
           </ProtectedRoute>
         }
       />

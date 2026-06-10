@@ -190,8 +190,26 @@ async def lifespan(app: FastAPI):
         logger.info("Test data seeded")
     except Exception as e:
         logger.warning(f"Warning seeding test data: {e}")
+
+    # Periodic overdue lesson-action reminders (every 6h, deduped to 1/24h per action)
+    import asyncio
+
+    async def _reminder_loop():
+        from app.models import AsyncSessionLocal
+        from app.services.lesson_reminder_service import send_overdue_action_reminders
+        while True:
+            try:
+                async with AsyncSessionLocal() as session:
+                    await send_overdue_action_reminders(session)
+            except Exception as e:
+                logger.warning(f"Lesson reminder run failed: {e}")
+            await asyncio.sleep(6 * 3600)
+
+    reminder_task = asyncio.create_task(_reminder_loop())
+
     yield
     # Shutdown
+    reminder_task.cancel()
     logger.info("Shutting down PLM application...")
 
 

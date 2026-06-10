@@ -4,6 +4,7 @@
  * Lessons can be captured before their project exists in the PLM and linked afterwards.
  */
 import { useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
@@ -50,6 +51,7 @@ interface LessonComment {
 interface LessonDetail extends Lesson {
   owner_name: string | null;
   created_by_name: string | null;
+  effectiveness_note: string | null;
   actions: LessonAction[];
   comments: LessonComment[];
 }
@@ -269,9 +271,16 @@ function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: (
 
   const onApiError = (error: any) => toast.error(error.response?.data?.detail || 'Request failed');
 
+  const [closeDialog, setCloseDialog] = useState<{ verified: boolean; note: string } | null>(null);
+
   const transition = useMutation({
-    mutationFn: async (status: string) => client.post(`/v1/lessons/${lessonId}/transition`, { status }),
-    onSuccess: (_d, status) => { toast.success(`Status: ${label(status)}`); refresh(); },
+    mutationFn: async (payload: { status: string; effectiveness_verified?: boolean; effectiveness_note?: string }) =>
+      client.post(`/v1/lessons/${lessonId}/transition`, payload),
+    onSuccess: (_d, payload) => {
+      toast.success(`Status: ${label(payload.status)}`);
+      setCloseDialog(null);
+      refresh();
+    },
     onError: onApiError,
   });
 
@@ -454,18 +463,74 @@ function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: (
 
         {/* Workflow */}
         {lesson.allowed_transitions.length > 0 && (
-          <div className="mt-4 flex items-center gap-2 border-t border-slate-700 pt-3">
+          <div className="mt-4 flex items-center gap-2 border-t border-slate-700 pt-3 flex-wrap">
             <span className="text-xs text-slate-500">Move to:</span>
             {lesson.allowed_transitions.map((s) => (
               <button
                 key={s}
-                onClick={() => transition.mutate(s)}
+                onClick={() =>
+                  s === 'closed'
+                    ? setCloseDialog({ verified: false, note: '' })
+                    : transition.mutate({ status: s })
+                }
                 disabled={transition.isPending}
                 className={`text-xs px-3 py-1 rounded border border-slate-600 hover:border-slate-400 ${STATUS_STYLE[s] || 'text-slate-300'}`}
               >
                 {label(s)}
               </button>
             ))}
+            {lesson.status === 'in_review' && !lesson.owner_id && (
+              <span className="text-xs text-amber-300">⚠ assign an owner before approval</span>
+            )}
+          </div>
+        )}
+
+        {/* Effectiveness verification before close */}
+        {closeDialog && (
+          <div className="mt-3 bg-slate-900/60 border border-slate-600 rounded p-3 space-y-2">
+            <div className="text-sm text-slate-200 font-medium">Effectiveness check — did the recommendation work?</div>
+            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={closeDialog.verified}
+                onChange={(e) => setCloseDialog({ ...closeDialog, verified: e.target.checked })}
+              />
+              Yes, the recommendation was applied and verified effective
+            </label>
+            <textarea
+              value={closeDialog.note}
+              onChange={(e) => setCloseDialog({ ...closeDialog, note: e.target.value })}
+              placeholder="How was effectiveness verified? (e.g. no recurrence on next project)"
+              rows={2}
+              className={inputCls}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() =>
+                  transition.mutate({
+                    status: 'closed',
+                    effectiveness_verified: true,
+                    effectiveness_note: closeDialog.note || undefined,
+                  })
+                }
+                disabled={!closeDialog.verified || transition.isPending}
+                className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded px-3 py-1 text-xs"
+              >
+                Verify & close
+              </button>
+              <button
+                onClick={() => setCloseDialog(null)}
+                className="bg-slate-700 text-slate-300 rounded px-3 py-1 text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {lesson.status === 'closed' && lesson.effectiveness_note && (
+          <div className="mt-3 text-xs text-emerald-400">
+            ✓ Effectiveness verified: <span className="text-slate-300">{lesson.effectiveness_note}</span>
           </div>
         )}
 
@@ -575,26 +640,47 @@ function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: (
 }
 
 export default function LessonsLearnedPage() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showNew, setShowNew] = useState(false);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(
+    searchParams.get('lesson') ? Number(searchParams.get('lesson')) : null
+  );
   const [statusFilter, setStatusFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [unlinkedOnly, setUnlinkedOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [queueMode, setQueueMode] = useState(false);
+  const projectFilter = searchParams.get('project') ? Number(searchParams.get('project')) : null;
+
+  const closeDetail = () => {
+    setSelectedId(null);
+    if (searchParams.get('lesson')) {
+      searchParams.delete('lesson');
+      setSearchParams(searchParams, { replace: true });
+    }
+  };
 
   const { data: lessons, isLoading } = useQuery({
-    queryKey: ['lessons', statusFilter, categoryFilter, typeFilter, unlinkedOnly, search],
+    queryKey: ['lessons', statusFilter, categoryFilter, typeFilter, unlinkedOnly, search, projectFilter, queueMode],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (statusFilter) params.set('status', statusFilter);
+      if (statusFilter && !queueMode) params.set('status', statusFilter);
       if (categoryFilter) params.set('category', categoryFilter);
       if (typeFilter) params.set('lesson_type', typeFilter);
       if (unlinkedOnly) params.set('unlinked', 'true');
       if (search) params.set('q', search);
+      if (projectFilter) params.set('project_id', String(projectFilter));
       return (await client.get(`/v1/lessons?${params}`)).data as Lesson[];
     },
   });
+
+  const visibleLessons = queueMode
+    ? (lessons ?? [])
+        .filter((l) => l.status === 'submitted' || l.status === 'in_review')
+        .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+    : lessons;
 
   const { data: stats } = useQuery({
     queryKey: ['lesson-stats'],
@@ -613,15 +699,50 @@ export default function LessonsLearnedPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-xl font-bold text-slate-100">Lessons Learned</h1>
-          <p className="text-sm text-slate-400">Capture, review, act — close only when actions are done.</p>
+          <p className="text-sm text-slate-400">Capture, review, act — close only when actions are done and verified effective.</p>
         </div>
-        <button
-          onClick={() => setShowNew(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-2 text-sm font-medium"
-        >
-          + Capture Lesson
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => navigate('/lessons/kpis')}
+            className="border border-slate-600 hover:border-slate-400 text-slate-300 rounded px-4 py-2 text-sm"
+          >
+            📊 KPI Board
+          </button>
+          <button
+            onClick={() => setQueueMode(!queueMode)}
+            className={`border rounded px-4 py-2 text-sm ${
+              queueMode ? 'border-amber-400 text-amber-300' : 'border-slate-600 text-slate-300 hover:border-slate-400'
+            }`}
+          >
+            📥 Review Queue{queueMode ? ' ✓' : ''}
+          </button>
+          <button
+            onClick={() => setShowNew(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-2 text-sm font-medium"
+          >
+            + Capture Lesson
+          </button>
+        </div>
       </div>
+
+      {projectFilter && (
+        <div className="mb-3 text-xs text-slate-400">
+          Filtered to project #{projectFilter}{' '}
+          <button
+            onClick={() => { searchParams.delete('project'); setSearchParams(searchParams, { replace: true }); }}
+            className="text-blue-400 hover:text-blue-300 ml-1"
+          >
+            clear
+          </button>
+        </div>
+      )}
+
+      {queueMode && (
+        <div className="mb-3 text-xs px-3 py-2 rounded bg-amber-600/10 border border-amber-700/40 text-amber-200">
+          Review queue: submitted and in-review lessons, oldest first. Open a lesson to triage —
+          approval requires an assigned owner.
+        </div>
+      )}
 
       {/* Stats */}
       {stats && (
@@ -636,7 +757,7 @@ export default function LessonsLearnedPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        {['', 'draft', 'submitted', 'in_review', 'approved', 'implemented', 'closed', 'rejected'].map((s) => (
+        {(queueMode ? [] : ['', 'draft', 'submitted', 'in_review', 'approved', 'implemented', 'closed', 'rejected']).map((s) => (
           <button
             key={s || 'all'}
             onClick={() => setStatusFilter(s)}
@@ -695,7 +816,7 @@ export default function LessonsLearnedPage() {
             </tr>
           </thead>
           <tbody>
-            {lessons?.map((l) => (
+            {visibleLessons?.map((l) => (
               <tr
                 key={l.id}
                 onClick={() => setSelectedId(l.id)}
@@ -726,10 +847,10 @@ export default function LessonsLearnedPage() {
                 <td className="px-4 py-2 text-slate-400 text-xs">{l.created_at?.slice(0, 10)}</td>
               </tr>
             ))}
-            {!isLoading && lessons?.length === 0 && (
+            {!isLoading && visibleLessons?.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">
-                  No lessons yet — capture the first one.
+                  {queueMode ? 'Review queue is empty — nothing waiting for triage.' : 'No lessons yet — capture the first one.'}
                 </td>
               </tr>
             )}
@@ -738,7 +859,7 @@ export default function LessonsLearnedPage() {
       </div>
 
       {showNew && <NewLessonModal onClose={() => setShowNew(false)} />}
-      {selectedId !== null && <LessonDetailModal lessonId={selectedId} onClose={() => setSelectedId(null)} />}
+      {selectedId !== null && <LessonDetailModal lessonId={selectedId} onClose={closeDetail} />}
     </div>
   );
 }
