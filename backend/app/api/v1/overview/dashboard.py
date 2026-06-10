@@ -164,10 +164,37 @@ async def get_dashboard(
         for entry, part_name, project_id in result.all()
     ]
 
+    # Upcoming / overdue project milestones (next 60 days or overdue)
+    from app.models.timing import ProjectMilestone
+
+    milestone_cutoff = datetime.utcnow() + timedelta(days=60)
+    result = await db.execute(
+        select(ProjectMilestone, Project.name)
+        .join(Project, Project.id == ProjectMilestone.project_id)
+        .where(
+            ProjectMilestone.status == "open",
+            ProjectMilestone.due_date <= milestone_cutoff,
+        )
+        .order_by(ProjectMilestone.due_date)
+        .limit(10)
+    )
+    milestones = [
+        {
+            "id": m.id,
+            "name": m.name,
+            "project_id": m.project_id,
+            "project_name": project_name,
+            "due_date": m.due_date.isoformat(),
+            "overdue": m.due_date < now,
+        }
+        for m, project_name in result.all()
+    ]
+
     return {
         "counts": counts,
         "category_counts": category_counts,
         "gauges_due": gauges_due,
+        "milestones": milestones,
         "active_workflows": active_workflows,
         "department_queues": department_queues,
         "recent_activity": recent_activity,

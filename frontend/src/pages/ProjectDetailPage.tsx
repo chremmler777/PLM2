@@ -11,6 +11,7 @@ import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSec
 import PartBOMSection from '../components/PartBOMSection';
 import PartRelationsSection from '../components/PartRelationsSection';
 import PPAPSection from '../components/PPAPSection';
+import MilestoneStrip from '../components/MilestoneStrip';
 import { toast } from 'sonner';
 
 // Types
@@ -1006,6 +1007,9 @@ export default function ProjectDetailPage() {
           <h1 className="text-3xl font-bold text-slate-100">
             {project.name} <span className="text-slate-400 text-sm">({project.code})</span>
           </h1>
+          <div className="mt-2">
+            <MilestoneStrip projectId={id} />
+          </div>
         </div>
         <button
           onClick={() => setShowAddModal(true)}

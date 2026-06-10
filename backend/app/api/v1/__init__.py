@@ -31,6 +31,9 @@ from app.api.v1.quality.ppap import router as ppap_router
 # Module: supply (supplier master data)
 from app.api.v1.supply.suppliers import router as suppliers_router
 
+# Module: timing (project milestones / gates)
+from app.api.v1.timing.milestones import router as timing_router
+
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
 api_router.include_router(health_router)
@@ -45,6 +48,7 @@ api_router.include_router(search_router)
 api_router.include_router(notifications_router)
 api_router.include_router(ppap_router)
 api_router.include_router(suppliers_router)
+api_router.include_router(timing_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)

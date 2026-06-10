@@ -28,6 +28,14 @@ interface DashboardData {
     started_at: string | null;
   }[];
   category_counts: Record<string, number>;
+  milestones: {
+    id: number;
+    name: string;
+    project_id: number;
+    project_name: string;
+    due_date: string;
+    overdue: boolean;
+  }[];
   gauges_due: {
     part_id: number;
     part_number: string;
@@ -105,6 +113,35 @@ export default function Dashboard() {
           </span>
         ))}
       </div>
+
+      {/* Timing gates */}
+      {data.milestones?.length > 0 && (
+        <div className="mb-4 bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+            ◇ Upcoming Gates
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {data.milestones.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => navigate(`/projects/${m.project_id}`)}
+                className={`px-3 py-2 rounded border text-sm text-left transition ${
+                  m.overdue
+                    ? 'bg-red-900/30 border-red-700 hover:bg-red-900/50'
+                    : 'bg-slate-700/50 border-slate-600 hover:bg-slate-700'
+                }`}
+              >
+                <span className="text-slate-100">{m.name}</span>
+                <span className="text-slate-400 text-xs ml-2">{m.project_name}</span>
+                <span className={`block text-xs mt-0.5 ${m.overdue ? 'text-red-300 font-medium' : 'text-slate-400'}`}>
+                  {m.overdue ? 'OVERDUE — ' : 'due '}
+                  {new Date(m.due_date).toLocaleDateString()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Calibration warnings */}
       {data.gauges_due?.length > 0 && (

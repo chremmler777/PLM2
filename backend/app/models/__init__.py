@@ -14,6 +14,7 @@ from app.models.part import (
 from app.models.notification import Notification
 from app.models.quality import PPAPSubmission, PPAPElement
 from app.models.supplier import Supplier
+from app.models.timing import ProjectMilestone
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask,
