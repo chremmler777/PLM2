@@ -93,6 +93,25 @@ async def seed_test_data():
                 )
                 session.add(test_user)
 
+            # Create admin user (for user management; change password after first login)
+            result = await session.execute(
+                select(User).where(User.email == "admin@example.com")
+            )
+            admin_user = result.scalar_one_or_none()
+            if not admin_user:
+                logger.info("Creating admin user...")
+                admin_user = User(
+                    organization_id=test_org.id,
+                    username="admin",
+                    email="admin@example.com",
+                    full_name="Administrator",
+                    hashed_password=get_password_hash("admin1234"),
+                    role="admin",
+                    is_active=True,
+                    mfa_enabled=False,
+                )
+                session.add(admin_user)
+
             # Create workflow departments
             departments_data = [
                 ("Developer", "action", 1),

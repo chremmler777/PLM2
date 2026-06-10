@@ -6,6 +6,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.parts import router as parts_router
 from app.api.v1.revision_files import router as revision_files_router
 from app.api.v1.part_bom import router as part_bom_router
+from app.api.v1.users import router as users_router
 from app.api.v1.plants import router as plants_router
 from app.api.v1.workflow_templates import router as workflow_templates_router
 from app.api.v1.workflow_instances import router as workflow_instances_router
@@ -19,6 +20,7 @@ api_router.include_router(articles_router)
 api_router.include_router(parts_router)
 api_router.include_router(revision_files_router)
 api_router.include_router(part_bom_router)
+api_router.include_router(users_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
