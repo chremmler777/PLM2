@@ -12,7 +12,7 @@ from app.models.part import (
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
 )
 from app.models.notification import Notification
-from app.models.lesson import LessonLearned, LessonAction, LessonComment, LessonReference
+from app.models.lesson import LessonLearned, LessonAction, LessonComment, LessonReference, LessonFile
 from app.models.quality import PPAPSubmission, PPAPElement
 from app.models.supplier import Supplier
 from app.models.timing import ProjectMilestone

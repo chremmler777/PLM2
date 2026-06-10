@@ -1,7 +1,7 @@
 """Lessons learned models - project knowledge capture with actions and comments."""
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import String, Text, DateTime, ForeignKey, Boolean, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.database import Base
@@ -12,17 +12,21 @@ LESSON_CATEGORIES = (
 )
 LESSON_TYPES = ("success", "problem", "improvement")
 LESSON_SEVERITIES = ("low", "medium", "high", "critical")
+REJECT_CATEGORIES = ("duplicate", "not_actionable", "out_of_scope", "insufficient_info")
 
-# Server-enforced status lifecycle
+# Strict server-enforced lifecycle. Creation lands in in_review (no draft/submit step):
+# in_review -accept-> in_work -owner sends-> verification -verified-> closed
+#     `-reject-> rejected          ^---- send back with feedback ----'
 LESSON_TRANSITIONS: dict[str, tuple[str, ...]] = {
-    "draft": ("submitted",),
-    "submitted": ("in_review", "draft"),
-    "in_review": ("approved", "rejected"),
-    "approved": ("implemented",),
-    "implemented": ("closed",),
-    "rejected": ("draft",),
+    "in_review": ("in_work", "rejected"),
+    "in_work": ("verification",),
+    "verification": ("closed", "in_work"),
+    "rejected": (),
     "closed": (),
 }
+
+# Days in state before a lesson is flagged stale (in_work uses target_date instead)
+STALE_AFTER_DAYS = {"in_review": 14, "verification": 7}
 
 
 class LessonLearned(Base):
@@ -45,16 +49,24 @@ class LessonLearned(Base):
     recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
-    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="in_review", index=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     department_id: Mapped[int | None] = mapped_column(ForeignKey("wf_departments.id"), nullable=True)
+    target_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # required to accept
+
+    # Rejection (terminal), categorized for KPI analysis
+    reject_category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # legacy (pre-v3)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # legacy (pre-v3)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # in_review -> in_work
+    verification_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_escalated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Effectiveness verification, required to close ("did the recommendation work?")
     effectiveness_note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -91,6 +103,23 @@ class LessonReference(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LessonFile(Base):
+    """Evidence attachment on a lesson (photos, reports, 8D sheets)."""
+    __tablename__ = "lesson_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons_learned.id"), index=True)
+
+    filename: Mapped[str] = mapped_column(String(255))
+    stored_path: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

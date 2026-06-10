@@ -9,6 +9,8 @@ import client from '../api/client';
 interface Kpis {
   total_lessons: number;
   avg_time_to_review_days: number | null;
+  avg_time_to_close_days: number | null;
+  on_time_close_rate: number | null;
   implementation_rate: number | null;
   action_completion_rate: number | null;
   open_actions: number;
@@ -19,21 +21,102 @@ interface Kpis {
   by_severity: Record<string, number>;
   by_status: Record<string, number>;
   by_month: Record<string, number>;
+  heatmap: Record<string, Record<string, number>>;
+  cycle_time_trend: Record<string, number>;
+  by_reject_category: Record<string, number>;
   references_total: number;
   reuse_rate: number | null;
   unlinked: number;
   in_review_queue: number;
+  stale_lessons: number;
+}
+
+const HEATMAP_SEVERITIES = ['critical', 'high', 'medium', 'low'];
+const HEATMAP_CATEGORIES = [
+  'design', 'manufacturing', 'quality', 'supplier',
+  'logistics', 'project_management', 'tooling', 'other',
+];
+
+/** Severity x category matrix with color intensity. */
+function Heatmap({ data }: { data: Record<string, Record<string, number>> }) {
+  const max = Math.max(
+    1,
+    ...HEATMAP_SEVERITIES.flatMap((s) => HEATMAP_CATEGORIES.map((c) => data[s]?.[c] ?? 0))
+  );
+  const cellColor = (v: number) => {
+    if (v === 0) return 'bg-slate-900 text-slate-700';
+    const intensity = v / max;
+    if (intensity > 0.66) return 'bg-red-600/70 text-white';
+    if (intensity > 0.33) return 'bg-amber-600/60 text-white';
+    return 'bg-blue-600/40 text-slate-100';
+  };
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 overflow-x-auto">
+      <div className="text-xs text-slate-400 uppercase tracking-wide mb-3">Severity × category heatmap</div>
+      <table className="text-xs">
+        <thead>
+          <tr>
+            <th />
+            {HEATMAP_CATEGORIES.map((c) => (
+              <th key={c} className="px-1 pb-2 text-slate-400 font-normal rotate-0 text-center min-w-[68px]">
+                {label(c)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {HEATMAP_SEVERITIES.map((s) => (
+            <tr key={s}>
+              <td className="pr-2 py-0.5 text-slate-300 text-right">{label(s)}</td>
+              {HEATMAP_CATEGORIES.map((c) => {
+                const v = data[s]?.[c] ?? 0;
+                return (
+                  <td key={c} className="p-0.5">
+                    <div className={`rounded h-8 flex items-center justify-center font-semibold ${cellColor(v)}`}>
+                      {v || ''}
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Capture-to-close cycle time per month as vertical bars. */
+function CycleTrend({ data }: { data: Record<string, number> }) {
+  const entries = Object.entries(data);
+  const max = Math.max(...entries.map(([, v]) => v), 1);
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+      <div className="text-xs text-slate-400 uppercase tracking-wide mb-3">
+        Cycle time trend (avg days capture → closed)
+      </div>
+      {entries.length === 0 ? (
+        <div className="text-xs text-slate-500">No closed lessons yet.</div>
+      ) : (
+        <div className="flex items-end gap-2 h-32">
+          {entries.map(([month, days]) => (
+            <div key={month} className="flex flex-col items-center gap-1 flex-1 min-w-0">
+              <span className="text-xs text-slate-300">{days}d</span>
+              <div
+                className="w-full max-w-[48px] bg-teal-500 rounded-t"
+                style={{ height: `${Math.max(6, (days / max) * 100)}%` }}
+              />
+              <span className="text-[10px] text-slate-500">{month}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const label = (s: string) => s.replace(/_/g, ' ');
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
-
-const SEVERITY_COLORS: Record<string, string> = {
-  low: 'bg-slate-500',
-  medium: 'bg-blue-500',
-  high: 'bg-amber-500',
-  critical: 'bg-red-500',
-};
 
 function Tile({ title, value, sub, accent = 'text-slate-100' }: {
   title: string;
@@ -136,14 +219,14 @@ export default function LessonsKpiBoardPage() {
         <Tile
           title="Time to review"
           value={kpis.avg_time_to_review_days === null ? '—' : `${kpis.avg_time_to_review_days}d`}
-          sub="avg submitted → approved"
+          sub="avg capture → accepted"
           accent={kpis.avg_time_to_review_days !== null && kpis.avg_time_to_review_days > 30 ? 'text-amber-300' : 'text-slate-100'}
         />
         <Tile
-          title="Implementation rate"
-          value={pct(kpis.implementation_rate)}
-          sub="approved lessons implemented"
-          accent={kpis.implementation_rate !== null && kpis.implementation_rate < 0.5 ? 'text-amber-300' : 'text-emerald-400'}
+          title="Time to close"
+          value={kpis.avg_time_to_close_days === null ? '—' : `${kpis.avg_time_to_close_days}d`}
+          sub={`avg capture → closed · ${pct(kpis.on_time_close_rate)} on time vs target`}
+          accent={kpis.on_time_close_rate !== null && kpis.on_time_close_rate < 0.7 ? 'text-amber-300' : 'text-slate-100'}
         />
         <Tile
           title="Overdue actions"
@@ -159,13 +242,25 @@ export default function LessonsKpiBoardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         <Tile title="Total lessons" value={kpis.total_lessons} />
         <Tile
           title="Review queue"
           value={kpis.in_review_queue}
-          sub="submitted + in review"
+          sub="awaiting triage"
           accent={kpis.in_review_queue > 0 ? 'text-amber-300' : 'text-slate-100'}
+        />
+        <Tile
+          title="Implementation"
+          value={pct(kpis.implementation_rate)}
+          sub="accepted lessons closed"
+          accent={kpis.implementation_rate !== null && kpis.implementation_rate < 0.5 ? 'text-amber-300' : 'text-emerald-400'}
+        />
+        <Tile
+          title="Stale"
+          value={kpis.stale_lessons}
+          sub="stuck in review/verification"
+          accent={kpis.stale_lessons > 0 ? 'text-red-400' : 'text-emerald-400'}
         />
         <Tile
           title="Unlinked backlog"
@@ -173,23 +268,19 @@ export default function LessonsKpiBoardPage() {
           sub="lessons without a PLM project"
           accent={kpis.unlinked > 0 ? 'text-amber-300' : 'text-emerald-400'}
         />
-        <Tile
-          title="Closed"
-          value={kpis.by_status?.closed ?? 0}
-          sub="effectiveness verified"
-          accent="text-emerald-400"
-        />
+      </div>
+
+      {/* Heatmap + cycle trend */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
+        <Heatmap data={kpis.heatmap} />
+        <CycleTrend data={kpis.cycle_time_trend} />
       </div>
 
       {/* Breakdowns */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-        <BarChart title="By category" data={kpis.by_category} />
-        <BarChart
-          title="By severity"
-          data={kpis.by_severity}
-          colorFor={(k) => SEVERITY_COLORS[k] ?? 'bg-blue-500'}
-        />
+        <BarChart title="By status" data={kpis.by_status} />
         <BarChart title="Captured per month" data={kpis.by_month} />
+        <BarChart title="Rejections by reason" data={kpis.by_reject_category} />
       </div>
 
       {/* Accountability */}

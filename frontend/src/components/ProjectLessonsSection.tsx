@@ -61,7 +61,7 @@ function ReviewLessonsModal({ projectId, referencedIds, onClose }: {
     onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to record'),
   });
 
-  const candidates = (lessons ?? []).filter((l) => l.project_id !== projectId && l.status !== 'draft');
+  const candidates = (lessons ?? []).filter((l) => l.project_id !== projectId && l.status !== 'rejected');
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={onClose}>

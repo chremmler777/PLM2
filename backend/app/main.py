@@ -196,11 +196,15 @@ async def lifespan(app: FastAPI):
 
     async def _reminder_loop():
         from app.models import AsyncSessionLocal
-        from app.services.lesson_reminder_service import send_overdue_action_reminders
+        from app.services.lesson_reminder_service import (
+            send_overdue_action_reminders, escalate_overdue_targets,
+        )
         while True:
             try:
                 async with AsyncSessionLocal() as session:
                     await send_overdue_action_reminders(session)
+                async with AsyncSessionLocal() as session:
+                    await escalate_overdue_targets(session)
             except Exception as e:
                 logger.warning(f"Lesson reminder run failed: {e}")
             await asyncio.sleep(6 * 3600)

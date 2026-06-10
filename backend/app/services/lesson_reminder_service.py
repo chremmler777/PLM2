@@ -45,3 +45,33 @@ async def send_overdue_action_reminders(db: AsyncSession) -> int:
         await db.commit()
         logger.info("Sent %d overdue lesson-action reminders", sent)
     return sent
+
+
+async def escalate_overdue_targets(db: AsyncSession) -> int:
+    """Escalate in-work lessons past their target date to owner + department (1/24h)."""
+    now = datetime.utcnow()
+    lessons = (await db.execute(
+        select(LessonLearned).where(
+            LessonLearned.status == "in_work",
+            LessonLearned.target_date.is_not(None),
+            LessonLearned.target_date < now,
+        )
+    )).scalars().all()
+
+    escalated = 0
+    for lesson in lessons:
+        if lesson.last_escalated_at and now - lesson.last_escalated_at < REMIND_EVERY:
+            continue
+        days_over = (now - lesson.target_date).days
+        title = f"Lesson past target date ({days_over}d): {lesson.title}"
+        if lesson.owner_id:
+            await NotificationService.notify_users(db, [lesson.owner_id], title=title, link="/lessons")
+        if lesson.department_id:
+            await NotificationService.notify_departments(db, [lesson.department_id], title=title, link="/lessons")
+        lesson.last_escalated_at = now
+        escalated += 1
+
+    if escalated:
+        await db.commit()
+        logger.info("Escalated %d lessons past target date", escalated)
+    return escalated

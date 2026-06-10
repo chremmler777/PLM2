@@ -135,3 +135,59 @@ lifespan runs every 6h.
   count, "Gate prep" amber prompt when no review recorded, Review Applicable Lessons
   modal (search all non-draft lessons from other projects → mark reviewed).
 - **Dashboard**: condensed lessons widget (queue, overdue, implementation %, unlinked).
+
+---
+
+# v3 — Strict lifecycle rework (2026-06-10, user-specified flow)
+
+User flow: capture → automatically in review → triage defines owner + timing + actions,
+then accept or reject → in work (evidence) → verification review → closed.
+"Clean workflow, no double entries or in-between states — it follows its spec."
+
+## New state machine (replaces v1 lifecycle)
+```
+in_review ──accept──▶ in_work ──all actions done, owner sends──▶ verification ──verified──▶ closed
+    │                    ▲                                            │
+    └──reject──▶ rejected└────────────── send back with feedback ─────┘
+```
+- **Creation lands in `in_review`** — no draft, no manual submit. created_at = submission time.
+- **Accept gates (server):** owner_id set, target_date set, ≥1 action. Sets accepted_at.
+- **Reject gates:** category ∈ {duplicate, not_actionable, out_of_scope, insufficient_info}
+  + free-text reason; submitter notified. Terminal.
+- **in_work → verification:** all actions done; only the owner (or admin) sends;
+  sets verification_requested_at.
+- **verification → closed:** effectiveness_verified=true (+ note), verifier recorded.
+- **verification → in_work:** send back with mandatory feedback note (system comment +
+  owner notified).
+- No other edges exist; tests assert every illegal edge from every state returns 400.
+
+## Field editability by state (PATCH-enforced)
+- `in_review`: everything (content, owner, target_date, department, project link, tags).
+- `in_work`: root_cause, recommendation, tags, project link; owner/target_date may be
+  *changed* (never cleared) and the change writes a system comment. Reviewed content
+  (title, description, category, type, severity) is locked after acceptance.
+- `verification`: project link only.
+- `closed` / `rejected`: read-only.
+- Actions: create/edit/delete in in_review + in_work only. Files: upload/delete in
+  in_review + in_work only.
+
+## Schema (migration 017)
+- lessons_learned += target_date, accepted_at, verification_requested_at,
+  reject_category, reject_reason, last_escalated_at.
+- New `lesson_files`: filename, stored uploads/lessons/{lesson_id}/, sha256,
+  content_type, size, uploaded_by, created_at.
+- **Data migration:** draft/submitted → in_review; approved → in_work
+  (accepted_at = approved_at, target_date default +30d); implemented → verification
+  (verification_requested_at = now); closed/rejected unchanged.
+
+## Duplicate guard
+GET /lessons/check-duplicates?title= → word-overlap matches (warn, never block);
+capture modal shows similar lessons live.
+
+## QoL / visuals
+Stepper with time-in-state + stale flags (in_review >14d, verification >7d, in_work
+past target_date); target-date escalation notifies owner + department (daily dedupe via
+last_escalated_at, same 6h loop); GET /lessons/tags for autocomplete; mine=true filter;
+capture autofocus + Ctrl+Enter; KPI board gains severity×category heatmap, monthly
+capture-to-close cycle-time trend, on-time close rate, time-to-accept.
+
