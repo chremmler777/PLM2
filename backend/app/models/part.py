@@ -287,5 +287,36 @@ class PartFile(Base):
     created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
 
 
+class PartBOMItem(Base):
+    """BOM line item owned by a sub-assembly's revision.
+
+    Each revision of a sub-assembly carries its own bill of materials, so a
+    frozen revision keeps the exact component list it was approved with.
+    An item references either a project part (child_part_id), a catalog part
+    (catalog_part_id), or is free text (name only).
+    """
+    __tablename__ = "part_bom_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("part_revisions.id"), index=True)
+
+    child_part_id: Mapped[int | None] = mapped_column(ForeignKey("parts.id"), nullable=True)
+    catalog_part_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_parts.id"), nullable=True)
+
+    item_number: Mapped[str] = mapped_column(String(50))  # position label, e.g. "10", "20"
+    name: Mapped[str] = mapped_column(String(255))  # display name (denormalized for free-text items)
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)
+    unit: Mapped[str] = mapped_column(String(20), default="pcs")
+    position: Mapped[int] = mapped_column(Integer, default=0)  # sort order
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+    revision: Mapped["PartRevision"] = relationship(foreign_keys=[revision_id])
+    child_part: Mapped["Part | None"] = relationship(foreign_keys=[child_part_id])
+    created_by_user: Mapped["User"] = relationship(foreign_keys=[created_by])
+
+
 # Import needed models for relationships
 from app.models.entities import Project, User

@@ -8,6 +8,7 @@ import client from '../api/client';
 import Viewer3D from '../components/Viewer3D';
 import CADUploader from '../components/CADUploader';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
+import PartBOMSection from '../components/PartBOMSection';
 import { toast } from 'sonner';
 
 // Types
@@ -925,21 +926,15 @@ export default function ProjectDetailPage() {
                 />
               )}
 
-              {/* BOM Section (sub_assembly only) */}
-              {selectedPart.part_type === 'sub_assembly' && (
-                <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-                  <h3 className="text-sm font-semibold text-slate-200 mb-3">BOM</h3>
-                  <div className="text-slate-400 text-sm">
-                    <p>No BOM items yet — add parts to this sub-assembly</p>
-                  </div>
-                  <button
-                    disabled
-                    title="Coming soon"
-                    className="mt-3 px-3 py-1 rounded bg-slate-700/50 text-slate-500 text-sm font-medium cursor-not-allowed"
-                  >
-                    + Add Item
-                  </button>
-                </div>
+              {/* BOM Section (sub_assembly only, revision-scoped) */}
+              {selectedPart.part_type === 'sub_assembly' && selectedRevisionId && (
+                <PartBOMSection
+                  partId={selectedPart.id}
+                  revisionId={selectedRevisionId}
+                  revisionName={selectedRevision?.revision_name}
+                  locked={revisionLocked}
+                  projectParts={parts ?? []}
+                />
               )}
 
               {/* Revisions Section */}

@@ -9,7 +9,7 @@ from app.models.article import (
 )
 from app.models.part import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
-    RevisionPhase, RevisionStatus, TestDataStatus
+    RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem
 )
 from app.models.workflow import (
     Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
