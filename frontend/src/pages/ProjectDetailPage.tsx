@@ -1006,7 +1006,7 @@ export default function ProjectDetailPage() {
           >
             ← Back
           </button>
-          <h1 className="text-3xl font-bold text-slate-100">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-100">
             {project.name} <span className="text-slate-400 text-sm">({project.code})</span>
           </h1>
           <div className="mt-2">

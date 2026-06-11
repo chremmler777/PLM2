@@ -313,7 +313,7 @@ export default function CatalogPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Purchased Parts Library</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Purchased Parts Library</h1>
           <p className="text-slate-400 text-sm mt-1">Central repository of reusable purchased parts — link from any project</p>
         </div>
         <button

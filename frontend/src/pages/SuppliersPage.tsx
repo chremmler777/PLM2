@@ -172,7 +172,7 @@ export default function SuppliersPage() {
     <div className="p-6 bg-slate-900 min-h-screen">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Suppliers</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-100">Suppliers</h1>
           <p className="text-slate-400 text-sm mt-1">Vendor master data</p>
         </div>
         <div className="flex items-center gap-3">

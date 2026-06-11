@@ -67,9 +67,9 @@ function actionColor(action: string): string {
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
-    <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-      <p className={`text-3xl font-bold ${accent ?? 'text-slate-100'}`}>{value}</p>
-      <p className="text-slate-400 text-sm mt-1">{label}</p>
+    <div className="bg-gradient-to-b from-slate-800 to-slate-800/70 rounded-lg border border-slate-700/80 p-4 shadow-panel hover:border-slate-600 hover:-translate-y-0.5 transition-all duration-200">
+      <p className={`text-3xl font-semibold tracking-tight ${accent ?? 'text-slate-100'}`}>{value}</p>
+      <p className="text-slate-500 text-[13px] mt-1">{label}</p>
     </div>
   );
 }
@@ -108,12 +108,23 @@ export default function Dashboard() {
   });
 
   if (isLoading || !data) {
-    return <div className="p-6 text-slate-400">Loading dashboard...</div>;
+    return (
+      <div className="p-6 bg-slate-900 min-h-screen max-w-[1440px] mx-auto">
+        <div className="skeleton h-9 w-48 mb-6" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="skeleton h-[88px]" />
+          ))}
+        </div>
+        <div className="skeleton h-40 mb-4" />
+        <div className="skeleton h-64" />
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 bg-slate-900 min-h-screen">
-      <h1 className="text-3xl font-bold text-slate-100 mb-6">Dashboard</h1>
+    <div className="p-6 bg-slate-900 min-h-screen max-w-[1440px] mx-auto rise-in">
+      <h1 className="text-3xl font-semibold tracking-tight text-slate-100 mb-6">Dashboard</h1>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">

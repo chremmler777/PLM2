@@ -13,17 +13,50 @@ html, body, #root {
   width: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 html, body {
   background-color: #0f172a;
   color: #f1f5f9;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Geist', system-ui, -apple-system, 'Segoe UI', 'Roboto', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* data-heavy app: keep digits aligned in tables, stats and badges */
+  font-variant-numeric: tabular-nums;
+}
+
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+::selection {
+  background-color: rgba(56, 189, 248, 0.3);
+}
+
+/* Slim, tinted scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #334155;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #475569;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* Dark mode - all elements */
@@ -31,15 +64,65 @@ input, textarea, select {
   background-color: #1e293b;
   color: #f1f5f9;
   border-color: #334155;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 input:focus, textarea:focus, select:focus {
   border-color: #0ea5e9;
   outline: none;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+input::placeholder, textarea::placeholder {
+  color: #64748b;
 }
 
 button {
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+/* Physical press feedback */
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Keyboard focus ring (mouse clicks stay clean) */
+:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.7);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Skeleton shimmer for loading states */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(100deg, #1e293b 40%, #283548 50%, #1e293b 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Staggered entry for page content */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.35s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-in { animation: none; }
+  .skeleton { animation: none; }
+  html { scroll-behavior: auto; }
 }
 
 /* Override Tailwind defaults for dark mode */

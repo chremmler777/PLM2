@@ -165,7 +165,7 @@ export default function ProjectsPage() {
     <div className="p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100">Projects</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-100">Projects</h1>
           <p className="text-slate-400 text-sm mt-1">Select a project to view parts and revisions</p>
         </div>
         <button
