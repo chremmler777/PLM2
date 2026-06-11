@@ -99,6 +99,92 @@ function LessonActionsSection() {
   );
 }
 
+interface MySepItem {
+  id: number;
+  item_no: number;
+  title_en: string;
+  department: string;
+  project_id: number;
+  project_name: string;
+  gate_code: string;
+  gate_target_date: string | null;
+}
+
+function SepItemsSection() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const { data: items = [] } = useQuery({
+    queryKey: ['my-sep-items'],
+    queryFn: async () => (await client.get('/v1/sep/my-items')).data as MySepItem[],
+    refetchInterval: 60_000,
+  });
+
+  const markDone = useMutation({
+    mutationFn: async (itemId: number) =>
+      client.patch(`/v1/sep/items/${itemId}`, { status: 'done' }),
+    onSuccess: () => {
+      toast.success('Work package done');
+      queryClient.invalidateQueries({ queryKey: ['my-sep-items'] });
+      queryClient.invalidateQueries({ queryKey: ['sep'] });
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to update'),
+  });
+
+  if (items.length === 0) return null;
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+        🚦 SEP Work Packages ({items.length})
+      </h2>
+      <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-900">
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Work Package</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Project / Gate</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Gate Target</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((i) => (
+              <tr key={i.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+                <td className="px-4 py-3 text-slate-100">
+                  {i.title_en}
+                  <span className="text-xs text-slate-500 ml-2">{i.department}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => navigate(`/projects/${i.project_id}`)}
+                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                  >
+                    {i.project_name}
+                  </button>
+                  <span className="text-xs text-slate-500 ml-2">{i.gate_code}</span>
+                </td>
+                <td className="px-4 py-3 text-xs text-slate-400">
+                  {i.gate_target_date ? i.gate_target_date.slice(0, 10) : '—'}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => markDone.mutate(i.id)}
+                    disabled={markDone.isPending}
+                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                  >
+                    Mark done
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function MyTasksPage() {
   const navigate = useNavigate();
   const { data: departments = [], isLoading: loadingDepts } = useDepartments();
@@ -114,6 +200,8 @@ export default function MyTasksPage() {
         <h1 className="text-2xl font-bold text-slate-100">My Tasks</h1>
         <p className="text-slate-400 text-sm mt-1">Active workflow tasks by department</p>
       </div>
+
+      <SepItemsSection />
 
       <LessonActionsSection />
 

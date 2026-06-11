@@ -95,6 +95,18 @@ export default function Dashboard() {
     refetchInterval: 60_000,
   });
 
+  const { data: sepOverview } = useQuery<Array<{
+    project_id: number;
+    project_name: string | null;
+    current_gate: string | null;
+    total: { pct: number };
+    gates: Array<{ id: number; code: string; seq: number; status: string; color: string; pct: number }>;
+  }>>({
+    queryKey: ['sep', 'overview'],
+    queryFn: async () => (await client.get('/v1/sep/overview')).data,
+    refetchInterval: 60_000,
+  });
+
   if (isLoading || !data) {
     return <div className="p-6 text-slate-400">Loading dashboard...</div>;
   }
@@ -151,6 +163,46 @@ export default function Dashboard() {
             <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-slate-300">
               Unlinked: <span className={`font-bold ${lessonKpis.unlinked ? 'text-amber-300' : 'text-emerald-400'}`}>{lessonKpis.unlinked}</span>
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* SEP R-grade overview */}
+      {sepOverview && sepOverview.length > 0 && (
+        <div className="mb-4 bg-slate-800 rounded-lg border border-slate-700 p-4">
+          <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+            🚦 SEP Q-Gates
+          </h2>
+          <div className="space-y-2">
+            {sepOverview.map((p) => (
+              <button
+                key={p.project_id}
+                onClick={() => navigate(`/projects/${p.project_id}`)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded border border-slate-700 bg-slate-900 hover:border-slate-500 text-left"
+              >
+                <span className="text-sm text-slate-200 min-w-[120px]">{p.project_name}</span>
+                <span className="flex gap-1">
+                  {p.gates.map((g) => (
+                    <span
+                      key={g.id}
+                      title={`${g.code}: ${g.pct}% (${g.status})`}
+                      className={`w-5 h-5 rounded text-[9px] flex items-center justify-center font-bold text-slate-900 ${
+                        g.status === 'pending'
+                          ? 'bg-slate-600 text-slate-300'
+                          : g.color === 'green' ? 'bg-emerald-500'
+                          : g.color === 'red' ? 'bg-red-500'
+                          : 'bg-amber-400'
+                      }`}
+                    >
+                      {g.code.split('/')[0]}
+                    </span>
+                  ))}
+                </span>
+                <span className="text-xs text-slate-400 ml-auto">
+                  {p.current_gate ? `current ${p.current_gate} · ` : ''}{p.total.pct}% total
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       )}

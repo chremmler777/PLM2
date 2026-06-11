@@ -1120,8 +1120,17 @@ async def create_reference(
         created_by=current_user.id,
     )
     db.add(ref)
+
+    # SEP integration: recording a reuse completes open "Lessons learned"
+    # checklist items in the project's current gate
+    from app.api.v1.timing.sep import mark_lessons_items_done
+    sep_items_done = await mark_lessons_items_done(db, body.project_id, current_user.id, lesson_id)
+
     await db.commit()
-    return {"id": ref.id, "lesson_id": lesson_id, "project_id": body.project_id, "note": ref.note}
+    return {
+        "id": ref.id, "lesson_id": lesson_id, "project_id": body.project_id,
+        "note": ref.note, "sep_items_completed": sep_items_done,
+    }
 
 
 @router.post("/{lesson_id}/comments", response_model=dict, status_code=status.HTTP_201_CREATED)

@@ -1,0 +1,1685 @@
+{
+ "source": "GB-DP-0001_SEP-Matrix_DE-EN_V01.xlsm",
+ "gates": [
+  {
+   "code": "K0/RG1",
+   "seq": 1,
+   "phase_de": "RFQ - Nomination",
+   "phase_en": "RFQ Nomination",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Herstellbarkeitsbewertung",
+     "title_en": "Feasibility assessment",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Risikobewertung durchführen",
+     "title_en": "Carry out risk assessment",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Kapazitätsprüfung",
+     "title_en": "Capacity check",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Unterlagen für die internen Fachbereiche erstellen zur Kostenermittlung",
+     "title_en": "Create documents for internal departments to determine costs",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Angebot erstellen",
+     "title_en": "Create offer",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Vertragsprüfung bei Auftragsvergabe",
+     "title_en": "Contract review when awarding contract",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 7,
+     "title_de": "Neuauftrag anlegen und Projektübergabe an Programm",
+     "title_en": "Create new order and hand over project to program",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 8,
+     "title_de": "Erstelllen der Investitionsplanung",
+     "title_en": "Create investment planning",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 9,
+     "title_de": "Technisches Konzept und Alternativen bewerten",
+     "title_en": "Evaluate technical concept and alternatives",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 10,
+     "title_de": "Benchmark koordinieren Lessons Learned andere Projekte",
+     "title_en": "Coordinate benchmark Lessons learned from other projects",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 11,
+     "title_de": "Patentrecherche/Patentanmeldung beauftragen (bei Bedarf)",
+     "title_en": "Commission patent research/patent application (if required)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 12,
+     "title_de": "Produktanforderungen festlegen",
+     "title_en": "Determine product requirements",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 13,
+     "title_de": "Prozessanforderungen festlegen",
+     "title_en": "Determine process requirements",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 14,
+     "title_de": "Erprobungsumfang und Teilebedarf für Erpobungen ermitteln (Gesetzeskonformität u. Produktsicherheit)",
+     "title_en": "Determine scope of testing and parts required for testing (legal compliance and product safety)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 15,
+     "title_de": "Kosten ermitteln für Entwicklungsumfang (sofern nicht extern angefragt über EK)",
+     "title_en": "Determine costs for scope of development (if not requested externally via EK)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 16,
+     "title_de": "Lessons Learned aus anderen Projekten",
+     "title_en": "Lessons learned from other projects",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 17,
+     "title_de": "Besondere Merkmale definieren",
+     "title_en": "Define special features",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 18,
+     "title_de": "Lastenheft und Spezifikationen prüfen",
+     "title_en": "Check requirements specification and specifications",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 19,
+     "title_de": "Grobterminplan erstellen",
+     "title_en": "Create rough schedule",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 20,
+     "title_de": "Toleranzen - FMK bewerten",
+     "title_en": "Evaluate tolerances - FMK",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 21,
+     "title_de": "Prüf und Validierungsumfänge festlegen",
+     "title_en": "Determine test and validation scopes",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 22,
+     "title_de": "Mess- und Prüfkonzept definieren",
+     "title_en": "Define measurement and test concept",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 23,
+     "title_de": "Kosten ermitteln für die Validierungs- und Serienbegleitenden Umfänge",
+     "title_en": "Determine costs for validation and series-related scopes",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 24,
+     "title_de": "Werkzeug- und Anbindungskonzeptekonzepte festlegen",
+     "title_en": "Define tool and connection concepts",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 25,
+     "title_de": "Kosten ermitteln für Werkzeuge",
+     "title_en": "Determine costs for tools",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 26,
+     "title_de": "Industrialisierungskonzept  festlegen und bewerten",
+     "title_en": "Define and evaluate industrialization concept",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 27,
+     "title_de": "Industriallisierungskosten und Prozesszeiten ermitteln",
+     "title_en": "Determine industrialization costs and process times",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 28,
+     "title_de": "Herstellbarkeitsbewertung durchführen",
+     "title_en": "Carry out a manufacturability assessment",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 29,
+     "title_de": "Kapazitätsprüfung durchführen",
+     "title_en": "Carry out a capacity check",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 30,
+     "title_de": "Industrialisierungskonzept mit festlegen und bewerten",
+     "title_en": "Determine and evaluate the industrialization concept",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 31,
+     "title_de": "Verpackungs- und Logistikkonzept mit festelegen und bewerten",
+     "title_en": "Determine and evaluate the packaging and logistics concept",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 32,
+     "title_de": "Flächenbedarfe festlegen und bestätigen",
+     "title_en": "Determine and confirm space requirements",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 33,
+     "title_de": "MTM starten und bewerten",
+     "title_en": "Start and evaluate MTM",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 34,
+     "title_de": "Potentielle Lieferanten mit festlegen  im Rahmen der Ausschreibung",
+     "title_en": "Identify potential suppliers as part of the tender",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 35,
+     "title_de": "Geheimhaltungssvereinbarungen",
+     "title_en": "Confidentiality Agreements",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 36,
+     "title_de": "Ausschreibungen im Rahmen des Sourcings",
+     "title_en": "Tenders as part of sourcing",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 37,
+     "title_de": "Freigabe zur Angebotserstellung",
+     "title_en": "Approval for preparing the offer",
+     "psp_no": null,
+     "department": "Managing Directors"
+    },
+    {
+     "item_no": 38,
+     "title_de": "Freigabe zur Angebotsversendung",
+     "title_en": "Approval for sending the offer",
+     "psp_no": null,
+     "department": "Managing Directors"
+    },
+    {
+     "item_no": 39,
+     "title_de": "Projektlegitimation bei Vergabe (Hr. Schmidt)",
+     "title_en": "Project legitimation upon award (Mr. Schmidt)",
+     "psp_no": null,
+     "department": "Managing Directors"
+    },
+    {
+     "item_no": 40,
+     "title_de": "Projektkosten / Entwicklungskosten planen (EP Leitung zu diesem Zeitpunkt)",
+     "title_en": "Plan project costs / development costs (EP management at this point)",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 41,
+     "title_de": "Projektziele festlegen (sofern hier schon machbar)",
+     "title_en": "Set project goals (if already feasible here)",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 42,
+     "title_de": "Projekt Klassifizierung vorhanden (TISAX)\nProject classification available (TISAX)",
+     "title_en": "Projekt Klassifizierung vorhanden (TISAX)\nProject classification available (TISAX)",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "K/RG2",
+   "seq": 2,
+   "phase_de": "Projektstart bis Ende Prototyp",
+   "phase_en": "Project start till end of Prototype",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Vertragsprüfung",
+     "title_en": "Contract review",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Änderungsmanagement",
+     "title_en": "Changemanagement",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Anpassen von Angeboten Beauftragungsstand zu Ist",
+     "title_en": "Adjustment of offers, commissioning, status to actual",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Rechnungsstellung veranlassen",
+     "title_en": "Initiate invoicing",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Teilepreislebenslauf erstellen",
+     "title_en": "Part price, create CV",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Leistungsbestätigungen einfordern",
+     "title_en": "Request confirmation of performance",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 7,
+     "title_de": "Projektauftrag intern unterzeichnen / Start Projekt",
+     "title_en": "Sign project order internal / start project",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 8,
+     "title_de": "Projektteam definieren",
+     "title_en": "Define project team",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 9,
+     "title_de": "TISAX Konformität Teeam prüfen und ggf. einsteuern\nReview TISAX compliance team and adjust if necessary",
+     "title_en": "TISAX Konformität Teeam prüfen und ggf. einsteuern\nReview TISAX compliance team and adjust if necessary",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 10,
+     "title_de": "Kick OFF Meeeting durchführen",
+     "title_en": "Hold kick-off meeting",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 11,
+     "title_de": "Arbeitspakete erstellen (Budgets)",
+     "title_en": "Create work packages (budgets)",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 12,
+     "title_de": "Projektterminplan erstellen",
+     "title_en": "Create project schedule",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 13,
+     "title_de": "Definition Meilensteine (Termine) und Q-Gate Reviews SEP-Matrix",
+     "title_en": "Definition of milestones (dates) and Q-Gate reviews SEP matrix",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 14,
+     "title_de": "Konzeptmuster erstellen und bewerten",
+     "title_en": "Create and evaluate concept samples and prototypes",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 15,
+     "title_de": "Machbarkeit der Designvorgaben verifizieren",
+     "title_en": "Verify feasibility of design specifications",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 16,
+     "title_de": "Funktionsmaßbetrachtung (FMK)",
+     "title_en": "Functional dimension analysis (FMK)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 17,
+     "title_de": "Starten der Design FMEA / CA-Simulation  (FEM Berechnungen) / wenn gefordert",
+     "title_en": "start of FMEA product / CA simulation (FEM calculations) / if required",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 18,
+     "title_de": "Prüfen ob Pflichtenhefte/Lastenghefte erstellt wurden",
+     "title_en": "Check whether specifications/requirements have been created",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 19,
+     "title_de": "Teilelebenslauf erstellen",
+     "title_en": "Create part history",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 20,
+     "title_de": "Poka Yoke berücksichtigen",
+     "title_en": "Take Poka Yoke into account",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 21,
+     "title_de": "Abschluss mit Leistungsbestätigung des Kunden",
+     "title_en": "Conclusion with confirmation of performance from the customer",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 22,
+     "title_de": "Lessons Learned  für Serienentwicklung",
+     "title_en": "Lesson learned for series development",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 23,
+     "title_de": "Unterstützung bei der Design FMEA, starten der Prozess FMEA",
+     "title_en": "Support with the Design FMEA, start the Process FMEA",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 24,
+     "title_de": "Erstellen von Prüfanweisungen und Arbeitsanweisungen",
+     "title_en": "Create test instructions and work instructions",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 25,
+     "title_de": "DVP erstellen und abstimmen Prototypen",
+     "title_en": "Create DVP and coordinate prototypes",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 26,
+     "title_de": "Messauftrag erstellen, Messberichte Auswerten/Analysieren\nCreate measurement orders, evaluate/analyze measurement reports",
+     "title_en": "Messauftrag erstellen, Messberichte Auswerten/Analysieren\nCreate measurement orders, evaluate/analyze measurement reports",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 27,
+     "title_de": "Werkzeugspezifikationen erstellen  anhand Produktanforderungen",
+     "title_en": "Create tool specifications based on product requirements",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 28,
+     "title_de": "Lieferantensourcing und Beauftragung",
+     "title_en": "Supplier sourcing and commissioning",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 29,
+     "title_de": "Industrialisierungskonzept  festlegen und umsetzen (Proto)",
+     "title_en": "Define and implement industrialization concept",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 30,
+     "title_de": "Spezifikationen/ Lastenhefte erstellen",
+     "title_en": "Create specifications/requirements",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 31,
+     "title_de": "Flächenbedarfe festlegen inkl. Layout (Proto)",
+     "title_en": "Determine space requirements including layout",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 32,
+     "title_de": "Sicherstellen der EDI Anbindung an den Kunden",
+     "title_en": "Ensuring the EDI connection to the customer",
+     "psp_no": null,
+     "department": "Productionplanning"
+    },
+    {
+     "item_no": 33,
+     "title_de": "Verpackungs- und Logistikkonzept mit festelegen und umsetzen (Proto)",
+     "title_en": "Determining and implementing the packaging and logistics concept",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 34,
+     "title_de": "Industrialisierungskonzept mit festlegen und umsetzen",
+     "title_en": "Determining and implementing the industrialization concept",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 35,
+     "title_de": "Artikelstammdaten anlegen",
+     "title_en": "Creating item master data",
+     "psp_no": null,
+     "department": "Productionplanning"
+    },
+    {
+     "item_no": 36,
+     "title_de": "Geheimhaltungssvereinbarungen",
+     "title_en": "Confidentiality Agreements",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 37,
+     "title_de": "Ausschreibungen und Nominierung im Rahmen des Sourcings",
+     "title_en": "Tenders and nominations in the context of sourcing",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 38,
+     "title_de": "Tracken Cash In and Cash out Plan und Bereichterstattung",
+     "title_en": "Track Cash In and Cash out plan and reimbursement",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 39,
+     "title_de": "Meilenstein, Reifegrad, Termin, Projektkostencontrolling und Berichtserstattung",
+     "title_en": "milestone, maturity level, schedule, project cost controlling and reporting",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "E/RG3",
+   "seq": 3,
+   "phase_de": "Produktdesign und Entwicklung",
+   "phase_en": "Product design and development",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Anpassen von Angeboten im Rahmen der Serienentwicklung",
+     "title_en": "Adapting offers as part of series development",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Änderungsmanagement",
+     "title_en": "Changemanagement",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Teilepreislebenslauf pflegen",
+     "title_en": "Maintain part price history",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Leistungsbestätigungen einfordern",
+     "title_en": "Requesting confirmation of performance",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Rechnungsstellung veranlassen",
+     "title_en": "Initiate invoicing",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Funktionsmaßbetrachtung (FMK) finalisieren",
+     "title_en": "Finalize functional dimension analysis (FMK)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 7,
+     "title_de": "Abstimmung mit Fachbereichen bzgl. Machbarkeit und Risiko",
+     "title_en": "Coordination with specialist departments regarding feasibility and risk",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 8,
+     "title_de": "Erprobungenplan (DV-Plan) erstellen und abstimmen",
+     "title_en": "Create and coordinate test plan (DV plan)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 9,
+     "title_de": "Anpassen der Design FMEA Produkt / CA-Simulation  (FEM Berechnungen)",
+     "title_en": "Adapting the Design FMEA product / CA simulation (FEM calculations",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 10,
+     "title_de": "Pflichtenhefte / Lastenhefte erstellen  wenn benötigt",
+     "title_en": "Create specifications / requirements specifications if required",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 11,
+     "title_de": "Poka Yoke berücksichtigen",
+     "title_en": "Take Poka Yoke into account",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 12,
+     "title_de": "Machbarkeit der Designvorgaben verifizieren",
+     "title_en": "Verify feasibility of design specifications",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 13,
+     "title_de": "Design Review anhand Kundenvorgaben (Projektteam)",
+     "title_en": "Design review based on customer specifications (project team)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 14,
+     "title_de": "Rückführung Änderungen gegenüber Angebotsstand (z.B. Gewicht)",
+     "title_en": "Feedback of changes compared to offer status (e.g. weight)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 15,
+     "title_de": "B-Freigabeprozess intern starten mit Fachbereichen (Herstellbarkeitbewertung)",
+     "title_en": "Start B-approval process internally with specialist departments(Feasibility assessment)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 16,
+     "title_de": "B-Freigabeprozess extern starten (Kundenspezifisch)",
+     "title_en": "Start B-approval process externally (customer-specific)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 17,
+     "title_de": "Abschluss mit Leistungsbestätigung des Kunden",
+     "title_en": "Conclusion with performance confirmation from customer",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 18,
+     "title_de": "Unterstützen bei der Prozess FMEA",
+     "title_en": "Support Process FMEA",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 19,
+     "title_de": "Projektterminplan erstellen",
+     "title_en": "Create project schedule",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 20,
+     "title_de": "Abstimmung FAKOM / Grain and Color (Kundenspezifisch)",
+     "title_en": "Coordination FAKOM / Grain and Color (customer-specific)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 21,
+     "title_de": "Key Characteristics und Besondere Merkmale",
+     "title_en": "Key characteristics and special features",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 22,
+     "title_de": "Definition der  Prüf- und Validierungsumfänge und mit KD abstimmen  (Note 3 und 1)",
+     "title_en": "Provide support in defining the scope of testing and validation and coordinate with KD (grade 3 and 1)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 23,
+     "title_de": "Weiterführen der Prozess FMEA (Planungsphase = Unterstützung bei der Design FMEA)",
+     "title_en": "Continue the Process FMEA (planning phase = support for the Design FMEA",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 24,
+     "title_de": "Mess- und Prüfkonzept definieren und umsetzen (planen)",
+     "title_en": "Define and implement (plan) measurement and test concept",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 25,
+     "title_de": "Lastenhefte (Lehren) erstellen und freigeben",
+     "title_en": "Create and release specifications (gauges)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 26,
+     "title_de": "Überarbeiten von Prüfanweisungen und Arbeitsanweisungen",
+     "title_en": "Revise test instructions and work instructions",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 27,
+     "title_de": "Personalplanung abschließen",
+     "title_en": "Complete personnel planning",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 28,
+     "title_de": "Erstellen von Prüfplänen für Zulieferer und Wareneingangskontrolle",
+     "title_en": "Creating inspection plans for suppliers and incoming goods inspections",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 29,
+     "title_de": "Input bei der Produktgestaltung aus Sicht Einkauf (Lieferanten, Zukaufteile)",
+     "title_en": "Input in product design from a purchasing perspective (suppliers, purchased parts)",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 30,
+     "title_de": "Tracken Cash In and Cash out Plan und Bereichterstattung",
+     "title_en": "Track Cash In and Cash out plan and reimbursement",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 31,
+     "title_de": "Meilenstein, Reifegrad, Termin, Projektkostencontrolling und Berichtserstattung",
+     "title_en": "milestone, maturity level, schedule, project cost controlling and reporting",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "D/RG4",
+   "seq": 4,
+   "phase_de": "Prozessdesign und Entwicklung",
+   "phase_en": "Process design and development",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Teilepreislebenslauf pflegen",
+     "title_en": "Maintain part price history",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Änderungsmanagement",
+     "title_en": "Changemanagement",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Anpassen der Design FMEA Produkt / CA-Simulation  (FEM Berechnungen)",
+     "title_en": "Adapting the Design FMEA product / CA simulation (FEM calculations",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 4,
+     "title_de": "Weiterführen der Prozess FMEA (Planungsphase = Unterstützung bei der Design FMEA)",
+     "title_en": "Continue the Process FMEA (planning phase = support for the Design FMEA",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Werkzeugspezifikationen erstellen  anhand Produktanforderungen",
+     "title_en": "Create tool specifications based on product requirements",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 6,
+     "title_de": "Lieferantensourcing und Beauftragung",
+     "title_en": "Supplier sourcing and commissioning",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 7,
+     "title_de": "Werkzeugoptimierungen",
+     "title_en": "Tool optimizations",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 8,
+     "title_de": "CA-Simulation durchführen sofern Sinnvoll  (z.B. Füll- und Verzugsanalysen)",
+     "title_en": "Carry out CA simulation if appropriate (e.g. filling and warpage analyses)",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 9,
+     "title_de": "Werkzeugangebote überarbeiten im Rahmen der Sereienwticklung",
+     "title_en": "Revise tool offers as part of series development",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 10,
+     "title_de": "Flächenbedarfe festlegen inkl. Layout",
+     "title_en": "Determine space requirements including layout",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 11,
+     "title_de": "Arbeitsplatzgestaltung und Wertstromanalyse erstellen",
+     "title_en": "Create workplace design and value stream analysis",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 12,
+     "title_de": "Feinplanung neue Anlagen, Werkzeuge und Produktionsstätten",
+     "title_en": "Detailed planning for new systems, tools and production facilities",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 13,
+     "title_de": "Pflichten und Lastenhefte finalisieren und freigeben",
+     "title_en": "Finalize and release duties and specifications",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 14,
+     "title_de": "Flächenbedarfe festlegen inkl. Layout",
+     "title_en": "Determine space requirements including layout",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 15,
+     "title_de": "Lieferantensourcing und Beauftragung (Ausnahme Werkzeugbeschaffung)",
+     "title_en": "Supplier sourcing and commissioning (except tool procurement)",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 16,
+     "title_de": "Tracken Cash In and Cash out Plan und Bereichterstattung",
+     "title_en": "Track Cash In and Cash out plan and reimbursement",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 17,
+     "title_de": "Meilenstein, Reifegrad, Termin, Projektkostencontrolling und Berichtserstattung",
+     "title_en": "milestone, maturity level, schedule, project cost controlling and reporting",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "C/RG5",
+   "seq": 5,
+   "phase_de": "Umsetzungsphase",
+   "phase_en": "Implementation Phase",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Änderungsmanagement starten",
+     "title_en": "Start change management",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Anpassen von Angeboten im Rahmen des Änderungsmanagement",
+     "title_en": "Adapting offers as part of change management",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Teilepreislebenslauf pflegen",
+     "title_en": "Maintain part price history",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Vertragsprüfung",
+     "title_en": "Contract review",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Rechungsstellung veranlassen",
+     "title_en": "Initiate Invoicing",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Leistungsbestätigungen einfordern",
+     "title_en": "Requesting confirmation of performance",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 7,
+     "title_de": "Abschluss mit Leistungsbestätigung des Kunden",
+     "title_en": "Conclusion with performance confirmation from customer",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 8,
+     "title_de": "Bauteilanalysen, Bauteiloptimierung und Bauteilmatching durchführen",
+     "title_en": "Carry out Part analysis, Part optimization and Part matching",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 9,
+     "title_de": "Erprobungen durchführen gemäß Erprobungsplan Serie",
+     "title_en": "Carry out tests according to the series test plan",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 10,
+     "title_de": "Design FMEA lfd. aktualisieren (lebendes Dokument)",
+     "title_en": "Continuously update Design FMEA (living document)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 11,
+     "title_de": "Erarbeiten von Maßnahmen aus Erprobung und Umsetzung",
+     "title_en": "Development of measures from testing and implementation",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 12,
+     "title_de": "Produktionslenkungsplan Vorserie finalsieren= Produktionslenkungsplan Serie finalsieren (beginnen)",
+     "title_en": "Finalize pre-series production control plan = Finalize (start) production control plan for series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 13,
+     "title_de": "Prozess FMEA lfd. aktualisieren, Übernahme besondere Merkmale aus Design-FMEA)",
+     "title_en": "Continuously update process FMEA, adopt special features from design FMEA",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 14,
+     "title_de": "Prüfplanung  intern definieren Merkmale aus Controlplan",
+     "title_en": "Define test planning internally Features from control plan",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 15,
+     "title_de": "Fähigkeiten starten (Kurzzeitfähigkeit MFU / CMK, Gewicht, bzw. Schieblehrenmaße) = Phase B Vorserie",
+     "title_en": "Start capabilities (short-term capability MFU / CMK, weight, or caliper dimensions) = Phase B pre-series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 16,
+     "title_de": "Prüfmittel erstellen / abnehmen / freigeben (MSA 1 und MSA 2)",
+     "title_en": "Create / accept / release test equipment (MSA 1 and MSA 2)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 17,
+     "title_de": "Messauftrag erstellen, Messberichte Auswerten/Analysieren\nCreate measurement orders, evaluate/analyze measurement reports",
+     "title_en": "Messauftrag erstellen, Messberichte Auswerten/Analysieren\nCreate measurement orders, evaluate/analyze measurement reports",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 18,
+     "title_de": "Vorbereiten der Leistungstests = Phase B Vorserie",
+     "title_en": "Prepare performance tests = Phase B pre-series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 19,
+     "title_de": "Grenzmuster definieren und festlegen = Phase B Vorserie",
+     "title_en": "Define and specify limit samples = Phase B pre-series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 20,
+     "title_de": "Abstimmung Bemusterungsumfang Note 3 und 1 = Phase B/A",
+     "title_en": "Coordinate sampling scope grades 3 and 1 = Phase B/A",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 21,
+     "title_de": "Produktionsmappen erstellen Freigabe erfolgt in Phase B",
+     "title_en": "Create production folders Release takes place in Phase B",
+     "psp_no": null,
+     "department": "(to be defined)"
+    },
+    {
+     "item_no": 22,
+     "title_de": "Einsteuern von Bauteilvermessungen",
+     "title_en": "Control component measurements",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 23,
+     "title_de": "Messplan  abstimmen - Transfer der Daten zur Bauteilvermessung an den Messraum)",
+     "title_en": "Coordinate measurement plan - transfer of data for component measurement to the measuring room",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 24,
+     "title_de": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "title_en": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 25,
+     "title_de": "Produktionskonzept umsetzen",
+     "title_en": "Implement production concept",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 26,
+     "title_de": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "title_en": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 27,
+     "title_de": "Abnahme von Anlagen bei Lieferanten / Leistungstest",
+     "title_en": "Acceptance of systems from suppliers / performance test",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 28,
+     "title_de": "Vorbereitung der internen und externen Prozessserie / Leistungstest",
+     "title_en": "Preparation of the internal and external process series / performance test",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 29,
+     "title_de": "Mitarbeiterschulungen",
+     "title_en": "Employee training",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 30,
+     "title_de": "Umsetzung Produktions und Logistikkonzept",
+     "title_en": "Implementation of production and logistics concept",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 31,
+     "title_de": "Anlaufkurve für Mitarbeiterschulung zur Zielerreichung festlegen (Basis MTM)",
+     "title_en": "Define start-up curve for employee training to achieve goals (based on MTM)",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 32,
+     "title_de": "Einbinden Serienqualität",
+     "title_en": "Integration of series quality",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 33,
+     "title_de": "Lieferantenqaulifizierung",
+     "title_en": "Supplier qualification",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 34,
+     "title_de": "Beginn der Lieferfähigkeitsanalyse mit dem Lieferant für Vorserie und Serie",
+     "title_en": "Start of delivery capability analysis with the supplier for pre-series and series",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 35,
+     "title_de": "Verifizierung der Qualität von Kaufteilen",
+     "title_en": "Verification of the quality of purchased parts",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 36,
+     "title_de": "Beginn Erstmusterabnahme Lieferanten",
+     "title_en": "Start of initial sample acceptance from suppliers",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 37,
+     "title_de": "Tracken Cash In and Cash out Plan und Bereichterstattung",
+     "title_en": "Track Cash In and Cash out plan and reimbursement",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 38,
+     "title_de": "Meilenstein, Reifegrad, Termin, Projektkostencontrolling und Berichtserstattung",
+     "title_en": "milestone, maturity level, schedule, project cost controlling and reporting",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "B/RG6",
+   "seq": 6,
+   "phase_de": "Vorserie",
+   "phase_en": "Pre-series",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Änderungsmanagement",
+     "title_en": "Changemanagement",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Anpassen von Angeboten im Rahmen des Änderungsmanagement",
+     "title_en": "Adapting offers as part of change management",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Teilepreislebenslauf pflegen",
+     "title_en": "Maintain part price history",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Vertragsprüfung",
+     "title_en": "Contract review",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 5,
+     "title_de": "Nachkalkulationen",
+     "title_en": "Follow-up calculations",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Leistungsbestätigungen einfordern",
+     "title_en": "Requesting confirmation of performance",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 7,
+     "title_de": "Rechnungsstellung veranlassen",
+     "title_en": "Initiate invoicing",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 8,
+     "title_de": "Abschluss mit Leistungsbestätigung des Kunden",
+     "title_en": "Conclusion with performance confirmation from customer",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 9,
+     "title_de": "Bauteiloptimierung und Bauteilmatching abschließen bis AP",
+     "title_en": "Complete component optimization and component matching by AP",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 10,
+     "title_de": "Erprobungen mit grün abschließen bis AP",
+     "title_en": "Complete tests with green by AP",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 11,
+     "title_de": "Sicherstellung Meilenstein Note 3",
+     "title_en": "Ensure milestone grade 3",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 12,
+     "title_de": "Sicherstellen der Anlauftauglichkeit",
+     "title_en": "Ensure start-up suitability",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 13,
+     "title_de": "Design FMEA lfd. aktualisieren (lebendes Dokument)",
+     "title_en": "Continuously update Design FMEA (living document)",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 14,
+     "title_de": "Abweichungen anhand Leistungstest aufzeigen und optmieren",
+     "title_en": "Identify and optimize deviations using performance tests",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 15,
+     "title_de": "Produktionslenkungsplan Serie finalsieren",
+     "title_en": "Finalize production control plan for series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 16,
+     "title_de": "Prozess FMEA lfd. aktualisieren (lebendes Dokument), Unterstützung bei der Design FMEA)",
+     "title_en": "Continuously update Process FMEA (living document)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 17,
+     "title_de": "Aktive Unterstützung Leistungstest / R&R / PZS / OEE Kennzahlen intern / extern",
+     "title_en": "Active support for performance test / R&R / PZS / OEE key figures internally / externally",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 18,
+     "title_de": "Bewertung der Kurzzeitfähigkeiten CP und CPK",
+     "title_en": "Assessment of short-term capabilities CP and CPK",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 19,
+     "title_de": "Produktionsmappen erstellen und für Serie freigeben",
+     "title_en": "Create production folders and release them for series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 20,
+     "title_de": "Grenzmuster durch KD freigeben lassen",
+     "title_en": "Have limit samples approved by KD",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 21,
+     "title_de": "Erstbemusterung Kunde Note 3 gemäß abgestimmten BAG (KD Forderung), KD-Portal, IMDS",
+     "title_en": "Initial sampling customer grade 3 according to agreed BAG (KD requirement), KD portal, IMDS",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 22,
+     "title_de": "Unterstützung bzgl. Bewertung Bauteilreifegrad intern und mit KD",
+     "title_en": "Support regarding assessment of component maturity level internally and with KD",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 23,
+     "title_de": "Fähigkeiten mit Lehren starten (Kurzzeitfähigkeit MFU und FMK Merkmale) = Phase B Vorserie",
+     "title_en": "Start capabilities with gauges (short-term capability MFU and FMK characteristics) = Phase B pre-series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 24,
+     "title_de": "Vorbereitung Übergabe QVP an Serienqualität (siehe Projektübergabeformular Projektleiter)",
+     "title_en": "Preparation for handover of QVP to series quality (see project handover form project manager)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 25,
+     "title_de": "Durchführung VDA 6.3 Audit im Zuge der PZS",
+     "title_en": "Implementation of VDA 6.3 audit as part of the PZS",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 26,
+     "title_de": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "title_en": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 27,
+     "title_de": "Start Übergabe Serienwerkzeuge an Produktionswerk",
+     "title_en": "Start handover of series tools to the production plant",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 28,
+     "title_de": "Wartungsintervalle der Fertigungseinrichtungen festlegen",
+     "title_en": "Determine maintenance intervals for production equipment",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 29,
+     "title_de": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "title_en": "Sicherstellung Reifegrad Serienbetriebsmittel und das Vorgabewerte erreicht werden. (z.B. Zykluszeit) \nEnsuring the maturity level of series production equipment, ensuring that target values ​​​​are achieved (e.g., cycle time)",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 30,
+     "title_de": "Start Übergabe Montage und Automationsequipment an Produktionswerk bis AP",
+     "title_en": "Start handover of assembly and automation equipment to production plant up to AP",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 31,
+     "title_de": "Ersatzteilpaket und Notfallstrategie festlegen",
+     "title_en": "Determine spare parts package and emergency strategy",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 32,
+     "title_de": "Durchführen Leistungstest / Prozessabnahme/ Ermittlung OEE-Kennzahlen",
+     "title_en": "Conduct performance test / process acceptance / determination of OEE indicators",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 33,
+     "title_de": "Unterstützung bei der Implementierung der Serienbetriebsmittel in das Werk",
+     "title_en": "Support in the implementation of series production equipment in the factory",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 34,
+     "title_de": "Optimierungen der Produktionsprozesse und Sicherstellung Anlauftauglichkeit",
+     "title_en": "Optimization of production processes and ensuring start-up suitability",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 35,
+     "title_de": "Unterstützung  der Leistungstest / Prozessabnahme/ Ermittlung OEE-Kennzahlen",
+     "title_en": "Support of performance tests / process acceptance / determination of OEE indicators",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 36,
+     "title_de": "Bereitstellung von geschultem Person für die Leistungstests intern und extern",
+     "title_en": "Provision of trained persons for performance tests internally and externally",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 37,
+     "title_de": "Stammdaten aktualisieren",
+     "title_en": "Update master data",
+     "psp_no": null,
+     "department": "Productionplanning"
+    },
+    {
+     "item_no": 38,
+     "title_de": "Starten Produktionsmittel und Prozesse abnmehmen bis Ende Vorserie",
+     "title_en": "Start acceptance of production equipment and processes until the end of the pre-series",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 39,
+     "title_de": "Einbindung Serienqualität und Übernahme Projekt",
+     "title_en": "Integration of series quality and project takeover",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 40,
+     "title_de": "Erstbemusterung Note 3 abschließen Lieferanten",
+     "title_en": "Complete initial sampling grade 3 Suppliers",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 41,
+     "title_de": "Abschluss von Rahmenverträgen für Serie",
+     "title_en": "Conclusion of framework agreements for series",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 42,
+     "title_de": "Tracken Cash In and Cash out Plan und Bereichterstattung",
+     "title_en": "Track Cash In and Cash out plan and reimbursement",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 43,
+     "title_de": "Meilenstein, Reifegrad, Termin, Projektkostencontrolling und Berichtserstattung",
+     "title_en": "milestone, maturity level, schedule, project cost controlling and reporting",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  },
+  {
+   "code": "A/RG7",
+   "seq": 7,
+   "phase_de": "Serie",
+   "phase_en": "Series",
+   "items": [
+    {
+     "item_no": 1,
+     "title_de": "Änderungsmanagement",
+     "title_en": "Changemanagement",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 2,
+     "title_de": "Teilepreislebenslauf pflegen",
+     "title_en": "Maintain part price history",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 3,
+     "title_de": "Rechnungsstellung veranlassen",
+     "title_en": "Initiate invoicing",
+     "psp_no": null,
+     "department": "Sales"
+    },
+    {
+     "item_no": 4,
+     "title_de": "Reifegradentwicklung und Controlling",
+     "title_en": "Maturity Level development and controlling",
+     "psp_no": null,
+     "department": "Development / Project Mgmt."
+    },
+    {
+     "item_no": 5,
+     "title_de": "Sicherstellung Note 1 gemäß abgestimmten BAG",
+     "title_en": "Ensuring grade 1 according to agreed BAG",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 6,
+     "title_de": "Erstbemusterung Kunde Note 1",
+     "title_en": "Initial sampling customer grade 1",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 7,
+     "title_de": "Bewertung der Langzeitfähigkeiten",
+     "title_en": "Assessment of long-term capabilities",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 8,
+     "title_de": "Produktionsmappen für Serie freigeben und an QS Werk übergeben",
+     "title_en": "Release production folders for series and hand over to QS factory",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 9,
+     "title_de": "abgestimmte Muster / Grenzmuster incl. Grenzmusterkatalog an Serie übergeben",
+     "title_en": "Coordinated samples / limit samples including limit sample catalog handed over to series",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 10,
+     "title_de": "Abschluss Vorserienreklamationen",
+     "title_en": "Completion of pre-series complaints",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 11,
+     "title_de": "Übergabe QVP an Serienqualität (siehe Projektübergabeformular Projektleiter)",
+     "title_en": "Handover of QVP to series quality (see project handover form project manager)",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 12,
+     "title_de": "Aktive Unterstützung bei möglicher Hochlaufabsicherng KD",
+     "title_en": "Active support with possible ramp-up assurance KD",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 13,
+     "title_de": "3-6 monatige Unterstützung der Serie durch QVP",
+     "title_en": "3-6 month support of the series by QVP",
+     "psp_no": null,
+     "department": "Advanced Product Quality Planning"
+    },
+    {
+     "item_no": 14,
+     "title_de": "Abschluß Übergabe Serienwerkzeuge an Produktionswerk",
+     "title_en": "Completion of handover of series tools to the production plant",
+     "psp_no": null,
+     "department": "Tool Mgmt."
+    },
+    {
+     "item_no": 15,
+     "title_de": "Abschluss Übergabe Montage und Automationsequipment an Produktionswerk",
+     "title_en": "Completion of handover of assembly and automation equipment to the production plant",
+     "psp_no": null,
+     "department": "Industrial Enineering"
+    },
+    {
+     "item_no": 16,
+     "title_de": "Abarbeitung der offenen Themen aus Vorserie",
+     "title_en": "Processing of open issues from pre-series",
+     "psp_no": null,
+     "department": "Production"
+    },
+    {
+     "item_no": 17,
+     "title_de": "Erstbemusterung Note 1 abschließen Lieferanten",
+     "title_en": "Complete initial sampling grade 1 suppliers",
+     "psp_no": null,
+     "department": "Purchasing/Supplier Mgmt."
+    },
+    {
+     "item_no": 18,
+     "title_de": "Projektentlastung",
+     "title_en": "Project relief",
+     "psp_no": null,
+     "department": "Managing Directors"
+    },
+    {
+     "item_no": 19,
+     "title_de": "Unterstützung beim Projektabschluss",
+     "title_en": "Support with project completion",
+     "psp_no": null,
+     "department": "Project Controlling"
+    },
+    {
+     "item_no": 20,
+     "title_de": "Wurde TISAX konform gearbeitet\nWas TISAX compliant work carried out",
+     "title_en": "Wurde TISAX konform gearbeitet\nWas TISAX compliant work carried out",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 21,
+     "title_de": "Projektabschluss",
+     "title_en": "Project completion",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    },
+    {
+     "item_no": 22,
+     "title_de": "Projektentlastung einleiten",
+     "title_en": "Initiate project relief",
+     "psp_no": null,
+     "department": "Project Mgmt."
+    }
+   ]
+  }
+ ]
+}

@@ -31,8 +31,9 @@ from app.api.v1.quality.ppap import router as ppap_router
 # Module: supply (supplier master data)
 from app.api.v1.supply.suppliers import router as suppliers_router
 
-# Module: timing (project milestones / gates)
+# Module: timing (project milestones / gates, SEP Q-gates)
 from app.api.v1.timing.milestones import router as timing_router
+from app.api.v1.timing.sep import router as sep_router
 
 # Module: learning (lessons learned)
 from app.api.v1.learning.lessons import router as lessons_router
@@ -52,6 +53,7 @@ api_router.include_router(notifications_router)
 api_router.include_router(ppap_router)
 api_router.include_router(suppliers_router)
 api_router.include_router(timing_router)
+api_router.include_router(sep_router)
 api_router.include_router(lessons_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
