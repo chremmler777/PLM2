@@ -222,3 +222,27 @@ async def test_implementation_spawns_ecn_revision_per_item(
     res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
     items = res.json()["impacted_items"]
     assert all(i["resulting_revision_id"] is not None for i in items)
+
+
+async def test_release_activates_revisions_and_stamps_eng_level(
+    client, eng_auth, admin_auth, seed, departments
+):
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    cid = change["id"]
+    await client.post(f"/api/v1/changes/{cid}/customer-response",
+                      json={"response": "accepted"}, headers=eng_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
+    await _transition(client, eng_auth, cid, "approved")
+    await _transition(client, eng_auth, cid, "in_implementation")
+    res = await _transition(client, eng_auth, cid, "in_validation")
+    assert res.status_code == 200, res.text
+    res = await _transition(client, eng_auth, cid, "released")
+    assert res.status_code == 200, res.text
+
+    # each impacted part now points at its ECN revision as active
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    for item in detail["impacted_items"]:
+        rev_id = item["resulting_revision_id"]
+        part = (await client.get(f"/api/v1/parts/{item['part_id']}", headers=eng_auth)).json()
+        assert part["active_revision_id"] == rev_id

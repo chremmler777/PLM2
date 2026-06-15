@@ -258,7 +258,28 @@ class ChangeService:
     async def release(session: AsyncSession, change: ChangeRequest, user_id: int):
         change.released_at = datetime.utcnow()
         change.released_by = user_id
-        # full activate/supersede logic added in Task 12
+        for item in change.impacted_items:
+            if item.resulting_revision_id is None:
+                continue
+            rev = await session.get(PartRevision, item.resulting_revision_id)
+            part = await session.get(Part, item.part_id)
+            if rev is None or part is None:
+                continue
+            prior = part.active_revision_id
+            if prior is not None and prior != rev.id:
+                rev.supersedes_revision_id = prior
+            rev.status = "approved"
+            rev.approved_at = datetime.utcnow()
+            rev.approved_by = user_id
+            part.active_revision_id = rev.id
+            # stamp engineering level
+            item.eng_level_after = rev.revision_name
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "released",
+                f"Released revision {rev.revision_name} as active on part {part.id}",
+                user_id, new_value={"part_id": part.id, "revision_id": rev.id},
+            )
 
     @staticmethod
     async def add_impacted_item(
