@@ -205,3 +205,20 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
     res = await _transition(client, eng_auth, cid, "approved")
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "approved"
+
+
+async def test_implementation_spawns_ecn_revision_per_item(
+    client, eng_auth, admin_auth, seed, departments
+):
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    cid = change["id"]
+    await client.post(f"/api/v1/changes/{cid}/customer-response",
+                      json={"response": "accepted"}, headers=eng_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
+    await _transition(client, eng_auth, cid, "approved")
+    res = await _transition(client, eng_auth, cid, "in_implementation")
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
+    items = res.json()["impacted_items"]
+    assert all(i["resulting_revision_id"] is not None for i in items)

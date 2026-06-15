@@ -227,7 +227,32 @@ class ChangeService:
 
     @staticmethod
     async def spawn_ecn_revisions(session: AsyncSession, change: ChangeRequest, user_id: int):
-        return  # implemented in Task 11
+        for item in change.impacted_items:
+            if item.resulting_revision_id is not None:
+                continue
+            # count existing ECN revisions on this part for a simple unique name
+            result = await session.execute(
+                select(func.count()).select_from(PartRevision).where(
+                    (PartRevision.part_id == item.part_id) & (PartRevision.phase == "ecn")
+                )
+            )
+            n = (result.scalar() or 0) + 1
+            rev = PartRevision(
+                part_id=item.part_id,
+                revision_name=f"ECR{n}.1",
+                phase="ecn",
+                status="draft",
+                change_reason=f"{change.change_number}: {change.title}",
+                created_by=user_id,
+            )
+            session.add(rev)
+            await session.flush()
+            item.resulting_revision_id = rev.id
+            await ChangeService.append_changelog(
+                session, change, "revision_spawned",
+                f"Spawned ECN revision {rev.revision_name} on part {item.part_id}",
+                user_id, new_value={"revision_id": rev.id, "part_id": item.part_id},
+            )
 
     @staticmethod
     async def release(session: AsyncSession, change: ChangeRequest, user_id: int):
