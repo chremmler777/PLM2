@@ -133,3 +133,24 @@ async def seed_impacted_items(
     added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
     await db.commit()
     return {"added": added}
+
+
+@router.post("/{change_id}/assessments", response_model=AssessmentResponse)
+async def submit_assessment(
+    change_id: int, body: AssessmentSubmit,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        a = await ChangeService.submit_assessment(
+            db, change, body.department_id, body.verdict, current_user.id,
+            cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
+            conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
+        )
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(a)
+    return a

@@ -204,6 +204,8 @@ class ChangeService:
             forced = True
 
         # Side effects on entry
+        if to_status == "in_assessment":
+            await ChangeService.ensure_assessments(session, change, user_id)
         if to_status == "in_implementation":
             await ChangeService.spawn_ecn_revisions(session, change, user_id)
         if to_status == "released":
@@ -295,3 +297,55 @@ class ChangeService:
                     )
                     added += 1
         return added
+
+    @staticmethod
+    async def ensure_assessments(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> None:
+        existing = {a.department_id for a in change.assessments}
+        names = TYPE_DISCIPLINES.get(change.change_type, [])
+        if not names:
+            return
+        result = await session.execute(
+            select(Department).where(Department.name.in_(names))
+        )
+        for dep in result.scalars().all():
+            if dep.id not in existing:
+                session.add(ChangeAssessment(
+                    change_id=change.id, department_id=dep.id, verdict="pending",
+                ))
+        await session.flush()
+
+    @staticmethod
+    async def submit_assessment(
+        session: AsyncSession, change: ChangeRequest, department_id: int,
+        verdict: str, user_id: int, *, cost_impact=None, lead_time_impact_days=None,
+        conditions=None, notes=None, responsible_id=None,
+    ) -> ChangeAssessment:
+        if verdict not in ASSESSMENT_VERDICTS:
+            raise ChangeError(f"Invalid verdict '{verdict}'")
+        result = await session.execute(
+            select(ChangeAssessment).where(
+                (ChangeAssessment.change_id == change.id)
+                & (ChangeAssessment.department_id == department_id)
+            )
+        )
+        a = result.scalar_one_or_none()
+        if a is None:
+            a = ChangeAssessment(change_id=change.id, department_id=department_id)
+            session.add(a)
+        a.verdict = verdict
+        a.cost_impact = cost_impact
+        a.lead_time_impact_days = lead_time_impact_days
+        a.conditions = conditions
+        a.notes = notes
+        a.responsible_id = responsible_id
+        a.submitted_at = datetime.utcnow()
+        a.submitted_by = user_id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "assessment_submitted",
+            f"Assessment for dept {department_id}: {verdict}", user_id,
+            field_name="verdict", new_value=verdict,
+        )
+        return a

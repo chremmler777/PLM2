@@ -113,3 +113,47 @@ async def test_seed_impacted_from_relations(client, eng_auth, seed):
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
     part_ids = {i["part_id"] for i in res.json()["impacted_items"]}
     assert tool in part_ids  # the producing tool was pulled in
+
+
+import pytest_asyncio
+from app.models.workflow import Department
+
+
+@pytest_asyncio.fixture
+async def departments(session_factory):
+    async with session_factory() as s:
+        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
+        ids = {}
+        for i, n in enumerate(names):
+            d = Department(name=n, flow_type="action", is_active=True, sort_order=i)
+            s.add(d)
+            await s.flush()
+            ids[n] = d.id
+        await s.commit()
+        return ids
+
+
+async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments):
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
+    part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-9")
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part_id}, headers=eng_auth)
+    # enter assessment -> assessments auto-created
+    res = await _transition(client, eng_auth, change["id"], "in_assessment")
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
+    assessments = res.json()["assessments"]
+    assert len(assessments) >= 1
+    tool_dep = departments["Tool Engineer"]
+
+    # submitting feasible for all then moving to costing should work
+    for a in assessments:
+        r = await client.post(f"/api/v1/changes/{change['id']}/assessments", json={
+            "department_id": a["department_id"], "verdict": "feasible",
+        }, headers=eng_auth)
+        assert r.status_code in (200, 201), r.text
+
+    # costing still needs a quoted price guard? No - costing guard is assessments only
+    res = await _transition(client, eng_auth, change["id"], "costing")
+    assert res.status_code == 200, res.text
