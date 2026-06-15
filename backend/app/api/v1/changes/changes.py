@@ -1,18 +1,26 @@
 # backend/app/api/v1/changes/changes.py
 """Change Management endpoints - the change lifecycle spine."""
+import hashlib
 import logging
+import os
+import uuid
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, status
+from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import get_db, User
+from app.models.change import ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment
+from app.models.workflow import UserDepartment
 from app.services.change_service import ChangeService, ChangeError
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
     AssessmentSubmit, AssessmentResponse, CustomerResponseRequest, SignOffRequest,
+    ChangelogResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +71,18 @@ async def get_change(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return change
+
+
+@router.get("/{change_id}/changelog", response_model=List[ChangelogResponse])
+async def get_changelog(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ChangeChangelog).where(ChangeChangelog.change_id == change_id)
+        .order_by(ChangeChangelog.performed_at)
+    )
+    return result.scalars().all()
 
 
 @router.post("/{change_id}/transition", response_model=ChangeResponse)
