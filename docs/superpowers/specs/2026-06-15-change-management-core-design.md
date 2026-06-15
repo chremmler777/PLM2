@@ -1,7 +1,7 @@
 # Change Management — Core + Lifecycle (Sub-project #1)
 
 **Date:** 2026-06-15
-**Status:** Design approved (pending written-spec review)
+**Status:** Implemented (sub-project #1) on branch `feature/change-management` — backend 102 tests pass, frontend type-clean. See plan `docs/superpowers/plans/2026-06-15-change-management-core.md`.
 **Scope:** The spine of the Change Management module. First of seven planned sub-projects.
 
 ---
