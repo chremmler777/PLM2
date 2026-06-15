@@ -14,6 +14,7 @@ import PPAPSection from '../components/PPAPSection';
 import MilestoneStrip from '../components/MilestoneStrip';
 import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import ProjectSepSection from '../components/ProjectSepSection';
+import ProjectChangesSection from '../components/ProjectChangesSection';
 import { toast } from 'sonner';
 
 // Types
@@ -1022,6 +1023,8 @@ export default function ProjectDetailPage() {
       </div>
 
       <ProjectSepSection projectId={id} />
+
+      <ProjectChangesSection projectId={id} />
 
       <ProjectLessonsSection projectId={id} />
 
