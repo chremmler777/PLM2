@@ -9,6 +9,7 @@ import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import { rasicColors } from '../lib/constants';
 import client from '../api/client';
+import { changesApi } from '../api/changes';
 import { toast } from 'sonner';
 
 interface MyLessonAction {
@@ -185,6 +186,58 @@ function SepItemsSection() {
   );
 }
 
+function ChangeTasksSection() {
+  const navigate = useNavigate();
+
+  const { data: tasks = [] } = useQuery({
+    queryKey: ['change-my-tasks'],
+    queryFn: () => changesApi.myTasks(),
+    refetchInterval: 60_000,
+  });
+
+  if (tasks.length === 0) return null;
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+        🔄 Change Assessments ({tasks.length})
+      </h2>
+      <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-700 bg-slate-900">
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Change</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">Title</th>
+              <th className="px-4 py-3" />
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((t) => (
+              <tr
+                key={`${t.change_id}-${t.assessment_id}`}
+                className="border-b border-slate-700 last:border-0 hover:bg-slate-750"
+              >
+                <td className="px-4 py-3">
+                  <span className="font-mono text-slate-100">{t.change_number}</span>
+                </td>
+                <td className="px-4 py-3 text-slate-100">{t.title}</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => navigate(`/changes/${t.change_id}`)}
+                    className="text-xs px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"
+                  >
+                    Assess
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function MyTasksPage() {
   const navigate = useNavigate();
   const { data: departments = [], isLoading: loadingDepts } = useDepartments();
@@ -202,6 +255,8 @@ export default function MyTasksPage() {
       </div>
 
       <SepItemsSection />
+
+      <ChangeTasksSection />
 
       <LessonActionsSection />
 
