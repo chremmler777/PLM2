@@ -146,3 +146,89 @@ class ChangeService:
         q = q.order_by(ChangeRequest.id.desc())
         result = await session.execute(q)
         return result.scalars().all()
+
+    @staticmethod
+    async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
+        """Return None if soft-OK, else a human reason string (overridable)."""
+        if to_status == "in_assessment":
+            count = len(change.impacted_items)
+            if count == 0:
+                return "No impacted items added yet"
+            if change.lead_id is None:
+                return "No lead (project manager) assigned"
+        if to_status == "costing":
+            pending = [a for a in change.assessments if a.verdict == "pending"]
+            if not change.assessments or pending:
+                return "Not all discipline assessments are submitted"
+            if any(a.verdict == "not_feasible" for a in change.assessments):
+                return "An assessment is 'not_feasible' — explicit decision required"
+        if to_status == "quoted":
+            if change.quoted_price is None:
+                return "No quoted price recorded"
+        if to_status == "in_validation":
+            missing = [i for i in change.impacted_items if i.resulting_revision_id is None]
+            if missing:
+                return "Some impacted items have no resulting revision"
+        return None
+
+    @staticmethod
+    async def transition(
+        session: AsyncSession, change: ChangeRequest, to_status: str,
+        user_id: int, *, justification: Optional[str] = None,
+        cancellation_reason: Optional[str] = None,
+    ) -> ChangeRequest:
+        if to_status not in CHANGE_STATUSES:
+            raise ChangeError(f"Unknown status '{to_status}'")
+        allowed = ALLOWED_TRANSITIONS.get(change.status, set())
+        if to_status not in allowed:
+            raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
+
+        # HARD gate: quoted -> approved cannot be forced
+        if to_status == "approved":
+            if change.customer_response != "accepted":
+                raise ChangeError("Customer has not accepted the offer")
+            if change.pm_signed_by is None or change.quality_signed_by is None:
+                raise ChangeError("Both PM and Quality sign-off are required")
+
+        if to_status == "cancelled":
+            if not cancellation_reason:
+                raise ChangeError("cancellation_reason is required to cancel")
+            change.cancellation_reason = cancellation_reason
+            change.cancelled_at = datetime.utcnow()
+
+        forced = False
+        reason = await ChangeService._guard(session, change, to_status)
+        if reason is not None:
+            if not justification:
+                raise ChangeError(f"{reason}. Provide a justification to override.")
+            forced = True
+
+        # Side effects on entry
+        if to_status == "in_implementation":
+            await ChangeService.spawn_ecn_revisions(session, change, user_id)
+        if to_status == "released":
+            await ChangeService.release(session, change, user_id)
+        if to_status == "closed":
+            change.closed_at = datetime.utcnow()
+
+        old = change.status
+        change.status = to_status
+        await session.flush()
+        action = "forced_transition" if forced else "status_changed"
+        desc = f"{old} -> {to_status}" + (f" (forced: {justification})" if forced else "")
+        await ChangeService.append_changelog(
+            session, change, action, desc, user_id,
+            field_name="status", old_value=old, new_value=to_status,
+            notes=justification if forced else None,
+        )
+        return change
+
+    @staticmethod
+    async def spawn_ecn_revisions(session: AsyncSession, change: ChangeRequest, user_id: int):
+        return  # implemented in Task 11
+
+    @staticmethod
+    async def release(session: AsyncSession, change: ChangeRequest, user_id: int):
+        change.released_at = datetime.utcnow()
+        change.released_by = user_id
+        # full activate/supersede logic added in Task 12

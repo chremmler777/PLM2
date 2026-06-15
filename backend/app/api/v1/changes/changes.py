@@ -11,6 +11,7 @@ from app.models import get_db, User
 from app.services.change_service import ChangeService, ChangeError
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
+    TransitionRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,4 +61,26 @@ async def get_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    return change
+
+
+@router.post("/{change_id}/transition", response_model=ChangeResponse)
+async def transition_change(
+    change_id: int,
+    body: TransitionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.transition(
+            db, change, body.to_status, current_user.id,
+            justification=body.justification, cancellation_reason=body.cancellation_reason,
+        )
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
     return change
