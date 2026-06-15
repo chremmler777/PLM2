@@ -223,3 +223,44 @@ async def sign_off(
     await db.commit()
     await db.refresh(change)
     return change
+
+
+@router.post("/{change_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_attachment(
+    change_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    contents = await file.read()
+    if len(contents) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+    uploads_dir = os.path.join(os.getcwd(), "uploads", "changes", str(change_id))
+    os.makedirs(uploads_dir, exist_ok=True)
+    safe_name = os.path.basename(file.filename or "attachment.bin")
+    stored_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}_{safe_name}")
+    with open(stored_path, "wb") as fh:
+        fh.write(contents)
+    att = await ChangeService.add_attachment(
+        db, change, filename=safe_name, stored_path=stored_path,
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
+        user_id=current_user.id,
+    )
+    await db.commit()
+    return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes}
+
+
+@router.get("/{change_id}/attachments/{attachment_id}/download")
+async def download_attachment(
+    change_id: int, attachment_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    att = await db.get(ChangeAttachment, attachment_id)
+    if not att or att.change_id != change_id or not os.path.exists(att.stored_path):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return FileResponse(att.stored_path, filename=att.filename,
+                        media_type=att.content_type or "application/octet-stream")

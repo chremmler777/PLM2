@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
+    ChangeAttachment,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES,
 )
@@ -451,3 +452,21 @@ class ChangeService:
             field_name=f"{role}_signed_by", new_value=user_id,
         )
         return change
+
+    @staticmethod
+    async def add_attachment(
+        session: AsyncSession, change: ChangeRequest, *, filename: str,
+        stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
+    ) -> ChangeAttachment:
+        att = ChangeAttachment(
+            change_id=change.id, filename=filename, stored_path=stored_path,
+            content_type=content_type, size_bytes=size_bytes, sha256=sha256,
+            uploaded_by=user_id,
+        )
+        session.add(att)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "attachment_added", f"Attached {filename}", user_id,
+            new_value={"filename": filename},
+        )
+        return att

@@ -257,3 +257,17 @@ async def test_changelog_is_hash_chained(client, eng_auth, seed):
     assert len(entries) >= 2  # created + status_changed
     actions = [e["action"] for e in entries]
     assert "created" in actions
+
+
+async def test_attach_document_to_change(client, eng_auth, seed):
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    files = {"file": ("ecr-start.pptx",
+                      b"PK\x03\x04 fake pptx bytes",
+                      "application/vnd.openxmlformats-officedocument.presentationml.presentation")}
+    res = await client.post(f"/api/v1/changes/{change['id']}/attachments",
+                            files=files, headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    # appears on the detail payload
+    detail = (await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)).json()
+    assert len(detail["attachments"]) == 1
+    assert detail["attachments"][0]["filename"] == "ecr-start.pptx"
