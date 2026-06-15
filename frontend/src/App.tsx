@@ -19,6 +19,8 @@ import Dashboard from './pages/Dashboard';
 import SuppliersPage from './pages/SuppliersPage';
 import LessonsLearnedPage from './pages/LessonsLearnedPage';
 import LessonsKpiBoardPage from './pages/LessonsKpiBoardPage';
+import ChangesPage from './pages/ChangesPage';
+import ChangeDetailPage from './pages/ChangeDetailPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -115,6 +117,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <LessonsKpiBoardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/changes"
+        element={
+          <ProtectedRoute>
+            <ChangesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/changes/:id"
+        element={
+          <ProtectedRoute>
+            <ChangeDetailPage />
           </ProtectedRoute>
         }
       />
