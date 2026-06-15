@@ -87,7 +87,7 @@ class ChangeRequest(Base):
     )
     changelog_entries: Mapped[list["ChangeChangelog"]] = relationship(
         back_populates="change", cascade="all, delete-orphan",
-        order_by="ChangeChangelog.performed_at",
+        order_by="ChangeChangelog.performed_at, ChangeChangelog.id",
     )
 
 

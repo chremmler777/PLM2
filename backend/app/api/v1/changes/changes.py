@@ -108,7 +108,7 @@ async def get_changelog(
 ):
     result = await db.execute(
         select(ChangeChangelog).where(ChangeChangelog.change_id == change_id)
-        .order_by(ChangeChangelog.performed_at)
+        .order_by(ChangeChangelog.performed_at, ChangeChangelog.id)
     )
     return result.scalars().all()
 
