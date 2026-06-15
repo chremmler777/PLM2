@@ -271,3 +271,25 @@ async def test_attach_document_to_change(client, eng_auth, seed):
     detail = (await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)).json()
     assert len(detail["attachments"]) == 1
     assert detail["attachments"][0]["filename"] == "ecr-start.pptx"
+
+
+async def test_my_change_tasks_lists_pending_assessments(
+    client, eng_auth, seed, departments, session_factory
+):
+    # assign engineer to "Tool Engineer" department
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"],
+                             department_id=departments["Tool Engineer"]))
+        await s.commit()
+
+    change = await _create_change(client, eng_auth, seed["project_id"], lead_id=seed["engineer_id"])
+    part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-MT")
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part_id}, headers=eng_auth)
+    await _transition(client, eng_auth, change["id"], "in_assessment")
+
+    res = await client.get("/api/v1/changes/my-tasks", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    tasks = res.json()
+    assert any(t["change_id"] == change["id"] and t["kind"] == "assessment" for t in tasks)

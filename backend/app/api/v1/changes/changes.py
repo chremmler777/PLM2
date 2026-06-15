@@ -61,6 +61,34 @@ async def list_changes(
     )
 
 
+@router.get("/my-tasks")
+async def my_change_tasks(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    # departments the user belongs to
+    dep_rows = await db.execute(
+        select(UserDepartment.department_id).where(UserDepartment.user_id == current_user.id)
+    )
+    dep_ids = {r[0] for r in dep_rows.all()}
+    tasks = []
+    if dep_ids:
+        rows = await db.execute(
+            select(ChangeAssessment, ChangeRequest)
+            .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
+            .where(
+                ChangeAssessment.department_id.in_(dep_ids)
+                & (ChangeAssessment.verdict == "pending")
+                & (ChangeRequest.status == "in_assessment")
+            )
+        )
+        for a, c in rows.all():
+            tasks.append({
+                "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
+                "title": c.title, "department_id": a.department_id, "assessment_id": a.id,
+            })
+    return tasks
+
+
 @router.get("/{change_id}", response_model=ChangeDetailResponse)
 async def get_change(
     change_id: int,
