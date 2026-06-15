@@ -154,3 +154,52 @@ async def submit_assessment(
     await db.commit()
     await db.refresh(a)
     return a
+
+
+@router.patch("/{change_id}", response_model=ChangeResponse)
+async def update_change(
+    change_id: int, body: ChangeUpdate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    await ChangeService.update_change(db, change, current_user.id,
+                                      **body.model_dump(exclude_unset=True))
+    await db.commit()
+    await db.refresh(change)
+    return change
+
+
+@router.post("/{change_id}/customer-response", response_model=ChangeResponse)
+async def customer_response(
+    change_id: int, body: CustomerResponseRequest,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.record_customer_response(db, change, body.response, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return change
+
+
+@router.post("/{change_id}/sign-off", response_model=ChangeResponse)
+async def sign_off(
+    change_id: int, body: SignOffRequest,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.sign_off(db, change, body.role, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return change

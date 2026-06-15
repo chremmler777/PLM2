@@ -349,3 +349,59 @@ class ChangeService:
             field_name="verdict", new_value=verdict,
         )
         return a
+
+    @staticmethod
+    async def update_change(
+        session: AsyncSession, change: ChangeRequest, user_id: int, **fields,
+    ) -> ChangeRequest:
+        allowed = {
+            "title", "reason", "description", "priority", "change_type", "lead_id",
+            "estimated_cost", "quoted_price", "pnl_note", "timing_milestone_id",
+        }
+        for k, v in fields.items():
+            if k in allowed and v is not None:
+                setattr(change, k, v)
+        change.updated_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "metadata_updated", "Change metadata updated", user_id,
+        )
+        return change
+
+    @staticmethod
+    async def record_customer_response(
+        session: AsyncSession, change: ChangeRequest, response: str, user_id: int,
+    ) -> ChangeRequest:
+        if response not in CUSTOMER_RESPONSES:
+            raise ChangeError(f"Invalid customer response '{response}'")
+        change.customer_response = response
+        change.customer_response_at = datetime.utcnow()
+        change.customer_response_by = user_id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "customer_response_recorded",
+            f"Customer response: {response}", user_id,
+            field_name="customer_response", new_value=response,
+        )
+        return change
+
+    @staticmethod
+    async def sign_off(
+        session: AsyncSession, change: ChangeRequest, role: str, user_id: int,
+    ) -> ChangeRequest:
+        if role not in SIGN_OFF_ROLES:
+            raise ChangeError(f"Invalid sign-off role '{role}'")
+        other = change.quality_signed_by if role == "pm" else change.pm_signed_by
+        if other is not None and other == user_id:
+            raise ChangeError("PM and Quality sign-off must be different users")
+        now = datetime.utcnow()
+        if role == "pm":
+            change.pm_signed_by, change.pm_signed_at = user_id, now
+        else:
+            change.quality_signed_by, change.quality_signed_at = user_id, now
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "signed_off", f"{role} sign-off", user_id,
+            field_name=f"{role}_signed_by", new_value=user_id,
+        )
+        return change

@@ -157,3 +157,51 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     # costing still needs a quoted price guard? No - costing guard is assessments only
     res = await _transition(client, eng_auth, change["id"], "costing")
     assert res.status_code == 200, res.text
+
+
+async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
+    change = await _create_change(client, auth, seed["project_id"], lead_id=seed["engineer_id"])
+    part_id = await _make_part(client, auth, seed["project_id"], f"ART-Q{change['id']}")
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part_id}, headers=auth)
+    await _transition(client, auth, change["id"], "in_assessment")
+    res = await client.get(f"/api/v1/changes/{change['id']}", headers=auth)
+    for a in res.json()["assessments"]:
+        await client.post(f"/api/v1/changes/{change['id']}/assessments",
+                          json={"department_id": a["department_id"], "verdict": "feasible"},
+                          headers=auth)
+    await _transition(client, auth, change["id"], "costing")
+    await client.patch(f"/api/v1/changes/{change['id']}",
+                       json={"quoted_price": 12500.0}, headers=auth)
+    await _transition(client, auth, change["id"], "quoted")
+    return change
+
+
+async def test_approve_blocked_until_customer_and_dual_signoff(
+    client, eng_auth, admin_auth, seed, departments
+):
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    cid = change["id"]
+    # cannot approve yet (no customer acceptance, no sign-off) — hard gate, no override
+    res = await _transition(client, eng_auth, cid, "approved", justification="please")
+    assert res.status_code == 400, res.text
+
+    # record customer acceptance
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response",
+                            json={"response": "accepted"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    # PM signs (engineer), Quality signs (admin) — must be different users
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    # same user cannot also be quality
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "quality"}, headers=eng_auth)
+    assert res.status_code == 400, res.text
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "quality"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    # now approve works
+    res = await _transition(client, eng_auth, cid, "approved")
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "approved"
