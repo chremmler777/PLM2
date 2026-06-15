@@ -15,7 +15,7 @@ from app.models.change import (
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES,
 )
-from app.models.part import Part, PartRevision
+from app.models.part import Part, PartRevision, PartRelation
 from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
@@ -232,3 +232,66 @@ class ChangeService:
         change.released_at = datetime.utcnow()
         change.released_by = user_id
         # full activate/supersede logic added in Task 12
+
+    @staticmethod
+    async def add_impacted_item(
+        session: AsyncSession, change: ChangeRequest, part_id: int,
+        user_id: int, *, impact_note: Optional[str] = None,
+        eng_level_before: Optional[str] = None,
+    ) -> ChangeImpactedItem:
+        part = await session.get(Part, part_id)
+        if not part or part.project_id != change.project_id:
+            raise ChangeError("Part not found in this project")
+        if any(i.part_id == part_id for i in change.impacted_items):
+            raise ChangeError("Item already impacted")
+        item = ChangeImpactedItem(
+            change_id=change.id, part_id=part_id, impact_note=impact_note,
+            eng_level_before=eng_level_before, created_by=user_id,
+        )
+        session.add(item)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "impacted_item_added",
+            f"Added impacted item {part.part_number}", user_id,
+            new_value={"part_id": part_id},
+        )
+        return item
+
+    @staticmethod
+    async def remove_impacted_item(
+        session: AsyncSession, change: ChangeRequest, item_id: int, user_id: int,
+    ) -> None:
+        item = await session.get(ChangeImpactedItem, item_id)
+        if not item or item.change_id != change.id:
+            raise ChangeError("Impacted item not found")
+        await session.delete(item)
+        await ChangeService.append_changelog(
+            session, change, "impacted_item_removed",
+            f"Removed impacted item {item.part_id}", user_id,
+            old_value={"part_id": item.part_id},
+        )
+
+    @staticmethod
+    async def seed_impacted_from_relations(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> int:
+        """For every currently-impacted part, pull in related parts (produces/checks/
+        assembles) that are not yet impacted. Returns count added."""
+        existing = {i.part_id for i in change.impacted_items}
+        added = 0
+        for part_id in list(existing):
+            result = await session.execute(
+                select(PartRelation).where(
+                    (PartRelation.from_part_id == part_id) | (PartRelation.to_part_id == part_id)
+                )
+            )
+            for rel in result.scalars().all():
+                other = rel.to_part_id if rel.from_part_id == part_id else rel.from_part_id
+                if other not in existing:
+                    existing.add(other)
+                    await ChangeService.add_impacted_item(
+                        session, change, other, user_id,
+                        impact_note=f"Linked via '{rel.relation_type}'",
+                    )
+                    added += 1
+        return added

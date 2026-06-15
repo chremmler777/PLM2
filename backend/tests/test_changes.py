@@ -65,3 +65,51 @@ async def test_cancel_requires_reason(client, eng_auth, seed):
                             cancellation_reason="Customer withdrew RFQ")
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "cancelled"
+
+
+async def _make_part(client, auth, project_id, number, category="article"):
+    res = await client.post("/api/v1/parts", json={
+        "project_id": project_id, "part_number": number, "name": number,
+        "part_type": "internal_mfg", "item_category": category,
+    }, headers=auth)
+    assert res.status_code in (200, 201), res.text
+    return res.json()["id"]
+
+
+async def test_add_and_remove_impacted_item(client, eng_auth, seed):
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-1")
+    res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                            json={"part_id": part_id, "impact_note": "wall thickness"},
+                            headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    item_id = res.json()["id"]
+
+    res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
+    assert len(res.json()["impacted_items"]) == 1
+
+    res = await client.delete(f"/api/v1/changes/{change['id']}/impacted-items/{item_id}",
+                              headers=eng_auth)
+    assert res.status_code in (200, 204), res.text
+    res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
+    assert res.json()["impacted_items"] == []
+
+
+async def test_seed_impacted_from_relations(client, eng_auth, seed):
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    article = await _make_part(client, eng_auth, seed["project_id"], "ART-2", "article")
+    tool = await _make_part(client, eng_auth, seed["project_id"], "TOOL-2", "tool")
+    # tool produces article
+    res = await client.post(f"/api/v1/parts/{tool}/relations", json={
+        "to_part_id": article, "relation_type": "produces",
+    }, headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    # add the article as impacted, then seed related items
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": article}, headers=eng_auth)
+    res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items/seed",
+                            headers=eng_auth)
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
+    part_ids = {i["part_id"] for i in res.json()["impacted_items"]}
+    assert tool in part_ids  # the producing tool was pulled in

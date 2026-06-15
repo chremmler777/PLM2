@@ -11,7 +11,8 @@ from app.models import get_db, User
 from app.services.change_service import ChangeService, ChangeError
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
-    TransitionRequest,
+    TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
+    AssessmentSubmit, AssessmentResponse, CustomerResponseRequest, SignOffRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,3 +85,51 @@ async def transition_change(
     await db.commit()
     await db.refresh(change)
     return change
+
+
+@router.post("/{change_id}/impacted-items", response_model=ImpactedItemResponse)
+async def add_impacted_item(
+    change_id: int, body: ImpactedItemCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        item = await ChangeService.add_impacted_item(
+            db, change, body.part_id, current_user.id,
+            impact_note=body.impact_note, eng_level_before=body.eng_level_before,
+        )
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.delete("/{change_id}/impacted-items/{item_id}", status_code=204)
+async def remove_impacted_item(
+    change_id: int, item_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.remove_impacted_item(db, change, item_id, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+
+
+@router.post("/{change_id}/impacted-items/seed")
+async def seed_impacted_items(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
+    await db.commit()
+    return {"added": added}
