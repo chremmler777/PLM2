@@ -175,3 +175,53 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed
                       json={"department_id": departments["APQP"], "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
+
+
+@pytest.mark.skip(reason="routes land in Task 7")
+async def test_deviation_requires_approval_then_clears(client, seed, ecr_template, departments):
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1}, headers=auth)
+    assert res.status_code == 200, res.text
+    routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
+    assert routing["deviation_status"] == "pending_approval"
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    for a in detail["assessments"]:
+        if a["rasic_letter"] in ("R", "A"):
+            await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                              json={"department_id": a["department_id"], "verdict": "feasible"}, headers=auth)
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Manufacturing Engineer"], "verdict": "feasible"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 400
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve", headers=auth)
+    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_apply_deviation_service(session_factory, seed, ecr_template, departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    cid = await _seeded_change(session_factory, seed)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"]); await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        r = await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add",
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+        await s.commit()
+        assert r.deviation_status == "pending_approval" and r.has_deviation is True
+        rows = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == departments["Manufacturing Engineer"])))).scalars().all()
+        assert len(rows) == 1 and rows[0].rasic_letter == "R"
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        # admin (different user) approves — proposer was engineer (the lead), so engineer cannot self-approve
+        r = await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"]); await s.commit()
+        assert r.deviation_status == "approved"

@@ -188,3 +188,90 @@ class ChangeRoutingService:
         )).scalars().all()
         blocking = [a for a in rows if a.rasic_letter in BLOCKING_LETTERS]
         return bool(blocking) and all(a.status == "submitted" for a in blocking)
+
+    @staticmethod
+    async def _routing(session: AsyncSession, change: ChangeRequest) -> ChangeRouting:
+        r = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if r is None:
+            raise ValueError("Change has no routing yet")
+        return r
+
+    @staticmethod
+    async def apply_deviation(session: AsyncSession, change: ChangeRequest, user_id: int, *,
+                              op: str, department_id: int, rasic_letter: Optional[str] = None,
+                              stage_order: Optional[int] = None) -> ChangeRouting:
+        from app.services.change_service import ChangeService  # local import avoids cycle
+        routing = await ChangeRoutingService._routing(session, change)
+        existing = (await session.execute(
+            select(ChangeAssessment).where(
+                (ChangeAssessment.change_id == change.id)
+                & (ChangeAssessment.department_id == department_id))
+        )).scalar_one_or_none()
+
+        if op == "add":
+            if rasic_letter not in TASK_LETTERS:
+                raise ValueError("add requires a task letter (R/A/S/C)")
+            order = stage_order or 1
+            if existing is None:
+                session.add(ChangeAssessment(
+                    change_id=change.id, department_id=department_id, verdict="pending",
+                    stage_order=order, rasic_letter=rasic_letter,
+                    status="active" if order <= await ChangeRoutingService._max_active_order(session, change) else "pending",
+                ))
+            else:
+                existing.rasic_letter = rasic_letter
+                existing.stage_order = order
+            desc = f"added dept {department_id} as {rasic_letter} in stage {order}"
+        elif op == "remove":
+            if existing is not None:
+                await session.delete(existing)
+            desc = f"removed dept {department_id}"
+        elif op == "reletter":
+            if rasic_letter not in TASK_LETTERS:
+                raise ValueError("reletter requires a task letter (R/A/S/C)")
+            if existing is None:
+                raise ValueError("no assessment to reletter")
+            existing.rasic_letter = rasic_letter
+            desc = f"re-lettered dept {department_id} to {rasic_letter}"
+        else:
+            raise ValueError(f"unknown op '{op}'")
+
+        routing.has_deviation = True
+        routing.deviation_status = "pending_approval"
+        routing.deviation_proposed_by = user_id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "routing_deviation", f"Routing deviation: {desc}", user_id)
+        return routing
+
+    @staticmethod
+    async def _max_active_order(session: AsyncSession, change: ChangeRequest) -> int:
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        active = [a.stage_order for a in rows if a.status == "active"]
+        return max(active) if active else 1
+
+    @staticmethod
+    async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int) -> ChangeRouting:
+        from app.services.change_service import ChangeService
+        routing = await ChangeRoutingService._routing(session, change)
+        if routing.deviation_status != "pending_approval":
+            raise ValueError("No deviation pending approval")
+        # No self-approval. If a non-lead proposed it, only the lead may approve. If the
+        # lead proposed it, anyone-but-the-proposer (i.e. the PM) may approve.
+        if routing.deviation_proposed_by == user_id:
+            raise ValueError("Cannot approve your own routing deviation")
+        if (change.lead_id is not None
+                and routing.deviation_proposed_by != change.lead_id
+                and user_id != change.lead_id):
+            raise ValueError("Only the change lead may approve this deviation")
+        routing.deviation_status = "approved"
+        routing.deviation_approved_by = user_id
+        routing.deviation_approved_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "routing_deviation_approved", "Routing deviation approved", user_id)
+        return routing
