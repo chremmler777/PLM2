@@ -87,6 +87,7 @@ async def my_change_tasks(
             .where(
                 ChangeAssessment.department_id.in_(dep_ids)
                 & (ChangeAssessment.verdict == "pending")
+                & (ChangeAssessment.status == "active")
                 & (ChangeRequest.status == "in_assessment")
             )
         )
