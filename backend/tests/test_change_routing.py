@@ -1,6 +1,7 @@
 # backend/tests/test_change_routing.py
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic
 from app.models.change import (
     ChangeRouting, ChangeRoutingStandard, BLOCKING_LETTERS, TASK_LETTERS,
@@ -78,3 +79,40 @@ async def test_resolve_fallback_to_type_disciplines(session_factory, departments
         # all fallback departments are blocking R
         assert all(d["rasic_letter"] == "R" for d in stages[0]["departments"])
         assert len(stages[0]["departments"]) >= 1
+
+
+async def _seeded_change(session_factory, seed, change_type="physical_part"):
+    """Create a captured change with one impacted part, directly via models."""
+    from app.models.change import ChangeRequest, ChangeImpactedItem
+    from app.models.part import Part
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-T-1", project_id=seed["project_id"],
+                          title="t", change_type=change_type, status="captured",
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"])
+        s.add(c); await s.flush()
+        await s.commit()
+        return c.id
+
+
+async def test_build_routing_generates_task_rows_excludes_informed(
+        session_factory, seed, ecr_template, departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment, ChangeRouting
+    cid = await _seeded_change(session_factory, seed)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(ChangeAssessment.change_id == cid))).scalars().all()
+        by_dep = {a.department_id: a for a in rows}
+        # Sales is I -> no row; Tool Eng(R, stage1), Quality(C, stage1), APQP(A, stage2)
+        assert departments["Sales"] not in by_dep
+        assert by_dep[departments["Tool Engineer"]].stage_order == 1
+        assert by_dep[departments["Tool Engineer"]].rasic_letter == "R"
+        assert by_dep[departments["Tool Engineer"]].status == "active"   # stage 1 activated
+        assert by_dep[departments["APQP"]].stage_order == 2
+        assert by_dep[departments["APQP"]].status == "pending"           # stage 2 not active yet
+        routing = (await s.execute(select(ChangeRouting).where(ChangeRouting.change_id == cid))).scalar_one()
+        assert routing.template_id == ecr_template
+        assert len(routing.standard_snapshot["stages"]) == 2
