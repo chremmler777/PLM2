@@ -80,6 +80,9 @@ class AssessmentResponse(BaseModel):
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
     submitted_at: Optional[datetime] = None
+    stage_order: int = 1
+    rasic_letter: str = "R"
+    status: str = "active"
 
     class Config:
         from_attributes = True

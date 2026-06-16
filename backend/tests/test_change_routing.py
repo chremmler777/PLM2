@@ -135,3 +135,43 @@ async def test_build_routing_is_idempotent(
         rows = (await s.execute(select(ChangeAssessment).where(ChangeAssessment.change_id == cid))).scalars().all()
         # Three task rows (Tool Eng, Quality, APQP) — Sales(I) excluded; no duplication.
         assert len(rows) == 3
+
+
+async def _login(client):
+    res = await client.post("/api/v1/auth/login", json={"email": "eng@test.io", "password": "eng-secret-12"})
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+async def _api_change_in_assessment(client, auth, seed):
+    body = {"project_id": seed["project_id"], "title": "Wall +0.2", "change_type": "physical_part",
+            "reason": "sink", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-R1",
+         "name": "ART-R1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "in_assessment"}, headers=auth)
+    return c
+
+
+async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed, ecr_template, departments):
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed)
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    # Quality (C, stage1) submitting alone must NOT advance to stage 2; costing blocked.
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Quality"], "verdict": "feasible"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 400, res.text  # Tool Engineer (R) still pending
+    # Submit Tool Engineer (R) -> stage 1 blocking done -> stage 2 activates (APQP)
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    apqp = next(a for a in detail["assessments"] if a["department_id"] == departments["APQP"])
+    assert apqp["status"] == "active"
+    # Costing still blocked until APQP (A) submits
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 400, res.text
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["APQP"], "verdict": "feasible"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text

@@ -158,11 +158,15 @@ class ChangeService:
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
         if to_status == "costing":
-            pending = [a for a in change.assessments if a.verdict == "pending"]
-            if not change.assessments or pending:
-                return "Not all discipline assessments are submitted"
-            if any(a.verdict == "not_feasible" for a in change.assessments):
+            from app.services.change_routing_service import ChangeRoutingService
+            if not await ChangeRoutingService.blocking_complete(session, change):
+                return "Not all responsible/accountable assessments are submitted"
+            submitted = [a for a in change.assessments if a.verdict != "pending"]
+            if any(a.verdict == "not_feasible" for a in submitted):
                 return "An assessment is 'not_feasible' — explicit decision required"
+            routing = change.routing
+            if routing is not None and routing.deviation_status == "pending_approval":
+                return "Routing deviation is pending approval"
         if to_status == "quoted":
             if change.quoted_price is None:
                 return "No quoted price recorded"
@@ -349,19 +353,8 @@ class ChangeService:
     async def ensure_assessments(
         session: AsyncSession, change: ChangeRequest, user_id: int,
     ) -> None:
-        existing = {a.department_id for a in change.assessments}
-        names = TYPE_DISCIPLINES.get(change.change_type, [])
-        if not names:
-            return
-        result = await session.execute(
-            select(Department).where(Department.name.in_(names))
-        )
-        for dep in result.scalars().all():
-            if dep.id not in existing:
-                session.add(ChangeAssessment(
-                    change_id=change.id, department_id=dep.id, verdict="pending",
-                ))
-        await session.flush()
+        from app.services.change_routing_service import ChangeRoutingService
+        await ChangeRoutingService.build_routing(session, change, user_id)
 
     @staticmethod
     async def submit_assessment(
@@ -389,7 +382,10 @@ class ChangeService:
         a.responsible_id = responsible_id
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
+        a.status = "submitted"
         await session.flush()
+        from app.services.change_routing_service import ChangeRoutingService
+        await ChangeRoutingService.maybe_advance(session, change, user_id)
         await ChangeService.append_changelog(
             session, change, "assessment_submitted",
             f"Assessment for dept {department_id}: {verdict}", user_id,

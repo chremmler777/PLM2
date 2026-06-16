@@ -150,3 +150,41 @@ class ChangeRoutingService:
                 body=f"Stage {stage_order} of '{change.title}' needs your assessment.",
                 link=f"/changes/{change.id}",
             )
+
+    @staticmethod
+    async def maybe_advance(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
+        """If the active stage's blocking (R/A) assessments are all submitted, activate
+        the next stage that has rows. C/S never block."""
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        if not rows:
+            return
+        all_orders = sorted({a.stage_order for a in rows})
+        # The "current" stage is the highest one that has already been activated —
+        # i.e. has any row no longer pending (active or submitted). Later stages are
+        # still entirely pending. A stage advances only once its blocking (R/A) rows
+        # are all submitted; C/S never block.
+        activated_orders = [
+            o for o in all_orders
+            if any(a.stage_order == o and a.status != "pending" for a in rows)
+        ]
+        if not activated_orders:
+            return
+        current = activated_orders[-1]
+        blocking = [a for a in rows if a.stage_order == current and a.rasic_letter in BLOCKING_LETTERS]
+        if any(a.status != "submitted" for a in blocking):
+            return  # still waiting on R/A
+        # Activate the next stage that still has pending rows.
+        for nxt in [o for o in all_orders if o > current]:
+            if any(a.stage_order == nxt and a.status == "pending" for a in rows):
+                await ChangeRoutingService.activate_stage(session, change, nxt)
+                return
+
+    @staticmethod
+    async def blocking_complete(session: AsyncSession, change: ChangeRequest) -> bool:
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        blocking = [a for a in rows if a.rasic_letter in BLOCKING_LETTERS]
+        return bool(blocking) and all(a.status == "submitted" for a in blocking)
