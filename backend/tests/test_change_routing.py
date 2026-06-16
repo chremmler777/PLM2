@@ -277,3 +277,29 @@ async def test_my_tasks_only_active_stage(client, seed, ecr_template, department
     # engineer is not a member of any department in this seed, so expect 0;
     # this asserts the endpoint runs and filters by active status without error.
     assert isinstance(tasks, list)
+
+
+@pytest.mark.asyncio
+async def test_my_tasks_active_stage_filter_exercised(
+        client, session_factory, seed, ecr_template, departments):
+    """Engineer is a member of an active-stage dept (Tool Engineer, stage 1) and a
+    pending-stage dept (APQP, stage 2). My-tasks must surface only the active one,
+    then flip to APQP once stage 1's blocking submit advances the change to stage 2."""
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=departments["Tool Engineer"]))
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=departments["APQP"]))
+        await s.commit()
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed)
+
+    dep_ids = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()}
+    assert departments["Tool Engineer"] in dep_ids   # active stage 1
+    assert departments["APQP"] not in dep_ids         # stage 2 still pending → hidden
+
+    # Submitting Tool Engineer (R) clears stage 1's blocking → stage 2 activates.
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+    dep_ids2 = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()}
+    assert departments["APQP"] in dep_ids2               # now active → visible
+    assert departments["Tool Engineer"] not in dep_ids2  # submitted → verdict no longer pending
