@@ -51,13 +51,13 @@ export const changesApi = {
     fd.append('file', file);
     return client.post(`/v1/changes/${id}/attachments`, fd).then((r) => r.data);
   },
+
+  getRouting: (id: number) =>
+    client.get<ChangeRouting>(`/v1/changes/${id}/routing`).then((r) => r.data),
+
+  postDeviation: (id: number, body: DeviationRequest) =>
+    client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation`, body).then((r) => r.data),
+
+  approveDeviation: (id: number) =>
+    client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/approve`).then((r) => r.data),
 };
-
-export const getChangeRouting = (id: number) =>
-  client.get<ChangeRouting>(`/v1/changes/${id}/routing`).then((r) => r.data);
-
-export const postDeviation = (id: number, body: DeviationRequest) =>
-  client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation`, body).then((r) => r.data);
-
-export const approveDeviation = (id: number) =>
-  client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/approve`).then((r) => r.data);
