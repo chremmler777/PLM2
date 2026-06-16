@@ -15,7 +15,7 @@ from app.models.change import (
     ChangeRequest, ChangeAssessment, ChangeRouting, ChangeRoutingStandard,
     BLOCKING_LETTERS, TASK_LETTERS,
 )
-from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic
+from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
 from app.services.notification_service import NotificationService
 
 
@@ -275,3 +275,73 @@ class ChangeRoutingService:
         await ChangeService.append_changelog(
             session, change, "routing_deviation_approved", "Routing deviation approved", user_id)
         return routing
+
+    @staticmethod
+    async def promote_to_standard(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
+        """If the change carries an approved deviation against a mapped template, bump
+        that template to v+1 (one step per stage), snapshot history, repoint standard."""
+        routing = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if routing is None or routing.deviation_status != "approved" or routing.template_id is None:
+            return  # nothing to promote (no deviation, or fallback routing had no template)
+
+        template = (await session.execute(
+            select(WfTemplate)
+            .where(WfTemplate.id == routing.template_id)
+            .options(selectinload(WfTemplate.stages).selectinload(WfStage.steps))
+        )).scalar_one_or_none()
+        if template is None:
+            return
+
+        # Build the new structure from the change's final assessments grouped by stage.
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        # carry over I departments from the snapshot
+        snapshot_stages = {st["stage_order"]: st for st in routing.standard_snapshot.get("stages", [])}
+        by_stage: dict[int, list[dict]] = {}
+        for a in rows:
+            by_stage.setdefault(a.stage_order, []).append(
+                {"department_id": a.department_id, "rasic_letter": a.rasic_letter})
+        for order, st in snapshot_stages.items():
+            for dep in st["departments"]:
+                if dep["rasic_letter"] == "I":
+                    by_stage.setdefault(order, []).append(dep)
+
+        # Drop old stages (cascade removes steps + rasic), then recreate.
+        for stage in list(template.stages):
+            await session.delete(stage)
+        await session.flush()
+
+        for order in sorted(by_stage):
+            stage = WfStage(template_id=template.id, stage_order=order, name=f"Stage {order}")
+            session.add(stage); await session.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"Stage {order}", position_in_stage=1)
+            session.add(step); await session.flush()
+            seen = set()
+            for dep in by_stage[order]:
+                key = (dep["department_id"], dep["rasic_letter"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                session.add(WfStepRasic(step_id=step.id, department_id=dep["department_id"],
+                                        rasic_letter=dep["rasic_letter"]))
+
+        template.version = (template.version or 1) + 1
+        template.updated_by = user_id
+        session.add(WfTemplateHistory(
+            template_id=template.id, version=template.version,
+            snapshot={"stages": [{"stage_order": o,
+                                  "departments": by_stage[o]} for o in sorted(by_stage)]},
+            changed_by=user_id,
+            change_note=f"Promoted from change {change.change_number} deviation",
+        ))
+        std = (await session.execute(
+            select(ChangeRoutingStandard).where(
+                ChangeRoutingStandard.change_type == change.change_type)
+        )).scalar_one_or_none()
+        if std is not None:
+            std.template_version = template.version
+            std.updated_by = user_id
+        await session.flush()

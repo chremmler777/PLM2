@@ -225,3 +225,40 @@ async def test_apply_deviation_service(session_factory, seed, ecr_template, depa
         # admin (different user) approves — proposer was engineer (the lead), so engineer cannot self-approve
         r = await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"]); await s.commit()
         assert r.deviation_status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_promotion_bumps_template_and_repoints_standard(
+        session_factory, seed, ecr_template, departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeRoutingStandard
+    from app.models.workflow import WfTemplate, WfTemplateHistory, WfStage, WfStep, WfStepRasic
+    cid = await _seeded_change(session_factory, seed)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add",
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.promote_to_standard(s, change, seed["admin_id"]); await s.commit()
+    async with session_factory() as s:
+        std = (await s.execute(select(ChangeRoutingStandard).where(
+            ChangeRoutingStandard.change_type == "physical_part"))).scalar_one()
+        tmpl = await s.get(WfTemplate, std.template_id)
+        assert tmpl.version == 2 and std.template_version == 2
+        hist = (await s.execute(select(WfTemplateHistory).where(
+            WfTemplateHistory.template_id == tmpl.id))).scalars().all()
+        assert any("CR-" in (h.change_note or "") for h in hist)
+        # new structure includes Manufacturing Engineer
+        stages = (await s.execute(select(WfStage).where(WfStage.template_id == tmpl.id))).scalars().all()
+        dep_ids = set()
+        for stg in stages:
+            steps = (await s.execute(select(WfStep).where(WfStep.stage_id == stg.id))).scalars().all()
+            for stp in steps:
+                ras = (await s.execute(select(WfStepRasic).where(WfStepRasic.step_id == stp.id))).scalars().all()
+                dep_ids |= {r.department_id for r in ras}
+        assert departments["Manufacturing Engineer"] in dep_ids

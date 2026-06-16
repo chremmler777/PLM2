@@ -285,6 +285,8 @@ class ChangeService:
                 f"Released revision {rev.revision_name} as active on part {part.id}",
                 user_id, new_value={"part_id": part.id, "revision_id": rev.id},
             )
+        from app.services.change_routing_service import ChangeRoutingService
+        await ChangeRoutingService.promote_to_standard(session, change, user_id)
 
     @staticmethod
     async def add_impacted_item(
