@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { CHANGE_STATUS_ORDER } from '../types/change';
+import AssessmentRouting from '../components/changes/AssessmentRouting';
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -137,7 +138,9 @@ export default function ChangeDetailPage() {
       )}
 
       {tab === 'assessments' && (
-        <ul className="text-sm divide-y border rounded-lg">
+        <div className="space-y-4">
+          <AssessmentRouting changeId={changeId} />
+          <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
             <li key={a.id} className="px-4 py-2 flex justify-between">
               <span>Dept #{a.department_id}</span>
@@ -145,7 +148,8 @@ export default function ChangeDetailPage() {
             </li>
           ))}
           {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
-        </ul>
+          </ul>
+        </div>
       )}
 
       {tab === 'commercial' && (
