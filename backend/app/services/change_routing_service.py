@@ -77,7 +77,11 @@ class ChangeRoutingService:
     @staticmethod
     async def build_routing(session: AsyncSession, change: ChangeRequest, user_id: int) -> ChangeRouting:
         """Idempotent: if routing already exists, do nothing. Otherwise snapshot the
-        standard, create assessment rows (pending), broadcast start, activate stage 1."""
+        standard, create assessment rows (pending), broadcast start, activate stage 1.
+
+        ``user_id`` is the actor initiating routing; reserved for future audit-log
+        attribution and intentionally unused here.
+        """
         existing = (await session.execute(
             select(ChangeRouting).where(ChangeRouting.change_id == change.id)
         )).scalar_one_or_none()

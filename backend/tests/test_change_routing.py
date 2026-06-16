@@ -116,3 +116,22 @@ async def test_build_routing_generates_task_rows_excludes_informed(
         routing = (await s.execute(select(ChangeRouting).where(ChangeRouting.change_id == cid))).scalar_one()
         assert routing.template_id == ecr_template
         assert len(routing.standard_snapshot["stages"]) == 2
+
+
+async def test_build_routing_is_idempotent(
+        session_factory, seed, ecr_template, departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment, ChangeRouting
+    cid = await _seeded_change(session_factory, seed)
+    # Build routing twice in separate sessions; the second call must be a no-op.
+    for _ in range(2):
+        async with session_factory() as s:
+            change = await s.get(ChangeRequest, cid)
+            await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+            await s.commit()
+    async with session_factory() as s:
+        routings = (await s.execute(select(ChangeRouting).where(ChangeRouting.change_id == cid))).scalars().all()
+        assert len(routings) == 1
+        rows = (await s.execute(select(ChangeAssessment).where(ChangeAssessment.change_id == cid))).scalars().all()
+        # Three task rows (Tool Eng, Quality, APQP) — Sales(I) excluded; no duplication.
+        assert len(rows) == 3
