@@ -303,3 +303,72 @@ async def test_my_tasks_active_stage_filter_exercised(
     dep_ids2 = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()}
     assert departments["APQP"] in dep_ids2               # now active → visible
     assert departments["Tool Engineer"] not in dep_ids2  # submitted → verdict no longer pending
+
+
+async def test_not_feasible_blocks_costing_until_justified(client, seed, departments):
+    auth = await _login(client)
+    # no ecr_template fixture here -> fallback single-stage all-R routing
+    body = {"project_id": seed["project_id"], "title": "NF", "change_type": "physical_part",
+            "reason": "x", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-NF",
+         "name": "ART-NF", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "in_assessment"}, headers=auth)
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    # submit all assessments, one as not_feasible
+    assessments = detail["assessments"]
+    assert assessments, "fallback should create assessments"
+    for i, a in enumerate(assessments):
+        verdict = "not_feasible" if i == 0 else "feasible"
+        await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                          json={"department_id": a["department_id"], "verdict": verdict}, headers=auth)
+    # costing soft-blocked due to not_feasible
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 400, res.text
+    # overridable with justification
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing", "justification": "risk accepted"}, headers=auth)
+    assert res.status_code == 200, res.text
+
+
+@pytest_asyncio.fixture
+async def ecr_template_3stage(session_factory, departments):
+    """stage1 Tool Engineer(R); stage2 Quality(C) ONLY (no blocking); stage3 APQP(A)."""
+    from app.models.workflow import WfTemplate, WfStage, WfStep, WfStepRasic
+    from app.models.change import ChangeRoutingStandard
+    async with session_factory() as s:
+        t = WfTemplate(name="ECR3", description="3-stage", version=1, is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [(1, [("Tool Engineer", "R")]), (2, [("Quality", "C")]), (3, [("APQP", "A")])]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=departments[name], rasic_letter=letter))
+        # map a DIFFERENT change_type so it doesn't clash with the ecr_template fixture's physical_part
+        s.add(ChangeRoutingStandard(change_type="tooling", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+        return t.id
+
+
+async def test_maybe_advance_cascades_through_optional_only_stage(
+        client, seed, ecr_template_3stage, departments):
+    auth = await _login(client)
+    body = {"project_id": seed["project_id"], "title": "casc", "change_type": "tooling",
+            "reason": "x", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-C1",
+         "name": "ART-C1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
+    await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "in_assessment"}, headers=auth)
+    # submit stage1 Tool Engineer (R) -> should cascade past the C-only stage2 and activate stage3 APQP
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    by_dep = {a["department_id"]: a for a in detail["assessments"]}
+    assert by_dep[departments["APQP"]]["status"] == "active"    # cascaded through stage 2
+    assert by_dep[departments["Quality"]]["status"] == "active"  # the optional stage was also activated

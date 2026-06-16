@@ -19,14 +19,6 @@ from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepR
 from app.services.notification_service import NotificationService
 
 
-# Legacy fallback (kept in sync with change_service.TYPE_DISCIPLINES).
-FALLBACK_DISCIPLINES = {
-    "physical_part": ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"],
-    "tooling":       ["Tool Engineer", "Process Engineer", "Manufacturing Engineer"],
-    "document_spec": ["Quality", "Project Manager"],
-    "process_im":    ["Process Engineer", "Manufacturing Engineer", "Quality"],
-    "packaging":     ["Packaging Engineer", "Quality", "Sales"],
-}
 
 
 def _first_stage_order(stages) -> int:
@@ -67,7 +59,8 @@ class ChangeRoutingService:
                 return template.id, template.version, stages
 
         # Fallback: single implicit stage, all blocking R, from discipline names.
-        names = FALLBACK_DISCIPLINES.get(change_type, [])
+        from app.services.change_service import TYPE_DISCIPLINES  # local import avoids circular-import at module load
+        names = TYPE_DISCIPLINES.get(change_type, [])
         rows = (await session.execute(
             select(Department).where(Department.name.in_(names))
         )).scalars().all() if names else []
@@ -154,7 +147,9 @@ class ChangeRoutingService:
     @staticmethod
     async def maybe_advance(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
         """If the active stage's blocking (R/A) assessments are all submitted, activate
-        the next stage that has rows. C/S never block."""
+        the next stage that has rows. C/S never block. Cascades through stages that have
+        no blocking rows (all-C/S stages) until it reaches one that has blocking rows
+        or runs out of stages."""
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
@@ -172,14 +167,22 @@ class ChangeRoutingService:
         if not activated_orders:
             return
         current = activated_orders[-1]
-        blocking = [a for a in rows if a.stage_order == current and a.rasic_letter in BLOCKING_LETTERS]
-        if any(a.status != "submitted" for a in blocking):
-            return  # still waiting on R/A
-        # Activate the next stage that still has pending rows.
-        for nxt in [o for o in all_orders if o > current]:
-            if any(a.stage_order == nxt and a.status == "pending" for a in rows):
-                await ChangeRoutingService.activate_stage(session, change, nxt)
-                return
+        while True:
+            blocking = [a for a in rows if a.stage_order == current and a.rasic_letter in BLOCKING_LETTERS]
+            if any(a.status != "submitted" for a in blocking):
+                return  # still waiting on R/A in the current stage
+            later = sorted({a.stage_order for a in rows if a.stage_order > current})
+            if not later:
+                return  # no more stages
+            nxt = later[0]
+            await ChangeRoutingService.activate_stage(session, change, nxt)
+            # Reflect the activation locally so the loop can re-evaluate the new current stage.
+            for a in rows:
+                if a.stage_order == nxt and a.status == "pending":
+                    a.status = "active"
+            current = nxt
+            # If nxt has no blocking rows, the top-of-loop check passes (empty any()=False)
+            # and we cascade onward to the subsequent stage.
 
     @staticmethod
     async def blocking_complete(session: AsyncSession, change: ChangeRequest) -> bool:
