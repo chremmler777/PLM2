@@ -7,7 +7,7 @@ ECN PartRevisions on each impacted part; on release those become active.
 """
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey
+from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -23,6 +23,10 @@ ASSESSMENT_VERDICTS = ("pending", "feasible", "feasible_with_conditions", "not_f
 CUSTOMER_RESPONSES = ("pending", "accepted", "declined", "negotiating")
 SIGN_OFF_ROLES = ("pm", "quality")
 TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
+
+BLOCKING_LETTERS = ("R", "A")
+TASK_LETTERS = ("R", "A", "S", "C")
+DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 
 
 class ChangeRequest(Base):
@@ -89,6 +93,9 @@ class ChangeRequest(Base):
         back_populates="change", cascade="all, delete-orphan",
         order_by="ChangeChangelog.performed_at, ChangeChangelog.id",
     )
+    routing: Mapped["ChangeRouting | None"] = relationship(
+        back_populates="change", cascade="all, delete-orphan", uselist=False, lazy="selectin"
+    )
 
 
 class ChangeImpactedItem(Base):
@@ -125,6 +132,10 @@ class ChangeAssessment(Base):
     lead_time_impact_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    stage_order: Mapped[int] = mapped_column(Integer, default=1)
+    rasic_letter: Mapped[str] = mapped_column(String(1), default="R")
+    status: Mapped[str] = mapped_column(String(20), default="active")  # pending|active|submitted|waived
 
     responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -178,6 +189,41 @@ class ChangeChangelog(Base):
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="changelog_entries", foreign_keys=[change_id])
     performed_by_user: Mapped["User"] = relationship(foreign_keys=[performed_by])
+
+
+class ChangeRouting(Base):
+    """Per-change snapshot of the standard RASIC routing + deviation governance state."""
+    __tablename__ = "change_routings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), unique=True, index=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("wf_templates.id"), nullable=True)
+    template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    standard_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    has_deviation: Mapped[bool] = mapped_column(default=False)
+    deviation_status: Mapped[str] = mapped_column(String(20), default="none")
+    deviation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deviation_proposed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deviation_approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deviation_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    change: Mapped["ChangeRequest"] = relationship(back_populates="routing", foreign_keys=[change_id])
+
+
+class ChangeRoutingStandard(Base):
+    """Maps a change_type to the standard ECR WfTemplate it routes through."""
+    __tablename__ = "change_routing_standards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_type: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("wf_templates.id"))
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # Import related models for relationship resolution
