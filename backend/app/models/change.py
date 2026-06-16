@@ -26,6 +26,7 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
+ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
 DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 
 
@@ -133,9 +134,9 @@ class ChangeAssessment(Base):
     conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    stage_order: Mapped[int] = mapped_column(Integer, default=1)
-    rasic_letter: Mapped[str] = mapped_column(String(1), default="R")
-    status: Mapped[str] = mapped_column(String(20), default="active")  # pending|active|submitted|waived
+    stage_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    rasic_letter: Mapped[str] = mapped_column(String(1), default="R", server_default="R")
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active")  # pending|active|submitted|waived
 
     responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

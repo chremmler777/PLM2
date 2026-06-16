@@ -58,8 +58,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table('change_routing_standards')
-    op.drop_table('change_routings')
-    op.drop_column('change_assessments', 'status')
-    op.drop_column('change_assessments', 'rasic_letter')
-    op.drop_column('change_assessments', 'stage_order')
+    from sqlalchemy import inspect
+    inspector = inspect(op.get_bind())
+    existing = inspector.get_table_names()
+
+    if 'change_routing_standards' in existing:
+        op.drop_table('change_routing_standards')
+    if 'change_routings' in existing:
+        op.drop_table('change_routings')
+
+    cols = {c['name'] for c in inspector.get_columns('change_assessments')}
+    for col in ('status', 'rasic_letter', 'stage_order'):
+        if col in cols:
+            op.drop_column('change_assessments', col)
