@@ -30,6 +30,39 @@ export interface Assessment {
   notes?: string | null;
   responsible_id?: number | null;
   submitted_at?: string | null;
+  stage_order: number;
+  rasic_letter: string;
+  status: string;
+}
+
+export interface RoutingDepartment {
+  department_id: number;
+  rasic_letter: 'R' | 'A' | 'S' | 'C' | 'I';
+  tier: 'blocking' | 'optional' | 'info';
+  status: 'pending' | 'active' | 'submitted' | 'waived' | null;
+  verdict: string | null;
+  assessment_id: number | null;
+}
+
+export interface RoutingStage {
+  stage_order: number;
+  departments: RoutingDepartment[];
+}
+
+export interface ChangeRouting {
+  change_id: number;
+  template_id: number | null;
+  template_version: number | null;
+  has_deviation: boolean;
+  deviation_status: 'none' | 'pending_approval' | 'approved';
+  stages: RoutingStage[];
+}
+
+export interface DeviationRequest {
+  op: 'add' | 'remove' | 'reletter';
+  department_id: number;
+  rasic_letter?: 'R' | 'A' | 'S' | 'C';
+  stage_order?: number;
 }
 
 export interface Attachment {
