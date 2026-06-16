@@ -139,3 +139,39 @@ class ChangeDetailResponse(ChangeResponse):
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []
+
+
+class RoutingDepartment(BaseModel):
+    department_id: int
+    rasic_letter: str
+    tier: str          # blocking | optional | info
+    status: Optional[str] = None     # None for info-only
+    verdict: Optional[str] = None
+    assessment_id: Optional[int] = None
+
+
+class RoutingStage(BaseModel):
+    stage_order: int
+    departments: List[RoutingDepartment] = []
+
+
+class RoutingResponse(BaseModel):
+    change_id: int
+    template_id: Optional[int] = None
+    template_version: Optional[int] = None
+    has_deviation: bool = False
+    deviation_status: str = "none"
+    stages: List[RoutingStage] = []
+
+
+class DeviationRequest(BaseModel):
+    op: str                       # add | remove | reletter
+    department_id: int
+    rasic_letter: Optional[str] = None
+    stage_order: Optional[int] = None
+
+
+class RoutingStandardUpsert(BaseModel):
+    change_type: str
+    template_id: int
+    template_version: int = 1

@@ -21,10 +21,19 @@ from app.schemas.change import (
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
     AssessmentSubmit, AssessmentResponse, CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
+    RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/changes", tags=["changes"])
+
+
+def _tier(letter: str) -> str:
+    if letter in ("R", "A"):
+        return "blocking"
+    if letter in ("S", "C"):
+        return "optional"
+    return "info"
 
 
 @router.post("", response_model=ChangeResponse)
@@ -89,6 +98,35 @@ async def my_change_tasks(
     return tasks
 
 
+@router.get("/routing-standards")
+async def list_routing_standards(db: AsyncSession = Depends(get_db),
+                                 current_user: User = Depends(get_current_user)):
+    from app.models.change import ChangeRoutingStandard
+    rows = (await db.execute(select(ChangeRoutingStandard))).scalars().all()
+    return [{"change_type": r.change_type, "template_id": r.template_id,
+             "template_version": r.template_version} for r in rows]
+
+
+@router.put("/routing-standards")
+async def upsert_routing_standard(body: RoutingStandardUpsert,
+                                  db: AsyncSession = Depends(get_db),
+                                  current_user: User = Depends(get_current_user)):
+    from app.models.change import ChangeRoutingStandard
+    row = (await db.execute(select(ChangeRoutingStandard).where(
+        ChangeRoutingStandard.change_type == body.change_type))).scalar_one_or_none()
+    if row is None:
+        row = ChangeRoutingStandard(change_type=body.change_type, template_id=body.template_id,
+                                    template_version=body.template_version, updated_by=current_user.id)
+        db.add(row)
+    else:
+        row.template_id = body.template_id
+        row.template_version = body.template_version
+        row.updated_by = current_user.id
+    await db.commit()
+    return {"change_type": body.change_type, "template_id": body.template_id,
+            "template_version": body.template_version}
+
+
 @router.get("/{change_id}", response_model=ChangeDetailResponse)
 async def get_change(
     change_id: int,
@@ -111,6 +149,68 @@ async def get_changelog(
         .order_by(ChangeChangelog.performed_at, ChangeChangelog.id)
     )
     return result.scalars().all()
+
+
+@router.get("/{change_id}/routing", response_model=RoutingResponse)
+async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    routing = change.routing
+    assess_by_dep = {a.department_id: a for a in change.assessments}
+    snapshot = routing.standard_snapshot if routing else {"stages": []}
+    stages = []
+    for st in snapshot.get("stages", []):
+        deps = []
+        for d in st["departments"]:
+            a = assess_by_dep.get(d["department_id"])
+            deps.append(RoutingDepartment(
+                department_id=d["department_id"], rasic_letter=d["rasic_letter"],
+                tier=_tier(d["rasic_letter"]),
+                status=(a.status if a else None), verdict=(a.verdict if a else None),
+                assessment_id=(a.id if a else None)))
+        stages.append(RoutingStage(stage_order=st["stage_order"], departments=deps))
+    return RoutingResponse(
+        change_id=change_id,
+        template_id=(routing.template_id if routing else None),
+        template_version=(routing.template_version if routing else None),
+        has_deviation=(routing.has_deviation if routing else False),
+        deviation_status=(routing.deviation_status if routing else "none"),
+        stages=stages)
+
+
+@router.post("/{change_id}/routing/deviation", response_model=RoutingResponse)
+async def post_deviation(change_id: int, body: DeviationRequest,
+                         db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    from app.services.change_routing_service import ChangeRoutingService
+    try:
+        await ChangeRoutingService.apply_deviation(
+            db, change, current_user.id, op=body.op, department_id=body.department_id,
+            rasic_letter=body.rasic_letter, stage_order=body.stage_order)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return await get_routing(change_id, db, current_user)
+
+
+@router.post("/{change_id}/routing/deviation/approve", response_model=RoutingResponse)
+async def approve_deviation(change_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    from app.services.change_routing_service import ChangeRoutingService
+    try:
+        await ChangeRoutingService.approve_deviation(db, change, current_user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return await get_routing(change_id, db, current_user)
 
 
 @router.post("/{change_id}/transition", response_model=ChangeResponse)

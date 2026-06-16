@@ -142,6 +142,11 @@ async def _login(client):
     return {"Authorization": f"Bearer {res.json()['access_token']}"}
 
 
+async def _login_admin(client):
+    res = await client.post("/api/v1/auth/login", json={"email": "admin@test.io", "password": "admin-secret-1"})
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
 async def _api_change_in_assessment(client, auth, seed):
     body = {"project_id": seed["project_id"], "title": "Wall +0.2", "change_type": "physical_part",
             "reason": "sink", "lead_id": seed["engineer_id"]}
@@ -177,7 +182,6 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed
     assert res.status_code == 200, res.text
 
 
-@pytest.mark.skip(reason="routes land in Task 7")
 async def test_deviation_requires_approval_then_clears(client, seed, ecr_template, departments):
     auth = await _login(client)
     c = await _api_change_in_assessment(client, auth, seed)
@@ -196,7 +200,8 @@ async def test_deviation_requires_approval_then_clears(client, seed, ecr_templat
                       json={"department_id": departments["Manufacturing Engineer"], "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400
-    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve", headers=auth)
+    admin_auth = await _login_admin(client)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve", headers=admin_auth)
     assert res.status_code == 200, res.text
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
