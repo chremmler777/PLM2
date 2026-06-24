@@ -85,3 +85,141 @@ async def test_summation_rolls_up_by_plant_and_department(session_factory, seed)
         assert summ["totals"]["grand_total"] == 200.0
         assert summ["by_plant"][0]["plant_id"] == plant.id
         assert summ["by_department"][0]["department_id"] == dep.id
+
+
+async def test_summation_multi_plant_and_multi_department(session_factory, seed):
+    """
+    Two plants × two departments → by_plant and by_department each have 2 entries
+    with independently verifiable numeric sub-totals.
+
+    Setup
+    -----
+    Plant A  (from seed)    rate 100 $/h  for dep_x
+    Plant B  (new)          rate 200 $/h  for dep_y
+
+    Cost lines (all on the SAME change, different assessments):
+      assessment_x (dep_x):
+        - plant_A, one_time,   2h internal + 10 external  → internal=200, external=10
+        - plant_A, lifecycle,  3h internal + 20 external  → internal=300, external=20
+      assessment_y (dep_y):
+        - plant_B, one_time,   1h internal + 5 external   → internal=200, external=5
+        - plant_B, lifecycle,  4h internal + 15 external  → internal=800, external=15
+
+    Expected by_plant:
+      plant_A: one_time_internal=200, one_time_external=10,
+               lifecycle_internal=300, lifecycle_external=20
+      plant_B: one_time_internal=200, one_time_external=5,
+               lifecycle_internal=800, lifecycle_external=15
+
+    Expected by_department:
+      dep_x: one_time_internal=200, one_time_external=10,
+             lifecycle_internal=300, lifecycle_external=20
+      dep_y: one_time_internal=200, one_time_external=5,
+             lifecycle_internal=800, lifecycle_external=15
+
+    Grand total = (200+10+300+20) + (200+5+800+15) = 530 + 1020 = 1550
+    """
+    from sqlalchemy import select
+    from datetime import date
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.change_cost import DepartmentRate
+    from app.models.workflow import Department
+    from app.models.entities import Organization, Plant
+    from app.services.cost_service import CostService
+
+    async with session_factory() as s:
+        # Plant A comes from seed fixture (already exists)
+        plant_a = (await s.execute(select(Plant))).scalars().first()
+
+        # Plant B — new plant
+        org_id = (await s.execute(select(Plant))).scalars().first().organization_id
+        plant_b = Plant(organization_id=org_id, name="Plant B", code="PLB", is_active=True)
+        s.add(plant_b)
+        await s.flush()
+
+        # Two departments
+        dep_x = Department(name="DepX", flow_type="action")
+        dep_y = Department(name="DepY", flow_type="action")
+        s.add_all([dep_x, dep_y])
+        await s.flush()
+
+        # Rates: dep_x@plant_a=100, dep_y@plant_b=200
+        s.add(DepartmentRate(department_id=dep_x.id, plant_id=plant_a.id,
+                             hourly_rate=100.0, min_factor=0.6, effective_from=date(2026, 1, 1)))
+        s.add(DepartmentRate(department_id=dep_y.id, plant_id=plant_b.id,
+                             hourly_rate=200.0, min_factor=0.6, effective_from=date(2026, 1, 1)))
+        await s.flush()
+
+        # One change
+        change = ChangeRequest(change_number="CR-T-4", project_id=seed["project_id"],
+                               title="multi-dim test", change_type="physical_part",
+                               status="in_assessment",
+                               raised_by=seed["engineer_id"], lead_id=seed["engineer_id"])
+        s.add(change)
+        await s.flush()
+
+        # Assessment X (dep_x) → cost lines on plant_a
+        ax = ChangeAssessment(change_id=change.id, department_id=dep_x.id, verdict="pending")
+        s.add(ax)
+        await s.flush()
+        await CostService.replace_cost_lines(s, change, ax, [
+            {"plant_id": plant_a.id, "cost_kind": "one_time",  "demand_hours": 2.0,
+             "external_cost": 10.0, "activity_label": "Design"},
+            {"plant_id": plant_a.id, "cost_kind": "lifecycle", "demand_hours": 3.0,
+             "external_cost": 20.0, "activity_label": "Support"},
+        ], seed["engineer_id"])
+
+        # Assessment Y (dep_y) → cost lines on plant_b
+        ay = ChangeAssessment(change_id=change.id, department_id=dep_y.id, verdict="pending")
+        s.add(ay)
+        await s.flush()
+        await CostService.replace_cost_lines(s, change, ay, [
+            {"plant_id": plant_b.id, "cost_kind": "one_time",  "demand_hours": 1.0,
+             "external_cost": 5.0,  "activity_label": "Tooling"},
+            {"plant_id": plant_b.id, "cost_kind": "lifecycle", "demand_hours": 4.0,
+             "external_cost": 15.0, "activity_label": "Maintenance"},
+        ], seed["engineer_id"])
+
+        await s.commit()
+
+        summ = await CostService.summation(s, change)
+
+    # ---- structural checks ----
+    assert len(summ["by_plant"]) == 2
+    assert len(summ["by_department"]) == 2
+
+    # ---- by_plant numeric sub-totals ----
+    pa_entry = next(e for e in summ["by_plant"] if e["plant_id"] == plant_a.id)
+    pb_entry = next(e for e in summ["by_plant"] if e["plant_id"] == plant_b.id)
+
+    assert pa_entry["one_time_internal"]  == 200.0   # 2h × 100
+    assert pa_entry["one_time_external"]  == 10.0
+    assert pa_entry["lifecycle_internal"] == 300.0   # 3h × 100
+    assert pa_entry["lifecycle_external"] == 20.0
+
+    assert pb_entry["one_time_internal"]  == 200.0   # 1h × 200
+    assert pb_entry["one_time_external"]  == 5.0
+    assert pb_entry["lifecycle_internal"] == 800.0   # 4h × 200
+    assert pb_entry["lifecycle_external"] == 15.0
+
+    # ---- by_department numeric sub-totals ----
+    dx_entry = next(e for e in summ["by_department"] if e["department_id"] == dep_x.id)
+    dy_entry = next(e for e in summ["by_department"] if e["department_id"] == dep_y.id)
+
+    assert dx_entry["one_time_internal"]  == 200.0
+    assert dx_entry["one_time_external"]  == 10.0
+    assert dx_entry["lifecycle_internal"] == 300.0
+    assert dx_entry["lifecycle_external"] == 20.0
+
+    assert dy_entry["one_time_internal"]  == 200.0
+    assert dy_entry["one_time_external"]  == 5.0
+    assert dy_entry["lifecycle_internal"] == 800.0
+    assert dy_entry["lifecycle_external"] == 15.0
+
+    # ---- grand total ----
+    # plant_a: 200+10+300+20=530  plant_b: 200+5+800+15=1020  total=1550
+    assert summ["totals"]["one_time_internal"]  == 400.0   # 200+200
+    assert summ["totals"]["one_time_external"]  == 15.0    # 10+5
+    assert summ["totals"]["lifecycle_internal"] == 1100.0  # 300+800
+    assert summ["totals"]["lifecycle_external"] == 35.0    # 20+15
+    assert summ["totals"]["grand_total"]        == 1550.0
