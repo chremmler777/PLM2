@@ -2,6 +2,7 @@ import { useParams } from 'react-router-dom';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
+import { plantsApi } from '../api/plants';
 import { CHANGE_STATUS_ORDER } from '../types/change';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
@@ -32,6 +33,10 @@ export default function ChangeDetailPage() {
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
     queryFn: () => changesApi.get(changeId),
+  });
+  const { data: allPlants = [] } = useQuery({
+    queryKey: ['plants'],
+    queryFn: plantsApi.list,
   });
   const { data: changelog = [] } = useQuery({
     queryKey: ['change', changeId, 'changelog'],
@@ -155,7 +160,17 @@ export default function ChangeDetailPage() {
           {change.assessments.map((a) => (
             <div key={a.id}>
               <div className="text-xs text-slate-400 mb-1">Cost lines — Dept #{a.department_id}</div>
-              <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={a.department_id} plants={[]} />
+              <CostLineGrid
+                changeId={changeId}
+                assessmentId={a.id}
+                departmentId={a.department_id}
+                plants={
+                  (change.affected_plant_ids && change.affected_plant_ids.length > 0
+                    ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
+                    : allPlants
+                  ).map((p) => ({ id: p.id, name: p.name }))
+                }
+              />
             </div>
           ))}
         </div>
