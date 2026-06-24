@@ -122,6 +122,15 @@ async def seed_test_data():
                 ("Project Manager", "action", 6),
                 ("Planner/Scheduler", "info", 7),
                 ("Operations Manager", "info", 8),
+                # Change-management cost departments (D2–D10)
+                ("R&D", "action", 9),
+                ("Tool design", "action", 10),
+                ("IE", "action", 11),
+                ("Quality", "action", 12),
+                ("Logistics", "action", 13),
+                ("Production", "action", 14),
+                ("Purchasing", "action", 15),
+                ("Production control", "action", 16),
             ]
             for dept_name, flow_type, sort_order in departments_data:
                 result = await session.execute(
@@ -173,6 +182,165 @@ async def seed_test_data():
                         if (dep.id, pid) not in existing_rates:
                             session.add(DepartmentRate(department_id=dep.id, plant_id=pid,
                                                        hourly_rate=rate, min_factor=factor))
+                await session.flush()
+
+                # --- Activity catalog (idempotent) ---
+                activity_catalog = {
+                    "Sales": [
+                        "Kostenverhandlung / cost negotiation",
+                        "Teilepreis / Neukalkulation //prize per part/new calculation",
+                        "Angebotserstellung/ tender preparation",
+                        "Bestellabwicklung / Purchase order processing",
+                    ],
+                    "R&D": [
+                        "Änderungsanfrage bewerten",
+                        "Herstellbarkeitsbewertung durchführen",
+                        "2D-Konstruktion Produkt / 2D construction product",
+                        "3D-Konstruktion Produkt / 3 D construction Product",
+                        "Moldflow-Simulation / moldflow- simulation",
+                        "Sonstige Simul. (FEM, Crash,...) / other simulations (FEM, crash,…)",
+                        "Versuchmuster Produkt vor Änd. erfassen / Prototype product",
+                        "benachbarte Bauteile / nearby components",
+                        "Toleranzen Produkt / tolerances product",
+                        "Oberfläche / Design (Außenseite Produkt) / surface / design (Outside product)",
+                        "Innenseite Produkt / inside product",
+                        "Zentrierung Produkt /centring product",
+                        "Befestigung Produkt / fixing product",
+                        "Werkstoff Produkt / Material // substance product/material",
+                        "Gewicht Produkt / weight product",
+                        "Lastenheft / Pflichtenheft // specification sheet / target specification",
+                        "Normen / Richtlinien / Regelungen //standards/ guidelines / regulations",
+                        "Vorschriften (Liefervor., FuVo, PV,Sicherheitsd.,..) // specifications (deliveryspecification, test specification, safety data sheet…)",
+                        "D- Pflicht / D-obligation",
+                        "Teilekennzeichng.(Änd.-Index)/ part marking (change index)",
+                        "FMEA- Produkt / Prozess // FMEA product / process",
+                        "Projektentwicklungskosten / cost of poject development",
+                        "Aktualisierung Zeichnungen / Update drawings",
+                        "SC/CC- Merkmale// SC/CC- features",
+                    ],
+                    "Tool design": [
+                        "2D-Konstruktion Betriebsmittel / 2D construction equipment",
+                        "3D-Konstruktion Betriebsmittel / 3D construction equipment",
+                        "Stückliste / equipment object list",
+                        "Bemi-Übersichtsliste / equipment reference list",
+                        "Bemi-Lebenslauf / equipment-maintenance history",
+                        "Bemi-Kennzeichng.(Änd. – Index)/ equipment identification (change index)",
+                        "Stanzwerkzeug / diecutting tool",
+                        "Umformwerkzeug Blech / Bördelwzg. // tin forming tool / cupping tool",
+                        "Preßwerkzeug / pressing tool",
+                        "PUR-Lackgiesswerkzeug / PUR- lacquer pouring tool",
+                        "Spritzgießwzg.(Auf-/Hinter-/Umspritzen) // in-mold tool (spray up/back injection molding/coating)",
+                        "Moldflow Simulation",
+                        "Konzepterstellung, Tracking und Freigabe",
+                        "Abmusterung und Bewertung",
+                        "Werkzeugvermessung / tool measurement",
+                    ],
+                    "IE": [
+                        "Neue Zeitaufnahme notwendig / time study necessary",
+                        "Material anlegen/ändern;// open/change materials",
+                        "Stückliste anlegen/ändern; //open/change bill of materials BOM",
+                        "Arbeitsplatz anlegen/ändern; // open / change work station",
+                        "Arbeitsplan anlegen/ändern; // open / change process sheet",
+                        "Fertigungsversion anlegen/ändern; // open / change production version",
+                        "Produktkostensammler anlegen; / open product cost collector",
+                        "Versuche durchführen / carry out tests",
+                        "Änderung AA / change working instructions",
+                        "PLP fuer SERIE ändern -/ change PLP (production control plan) for series",
+                        "Materialverbrauch/ material usage",
+                        "Layout aendern/ change layout",
+                        "AK u.KAPA Rechnung / calculation AK (manpower) and KAPA (capacity)",
+                        "Verfahrensablauf- SERIE / process flow series",
+                        "Poliermodelle / polishing adapter",
+                        "Schleifvorrichtungen /sanding devices",
+                        "Verklebevorrichtungen / glueing devices",
+                        "Nietvorrichtungen / riveting devices",
+                        "Schweissvorrichtungen / welding devices",
+                        "Spritzstand / spraying booth",
+                        "Folienklebevorrichtungen / devices for laminate foils",
+                        "Montagevorrichtungen/ assembly devices",
+                        "Schablonen / models",
+                        "CNC-Vorrichtungen/ CNC devices",
+                    ],
+                    "Quality": [
+                        "Aktualisierung FMEA- Prozeß und Produktionslenkungsplan / updating of the FMEA -process and control plan",
+                        "Erprobungspläne ändern / change the testing plans",
+                        "Prüfvorschriften -verfahren ändern / change test specification/process",
+                        "Labortests / laboratory tests",
+                        "PPM-Forderungen ändern / change ppm demands",
+                        "Prüfmittel, Messaufnahmen / test equipment, devices for measurement",
+                        "Hilfsprüfmittel / supporting test equipment",
+                        "Produktionslehren / Fertigteillehren // production model / model for finished parts",
+                        "MSA1 / MSA2 durchführen",
+                        "Teilevermessung / part measurement",
+                        "MFU / PFU // machine capability study/process capability study",
+                        "Kosten f. Neubemusterung (EMPB Änd.) Kunde / cost for sampling sampling (EMPB change) customer",
+                        "IMDS - Eintrag ändern / change IMDS input",
+                        "Rückstellmuster / reference sample",
+                        "Einbauversuche beim Kunden / trial installation with the customer",
+                    ],
+                    "Logistics": [
+                        "Lieferadresse / delivery adress",
+                        "Abladestellen / unloading points",
+                        "Ersatzteilabwicklung / spare part handling",
+                        "Frachtkosten / freight costs",
+                        "Entfernung zum Verbauort/ distance to place of installation",
+                        "Mindestbestand Fertigteile /minimum stock of finished parts",
+                        "Art des Auslieferungslagers / the method of the warehouse",
+                        "Anzahl der Behälterplätze / the number of the places for thre boxes",
+                        "qm-Bedarf / demand of space",
+                        "Anzahl Mitarbeiter /number of staff",
+                        "Schulung Mitarbeiter erforderlich / training for staff necessary",
+                        "Behältertyp / type of box",
+                        "Maße, Gewicht / dimensions, weight",
+                        "Zusatzverpackung / additional packaging",
+                        "Ladungsträger / carrier",
+                        "Verpackungsvorschrift ändern / change the packing instruction",
+                        "Sonderkennzeichnungen LT erforderlich / special identification for the carrier necessary",
+                        "Vorlaufplanung / Sonderschichten // extra shift",
+                        "Teileverschrottung / scrapping",
+                        "Bestellungen anpassen/ to adapt the orders",
+                        "Disposition neu / new disposal",
+                    ],
+                    "Production": [
+                        "Versuche durchführen / to make an experiment",
+                        "Schulung Personal / training staff",
+                        "MFU / PFU// machine capability study/process capability study",
+                        "Pruefung der vorhandene BEMI/ check the available equipment",
+                        "Bauteilkennzeichnung / part marking",
+                        "vermehrter Ausschuss / increased waste",
+                    ],
+                    "Purchasing": [
+                        "Angebote einholen / to invite offers",
+                        "Preisverhandlungen durchführen /to make price negotiations",
+                        "Teilepreis / piece prize",
+                        "Q-Planung Zukaufteile / Quality planning purchased parts",
+                        "EMPB / Durchführung Erstbemusterung // EMPB / realization initial sampling",
+                        "QVP / Qualitätsvorausplanung // Quality advance planning",
+                        "Lieferantenaudit / supplier audit",
+                    ],
+                    "Production control": [
+                        "Lagerbestand Fertigteile in Stück",
+                        "Reichweite Fertigteile Datum",
+                        "Lagerbestand Halbfertigteile in Stück",
+                        "Reichweite Halbfertigteile Datum",
+                        "Lagerbestand Einzelteile in Stück",
+                        "Reichweite Einzelteile Datum",
+                    ],
+                }
+                # Pre-load existing (department_id, label) pairs for idempotency
+                existing_acts = {(a.department_id, a.label) for a in (await session.execute(
+                    select(AssessmentActivity))).scalars().all()}
+                for dep_name, labels in activity_catalog.items():
+                    dep = (await session.execute(
+                        select(_Dep).where(_Dep.name == dep_name))).scalar_one_or_none()
+                    if dep is None:
+                        logger.warning(f"Activity catalog: department '{dep_name}' not found, skipping")
+                        continue
+                    for sort_order, label in enumerate(labels, start=1):
+                        if (dep.id, label) not in existing_acts:
+                            session.add(AssessmentActivity(
+                                department_id=dep.id, label=label,
+                                sort_order=sort_order, is_active=True))
             await session.commit()
             logger.info("Test data seeded successfully")
         except Exception as e:

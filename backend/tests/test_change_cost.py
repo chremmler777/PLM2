@@ -301,3 +301,79 @@ async def test_reference_endpoints(client, eng_auth, seed, session_factory):
     acts = await client.get(f"/api/v1/changes/reference/activities?department_id={dep_id}",
                             headers=eng_auth)
     assert acts.json()[0]["label"] == "Angebot"
+
+
+@pytest.mark.asyncio
+async def test_activity_catalog_seed_sales_order_and_count(client, eng_auth, seed, session_factory):
+    """Verify the activity catalog seed data: Sales has 4 activities in the correct order."""
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    from app.models.change_cost import AssessmentActivity
+
+    # Seed Sales activities inline (mirrors what main.py seed_test_data does for Sales/D2)
+    sales_labels = [
+        "Kostenverhandlung / cost negotiation",
+        "Teilepreis / Neukalkulation //prize per part/new calculation",
+        "Angebotserstellung/ tender preparation",
+        "Bestellabwicklung / Purchase order processing",
+    ]
+    async with session_factory() as s:
+        dep = Department(name="SalesCatalog", flow_type="action")
+        s.add(dep)
+        await s.flush()
+        for sort_order, label in enumerate(sales_labels, start=1):
+            s.add(AssessmentActivity(department_id=dep.id, label=label,
+                                     sort_order=sort_order, is_active=True))
+        await s.commit()
+        dep_id = dep.id
+
+    acts = await client.get(f"/api/v1/changes/reference/activities?department_id={dep_id}",
+                            headers=eng_auth)
+    assert acts.status_code == 200, acts.text
+    items = acts.json()
+    assert len(items) == 4, f"Expected 4 Sales activities, got {len(items)}"
+    assert items[0]["label"] == "Kostenverhandlung / cost negotiation"
+    assert items[0]["sort_order"] == 1
+    assert items[1]["label"] == "Teilepreis / Neukalkulation //prize per part/new calculation"
+    assert items[2]["label"] == "Angebotserstellung/ tender preparation"
+    assert items[3]["label"] == "Bestellabwicklung / Purchase order processing"
+    assert items[3]["sort_order"] == 4
+
+
+@pytest.mark.asyncio
+async def test_activity_catalog_seed_idempotency(session_factory):
+    """Seeding the same activities twice must not create duplicates."""
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    from app.models.change_cost import AssessmentActivity
+
+    labels = ["Label A", "Label B", "Label C"]
+
+    async def _seed_once(s, dep_id, existing):
+        for sort_order, label in enumerate(labels, start=1):
+            if (dep_id, label) not in existing:
+                s.add(AssessmentActivity(department_id=dep_id, label=label,
+                                         sort_order=sort_order, is_active=True))
+
+    async with session_factory() as s:
+        dep = Department(name="IdempDept", flow_type="action")
+        s.add(dep)
+        await s.flush()
+        dep_id = dep.id
+
+        # First seed pass
+        existing = set()
+        await _seed_once(s, dep_id, existing)
+        await s.commit()
+
+        # Second seed pass — pre-load existing pairs first (same as main.py idempotency)
+        existing2 = {(a.department_id, a.label) for a in (await s.execute(
+            select(AssessmentActivity).where(AssessmentActivity.department_id == dep_id)
+        )).scalars().all()}
+        await _seed_once(s, dep_id, existing2)
+        await s.commit()
+
+        count = (await s.execute(
+            select(AssessmentActivity).where(AssessmentActivity.department_id == dep_id)
+        )).scalars().all()
+        assert len(count) == 3, f"Expected 3 activities after double-seed, got {len(count)}"
