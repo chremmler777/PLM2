@@ -223,3 +223,41 @@ async def test_summation_multi_plant_and_multi_department(session_factory, seed)
     assert summ["totals"]["lifecycle_internal"] == 1100.0  # 300+800
     assert summ["totals"]["lifecycle_external"] == 35.0    # 20+15
     assert summ["totals"]["grand_total"]        == 1550.0
+
+
+async def _captured_change_with_assessment(client, eng_auth, seed, session_factory):
+    from datetime import date
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    from app.models.change_cost import DepartmentRate
+    from app.models.entities import Plant
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "c", "change_type": "physical_part",
+        "lead_id": seed["engineer_id"]}, headers=eng_auth)
+    cid = res.json()["id"]
+    async with session_factory() as s:
+        plant = (await s.execute(select(Plant))).scalars().first()
+        dep = Department(name="Sales", flow_type="action"); s.add(dep); await s.flush()
+        s.add(DepartmentRate(department_id=dep.id, plant_id=plant.id, hourly_rate=50.0,
+                             min_factor=0.6, effective_from=date(2026, 1, 1)))
+        from app.models.change import ChangeAssessment
+        a = ChangeAssessment(change_id=cid, department_id=dep.id, verdict="pending")
+        s.add(a); await s.commit()
+        return cid, a.id, dep.id, plant.id
+
+
+async def test_put_and_get_cost_lines_and_summation(client, eng_auth, seed, session_factory):
+    cid, aid, dep_id, plant_id = await _captured_change_with_assessment(
+        client, eng_auth, seed, session_factory)
+    put = await client.put(
+        f"/api/v1/changes/{cid}/assessments/{aid}/cost-lines",
+        json={"lines": [{"plant_id": plant_id, "cost_kind": "one_time",
+                         "demand_hours": 3.0, "external_cost": 10.0,
+                         "activity_label": "Angebot"}]},
+        headers=eng_auth)
+    assert put.status_code == 200, put.text
+    assert put.json()[0]["internal_cost"] == 150.0
+    got = await client.get(f"/api/v1/changes/{cid}/assessments/{aid}/cost-lines", headers=eng_auth)
+    assert len(got.json()) == 1
+    summ = await client.get(f"/api/v1/changes/{cid}/summation", headers=eng_auth)
+    assert summ.json()["totals"]["grand_total"] == 160.0

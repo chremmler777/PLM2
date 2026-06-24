@@ -175,3 +175,63 @@ class RoutingStandardUpsert(BaseModel):
     change_type: str
     template_id: int
     template_version: int = 1
+
+
+class CostLineIn(BaseModel):
+    plant_id: int
+    cost_kind: str = "one_time"
+    demand_hours: float = 0.0
+    external_cost: float = 0.0
+    activity_id: Optional[int] = None
+    activity_label: Optional[str] = None
+    note: Optional[str] = None
+
+
+class CostLineReplace(BaseModel):
+    lines: List[CostLineIn] = []
+
+
+class CostLineResponse(BaseModel):
+    id: int
+    plant_id: int
+    activity_id: Optional[int] = None
+    activity_label: Optional[str] = None
+    cost_kind: str
+    demand_hours: float
+    rate_snapshot: float
+    internal_cost: float
+    external_cost: float
+    note: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PlantRollup(BaseModel):
+    plant_id: int
+    one_time_internal: float
+    one_time_external: float
+    lifecycle_internal: float
+    lifecycle_external: float
+
+
+class DeptRollup(BaseModel):
+    department_id: int
+    one_time_internal: float
+    one_time_external: float
+    lifecycle_internal: float
+    lifecycle_external: float
+
+
+class SummationTotals(BaseModel):
+    one_time_internal: float
+    one_time_external: float
+    lifecycle_internal: float
+    lifecycle_external: float
+    grand_total: float
+
+
+class SummationResponse(BaseModel):
+    by_plant: List[PlantRollup] = []
+    by_department: List[DeptRollup] = []
+    totals: SummationTotals

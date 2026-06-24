@@ -22,6 +22,7 @@ from app.schemas.change import (
     AssessmentSubmit, AssessmentResponse, CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
+    CostLineReplace, CostLineResponse, SummationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -393,3 +394,45 @@ async def download_attachment(
         raise HTTPException(status_code=404, detail="Attachment not found")
     return FileResponse(att.stored_path, filename=att.filename,
                         media_type=att.content_type or "application/octet-stream")
+
+
+@router.get("/{change_id}/assessments/{aid}/cost-lines", response_model=List[CostLineResponse])
+async def get_cost_lines(
+    change_id: int, aid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    a = await db.get(ChangeAssessment, aid)
+    if not a or a.change_id != change_id:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    return a.cost_lines
+
+
+@router.put("/{change_id}/assessments/{aid}/cost-lines", response_model=List[CostLineResponse])
+async def put_cost_lines(
+    change_id: int, aid: int, body: CostLineReplace,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.cost_service import CostService, CostError
+    change = await ChangeService.get_change(db, change_id)
+    a = await db.get(ChangeAssessment, aid)
+    if not change or not a or a.change_id != change_id:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    try:
+        lines = await CostService.replace_cost_lines(
+            db, change, a, [l.model_dump() for l in body.lines], current_user.id)
+    except CostError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return lines
+
+
+@router.get("/{change_id}/summation", response_model=SummationResponse)
+async def get_summation(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.cost_service import CostService
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return await CostService.summation(db, change)
