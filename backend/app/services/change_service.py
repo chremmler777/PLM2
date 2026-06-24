@@ -16,7 +16,7 @@ from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
-    SIGN_OFF_ROLES,
+    SIGN_OFF_ROLES, IMPLEMENTATION_MODES,
 )
 from app.models.part import Part, PartRevision, PartRelation
 from app.models.workflow import Department
@@ -440,9 +440,40 @@ class ChangeService:
             "issuer", "is_series", "cm_internal", "cm_external",
             "implementation_mode", "customer_relevant", "car_line",
         }
+
+        # Validate implementation_mode before applying any changes
+        impl_mode = fields.get("implementation_mode")
+        if impl_mode is not None and impl_mode not in IMPLEMENTATION_MODES:
+            raise ChangeError(
+                f"Invalid implementation_mode '{impl_mode}'. "
+                f"Allowed: {', '.join(IMPLEMENTATION_MODES)}"
+            )
+
         for k, v in fields.items():
             if k in allowed and v is not None:
                 setattr(change, k, v)
+
+        # Handle affected_plant_ids (replace-set semantics; [] clears all)
+        if "affected_plant_ids" in fields and fields["affected_plant_ids"] is not None:
+            from app.models.entities import Plant
+            plant_ids = fields["affected_plant_ids"]
+            plants = []
+            for pid in plant_ids:
+                plant = await session.get(Plant, pid)
+                if plant is None:
+                    raise ChangeError(f"Plant {pid} not found")
+                plants.append(plant)
+            old_ids = sorted(p.id for p in change.affected_plants)
+            change.affected_plants = plants
+            await session.flush()  # persist M2M rows before changelog query
+            new_ids = sorted(plant_ids)
+            await ChangeService.append_changelog(
+                session, change, "affected_plants_updated",
+                "Affected plants updated", user_id,
+                field_name="affected_plant_ids",
+                old_value=old_ids, new_value=new_ids,
+            )
+
         change.updated_at = datetime.utcnow()
         await session.flush()
         await ChangeService.append_changelog(

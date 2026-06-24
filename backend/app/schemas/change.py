@@ -1,7 +1,7 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChangeCreate(BaseModel):
@@ -33,6 +33,7 @@ class ChangeUpdate(BaseModel):
     implementation_mode: Optional[str] = None
     customer_relevant: Optional[bool] = None
     car_line: Optional[str] = None
+    affected_plant_ids: Optional[List[int]] = None
 
 
 class TransitionRequest(BaseModel):
@@ -144,8 +145,29 @@ class ChangeResponse(BaseModel):
     implementation_mode: Optional[str] = None
     customer_relevant: bool = False
     car_line: Optional[str] = None
+    affected_plant_ids: List[int] = []
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_affected_plant_ids(cls, data: Any) -> Any:
+        """When building from an ORM ChangeRequest, map affected_plants → affected_plant_ids.
+
+        Pydantic from_attributes reads obj.affected_plant_ids which doesn't exist on the
+        ORM model (the relationship is named affected_plants). We inject it here.
+        """
+        if hasattr(data, "affected_plants"):
+            # ORM object: extract plant ids and return a dict for Pydantic to validate.
+            # We use __dict__ as a base so subclasses (ChangeDetailResponse) also get
+            # their extra ORM relationships (impacted_items, assessments, attachments).
+            plants = data.affected_plants or []
+            plant_ids = [p.id for p in plants]
+            # Build a plain dict from the ORM instance's loaded state
+            row = {k: v for k, v in vars(data).items() if not k.startswith("_")}
+            row["affected_plant_ids"] = plant_ids
+            return row
+        return data
 
     class Config:
         from_attributes = True

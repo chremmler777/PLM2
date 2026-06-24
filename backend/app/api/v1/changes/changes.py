@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, 
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_current_user
 from app.models import get_db, User
@@ -316,10 +317,20 @@ async def update_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    await ChangeService.update_change(db, change, current_user.id,
-                                      **body.model_dump(exclude_unset=True))
+    try:
+        await ChangeService.update_change(db, change, current_user.id,
+                                          **body.model_dump(exclude_unset=True))
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
-    await db.refresh(change)
+    # Evict from identity map so the re-query hits the DB fresh (M2M not cached).
+    db.expunge(change)
+    result = await db.execute(
+        select(ChangeRequest)
+        .where(ChangeRequest.id == change_id)
+        .options(selectinload(ChangeRequest.affected_plants))
+    )
+    change = result.scalar_one()
     return change
 
 

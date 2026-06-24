@@ -35,6 +35,7 @@ BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
 ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
 DEVIATION_STATUSES = ("none", "pending_approval", "approved")
+IMPLEMENTATION_MODES = ("integrated", "separational")
 
 
 class ChangeRequest(Base):
