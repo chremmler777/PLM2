@@ -117,3 +117,55 @@ export interface ChangeTask {
   department_id: number;
   assessment_id: number;
 }
+
+// --- Cost & summation types (sub-project A) ---
+
+export type CostKind = 'one_time' | 'lifecycle';
+
+export interface CostLine {
+  id: number;
+  plant_id: number;
+  activity_id?: number | null;
+  activity_label?: string | null;
+  cost_kind: CostKind;
+  demand_hours: number;
+  rate_snapshot: number;
+  internal_cost: number;
+  external_cost: number;
+  note?: string | null;
+}
+
+export interface CostLineIn {
+  plant_id: number;
+  cost_kind: CostKind;
+  demand_hours: number;
+  external_cost: number;
+  activity_id?: number | null;
+  activity_label?: string | null;
+  note?: string | null;
+}
+
+export interface PlantRollup {
+  plant_id: number;
+  one_time_internal: number; one_time_external: number;
+  lifecycle_internal: number; lifecycle_external: number;
+}
+export interface DeptRollup extends Omit<PlantRollup, 'plant_id'> { department_id: number; }
+export interface Summation {
+  by_plant: PlantRollup[];
+  by_department: DeptRollup[];
+  totals: { one_time_internal: number; one_time_external: number;
+            lifecycle_internal: number; lifecycle_external: number; grand_total: number };
+}
+
+export type GateKey = 'feasibility' | 'budget' | 'release';
+export interface Gate {
+  gate_key: GateKey;
+  decision: 'yes' | 'no' | 'na';
+  decided_by?: number | null;
+  decided_at?: string | null;
+  remark?: string | null;
+}
+
+export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
+export interface ActivityRef { id: number; department_id: number; label: string; sort_order: number; }

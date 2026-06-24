@@ -2,6 +2,7 @@ import client from './client';
 import type {
   ChangeRequest, ChangeDetail, ChangelogEntry, ChangeTask,
   ChangeRouting, DeviationRequest,
+  CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
 } from '../types/change';
 
 export const changesApi = {
@@ -60,4 +61,19 @@ export const changesApi = {
 
   approveDeviation: (id: number) =>
     client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/approve`).then((r) => r.data),
+
+  getCostLines: (id: number, aid: number) =>
+    client.get<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`).then((r) => r.data),
+  putCostLines: (id: number, aid: number, lines: CostLineIn[]) =>
+    client.put<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`, { lines }).then((r) => r.data),
+  getSummation: (id: number) =>
+    client.get<Summation>(`/v1/changes/${id}/summation`).then((r) => r.data),
+  getGates: (id: number) =>
+    client.get<Gate[]>(`/v1/changes/${id}/gates`).then((r) => r.data),
+  putGate: (id: number, gateKey: string, body: { decision: string; remark?: string }) =>
+    client.put<Gate>(`/v1/changes/${id}/gates/${gateKey}`, body).then((r) => r.data),
+  referenceRates: () =>
+    client.get<DepartmentRateRef[]>('/v1/changes/reference/rates').then((r) => r.data),
+  referenceActivities: (departmentId: number) =>
+    client.get<ActivityRef[]>('/v1/changes/reference/activities', { params: { department_id: departmentId } }).then((r) => r.data),
 };
