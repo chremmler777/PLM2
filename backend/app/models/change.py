@@ -7,10 +7,17 @@ ECN PartRevisions on each impacted part; on release those become active.
 """
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON
+from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON, Boolean, Table, Column
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
+
+change_affected_plants = Table(
+    "change_affected_plants", Base.metadata,
+    Column("change_id", ForeignKey("change_requests.id"), primary_key=True),
+    Column("plant_id", ForeignKey("plants.id"), primary_key=True),
+)
 
 CHANGE_TYPES = ("physical_part", "tooling", "document_spec", "process_im", "packaging")
 CHANGE_PRIORITIES = ("low", "medium", "high", "critical")
@@ -45,6 +52,15 @@ class ChangeRequest(Base):
     change_type: Mapped[str] = mapped_column(String(30), default="physical_part")
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     data_classification: Mapped[str] = mapped_column(String(20), default="confidential")
+
+    # D1 master fields
+    issuer: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    is_series: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    cm_internal: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    cm_external: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    implementation_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customer_relevant: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    car_line: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     status: Mapped[str] = mapped_column(String(20), default="captured", index=True)
 
@@ -100,6 +116,9 @@ class ChangeRequest(Base):
     gates: Mapped[list["ChangeGate"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
     )
+    affected_plants: Mapped[list["Plant"]] = relationship(
+        secondary=change_affected_plants, lazy="selectin",
+    )
 
 
 class ChangeImpactedItem(Base):
@@ -113,6 +132,7 @@ class ChangeImpactedItem(Base):
     impact_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     eng_level_before: Mapped[str | None] = mapped_column(String(50), nullable=True)
     eng_level_after: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_lead: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     resulting_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -239,7 +259,7 @@ class ChangeRoutingStandard(Base):
 
 
 # Import related models for relationship resolution
-from app.models.entities import Project, User  # noqa: E402
+from app.models.entities import Project, User, Plant  # noqa: E402,F811
 from app.models.part import Part, PartRevision  # noqa: E402
 from app.models.workflow import Department  # noqa: E402
 from app.models.change_cost import AssessmentCostLine, ChangeGate  # noqa: E402

@@ -327,6 +327,7 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, part_id: int,
         user_id: int, *, impact_note: Optional[str] = None,
         eng_level_before: Optional[str] = None,
+        is_lead: bool = False,
     ) -> ChangeImpactedItem:
         part = await session.get(Part, part_id)
         if not part or part.project_id != change.project_id:
@@ -335,7 +336,7 @@ class ChangeService:
             raise ChangeError("Item already impacted")
         item = ChangeImpactedItem(
             change_id=change.id, part_id=part_id, impact_note=impact_note,
-            eng_level_before=eng_level_before, created_by=user_id,
+            eng_level_before=eng_level_before, created_by=user_id, is_lead=is_lead,
         )
         session.add(item)
         await session.flush()
@@ -436,6 +437,8 @@ class ChangeService:
         allowed = {
             "title", "reason", "description", "priority", "change_type", "lead_id",
             "estimated_cost", "quoted_price", "pnl_note", "timing_milestone_id",
+            "issuer", "is_series", "cm_internal", "cm_external",
+            "implementation_mode", "customer_relevant", "car_line",
         }
         for k, v in fields.items():
             if k in allowed and v is not None:

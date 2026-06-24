@@ -250,6 +250,7 @@ async def add_impacted_item(
         item = await ChangeService.add_impacted_item(
             db, change, body.part_id, current_user.id,
             impact_note=body.impact_note, eng_level_before=body.eng_level_before,
+            is_lead=body.is_lead,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -261,3 +261,21 @@ async def test_put_and_get_cost_lines_and_summation(client, eng_auth, seed, sess
     assert len(got.json()) == 1
     summ = await client.get(f"/api/v1/changes/{cid}/summation", headers=eng_auth)
     assert summ.json()["totals"]["grand_total"] == 160.0
+
+
+@pytest.mark.asyncio
+async def test_d1_master_fields_patch(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "d1", "change_type": "physical_part",
+        "lead_id": seed["engineer_id"]}, headers=eng_auth)
+    cid = res.json()["id"]
+    patch = await client.patch(f"/api/v1/changes/{cid}", json={
+        "issuer": "Customer X", "is_series": True, "cm_external": True,
+        "implementation_mode": "integrated", "customer_relevant": True,
+        "car_line": "VW426"}, headers=eng_auth)
+    assert patch.status_code == 200, patch.text
+    got = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
+    body = got.json()
+    assert body["issuer"] == "Customer X"
+    assert body["is_series"] is True
+    assert body["car_line"] == "VW426"

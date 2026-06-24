@@ -26,6 +26,13 @@ class ChangeUpdate(BaseModel):
     quoted_price: Optional[float] = None
     pnl_note: Optional[str] = None
     timing_milestone_id: Optional[int] = None
+    issuer: Optional[str] = None
+    is_series: Optional[bool] = None
+    cm_internal: Optional[bool] = None
+    cm_external: Optional[bool] = None
+    implementation_mode: Optional[str] = None
+    customer_relevant: Optional[bool] = None
+    car_line: Optional[str] = None
 
 
 class TransitionRequest(BaseModel):
@@ -46,6 +53,7 @@ class ImpactedItemCreate(BaseModel):
     part_id: int
     impact_note: Optional[str] = None
     eng_level_before: Optional[str] = None
+    is_lead: bool = False
 
 
 class AssessmentSubmit(BaseModel):
@@ -64,6 +72,7 @@ class ImpactedItemResponse(BaseModel):
     impact_note: Optional[str] = None
     eng_level_before: Optional[str] = None
     eng_level_after: Optional[str] = None
+    is_lead: bool = False
     resulting_revision_id: Optional[int] = None
 
     class Config:
@@ -128,6 +137,13 @@ class ChangeResponse(BaseModel):
     quality_signed_by: Optional[int] = None
     estimated_cost: Optional[float] = None
     quoted_price: Optional[float] = None
+    issuer: Optional[str] = None
+    is_series: bool = False
+    cm_internal: bool = False
+    cm_external: bool = False
+    implementation_mode: Optional[str] = None
+    customer_relevant: bool = False
+    car_line: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
