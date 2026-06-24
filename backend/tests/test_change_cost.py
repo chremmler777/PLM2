@@ -377,3 +377,14 @@ async def test_activity_catalog_seed_idempotency(session_factory):
             select(AssessmentActivity).where(AssessmentActivity.department_id == dep_id)
         )).scalars().all()
         assert len(count) == 3, f"Expected 3 activities after double-seed, got {len(count)}"
+
+
+def test_migration_021_is_head_with_expected_tables():
+    import re, pathlib
+    p = pathlib.Path("alembic/versions/021_add_cm_cost_lines.py")
+    assert p.exists(), "migration 021 missing"
+    src = p.read_text()
+    assert re.search(r"down_revision\s*=\s*'020'", src)
+    for t in ("department_rate", "assessment_activity", "assessment_cost_line",
+              "change_gate", "change_affected_plants"):
+        assert t in src
