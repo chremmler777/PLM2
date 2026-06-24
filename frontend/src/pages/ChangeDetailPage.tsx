@@ -4,6 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { CHANGE_STATUS_ORDER } from '../types/change';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
+import D1MasterPanel from '../components/changes/D1MasterPanel';
+import SummationView from '../components/changes/SummationView';
+import CostLineGrid from '../components/changes/CostLineGrid';
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -18,7 +21,7 @@ const NEXT_STATUS: Record<string, string[]> = {
   in_validation: ['released'], released: ['closed'],
 };
 
-type Tab = 'overview' | 'impacted' | 'assessments' | 'commercial' | 'audit';
+type Tab = 'overview' | 'impacted' | 'assessments' | 'commercial' | 'd1' | 'audit';
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -94,7 +97,7 @@ export default function ChangeDetailPage() {
       </div>
 
       <div className="border-b flex gap-4 text-sm mb-4">
-        {(['overview', 'impacted', 'assessments', 'commercial', 'audit'] as Tab[]).map((t) => (
+        {(['overview', 'impacted', 'assessments', 'commercial', 'd1', 'audit'] as Tab[]).map((t) => (
           <button key={t}
             className={`pb-2 ${tab === t ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
             onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
@@ -149,6 +152,19 @@ export default function ChangeDetailPage() {
           ))}
           {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
           </ul>
+          {change.assessments.map((a) => (
+            <div key={a.id}>
+              <div className="text-xs text-slate-400 mb-1">Cost lines — Dept #{a.department_id}</div>
+              <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={a.department_id} plants={[]} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'd1' && (
+        <div className="space-y-4">
+          <D1MasterPanel changeId={changeId} />
+          <SummationView changeId={changeId} />
         </div>
       )}
 
