@@ -10,8 +10,7 @@ from typing import Optional, List
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change_cost import ChangeGate
-from app.models.change_cost import GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
+from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment,

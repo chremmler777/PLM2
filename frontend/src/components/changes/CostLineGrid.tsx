@@ -72,6 +72,16 @@ export default function CostLineGrid({
     queryFn: changesApi.referenceRates,
   });
 
+  // Derive the plants that have a DepartmentRate for this assessment's department.
+  // Intersect with the passed-in plants list (to keep names) so only rated plants
+  // appear in the grid. This prevents picking a plant with no rate → silent 0 → 400 on save.
+  const ratedPlantIds = new Set(
+    rates.filter((r) => r.department_id === departmentId).map((r) => r.plant_id),
+  );
+  const ratedPlants = rates.length === 0
+    ? plants  // rates not loaded yet → show all to avoid flicker; will re-filter once loaded
+    : plants.filter((p) => ratedPlantIds.has(p.id));
+
   const { data: activities = [] } = useQuery({
     queryKey: ['cm-activities', departmentId],
     queryFn: () => changesApi.referenceActivities(departmentId),
@@ -108,7 +118,7 @@ export default function CostLineGrid({
   });
 
   const addRow = () =>
-    setRows((r) => [...r, makeRow(plants[0]?.id ?? 0)]);
+    setRows((r) => [...r, makeRow(ratedPlants[0]?.id ?? 0)]);
 
   const update = (i: number, patch: Partial<Row>) =>
     setRows((r) =>
@@ -125,7 +135,7 @@ export default function CostLineGrid({
 
   // Per-plant totals
   const plantTotals: Record<number, { internal: number; external: number }> = {};
-  for (const p of plants) plantTotals[p.id] = { internal: 0, external: 0 };
+  for (const p of ratedPlants) plantTotals[p.id] = { internal: 0, external: 0 };
   let grandTotal = 0;
   for (const row of rows) {
     if (plantTotals[row.plant_id]) {
@@ -133,6 +143,17 @@ export default function CostLineGrid({
       plantTotals[row.plant_id].external += row.external_cost || 0;
     }
     grandTotal += row._internal + (row.external_cost || 0);
+  }
+
+  // If rates are loaded but none match this department → show inline message, disable Save
+  const noRatesConfigured = rates.length > 0 && ratedPlants.length === 0;
+
+  if (noRatesConfigured) {
+    return (
+      <div className="rounded border border-slate-700 bg-slate-800/40 p-3 text-sm text-slate-400">
+        {t('no_rate_configured')}
+      </div>
+    );
   }
 
   return (
@@ -174,7 +195,7 @@ export default function CostLineGrid({
                   value={row.plant_id}
                   onChange={(e) => update(i, { plant_id: Number(e.target.value) })}
                 >
-                  {plants.map((p) => (
+                  {ratedPlants.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
@@ -233,9 +254,9 @@ export default function CostLineGrid({
           ))}
         </tbody>
         {/* Per-plant footer */}
-        {plants.length > 1 && rows.length > 0 && (
+        {ratedPlants.length > 1 && rows.length > 0 && (
           <tfoot>
-            {plants.map((p) => {
+            {ratedPlants.map((p) => {
               const pt = plantTotals[p.id];
               if (!pt || (pt.internal === 0 && pt.external === 0)) return null;
               return (

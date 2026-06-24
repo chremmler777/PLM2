@@ -64,6 +64,8 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 const PLANTS = [{ id: 10, name: 'Plant A' }, { id: 20, name: 'Plant B' }];
+// RATES only covers plant 10 (not plant 20) for department 1
+// This mirrors the real scenario: Weissenburg rated, some other plant not rated
 
 describe('CostLineGrid component', () => {
   beforeEach(() => {
@@ -126,6 +128,46 @@ describe('CostLineGrid component', () => {
 
     // Total = 300 (internal) + 0 (external). Grand total span shows "Total: 300.00"
     expect(screen.getAllByText(/300\.00/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('only offers rated plants in the row dropdown (plant 20 has no rate)', async () => {
+    // RATES = [{dept:1, plant:10}] — plant 20 has no rate for dept 1
+    // So only Plant A (id=10) should appear in the select, not Plant B (id=20)
+    render(
+      <CostLineGrid changeId={1} assessmentId={2} departmentId={1} plants={PLANTS} />,
+      { wrapper: makeWrapper() }
+    );
+    fireEvent.click(screen.getByRole('button', { name: /\+\s*row/i }));
+    const selects = screen.getAllByRole('combobox');
+    // The plant select is the second combobox (after activity datalist)
+    // Find the one containing plant options
+    const plantSelect = selects.find((s) =>
+      Array.from(s.querySelectorAll('option')).some((o) => o.textContent === 'Plant A')
+    );
+    expect(plantSelect).toBeDefined();
+    const options = Array.from(plantSelect!.querySelectorAll('option')).map((o) => o.textContent);
+    expect(options).toContain('Plant A');
+    expect(options).not.toContain('Plant B');
+  });
+
+  it('shows no-rate message and no table when no rates exist for the department', async () => {
+    // Use a wrapper with rates for a DIFFERENT department (dept 99), not dept 1
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['cm-rates'], [{ department_id: 99, plant_id: 10, hourly_rate: 100, min_factor: 0.5 }]);
+    qc.setQueryData(['cm-activities', 1], ACTIVITIES);
+    qc.setQueryData(['cost-lines', 1, 2], []);
+    const noRateWrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+
+    render(
+      <CostLineGrid changeId={1} assessmentId={2} departmentId={1} plants={PLANTS} />,
+      { wrapper: noRateWrapper }
+    );
+    // Should show the no-rate message instead of the grid
+    expect(screen.getByText(/no cost rates configured/i)).toBeDefined();
+    // Save button should not be present
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
   });
 
   it('calls putCostLines with correct payload on Save', async () => {

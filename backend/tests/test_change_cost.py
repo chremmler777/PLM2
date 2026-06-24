@@ -379,7 +379,7 @@ async def test_activity_catalog_seed_idempotency(session_factory):
         assert len(count) == 3, f"Expected 3 activities after double-seed, got {len(count)}"
 
 
-def test_migration_021_is_head_with_expected_tables():
+async def test_migration_021_is_head_with_expected_tables():
     import re, pathlib
     p = pathlib.Path("alembic/versions/021_add_cm_cost_lines.py")
     assert p.exists(), "migration 021 missing"

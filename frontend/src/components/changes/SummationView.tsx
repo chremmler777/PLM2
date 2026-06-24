@@ -24,7 +24,7 @@ export default function SummationView({ changeId }: { changeId: number }) {
   return (
     <div className="rounded border border-slate-700 bg-slate-800/40 p-3 text-sm text-slate-200 space-y-4">
       <div>
-        <div className="font-semibold text-slate-100 mb-2">Summierung</div>
+        <div className="font-semibold text-slate-100 mb-2">{t('summierung')}</div>
         <table className="w-full">
           <tbody>
             <tr><td>{t('one_time')} ({t('internal')})</td><td className="text-right">{tot.one_time_internal.toFixed(2)}</td></tr>

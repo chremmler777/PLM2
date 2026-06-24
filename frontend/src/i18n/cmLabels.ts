@@ -34,5 +34,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   no_lead_set: { de: 'Kein Leit-Teil', en: 'No lead set' },
   by_department: { de: 'Nach Abteilung', en: 'By department' },
   by_plant: { de: 'Nach Werk', en: 'By plant' },
+  summierung: { de: 'Summierung', en: 'Summierung' },
+  no_rate_configured: { de: 'Keine Kostensätze für diese Abteilung konfiguriert', en: 'No cost rates configured for this department' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;
