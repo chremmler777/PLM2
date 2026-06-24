@@ -55,3 +55,18 @@ class AssessmentCostLine(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     assessment: Mapped["ChangeAssessment"] = relationship(back_populates="cost_lines")
+
+
+class ChangeGate(Base):
+    """One of the three D1 'Final assessment' gates on a change."""
+    __tablename__ = "change_gate"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+    gate_key: Mapped[str] = mapped_column(String(20))  # feasibility|budget|release
+    decision: Mapped[str] = mapped_column(String(10), default="na")  # yes|no|na
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    change: Mapped["ChangeRequest"] = relationship(back_populates="gates")

@@ -97,6 +97,9 @@ class ChangeRequest(Base):
     routing: Mapped["ChangeRouting | None"] = relationship(
         back_populates="change", cascade="all, delete-orphan", uselist=False, lazy="selectin"
     )
+    gates: Mapped[list["ChangeGate"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+    )
 
 
 class ChangeImpactedItem(Base):
@@ -239,4 +242,4 @@ class ChangeRoutingStandard(Base):
 from app.models.entities import Project, User  # noqa: E402
 from app.models.part import Part, PartRevision  # noqa: E402
 from app.models.workflow import Department  # noqa: E402
-from app.models.change_cost import AssessmentCostLine  # noqa: E402
+from app.models.change_cost import AssessmentCostLine, ChangeGate  # noqa: E402

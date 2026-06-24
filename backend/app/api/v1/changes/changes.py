@@ -23,6 +23,7 @@ from app.schemas.change import (
     ChangelogResponse,
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
+    GateDecisionIn, GateResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -436,3 +437,31 @@ async def get_summation(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return await CostService.summation(db, change)
+
+
+@router.get("/{change_id}/gates", response_model=List[GateResponse])
+async def get_gates(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change.gates
+
+
+@router.put("/{change_id}/gates/{gate_key}", response_model=GateResponse)
+async def put_gate(
+    change_id: int, gate_key: str, body: GateDecisionIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        gate = await ChangeService.decide_gate(
+            db, change, gate_key, body.decision, current_user.id, remark=body.remark)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return gate

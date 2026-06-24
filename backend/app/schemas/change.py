@@ -235,3 +235,19 @@ class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
     totals: SummationTotals
+
+
+class GateDecisionIn(BaseModel):
+    decision: str  # yes | no | na
+    remark: Optional[str] = None
+
+
+class GateResponse(BaseModel):
+    gate_key: str
+    decision: str
+    decided_by: Optional[int] = None
+    decided_at: Optional[datetime] = None
+    remark: Optional[str] = None
+
+    class Config:
+        from_attributes = True

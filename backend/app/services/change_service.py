@@ -10,6 +10,8 @@ from typing import Optional, List
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.change_cost import ChangeGate
+from app.models.change_cost import GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment,
@@ -99,6 +101,33 @@ class ChangeService:
         return entry
 
     @staticmethod
+    async def decide_gate(
+        session: AsyncSession, change: ChangeRequest, gate_key: str,
+        decision: str, user_id: int, *, remark: Optional[str] = None,
+    ) -> ChangeGate:
+        if gate_key not in GATE_KEYS:
+            raise ChangeError(f"Unknown gate '{gate_key}'")
+        if decision not in GATE_DECISIONS:
+            raise ChangeError(f"Invalid gate decision '{decision}'")
+        row = (await session.execute(
+            select(ChangeGate).where(
+                (ChangeGate.change_id == change.id) & (ChangeGate.gate_key == gate_key))
+        )).scalar_one_or_none()
+        if row is None:
+            row = ChangeGate(change_id=change.id, gate_key=gate_key)
+            session.add(row)
+        row.decision = decision
+        row.decided_by = user_id
+        row.decided_at = datetime.utcnow()
+        row.remark = remark
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "gate_decided", f"Gate {gate_key}: {decision}", user_id,
+            field_name=f"gate_{gate_key}", new_value=decision, notes=remark,
+        )
+        return row
+
+    @staticmethod
     async def create_change(
         session: AsyncSession, *, project_id: int, title: str, change_type: str,
         raised_by: int, reason: Optional[str] = None, description: Optional[str] = None,
@@ -174,6 +203,11 @@ class ChangeService:
             missing = [i for i in change.impacted_items if i.resulting_revision_id is None]
             if missing:
                 return "Some impacted items have no resulting revision"
+        # Gate wiring (additive): a gate constrains its target transition only when a
+        # row exists. Changes with no gate rows behave exactly as before.
+        for gate in change.gates:
+            if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
+                return f"Gate '{gate.gate_key}' is not approved ('{gate.decision}')"
         return None
 
     @staticmethod
