@@ -141,8 +141,8 @@ export default function CostLineGrid({
         <thead>
           <tr className="text-xs text-slate-400 border-b border-slate-700">
             <th className="text-left pb-1">{t('activity')}</th>
-            <th className="text-left pb-1">Plant</th>
-            <th className="text-left pb-1">Kind</th>
+            <th className="text-left pb-1">{t('plant')}</th>
+            <th className="text-left pb-1">{t('kind')}</th>
             <th className="text-right pb-1">{t('hours')}</th>
             <th className="text-right pb-1">{t('internal')}</th>
             <th className="text-right pb-1">{t('external')}</th>
@@ -269,7 +269,7 @@ export default function CostLineGrid({
           disabled={save.isPending}
           className="px-2.5 py-1 text-xs rounded bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50"
         >
-          {save.isPending ? 'Saving…' : 'Save'}
+          {save.isPending ? t('saving') : t('save')}
         </button>
       </div>
     </div>

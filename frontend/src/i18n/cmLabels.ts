@@ -13,5 +13,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   feasibility: { de: 'Realisierbar?', en: 'Feasible?' },
   budget: { de: 'Budget geprüft?', en: 'Budget checked?' },
   release: { de: 'Techn. Freigabe?', en: 'Technical release?' },
+  plant: { de: 'Werk', en: 'Plant' },
+  kind: { de: 'Art', en: 'Kind' },
+  save: { de: 'Speichern', en: 'Save' },
+  saving: { de: 'Speichert…', en: 'Saving…' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;
