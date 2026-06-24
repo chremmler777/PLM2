@@ -77,3 +77,33 @@ class CostService:
             field_name="cost_impact", new_value=assessment.cost_impact,
         )
         return new_lines
+
+    @staticmethod
+    async def summation(session: AsyncSession, change: ChangeRequest) -> dict:
+        rows = (await session.execute(
+            select(AssessmentCostLine, ChangeAssessment.department_id)
+            .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
+            .where(ChangeAssessment.change_id == change.id)
+        )).all()
+
+        def _blank() -> dict:
+            return {"one_time_internal": 0.0, "one_time_external": 0.0,
+                    "lifecycle_internal": 0.0, "lifecycle_external": 0.0}
+
+        by_plant: dict[int, dict] = {}
+        by_dep: dict[int, dict] = {}
+        totals = _blank()
+        for line, department_id in rows:
+            pk = "one_time" if line.cost_kind == "one_time" else "lifecycle"
+            for bucket in (by_plant.setdefault(line.plant_id, _blank()),
+                           by_dep.setdefault(department_id, _blank()),
+                           totals):
+                bucket[f"{pk}_internal"] += line.internal_cost
+                bucket[f"{pk}_external"] += line.external_cost
+        totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
+                                 + totals["lifecycle_internal"] + totals["lifecycle_external"])
+        return {
+            "by_plant": [{"plant_id": pid, **vals} for pid, vals in sorted(by_plant.items())],
+            "by_department": [{"department_id": did, **vals} for did, vals in sorted(by_dep.items())],
+            "totals": totals,
+        }
