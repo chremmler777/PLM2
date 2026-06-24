@@ -18,6 +18,7 @@ export interface ImpactedItem {
   eng_level_before?: string | null;
   eng_level_after?: string | null;
   resulting_revision_id?: number | null;
+  is_lead?: boolean;
 }
 
 export interface Assessment {
@@ -101,6 +102,14 @@ export interface ChangeRequest {
   quoted_price?: number | null;
   created_at: string;
   updated_at: string;
+  issuer?: string | null;
+  is_series?: boolean;
+  cm_internal?: boolean;
+  cm_external?: boolean;
+  implementation_mode?: 'integrated' | 'separational' | null;
+  customer_relevant?: boolean;
+  car_line?: string | null;
+  affected_plant_ids?: number[];
 }
 
 export interface ChangeDetail extends ChangeRequest {
