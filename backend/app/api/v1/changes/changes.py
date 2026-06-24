@@ -131,6 +131,29 @@ async def upsert_routing_standard(body: RoutingStandardUpsert,
             "template_version": body.template_version}
 
 
+@router.get("/reference/rates")
+async def reference_rates(db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    from app.models.change_cost import DepartmentRate
+    rows = (await db.execute(select(DepartmentRate))).scalars().all()
+    return [{"department_id": r.department_id, "plant_id": r.plant_id,
+             "hourly_rate": r.hourly_rate, "min_factor": r.min_factor} for r in rows]
+
+
+@router.get("/reference/activities")
+async def reference_activities(department_id: Optional[int] = Query(None),
+                               db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    from app.models.change_cost import AssessmentActivity
+    q = select(AssessmentActivity).where(AssessmentActivity.is_active == True)  # noqa: E712
+    if department_id is not None:
+        q = q.where(AssessmentActivity.department_id == department_id)
+    q = q.order_by(AssessmentActivity.sort_order)
+    rows = (await db.execute(q)).scalars().all()
+    return [{"id": r.id, "department_id": r.department_id, "label": r.label,
+             "sort_order": r.sort_order} for r in rows]
+
+
 @router.get("/{change_id}", response_model=ChangeDetailResponse)
 async def get_change(
     change_id: int,

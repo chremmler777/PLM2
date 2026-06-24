@@ -279,3 +279,25 @@ async def test_d1_master_fields_patch(client, eng_auth, seed):
     assert body["issuer"] == "Customer X"
     assert body["is_series"] is True
     assert body["car_line"] == "VW426"
+
+
+@pytest.mark.asyncio
+async def test_reference_endpoints(client, eng_auth, seed, session_factory):
+    from datetime import date
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    from app.models.change_cost import DepartmentRate, AssessmentActivity
+    from app.models.entities import Plant
+    async with session_factory() as s:
+        plant = (await s.execute(select(Plant))).scalars().first()
+        dep = Department(name="Sales", flow_type="action"); s.add(dep); await s.flush()
+        s.add(DepartmentRate(department_id=dep.id, plant_id=plant.id, hourly_rate=50.0,
+                             min_factor=0.6, effective_from=date(2026, 1, 1)))
+        s.add(AssessmentActivity(department_id=dep.id, label="Angebot", sort_order=1, is_active=True))
+        await s.commit()
+        dep_id = dep.id
+    rates = await client.get("/api/v1/changes/reference/rates", headers=eng_auth)
+    assert any(r["hourly_rate"] == 50.0 for r in rates.json())
+    acts = await client.get(f"/api/v1/changes/reference/activities?department_id={dep_id}",
+                            headers=eng_auth)
+    assert acts.json()[0]["label"] == "Angebot"
