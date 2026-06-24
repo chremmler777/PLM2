@@ -21,7 +21,7 @@ from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeAttachment, ChangeChangelog,
 )
 from app.models.change_cost import (
-    DepartmentRate, AssessmentActivity,
+    DepartmentRate, AssessmentActivity, AssessmentCostLine,
 )
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
@@ -78,4 +78,5 @@ __all__ = [
     "ChangeChangelog",
     "DepartmentRate",
     "AssessmentActivity",
+    "AssessmentCostLine",
 ]

@@ -36,3 +36,22 @@ class AssessmentActivity(Base):
     label: Mapped[str] = mapped_column(String(200))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AssessmentCostLine(Base):
+    """One cost line on a department's assessment tab (per plant, one-time or lifecycle)."""
+    __tablename__ = "assessment_cost_line"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("change_assessments.id"), index=True)
+    plant_id: Mapped[int] = mapped_column(ForeignKey("plants.id"), index=True)
+    activity_id: Mapped[int | None] = mapped_column(ForeignKey("assessment_activity.id"), nullable=True)
+    activity_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    cost_kind: Mapped[str] = mapped_column(String(20), default="one_time")
+    demand_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    rate_snapshot: Mapped[float] = mapped_column(Float, default=0.0)
+    internal_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    external_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    assessment: Mapped["ChangeAssessment"] = relationship(back_populates="cost_lines")

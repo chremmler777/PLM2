@@ -134,6 +134,11 @@ class ChangeAssessment(Base):
     conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    producibility: Mapped[str] = mapped_column(String(10), default="na", server_default="na")  # yes|no|na
+    contact_person: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    approval_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lifecycle_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     stage_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     rasic_letter: Mapped[str] = mapped_column(String(1), default="R", server_default="R")
     status: Mapped[str] = mapped_column(String(20), default="active", server_default="active")  # pending|active|submitted|waived
@@ -147,6 +152,9 @@ class ChangeAssessment(Base):
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="assessments", foreign_keys=[change_id])
     department: Mapped["Department"] = relationship(foreign_keys=[department_id])
+    cost_lines: Mapped[list["AssessmentCostLine"]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan", lazy="selectin",
+    )
 
 
 class ChangeAttachment(Base):
@@ -231,3 +239,4 @@ class ChangeRoutingStandard(Base):
 from app.models.entities import Project, User  # noqa: E402
 from app.models.part import Part, PartRevision  # noqa: E402
 from app.models.workflow import Department  # noqa: E402
+from app.models.change_cost import AssessmentCostLine  # noqa: E402
