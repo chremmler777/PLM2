@@ -13,6 +13,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
+import AuditTimeline from '../components/changes/AuditTimeline';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { t } from '../i18n/cmLabels';
 import { STATUS_LABELS } from '../lib/changeStatus';
@@ -37,11 +38,6 @@ export default function ChangeDetailPage() {
   const { data: allPlants = [] } = useQuery({
     queryKey: ['plants'],
     queryFn: plantsApi.list,
-  });
-  const { data: changelog = [] } = useQuery({
-    queryKey: ['change', changeId, 'changelog'],
-    queryFn: () => changesApi.changelog(changeId),
-    enabled: tab === 'audit',
   });
   const { data: impl } = useQuery({
     queryKey: ['change', changeId, 'implementation'],
@@ -246,14 +242,7 @@ export default function ChangeDetailPage() {
       )}
 
       {tab === 'audit' && (
-        <ol className="text-sm space-y-2">
-          {changelog.map((e) => (
-            <li key={e.id} className="flex gap-3">
-              <span className="text-gray-400 font-mono">{new Date(e.performed_at).toLocaleString()}</span>
-              <span>{e.action_description}</span>
-            </li>
-          ))}
-        </ol>
+        <AuditTimeline correlationId={change.change_number} />
       )}
     </div>
   );

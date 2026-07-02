@@ -72,5 +72,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },
+  'audit.title': { de: 'Audit-Trail', en: 'Audit trail' },
+  'audit.chainOk': { de: 'Kette intakt', en: 'chain intact' },
+  'audit.chainBroken': { de: 'Kette beschädigt', en: 'chain broken' },
+  'audit.export': { de: 'CSV exportieren', en: 'Export CSV' },
+  'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
+  'audit.all': { de: 'Alle', en: 'All' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;
