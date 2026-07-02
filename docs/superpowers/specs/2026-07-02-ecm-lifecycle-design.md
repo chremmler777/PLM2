@@ -78,6 +78,54 @@ disclosure (summary first, detail on demand), status colors used consistently,
 empty states that teach, quality-of-life touches welcome (keyboard-friendly
 grids, sensible defaults, inline validation).
 
+## Workflow definitions (seeded templates, RASIC per department module)
+
+Source: `Documents/Changemanagement/ÄnderungsmitteilungChange_Management (*).xlsx`
+(D1 approval matrix rows 32–45, gates rows 48–57, department tabs D2–D10). The
+existing `ECR` WfTemplate in the DB is a 4-step stub and is replaced by these
+two seeded, designer-editable templates. Department names map to seeded
+`wf_departments`; D1-matrix roles not present as departments map as noted.
+
+### Template 1: "ECM Bewertung" (change-level assessment routing; captured → approved)
+
+Replaces the ECR stub as the `ChangeRoutingStandard` target for all change types.
+Each R-department's module = its D2–D10 tab (producibility verdict + cost lines
+per affected plant).
+
+| Stage | Step | R | A | S/C/I |
+|---|---|---|---|---|
+| 1 Machbarkeit & Bewertung *(opens after gate `feasibility`)* | Fachbereichsbewertung (parallel, one per dept) | Sales, R&D, Tool design, IE, Quality, Logistics, Production, Purchasing, Production control | Project Manager | I: Planner/Scheduler |
+| 2 Summierung & Budget *(gate `budget` guards exit)* | Kostenzusammenfassung prüfen, Budget freigeben | Project Manager | Sales | C: R&D, Tool design; I: all assessed depts |
+| 3 Kundenaktivitäten | Angebot an Kunde / Kundenantwort erfassen | Sales | Project Manager | I: Quality (customer_relevant), R&D |
+
+D1-matrix mapping: Produktentwicklung→R&D; Prozessentw./Industrial Engineering→IE;
+WZ-Management→Tool design; Lieferantenmanagement→Purchasing; QVP + QS (Messraum,
+SPC)→Quality; Fertigungssteuerung→Production control. Producibility is asked
+**per affected plant** (D1 has one matrix per plant); assessments stay
+per-department with per-plant cost lines and per-plant producibility flags.
+
+### Template 2: "ECN Umsetzung" (check workflow per impacted ECN revision; kickoff → ready-to-go)
+
+Instantiated as a `WfInstance` per ECN revision at kickoff (gate `release` = the
+D1 "techn. Freigabe / Bestellung → Start Umsetzung"). Steps that don't apply to
+an item category are waivable by the owner with reason (audited).
+
+| Stage | Step | R | A | S/C/I |
+|---|---|---|---|---|
+| 1 Konstruktion | 3D-Daten aktualisieren **(evidence: CAD file on revision or signed no-geometry-change)** | Tool design (tools) / R&D (articles) | R&D | I: Project Manager |
+| | Zeichnungen & Doku aktualisieren | Tool design / R&D | R&D | S: Quality |
+| 2 Design-Check (4-eyes) | Konstruktionsprüfung (different user than step 1) | R&D | Quality | C: IE |
+| 3 Industrialisierung | Werkzeugänderung umsetzen | Production | Tool design | I: Production control |
+| | Prozess/Arbeitspläne anpassen | IE | Project Manager | C: Production |
+| | Prüfplan / PPAP-Bedarf klären | Quality | Project Manager | C: Sales (if customer_relevant) |
+| | Stammdaten & Logistik aktualisieren | Logistics | Project Manager | C: Purchasing; I: Production control |
+| 4 Ready to go | Bemusterung / Trial | Quality | Project Manager | S: Production |
+| | Finale Freigabe (computed check: all steps done, evidence complete) | Project Manager | Quality | I: Sales, Logistics, Production control |
+
+RASIC semantics as in the existing routing engine: R/A block, S/C never block
+(cascade), I notify-only. "Ready to go" on the change = every impacted
+revision's instance reached Finale Freigabe.
+
 ## Phasing (each phase = own spec/plan → implement cycle)
 
 | Phase | Content | Rationale |
