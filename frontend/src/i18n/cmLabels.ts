@@ -70,6 +70,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
   'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
+  'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },

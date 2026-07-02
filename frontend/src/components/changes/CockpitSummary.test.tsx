@@ -76,6 +76,21 @@ describe('CockpitSummary', () => {
     expect(releaseRow?.className).toContain('text-slate-400')
   })
 
+  it('gate rows act in place: clicking one calls onResolveGate with its key', () => {
+    const onResolveGate = vi.fn()
+    render(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[
+        { gate_key: 'feasibility', decision: 'na' },
+        { gate_key: 'budget', decision: 'na' },
+      ]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onResolveGate={onResolveGate} />)
+    fireEvent.click(screen.getByRole('button', { name: /Feasibility/ }))
+    expect(onResolveGate).toHaveBeenCalledWith('feasibility')
+    fireEvent.click(screen.getByRole('button', { name: /Budget/ }))
+    expect(onResolveGate).toHaveBeenCalledWith('budget')
+  })
+
   it('keeps the green nothing-blocking state while still listing later gates as muted', () => {
     render(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
       gates={[{ gate_key: 'budget', decision: 'na' }]}

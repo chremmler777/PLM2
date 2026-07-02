@@ -1,4 +1,4 @@
-import type { ChangeDetail, Gate } from '../../types/change'
+import type { ChangeDetail, Gate, GateKey } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 
@@ -9,9 +9,12 @@ interface Props {
   impl?: { ready_to_go: boolean } | undefined
   onAdvance: (to: string) => void
   advancing: boolean
+  /** Called with the gate's key when the user clicks a gate row — the page
+      jumps to where the gate is decided (D1 tab). */
+  onResolveGate?: (gateKey: GateKey) => void
 }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate }: Props) {
   const next = NEXT_STATUS[change.status] ?? []
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
@@ -24,6 +27,27 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
     + (overdue > 0 ? 1 : 0)
   const offPath = OFF_PATH_STATUSES.includes(change.status)
+
+  const gateRow = (g: Gate, blocking: boolean) => {
+    const label = (
+      <>
+        {blocking && '⚠ '}{t('cockpit.gate')} {t('gate.' + g.gate_key)}:{' '}
+        <span className="uppercase">{g.decision}</span>
+      </>
+    )
+    return (
+      <li key={g.gate_key} className={blocking ? 'text-amber-300' : 'text-slate-400'}>
+        {onResolveGate ? (
+          <button type="button"
+            className="text-left hover:underline decoration-dotted underline-offset-2"
+            onClick={() => onResolveGate(g.gate_key)}
+            title={t('cockpit.resolveGate')}>
+            {label} <span className="text-xs opacity-70">→ D1</span>
+          </button>
+        ) : label}
+      </li>
+    )
+  }
 
   return (
     <div className="grid md:grid-cols-3 gap-3 my-4">
@@ -47,21 +71,13 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
             {laterGates.length > 0 && (
               <ul className="space-y-1.5 text-sm mt-2">
-                {laterGates.map((g) => (
-                  <li key={g.gate_key} className="text-slate-400">
-                    {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
-                  </li>
-                ))}
+                {laterGates.map((g) => gateRow(g, false))}
               </ul>
             )}
           </>
         ) : (
           <ul className="space-y-1.5 text-sm">
-            {blockingGates.map((g) => (
-              <li key={g.gate_key} className="text-amber-300">
-                ⚠ {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
-              </li>
-            ))}
+            {blockingGates.map((g) => gateRow(g, true))}
             {pendingDeviations > 0 && (
               <li className="text-amber-300">⚠ {t('cockpit.pendingDeviations')}: {pendingDeviations}</li>
             )}
@@ -71,11 +87,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             {unclaimed > 0 && (
               <li className="text-slate-400">{t('cockpit.unclaimed')}: {unclaimed}</li>
             )}
-            {laterGates.map((g) => (
-              <li key={g.gate_key} className="text-slate-400">
-                {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
-              </li>
-            ))}
+            {laterGates.map((g) => gateRow(g, false))}
           </ul>
         )}
       </div>

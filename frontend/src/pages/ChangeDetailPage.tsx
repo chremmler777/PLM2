@@ -137,6 +137,7 @@ export default function ChangeDetailPage() {
         impl={impl}
         onAdvance={advance}
         advancing={transition.isPending}
+        onResolveGate={() => setTab('d1')}
       />
 
       <div className="border-b flex gap-4 text-sm mb-4">
