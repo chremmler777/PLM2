@@ -96,8 +96,13 @@ class ChangeRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(foreign_keys=[project_id])
-    lead: Mapped["User | None"] = relationship(foreign_keys=[lead_id])
+    lead: Mapped["User | None"] = relationship(
+        foreign_keys=[lead_id], lazy="selectin")
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
+
+    @property
+    def lead_name(self) -> Optional[str]:
+        return self.lead.full_name if self.lead is not None else None
 
     impacted_items: Mapped[list["ChangeImpactedItem"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin"

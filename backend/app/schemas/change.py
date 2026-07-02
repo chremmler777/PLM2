@@ -144,6 +144,7 @@ class ChangeResponse(BaseModel):
     priority: str
     status: str
     lead_id: Optional[int] = None
+    lead_name: Optional[str] = None
     raised_by: int
     customer_response: str
     pm_signed_by: Optional[int] = None
@@ -178,6 +179,7 @@ class ChangeResponse(BaseModel):
             # Build a plain dict from the ORM instance's loaded state
             row = {k: v for k, v in vars(data).items() if not k.startswith("_")}
             row["affected_plant_ids"] = plant_ids
+            row["lead_name"] = data.lead_name
             return row
         return data
 

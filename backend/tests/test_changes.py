@@ -384,3 +384,15 @@ async def test_valid_implementation_modes_accepted(client, eng_auth, seed):
         )
         assert res.status_code == 200, res.text
         assert res.json()["implementation_mode"] == mode
+
+
+async def test_change_response_resolves_lead_name(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "lead name test",
+        "change_type": "tooling", "lead_id": seed["engineer_id"]},
+        headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    change_id = res.json()["id"]
+    res = await client.get(f"/api/v1/changes/{change_id}", headers=eng_auth)
+    assert res.status_code == 200
+    assert res.json()["lead_name"]  # resolved full name, not an id

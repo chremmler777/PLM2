@@ -34,6 +34,11 @@ export interface Assessment {
   stage_order: number;
   rasic_letter: string;
   status: string;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
 }
 
 export interface RoutingDepartment {
@@ -94,6 +99,7 @@ export interface ChangeRequest {
   priority: 'low' | 'medium' | 'high' | 'critical';
   status: ChangeStatus;
   lead_id?: number | null;
+  lead_name?: string | null;
   raised_by: number;
   customer_response: 'pending' | 'accepted' | 'declined' | 'negotiating';
   pm_signed_by?: number | null;
