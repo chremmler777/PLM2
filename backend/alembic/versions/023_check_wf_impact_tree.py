@@ -49,11 +49,17 @@ def upgrade() -> None:
         # enforced at the ORM level only (see PartRevision.originating_change_id).
         op.add_column("part_revisions", sa.Column(
             "originating_change_id", sa.Integer(), nullable=True))
+        # Create the index to match the ORM model declaration (index=True).
+        rev_indexes = {ix["name"] for ix in inspect(op.get_bind()).get_indexes("part_revisions")}
+        if "ix_part_revisions_originating_change_id" not in rev_indexes:
+            op.create_index("ix_part_revisions_originating_change_id",
+                            "part_revisions", ["originating_change_id"])
     if "no_geometry_change" not in rev_cols:
         op.add_column("part_revisions", sa.Column(
             "no_geometry_change", sa.Boolean(), nullable=False,
             server_default=sa.text("0")))
     if "no_geometry_change_by" not in rev_cols:
+        # Note: SQLite FK limitation (see originating_change_id comment above).
         op.add_column("part_revisions", sa.Column(
             "no_geometry_change_by", sa.Integer(), nullable=True))
     if "no_geometry_change_at" not in rev_cols:
@@ -80,6 +86,11 @@ def downgrade() -> None:
     op.drop_table("check_workflow_standards")
     op.drop_column("wf_steps", "requires_cad_evidence")
     op.drop_column("wf_steps", "four_eyes")
+    # Drop the index before dropping the column (guarded idempotently).
+    bind = op.get_bind()
+    rev_indexes = {ix["name"] for ix in inspect(bind).get_indexes("part_revisions")}
+    if "ix_part_revisions_originating_change_id" in rev_indexes:
+        op.drop_index("ix_part_revisions_originating_change_id", table_name="part_revisions")
     op.drop_column("part_revisions", "originating_change_id")
     op.drop_column("part_revisions", "no_geometry_change")
     op.drop_column("part_revisions", "no_geometry_change_by")

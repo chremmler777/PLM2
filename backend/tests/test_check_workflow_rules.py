@@ -1,6 +1,5 @@
 # backend/tests/test_check_workflow_rules.py
 import pytest
-from sqlalchemy import select
 
 pytestmark = pytest.mark.asyncio
 
