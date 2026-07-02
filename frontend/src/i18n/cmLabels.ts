@@ -61,5 +61,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'tasks.mine': { de: 'Meine', en: 'Mine' },
   'esc.title': { de: 'Eskalationen — überfällig in meinen Changes', en: 'Escalations — overdue in my changes' },
+  'cockpit.where': { de: 'Status', en: 'Status' },
+  'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
+  'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },
+  'cockpit.nothingBlocking': { de: 'Nichts blockiert', en: 'Nothing blocking' },
+  'cockpit.lead': { de: 'Verantwortlich (Lead)', en: 'Lead' },
+  'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
+  'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
+  'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
+  'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
+  'gate.budget': { de: 'Budget', en: 'Budget' },
+  'gate.release': { de: 'Freigabe', en: 'Release' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

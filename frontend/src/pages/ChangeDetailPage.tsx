@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
-import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
@@ -12,8 +11,11 @@ import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
+import LifecycleStepper from '../components/changes/LifecycleStepper';
+import CockpitSummary from '../components/changes/CockpitSummary';
+import { useDepartments } from '../hooks/queries/useWorkflows';
 import { t } from '../i18n/cmLabels';
-import { STATUS_LABELS, NEXT_STATUS } from '../lib/changeStatus';
+import { STATUS_LABELS } from '../lib/changeStatus';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -46,6 +48,17 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.getImplementation(changeId),
     enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
   });
+  const { data: gates = [] } = useQuery({
+    queryKey: ['change', changeId, 'gates'],
+    queryFn: () => changesApi.getGates(changeId),
+  });
+  const { data: deviations = [] } = useQuery({
+    queryKey: ['change', changeId, 'deviations'],
+    queryFn: () => changesApi.listDeviations(changeId),
+  });
+  const { data: departments = [] } = useDepartments();
+  const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
 
   const transition = useMutation({
     mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
@@ -90,11 +103,17 @@ export default function ChangeDetailPage() {
             </span>
           )}
         </h1>
-        <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
-                onClick={() => advance('cancelled')}>Cancel</button>
+        <div className="flex gap-2">
+          {change.status === 'on_hold' && (
+            <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
+                    onClick={() => advance('in_assessment')}>Resume</button>
+          )}
+          <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
+                  onClick={() => advance('cancelled')}>Cancel</button>
+        </div>
       </div>
 
-      <Stepper status={change.status} />
+      <LifecycleStepper status={change.status} />
 
       {blocked && (
         <DeviationBanner
@@ -114,20 +133,14 @@ export default function ChangeDetailPage() {
         onClose={() => setCancelOpen(false)}
       />
 
-      <div className="flex gap-2 my-4">
-        {(NEXT_STATUS[change.status] ?? []).map((to) => (
-          <button key={to}
-            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-50"
-            disabled={transition.isPending}
-            onClick={() => advance(to)}>
-            → {STATUS_LABELS[to] ?? to}
-          </button>
-        ))}
-        {change.status === 'on_hold' && (
-          <button className="px-4 py-2 rounded-lg border text-sm"
-                  onClick={() => advance('in_assessment')}>Resume</button>
-        )}
-      </div>
+      <CockpitSummary
+        change={change}
+        gates={gates}
+        pendingDeviations={pendingDeviations}
+        impl={impl}
+        onAdvance={advance}
+        advancing={transition.isPending}
+      />
 
       <div className="border-b flex gap-4 text-sm mb-4">
         {(['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'] as Tab[]).map((tb) => (
@@ -173,16 +186,22 @@ export default function ChangeDetailPage() {
           <AssessmentRouting changeId={changeId} />
           <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
-            <li key={a.id} className="px-4 py-2 flex justify-between">
-              <span>Dept #{a.department_id}</span>
-              <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
+            <li key={a.id} className="px-4 py-2 flex justify-between items-center gap-3">
+              <span>{deptName(a.department_id)}</span>
+              <span className="flex items-center gap-3">
+                <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
+                <span className="text-slate-400 text-xs">
+                  {a.owner_name ?? t('tasks.unclaimed')}
+                  {a.overdue && <span className="text-red-400 ml-2">⚠ {t('tasks.overdue')}</span>}
+                </span>
+              </span>
             </li>
           ))}
           {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
           </ul>
           {change.assessments.map((a) => (
             <div key={a.id}>
-              <div className="text-xs text-slate-400 mb-1">Cost lines — Dept #{a.department_id}</div>
+              <div className="text-xs text-slate-400 mb-1">Cost lines — {deptName(a.department_id)}</div>
               <CostLineGrid
                 changeId={changeId}
                 assessmentId={a.id}
@@ -236,23 +255,6 @@ export default function ChangeDetailPage() {
           ))}
         </ol>
       )}
-    </div>
-  );
-}
-
-function Stepper({ status }: { status: string }) {
-  const idx = CHANGE_STATUS_ORDER.indexOf(status as ChangeStatus);
-  return (
-    <div className="flex items-center gap-1 text-xs">
-      {CHANGE_STATUS_ORDER.map((s, i) => (
-        <div key={s} className="flex items-center gap-1">
-          <span className={`px-2 py-1 rounded-full ${
-            i < idx ? 'bg-green-100 text-green-700'
-            : i === idx ? 'bg-blue-600 text-white'
-            : 'bg-gray-100 text-gray-400'}`}>{STATUS_LABELS[s] ?? s}</span>
-          {i < CHANGE_STATUS_ORDER.length - 1 && <span className="text-gray-300">→</span>}
-        </div>
-      ))}
     </div>
   );
 }

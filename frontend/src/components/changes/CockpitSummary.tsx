@@ -1,0 +1,93 @@
+import type { ChangeDetail, Gate } from '../../types/change'
+import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES } from '../../lib/changeStatus'
+import { t } from '../../i18n/cmLabels'
+
+interface Props {
+  change: ChangeDetail
+  gates: Gate[]
+  pendingDeviations: number
+  impl?: { ready_to_go: boolean } | undefined
+  onAdvance: (to: string) => void
+  advancing: boolean
+}
+
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing }: Props) {
+  const openGates = gates.filter((g) => g.decision !== 'yes')
+  const overdue = change.assessments.filter((a) => a.overdue).length
+  const unclaimed = change.assessments.filter(
+    (a) => a.status === 'active' && a.owner_id === null).length
+  const blockers = openGates.length + (pendingDeviations > 0 ? 1 : 0)
+    + (overdue > 0 ? 1 : 0)
+  const next = NEXT_STATUS[change.status] ?? []
+  const offPath = OFF_PATH_STATUSES.includes(change.status)
+
+  return (
+    <div className="grid md:grid-cols-3 gap-3 my-4">
+      <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.where')}</h3>
+        <span className={`px-2.5 py-1 rounded-full text-sm font-semibold ${STATUS_PILL[change.status]}`}>
+          {STATUS_LABELS[change.status]}
+        </span>
+        <p className="mt-3 text-sm text-slate-300">
+          {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '—'}</span>
+        </p>
+        <p className="mt-1 text-xs text-slate-500">
+          {new Date(change.created_at).toLocaleDateString()} → {new Date(change.updated_at).toLocaleDateString()}
+        </p>
+      </div>
+
+      <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.blocking')}</h3>
+        {blockers === 0 && unclaimed === 0 ? (
+          <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
+        ) : (
+          <ul className="space-y-1.5 text-sm">
+            {openGates.map((g) => (
+              <li key={g.gate_key} className="text-amber-300">
+                ⚠ Gate {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
+              </li>
+            ))}
+            {pendingDeviations > 0 && (
+              <li className="text-amber-300">⚠ {t('cockpit.pendingDeviations')}: {pendingDeviations}</li>
+            )}
+            {overdue > 0 && (
+              <li className="text-red-400">⚠ {t('cockpit.overdueAssessments')}: {overdue}</li>
+            )}
+            {unclaimed > 0 && (
+              <li className="text-slate-400">{t('cockpit.unclaimed')}: {unclaimed}</li>
+            )}
+          </ul>
+        )}
+      </div>
+
+      <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
+        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.next')}</h3>
+        {impl?.ready_to_go && (
+          <span className="inline-block mb-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
+            ✓ {t('impl.readyToGo')}
+          </span>
+        )}
+        {offPath || next.length === 0 ? (
+          <p className="text-sm text-slate-400">{STATUS_LABELS[change.status]}</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <button
+              className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+              disabled={advancing}
+              onClick={() => onAdvance(next[0])}>
+              → {STATUS_LABELS[next[0]]}
+            </button>
+            {next.slice(1).map((to) => (
+              <button key={to}
+                className="border border-slate-600 text-slate-300 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+                disabled={advancing}
+                onClick={() => onAdvance(to)}>
+                → {STATUS_LABELS[to]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
