@@ -277,6 +277,19 @@ class ChangeService:
             missing = [i for i in change.impacted_items if i.resulting_revision_id is None]
             if missing:
                 return "Some impacted items have no resulting revision"
+        if to_status == "in_implementation":
+            from app.models.workflow import CheckWorkflowStandard
+            part_ids = [i.part_id for i in change.impacted_items]
+            if part_ids:
+                cats = {c for (c,) in await session.execute(
+                    select(Part.item_category).where(Part.id.in_(part_ids)))}
+                mapped = {c for (c,) in await session.execute(
+                    select(CheckWorkflowStandard.item_category).where(
+                        CheckWorkflowStandard.item_category.in_(cats)))}
+                missing = sorted(cats - mapped)
+                if missing:
+                    return ("no check-workflow template mapped for item "
+                            f"category: {', '.join(missing)}")
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
         for gate in change.gates:
@@ -345,31 +358,65 @@ class ChangeService:
     @staticmethod
     async def spawn_ecn_revisions(session: AsyncSession, change: ChangeRequest, user_id: int):
         for item in change.impacted_items:
-            if item.resulting_revision_id is not None:
-                continue
-            # count existing ECN revisions on this part for a simple unique name
-            result = await session.execute(
-                select(func.count()).select_from(PartRevision).where(
-                    (PartRevision.part_id == item.part_id) & (PartRevision.phase == "ecn")
+            if item.resulting_revision_id is None:
+                # count existing ECN revisions on this part for a simple unique name
+                result = await session.execute(
+                    select(func.count()).select_from(PartRevision).where(
+                        (PartRevision.part_id == item.part_id) & (PartRevision.phase == "ecn")
+                    )
                 )
-            )
-            n = (result.scalar() or 0) + 1
-            rev = PartRevision(
-                part_id=item.part_id,
-                revision_name=f"ECR{n}.1",
-                phase="ecn",
-                status="draft",
-                change_reason=f"{change.change_number}: {change.title}",
-                created_by=user_id,
-            )
-            session.add(rev)
-            await session.flush()
-            item.resulting_revision_id = rev.id
-            await ChangeService.append_changelog(
-                session, change, "revision_spawned",
-                f"Spawned ECN revision {rev.revision_name} on part {item.part_id}",
-                user_id, new_value={"revision_id": rev.id, "part_id": item.part_id},
-            )
+                n = (result.scalar() or 0) + 1
+                rev = PartRevision(
+                    part_id=item.part_id,
+                    revision_name=f"ECR{n}.1",
+                    phase="ecn",
+                    status="draft",
+                    change_reason=f"{change.change_number}: {change.title}",
+                    created_by=user_id,
+                    originating_change_id=change.id,
+                )
+                session.add(rev)
+                await session.flush()
+                item.resulting_revision_id = rev.id
+                await ChangeService.append_changelog(
+                    session, change, "revision_spawned",
+                    f"Spawned ECN revision {rev.revision_name} on part {item.part_id}",
+                    user_id, new_value={"revision_id": rev.id, "part_id": item.part_id},
+                )
+            await ChangeService._ensure_check_workflow(session, change, item, user_id)
+
+    @staticmethod
+    async def _ensure_check_workflow(session: AsyncSession, change: ChangeRequest,
+                                     item: "ChangeImpactedItem", user_id: int) -> None:
+        """Start the mapped check-WF instance for an impacted item's ECN
+        revision. No-op if one already runs/ran, or (deviation-bypassed
+        kickoff) no mapping exists — the change then stays not-ready-to-go."""
+        from app.models.workflow import CheckWorkflowStandard, WfInstance
+        from app.services.workflow_service import WorkflowService
+
+        existing = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.part_revision_id == item.resulting_revision_id,
+                WfInstance.status.in_(("active", "completed")))
+        )).scalars().first()
+        if existing is not None:
+            return
+        part = await session.get(Part, item.part_id)
+        standard = (await session.execute(
+            select(CheckWorkflowStandard).where(
+                CheckWorkflowStandard.item_category == part.item_category)
+        )).scalar_one_or_none()
+        if standard is None:
+            return
+        instance = await WorkflowService.start_workflow(
+            session, item.resulting_revision_id, standard.template_id, user_id)
+        await ChangeService.append_changelog(
+            session, change, "check_wf_started",
+            f"Check workflow started for revision {item.resulting_revision_id} "
+            f"(part {item.part_id})",
+            user_id, new_value={"instance_id": instance.id,
+                                "revision_id": item.resulting_revision_id},
+        )
 
     @staticmethod
     async def release(session: AsyncSession, change: ChangeRequest, user_id: int):

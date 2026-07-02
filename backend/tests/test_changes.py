@@ -209,7 +209,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
 
 
 async def test_implementation_spawns_ecn_revision_per_item(
-    client, eng_auth, admin_auth, seed, departments
+    client, eng_auth, admin_auth, seed, departments, check_wf_standards
 ):
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
     cid = change["id"]
@@ -226,7 +226,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
 
 
 async def test_release_activates_revisions_and_stamps_eng_level(
-    client, eng_auth, admin_auth, seed, departments
+    client, eng_auth, admin_auth, seed, departments, check_wf_standards
 ):
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
     cid = change["id"]
