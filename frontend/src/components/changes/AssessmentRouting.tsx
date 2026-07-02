@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
+import { useDepartments } from '../../hooks/queries/useWorkflows';
 
 const LETTER_LABEL: Record<string, string> = {
   R: 'Responsible', A: 'Accountable', S: 'Support', C: 'Consulted', I: 'Informed',
@@ -16,6 +17,8 @@ export default function AssessmentRouting({ changeId }: { changeId: number }) {
     queryKey: ['change-routing', changeId],
     queryFn: () => changesApi.getRouting(changeId),
   });
+  const { data: departments = [] } = useDepartments();
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
   const approve = useMutation({
     mutationFn: () => changesApi.approveDeviation(changeId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change-routing', changeId] }),
@@ -58,7 +61,7 @@ export default function AssessmentRouting({ changeId }: { changeId: number }) {
                   <span className="flex items-center gap-2">
                     <span className={`px-1.5 py-0.5 rounded border text-xs ${TIER_BADGE[d.tier]}`}
                       title={LETTER_LABEL[d.rasic_letter]}>{d.rasic_letter}</span>
-                    <span className="text-slate-200">Dept {d.department_id}</span>
+                    <span className="text-slate-200">{deptName(d.department_id)}</span>
                   </span>
                   <span className="text-slate-400 text-xs">
                     {d.tier === 'info' ? 'notified' : (d.verdict && d.verdict !== 'pending' ? d.verdict : d.status)}
