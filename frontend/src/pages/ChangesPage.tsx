@@ -1,20 +1,11 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { changesApi } from '../api/changes';
-import type { ChangeType } from '../types/change';
 import { STATUS_LABELS } from '../lib/changeStatus';
-
-const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
-  { value: 'physical_part', label: 'Physical Part' },
-  { value: 'tooling', label: 'Tooling' },
-  { value: 'document_spec', label: 'Document / Spec' },
-  { value: 'process_im', label: 'Process / IM' },
-  { value: 'packaging', label: 'Packaging' },
-];
+import StartChangeModal from '../components/changes/StartChangeModal';
 
 export default function ChangesPage() {
-  const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('');
 
@@ -85,59 +76,8 @@ export default function ChangesPage() {
       )}
 
       {showCreate && (
-        <CreateChangeModal
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); qc.invalidateQueries({ queryKey: ['changes'] }); }}
-        />
+        <StartChangeModal open onClose={() => setShowCreate(false)} />
       )}
-    </div>
-  );
-}
-
-function CreateChangeModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [projectId, setProjectId] = useState('');
-  const [title, setTitle] = useState('');
-  const [changeType, setChangeType] = useState<ChangeType>('physical_part');
-  const [reason, setReason] = useState('');
-
-  const mutation = useMutation({
-    mutationFn: () => changesApi.create({
-      project_id: Number(projectId), title, change_type: changeType, reason,
-    }),
-    onSuccess: onCreated,
-  });
-
-  return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl p-6 w-full max-w-md">
-        <h2 className="text-lg font-semibold mb-4">New Change</h2>
-        <label className="block text-sm mb-2">Project ID
-          <input className="mt-1 w-full border rounded-lg px-3 py-2" value={projectId}
-                 onChange={(e) => setProjectId(e.target.value)} />
-        </label>
-        <label className="block text-sm mb-2">Title
-          <input className="mt-1 w-full border rounded-lg px-3 py-2" value={title}
-                 onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        <label className="block text-sm mb-2">Type
-          <select className="mt-1 w-full border rounded-lg px-3 py-2" value={changeType}
-                  onChange={(e) => setChangeType(e.target.value as ChangeType)}>
-            {CHANGE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </label>
-        <label className="block text-sm mb-4">Reason (a sentence is fine; a PPT can be attached later)
-          <textarea className="mt-1 w-full border rounded-lg px-3 py-2" value={reason}
-                    onChange={(e) => setReason(e.target.value)} />
-        </label>
-        <div className="flex justify-end gap-2">
-          <button className="px-4 py-2 text-sm" onClick={onClose}>Cancel</button>
-          <button
-            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-50"
-            disabled={!projectId || !title || mutation.isPending}
-            onClick={() => mutation.mutate()}
-          >Create</button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import StartChangeModal from '../components/changes/StartChangeModal';
 
 interface Revision {
   id: number;
@@ -25,6 +26,8 @@ interface Part {
   name: string;
   part_type: string;
   data_classification: string;
+  item_category: string;
+  project_id: number;
   revisions: Revision[];
 }
 
@@ -167,6 +170,7 @@ export default function PartDetail() {
   const [proposalSummary, setProposalSummary] = useState('');
   const [showRejectDraftsModal, setShowRejectDraftsModal] = useState(false);
   const [showRejectFreezeDraftsModal, setShowRejectFreezeDraftsModal] = useState(false);
+  const [showStartChange, setShowStartChange] = useState(false);
 
   // Fetch part
   const { data: part, isLoading, error: partError, refetch } = useQuery({
@@ -473,8 +477,30 @@ export default function PartDetail() {
                 {getActiveRevisionLevel(part.revisions)}
               </p>
             </div>
+            <button
+              onClick={() => setShowStartChange(true)}
+              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
+            >
+              Start change
+            </button>
           </div>
         </div>
+
+        {showStartChange && (
+          <StartChangeModal
+            open
+            onClose={() => setShowStartChange(false)}
+            prefill={{
+              projectId: part.project_id,
+              part: {
+                id: part.id,
+                part_number: part.part_number,
+                name: part.name,
+                item_category: part.item_category,
+              },
+            }}
+          />
+        )}
 
         {/* Part Info */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">

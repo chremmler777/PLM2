@@ -15,6 +15,7 @@ import MilestoneStrip from '../components/MilestoneStrip';
 import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
+import StartChangeModal from '../components/changes/StartChangeModal';
 import { toast } from 'sonner';
 
 // Types
@@ -893,6 +894,7 @@ export default function ProjectDetailPage() {
   const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
@@ -1036,13 +1038,29 @@ export default function ProjectDetailPage() {
             <MilestoneStrip projectId={id} />
           </div>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
-        >
-          + Add Part
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowStartChange(true)}
+            className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
+          >
+            Start change
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
+          >
+            + Add Part
+          </button>
+        </div>
       </div>
+
+      {showStartChange && (
+        <StartChangeModal
+          open
+          onClose={() => setShowStartChange(false)}
+          prefill={{ projectId: id }}
+        />
+      )}
 
       <ProjectSepSection projectId={id} />
 

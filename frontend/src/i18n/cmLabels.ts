@@ -78,5 +78,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.export': { de: 'CSV exportieren', en: 'Export CSV' },
   'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
   'audit.all': { de: 'Alle', en: 'All' },
+  'start.title': { de: 'Änderung starten', en: 'Start change' },
+  'start.project': { de: 'Projekt', en: 'Project' },
+  'start.item': { de: 'Betroffenes Teil', en: 'Affected item' },
+  'start.searchItem': { de: 'Teil suchen…', en: 'Search item…' },
+  'start.articles': { de: 'Artikel', en: 'Articles' },
+  'start.tools': { de: 'Werkzeuge & Betriebsmittel', en: 'Tools & equipment' },
+  'start.changeTitle': { de: 'Titel', en: 'Title' },
+  'start.reason': { de: 'Begründung', en: 'Reason' },
+  'start.type': { de: 'Änderungsart', en: 'Change type' },
+  'start.create': { de: 'Änderung anlegen', en: 'Create change' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

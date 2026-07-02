@@ -32,7 +32,7 @@ export const changesApi = {
   decideDeviation: (id: number, devId: number, body: { decision: 'approved' | 'rejected'; note?: string }) =>
     client.post<TransitionDeviation>(`/v1/changes/${id}/deviations/${devId}/decide`, body).then((r) => r.data),
 
-  addImpactedItem: (id: number, body: { part_id: number; impact_note?: string; eng_level_before?: string }) =>
+  addImpactedItem: (id: number, body: { part_id: number; is_lead?: boolean; impact_note?: string; eng_level_before?: string }) =>
     client.post(`/v1/changes/${id}/impacted-items`, body).then((r) => r.data),
 
   removeImpactedItem: (id: number, itemId: number) =>
