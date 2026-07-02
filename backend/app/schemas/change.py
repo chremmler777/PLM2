@@ -214,6 +214,21 @@ class RoutingStandardUpsert(BaseModel):
     template_version: int = 1
 
 
+class CheckStandardIn(BaseModel):
+    item_category: str
+    template_id: int
+
+
+class CheckStandardResponse(BaseModel):
+    id: int
+    item_category: str
+    template_id: int
+    template_version: int
+
+    class Config:
+        from_attributes = True
+
+
 class CostLineIn(BaseModel):
     plant_id: int
     cost_kind: str = "one_time"

@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import uuid
+from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, status
@@ -26,6 +27,7 @@ from app.schemas.change import (
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
+    CheckStandardIn, CheckStandardResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -130,6 +132,43 @@ async def upsert_routing_standard(body: RoutingStandardUpsert,
     await db.commit()
     return {"change_type": body.change_type, "template_id": body.template_id,
             "template_version": body.template_version}
+
+
+@router.get("/check-standards", response_model=List[CheckStandardResponse])
+async def list_check_standards(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.models.workflow import CheckWorkflowStandard
+    rows = (await db.execute(select(CheckWorkflowStandard))).scalars().all()
+    return rows
+
+
+@router.put("/check-standards", response_model=CheckStandardResponse)
+async def put_check_standard(
+    body: CheckStandardIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.models.workflow import CheckWorkflowStandard, CHECK_WF_ITEM_CATEGORIES, WfTemplate
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if body.item_category not in CHECK_WF_ITEM_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Unknown item_category")
+    tmpl = await db.get(WfTemplate, body.template_id)
+    if tmpl is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    row = (await db.execute(select(CheckWorkflowStandard).where(
+        CheckWorkflowStandard.item_category == body.item_category))).scalar_one_or_none()
+    if row is None:
+        row = CheckWorkflowStandard(item_category=body.item_category,
+                                    template_id=tmpl.id)
+        db.add(row)
+    row.template_id = tmpl.id
+    row.template_version = tmpl.version
+    row.updated_by = current_user.id
+    row.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 @router.get("/reference/rates")

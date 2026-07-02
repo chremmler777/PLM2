@@ -341,6 +341,11 @@ async def seed_test_data():
                             session.add(AssessmentActivity(
                                 department_id=dep.id, label=label,
                                 sort_order=sort_order, is_active=True))
+
+            # --- Seeded change-management workflow templates (idempotent) ---
+            from app.services.wf_seed_service import seed_change_workflows
+            await seed_change_workflows(session)
+
             await session.commit()
             logger.info("Test data seeded successfully")
         except Exception as e:
