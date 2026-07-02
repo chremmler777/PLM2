@@ -15,3 +15,13 @@ plm.db
 backend/plm.db
 backend/uploads/
 uploads/
+
+# Local agent/session state (never commit)
+.claude/
+.memsearch/
+.superpowers/
+.playwright-cli/
+frontend/.playwright-cli/
+*.db-shm
+*.db-wal
+backend/app.db
