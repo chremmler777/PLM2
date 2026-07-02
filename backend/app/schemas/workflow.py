@@ -154,9 +154,24 @@ class WfInstanceTaskResponse(BaseModel):
     completed_at: datetime | None
     decision: str | None
     notes: str | None
+    owner_id: int | None = None
+    owner_name: str | None = None
+    accepted_at: datetime | None = None
+    due_date: datetime | None = None
+    overdue: bool = False
 
     class Config:
         from_attributes = True
+
+
+class AssignTaskRequest(BaseModel):
+    """Assign a task to a department member."""
+    user_id: int
+
+
+class DueDateRequest(BaseModel):
+    """Set a task's due date."""
+    due_date: datetime
 
 
 class WfInstanceResponse(BaseModel):

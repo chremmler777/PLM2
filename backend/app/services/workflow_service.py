@@ -292,6 +292,96 @@ class WorkflowService:
         return instance
 
     @staticmethod
+    async def _is_department_member(db: AsyncSession, user_id: int,
+                                    department_id: int) -> bool:
+        from app.models.workflow import UserDepartment
+        row = (await db.execute(
+            select(UserDepartment).where(
+                UserDepartment.user_id == user_id,
+                UserDepartment.department_id == department_id).limit(1)
+        )).scalar_one_or_none()
+        return row is not None
+
+    @staticmethod
+    async def _load_open_task(db: AsyncSession, task_id: int) -> WfInstanceTask:
+        task = (await db.execute(
+            select(WfInstanceTask).where(WfInstanceTask.id == task_id)
+            .options(selectinload(WfInstanceTask.instance),
+                     selectinload(WfInstanceTask.step))
+        )).scalar_one_or_none()
+        if task is None:
+            raise ValueError("Task not found")
+        if task.status != "active" or not task.is_actionable:
+            raise ValueError("Task is not open (active and actionable)")
+        return task
+
+    @staticmethod
+    async def accept_task(db: AsyncSession, task_id: int, user) -> WfInstanceTask:
+        task = await WorkflowService._load_open_task(db, task_id)
+        if user.role != "admin" and not await WorkflowService._is_department_member(
+                db, user.id, task.department_id):
+            raise ValueError("Only members of the task's department may accept it")
+        if task.owner_id is not None and task.owner_id != user.id:
+            raise ValueError("Task is already owned by another user")
+        task.owner_id = user.id
+        task.accepted_at = datetime.utcnow()
+        await db.flush()
+        await WorkflowService._audit(
+            db, task.instance, "task_accepted", user.id,
+            {"task_id": task.id, "owner_id": user.id})
+        return task
+
+    @staticmethod
+    async def assign_task(db: AsyncSession, task_id: int, assignee_id: int,
+                          actor) -> WfInstanceTask:
+        from app.models.entities import User
+        task = await WorkflowService._load_open_task(db, task_id)
+        if actor.role != "admin" and not await WorkflowService._is_department_member(
+                db, actor.id, task.department_id):
+            raise ValueError("Only members of the task's department (or an admin) may assign it")
+        assignee = await db.get(User, assignee_id)
+        if assignee is None or not assignee.is_active:
+            raise ValueError("Assignee not found or inactive")
+        if not await WorkflowService._is_department_member(
+                db, assignee_id, task.department_id):
+            raise ValueError("Assignee must be a member of the task's department")
+        task.owner_id = assignee_id
+        task.accepted_at = None
+        await db.flush()
+        await WorkflowService._audit(
+            db, task.instance, "task_assigned", actor.id,
+            {"task_id": task.id, "owner_id": assignee_id})
+        if assignee_id != actor.id:
+            from app.services.notification_service import NotificationService
+            step_name = task.step.step_name if task.step else "workflow task"
+            await NotificationService.notify_users(
+                db, [assignee_id], title=f"Task assigned: {step_name}",
+                link="/my-tasks")
+        return task
+
+    @staticmethod
+    async def set_task_due_date(db: AsyncSession, task_id: int,
+                                due_date: datetime, actor) -> WfInstanceTask:
+        from app.models.change import ChangeRequest
+        task = await WorkflowService._load_open_task(db, task_id)
+        allowed = actor.role == "admin" or task.instance.started_by == actor.id
+        if not allowed:
+            rev = await db.get(PartRevision, task.instance.part_revision_id)
+            if rev is not None and rev.originating_change_id is not None:
+                change = await db.get(ChangeRequest, rev.originating_change_id)
+                allowed = change is not None and change.lead_id == actor.id
+        if not allowed:
+            raise ValueError(
+                "Only an admin, the workflow starter, or the change lead may set due dates")
+        old = task.due_date.isoformat() if task.due_date else None
+        task.due_date = due_date
+        await db.flush()
+        await WorkflowService._audit(
+            db, task.instance, "task_due_date_set", actor.id,
+            {"task_id": task.id, "old": old, "new": due_date.isoformat()})
+        return task
+
+    @staticmethod
     async def get_revision_workflow(
         db: AsyncSession,
         revision_id: int,
