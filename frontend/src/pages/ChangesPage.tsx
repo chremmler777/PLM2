@@ -28,7 +28,7 @@ export default function ChangesPage() {
 
       <div className="mb-4">
         <select
-          className="border rounded-lg px-3 py-2 text-sm"
+          className="border border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-800 text-slate-100"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >
@@ -40,11 +40,11 @@ export default function ChangesPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-gray-500">Loading…</p>
+        <p className="text-slate-400">Loading…</p>
       ) : (
-        <div className="border rounded-xl overflow-hidden">
+        <div className="border border-slate-700 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-left text-gray-500">
+            <thead className="bg-slate-700 text-left text-slate-400">
               <tr>
                 <th className="px-4 py-3">Number</th>
                 <th className="px-4 py-3">Title</th>
@@ -55,7 +55,7 @@ export default function ChangesPage() {
             </thead>
             <tbody>
               {changes.map((c) => (
-                <tr key={c.id} className="border-t hover:bg-gray-50">
+                <tr key={c.id} className="border-t border-slate-700 hover:bg-slate-800/60">
                   <td className="px-4 py-3 font-mono">
                     <Link className="text-blue-600 hover:underline" to={`/changes/${c.id}`}>
                       {c.change_number}
@@ -68,7 +68,7 @@ export default function ChangesPage() {
                 </tr>
               ))}
               {changes.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No changes yet.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
               )}
             </tbody>
           </table>

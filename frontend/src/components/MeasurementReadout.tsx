@@ -82,7 +82,7 @@ export function MeasurementReadout({
 
   return (
     <div
-      className={`fixed bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-red-600 dark:border-red-500 w-64 z-30 font-mono ${isDragging ? 'cursor-grabbing' : ''}`}
+      className={`fixed bg-slate-800 rounded-lg shadow-xl border-2 border-red-600 w-64 z-30 font-mono ${isDragging ? 'cursor-grabbing' : ''}`}
       style={{
         left: position.x,
         bottom: position.y,
@@ -94,14 +94,14 @@ export function MeasurementReadout({
     >
       {/* Draggable header */}
       <div className={`flex items-center justify-between p-3 pb-2 cursor-grab ${isDragging ? 'cursor-grabbing' : ''}`}>
-        <div className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
-          <span className="text-gray-400 text-xs">⋮⋮</span>
+        <div className="text-sm font-bold text-red-400 flex items-center gap-2">
+          <span className="text-slate-500 text-xs">⋮⋮</span>
           MEASUREMENT
         </div>
         {onClear && (
           <button
             onClick={onClear}
-            className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded text-gray-700 dark:text-gray-300 transition-colors"
+            className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-700 rounded text-slate-300 transition-colors"
             title="Clear measurement and start new"
           >
             ✕ Clear
@@ -110,17 +110,17 @@ export function MeasurementReadout({
       </div>
 
       <div className="px-3 pb-3">
-        <div className="border-t border-gray-300 dark:border-gray-700 pt-2 mb-2">
+        <div className="border-t border-slate-700 pt-2 mb-2">
           <div className="text-xs space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Point 1:</span>
+              <span className="text-slate-400">Point 1:</span>
               <span className={`font-medium ${getSnapColor(point1SnapType)}`}>
                 {getSnapLabel(point1SnapType)}
               </span>
             </div>
-            <div className="text-center text-gray-400">↓</div>
+            <div className="text-center text-slate-400">↓</div>
             <div className="flex items-center justify-between">
-              <span className="text-gray-600 dark:text-gray-400">Point 2:</span>
+              <span className="text-slate-400">Point 2:</span>
               <span className={`font-medium ${getSnapColor(point2SnapType)}`}>
                 {getSnapLabel(point2SnapType)}
               </span>
@@ -134,17 +134,17 @@ export function MeasurementReadout({
         </div>
 
         {axisDistances && (
-          <div className="bg-gray-50 dark:bg-gray-700 rounded p-2 text-xs space-y-1">
-            <div className="font-bold text-gray-700 dark:text-gray-300 mb-1">Axis Breakdown:</div>
-            <div className="flex justify-between text-gray-700 dark:text-gray-300">
+          <div className="bg-slate-700 rounded p-2 text-xs space-y-1">
+            <div className="font-bold text-slate-300 mb-1">Axis Breakdown:</div>
+            <div className="flex justify-between text-slate-300">
               <span>X:</span>
               <span className="font-mono font-bold">{axisDistances.x.toFixed(2)} mm</span>
             </div>
-            <div className="flex justify-between text-gray-700 dark:text-gray-300">
+            <div className="flex justify-between text-slate-300">
               <span>Y:</span>
               <span className="font-mono font-bold">{axisDistances.y.toFixed(2)} mm</span>
             </div>
-            <div className="flex justify-between text-gray-700 dark:text-gray-300">
+            <div className="flex justify-between text-slate-300">
               <span>Z:</span>
               <span className="font-mono font-bold">{axisDistances.z.toFixed(2)} mm</span>
             </div>
