@@ -1,5 +1,5 @@
 import type { ChangeDetail, Gate } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 
 interface Props {
@@ -12,13 +12,17 @@ interface Props {
 }
 
 export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing }: Props) {
+  const next = NEXT_STATUS[change.status] ?? []
   const openGates = gates.filter((g) => g.decision !== 'yes')
+  // A gate only blocks when it guards a transition that's currently available —
+  // gates seeded 'na' but guarding a later transition are just "outstanding later".
+  const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key]))
+  const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key]))
   const overdue = change.assessments.filter((a) => a.overdue).length
   const unclaimed = change.assessments.filter(
     (a) => a.status === 'active' && a.owner_id === null).length
-  const blockers = openGates.length + (pendingDeviations > 0 ? 1 : 0)
+  const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
     + (overdue > 0 ? 1 : 0)
-  const next = NEXT_STATUS[change.status] ?? []
   const offPath = OFF_PATH_STATUSES.includes(change.status)
 
   return (
@@ -39,12 +43,23 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.blocking')}</h3>
         {blockers === 0 && unclaimed === 0 ? (
-          <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
+          <>
+            <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
+            {laterGates.length > 0 && (
+              <ul className="space-y-1.5 text-sm mt-2">
+                {laterGates.map((g) => (
+                  <li key={g.gate_key} className="text-slate-400">
+                    {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         ) : (
           <ul className="space-y-1.5 text-sm">
-            {openGates.map((g) => (
+            {blockingGates.map((g) => (
               <li key={g.gate_key} className="text-amber-300">
-                ⚠ Gate {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
+                ⚠ {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
               </li>
             ))}
             {pendingDeviations > 0 && (
@@ -56,6 +71,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             {unclaimed > 0 && (
               <li className="text-slate-400">{t('cockpit.unclaimed')}: {unclaimed}</li>
             )}
+            {laterGates.map((g) => (
+              <li key={g.gate_key} className="text-slate-400">
+                {t('cockpit.gate')} {t('gate.' + g.gate_key)}: <span className="uppercase">{g.decision}</span>
+              </li>
+            ))}
           </ul>
         )}
       </div>

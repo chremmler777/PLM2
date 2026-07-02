@@ -69,6 +69,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
   'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
+  'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },
@@ -88,5 +89,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.reason': { de: 'Begründung', en: 'Reason' },
   'start.type': { de: 'Änderungsart', en: 'Change type' },
   'start.create': { de: 'Änderung anlegen', en: 'Create change' },
+  'start.clearItem': { de: 'Auswahl entfernen', en: 'Clear selected item' },
+  'start.noMatches': { de: 'Keine Treffer — Nummer oder Namen anders schreiben?', en: 'No matches — try a different number or name?' },
+  'common.cancel': { de: 'Abbrechen', en: 'Cancel' },
+  'common.close': { de: 'Schließen', en: 'Close' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

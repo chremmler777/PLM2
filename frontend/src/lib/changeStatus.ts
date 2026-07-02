@@ -1,4 +1,4 @@
-import type { ChangeStatus } from '../types/change'
+import type { ChangeStatus, GateKey } from '../types/change'
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -31,3 +31,11 @@ export const STATUS_PILL: Record<ChangeStatus, string> = {
 }
 
 export const OFF_PATH_STATUSES: ChangeStatus[] = ['on_hold', 'rejected', 'cancelled']
+
+/** Which transition each gate guards. Mirrors GATE_TARGET_STATUS in
+ * backend/app/models/change_cost.py — keep values in sync. */
+export const GATE_TARGET_STATUS: Record<GateKey, ChangeStatus> = {
+  feasibility: 'in_assessment',
+  budget: 'costing',
+  release: 'in_implementation',
+}

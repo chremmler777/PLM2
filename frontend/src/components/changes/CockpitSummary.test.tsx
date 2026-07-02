@@ -22,14 +22,23 @@ describe('CockpitSummary', () => {
           rasic_letter: 'R', status: 'active', owner_id: null, owner_name: null,
           accepted_at: null, due_date: '2026-06-01T00:00:00', overdue: true },
       ] as ChangeDetail['assessments'] })}
+      // status 'quoted' -> next is 'approved'/'rejected'. Neither gate below
+      // guards that transition (feasibility guards in_assessment, budget guards
+      // costing, release guards in_implementation), so none should be amber.
       gates={[
         { gate_key: 'feasibility', decision: 'yes' },
         { gate_key: 'budget', decision: 'na' },
+        { gate_key: 'release', decision: 'na' },
       ]}
       pendingDeviations={1}
       onAdvance={onAdvance} advancing={false} />)
     expect(screen.getByText('Eva Eng')).toBeDefined()
-    expect(screen.getByText(/Budget/)).toBeDefined()          // open gate named
+    const budgetRow = screen.getByText(/Budget/).closest('li')
+    expect(budgetRow?.textContent).not.toContain('⚠')
+    expect(budgetRow?.className).toContain('text-slate-400')
+    const releaseRow = screen.getByText(/Release/).closest('li')
+    expect(releaseRow?.textContent).not.toContain('⚠')
+    expect(releaseRow?.className).toContain('text-slate-400')
     expect(screen.getByText(/Pending deviations/)).toBeDefined()
     expect(screen.getByText(/Overdue assessments/)).toBeDefined()
     const primary = screen.getByRole('button', { name: /Approved/ })
@@ -42,5 +51,38 @@ describe('CockpitSummary', () => {
     render(<CockpitSummary change={change({ status: 'captured' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+  })
+
+  it('marks a gate amber only when it guards a currently-available transition', () => {
+    // status 'captured' -> next is 'in_assessment'. feasibility guards
+    // in_assessment, so a not-yes feasibility gate IS a real blocker. budget and
+    // release guard later transitions, so they render muted, not amber.
+    render(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[
+        { gate_key: 'feasibility', decision: 'na' },
+        { gate_key: 'budget', decision: 'na' },
+        { gate_key: 'release', decision: 'na' },
+      ]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+    expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+    const feasibilityRow = screen.getByText(/Feasibility/).closest('li')
+    expect(feasibilityRow?.textContent).toContain('⚠')
+    expect(feasibilityRow?.className).toContain('text-amber-300')
+    const budgetRow = screen.getByText(/Budget/).closest('li')
+    expect(budgetRow?.textContent).not.toContain('⚠')
+    expect(budgetRow?.className).toContain('text-slate-400')
+    const releaseRow = screen.getByText(/Release/).closest('li')
+    expect(releaseRow?.textContent).not.toContain('⚠')
+    expect(releaseRow?.className).toContain('text-slate-400')
+  })
+
+  it('keeps the green nothing-blocking state while still listing later gates as muted', () => {
+    render(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
+      gates={[{ gate_key: 'budget', decision: 'na' }]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+    const budgetRow = screen.getByText(/Budget/).closest('li')
+    expect(budgetRow?.textContent).not.toContain('⚠')
+    expect(budgetRow?.className).toContain('text-slate-400')
   })
 })
