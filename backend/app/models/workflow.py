@@ -4,6 +4,10 @@ from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean, JSO
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 
+WF_TASK_STATUSES = ("pending", "active", "approved", "rejected", "noted", "waived")
+WF_TASK_DECISIONS = ("approved", "rejected", "waived")
+CHECK_WF_ITEM_CATEGORIES = ("article", "tool", "assembly_equipment", "eoat", "gauge")
+
 
 # ============================================================================
 # NEW: Stage-based workflow template design with RASIC matrix
@@ -83,6 +87,8 @@ class WfStep(Base):
     stage_id: Mapped[int] = mapped_column(ForeignKey("wf_stages.id"))
     step_name: Mapped[str] = mapped_column(String(100))
     position_in_stage: Mapped[int] = mapped_column(Integer)  # For ordering within parallel group
+    requires_cad_evidence: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    four_eyes: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     stage: Mapped["WfStage"] = relationship(back_populates="steps")
     rasic_assignments: Mapped[list["WfStepRasic"]] = relationship(
@@ -118,6 +124,21 @@ class WfTemplateHistory(Base):
 
     template: Mapped["WfTemplate"] = relationship(back_populates="history")
     changed_by_user: Mapped["User"] = relationship(foreign_keys=[changed_by])
+
+
+class CheckWorkflowStandard(Base):
+    """Maps a part item_category to the check-workflow template instantiated
+    per ECN revision at change kickoff (approved -> in_implementation)."""
+    __tablename__ = "check_workflow_standards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_category: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("wf_templates.id"))
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    template: Mapped["WfTemplate"] = relationship()
 
 
 # ============================================================================

@@ -26,7 +26,7 @@ from app.models.change_cost import (
 )
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
-    WfInstance, WfInstanceTask,
+    WfInstance, WfInstanceTask, CheckWorkflowStandard,
     WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )
 
@@ -64,6 +64,7 @@ __all__ = [
     "WfStep",
     "WfStepRasic",
     "WfTemplateHistory",
+    "CheckWorkflowStandard",
     # New workflow instance models (Phase 3c)
     "WfInstance",
     "WfInstanceTask",
