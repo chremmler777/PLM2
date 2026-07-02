@@ -112,11 +112,17 @@ async def _get_revision_or_404(db: AsyncSession, revision_id: int):
     return revision
 
 
-async def _load_revision(db: AsyncSession, part_id: int, revision_id: int):
-    """Load a revision, 404 on missing or part mismatch."""
+async def _load_revision(
+    db: AsyncSession, part_id: int, revision_id: int, *, mismatch_status: int = status.HTTP_404_NOT_FOUND
+):
+    """Load a revision, 404 on missing; on part mismatch raise `mismatch_status`
+    (404 by default, or 400 to preserve the upload endpoint's existing contract)."""
     revision = await RevisionService.get_revision(db, revision_id)
-    if not revision or revision.part_id != part_id:
+    if not revision:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if revision.part_id != part_id:
+        detail = "Revision not found" if mismatch_status == status.HTTP_404_NOT_FOUND else "Revision does not belong to this part"
+        raise HTTPException(status_code=mismatch_status, detail=detail)
     return revision
 
 
@@ -164,12 +170,7 @@ async def upload_revision_file(
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
 
-        revision = await _get_revision_or_404(db, revision_id)
-        if revision.part_id != part_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Revision does not belong to this part",
-            )
+        revision = await _load_revision(db, part_id, revision_id, mismatch_status=status.HTTP_400_BAD_REQUEST)
         if _status_value(revision.status) in LOCKED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
