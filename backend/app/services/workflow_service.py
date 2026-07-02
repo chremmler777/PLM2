@@ -66,7 +66,43 @@ class WorkflowService:
         first_stage = sorted(template.stages, key=lambda s: s.stage_order)[0]
         await WorkflowService._create_stage_tasks(db, instance, first_stage)
 
+        await WorkflowService._audit(db, instance, "wf_started", started_by_id,
+                                     {"template_id": template_id,
+                                      "revision_id": revision_id})
+
         return instance
+
+    @staticmethod
+    async def has_3d_evidence(db: AsyncSession, revision_id: int) -> bool:
+        """CAD evidence rule: a live CAD file on the revision OR an
+        owner-signed no-geometry-change flag. File presence only — conversion
+        success is deliberately not required (spec risk note)."""
+        from app.models.part import RevisionFile
+        rev = await db.get(PartRevision, revision_id)
+        if rev is not None and rev.no_geometry_change:
+            return True
+        row = (await db.execute(
+            select(RevisionFile.id).where(
+                RevisionFile.revision_id == revision_id,
+                RevisionFile.file_type == "cad",
+                RevisionFile.is_deleted == False,  # noqa: E712
+            ).limit(1)
+        )).scalar_one_or_none()
+        return row is not None
+
+    @staticmethod
+    async def _audit(db: AsyncSession, instance: WfInstance, action: str,
+                     user_id: int | None, new_values: dict | None = None) -> None:
+        from app.models.change import ChangeRequest
+        from app.services.audit_service import AuditService
+        correlation = None
+        rev = await db.get(PartRevision, instance.part_revision_id)
+        if rev is not None and rev.originating_change_id is not None:
+            change = await db.get(ChangeRequest, rev.originating_change_id)
+            correlation = change.change_number if change else None
+        await AuditService.record(
+            db, entity_type="wf_instance", entity_id=instance.id, action=action,
+            user_id=user_id, new_values=new_values, correlation_id=correlation)
 
     @staticmethod
     async def _create_stage_tasks(
@@ -130,14 +166,17 @@ class WorkflowService:
     ) -> WfInstance:
         """Complete an actionable task and advance the workflow if stage is done."""
         # Validate decision value first
-        if decision not in ("approved", "rejected"):
-            raise ValueError("Decision must be 'approved' or 'rejected'")
+        if decision not in ("approved", "rejected", "waived"):
+            raise ValueError("Decision must be 'approved', 'rejected' or 'waived'")
+        if decision == "waived" and not (notes and notes.strip()):
+            raise ValueError("Waiving a step requires a reason (notes)")
 
         # Load task with instance eager-loaded
         task_result = await db.execute(
             select(WfInstanceTask)
             .where(WfInstanceTask.id == task_id)
-            .options(selectinload(WfInstanceTask.instance))
+            .options(selectinload(WfInstanceTask.instance),
+                     selectinload(WfInstanceTask.step))
         )
         task = task_result.scalar_one_or_none()
         if not task:
@@ -146,6 +185,24 @@ class WorkflowService:
             raise ValueError("Task is not active")
         if not task.is_actionable:
             raise ValueError("Task is not actionable (S/I/C roles cannot complete tasks)")
+
+        step = task.step
+        if step is not None and step.requires_cad_evidence and decision == "approved":
+            if not await WorkflowService.has_3d_evidence(db, task.instance.part_revision_id):
+                raise ValueError(
+                    "3D evidence required: upload a CAD file to this revision "
+                    "or sign 'no geometry change' before approving this step")
+        if step is not None and step.four_eyes and decision == "approved":
+            prev = (await db.execute(
+                select(WfInstanceTask.completed_by).where(
+                    WfInstanceTask.instance_id == task.instance_id,
+                    WfInstanceTask.stage_order == task.stage_order - 1,
+                    WfInstanceTask.status.in_(("approved", "waived")),
+                ))).scalars().all()
+            if completed_by_id in {u for u in prev if u is not None}:
+                raise ValueError(
+                    "4-eyes check: this step must be decided by a different "
+                    "user than the previous stage")
 
         instance = task.instance
 
@@ -156,6 +213,11 @@ class WorkflowService:
         task.decision = decision
         task.notes = notes
         await db.flush()
+
+        await WorkflowService._audit(
+            db, instance, f"task_{decision}", completed_by_id,
+            {"task_id": task.id, "step": step.step_name if step else None,
+             "notes": notes})
 
         # Rejection propagates to instance immediately
         if decision == "rejected":
@@ -185,7 +247,7 @@ class WorkflowService:
         )
         all_actionable = stage_tasks_result.scalars().all()
 
-        if all(t.status == "approved" for t in all_actionable):
+        if all(t.status in ("approved", "waived") for t in all_actionable):
             # Advance: load template stages to find next
             tmpl_result = await db.execute(
                 select(WfTemplate)
@@ -203,6 +265,9 @@ class WorkflowService:
             if not next_stages:
                 instance.status = "completed"
                 instance.completed_at = datetime.utcnow()
+
+                await WorkflowService._audit(db, instance, "wf_completed",
+                                             completed_by_id, None)
 
                 from app.services.notification_service import NotificationService
 
