@@ -165,6 +165,122 @@ async def test_four_eyes_blocks_previous_stage_completer(
         assert inst.status == "completed"
 
 
+async def _stage_actionable(session_factory, instance_id, stage_order):
+    """Active, actionable (R/A) tasks of a stage as (task_id, step_name) tuples."""
+    from app.models.workflow import WfInstanceTask, WfStep
+    async with session_factory() as s:
+        return (await s.execute(
+            select(WfInstanceTask.id, WfStep.step_name)
+            .join(WfStep, WfInstanceTask.step_id == WfStep.id)
+            .where(WfInstanceTask.instance_id == instance_id,
+                   WfInstanceTask.stage_order == stage_order,
+                   WfInstanceTask.is_actionable == True,  # noqa: E712
+                   WfInstanceTask.status == "active"))).all()
+
+
+async def test_seeded_ecn_template_end_to_end(
+        session_factory, seed, part, check_wf_standards):
+    """Drive the SEEDED 'ECN Umsetzung (Artikel)' template end-to-end: evidence
+    gate on stage 1, four-eyes block on stage 2, advance to stage 3, then the
+    reject-restart recency rule via implementation_progress."""
+    from app.services.workflow_service import WorkflowService
+    from app.services.change_service import ChangeService
+    from app.models.change import ChangeRequest, ChangeImpactedItem
+    from app.models.workflow import WfTemplate, WfInstance
+    from app.models.part import PartRevision
+    from sqlalchemy.orm import selectinload
+
+    async with session_factory() as s:
+        tmpl = (await s.execute(select(WfTemplate).where(
+            WfTemplate.name == "ECN Umsetzung (Artikel)"))).scalar_one()
+        tmpl_id = tmpl.id
+        inst = await WorkflowService.start_workflow(
+            s, part["revision_id"], tmpl_id, seed["engineer_id"])
+        await s.commit()
+        inst_id = inst.id
+
+    # --- Stage 1 "Konstruktion" ---
+    s1 = await _stage_actionable(session_factory, inst_id, 1)
+    three_d = [tid for tid, name in s1 if name == "3D-Daten aktualisieren"]
+    assert three_d, "expected the evidence-gated 3D step to be actionable"
+
+    # Evidence gate: approving the 3D R-task without evidence is blocked.
+    async with session_factory() as s:
+        with pytest.raises(ValueError, match="evidence"):
+            await WorkflowService.complete_task(
+                s, three_d[0], "approved", None, seed["engineer_id"])
+
+    # Sign 'no geometry change' to satisfy the CAD-evidence rule.
+    async with session_factory() as s:
+        rev = await s.get(PartRevision, part["revision_id"])
+        rev.no_geometry_change = True
+        await s.commit()
+
+    # Complete every actionable stage-1 task with the engineer.
+    for tid, _name in s1:
+        async with session_factory() as s:
+            await WorkflowService.complete_task(
+                s, tid, "approved", None, seed["engineer_id"])
+            await s.commit()
+
+    # --- Stage 2 "Design-Check" (four_eyes) ---
+    s2 = await _stage_actionable(session_factory, inst_id, 2)
+    assert s2, "expected stage 2 to be active"
+    # Engineer completed stage 1 -> four-eyes rule blocks them here.
+    async with session_factory() as s:
+        with pytest.raises(ValueError, match="4-eyes"):
+            await WorkflowService.complete_task(
+                s, s2[0][0], "approved", None, seed["engineer_id"])
+    # Admin (fresh eyes) completes the stage-2 tasks.
+    for tid, _name in s2:
+        async with session_factory() as s:
+            await WorkflowService.complete_task(
+                s, tid, "approved", None, seed["admin_id"])
+            await s.commit()
+
+    # Advanced to stage 3.
+    async with session_factory() as s:
+        inst = await s.get(WfInstance, inst_id)
+        assert inst.status == "active"
+        assert inst.current_stage_order == 3
+
+    # --- Reject-restart recency rule ---
+    s3 = await _stage_actionable(session_factory, inst_id, 3)
+    async with session_factory() as s:
+        rej = await WorkflowService.complete_task(
+            s, s3[0][0], "rejected", "needs rework", seed["admin_id"])
+        await s.commit()
+        assert rej.status == "rejected"
+
+    # Restart: a fresh instance on the same revision (allowed — old one rejected).
+    async with session_factory() as s:
+        new_inst = await WorkflowService.start_workflow(
+            s, part["revision_id"], tmpl_id, seed["engineer_id"])
+        await s.commit()
+        new_id = new_inst.id
+    assert new_id != inst_id
+
+    # Full-change variant: implementation_progress rolls up the NEWEST instance.
+    async with session_factory() as s:
+        change = await ChangeService.create_change(
+            s, project_id=seed["project_id"], title="recency",
+            change_type="tooling", raised_by=seed["engineer_id"],
+            lead_id=seed["engineer_id"])
+        s.add(ChangeImpactedItem(
+            change_id=change.id, part_id=part["part_id"], is_lead=True,
+            resulting_revision_id=part["revision_id"],
+            created_by=seed["engineer_id"]))
+        await s.commit()
+        cid = change.id
+
+    async with session_factory() as s:
+        change = (await s.execute(
+            select(ChangeRequest).where(ChangeRequest.id == cid)
+            .options(selectinload(ChangeRequest.impacted_items)))).scalar_one()
+        progress = await ChangeService.implementation_progress(s, change)
+        assert progress["items"][0]["instance_id"] == new_id
+
+
 async def test_wf_events_write_audit_log(session_factory, seed, part, rules_template):
     from app.models.entities import AuditLog
     inst_id = await _start_instance(session_factory, seed, part, rules_template)

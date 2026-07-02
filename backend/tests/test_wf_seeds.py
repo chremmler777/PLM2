@@ -70,6 +70,61 @@ async def test_seed_assessment_standard_maps_all_change_types(session_factory, s
         assert len(stages) == 3
 
 
+async def test_repair_inflight_backfills_check_workflow(session_factory, seed, part):
+    """A change already in_implementation at deploy time (ECN revision spawned
+    but no check-WF instance) gets self-healed by the startup repair."""
+    from app.models.change import ChangeRequest, ChangeImpactedItem
+    from app.models.part import PartRevision
+    from app.models.workflow import WfInstance
+    from app.services.wf_seed_service import (
+        seed_check_standards, repair_inflight_check_workflows)
+    from tests.test_change_kickoff import _approved_change
+
+    cid = await _approved_change(session_factory, seed, part["part_id"])
+
+    # Simulate mid-flight state: in_implementation, ECN revision on the impacted
+    # item, but no WfInstance (kickoff side-effects never fired pre-Phase B).
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        change.status = "in_implementation"
+        item = (await s.execute(select(ChangeImpactedItem).where(
+            ChangeImpactedItem.change_id == cid))).scalar_one()
+        rev = PartRevision(
+            part_id=part["part_id"], revision_name="ECR1.1", phase="ecn",
+            status="draft", originating_change_id=cid,
+            created_by=seed["engineer_id"])
+        s.add(rev)
+        await s.flush()
+        item.resulting_revision_id = rev.id
+        rev_id = rev.id
+        await s.commit()
+
+    # Now seed the check standards (as a redeploy would), then run repair.
+    async with session_factory() as s:
+        await seed_check_standards(s)
+        await s.commit()
+
+    async with session_factory() as s:
+        examined = await repair_inflight_check_workflows(s)
+        await s.commit()
+        assert examined == 1
+
+    async with session_factory() as s:
+        insts = (await s.execute(select(WfInstance).where(
+            WfInstance.part_revision_id == rev_id))).scalars().all()
+        assert len(insts) == 1
+        assert insts[0].status == "active"
+
+    # Idempotency: a second run creates no duplicate instance.
+    async with session_factory() as s:
+        await repair_inflight_check_workflows(s)
+        await s.commit()
+    async with session_factory() as s:
+        n = (await s.execute(select(func.count()).select_from(WfInstance).where(
+            WfInstance.part_revision_id == rev_id))).scalar()
+        assert n == 1
+
+
 async def test_check_standards_api_roundtrip(client, admin_auth, eng_auth, session_factory, seed):
     from app.services.wf_seed_service import seed_check_standards
     from app.models.workflow import WfTemplate

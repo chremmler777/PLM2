@@ -343,8 +343,12 @@ async def seed_test_data():
                                 sort_order=sort_order, is_active=True))
 
             # --- Seeded change-management workflow templates (idempotent) ---
-            from app.services.wf_seed_service import seed_change_workflows
+            from app.services.wf_seed_service import (
+                seed_change_workflows, repair_inflight_check_workflows)
             await seed_change_workflows(session)
+            # Self-heal changes deployed mid-flight before Phase B: back-fill
+            # check-WF instances for in-flight ECN revisions (idempotent).
+            await repair_inflight_check_workflows(session)
 
             await session.commit()
             logger.info("Test data seeded successfully")

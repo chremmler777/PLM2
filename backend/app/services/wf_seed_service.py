@@ -199,3 +199,29 @@ async def seed_assessment_standard(session: AsyncSession) -> None:
 async def seed_change_workflows(session: AsyncSession) -> None:
     await seed_assessment_standard(session)
     await seed_check_standards(session)
+
+
+async def repair_inflight_check_workflows(session: AsyncSession) -> int:
+    """One-time self-heal: ensure check-WF instances exist for ECN revisions of
+    changes already past kickoff (deployed mid-flight before Phase B).
+    Idempotent — _ensure_check_workflow no-ops when an instance exists or the
+    category is unmapped. Returns the number of items examined."""
+    from sqlalchemy.orm import selectinload
+    from app.models.change import ChangeRequest
+    from app.services.change_service import ChangeService  # local import: avoids cycle
+
+    changes = (await session.execute(
+        select(ChangeRequest)
+        .where(ChangeRequest.status.in_(("in_implementation", "in_validation")))
+        .options(selectinload(ChangeRequest.impacted_items))
+    )).scalars().all()
+    examined = 0
+    for change in changes:
+        user_id = change.lead_id or change.raised_by
+        for item in change.impacted_items:
+            if item.resulting_revision_id is None:
+                continue
+            examined += 1
+            await ChangeService._ensure_check_workflow(session, change, item, user_id)
+    await session.flush()
+    return examined
