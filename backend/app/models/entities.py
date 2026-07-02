@@ -187,7 +187,7 @@ class AuditLog(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[int] = mapped_column(Integer)
-    action: Mapped[str] = mapped_column(String(20))
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     old_values: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
