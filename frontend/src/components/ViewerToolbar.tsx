@@ -35,7 +35,7 @@ export default function ViewerToolbar({
           className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
             viewMode === 'solid'
               ? 'bg-blue-600 text-white'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
           }`}
           title="Solid view"
         >
@@ -46,7 +46,7 @@ export default function ViewerToolbar({
           className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
             viewMode === 'wireframe'
               ? 'bg-blue-600 text-white'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
           }`}
           title="Wireframe view"
         >
@@ -71,7 +71,7 @@ export default function ViewerToolbar({
         className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
           isMeasuring
             ? 'bg-green-600 text-white'
-            : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
         }`}
         title="Point-to-point measurement (click two points)"
       >
@@ -84,7 +84,7 @@ export default function ViewerToolbar({
         className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
           isCutPlaneActive
             ? 'bg-orange-600 text-white'
-            : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
         }`}
         title="Cut plane / cross-section"
       >
@@ -94,7 +94,7 @@ export default function ViewerToolbar({
       {/* Reset View Button */}
       <button
         onClick={onResetView}
-        className="px-3 py-1 text-xs font-medium rounded bg-slate-700 text-slate-300 hover:bg-slate-700 transition-colors border-r border-slate-700 pr-3"
+        className="px-3 py-1 text-xs font-medium rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors border-r border-slate-700 pr-3"
         title="Reset camera to home position"
       >
         🏠 Reset
@@ -106,7 +106,7 @@ export default function ViewerToolbar({
         className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
           isFullscreen
             ? 'bg-blue-600 text-white'
-            : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
         }`}
         title="Toggle fullscreen (F)"
       >

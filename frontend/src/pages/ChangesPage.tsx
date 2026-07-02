@@ -28,7 +28,7 @@ export default function ChangesPage() {
 
       <div className="mb-4">
         <select
-          className="border border-slate-700 rounded-lg px-3 py-2 text-sm bg-slate-800 text-slate-100"
+          className="border border-slate-700 rounded-lg px-3 py-2 text-sm"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >

@@ -52,7 +52,7 @@ export default function StartWorkflowModal({ revisionId, onStarted, onCancel }: 
                 onChange={(e) =>
                   setSelectedTemplateId(e.target.value ? Number(e.target.value) : '')
                 }
-                className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 option:bg-slate-900 option:text-slate-100"
+                className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">— Choose a template —</option>
                 {activeTemplates.map((t) => (

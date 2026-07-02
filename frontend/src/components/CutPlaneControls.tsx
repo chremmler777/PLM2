@@ -36,7 +36,7 @@ export function CutPlaneControls({
               className={`flex-1 py-1 text-xs font-medium rounded transition-colors ${
                 axis === a
                   ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-700'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}
             >
               {a.toUpperCase()}

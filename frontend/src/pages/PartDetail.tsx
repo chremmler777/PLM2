@@ -38,7 +38,7 @@ function getStatusColor(status: string) {
     case 'rejected':
       return 'bg-red-100 text-red-800';
     case 'archived':
-      return 'bg-slate-700 text-slate-200';
+      return 'bg-slate-800 text-slate-500';
     case 'approved':
       return 'bg-green-100 text-green-800';
     case 'frozen':
@@ -564,11 +564,11 @@ export default function PartDetail() {
                       key={major}
                       className={`border rounded-lg p-4 ${
                         majorRev && majorRev.status !== 'rejected' && majorRev === getLatestActiveRFQMajor(part.revisions)
-                          ? 'border-blue-400 bg-blue-900 shadow-md'
+                          ? 'border-blue-400 bg-blue-900 shadow-panel'
                           : majorRev && majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-purple-400 bg-purple-900 shadow-md'
+                          ? 'border-purple-400 bg-purple-900 shadow-panel'
                           : majorRev && majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-orange-400 bg-orange-900 shadow-md'
+                          ? 'border-orange-400 bg-orange-900 shadow-panel'
                           : 'border-slate-700'
                       }`}
                     >

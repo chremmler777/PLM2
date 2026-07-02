@@ -101,7 +101,7 @@ export function MeasurementReadout({
         {onClear && (
           <button
             onClick={onClear}
-            className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-700 rounded text-slate-300 transition-colors"
+            className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded text-slate-300 transition-colors"
             title="Clear measurement and start new"
           >
             ✕ Clear
@@ -129,7 +129,7 @@ export function MeasurementReadout({
         </div>
 
         <div className="bg-red-50 dark:bg-red-900/20 rounded p-2 mb-2">
-          <div className="text-xs text-gray-600 dark:text-gray-400">Total Distance</div>
+          <div className="text-xs text-slate-400">Total Distance</div>
           <div className="text-2xl font-bold text-red-600 dark:text-red-400">{distance.toFixed(2)} mm</div>
         </div>
 
