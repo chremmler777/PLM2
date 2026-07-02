@@ -414,6 +414,7 @@ class WorkflowService:
     async def get_my_tasks(
         db: AsyncSession,
         department_ids: list[int],
+        user_id: int,
     ) -> list[dict]:
         """Return active actionable tasks for the departments, with part/revision info."""
         if not department_ids:
@@ -459,7 +460,17 @@ class WorkflowService:
                 "revision_id": revision.id,
                 "revision_name": revision.revision_name,
                 "instance_started_at": instance.started_at,
+                "owner_id": t.owner_id,
+                "owner_name": t.owner_name,
+                "accepted_at": t.accepted_at,
+                "due_date": t.due_date,
+                "overdue": t.overdue,
+                "mine": t.owner_id == user_id,
             })
+
+        results.sort(key=lambda d: (
+            not d["mine"], not d["overdue"],
+            d["due_date"] is None, d["due_date"] or datetime.max, d["task_id"]))
         return results
 
     @staticmethod

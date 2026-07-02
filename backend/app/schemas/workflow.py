@@ -194,7 +194,7 @@ class WfInstanceResponse(BaseModel):
 
 
 class MyTaskResponse(BaseModel):
-    """A task from the current user's department perspective."""
+    """Dead: unused stale schema (article_* fields don't match current dict keys)."""
     task_id: int
     instance_id: int
     status: str

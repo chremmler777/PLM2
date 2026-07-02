@@ -106,7 +106,17 @@ async def my_change_tasks(
             tasks.append({
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
                 "title": c.title, "department_id": a.department_id, "assessment_id": a.id,
+                "owner_id": a.owner_id,
+                "owner_name": a.owner_name,
+                "accepted_at": a.accepted_at,
+                "due_date": a.due_date,
+                "overdue": a.overdue,
+                "mine": a.owner_id == current_user.id,
             })
+
+        tasks.sort(key=lambda d: (
+            not d["mine"], not d["overdue"],
+            d["due_date"] is None, d["due_date"] or datetime.max, d["assessment_id"]))
     return tasks
 
 

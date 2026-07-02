@@ -143,7 +143,7 @@ async def get_my_tasks(
         dept_ids = [department_id]
     else:
         dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
-    return await WorkflowService.get_my_tasks(db, dept_ids)
+    return await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
 
 
 @router.post(
