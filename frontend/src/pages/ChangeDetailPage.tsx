@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
-import { CHANGE_STATUS_ORDER } from '../types/change';
+import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
@@ -13,6 +13,9 @@ import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import { t } from '../i18n/cmLabels';
+
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -63,8 +66,8 @@ export default function ChangeDetailPage() {
       setBlocked(null);
       qc.invalidateQueries({ queryKey: ['change', changeId] });
     },
-    onError: (e: any, vars) => {
-      const detail = e?.response?.data?.detail ?? 'Transition failed';
+    onError: (e: unknown, vars) => {
+      const detail = errDetail(e) ?? 'Transition failed';
       if (vars.to !== 'cancelled') setBlocked({ to: vars.to, reason: detail });
       else alert(detail);
     },
@@ -72,7 +75,7 @@ export default function ChangeDetailPage() {
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(changeId, role),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Sign-off failed'),
+    onError: (e: unknown) => alert(errDetail(e) ?? 'Sign-off failed'),
   });
   const customer = useMutation({
     mutationFn: (response: string) => changesApi.customerResponse(changeId, response),
@@ -250,7 +253,7 @@ export default function ChangeDetailPage() {
 }
 
 function Stepper({ status }: { status: string }) {
-  const idx = CHANGE_STATUS_ORDER.indexOf(status as any);
+  const idx = CHANGE_STATUS_ORDER.indexOf(status as ChangeStatus);
   return (
     <div className="flex items-center gap-1 text-xs">
       {CHANGE_STATUS_ORDER.map((s, i) => (

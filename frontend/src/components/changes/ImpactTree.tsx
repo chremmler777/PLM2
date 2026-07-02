@@ -8,6 +8,9 @@ const LOCKED: ChangeStatus[] = [
   'in_implementation', 'in_validation', 'released', 'closed', 'rejected', 'cancelled',
 ]
 
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+
 interface Props {
   changeId: number
   status: ChangeStatus
@@ -57,7 +60,7 @@ export default function ImpactTree({ changeId, status }: Props) {
       qc.invalidateQueries({ queryKey: ['change', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'impact-tree'] })
     },
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Apply failed'),
+    onError: (e: unknown) => alert(errDetail(e) ?? 'Apply failed'),
   })
 
   const toggle = (partId: number) => {

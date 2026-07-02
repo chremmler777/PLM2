@@ -11,6 +11,9 @@ interface Props {
   changeId: number;
 }
 
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+
 export default function ImplementationPanel({ changeId }: Props) {
   const qc = useQueryClient();
   const [signTarget, setSignTarget] = useState<ImplementationItem | null>(null);
@@ -32,7 +35,7 @@ export default function ImplementationPanel({ changeId }: Props) {
       setSignTarget(null);
       invalidate();
     },
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Sign-off failed'),
+    onError: (e: unknown) => alert(errDetail(e) ?? 'Sign-off failed'),
   });
 
   if (isLoading || !data) return <div className="text-slate-400 text-sm">…</div>;
