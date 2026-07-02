@@ -97,6 +97,12 @@ class ChangeService:
             previous_hash=prev, entry_hash=entry_hash,
         )
         session.add(entry)
+        from app.services.audit_service import AuditService  # local import avoids cycle
+        await AuditService.record(
+            session, entity_type="change", entity_id=change.id, action=action,
+            user_id=performed_by, old_values=old_value, new_values=new_value,
+            correlation_id=change.change_number,
+        )
         return entry
 
     @staticmethod
