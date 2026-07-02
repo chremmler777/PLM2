@@ -139,7 +139,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           <button
             className="text-slate-400 hover:text-slate-200 text-xl leading-none"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             ×
           </button>
@@ -191,7 +191,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 type="button"
                 className="ml-auto text-slate-400 hover:text-slate-200"
                 onClick={() => setPicked(undefined)}
-                aria-label="Clear selected item"
+                aria-label={t('start.clearItem')}
               >
                 ✕
               </button>
@@ -246,7 +246,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     </div>
                   )}
                   {filtered.articles.length === 0 && filtered.tools.length === 0 && (
-                    <div className="px-3 py-3 text-sm text-slate-500">—</div>
+                    <div className="px-3 py-3 text-sm text-slate-500">{t('start.noMatches')}</div>
                   )}
                 </div>
               )}
@@ -309,7 +309,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             className="px-4 py-2 text-sm text-slate-300 hover:text-slate-100"
             onClick={onClose}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-500 disabled:opacity-50"

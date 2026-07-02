@@ -1,6 +1,6 @@
 import client from './client';
 import type {
-  ChangeRequest, ChangeDetail, ChangelogEntry, ChangeTask,
+  ChangeRequest, ChangeDetail, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress,
@@ -49,9 +49,6 @@ export const changesApi = {
 
   signOff: (id: number, role: 'pm' | 'quality') =>
     client.post(`/v1/changes/${id}/sign-off`, { role }).then((r) => r.data),
-
-  changelog: (id: number) =>
-    client.get<ChangelogEntry[]>(`/v1/changes/${id}/changelog`).then((r) => r.data),
 
   myTasks: () =>
     client.get<ChangeTask[]>('/v1/changes/my-tasks').then((r) => r.data),

@@ -7,6 +7,9 @@ import client from '../api/client';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+
 interface UserRecord {
   id: number;
   email: string;
@@ -50,8 +53,8 @@ function DepartmentsModal({ user, onClose }: { user: UserRecord; onClose: () => 
       queryClient.invalidateQueries({ queryKey: ['user-departments', user.id] });
       onClose();
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Failed to update departments');
+    onError: (error: unknown) => {
+      toast.error(errDetail(error) || 'Failed to update departments');
     },
   });
 
@@ -118,19 +121,22 @@ function SetPasswordModal({ userName, onSubmit, onClose }: {
   onClose: () => void
 }) {
   const [pw, setPw] = useState('')
+  const canSubmit = pw.length >= 8
+  const submit = () => { onSubmit(pw); onClose() }
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-slate-100 mb-3">Set password — {userName}</h2>
         <input type="password" autoFocus minLength={8}
           className="w-full rounded-lg px-3 py-2 text-sm bg-slate-700 border border-slate-600 text-slate-100"
           placeholder="New password (min 8 characters)"
-          value={pw} onChange={(e) => setPw(e.target.value)} />
+          value={pw} onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) submit() }} />
         <div className="flex justify-end gap-2 mt-4">
           <button className="px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded" onClick={onClose}>Cancel</button>
           <button className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50 hover:bg-sky-500"
-            disabled={pw.length < 8}
-            onClick={() => { onSubmit(pw); onClose() }}>Set password</button>
+            disabled={!canSubmit}
+            onClick={submit}>Set password</button>
         </div>
       </div>
     </div>
@@ -159,8 +165,8 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       onClose();
     },
-    onError: (error: any) => {
-      const detail = error.response?.data?.detail;
+    onError: (error: unknown) => {
+      const detail = errDetail(error);
       toast.error(typeof detail === 'string' ? detail : 'Failed to create user');
     },
   });
@@ -253,8 +259,8 @@ export default function UsersPage() {
       toast.success('User updated');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (err: any) => {
-      const detail = err.response?.data?.detail;
+    onError: (err: unknown) => {
+      const detail = errDetail(err);
       toast.error(typeof detail === 'string' ? detail : 'Failed to update user');
     },
   });

@@ -22,7 +22,5 @@ from app.schemas.project import (
 from app.schemas.bom import (
     CatalogPartCreateRequest, CatalogPartUpdateRequest, CatalogPartResponse,
     DuplicateCheckResponse,
-    BOMItemCreateRequest, BOMItemUpdateRequest, BOMItemResponse, BOMResponse,
-    ProjectBOMResponse, ProjectBOMLineResponse, ProjectBOMSourceResponse,
     PartTypeEnum,
 )
