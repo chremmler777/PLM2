@@ -13,22 +13,10 @@ import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import { t } from '../i18n/cmLabels';
+import { STATUS_LABELS, NEXT_STATUS } from '../lib/changeStatus';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-
-const STATUS_LABELS: Record<string, string> = {
-  captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
-  quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
-  in_validation: 'Validation', released: 'Released', closed: 'Closed',
-};
-
-const NEXT_STATUS: Record<string, string[]> = {
-  captured: ['in_assessment'], in_assessment: ['costing', 'rejected'],
-  costing: ['quoted'], quoted: ['approved', 'rejected'],
-  approved: ['in_implementation'], in_implementation: ['in_validation'],
-  in_validation: ['released'], released: ['closed'],
-};
 
 type Tab = 'overview' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
 

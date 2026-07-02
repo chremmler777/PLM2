@@ -3,13 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { changesApi } from '../api/changes';
 import type { ChangeType } from '../types/change';
-
-const STATUS_LABELS: Record<string, string> = {
-  captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
-  quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
-  in_validation: 'Validation', released: 'Released', closed: 'Closed',
-  on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
-};
+import { STATUS_LABELS } from '../lib/changeStatus';
 
 const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
   { value: 'physical_part', label: 'Physical Part' },
