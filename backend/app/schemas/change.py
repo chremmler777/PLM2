@@ -92,9 +92,22 @@ class AssessmentResponse(BaseModel):
     stage_order: int = 1
     rasic_letter: str = "R"
     status: str = "active"
+    owner_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    accepted_at: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    overdue: bool = False
 
     class Config:
         from_attributes = True
+
+
+class AssessmentAssignIn(BaseModel):
+    user_id: int
+
+
+class AssessmentDueDateIn(BaseModel):
+    due_date: datetime
 
 
 class AttachmentResponse(BaseModel):

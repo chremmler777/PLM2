@@ -24,7 +24,8 @@ from app.services.change_service import ChangeService, ChangeError
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
-    AssessmentSubmit, AssessmentResponse, CustomerResponseRequest, SignOffRequest,
+    AssessmentSubmit, AssessmentResponse, AssessmentAssignIn, AssessmentDueDateIn,
+    CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
@@ -430,6 +431,62 @@ async def submit_assessment(
             cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
             conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
         )
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+@router.post("/{change_id}/assessments/{assessment_id}/accept",
+             response_model=AssessmentResponse)
+async def accept_assessment(
+    change_id: int, assessment_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        a = await ChangeService.accept_assessment(db, change, assessment_id, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+@router.post("/{change_id}/assessments/{assessment_id}/assign",
+             response_model=AssessmentResponse)
+async def assign_assessment(
+    change_id: int, assessment_id: int, body: AssessmentAssignIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        a = await ChangeService.assign_assessment(
+            db, change, assessment_id, body.user_id, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(a)
+    return a
+
+
+@router.put("/{change_id}/assessments/{assessment_id}/due-date",
+            response_model=AssessmentResponse)
+async def set_assessment_due_date(
+    change_id: int, assessment_id: int, body: AssessmentDueDateIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        a = await ChangeService.set_assessment_due_date(
+            db, change, assessment_id, body.due_date, current_user)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

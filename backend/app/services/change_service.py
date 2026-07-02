@@ -750,6 +750,85 @@ class ChangeService:
         return a
 
     @staticmethod
+    async def _get_assessment(session: AsyncSession, change: ChangeRequest,
+                              assessment_id: int) -> ChangeAssessment:
+        a = await session.get(ChangeAssessment, assessment_id)
+        if a is None or a.change_id != change.id:
+            raise ChangeError("Assessment not found on this change")
+        if a.status != "active":
+            raise ChangeError("Assessment is not active")
+        return a
+
+    @staticmethod
+    async def accept_assessment(session: AsyncSession, change: ChangeRequest,
+                                assessment_id: int, user) -> ChangeAssessment:
+        from app.services.workflow_service import WorkflowService
+        a = await ChangeService._get_assessment(session, change, assessment_id)
+        if user.role != "admin" and not await WorkflowService._is_department_member(
+                session, user.id, a.department_id):
+            raise ChangeError("Only members of the assessed department may accept")
+        if a.owner_id is not None and a.owner_id != user.id:
+            raise ChangeError("Assessment is already owned by another user")
+        a.owner_id = user.id
+        a.accepted_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "assessment_accepted",
+            f"Assessment {a.id} accepted", user.id,
+            new_value={"assessment_id": a.id, "owner_id": user.id})
+        return a
+
+    @staticmethod
+    async def assign_assessment(session: AsyncSession, change: ChangeRequest,
+                                assessment_id: int, assignee_id: int,
+                                actor) -> ChangeAssessment:
+        from app.services.workflow_service import WorkflowService
+        a = await ChangeService._get_assessment(session, change, assessment_id)
+        allowed = (actor.role == "admin" or change.lead_id == actor.id
+                   or await WorkflowService._is_department_member(
+                       session, actor.id, a.department_id))
+        if not allowed:
+            raise ChangeError(
+                "Only an admin, the change lead, or a department member may assign")
+        assignee = await session.get(User, assignee_id)
+        if assignee is None or not assignee.is_active:
+            raise ChangeError("Assignee not found or inactive")
+        if not await WorkflowService._is_department_member(
+                session, assignee_id, a.department_id):
+            raise ChangeError("Assignee must be a member of the assessed department")
+        a.owner_id = assignee_id
+        a.accepted_at = None
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "assessment_assigned",
+            f"Assessment {a.id} assigned to user {assignee_id}", actor.id,
+            new_value={"assessment_id": a.id, "owner_id": assignee_id})
+        if assignee_id != actor.id:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_users(
+                session, [assignee_id],
+                title=f"Assessment assigned: {change.change_number}",
+                link=f"/changes/{change.id}")
+        return a
+
+    @staticmethod
+    async def set_assessment_due_date(session: AsyncSession, change: ChangeRequest,
+                                      assessment_id: int, due_date: datetime,
+                                      actor) -> ChangeAssessment:
+        a = await ChangeService._get_assessment(session, change, assessment_id)
+        if actor.role != "admin" and change.lead_id != actor.id:
+            raise ChangeError("Only the change lead or an admin may set due dates")
+        old = a.due_date.isoformat() if a.due_date else None
+        a.due_date = due_date
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "assessment_due_date_set",
+            f"Assessment {a.id} due date set", actor.id,
+            old_value={"due_date": old},
+            new_value={"assessment_id": a.id, "due_date": due_date.isoformat()})
+        return a
+
+    @staticmethod
     async def update_change(
         session: AsyncSession, change: ChangeRequest, user_id: int, **fields,
     ) -> ChangeRequest:
