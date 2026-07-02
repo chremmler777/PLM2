@@ -4,6 +4,7 @@ release."""
 import hashlib
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List
 
@@ -18,7 +19,7 @@ from app.models.change import (
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES,
 )
 from app.models.entities import User
-from app.models.part import Part, PartRevision, PartRelation
+from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
 from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ TYPE_DISCIPLINES = {
     "process_im":    ["Process Engineer", "Manufacturing Engineer", "Quality"],
     "packaging":     ["Packaging Engineer", "Quality", "Sales"],
 }
+
+
+IMPACT_LOCKED_STATUSES = ("in_implementation", "in_validation", "released",
+                          "closed", "rejected", "cancelled")
 
 
 class ChangeError(ValueError):
@@ -394,6 +399,127 @@ class ChangeService:
             )
         from app.services.change_routing_service import ChangeRoutingService
         await ChangeRoutingService.promote_to_standard(session, change, user_id)
+
+    @staticmethod
+    async def get_impact_tree(session: AsyncSession, change: ChangeRequest) -> dict:
+        parts = (await session.execute(
+            select(Part).where(Part.project_id == change.project_id)
+        )).scalars().all()
+        impacted = {i.part_id: i for i in change.impacted_items}
+        ids = {p.id for p in parts}
+        children_map: dict = defaultdict(list)
+        roots = []
+        for p in parts:
+            if p.parent_part_id in ids and p.parent_part_id != p.id:
+                children_map[p.parent_part_id].append(p)
+            else:
+                roots.append(p)
+
+        def node(p: Part, seen: frozenset) -> dict:
+            item = impacted.get(p.id)
+            # Cycle guard: never descend into a part already on the current path.
+            seen = seen | {p.id}
+            kids = [c for c in sorted(children_map.get(p.id, []), key=lambda x: x.id)
+                    if c.id not in seen]
+            return {
+                "part_id": p.id,
+                "part_number": p.part_number,
+                "name": p.name,
+                "part_type": p.part_type,
+                "item_category": p.item_category,
+                "is_impacted": item is not None,
+                "is_lead": bool(item and item.is_lead),
+                "resulting_revision_id": item.resulting_revision_id if item else None,
+                "children": [node(c, seen) for c in kids],
+            }
+
+        return {
+            "tree": [node(p, frozenset()) for p in sorted(roots, key=lambda x: x.id)],
+            "impacted_part_ids": sorted(impacted),
+            "lead_part_id": next(
+                (pid for pid, it in impacted.items() if it.is_lead), None),
+        }
+
+    @staticmethod
+    async def suggest_rollups(session: AsyncSession, project_id: int,
+                              part_ids: set[int]) -> set[int]:
+        """Transitive BOM roll-up: parents whose display revision's BOM
+        references a selected (or already-suggested) part structurally must
+        revise too. Display revision = active revision, else latest."""
+        rows = (await session.execute(
+            select(Part.id, Part.active_revision_id)
+            .where(Part.project_id == project_id))).all()
+        display_rev_to_part: dict[int, int] = {}
+        missing = []
+        for pid, active in rows:
+            if active is not None:
+                display_rev_to_part[active] = pid
+            else:
+                missing.append(pid)
+        if missing:
+            latest = (await session.execute(
+                select(PartRevision.part_id, func.max(PartRevision.id))
+                .where(PartRevision.part_id.in_(missing))
+                .group_by(PartRevision.part_id))).all()
+            for pid, rid in latest:
+                display_rev_to_part[rid] = pid
+        if not display_rev_to_part:
+            return set()
+        edges = (await session.execute(
+            select(PartBOMItem.child_part_id, PartBOMItem.revision_id).where(
+                PartBOMItem.revision_id.in_(display_rev_to_part.keys()),
+                PartBOMItem.child_part_id.is_not(None)))).all()
+        parents_of: dict[int, set[int]] = defaultdict(set)
+        for child_id, rev_id in edges:
+            parents_of[child_id].add(display_rev_to_part[rev_id])
+
+        suggested: set[int] = set()
+        frontier = set(part_ids)
+        while frontier:
+            nxt: set[int] = set()
+            for pid in frontier:
+                for parent in parents_of.get(pid, ()):
+                    if parent not in part_ids and parent not in suggested:
+                        suggested.add(parent)
+                        nxt.add(parent)
+            frontier = nxt
+        return suggested
+
+    @staticmethod
+    async def apply_impact_selection(session: AsyncSession, change: ChangeRequest,
+                                     part_ids: list[int], user_id: int) -> None:
+        if change.status in IMPACT_LOCKED_STATUSES:
+            raise ChangeError(
+                "Impact selection is locked once implementation has started")
+        wanted = set(part_ids)
+        valid = {pid for (pid,) in (await session.execute(
+            select(Part.id).where(Part.project_id == change.project_id,
+                                  Part.id.in_(wanted))))}
+        unknown = sorted(wanted - valid)
+        if unknown:
+            raise ChangeError(f"Parts not in this project: {unknown}")
+        current = {i.part_id: i for i in change.impacted_items}
+        for pid, item in list(current.items()):
+            if pid in wanted:
+                continue
+            if item.is_lead:
+                raise ChangeError("The lead item cannot be removed")
+            if item.resulting_revision_id is not None:
+                raise ChangeError(
+                    f"Part {pid} already has a spawned revision and cannot be removed")
+            await session.delete(item)
+            await ChangeService.append_changelog(
+                session, change, "impacted_removed",
+                f"Impacted part {pid} removed via impact tree", user_id,
+                old_value={"part_id": pid})
+        for pid in sorted(wanted - set(current)):
+            session.add(ChangeImpactedItem(change_id=change.id, part_id=pid,
+                                           created_by=user_id))
+            await ChangeService.append_changelog(
+                session, change, "impacted_added",
+                f"Impacted part {pid} added via impact tree", user_id,
+                new_value={"part_id": pid})
+        await session.flush()
 
     @staticmethod
     async def add_impacted_item(

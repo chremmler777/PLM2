@@ -15,7 +15,10 @@ from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_current_user
 from app.models import get_db, User
-from app.models.change import ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment
+from app.models.change import (
+    ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment,
+    ChangeImpactedItem,
+)
 from app.models.workflow import UserDepartment
 from app.services.change_service import ChangeService, ChangeError
 from app.schemas.change import (
@@ -28,6 +31,7 @@ from app.schemas.change import (
     GateDecisionIn, GateResponse,
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
     CheckStandardIn, CheckStandardResponse,
+    ImpactSuggestIn, ImpactSelectionIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,6 +340,56 @@ async def remove_impacted_item(
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
+
+
+@router.get("/{change_id}/impact-tree")
+async def get_impact_tree(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return await ChangeService.get_impact_tree(db, change)
+
+
+@router.post("/{change_id}/impact-tree/suggest")
+async def suggest_impact_rollups(
+    change_id: int, body: ImpactSuggestIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    suggested = await ChangeService.suggest_rollups(
+        db, change.project_id, set(body.part_ids))
+    return {"suggested_part_ids": sorted(suggested)}
+
+
+@router.put("/{change_id}/impacted-items")
+async def apply_impact_selection(
+    change_id: int, body: ImpactSelectionIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if current_user.role != "admin" and change.lead_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the change lead or an admin may edit the impact selection")
+    try:
+        await ChangeService.apply_impact_selection(
+            db, change, body.part_ids, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    # Read impacted parts fresh: with expire_on_commit=False the cached
+    # relationship collection would not reflect the just-applied diff.
+    rows = await db.execute(
+        select(ChangeImpactedItem.part_id).where(
+            ChangeImpactedItem.change_id == change_id))
+    return {"impacted_part_ids": sorted(pid for (pid,) in rows)}
 
 
 @router.post("/{change_id}/impacted-items/seed")

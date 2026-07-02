@@ -305,6 +305,14 @@ class GateResponse(BaseModel):
         from_attributes = True
 
 
+class ImpactSuggestIn(BaseModel):
+    part_ids: List[int]
+
+
+class ImpactSelectionIn(BaseModel):
+    part_ids: List[int]
+
+
 class DeviationProposeIn(BaseModel):
     to_status: str
     reason: str
