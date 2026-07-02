@@ -484,3 +484,30 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
             ChangeAssessment.change_id == cid))).scalars().all())
         assert rows[(te, 1)].status == "submitted"
         assert rows[(te, 2)].status == "submitted"
+
+
+async def test_routing_view_reports_per_stage_status_for_multistage_dept(
+        client, session_factory, seed, ecr_template_multistage_dept, departments):
+    """GET /routing must key assessments by (department, stage): a department
+    appearing in multiple stages shows its stage-1 row active while its
+    stage-2 row is still pending — not one status echoed across all stages."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest
+    cid = await _seeded_change(session_factory, seed, change_type="packaging")
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+        await s.commit()
+
+    auth = await _login(client)
+    res = await client.get(f"/api/v1/changes/{cid}/routing", headers=auth)
+    assert res.status_code == 200, res.text
+    te = departments["Tool Engineer"]
+    by_stage = {}
+    for st in res.json()["stages"]:
+        for d in st["departments"]:
+            if d["department_id"] == te:
+                by_stage[st["stage_order"]] = d
+    assert by_stage[1]["status"] == "active"
+    assert by_stage[2]["status"] == "pending"
+    assert by_stage[1]["assessment_id"] != by_stage[2]["assessment_id"]

@@ -258,13 +258,15 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
     if change is None:
         raise HTTPException(404, "Change not found")
     routing = change.routing
-    assess_by_dep = {a.department_id: a for a in change.assessments}
+    # Key by (department, stage): departments appear in multiple stages of the
+    # seeded templates, and each stage owns its own assessment row.
+    assess_by_key = {(a.department_id, a.stage_order): a for a in change.assessments}
     snapshot = routing.standard_snapshot if routing else {"stages": []}
     stages = []
     for st in snapshot.get("stages", []):
         deps = []
         for d in st["departments"]:
-            a = assess_by_dep.get(d["department_id"])
+            a = assess_by_key.get((d["department_id"], st["stage_order"]))
             deps.append(RoutingDepartment(
                 department_id=d["department_id"], rasic_letter=d["rasic_letter"],
                 tier=_tier(d["rasic_letter"]),
