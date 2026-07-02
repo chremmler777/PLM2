@@ -220,11 +220,15 @@ class ChangeRoutingService:
                 raise ValueError("add requires a task letter (R/A/S/C)")
             order = stage_order or 1
             if existing is None:
-                session.add(ChangeAssessment(
+                new_status = "active" if order <= await ChangeRoutingService._max_active_order(session, change) else "pending"
+                new_row = ChangeAssessment(
                     change_id=change.id, department_id=department_id, verdict="pending",
                     stage_order=order, rasic_letter=rasic_letter,
-                    status="active" if order <= await ChangeRoutingService._max_active_order(session, change) else "pending",
-                ))
+                    status=new_status,
+                    due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+                              if new_status == "active" else None),
+                )
+                session.add(new_row)
             else:
                 existing.rasic_letter = rasic_letter
                 existing.stage_order = order

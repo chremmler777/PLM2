@@ -234,6 +234,28 @@ async def test_apply_deviation_service(session_factory, seed, ecr_template, depa
         assert r.deviation_status == "approved"
 
 
+async def test_apply_deviation_add_to_active_stage_stamps_due_date(
+        session_factory, seed, ecr_template, departments):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    cid = await _seeded_change(session_factory, seed)
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"]); await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        # stage_order=1 is the currently-active stage, so the new row must land "active".
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add",
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+        await s.commit()
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == departments["Manufacturing Engineer"])))).scalar_one()
+        assert row.status == "active"
+        assert row.due_date is not None
+
+
 @pytest.mark.asyncio
 async def test_promotion_bumps_template_and_repoints_standard(
         session_factory, seed, ecr_template, departments):
