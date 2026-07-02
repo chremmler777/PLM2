@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Props {
   open: boolean;
@@ -11,6 +11,9 @@ interface Props {
 
 export default function ReasonDialog({ open, title, label, submitLabel = 'Submit', onSubmit, onClose }: Props) {
   const [reason, setReason] = useState('');
+  useEffect(() => {
+    if (open) setReason('');
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog">

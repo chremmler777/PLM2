@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import DeviationBanner from './DeviationBanner';
+import ReasonDialog from './ReasonDialog';
 import { changesApi } from '../../api/changes';
 
 vi.mock('../../api/changes', () => ({
@@ -46,5 +47,19 @@ describe('DeviationBanner', () => {
         to_status: 'in_assessment', reason: 'PPT only',
       })
     );
+  });
+});
+
+describe('ReasonDialog', () => {
+  afterEach(() => { cleanup(); });
+
+  it('clears the textarea when reopened', () => {
+    const { rerender } = render(
+      <ReasonDialog open title="t" label="l" onSubmit={() => {}} onClose={() => {}} />
+    );
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'stale text' } });
+    rerender(<ReasonDialog open={false} title="t" label="l" onSubmit={() => {}} onClose={() => {}} />);
+    rerender(<ReasonDialog open title="t" label="l" onSubmit={() => {}} onClose={() => {}} />);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
   });
 });
