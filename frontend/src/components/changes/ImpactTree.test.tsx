@@ -34,7 +34,8 @@ const tree = {
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+  const result = render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+  return { ...result, qc }
 }
 
 describe('ImpactTree', () => {
@@ -70,5 +71,29 @@ describe('ImpactTree', () => {
     await screen.findByText('Child')
     expect(screen.queryByRole('button', { name: /Apply selection/ })).toBeNull()
     expect(screen.getByText(/Selection locked/)).toBeDefined()
+  })
+
+  it('preserves unsaved edits across a background refetch', async () => {
+    const { qc } = wrap(<ImpactTree changeId={7} status="captured" />)
+    await screen.findByText('Child')
+
+    // Unsaved edit: check the sibling node.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    const sibling = screen.getByRole('checkbox', { name: /Sibling/ }) as HTMLInputElement
+    expect(sibling.checked).toBe(true)
+
+    // Simulate a background refetch (e.g. window focus) that resolves fresh
+    // server data — the underlying impacted_part_ids are unchanged, but the
+    // payload is a new object reference (e.g. an unrelated field changed
+    // server-side). This must not clobber the user's in-progress edit.
+    const refetched = {
+      ...tree,
+      tree: [{ ...tree.tree[0], name: 'Assembly Updated' }],
+    }
+    vi.mocked(changesApi.getImpactTree).mockResolvedValueOnce(refetched)
+    await qc.refetchQueries({ queryKey: ['change', 7, 'impact-tree'] })
+    await screen.findByText('Assembly Updated')
+
+    expect(sibling.checked).toBe(true)
   })
 })

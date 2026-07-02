@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import type { ChangeStatus, ImpactTreeNode } from '../../types/change'
@@ -23,8 +23,22 @@ export default function ImpactTree({ changeId, status }: Props) {
     queryFn: () => changesApi.getImpactTree(changeId),
   })
 
+  const lastSyncedRef = useRef<string>('')
   useEffect(() => {
-    if (data) setSelected(new Set(data.impacted_part_ids))
+    if (!data) return
+    const serverKey = [...data.impacted_part_ids].sort((a, b) => a - b).join(',')
+    const selectedNow = [...selected].sort((a, b) => a - b).join(',')
+    // Only overwrite the user's in-progress selection if it hasn't diverged
+    // from what we last synced from the server (i.e. no unsaved edits), or
+    // this is the initial load. A background refetch (e.g. window focus)
+    // that lands mid-edit must not clobber the user's checkbox changes.
+    if (selectedNow === lastSyncedRef.current || lastSyncedRef.current === '') {
+      setSelected(new Set(data.impacted_part_ids))
+      lastSyncedRef.current = serverKey
+    } else if (serverKey === selectedNow) {
+      lastSyncedRef.current = serverKey
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
   const selectedKey = useMemo(() => [...selected].sort((a, b) => a - b), [selected])
@@ -88,15 +102,19 @@ export default function ImpactTree({ changeId, status }: Props) {
             ECN #{node.resulting_revision_id}
           </span>
         )}
-        {!selected.has(node.part_id) && suggested.has(node.part_id) && (
-          <button
-            onClick={() => editable && toggle(node.part_id)}
-            className="px-2 py-0.5 rounded-full text-xs bg-amber-900 text-amber-100 hover:bg-amber-800"
-            title={t('impact.hint')}
-          >
-            {t('impact.suggested')} +
-          </button>
-        )}
+        {!selected.has(node.part_id) && suggested.has(node.part_id) && (() => {
+          const chipDisabled = !editable || node.is_lead || node.resulting_revision_id !== null
+          return (
+            <button
+              onClick={() => !chipDisabled && toggle(node.part_id)}
+              disabled={chipDisabled}
+              className="px-2 py-0.5 rounded-full text-xs bg-amber-900 text-amber-100 hover:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-amber-900"
+              title={t('impact.hint')}
+            >
+              {t('impact.suggested')} +
+            </button>
+          )
+        })()}
       </div>
       {node.children.map(c => renderNode(c, depth + 1))}
     </div>
