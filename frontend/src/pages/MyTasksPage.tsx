@@ -14,6 +14,9 @@ import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
 import { toast } from 'sonner';
 
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+
 interface MyLessonAction {
   id: number;
   description: string;
@@ -42,7 +45,7 @@ function LessonActionsSection() {
       toast.success('Action completed');
       queryClient.invalidateQueries({ queryKey: ['my-lesson-actions'] });
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to complete'),
+    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to complete'),
   });
 
   if (actions.length === 0) return null;
@@ -131,7 +134,7 @@ function SepItemsSection() {
       queryClient.invalidateQueries({ queryKey: ['my-sep-items'] });
       queryClient.invalidateQueries({ queryKey: ['sep'] });
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to update'),
+    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to update'),
   });
 
   if (items.length === 0) return null;
@@ -205,7 +208,7 @@ function ChangeTasksSection() {
       toast.success('Assessment accepted');
       queryClient.invalidateQueries({ queryKey: ['change-my-tasks'] });
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to accept'),
+    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to accept'),
   });
 
   if (tasks.length === 0) return null;
