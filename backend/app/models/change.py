@@ -117,6 +117,9 @@ class ChangeRequest(Base):
     gates: Mapped[list["ChangeGate"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
     )
+    transition_deviations: Mapped[list["ChangeTransitionDeviation"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+    )
     affected_plants: Mapped[list["Plant"]] = relationship(
         secondary=change_affected_plants, lazy="selectin",
     )
@@ -257,6 +260,29 @@ class ChangeRoutingStandard(Base):
     template_version: Mapped[int] = mapped_column(Integer, default=1)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+DEVIATION_STATUSES = ("pending", "approved", "rejected", "consumed")
+
+
+class ChangeTransitionDeviation(Base):
+    """Formal 4-eyes bypass for a soft-blocked transition (replaces the old
+    free-text justification override). Lifecycle: pending -> approved|rejected;
+    an approved deviation is consumed by the transition that uses it."""
+    __tablename__ = "change_transition_deviations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+    to_status: Mapped[str] = mapped_column(String(30))
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(15), default="pending")
+    proposed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    proposed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    change: Mapped["ChangeRequest"] = relationship(back_populates="transition_deviations")
 
 
 # Import related models for relationship resolution

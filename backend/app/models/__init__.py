@@ -19,7 +19,7 @@ from app.models.timing import ProjectMilestone
 from app.models.sep import SepGate, SepWorkItem, SepItemAudit, SepRisk
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeAttachment, ChangeChangelog,
-    change_affected_plants,
+    ChangeTransitionDeviation, change_affected_plants,
 )
 from app.models.change_cost import (
     DepartmentRate, AssessmentActivity, AssessmentCostLine, ChangeGate,
@@ -77,6 +77,7 @@ __all__ = [
     "ChangeAssessment",
     "ChangeAttachment",
     "ChangeChangelog",
+    "ChangeTransitionDeviation",
     "change_affected_plants",
     "DepartmentRate",
     "AssessmentActivity",
