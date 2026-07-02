@@ -3,6 +3,7 @@ import type {
   ChangeRequest, ChangeDetail, ChangelogEntry, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
+  TransitionDeviation,
 } from '../types/change';
 
 export const changesApi = {
@@ -20,8 +21,15 @@ export const changesApi = {
   update: (id: number, body: Record<string, unknown>) =>
     client.patch<ChangeRequest>(`/v1/changes/${id}`, body).then((r) => r.data),
 
-  transition: (id: number, to_status: string, opts?: { justification?: string; cancellation_reason?: string }) =>
+  transition: (id: number, to_status: string, opts?: { cancellation_reason?: string }) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/transition`, { to_status, ...opts }).then((r) => r.data),
+
+  listDeviations: (id: number) =>
+    client.get<TransitionDeviation[]>(`/v1/changes/${id}/deviations`).then((r) => r.data),
+  proposeDeviation: (id: number, body: { to_status: string; reason: string }) =>
+    client.post<TransitionDeviation>(`/v1/changes/${id}/deviations`, body).then((r) => r.data),
+  decideDeviation: (id: number, devId: number, body: { decision: 'approved' | 'rejected'; note?: string }) =>
+    client.post<TransitionDeviation>(`/v1/changes/${id}/deviations/${devId}/decide`, body).then((r) => r.data),
 
   addImpactedItem: (id: number, body: { part_id: number; impact_note?: string; eng_level_before?: string }) =>
     client.post(`/v1/changes/${id}/impacted-items`, body).then((r) => r.data),

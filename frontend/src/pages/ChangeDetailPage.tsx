@@ -8,6 +8,8 @@ import AssessmentRouting from '../components/changes/AssessmentRouting';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostLineGrid from '../components/changes/CostLineGrid';
+import DeviationBanner from '../components/changes/DeviationBanner';
+import ReasonDialog from '../components/changes/ReasonDialog';
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -29,6 +31,8 @@ export default function ChangeDetailPage() {
   const changeId = Number(id);
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('overview');
+  const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -45,10 +49,17 @@ export default function ChangeDetailPage() {
   });
 
   const transition = useMutation({
-    mutationFn: (vars: { to: string; justification?: string; cancellation_reason?: string }) =>
+    mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
       changesApi.transition(changeId, vars.to, vars),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Transition failed'),
+    onSuccess: () => {
+      setBlocked(null);
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+    },
+    onError: (e: any, vars) => {
+      const detail = e?.response?.data?.detail ?? 'Transition failed';
+      if (vars.to !== 'cancelled') setBlocked({ to: vars.to, reason: detail });
+      else alert(detail);
+    },
   });
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(changeId, role),
@@ -63,15 +74,8 @@ export default function ChangeDetailPage() {
   if (isLoading || !change) return <div className="p-6 text-gray-500">Loading…</div>;
 
   const advance = (to: string) => {
-    let justification: string | undefined;
-    if (to !== 'rejected') {
-      justification = window.prompt(
-        `Move to "${STATUS_LABELS[to] ?? to}". If data is incomplete, enter a justification to override (or leave blank):`
-      ) ?? undefined;
-    }
-    const cancellation_reason = to === 'cancelled'
-      ? window.prompt('Cancellation reason:') ?? undefined : undefined;
-    transition.mutate({ to, justification: justification || undefined, cancellation_reason });
+    if (to === 'cancelled') { setCancelOpen(true); return; }
+    transition.mutate({ to });
   };
 
   return (
@@ -85,6 +89,24 @@ export default function ChangeDetailPage() {
       </div>
 
       <Stepper status={change.status} />
+
+      {blocked && (
+        <DeviationBanner
+          changeId={changeId}
+          blockedTo={blocked.to}
+          blockedReason={blocked.reason}
+          onRetry={() => transition.mutate({ to: blocked.to })}
+          onClose={() => setBlocked(null)}
+        />
+      )}
+      <ReasonDialog
+        open={cancelOpen}
+        title="Cancel change"
+        label="Cancellation reason (required, audited)"
+        submitLabel="Cancel change"
+        onSubmit={(reason) => { setCancelOpen(false); transition.mutate({ to: 'cancelled', cancellation_reason: reason }); }}
+        onClose={() => setCancelOpen(false)}
+      />
 
       <div className="flex gap-2 my-4">
         {(NEXT_STATUS[change.status] ?? []).map((to) => (

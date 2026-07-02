@@ -178,3 +178,15 @@ export interface Gate {
 
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
 export interface ActivityRef { id: number; department_id: number; label: string; sort_order: number; }
+
+export interface TransitionDeviation {
+  id: number;
+  to_status: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'consumed';
+  proposed_by: number;
+  proposed_at: string;
+  decided_by?: number | null;
+  decided_at?: string | null;
+  decision_note?: string | null;
+}
