@@ -21,10 +21,15 @@ class AuditService:
     @staticmethod
     def _payload(entity_type: str, entity_id: int, action: str,
                  old_s: Optional[str], new_s: Optional[str],
-                 user_id: Optional[int], ts: datetime, prev: Optional[str]) -> str:
+                 user_id: Optional[int], ts: datetime, prev: Optional[str],
+                 correlation_id: Optional[str], log_level: str) -> str:
+        """Full row content except id is inside the hash envelope, so no field
+        (including correlation_id/log_level) can be altered without breaking
+        the chain."""
         return "|".join([
             entity_type, str(entity_id), action, old_s or "", new_s or "",
             str(user_id or ""), ts.isoformat(), prev or "",
+            correlation_id or "", log_level,
         ])
 
     @staticmethod
@@ -45,7 +50,8 @@ class AuditService:
             correlation_id=correlation_id, log_level=log_level,
             previous_hash=prev,
             entry_hash=hashlib.sha256(AuditService._payload(
-                entity_type, entity_id, action, old_s, new_s, user_id, ts, prev
+                entity_type, entity_id, action, old_s, new_s, user_id, ts, prev,
+                correlation_id, log_level
             ).encode()).hexdigest(),
         )
         session.add(entry)
@@ -60,7 +66,8 @@ class AuditService:
         for r in rows:
             expected = hashlib.sha256(AuditService._payload(
                 r.entity_type, r.entity_id, r.action, r.old_values, r.new_values,
-                r.user_id, r.timestamp, prev).encode()).hexdigest()
+                r.user_id, r.timestamp, prev, r.correlation_id, r.log_level
+            ).encode()).hexdigest()
             if r.previous_hash != prev or r.entry_hash != expected:
                 return {"valid": False, "checked": len(rows), "first_broken_id": r.id}
             prev = r.entry_hash

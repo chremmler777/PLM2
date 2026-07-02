@@ -54,6 +54,23 @@ async def test_verify_chain_detects_tamper(session_factory, seed):
     assert result["first_broken_id"] == e1.id
 
 
+async def test_verify_chain_detects_correlation_tamper(session_factory, seed):
+    from app.models.entities import AuditLog
+    from app.services.audit_service import AuditService
+    async with session_factory() as s:
+        e1 = await AuditService.record(s, entity_type="change", entity_id=1,
+                                       action="created", user_id=seed["engineer_id"],
+                                       correlation_id="CR-2026-0001")
+        await s.commit()
+        assert (await AuditService.verify_chain(s))["valid"] is True
+        await s.execute(update(AuditLog).where(AuditLog.id == e1.id)
+                        .values(correlation_id="CR-2026-9999"))
+        await s.commit()
+        result = await AuditService.verify_chain(s)
+    assert result["valid"] is False
+    assert result["first_broken_id"] == e1.id
+
+
 async def test_audit_api_filters_by_correlation_id(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "api audit",
