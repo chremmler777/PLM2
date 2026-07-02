@@ -3,7 +3,7 @@ import type {
   ChangeRequest, ChangeDetail, ChangelogEntry, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
-  TransitionDeviation,
+  TransitionDeviation, ImpactTreeResponse,
 } from '../types/change';
 
 export const changesApi = {
@@ -84,4 +84,11 @@ export const changesApi = {
     client.get<DepartmentRateRef[]>('/v1/changes/reference/rates').then((r) => r.data),
   referenceActivities: (departmentId: number) =>
     client.get<ActivityRef[]>('/v1/changes/reference/activities', { params: { department_id: departmentId } }).then((r) => r.data),
+
+  getImpactTree: (changeId: number): Promise<ImpactTreeResponse> =>
+    client.get(`/v1/changes/${changeId}/impact-tree`).then((r) => r.data),
+  suggestImpact: (changeId: number, partIds: number[]): Promise<{ suggested_part_ids: number[] }> =>
+    client.post(`/v1/changes/${changeId}/impact-tree/suggest`, { part_ids: partIds }).then((r) => r.data),
+  applyImpactSelection: (changeId: number, partIds: number[]): Promise<{ impacted_part_ids: number[] }> =>
+    client.put(`/v1/changes/${changeId}/impacted-items`, { part_ids: partIds }).then((r) => r.data),
 };

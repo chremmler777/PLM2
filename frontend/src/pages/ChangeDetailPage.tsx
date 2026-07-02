@@ -10,6 +10,7 @@ import SummationView from '../components/changes/SummationView';
 import CostLineGrid from '../components/changes/CostLineGrid';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
+import ImpactTree from '../components/changes/ImpactTree';
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -152,19 +153,8 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {tab === 'impacted' && (
-        <ul className="text-sm divide-y border rounded-lg">
-          {change.impacted_items.map((i) => (
-            <li key={i.id} className="px-4 py-2 flex justify-between">
-              <span>Part #{i.part_id} {i.impact_note ? `— ${i.impact_note}` : ''}</span>
-              <span className="text-gray-500">
-                {i.resulting_revision_id ? `rev #${i.resulting_revision_id}` : 'no revision'}
-                {i.eng_level_after ? ` (${i.eng_level_after})` : ''}
-              </span>
-            </li>
-          ))}
-          {change.impacted_items.length === 0 && <li className="px-4 py-3 text-gray-400">None.</li>}
-        </ul>
+      {tab === 'impacted' && change && (
+        <ImpactTree changeId={change.id} status={change.status} />
       )}
 
       {tab === 'assessments' && (

@@ -36,5 +36,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   by_plant: { de: 'Nach Werk', en: 'By plant' },
   summierung: { de: 'Summierung', en: 'Summierung' },
   no_rate_configured: { de: 'Keine Kostensätze für diese Abteilung konfiguriert', en: 'No cost rates configured for this department' },
+  'impact.title': { de: 'Betroffene Struktur', en: 'Impact tree' },
+  'impact.hint': { de: 'Betroffene Knoten wählen — Vorschläge zeigen strukturell betroffene Baugruppen.', en: 'Pick impacted nodes — suggestions mark structurally affected parent assemblies.' },
+  'impact.suggested': { de: 'Vorschlag', en: 'Suggested' },
+  'impact.lead': { de: 'Leit-Teil', en: 'Lead item' },
+  'impact.apply': { de: 'Auswahl übernehmen', en: 'Apply selection' },
+  'impact.locked': { de: 'Auswahl gesperrt — Umsetzung gestartet', en: 'Selection locked — implementation started' },
+  'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

@@ -1,0 +1,74 @@
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import ImpactTree from './ImpactTree'
+import { changesApi } from '../../api/changes'
+
+vi.mock('../../api/changes', () => ({
+  changesApi: {
+    getImpactTree: vi.fn(),
+    suggestImpact: vi.fn(),
+    applyImpactSelection: vi.fn(),
+  },
+}))
+
+const tree = {
+  tree: [
+    {
+      part_id: 1, part_number: 'ASM-1', name: 'Assembly', part_type: 'sub_assembly',
+      item_category: 'article', is_impacted: false, is_lead: false,
+      resulting_revision_id: null,
+      children: [
+        { part_id: 2, part_number: 'CHD-1', name: 'Child', part_type: 'internal_mfg',
+          item_category: 'article', is_impacted: true, is_lead: true,
+          resulting_revision_id: null, children: [] },
+        { part_id: 3, part_number: 'CHD-2', name: 'Sibling', part_type: 'internal_mfg',
+          item_category: 'article', is_impacted: false, is_lead: false,
+          resulting_revision_id: null, children: [] },
+      ],
+    },
+  ],
+  impacted_part_ids: [2],
+  lead_part_id: 2,
+}
+
+function wrap(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
+
+describe('ImpactTree', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue(tree)
+    vi.mocked(changesApi.suggestImpact).mockResolvedValue({ suggested_part_ids: [1] })
+    vi.mocked(changesApi.applyImpactSelection).mockResolvedValue({ impacted_part_ids: [2, 3] })
+  })
+  afterEach(cleanup)
+
+  it('renders nodes and marks suggested parents when selection changes', async () => {
+    wrap(<ImpactTree changeId={7} status="captured" />)
+    expect(await screen.findByText('Child')).toBeDefined()
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    await waitFor(() =>
+      expect(changesApi.suggestImpact).toHaveBeenCalledWith(7, [2, 3]))
+    expect(await screen.findByText(/Suggested/)).toBeDefined()
+  })
+
+  it('lead checkbox is disabled and apply sends the selection', async () => {
+    wrap(<ImpactTree changeId={7} status="captured" />)
+    await screen.findByText('Child')
+    const lead = screen.getByRole('checkbox', { name: /Child/ }) as HTMLInputElement
+    expect(lead.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Apply selection/ }))
+    await waitFor(() =>
+      expect(changesApi.applyImpactSelection).toHaveBeenCalledWith(7, [2, 3]))
+  })
+
+  it('locks editing once implementation started', async () => {
+    wrap(<ImpactTree changeId={7} status="in_implementation" />)
+    await screen.findByText('Child')
+    expect(screen.queryByRole('button', { name: /Apply selection/ })).toBeNull()
+    expect(screen.getByText(/Selection locked/)).toBeDefined()
+  })
+})

@@ -179,6 +179,24 @@ export interface Gate {
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
 export interface ActivityRef { id: number; department_id: number; label: string; sort_order: number; }
 
+export interface ImpactTreeNode {
+  part_id: number;
+  part_number: string;
+  name: string;
+  part_type: string;
+  item_category: string;
+  is_impacted: boolean;
+  is_lead: boolean;
+  resulting_revision_id: number | null;
+  children: ImpactTreeNode[];
+}
+
+export interface ImpactTreeResponse {
+  tree: ImpactTreeNode[];
+  impacted_part_ids: number[];
+  lead_part_id: number | null;
+}
+
 export interface TransitionDeviation {
   id: number;
   to_status: string;
