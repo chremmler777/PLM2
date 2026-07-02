@@ -4,7 +4,7 @@ release. Standard is read from the flow designer (WfTemplate); falls back to the
 legacy TYPE_DISCIPLINES dict when no ChangeRoutingStandard mapping exists.
 """
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from app.models.change import (
 )
 from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
 from app.services.notification_service import NotificationService
+from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS
 
 
 
@@ -134,6 +135,7 @@ class ChangeRoutingService:
         for a in rows:
             if a.status == "pending":
                 a.status = "active"
+                a.due_date = datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
                 notify.append(a.department_id)
         await session.flush()
         if notify:

@@ -1,5 +1,5 @@
 """Workflow instance execution service (Phase 3c)."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from app.models.workflow import (
 from app.models.part import PartRevision
 
 ACTIONABLE_LETTERS = {"R", "A"}
+DEFAULT_TASK_DUE_DAYS = 7
 
 
 class WorkflowService:
@@ -126,6 +127,8 @@ class WorkflowService:
                     rasic_letter=rasic.rasic_letter,
                     status="active" if is_actionable else "noted",
                     is_actionable=is_actionable,
+                    due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS))
+                    if is_actionable else None,
                 )
                 db.add(task)
         await db.flush()
