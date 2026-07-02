@@ -52,3 +52,23 @@ async def test_verify_chain_detects_tamper(session_factory, seed):
         result = await AuditService.verify_chain(s)
     assert result["valid"] is False
     assert result["first_broken_id"] == e1.id
+
+
+async def test_audit_api_filters_by_correlation_id(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "api audit",
+        "change_type": "physical_part"}, headers=eng_auth)
+    number = res.json()["change_number"]
+    listed = await client.get(f"/api/v1/audit?correlation_id={number}", headers=eng_auth)
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert len(body) >= 1
+    assert all(e["correlation_id"] == number for e in body)
+
+    verify = await client.get("/api/v1/audit/verify", headers=eng_auth)
+    assert verify.json()["valid"] is True
+
+    export = await client.get(f"/api/v1/audit/export?correlation_id={number}", headers=eng_auth)
+    assert export.status_code == 200
+    assert "text/csv" in export.headers["content-type"]
+    assert number in export.text

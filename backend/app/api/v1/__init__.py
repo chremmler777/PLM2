@@ -40,6 +40,7 @@ from app.api.v1.learning.lessons import router as lessons_router
 
 # Module: changes (engineering change management)
 from app.api.v1.changes.changes import router as changes_router
+from app.api.v1.audit import router as audit_router
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
@@ -59,6 +60,7 @@ api_router.include_router(timing_router)
 api_router.include_router(sep_router)
 api_router.include_router(lessons_router)
 api_router.include_router(changes_router)
+api_router.include_router(audit_router)
 api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
