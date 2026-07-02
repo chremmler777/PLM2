@@ -252,6 +252,63 @@ class ChangeService:
         return result.scalars().all()
 
     @staticmethod
+    async def implementation_progress(session: AsyncSession,
+                                      change: ChangeRequest) -> dict:
+        from app.models.part import RevisionFile
+        from app.models.workflow import WfInstance, WfStage
+
+        items = []
+        for item in change.impacted_items:
+            part = await session.get(Part, item.part_id)
+            entry = {
+                "item_id": item.id,
+                "part_id": item.part_id,
+                "part_number": part.part_number if part else None,
+                "part_name": part.name if part else None,
+                "item_category": part.item_category if part else None,
+                "is_lead": item.is_lead,
+                "revision_id": item.resulting_revision_id,
+                "revision_name": None,
+                "instance_id": None,
+                "instance_status": None,
+                "current_stage_order": None,
+                "total_stages": None,
+                "has_cad_file": False,
+                "no_geometry_change": False,
+                "ready": False,
+            }
+            if item.resulting_revision_id is not None:
+                rev = await session.get(PartRevision, item.resulting_revision_id)
+                if rev is not None:
+                    entry["revision_name"] = rev.revision_name
+                    entry["no_geometry_change"] = bool(rev.no_geometry_change)
+                n_files = (await session.execute(
+                    select(func.count()).select_from(RevisionFile).where(
+                        RevisionFile.revision_id == item.resulting_revision_id,
+                        RevisionFile.file_type == "cad",
+                        RevisionFile.is_deleted == False,  # noqa: E712
+                    ))).scalar()
+                entry["has_cad_file"] = bool(n_files)
+                inst = (await session.execute(
+                    select(WfInstance)
+                    .where(WfInstance.part_revision_id == item.resulting_revision_id)
+                    .order_by(WfInstance.id.desc()).limit(1)
+                )).scalar_one_or_none()
+                if inst is not None:
+                    entry["instance_id"] = inst.id
+                    entry["instance_status"] = inst.status
+                    entry["current_stage_order"] = inst.current_stage_order
+                    entry["total_stages"] = (await session.execute(
+                        select(func.count()).select_from(WfStage).where(
+                            WfStage.template_id == inst.template_id))).scalar()
+                    entry["ready"] = inst.status == "completed"
+            items.append(entry)
+        return {
+            "ready_to_go": bool(items) and all(e["ready"] for e in items),
+            "items": items,
+        }
+
+    @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
         """Return None if soft-OK, else a human reason string (overridable)."""
         if to_status == "in_assessment":
@@ -290,6 +347,12 @@ class ChangeService:
                 if missing:
                     return ("no check-workflow template mapped for item "
                             f"category: {', '.join(missing)}")
+        if to_status == "released":
+            progress = await ChangeService.implementation_progress(session, change)
+            if not progress["ready_to_go"]:
+                pending = sum(1 for e in progress["items"] if not e["ready"])
+                return (f"not ready to go: {pending} of {len(progress['items'])} "
+                        "impacted revisions have not completed their check workflow")
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
         for gate in change.gates:

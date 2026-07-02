@@ -1,7 +1,7 @@
 # backend/tests/test_changes.py
 import pytest
 
-from tests.conftest import approve_gates
+from tests.conftest import approve_gates, force_complete_check_workflows
 
 pytestmark = pytest.mark.asyncio
 
@@ -226,7 +226,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
 
 
 async def test_release_activates_revisions_and_stamps_eng_level(
-    client, eng_auth, admin_auth, seed, departments, check_wf_standards
+    client, eng_auth, admin_auth, seed, departments, check_wf_standards, session_factory
 ):
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
     cid = change["id"]
@@ -238,6 +238,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await _transition(client, eng_auth, cid, "in_implementation")
     res = await _transition(client, eng_auth, cid, "in_validation")
     assert res.status_code == 200, res.text
+    await force_complete_check_workflows(session_factory, cid)
     res = await _transition(client, eng_auth, cid, "released")
     assert res.status_code == 200, res.text
 

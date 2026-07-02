@@ -222,6 +222,17 @@ async def get_changelog(
     return result.scalars().all()
 
 
+@router.get("/{change_id}/implementation")
+async def get_implementation_progress(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return await ChangeService.implementation_progress(db, change)
+
+
 @router.get("/{change_id}/routing", response_model=RoutingResponse)
 async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
