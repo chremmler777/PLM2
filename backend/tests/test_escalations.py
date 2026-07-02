@@ -87,3 +87,72 @@ async def test_change_my_tasks_owner_fields(client, eng_auth, seed,
     mine = [t for t in res.json() if t["change_id"] == change["id"]]
     assert mine and mine[0]["mine"] is True and mine[0]["overdue"] is True
     assert mine[0]["due_date"] is not None
+
+
+async def test_lead_escalations_roll_up(client, eng_auth, seed, session_factory,
+                                        part, check_wf_standards):
+    """Engineer leads a change with an overdue assessment AND an overdue check-WF
+    task -> both appear in /changes/my-escalations, worst first."""
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.change_cost import ChangeGate
+    from app.models.workflow import WfInstanceTask, WfInstance
+    from app.models.part import PartRevision
+    from app.models.workflow import Department
+    from app.services.change_service import ChangeService
+
+    async with session_factory() as s:
+        for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
+            s.add(Department(name=n, flow_type="action", is_active=True))
+        await s.commit()
+    change = await _routed_change(client, eng_auth, seed, session_factory,
+                                  part["part_id"])
+
+    # overdue assessment (5 days)
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.status == "active"))).scalars().first()
+        a.due_date = datetime.utcnow() - timedelta(days=5)
+        # drive the change to in_implementation directly to spawn the check WF
+        c = await s.get(ChangeRequest, change["id"])
+        c.status = "approved"
+        await s.execute(update(ChangeGate).where(ChangeGate.change_id == c.id)
+                        .values(decision="yes"))
+        await s.commit()
+
+    async with session_factory() as s:
+        c = await ChangeService.get_change(s, change["id"])
+        await ChangeService.transition(s, c, "in_implementation",
+                                       seed["engineer_id"])
+        await s.commit()
+
+    # make one spawned WF task overdue (2 days)
+    async with session_factory() as s:
+        rev_id = (await s.execute(select(PartRevision.id).where(
+            PartRevision.originating_change_id == change["id"]))).scalars().first()
+        task_id = (await s.execute(
+            select(WfInstanceTask.id)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .where(WfInstance.part_revision_id == rev_id,
+                   WfInstanceTask.status == "active",
+                   WfInstanceTask.is_actionable == True)  # noqa: E712
+        )).scalars().first()
+        await s.execute(update(WfInstanceTask).where(WfInstanceTask.id == task_id)
+                        .values(due_date=datetime.utcnow() - timedelta(days=2)))
+        await s.commit()
+
+    res = await client.get("/api/v1/changes/my-escalations", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    rows = res.json()
+    kinds = [r["kind"] for r in rows]
+    assert "assessment" in kinds and "wf_task" in kinds
+    assert rows[0]["days_overdue"] >= rows[-1]["days_overdue"]
+    assert rows[0]["days_overdue"] == 5
+    assert all(r["change_number"] == change["change_number"] for r in rows
+               if r["change_id"] == change["id"])
+
+
+async def test_escalations_empty_for_non_lead(client, admin_auth):
+    res = await client.get("/api/v1/changes/my-escalations", headers=admin_auth)
+    assert res.status_code == 200
+    assert res.json() == []

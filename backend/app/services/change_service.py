@@ -16,7 +16,7 @@ from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment, ChangeTransitionDeviation,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
-    SIGN_OFF_ROLES, IMPLEMENTATION_MODES,
+    SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES,
 )
 from app.models.entities import User
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
@@ -250,6 +250,63 @@ class ChangeService:
         q = q.order_by(ChangeRequest.id.desc())
         result = await session.execute(q)
         return result.scalars().all()
+
+    @staticmethod
+    async def lead_escalations(session: AsyncSession, user_id: int) -> list[dict]:
+        from app.models.workflow import Department, WfInstance, WfInstanceTask, WfStep
+
+        now = datetime.utcnow()
+        changes = (await session.execute(
+            select(ChangeRequest).where(
+                ChangeRequest.lead_id == user_id,
+                ChangeRequest.status.not_in(TERMINAL_STATUSES)))).scalars().all()
+        if not changes:
+            return []
+        by_id = {c.id: c for c in changes}
+        out: list[dict] = []
+
+        assessment_rows = (await session.execute(
+            select(ChangeAssessment, Department.name)
+            .join(Department, Department.id == ChangeAssessment.department_id)
+            .where(ChangeAssessment.change_id.in_(by_id.keys()),
+                   ChangeAssessment.status == "active",
+                   ChangeAssessment.due_date.is_not(None),
+                   ChangeAssessment.due_date < now))).all()
+        for a, dept_name in assessment_rows:
+            c = by_id[a.change_id]
+            out.append({
+                "kind": "assessment", "change_id": c.id,
+                "change_number": c.change_number, "change_title": c.title,
+                "label": dept_name, "owner_id": a.owner_id,
+                "owner_name": a.owner_name,
+                "due_date": a.due_date.isoformat(),
+                "days_overdue": (now - a.due_date).days,
+            })
+
+        task_rows = (await session.execute(
+            select(WfInstanceTask, WfStep.step_name, PartRevision.originating_change_id)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+            .join(WfStep, WfStep.id == WfInstanceTask.step_id)
+            .where(PartRevision.originating_change_id.in_(by_id.keys()),
+                   WfInstance.status == "active",
+                   WfInstanceTask.status == "active",
+                   WfInstanceTask.is_actionable == True,  # noqa: E712
+                   WfInstanceTask.due_date.is_not(None),
+                   WfInstanceTask.due_date < now))).all()
+        for t, step_name, change_id in task_rows:
+            c = by_id[change_id]
+            out.append({
+                "kind": "wf_task", "change_id": c.id,
+                "change_number": c.change_number, "change_title": c.title,
+                "label": step_name, "owner_id": t.owner_id,
+                "owner_name": t.owner_name,
+                "due_date": t.due_date.isoformat(),
+                "days_overdue": (now - t.due_date).days,
+            })
+
+        out.sort(key=lambda r: r["days_overdue"], reverse=True)
+        return out
 
     @staticmethod
     async def implementation_progress(session: AsyncSession,
