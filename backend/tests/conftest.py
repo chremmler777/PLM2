@@ -90,6 +90,16 @@ async def login(client: AsyncClient, email: str, password: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def approve_gates(client, auth, change_id: int, *keys):
+    """Set the given change gates to 'yes' (all three when no keys given)."""
+    for k in keys or ("feasibility", "budget", "release"):
+        res = await client.put(
+            f"/api/v1/changes/{change_id}/gates/{k}",
+            json={"decision": "yes"}, headers=auth,
+        )
+        assert res.status_code == 200, res.text
+
+
 @pytest_asyncio.fixture
 async def admin_auth(client):
     return await login(client, "admin@test.io", ADMIN_PASSWORD)

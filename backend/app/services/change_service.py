@@ -211,6 +211,9 @@ class ChangeService:
         )
         session.add(change)
         await session.flush()
+        for key in GATE_KEYS:
+            session.add(ChangeGate(change_id=change.id, gate_key=key))
+        await session.flush()
         await ChangeService.append_changelog(
             session, change, "created", f"Change {number} created", raised_by,
         )

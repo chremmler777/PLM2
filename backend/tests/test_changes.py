@@ -1,6 +1,8 @@
 # backend/tests/test_changes.py
 import pytest
 
+from tests.conftest import approve_gates
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -40,7 +42,9 @@ async def _transition(client, auth, change_id, to_status, **over):
 
 
 async def test_transition_blocked_without_impacted_items(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
+    await approve_gates(client, eng_auth, change["id"])
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
     assert "deviation" in res.json()["detail"].lower()
@@ -131,6 +135,7 @@ async def departments(session_factory):
 async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments):
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
+    await approve_gates(client, eng_auth, change["id"])
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-9")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
@@ -156,6 +161,7 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
 
 async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
     change = await _create_change(client, auth, seed["project_id"], lead_id=seed["engineer_id"])
+    await approve_gates(client, auth, change["id"])
     part_id = await _make_part(client, auth, seed["project_id"], f"ART-Q{change['id']}")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=auth)
@@ -279,6 +285,7 @@ async def test_my_change_tasks_lists_pending_assessments(
         await s.commit()
 
     change = await _create_change(client, eng_auth, seed["project_id"], lead_id=seed["engineer_id"])
+    await approve_gates(client, eng_auth, change["id"])
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-MT")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)

@@ -494,6 +494,9 @@ async def put_gate(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    if current_user.role != "admin" and change.lead_id != current_user.id:
+        raise HTTPException(status_code=403,
+                            detail="Only the change lead or an admin may decide gates")
     try:
         gate = await ChangeService.decide_gate(
             db, change, gate_key, body.decision, current_user.id, remark=body.remark)

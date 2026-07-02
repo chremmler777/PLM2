@@ -6,6 +6,7 @@ from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepR
 from app.models.change import (
     ChangeRouting, ChangeRoutingStandard, BLOCKING_LETTERS, TASK_LETTERS,
 )
+from tests.conftest import approve_gates
 
 pytestmark = pytest.mark.asyncio
 
@@ -151,6 +152,7 @@ async def _api_change_in_assessment(client, auth, seed):
     body = {"project_id": seed["project_id"], "title": "Wall +0.2", "change_type": "physical_part",
             "reason": "sink", "lead_id": seed["engineer_id"]}
     c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
     p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-R1",
          "name": "ART-R1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
@@ -311,6 +313,7 @@ async def test_not_feasible_blocks_costing_until_justified(client, seed, departm
     body = {"project_id": seed["project_id"], "title": "NF", "change_type": "physical_part",
             "reason": "x", "lead_id": seed["engineer_id"]}
     c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
     p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-NF",
          "name": "ART-NF", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
@@ -366,6 +369,7 @@ async def test_maybe_advance_cascades_through_optional_only_stage(
     body = {"project_id": seed["project_id"], "title": "casc", "change_type": "tooling",
             "reason": "x", "lead_id": seed["engineer_id"]}
     c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    await approve_gates(client, auth, c["id"])
     p = (await client.post("/api/v1/parts", json={"project_id": seed["project_id"], "part_number": "ART-C1",
          "name": "ART-C1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
