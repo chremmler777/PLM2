@@ -55,6 +55,9 @@ export const changesApi = {
   myTasks: () =>
     client.get<ChangeTask[]>('/v1/changes/my-tasks').then((r) => r.data),
 
+  acceptAssessment: (changeId: number, assessmentId: number) =>
+    client.post(`/v1/changes/${changeId}/assessments/${assessmentId}/accept`).then((r) => r.data),
+
   uploadAttachment: (id: number, file: File) => {
     const fd = new FormData();
     fd.append('file', file);

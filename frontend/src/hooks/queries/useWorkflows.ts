@@ -3,6 +3,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as workflowApi from '../../api/workflows';
+import client from '../../api/client';
 import { WfTemplateSave, CompleteTaskRequest, CancelWorkflowRequest } from '../../types/workflow';
 
 const QUERY_KEYS = {
@@ -123,3 +124,15 @@ export const useMyTasks = (departmentId: number) => {
     enabled: departmentId >= 0,
   });
 };
+
+export function useAcceptTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ instanceId, taskId }: { instanceId: number; taskId: number }) =>
+      client.post(`/v1/workflow-instances/${instanceId}/tasks/${taskId}/accept`).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflow', 'my-tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['open-task-count'] });
+    },
+  });
+}

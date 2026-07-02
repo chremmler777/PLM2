@@ -5,11 +5,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
+import { useDepartments, useMyTasks, useAcceptTask } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import { rasicColors } from '../lib/constants';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
+import { t } from '../i18n/cmLabels';
 import { toast } from 'sonner';
 
 interface MyLessonAction {
@@ -188,11 +189,22 @@ function SepItemsSection() {
 
 function ChangeTasksSection() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data: tasks = [] } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
     refetchInterval: 60_000,
+  });
+
+  const accept = useMutation({
+    mutationFn: ({ changeId, assessmentId }: { changeId: number; assessmentId: number }) =>
+      changesApi.acceptAssessment(changeId, assessmentId),
+    onSuccess: () => {
+      toast.success('Assessment accepted');
+      queryClient.invalidateQueries({ queryKey: ['change-my-tasks'] });
+    },
+    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to accept'),
   });
 
   if (tasks.length === 0) return null;
@@ -208,22 +220,51 @@ function ChangeTasksSection() {
             <tr className="border-b border-slate-700 bg-slate-900">
               <th className="text-left px-4 py-3 text-slate-400 font-medium">Change</th>
               <th className="text-left px-4 py-3 text-slate-400 font-medium">Title</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.owner')}</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
-            {tasks.map((t) => (
+            {tasks.map((task) => (
               <tr
-                key={`${t.change_id}-${t.assessment_id}`}
-                className="border-b border-slate-700 last:border-0 hover:bg-slate-750"
+                key={`${task.change_id}-${task.assessment_id}`}
+                className={`border-b border-slate-700 last:border-0 hover:bg-slate-750${
+                  task.mine ? ' border-l-2 border-sky-500' : ''
+                }`}
               >
                 <td className="px-4 py-3">
-                  <span className="font-mono text-slate-100">{t.change_number}</span>
+                  <span className="font-mono text-slate-100">{task.change_number}</span>
                 </td>
-                <td className="px-4 py-3 text-slate-100">{t.title}</td>
+                <td className="px-4 py-3 text-slate-100">{task.title}</td>
+                <td className="px-4 py-3">
+                  {task.owner_id !== null ? (
+                    <span className="text-slate-200">{task.owner_name}</span>
+                  ) : (
+                    <button
+                      onClick={() =>
+                        accept.mutate({ changeId: task.change_id, assessmentId: task.assessment_id })
+                      }
+                      disabled={accept.isPending}
+                      className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
+                    >
+                      {t('tasks.accept')}
+                    </button>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-xs">
+                  {task.due_date ? (
+                    <span className={task.overdue ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                      {new Date(task.due_date).toLocaleDateString()}
+                      {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
+                    </span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
-                    onClick={() => navigate(`/changes/${t.change_id}`)}
+                    onClick={() => navigate(`/changes/${task.change_id}`)}
                     className="text-xs px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"
                   >
                     Assess
@@ -244,6 +285,7 @@ export default function MyTasksPage() {
   const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
 
   const { data: tasks = [], isLoading: loadingTasks } = useMyTasks(selectedDeptId);
+  const acceptTask = useAcceptTask();
 
   const activeDepartments = departments.filter((d) => d.is_active);
 
@@ -301,6 +343,8 @@ export default function MyTasksPage() {
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Revision</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Step</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Stage</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.owner')}</th>
+                <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">RASIC</th>
                 <th className="text-left px-4 py-3 text-slate-400 font-medium">Started</th>
                 <th className="px-4 py-3" />
@@ -313,7 +357,9 @@ export default function MyTasksPage() {
                 return (
                   <tr
                     key={task.task_id}
-                    className="border-b border-slate-700 hover:bg-slate-750 last:border-0"
+                    className={`border-b border-slate-700 hover:bg-slate-750 last:border-0${
+                      task.mine ? ' border-l-2 border-sky-500' : ''
+                    }`}
                   >
                     <td className="px-4 py-3">
                       <div className="text-slate-100 font-medium">{task.part_name}</div>
@@ -325,6 +371,31 @@ export default function MyTasksPage() {
                       <span className="text-slate-400 text-xs mr-1">Stage {task.stage_order}</span>
                       {task.stage_name && (
                         <span className="text-slate-300">{task.stage_name}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {task.owner_id !== null ? (
+                        <span className="text-slate-200">{task.owner_name}</span>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            acceptTask.mutate({ instanceId: task.instance_id, taskId: task.task_id })
+                          }
+                          disabled={acceptTask.isPending}
+                          className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
+                        >
+                          {t('tasks.accept')}
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs">
+                      {task.due_date ? (
+                        <span className={task.overdue ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                          {new Date(task.due_date).toLocaleDateString()}
+                          {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3">

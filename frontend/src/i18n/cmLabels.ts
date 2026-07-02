@@ -54,5 +54,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl.noRevision': { de: 'Noch keine ECN-Revision (Kickoff ausstehend)', en: 'No ECN revision yet (kickoff pending)' },
   'wf.waive': { de: 'Erlassen', en: 'Waive' },
   'wf.waiveReason': { de: 'Begründung für das Erlassen', en: 'Reason for waiving' },
+  'tasks.owner': { de: 'Verantwortlich', en: 'Owner' },
+  'tasks.due': { de: 'Fällig', en: 'Due' },
+  'tasks.overdue': { de: 'überfällig', en: 'overdue' },
+  'tasks.accept': { de: 'Übernehmen', en: 'Accept' },
+  'tasks.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
+  'tasks.mine': { de: 'Meine', en: 'Mine' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

@@ -139,6 +139,12 @@ export interface MyTask {
   revision_id: number;
   revision_name: string;
   instance_started_at: string;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
+  mine: boolean;
 }
 
 // Instance request types

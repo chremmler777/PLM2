@@ -125,6 +125,12 @@ export interface ChangeTask {
   title: string;
   department_id: number;
   assessment_id: number;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
+  mine: boolean;
 }
 
 // --- Cost & summation types (sub-project A) ---
