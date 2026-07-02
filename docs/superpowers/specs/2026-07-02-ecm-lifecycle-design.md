@@ -78,6 +78,15 @@ disclosure (summary first, detail on demand), status colors used consistently,
 empty states that teach, quality-of-life touches welcome (keyboard-friendly
 grids, sensible defaults, inline validation).
 
+**The UI drives the task (hard requirement, 2026-07-02):** never leave the
+user asking "where do I define this?". Every blocked state names its reason
+and offers the resolving action in place (blocked transition → inline
+deviation request; missing evidence → upload affordance on the exact item;
+pending approval → approve/reject buttons where the pending thing is shown).
+Every screen has one visually primary next action derived from the change's
+state. Forms and pickers open in context (modals/inline), never on a
+disconnected settings page the user must know about.
+
 ## Workflow definitions (seeded templates, RASIC per department module)
 
 Source: `Documents/Changemanagement/ÄnderungsmitteilungChange_Management (*).xlsx`
