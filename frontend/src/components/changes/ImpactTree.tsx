@@ -26,7 +26,7 @@ export default function ImpactTree({ changeId, status }: Props) {
     queryFn: () => changesApi.getImpactTree(changeId),
   })
 
-  const lastSyncedRef = useRef<string>('')
+  const lastSyncedRef = useRef<string | null>(null)
   useEffect(() => {
     if (!data) return
     const serverKey = [...data.impacted_part_ids].sort((a, b) => a - b).join(',')
@@ -35,7 +35,7 @@ export default function ImpactTree({ changeId, status }: Props) {
     // from what we last synced from the server (i.e. no unsaved edits), or
     // this is the initial load. A background refetch (e.g. window focus)
     // that lands mid-edit must not clobber the user's checkbox changes.
-    if (selectedNow === lastSyncedRef.current || lastSyncedRef.current === '') {
+    if (selectedNow === lastSyncedRef.current || lastSyncedRef.current === null) {
       setSelected(new Set(data.impacted_part_ids))
       lastSyncedRef.current = serverKey
     } else if (serverKey === selectedNow) {
