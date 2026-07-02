@@ -25,6 +25,7 @@ from app.schemas.change import (
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
+    DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -500,3 +501,49 @@ async def put_gate(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return gate
+
+
+@router.get("/{change_id}/deviations", response_model=List[TransitionDeviationResponse])
+async def list_deviations(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change.transition_deviations
+
+
+@router.post("/{change_id}/deviations", response_model=TransitionDeviationResponse)
+async def propose_deviation(
+    change_id: int, body: DeviationProposeIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        dev = await ChangeService.propose_transition_deviation(
+            db, change, body.to_status, body.reason, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return dev
+
+
+@router.post("/{change_id}/deviations/{dev_id}/decide",
+             response_model=TransitionDeviationResponse)
+async def decide_deviation(
+    change_id: int, dev_id: int, body: DeviationDecideIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        dev = await ChangeService.decide_transition_deviation(
+            db, change, dev_id, body.decision, current_user, note=body.note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return dev

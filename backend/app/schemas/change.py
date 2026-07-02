@@ -289,3 +289,28 @@ class GateResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DeviationProposeIn(BaseModel):
+    to_status: str
+    reason: str
+
+
+class DeviationDecideIn(BaseModel):
+    decision: str  # approved | rejected
+    note: Optional[str] = None
+
+
+class TransitionDeviationResponse(BaseModel):
+    id: int
+    to_status: str
+    reason: str
+    status: str
+    proposed_by: int
+    proposed_at: datetime
+    decided_by: Optional[int] = None
+    decided_at: Optional[datetime] = None
+    decision_note: Optional[str] = None
+
+    class Config:
+        from_attributes = True

@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
-    ChangeAttachment,
+    ChangeAttachment, ChangeTransitionDeviation,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES,
 )
+from app.models.entities import User
 from app.models.part import Part, PartRevision, PartRelation
 from app.models.workflow import Department
 
@@ -131,6 +132,64 @@ class ChangeService:
             field_name=f"gate_{gate_key}", new_value=decision, notes=remark,
         )
         return row
+
+    @staticmethod
+    async def propose_transition_deviation(
+        session: AsyncSession, change: ChangeRequest, to_status: str,
+        reason: str, user_id: int,
+    ) -> ChangeTransitionDeviation:
+        if to_status not in CHANGE_STATUSES:
+            raise ChangeError(f"Unknown status '{to_status}'")
+        if not reason or not reason.strip():
+            raise ChangeError("A reason is required to propose a deviation")
+        if any(d.to_status == to_status and d.status == "pending"
+               for d in change.transition_deviations):
+            raise ChangeError("A deviation for this transition is already pending")
+        dev = ChangeTransitionDeviation(
+            change_id=change.id, to_status=to_status, reason=reason.strip(),
+            proposed_by=user_id,
+        )
+        session.add(dev)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "deviation_proposed",
+            f"Transition deviation to '{to_status}' proposed", user_id,
+            field_name="deviation",
+            new_value={"deviation_id": dev.id, "to_status": to_status},
+            notes=reason.strip(),
+        )
+        return dev
+
+    @staticmethod
+    async def decide_transition_deviation(
+        session: AsyncSession, change: ChangeRequest, deviation_id: int,
+        decision: str, actor: User, *, note: Optional[str] = None,
+    ) -> ChangeTransitionDeviation:
+        if decision not in ("approved", "rejected"):
+            raise ChangeError(f"Invalid deviation decision '{decision}'")
+        dev = next((d for d in change.transition_deviations if d.id == deviation_id), None)
+        if dev is None:
+            raise ChangeError("Deviation not found")
+        if dev.status != "pending":
+            raise ChangeError(f"Deviation is '{dev.status}', not pending")
+        if dev.proposed_by == actor.id:
+            raise ChangeError("Cannot decide your own deviation (4-eyes rule)")
+        if (actor.role != "admin" and actor.id != change.lead_id
+                and dev.proposed_by != change.lead_id):
+            raise ChangeError("Only the change lead or an admin may decide this deviation")
+        dev.status = decision
+        dev.decided_by = actor.id
+        dev.decided_at = datetime.utcnow()
+        dev.decision_note = note
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "deviation_decided",
+            f"Deviation #{dev.id} ({dev.to_status}): {decision}", actor.id,
+            field_name="deviation",
+            new_value={"deviation_id": dev.id, "decision": decision},
+            notes=note,
+        )
+        return dev
 
     @staticmethod
     async def create_change(
