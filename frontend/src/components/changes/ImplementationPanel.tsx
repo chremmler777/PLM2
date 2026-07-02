@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import type { ImplementationItem } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
@@ -35,7 +36,7 @@ export default function ImplementationPanel({ changeId }: Props) {
       setSignTarget(null);
       invalidate();
     },
-    onError: (e: unknown) => alert(errDetail(e) ?? 'Sign-off failed'),
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
   });
 
   if (isLoading || !data) return <div className="text-slate-400 text-sm">…</div>;

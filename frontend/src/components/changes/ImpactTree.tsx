@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeStatus, ImpactTreeNode } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
@@ -60,7 +61,7 @@ export default function ImpactTree({ changeId, status }: Props) {
       qc.invalidateQueries({ queryKey: ['change', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'impact-tree'] })
     },
-    onError: (e: unknown) => alert(errDetail(e) ?? 'Apply failed'),
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Apply failed'),
   })
 
   const toggle = (partId: number) => {

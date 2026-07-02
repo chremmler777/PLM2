@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
@@ -66,13 +67,13 @@ export default function ChangeDetailPage() {
     onError: (e: unknown, vars) => {
       const detail = errDetail(e) ?? 'Transition failed';
       if (vars.to !== 'cancelled') setBlocked({ to: vars.to, reason: detail });
-      else alert(detail);
+      else toast.error(detail);
     },
   });
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(changeId, role),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: unknown) => alert(errDetail(e) ?? 'Sign-off failed'),
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
   });
   const customer = useMutation({
     mutationFn: (response: string) => changesApi.customerResponse(changeId, response),

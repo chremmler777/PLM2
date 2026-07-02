@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import ReasonDialog from './ReasonDialog';
 
@@ -35,7 +36,7 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
     mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected' }) =>
       changesApi.decideDeviation(changeId, vars.devId, { decision: vars.decision }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] }),
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Decision failed'),
+    onError: (e: any) => toast.error(e?.response?.data?.detail ?? 'Decision failed'),
   });
 
   const relevant = deviations.filter((d) => d.to_status === blockedTo);

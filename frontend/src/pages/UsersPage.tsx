@@ -112,6 +112,31 @@ function roleColor(role: string): string {
   return colors[role] || 'bg-slate-700 text-slate-300';
 }
 
+function SetPasswordModal({ userName, onSubmit, onClose }: {
+  userName: string
+  onSubmit: (password: string) => void
+  onClose: () => void
+}) {
+  const [pw, setPw] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm">
+        <h2 className="text-lg font-semibold text-slate-100 mb-3">Set password — {userName}</h2>
+        <input type="password" autoFocus minLength={8}
+          className="w-full rounded-lg px-3 py-2 text-sm bg-slate-700 border border-slate-600 text-slate-100"
+          placeholder="New password (min 8 characters)"
+          value={pw} onChange={(e) => setPw(e.target.value)} />
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded" onClick={onClose}>Cancel</button>
+          <button className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50 hover:bg-sky-500"
+            disabled={pw.length < 8}
+            onClick={() => { onSubmit(pw); onClose() }}>Set password</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CreateUserModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
@@ -213,6 +238,7 @@ export default function UsersPage() {
   const { userId } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [departmentsUser, setDepartmentsUser] = useState<UserRecord | null>(null);
+  const [passwordModalUser, setPasswordModalUser] = useState<UserRecord | null>(null);
 
   const { data: users, isLoading, error } = useQuery<UserRecord[]>({
     queryKey: ['users'],
@@ -234,13 +260,14 @@ export default function UsersPage() {
   });
 
   const resetPassword = (user: UserRecord) => {
-    const pw = window.prompt(`New password for ${user.username} (min 8 characters):`);
-    if (!pw) return;
-    if (pw.length < 8) {
-      toast.error('Password must be at least 8 characters');
-      return;
+    setPasswordModalUser(user);
+  };
+
+  const handlePasswordSubmit = (password: string) => {
+    if (passwordModalUser) {
+      updateMutation.mutate({ id: passwordModalUser.id, password });
+      setPasswordModalUser(null);
     }
-    updateMutation.mutate({ id: user.id, password: pw });
   };
 
   if (error) {
@@ -347,6 +374,7 @@ export default function UsersPage() {
 
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
       {departmentsUser && <DepartmentsModal user={departmentsUser} onClose={() => setDepartmentsUser(null)} />}
+      {passwordModalUser && <SetPasswordModal userName={passwordModalUser.username} onSubmit={handlePasswordSubmit} onClose={() => setPasswordModalUser(null)} />}
     </div>
   );
 }
