@@ -31,6 +31,20 @@ lifecycle and hardens the compliance posture.
 
 ## Scope areas
 
+### 0. Context-first change initiation (added 2026-07-02, supersedes the legacy standalone form as primary path)
+
+Changes start from the thing that's changing, not from a blank form:
+- **From a Part detail page (tool or article):** "Start change" button → modal with
+  title + reason only; change_type inferred from item_category (tooling for
+  tools/gauges/equipment, physical_part for articles, overridable). Creates the
+  change with that part as lead impacted item, project inherited, and
+  PartRelation-linked parts (produces/checks/assembles) offered as pre-checked
+  suggestions feeding the impact tree.
+- **From a Project page:** "Start change" → searchable item picker (grouped
+  Articles / Tools, names not IDs) → same prefill path.
+- **Changes page form = fallback only:** project dropdown → searchable item
+  dropdown → prefill. No free-text ID fields anywhere in change creation.
+
 ### 1. Impact tree → revisions
 Interactive tree of the affected tool/article (Part hierarchy + revision-owned
 BOM). Lead picks impacted nodes; system computes suggested parent roll-ups;
