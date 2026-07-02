@@ -68,7 +68,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const { data: projects = [] } = useQuery<ProjectRef[]>({
     queryKey: ['projects'],
     queryFn: async () => (await client.get('/v1/plants/projects')).data,
-    enabled: open && !projectLocked,
+    enabled: open,
   });
 
   const { data: parts = [] } = useQuery<PickedPart[]>({

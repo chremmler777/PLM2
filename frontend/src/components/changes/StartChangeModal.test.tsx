@@ -59,6 +59,12 @@ describe('StartChangeModal', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/42')
   })
 
+  it('shows the locked project name instead of a raw id when prefilled', async () => {
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    expect(await screen.findByText('VW426 Atlas')).toBeTruthy()
+    expect(screen.queryByText('#1')).toBeNull()
+  })
+
   it('requires picking an item when not prefilled', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
     fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'X' } })
