@@ -73,3 +73,28 @@ async def test_reject_and_duplicate_pending_blocked(client, eng_auth, admin_auth
     again = await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
         "to_status": "in_assessment", "reason": "r3"}, headers=eng_auth)
     assert again.status_code == 200
+
+
+async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session_factory):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        viewer = User(
+            organization_id=seed["org_id"], username="viewer2", email="viewer2@test.io",
+            full_name="Viewer", hashed_password=get_password_hash("viewer-secret-1"),
+            role="viewer", is_active=True, mfa_enabled=False,
+        )
+        s.add(viewer)
+        await s.commit()
+    login = await client.post("/api/v1/auth/login", json={
+        "email": "viewer2@test.io", "password": "viewer-secret-1"})
+    viewer_auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    c = await _change(client, eng_auth, seed)  # lead is the engineer (proposer)
+    dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
+        "to_status": "in_assessment", "reason": "lead proposes"}, headers=eng_auth)).json()
+    denied = await client.post(
+        f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
+        json={"decision": "approved"}, headers=viewer_auth)
+    assert denied.status_code == 400
+    assert "role" in denied.json()["detail"].lower()

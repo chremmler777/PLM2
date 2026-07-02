@@ -174,6 +174,8 @@ class ChangeService:
             raise ChangeError(f"Deviation is '{dev.status}', not pending")
         if dev.proposed_by == actor.id:
             raise ChangeError("Cannot decide your own deviation (4-eyes rule)")
+        if actor.role not in ("admin", "engineer"):
+            raise ChangeError("Deviation decisions require an engineer or admin role")
         if (actor.role != "admin" and actor.id != change.lead_id
                 and dev.proposed_by != change.lead_id):
             raise ChangeError("Only the change lead or an admin may decide this deviation")
