@@ -6,6 +6,7 @@ start), and a hash-chained changelog hang off it. On approval the change spawns
 ECN PartRevisions on each impacted part; on release those become active.
 """
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON, Boolean, Table, Column
 from sqlalchemy import false as sa_false
@@ -174,6 +175,13 @@ class ChangeAssessment(Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     submitted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
+    # Phase C: named ownership + due dates (owner = accountable person; distinct
+    # from responsible_id, a free-form contact declared at submission)
+    owner_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -182,6 +190,17 @@ class ChangeAssessment(Base):
     cost_lines: Mapped[list["AssessmentCostLine"]] = relationship(
         back_populates="assessment", cascade="all, delete-orphan", lazy="selectin",
     )
+    owner: Mapped["User | None"] = relationship(
+        foreign_keys=[owner_id], lazy="selectin")
+
+    @property
+    def owner_name(self) -> Optional[str]:
+        return self.owner.full_name if self.owner is not None else None
+
+    @property
+    def overdue(self) -> bool:
+        return (self.due_date is not None and self.status == "active"
+                and self.due_date < datetime.utcnow())
 
 
 class ChangeAttachment(Base):

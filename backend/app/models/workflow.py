@@ -190,10 +190,27 @@ class WfInstanceTask(Base):
     decision: Mapped[str | None] = mapped_column(String(20), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Phase C: named ownership + due dates
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     instance: Mapped["WfInstance"] = relationship(back_populates="tasks")
     step: Mapped["WfStep"] = relationship()
     department: Mapped["Department"] = relationship()
     completed_by_user: Mapped["User | None"] = relationship(foreign_keys=[completed_by])
+    owner: Mapped["User | None"] = relationship(
+        foreign_keys=[owner_id], lazy="selectin")
+
+    @property
+    def owner_name(self) -> str | None:
+        return self.owner.full_name if self.owner is not None else None
+
+    @property
+    def overdue(self) -> bool:
+        return (self.due_date is not None and self.status == "active"
+                and self.due_date < datetime.utcnow())
 
 
 # ============================================================================
