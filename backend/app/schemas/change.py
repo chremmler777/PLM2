@@ -38,7 +38,6 @@ class ChangeUpdate(BaseModel):
 
 class TransitionRequest(BaseModel):
     to_status: str
-    justification: Optional[str] = None
     cancellation_reason: Optional[str] = None
 
 

@@ -326,9 +326,14 @@ async def test_not_feasible_blocks_costing_until_justified(client, seed, departm
     # costing soft-blocked due to not_feasible
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400, res.text
-    # overridable with justification
+    # overridable only via an approved transition deviation (4-eyes)
+    admin_auth = await _login_admin(client)
+    dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations",
+                             json={"to_status": "costing", "reason": "risk accepted"}, headers=auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
+                      json={"decision": "approved"}, headers=admin_auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition",
-                            json={"to_status": "costing", "justification": "risk accepted"}, headers=auth)
+                            json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
 
 

@@ -279,8 +279,7 @@ class ChangeService:
     @staticmethod
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
-        user_id: int, *, justification: Optional[str] = None,
-        cancellation_reason: Optional[str] = None,
+        user_id: int, *, cancellation_reason: Optional[str] = None,
     ) -> ChangeRequest:
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
@@ -301,12 +300,16 @@ class ChangeService:
             change.cancellation_reason = cancellation_reason
             change.cancelled_at = datetime.utcnow()
 
-        forced = False
+        deviation = None
         reason = await ChangeService._guard(session, change, to_status)
         if reason is not None:
-            if not justification:
-                raise ChangeError(f"{reason}. Provide a justification to override.")
-            forced = True
+            deviation = next(
+                (d for d in change.transition_deviations
+                 if d.to_status == to_status and d.status == "approved"), None)
+            if deviation is None:
+                raise ChangeError(
+                    f"{reason}. An approved deviation is required to proceed.")
+            deviation.status = "consumed"
 
         # Side effects on entry
         if to_status == "in_assessment":
@@ -321,12 +324,13 @@ class ChangeService:
         old = change.status
         change.status = to_status
         await session.flush()
-        action = "forced_transition" if forced else "status_changed"
-        desc = f"{old} -> {to_status}" + (f" (forced: {justification})" if forced else "")
+        action = "deviated_transition" if deviation else "status_changed"
+        desc = f"{old} -> {to_status}" + (
+            f" (deviation #{deviation.id}: {deviation.reason})" if deviation else "")
         await ChangeService.append_changelog(
             session, change, action, desc, user_id,
             field_name="status", old_value=old, new_value=to_status,
-            notes=justification if forced else None,
+            notes=deviation.reason if deviation else None,
         )
         return change
 

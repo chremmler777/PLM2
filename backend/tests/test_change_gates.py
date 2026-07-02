@@ -29,7 +29,7 @@ async def test_gate_blocks_transition_until_yes(client, eng_auth, seed, session_
         "part_type": "sub_assembly", "data_classification": "confidential"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": pres.json()["id"]}, headers=eng_auth)
-    # set the feasibility gate to "no" -> transition must be blocked without justification
+    # set the feasibility gate to "no" -> transition must be blocked without an approved deviation
     await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
                      json={"decision": "no"}, headers=eng_auth)
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",

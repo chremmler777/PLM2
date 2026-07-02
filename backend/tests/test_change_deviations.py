@@ -98,3 +98,32 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
         json={"decision": "approved"}, headers=viewer_auth)
     assert denied.status_code == 400
     assert "role" in denied.json()["detail"].lower()
+
+
+async def test_blocked_transition_requires_approved_deviation(
+        client, eng_auth, admin_auth, seed):
+    c = await _change(client, eng_auth, seed)  # no impacted items -> guard blocks
+    blocked = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                                json={"to_status": "in_assessment"}, headers=eng_auth)
+    assert blocked.status_code == 400
+    assert "deviation" in blocked.json()["detail"].lower()
+
+    dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={
+        "to_status": "in_assessment", "reason": "PPT only at capture"},
+        headers=eng_auth)).json()
+    await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
+                      json={"decision": "approved"}, headers=admin_auth)
+
+    ok = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                           json={"to_status": "in_assessment"}, headers=eng_auth)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["status"] == "in_assessment"
+
+    # deviation is consumed and cannot be reused
+    listed = (await client.get(f"/api/v1/changes/{c['id']}/deviations",
+                               headers=eng_auth)).json()
+    assert listed[0]["status"] == "consumed"
+
+    log = (await client.get(f"/api/v1/changes/{c['id']}/changelog",
+                            headers=eng_auth)).json()
+    assert any(e["action"] == "deviated_transition" for e in log)

@@ -39,16 +39,11 @@ async def _transition(client, auth, change_id, to_status, **over):
     return await client.post(f"/api/v1/changes/{change_id}/transition", json=body, headers=auth)
 
 
-async def test_transition_requires_impacted_item_then_forced_override(client, eng_auth, seed):
+async def test_transition_blocked_without_impacted_items(client, eng_auth, seed):
     change = await _create_change(client, eng_auth, seed["project_id"])
-    # Soft guard blocks without impacted items + no justification
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
-    # Forced override with justification succeeds and logs it
-    res = await _transition(client, eng_auth, change["id"], "in_assessment",
-                            justification="PPT only at this stage")
-    assert res.status_code == 200, res.text
-    assert res.json()["status"] == "in_assessment"
+    assert "deviation" in res.json()["detail"].lower()
 
 
 async def test_illegal_transition_rejected(client, eng_auth, seed):
@@ -183,7 +178,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
     change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
     cid = change["id"]
     # cannot approve yet (no customer acceptance, no sign-off) — hard gate, no override
-    res = await _transition(client, eng_auth, cid, "approved", justification="please")
+    res = await _transition(client, eng_auth, cid, "approved")
     assert res.status_code == 400, res.text
 
     # record customer acceptance

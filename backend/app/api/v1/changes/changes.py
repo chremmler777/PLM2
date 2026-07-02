@@ -254,7 +254,7 @@ async def transition_change(
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
-            justification=body.justification, cancellation_reason=body.cancellation_reason,
+            cancellation_reason=body.cancellation_reason,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
