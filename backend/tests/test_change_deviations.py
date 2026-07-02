@@ -6,7 +6,7 @@ pytestmark = pytest.mark.asyncio
 
 async def test_deviation_model_persists(session_factory, seed):
     from app.models.change import (
-        ChangeRequest, ChangeTransitionDeviation, DEVIATION_STATUSES,
+        ChangeRequest, ChangeTransitionDeviation, TRANSITION_DEVIATION_STATUSES,
     )
     async with session_factory() as s:
         change = ChangeRequest(
@@ -21,4 +21,4 @@ async def test_deviation_model_persists(session_factory, seed):
         dev = (await s.execute(select(ChangeTransitionDeviation))).scalar_one()
     assert dev.status == "pending"
     assert dev.to_status == "in_assessment"
-    assert DEVIATION_STATUSES == ("pending", "approved", "rejected", "consumed")
+    assert TRANSITION_DEVIATION_STATUSES == ("pending", "approved", "rejected", "consumed")

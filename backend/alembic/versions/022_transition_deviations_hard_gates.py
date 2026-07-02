@@ -33,7 +33,7 @@ def upgrade() -> None:
             sa.Column("reason", sa.Text, nullable=False),
             sa.Column("status", sa.String(15), nullable=False, server_default="pending"),
             sa.Column("proposed_by", sa.Integer, sa.ForeignKey("users.id"), nullable=False),
-            sa.Column("proposed_at", sa.DateTime, nullable=True),
+            sa.Column("proposed_at", sa.DateTime, nullable=False),
             sa.Column("decided_by", sa.Integer, sa.ForeignKey("users.id"), nullable=True),
             sa.Column("decided_at", sa.DateTime, nullable=True),
             sa.Column("decision_note", sa.Text, nullable=True),
