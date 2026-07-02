@@ -4,9 +4,7 @@ from app.models.entities import (
     Organization, Plant, User, Project, CADFile,
     UserWorkflowRole, AuditLog, LoginHistory
 )
-from app.models.article import (
-    Article, ArticleRevision, ArticleDocument, BOM, BOMItem, CatalogPart
-)
+from app.models.catalog import CatalogPart
 from app.models.part import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
@@ -27,7 +25,6 @@ from app.models.change_cost import (
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
-    WorkflowTemplate, WorkflowStep, WorkflowInstance, WorkflowTask
 )
 
 __all__ = [
@@ -44,11 +41,6 @@ __all__ = [
     "UserWorkflowRole",
     "AuditLog",
     "LoginHistory",
-    "Article",
-    "ArticleRevision",
-    "ArticleDocument",
-    "BOM",
-    "BOMItem",
     "CatalogPart",
     "Part",
     "PartRevision",
@@ -68,11 +60,6 @@ __all__ = [
     # New workflow instance models (Phase 3c)
     "WfInstance",
     "WfInstanceTask",
-    # Legacy workflow models
-    "WorkflowTemplate",
-    "WorkflowStep",
-    "WorkflowInstance",
-    "WorkflowTask",
     "ChangeRequest",
     "ChangeImpactedItem",
     "ChangeAssessment",

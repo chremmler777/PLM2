@@ -13,14 +13,6 @@ __all__ = [
     "UserUpdateRequest",
 ]
 
-# Article schemas
-from app.schemas.article import (
-    ArticleCreateRequest, ArticleUpdateRequest, ArticleResponse, ArticleDetailResponse,
-    RevisionCreateRequest, ReleaseRevisionRequest, ChangeProposalRequest, RevisionStatusTransitionRequest,
-    RevisionResponse, RevisionTreeResponse,
-    ArticleTypeEnum, SourcingTypeEnum, RevisionTypeEnum, RevisionStatusEnum,
-)
-
 # Project schemas
 from app.schemas.project import (
     ProjectCreateRequest, ProjectUpdateRequest, ProjectResponse,
