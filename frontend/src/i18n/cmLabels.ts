@@ -60,5 +60,6 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.accept': { de: 'Übernehmen', en: 'Accept' },
   'tasks.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'tasks.mine': { de: 'Meine', en: 'Mine' },
+  'esc.title': { de: 'Eskalationen — überfällig in meinen Changes', en: 'Escalations — overdue in my changes' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

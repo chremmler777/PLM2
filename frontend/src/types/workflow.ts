@@ -105,6 +105,23 @@ export interface WfInstanceTask {
   completed_at: string | null;
   decision: WfDecision | null;
   notes: string | null;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
+}
+
+export interface Escalation {
+  kind: 'assessment' | 'wf_task';
+  change_id: number;
+  change_number: string;
+  change_title: string;
+  label: string;
+  owner_id: number | null;
+  owner_name: string | null;
+  due_date: string;
+  days_overdue: number;
 }
 
 export interface WfInstance {

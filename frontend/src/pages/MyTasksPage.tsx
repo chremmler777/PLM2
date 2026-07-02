@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useDepartments, useMyTasks, useAcceptTask } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
+import EscalationsCard from '../components/EscalationsCard';
 import { rasicColors } from '../lib/constants';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
@@ -295,6 +296,8 @@ export default function MyTasksPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-100">My Tasks</h1>
         <p className="text-slate-400 text-sm mt-1">Active workflow tasks by department</p>
       </div>
+
+      <EscalationsCard />
 
       <SepItemsSection />
 

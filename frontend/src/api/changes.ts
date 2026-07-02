@@ -5,6 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress,
 } from '../types/change';
+import type { Escalation } from '../types/workflow';
 
 export const changesApi = {
   list: (params: { project_id?: number; status?: string; change_type?: string }) =>
@@ -54,6 +55,9 @@ export const changesApi = {
 
   myTasks: () =>
     client.get<ChangeTask[]>('/v1/changes/my-tasks').then((r) => r.data),
+
+  myEscalations: (): Promise<Escalation[]> =>
+    client.get('/v1/changes/my-escalations').then((r) => r.data),
 
   acceptAssessment: (changeId: number, assessmentId: number) =>
     client.post(`/v1/changes/${changeId}/assessments/${assessmentId}/accept`).then((r) => r.data),

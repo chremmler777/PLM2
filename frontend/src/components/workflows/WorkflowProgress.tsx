@@ -4,7 +4,9 @@
  */
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { WfInstance, WfInstanceTask, WfDecision } from '../../types/workflow';
+import { useAcceptTask } from '../../hooks/queries/useWorkflows';
 import { rasicColors, instanceStatusColors } from '../../lib/constants';
 import { t } from '../../i18n/cmLabels';
 
@@ -30,6 +32,15 @@ export default function WorkflowProgress({
   isCanceling,
 }: Props) {
   const [notesModal, setNotesModal] = useState<NotesModalState | null>(null);
+  const queryClient = useQueryClient();
+  const acceptTask = useAcceptTask();
+
+  const handleAccept = (task: WfInstanceTask) => {
+    acceptTask.mutate(
+      { instanceId: task.instance_id, taskId: task.id },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflow'] }) },
+    );
+  };
 
   // Derive unique stage orders from tasks for the progress bar
   const stageOrders = Array.from(new Set(instance.tasks.map((t) => t.stage_order))).sort(
@@ -126,6 +137,8 @@ export default function WorkflowProgress({
               key={task.id}
               task={task}
               isCompletingTask={isCompletingTask}
+              isAccepting={acceptTask.isPending}
+              onAccept={() => handleAccept(task)}
               onApprove={() => onCompleteTask(task.id, 'approved')}
               onReject={() => setNotesModal({ taskId: task.id, mode: 'rejected', notes: '' })}
               onWaive={() => setNotesModal({ taskId: task.id, mode: 'waived', notes: '' })}
@@ -206,12 +219,22 @@ export default function WorkflowProgress({
 interface TaskRowProps {
   task: WfInstanceTask;
   isCompletingTask: boolean;
+  isAccepting: boolean;
+  onAccept: () => void;
   onApprove: () => void;
   onReject: () => void;
   onWaive: () => void;
 }
 
-function TaskRow({ task, isCompletingTask, onApprove, onReject, onWaive }: TaskRowProps) {
+function TaskRow({
+  task,
+  isCompletingTask,
+  isAccepting,
+  onAccept,
+  onApprove,
+  onReject,
+  onWaive,
+}: TaskRowProps) {
   const colors = rasicColors[task.rasic_letter] ?? rasicColors['R'];
 
   if (!task.is_actionable) {
@@ -286,7 +309,30 @@ function TaskRow({ task, isCompletingTask, onApprove, onReject, onWaive }: TaskR
         {task.rasic_letter}
       </span>
       <span className="text-slate-100 text-sm font-medium flex-1">{task.department_name}</span>
-      <span className="text-xs text-slate-400 mr-2">{task.step_name}</span>
+      <span className="text-xs text-slate-400 mr-2">
+        {task.step_name}
+        {task.due_date && (
+          <span
+            className={`ml-2 ${task.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}`}
+          >
+            {new Date(task.due_date).toLocaleDateString()}
+            {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
+          </span>
+        )}
+      </span>
+      {task.owner_name ? (
+        <span className="text-xs bg-slate-700 text-slate-200 px-2 py-0.5 rounded mr-2">
+          {task.owner_name}
+        </span>
+      ) : (
+        <button
+          onClick={onAccept}
+          disabled={isAccepting}
+          className="px-2 py-0.5 mr-2 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs disabled:opacity-50"
+        >
+          {t('tasks.accept')}
+        </button>
+      )}
       <div className="flex gap-2">
         <button
           onClick={onApprove}
