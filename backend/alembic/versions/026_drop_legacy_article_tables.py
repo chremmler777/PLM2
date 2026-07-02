@@ -26,6 +26,16 @@ _LEGACY_TABLES = (
 def upgrade() -> None:
     bind = op.get_bind()
     existing = set(inspect(bind).get_table_names())
+    if bind.dialect.name == "postgresql":
+        # articles <-> article_revisions have a circular FK
+        # (articles.active_revision_id), so a plain ordered drop cannot
+        # succeed on an enforcing backend. CASCADE is safe here: nothing
+        # outside this legacy set references these tables (verified at
+        # retirement), so it only severs intra-legacy constraints.
+        for table in _LEGACY_TABLES:
+            if table in existing:
+                op.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
+        return
     for table in _LEGACY_TABLES:
         if table in existing:
             op.drop_table(table)

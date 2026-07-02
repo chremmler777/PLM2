@@ -37,10 +37,10 @@ def upgrade() -> None:
     if "requires_cad_evidence" not in step_cols:
         op.add_column("wf_steps", sa.Column(
             "requires_cad_evidence", sa.Boolean(), nullable=False,
-            server_default=sa.text("0")))
+            server_default=sa.false()))
     if "four_eyes" not in step_cols:
         op.add_column("wf_steps", sa.Column(
-            "four_eyes", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+            "four_eyes", sa.Boolean(), nullable=False, server_default=sa.false()))
 
     rev_cols = {c["name"] for c in insp.get_columns("part_revisions")}
     if "originating_change_id" not in rev_cols:
@@ -57,7 +57,7 @@ def upgrade() -> None:
     if "no_geometry_change" not in rev_cols:
         op.add_column("part_revisions", sa.Column(
             "no_geometry_change", sa.Boolean(), nullable=False,
-            server_default=sa.text("0")))
+            server_default=sa.false()))
     if "no_geometry_change_by" not in rev_cols:
         # Note: SQLite FK limitation (see originating_change_id comment above).
         op.add_column("part_revisions", sa.Column(
