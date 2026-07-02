@@ -33,7 +33,14 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
     completeMutation.mutate(
       { taskId, data: { decision, notes } },
       {
-        onSuccess: () => toast.success(decision === 'approved' ? 'Task approved' : 'Task rejected'),
+        onSuccess: () =>
+          toast.success(
+            decision === 'approved'
+              ? 'Task approved'
+              : decision === 'waived'
+                ? 'Task waived'
+                : 'Task rejected',
+          ),
         onError: () => toast.error('Failed to complete task'),
       },
     );

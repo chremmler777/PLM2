@@ -43,5 +43,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.apply': { de: 'Auswahl übernehmen', en: 'Apply selection' },
   'impact.locked': { de: 'Auswahl gesperrt — Umsetzung gestartet', en: 'Selection locked — implementation started' },
   'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
+  'impl.title': { de: 'Umsetzung', en: 'Implementation' },
+  'impl.readyToGo': { de: 'Ready to go — alle Prüf-Workflows abgeschlossen', en: 'Ready to go — all check workflows completed' },
+  'impl.notReady': { de: 'Noch nicht ready to go', en: 'Not ready to go yet' },
+  'impl.evidenceOk': { de: '3D-Nachweis vorhanden', en: '3D evidence present' },
+  'impl.evidenceMissing': { de: '3D-Nachweis fehlt', en: '3D evidence missing' },
+  'impl.noGeometry': { de: 'Keine Geometrieänderung', en: 'No geometry change' },
+  'impl.signNoGeometry': { de: 'Keine Geometrieänderung bestätigen', en: 'Sign no geometry change' },
+  'impl.stage': { de: 'Stufe', en: 'Stage' },
+  'impl.noRevision': { de: 'Noch keine ECN-Revision (Kickoff ausstehend)', en: 'No ECN revision yet (kickoff pending)' },
+  'wf.waive': { de: 'Erlassen', en: 'Waive' },
+  'wf.waiveReason': { de: 'Begründung für das Erlassen', en: 'Reason for waiving' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

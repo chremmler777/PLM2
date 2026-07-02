@@ -3,7 +3,7 @@ import type {
   ChangeRequest, ChangeDetail, ChangelogEntry, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
-  TransitionDeviation, ImpactTreeResponse,
+  TransitionDeviation, ImpactTreeResponse, ImplementationProgress,
 } from '../types/change';
 
 export const changesApi = {
@@ -91,4 +91,9 @@ export const changesApi = {
     client.post(`/v1/changes/${changeId}/impact-tree/suggest`, { part_ids: partIds }).then((r) => r.data),
   applyImpactSelection: (changeId: number, partIds: number[]): Promise<{ impacted_part_ids: number[] }> =>
     client.put(`/v1/changes/${changeId}/impacted-items`, { part_ids: partIds }).then((r) => r.data),
+
+  getImplementation: (changeId: number): Promise<ImplementationProgress> =>
+    client.get(`/v1/changes/${changeId}/implementation`).then((r) => r.data),
+  signNoGeometryChange: (partId: number, revisionId: number, reason: string) =>
+    client.post(`/v1/parts/${partId}/revisions/${revisionId}/no-geometry-change`, { reason }).then((r) => r.data),
 };

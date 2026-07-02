@@ -86,9 +86,9 @@ export interface WfTemplateSave {
 // Phase 3c: Workflow instance types
 // ============================================================================
 
-export type WfTaskStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'noted';
+export type WfTaskStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'noted' | 'waived';
 export type WfInstanceStatus = 'active' | 'completed' | 'canceled' | 'rejected';
-export type WfDecision = 'approved' | 'rejected';
+export type WfDecision = 'approved' | 'rejected' | 'waived';
 
 export interface WfInstanceTask {
   id: number;

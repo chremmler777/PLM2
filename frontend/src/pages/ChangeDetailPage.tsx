@@ -11,6 +11,8 @@ import CostLineGrid from '../components/changes/CostLineGrid';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
+import ImplementationPanel from '../components/changes/ImplementationPanel';
+import { t } from '../i18n/cmLabels';
 
 const STATUS_LABELS: Record<string, string> = {
   captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
@@ -25,7 +27,7 @@ const NEXT_STATUS: Record<string, string[]> = {
   in_validation: ['released'], released: ['closed'],
 };
 
-type Tab = 'overview' | 'impacted' | 'assessments' | 'commercial' | 'd1' | 'audit';
+type Tab = 'overview' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -47,6 +49,11 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'changelog'],
     queryFn: () => changesApi.changelog(changeId),
     enabled: tab === 'audit',
+  });
+  const { data: impl } = useQuery({
+    queryKey: ['change', changeId, 'implementation'],
+    queryFn: () => changesApi.getImplementation(changeId),
+    enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
   });
 
   const transition = useMutation({
@@ -82,8 +89,15 @@ export default function ChangeDetailPage() {
   return (
     <div className="max-w-5xl mx-auto p-6">
       <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-semibold">
-          <span className="font-mono text-gray-500">{change.change_number}</span> — {change.title}
+        <h1 className="text-2xl font-semibold flex items-center gap-3">
+          <span>
+            <span className="font-mono text-gray-500">{change.change_number}</span> — {change.title}
+          </span>
+          {impl?.ready_to_go && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100">
+              ✓ {t('impl.readyToGo')}
+            </span>
+          )}
         </h1>
         <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
                 onClick={() => advance('cancelled')}>Cancel</button>
@@ -125,10 +139,12 @@ export default function ChangeDetailPage() {
       </div>
 
       <div className="border-b flex gap-4 text-sm mb-4">
-        {(['overview', 'impacted', 'assessments', 'commercial', 'd1', 'audit'] as Tab[]).map((t) => (
-          <button key={t}
-            className={`pb-2 ${tab === t ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
-            onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
+        {(['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'] as Tab[]).map((tb) => (
+          <button key={tb}
+            className={`pb-2 ${tab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+            onClick={() => setTab(tb)}>
+            {tb === 'implementation' ? t('impl.title') : tb[0].toUpperCase() + tb.slice(1)}
+          </button>
         ))}
       </div>
 
@@ -155,6 +171,10 @@ export default function ChangeDetailPage() {
 
       {tab === 'impacted' && change && (
         <ImpactTree changeId={change.id} status={change.status} />
+      )}
+
+      {tab === 'implementation' && change && (
+        <ImplementationPanel changeId={change.id} />
       )}
 
       {tab === 'assessments' && (

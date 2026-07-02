@@ -197,6 +197,29 @@ export interface ImpactTreeResponse {
   lead_part_id: number | null;
 }
 
+export interface ImplementationItem {
+  item_id: number;
+  part_id: number;
+  part_number: string | null;
+  part_name: string | null;
+  item_category: string | null;
+  is_lead: boolean;
+  revision_id: number | null;
+  revision_name: string | null;
+  instance_id: number | null;
+  instance_status: string | null;
+  current_stage_order: number | null;
+  total_stages: number | null;
+  has_cad_file: boolean;
+  no_geometry_change: boolean;
+  ready: boolean;
+}
+
+export interface ImplementationProgress {
+  ready_to_go: boolean;
+  items: ImplementationItem[];
+}
+
 export interface TransitionDeviation {
   id: number;
   to_status: string;

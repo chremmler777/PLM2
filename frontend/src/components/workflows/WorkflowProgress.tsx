@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { WfInstance, WfInstanceTask, WfDecision } from '../../types/workflow';
 import { rasicColors, instanceStatusColors } from '../../lib/constants';
+import { t } from '../../i18n/cmLabels';
 
 interface Props {
   instance: WfInstance;
@@ -15,8 +16,9 @@ interface Props {
   isCanceling: boolean;
 }
 
-interface RejectState {
+interface NotesModalState {
   taskId: number;
+  mode: 'rejected' | 'waived';
   notes: string;
 }
 
@@ -27,7 +29,7 @@ export default function WorkflowProgress({
   isCompletingTask,
   isCanceling,
 }: Props) {
-  const [rejectState, setRejectState] = useState<RejectState | null>(null);
+  const [notesModal, setNotesModal] = useState<NotesModalState | null>(null);
 
   // Derive unique stage orders from tasks for the progress bar
   const stageOrders = Array.from(new Set(instance.tasks.map((t) => t.stage_order))).sort(
@@ -125,43 +127,69 @@ export default function WorkflowProgress({
               task={task}
               isCompletingTask={isCompletingTask}
               onApprove={() => onCompleteTask(task.id, 'approved')}
-              onReject={() => setRejectState({ taskId: task.id, notes: '' })}
+              onReject={() => setNotesModal({ taskId: task.id, mode: 'rejected', notes: '' })}
+              onWaive={() => setNotesModal({ taskId: task.id, mode: 'waived', notes: '' })}
             />
           ))}
         </div>
       )}
 
-      {/* Reject confirmation with notes */}
-      {rejectState && (
+      {/* Reject / waive confirmation with notes */}
+      {notesModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-slate-800 border border-slate-700 rounded-lg shadow-lg max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-slate-100 mb-3">Reject Task</h3>
+            <h3 className="text-lg font-semibold text-slate-100 mb-3">
+              {notesModal.mode === 'waived' ? t('wf.waive') : 'Reject Task'}
+            </h3>
             <p className="text-slate-300 text-sm mb-4">
-              Rejecting this task will stop the entire workflow. Add an optional note below.
+              {notesModal.mode === 'waived'
+                ? 'Waiving skips this task without approval. A reason is required.'
+                : 'Rejecting this task will stop the entire workflow. Add an optional note below.'}
             </p>
             <textarea
-              value={rejectState.notes}
-              onChange={(e) => setRejectState({ ...rejectState, notes: e.target.value })}
+              value={notesModal.notes}
+              onChange={(e) => setNotesModal({ ...notesModal, notes: e.target.value })}
               rows={3}
-              placeholder="Reason for rejection (optional)…"
+              placeholder={
+                notesModal.mode === 'waived'
+                  ? `${t('wf.waiveReason')}…`
+                  : 'Reason for rejection (optional)…'
+              }
               className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 mb-4"
             />
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setRejectState(null)}
+                onClick={() => setNotesModal(null)}
                 className="px-4 py-2 bg-slate-700 text-slate-100 rounded-md hover:bg-slate-600 font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={() => {
-                  onCompleteTask(rejectState.taskId, 'rejected', rejectState.notes || undefined);
-                  setRejectState(null);
+                  onCompleteTask(
+                    notesModal.taskId,
+                    notesModal.mode,
+                    notesModal.notes || undefined,
+                  );
+                  setNotesModal(null);
                 }}
-                disabled={isCompletingTask}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 font-medium"
+                disabled={
+                  isCompletingTask ||
+                  (notesModal.mode === 'waived' && !notesModal.notes.trim())
+                }
+                className={`px-4 py-2 text-white rounded-md disabled:opacity-50 font-medium ${
+                  notesModal.mode === 'waived'
+                    ? 'bg-slate-600 hover:bg-slate-500'
+                    : 'bg-red-600 hover:bg-red-700'
+                }`}
               >
-                {isCompletingTask ? 'Rejecting…' : 'Confirm Reject'}
+                {notesModal.mode === 'waived'
+                  ? isCompletingTask
+                    ? 'Waiving…'
+                    : t('wf.waive')
+                  : isCompletingTask
+                  ? 'Rejecting…'
+                  : 'Confirm Reject'}
               </button>
             </div>
           </div>
@@ -180,9 +208,10 @@ interface TaskRowProps {
   isCompletingTask: boolean;
   onApprove: () => void;
   onReject: () => void;
+  onWaive: () => void;
 }
 
-function TaskRow({ task, isCompletingTask, onApprove, onReject }: TaskRowProps) {
+function TaskRow({ task, isCompletingTask, onApprove, onReject, onWaive }: TaskRowProps) {
   const colors = rasicColors[task.rasic_letter] ?? rasicColors['R'];
 
   if (!task.is_actionable) {
@@ -232,6 +261,22 @@ function TaskRow({ task, isCompletingTask, onApprove, onReject }: TaskRowProps) 
     );
   }
 
+  if (task.status === 'waived') {
+    return (
+      <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
+        <span
+          className={`${colors.bg} ${colors.text} text-xs font-semibold px-1.5 py-0.5 rounded`}
+        >
+          {task.rasic_letter}
+        </span>
+        <span className="text-slate-300 text-sm flex-1">{task.department_name}</span>
+        <span className="text-xs bg-slate-700 text-slate-200 px-2 py-0.5 rounded font-medium">
+          waived
+        </span>
+      </div>
+    );
+  }
+
   // Active actionable task
   return (
     <div className="flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3">
@@ -256,6 +301,13 @@ function TaskRow({ task, isCompletingTask, onApprove, onReject }: TaskRowProps) 
           className="px-3 py-1 text-xs bg-red-700 text-red-100 rounded hover:bg-red-600 disabled:opacity-50 font-medium"
         >
           Reject
+        </button>
+        <button
+          onClick={onWaive}
+          disabled={isCompletingTask}
+          className="px-3 py-1 text-xs bg-slate-700 text-slate-100 rounded hover:bg-slate-600 disabled:opacity-50 font-medium"
+        >
+          {t('wf.waive')}
         </button>
       </div>
     </div>
