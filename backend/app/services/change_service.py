@@ -716,10 +716,20 @@ class ChangeService:
                 & (ChangeAssessment.department_id == department_id)
             )
         )
-        a = result.scalar_one_or_none()
-        if a is None:
+        rows = result.scalars().all()
+        # A department may hold assessment rows across several stages (e.g. R in
+        # stage 1, A in stage 2). Target the currently-actionable one deterministically:
+        # prefer the lowest-stage 'active' row, else the lowest-stage 'pending' row.
+        # submitted/waived rows are done and never re-targeted.
+        open_rows = [r for r in rows if r.status in ("active", "pending")]
+        if open_rows:
+            a = min(open_rows, key=lambda r: (r.status != "active", r.stage_order))
+        elif not rows:
+            # No routing row at all: tolerate a bare submit (pre-routing behaviour).
             a = ChangeAssessment(change_id=change.id, department_id=department_id)
             session.add(a)
+        else:
+            raise ChangeError("no open assessment for this department")
         a.verdict = verdict
         a.cost_impact = cost_impact
         a.lead_time_impact_days = lead_time_impact_days

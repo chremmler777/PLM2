@@ -381,3 +381,84 @@ async def test_maybe_advance_cascades_through_optional_only_stage(
     by_dep = {a["department_id"]: a for a in detail["assessments"]}
     assert by_dep[departments["APQP"]]["status"] == "active"    # cascaded through stage 2
     assert by_dep[departments["Quality"]]["status"] == "active"  # the optional stage was also activated
+
+
+@pytest_asyncio.fixture
+async def ecr_template_multistage_dept(session_factory, departments):
+    """Same dept appears in >1 stage: stage1 Tool Engineer(R) + Quality(R);
+    stage2 Tool Engineer(A) + APQP(C). Mapped to change_type 'packaging'."""
+    from app.models.workflow import WfTemplate, WfStage, WfStep, WfStepRasic
+    from app.models.change import ChangeRoutingStandard
+    async with session_factory() as s:
+        t = WfTemplate(name="ECRmulti", description="multi-stage dept", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [
+            (1, [("Tool Engineer", "R"), ("Quality", "R")]),
+            (2, [("Tool Engineer", "A"), ("APQP", "C")]),
+        ]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=departments[name], rasic_letter=letter))
+        s.add(ChangeRoutingStandard(change_type="packaging", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+        return t.id
+
+
+async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
+        session_factory, seed, ecr_template_multistage_dept, departments):
+    """A department with rows in multiple stages must not raise MultipleResultsFound.
+    submit_assessment targets the currently-active stage row, leaves later-stage rows
+    untouched, and after all stage-1 blocking rows submit the same dept's stage-2 row
+    becomes the next submit target."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    cid = await _seeded_change(session_factory, seed, change_type="packaging")
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+        await s.commit()
+
+    te = departments["Tool Engineer"]
+
+    def rows_by(rows):
+        return {(a.department_id, a.stage_order): a for a in rows}
+
+    # First submit for Tool Engineer must hit the stage-1 active row (not raise).
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        rows = rows_by((await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars().all())
+        assert rows[(te, 1)].status == "submitted"     # stage-1 row taken
+        assert rows[(te, 2)].status == "pending"        # stage-2 row untouched
+
+    # Finish stage-1 blocking (Quality R) -> stage 2 activates, incl. Tool Engineer(A).
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.submit_assessment(
+            s, change, departments["Quality"], "feasible", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        rows = rows_by((await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars().all())
+        assert rows[(te, 2)].status == "active"         # stage 2 now active
+
+    # Second submit for the SAME dept now targets the stage-2 row.
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.submit_assessment(s, change, te, "feasible", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        rows = rows_by((await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars().all())
+        assert rows[(te, 1)].status == "submitted"
+        assert rows[(te, 2)].status == "submitted"
