@@ -148,6 +148,26 @@ function useAssemblyFiles(partId: number) {
   });
 }
 
+// Order by the embedded tool number: "3450" for a tool, the middle "3450" for
+// an article like "20-3450-001-0". Groups each tool with the articles it produces
+// (tool first), so the list runs 3450 → 3457 instead of all 10-/20- prefixes first.
+function toolNumber(partNumber: string): number {
+  const segs = partNumber.split('-');
+  const n = parseInt(segs.length > 1 ? segs[1] : segs[0], 10);
+  return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
+}
+
+function comparePartNodes(a: TreeNode, b: TreeNode): number {
+  const ta = toolNumber(a.part.part_number);
+  const tb = toolNumber(b.part.part_number);
+  if (ta !== tb) return ta - tb;
+  // Within the same tool number, the tool (no hyphen) comes before its articles.
+  const ha = a.part.part_number.includes('-') ? 1 : 0;
+  const hb = b.part.part_number.includes('-') ? 1 : 0;
+  if (ha !== hb) return ha - hb;
+  return a.part.part_number.localeCompare(b.part.part_number);
+}
+
 // Build tree structure from flat parts list
 function buildPartTree(parts: Part[]): TreeNode[] {
   const partMap = new Map<number, Part>(parts.map((p) => [p.id, p]));
@@ -169,6 +189,7 @@ function buildPartTree(parts: Part[]): TreeNode[] {
       }
     }
 
+    children.sort(comparePartNodes);
     return { part, children };
   }
 
@@ -180,6 +201,7 @@ function buildPartTree(parts: Part[]): TreeNode[] {
     }
   }
 
+  roots.sort(comparePartNodes);
   return roots;
 }
 
@@ -444,7 +466,7 @@ function TreeNodeComponent({
         )}
 
         <div className={`truncate flex-1 min-w-0 ${isHeadline ? 'text-slate-50 text-sm font-bold' : 'text-slate-100 text-sm font-medium'}`}>
-          <span className="text-slate-400 text-xs">{node.part.id}</span>
+          <span className="text-slate-400 text-xs">{node.part.part_number}</span>
           <span className="mx-1">•</span>
           <span>{node.part.name}</span>
           {hasChildren && (
