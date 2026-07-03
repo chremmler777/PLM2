@@ -125,17 +125,6 @@ function getLatestFreezeMajor(revisions: Revision[]): Revision | null {
     })[0] || null;
 }
 
-function getLatestProposalForParent(parentId: number, revisions: Revision[]): Revision | null {
-  // Get the latest proposal under a major version
-  const proposals = revisions.filter((r) => r.parent_revision_id === parentId);
-  return proposals
-    .sort((a, b) => {
-      const numA = parseInt(a.revision_name.split('.')[1] || '0');
-      const numB = parseInt(b.revision_name.split('.')[1] || '0');
-      return numB - numA;
-    })[0] || null;
-}
-
 function getActiveRevisionLevel(revisions: Revision[]): string {
   // Get the latest non-rejected major for current phase
   // Priority: Freeze > Engineering > RFQ

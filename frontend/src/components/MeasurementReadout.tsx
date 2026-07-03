@@ -78,6 +78,7 @@ export function MeasurementReadout({
         window.removeEventListener('mouseup', handleMouseUp)
       }
     }
+    return undefined
   }, [isDragging, handleMouseMove, handleMouseUp])
 
   return (

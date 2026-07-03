@@ -48,10 +48,6 @@ export default function Viewer3D({
   models,
   onError,
   onLoad,
-  articleId,
-  selectedRevisionId,
-  onRevisionSelect,
-  sourcingType
 }: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const orbitControlsRef = useRef<any>(null)
@@ -279,7 +275,7 @@ export default function Viewer3D({
   }
 
   // Handle visibility toggle from object tree
-  const handleToggleVisibility = (node: SceneNode) => {
+  const handleToggleVisibility = () => {
     // Visibility is handled in the ObjectTree component
     // This is just a callback for any additional logic needed
   }
@@ -476,8 +472,6 @@ export default function Viewer3D({
               ) : null}
               <CutPlane
                 active={isCutPlaneActive}
-                axis={cutPlaneAxis}
-                position={cutPlanePosition}
               />
               <OrbitControls
                 ref={orbitControlsRef}
