@@ -170,12 +170,15 @@ class WorkflowService:
         """Create tasks for every RASIC assignment in a stage and notify
         members of the departments that have actionable tasks."""
         actionable_departments: set[int] = set()
+        fyi_departments: set[int] = set()
         tasks_created: list[WfInstanceTask] = []
         for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
             for rasic in step.rasic_assignments:
                 is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
                 if is_actionable:
                     actionable_departments.add(rasic.department_id)
+                elif rasic.rasic_letter == "I":
+                    fyi_departments.add(rasic.department_id)
                 task = WfInstanceTask(
                     instance_id=instance.id,
                     stage_order=stage.stage_order,
@@ -227,6 +230,23 @@ class WorkflowService:
                 title=f"Workflow task: {part.name} {revision.revision_name}",
                 body=f"Your department has a new task in '{stage_label}'.",
                 link="/my-tasks",
+            )
+
+        if fyi_departments:
+            from app.services.notification_service import NotificationService
+
+            part, revision = await WorkflowService._instance_part_context(db, instance)
+            stage_label = stage.name or f"stage {stage.stage_order}"
+            link = (f"/changes/{instance.change_id}?tab=assessments"
+                    if instance.change_id is not None else "/my-tasks")
+            await NotificationService.notify_departments_once(
+                db,
+                list(fyi_departments),
+                kind="fyi_stage",
+                subject_key=f"inst:{instance.id}:stage:{stage.stage_order}",
+                title=f"FYI: {part.name} {revision.revision_name}",
+                body=f"'{stage_label}' has started — informational only.",
+                link=link,
             )
 
     @staticmethod
@@ -520,9 +540,12 @@ class WorkflowService:
         if assignee_id != actor.id:
             from app.services.notification_service import NotificationService
             step_name = task.step.step_name if task.step else "workflow task"
-            await NotificationService.notify_users(
-                db, [assignee_id], title=f"Task assigned: {step_name}",
-                link="/my-tasks")
+            link = (f"/changes/{task.instance.change_id}?tab=assessments"
+                    if task.instance.change_id is not None else "/my-tasks")
+            await NotificationService.notify_once(
+                db, [assignee_id], kind="task_assigned",
+                subject_key=f"task:{task.id}",
+                title=f"Task assigned: {step_name}", link=link)
         return task
 
     @staticmethod

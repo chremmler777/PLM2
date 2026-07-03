@@ -163,6 +163,15 @@ class ChangeService:
             new_value={"deviation_id": dev.id, "to_status": to_status},
             notes=reason.strip(),
         )
+        if change.lead_id is not None and change.lead_id != user_id:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="deviation_pending",
+                subject_key=f"dev:{dev.id}",
+                title=f"Deviation pending: {change.change_number}",
+                body=f"A transition deviation to '{to_status}' needs your review.",
+                link=f"/changes/{change.id}",
+            )
         return dev
 
     @staticmethod

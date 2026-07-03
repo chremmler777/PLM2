@@ -428,6 +428,12 @@ async def lifespan(app: FastAPI):
                     await escalate_overdue_targets(session)
             except Exception as e:
                 logger.warning(f"Lesson reminder run failed: {e}")
+            try:
+                async with AsyncSessionLocal() as session:
+                    from app.services.notification_sweep import run_notification_sweep
+                    await run_notification_sweep(session)
+            except Exception as e:
+                logger.warning(f"Notification sweep run failed: {e}")
             await asyncio.sleep(6 * 3600)
 
     reminder_task = asyncio.create_task(_reminder_loop())
