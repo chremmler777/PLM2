@@ -51,10 +51,16 @@ async def rules_template(session_factory, seed):
     """2-stage template: stage 1 evidence-gated step, stage 2 four-eyes step.
     One department carries R in both stages so the same user could act twice."""
     from app.models.workflow import (
-        Department, WfTemplate, WfStage, WfStep, WfStepRasic)
+        Department, WfTemplate, WfStage, WfStep, WfStepRasic, UserDepartment)
     async with session_factory() as s:
         dept = Department(name="Rules Dept", flow_type="action", is_active=True)
         s.add(dept)
+        await s.flush()
+        # The tests drive this dept's tasks as both the engineer and the admin
+        # (four-eyes needs two different actors); complete_task's
+        # department-membership guard requires the engineer to be a member
+        # (the admin is exempt by role).
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept.id))
         await s.flush()
         tmpl = WfTemplate(name="rules-tpl", version=1, is_active=True,
                           created_by=seed["engineer_id"])
@@ -190,12 +196,19 @@ async def test_seeded_ecn_template_end_to_end(
     from app.models.part import PartRevision
     from sqlalchemy.orm import selectinload
 
+    from app.models.workflow import Department, UserDepartment
+
     async with session_factory() as s:
         tmpl = (await s.execute(select(WfTemplate).where(
             WfTemplate.name == "ECN Umsetzung (Artikel)"))).scalar_one()
         tmpl_id = tmpl.id
         inst = await WorkflowService.start_workflow(
             s, part["revision_id"], tmpl_id, seed["engineer_id"])
+        # Stage 1 ("Konstruktion") is all R&D-R; grant the engineer membership
+        # so complete_task's department-membership guard doesn't block them.
+        rd = (await s.execute(select(Department).where(
+            Department.name == "R&D"))).scalar_one()
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=rd.id))
         await s.commit()
         inst_id = inst.id
 

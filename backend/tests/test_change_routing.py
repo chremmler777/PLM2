@@ -37,6 +37,22 @@ async def departments(session_factory):
 
 
 @pytest_asyncio.fixture
+async def departments_member(session_factory, seed, departments):
+    """Grant the engineer (eng@test.io, driven via `_login`/`eng_auth`)
+    membership in every department the `departments` fixture created.
+    complete_task's department-membership guard requires this for the tests
+    that submit blocking (R/A) assessments as that user; tests asserting
+    no-membership behaviour (test_my_tasks_only_active_stage) or a custom
+    membership set (test_my_tasks_active_stage_filter_exercised) don't use it."""
+    from app.models.workflow import UserDepartment
+    async with session_factory() as s:
+        for dept_id in departments.values():
+            s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
+        await s.commit()
+    return departments
+
+
+@pytest_asyncio.fixture
 async def ecr_template(session_factory, departments):
     """Two-stage ECR: stage1 Tool Engineer(R) + Quality(C); stage2 APQP(A) + Sales(I)."""
     async with session_factory() as s:
@@ -172,7 +188,8 @@ async def _api_change_in_assessment(client, auth, seed):
     return c
 
 
-async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed, ecr_template, departments):
+async def test_stage_gating_blocks_costing_until_blocking_submitted(
+        client, seed, ecr_template, departments, departments_member):
     auth = await _login(client)
     c = await _api_change_in_assessment(client, auth, seed)
     detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
@@ -199,7 +216,8 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed
     assert res.status_code == 200, res.text
 
 
-async def test_deviation_requires_approval_then_clears(client, seed, ecr_template, departments):
+async def test_deviation_requires_approval_then_clears(
+        client, seed, ecr_template, departments, departments_member):
     auth = await _login(client)
     c = await _api_change_in_assessment(client, auth, seed)
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
@@ -344,7 +362,8 @@ async def test_my_tasks_active_stage_filter_exercised(
     assert departments["Tool Engineer"] not in dep_ids2  # submitted → verdict no longer pending
 
 
-async def test_not_feasible_blocks_costing_until_justified(client, seed, departments):
+async def test_not_feasible_blocks_costing_until_justified(
+        client, seed, departments, departments_member):
     auth = await _login(client)
     # no ecr_template fixture here -> fallback single-stage all-R routing
     body = {"project_id": seed["project_id"], "title": "NF", "change_type": "physical_part",
@@ -401,7 +420,7 @@ async def ecr_template_3stage(session_factory, departments):
 
 
 async def test_maybe_advance_cascades_through_optional_only_stage(
-        client, seed, ecr_template_3stage, departments):
+        client, seed, ecr_template_3stage, departments, departments_member):
     auth = await _login(client)
     body = {"project_id": seed["project_id"], "title": "casc", "change_type": "tooling",
             "reason": "x", "lead_id": seed["engineer_id"]}
@@ -450,7 +469,7 @@ async def ecr_template_multistage_dept(session_factory, departments):
 
 
 async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
-        session_factory, seed, ecr_template_multistage_dept, departments):
+        session_factory, seed, ecr_template_multistage_dept, departments, departments_member):
     """A department with rows in multiple stages must not raise MultipleResultsFound.
     submit_assessment targets the currently-active stage row, leaves later-stage rows
     untouched, and after all stage-1 blocking rows submit the same dept's stage-2 row

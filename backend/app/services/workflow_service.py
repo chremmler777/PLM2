@@ -311,6 +311,21 @@ class WorkflowService:
         if not task.is_actionable:
             raise ValueError("Task is not actionable (S/I/C roles cannot complete tasks)")
 
+        # Department-membership guard: only a member of the task's department
+        # (or an admin) may record a decision on it. Placed after the
+        # active/actionable checks (those are structural — "can this task be
+        # acted on at all") and before any decision writes, so a rejected
+        # actor never mutates state. Mirrors accept_task/assign_task's
+        # existing admin-exempt membership check.
+        from app.models.entities import User
+        actor = await db.get(User, completed_by_id)
+        if actor is None:
+            raise ValueError("Actor not found")
+        if actor.role != "admin" and not await WorkflowService._is_department_member(
+                db, completed_by_id, task.department_id):
+            raise ValueError(
+                "Only members of the task's department (or an admin) may complete it")
+
         step = task.step
         # CAD-evidence gate applies to revision-scoped (ECN) instances only;
         # change-scoped instances have no part revision to attach a CAD file to.

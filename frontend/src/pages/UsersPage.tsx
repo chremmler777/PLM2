@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
+import { useDepartments } from '../hooks/queries/useWorkflows';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -27,17 +28,38 @@ interface DepartmentRecord {
   is_active?: boolean;
 }
 
+function useUserDepartments(userId: number) {
+  return useQuery<DepartmentRecord[]>({
+    queryKey: ['user-departments', userId],
+    queryFn: async () => (await client.get(`/v1/users/${userId}/departments`)).data,
+  });
+}
+
+function DepartmentChips({ userId }: { userId: number }) {
+  const { data: memberships, isLoading } = useUserDepartments(userId);
+  if (isLoading) return <span className="text-slate-500 text-xs">...</span>;
+  if (!memberships || memberships.length === 0) {
+    return <span className="text-slate-500 text-xs italic">no departments</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {memberships.map((d) => (
+        <span
+          key={d.id}
+          className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-200 text-xs"
+        >
+          {d.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function DepartmentsModal({ user, onClose }: { user: UserRecord; onClose: () => void }) {
   const queryClient = useQueryClient();
 
-  const { data: allDepartments } = useQuery<DepartmentRecord[]>({
-    queryKey: ['departments'],
-    queryFn: async () => (await client.get('/v1/workflow-templates/departments')).data,
-  });
-  const { data: memberships } = useQuery<DepartmentRecord[]>({
-    queryKey: ['user-departments', user.id],
-    queryFn: async () => (await client.get(`/v1/users/${user.id}/departments`)).data,
-  });
+  const { data: allDepartments } = useDepartments();
+  const { data: memberships } = useUserDepartments(user.id);
 
   const [selected, setSelected] = useState<Set<number> | null>(null);
   const effective = selected ?? new Set(memberships?.map((d) => d.id) ?? []);
@@ -309,6 +331,7 @@ export default function UsersPage() {
                 <th className="text-left px-4 py-3 font-medium">User</th>
                 <th className="text-left px-4 py-3 font-medium">Email</th>
                 <th className="text-left px-4 py-3 font-medium">Role</th>
+                <th className="text-left px-4 py-3 font-medium">Departments</th>
                 <th className="text-left px-4 py-3 font-medium">Status</th>
                 <th className="text-right px-4 py-3 font-medium">Actions</th>
               </tr>
@@ -337,6 +360,9 @@ export default function UsersPage() {
                           <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <DepartmentChips userId={user.id} />
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${user.is_active ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}`}>

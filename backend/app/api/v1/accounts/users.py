@@ -11,6 +11,7 @@ from app.auth.security import get_password_hash
 from app.dependencies import get_current_user, require_role
 from app.models import User, get_db
 from app.models.workflow import Department, UserDepartment
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +140,20 @@ async def set_user_departments(
             )
 
     existing = await db.execute(select(UserDepartment).where(UserDepartment.user_id == user_id))
-    for membership in existing.scalars().all():
+    existing_memberships = existing.scalars().all()
+    old_dept_ids = sorted({m.department_id for m in existing_memberships})
+    for membership in existing_memberships:
         await db.delete(membership)
-    for dept_id in set(body.department_ids):
+    new_dept_ids = sorted(set(body.department_ids))
+    for dept_id in new_dept_ids:
         db.add(UserDepartment(user_id=user_id, department_id=dept_id))
+
+    await AuditService.record(
+        db, entity_type="user", entity_id=user_id, action="departments_set",
+        user_id=current_user.id,
+        old_values={"department_ids": old_dept_ids},
+        new_values={"department_ids": new_dept_ids},
+    )
     await db.commit()
 
     logger.info(f"Admin {current_user.email} set departments {body.department_ids} for user {user_id}")

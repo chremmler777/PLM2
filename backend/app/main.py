@@ -344,8 +344,13 @@ async def seed_test_data():
 
             # --- Seeded change-management workflow templates (idempotent) ---
             from app.services.wf_seed_service import (
-                seed_change_workflows, repair_inflight_check_workflows)
+                seed_change_workflows, repair_inflight_check_workflows,
+                seed_dev_department_memberships)
             await seed_change_workflows(session)
+            # Dev-only: give the two well-known dev accounts real department
+            # membership so My Tasks and the complete_task membership guard
+            # have someone to work with (idempotent, create-if-absent).
+            await seed_dev_department_memberships(session)
             # Self-heal changes deployed mid-flight before Phase B: back-fill
             # check-WF instances for in-flight ECN revisions (idempotent).
             await repair_inflight_check_workflows(session)

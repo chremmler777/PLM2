@@ -461,7 +461,12 @@ async def submit_assessment(
             cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
             conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
         )
-    except ChangeError as e:
+    except ValueError as e:
+        # Blocking (R/A) submissions delegate to WorkflowService.complete_task,
+        # which raises plain ValueError (not ChangeError) for its gates —
+        # e.g. the department-membership guard. Catch broadly so those map to
+        # 400 instead of leaking as an unhandled 500. ChangeError is itself a
+        # ValueError subclass, so existing behaviour is unchanged.
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)

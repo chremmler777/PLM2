@@ -135,14 +135,19 @@ async def test_blocked_transition_requires_approved_deviation(
 # ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture
-async def dev_departments(session_factory):
-    from app.models.workflow import Department
+async def dev_departments(session_factory, seed):
+    from app.models.workflow import Department, UserDepartment
     async with session_factory() as s:
         names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
         ids = {}
         for i, n in enumerate(names):
             d = Department(name=n, flow_type="action", is_active=True, sort_order=i)
             s.add(d); await s.flush(); ids[n] = d.id
+        # These tests drive submit_assessment/complete_task as the engineer
+        # across every department below; grant membership in all of them so
+        # complete_task's department-membership guard doesn't block them.
+        for dept_id in ids.values():
+            s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
         await s.commit()
         return ids
 

@@ -201,6 +201,48 @@ async def seed_change_workflows(session: AsyncSession) -> None:
     await seed_check_standards(session)
 
 
+# Dev-only department memberships (spec: Phase E Task 17). Grants the two
+# well-known dev accounts real department membership so My Tasks and the
+# complete_task membership guard have someone to work with out of the box.
+# Create-if-absent per (user, department) pair: never removes memberships an
+# admin has since set up by hand, and safe to call on every startup.
+DEV_MEMBERSHIPS = {
+    "test@example.com": ["R&D"],
+    "admin@example.com": None,  # None = every active department
+}
+
+
+async def seed_dev_department_memberships(session: AsyncSession) -> None:
+    from app.models.workflow import UserDepartment
+
+    all_dept_ids = [d for (d,) in (await session.execute(
+        select(Department.id).where(Department.is_active == True)  # noqa: E712
+    )).all()]
+
+    for email, dept_names in DEV_MEMBERSHIPS.items():
+        user = (await session.execute(
+            select(User).where(User.email == email))).scalar_one_or_none()
+        if user is None:
+            continue
+        if dept_names is None:
+            target_ids = set(all_dept_ids)
+        else:
+            target_ids = set()
+            for name in dept_names:
+                dept = (await session.execute(
+                    select(Department).where(Department.name == name)
+                )).scalar_one_or_none()
+                if dept is not None:
+                    target_ids.add(dept.id)
+
+        existing_ids = {uid for (uid,) in (await session.execute(
+            select(UserDepartment.department_id).where(
+                UserDepartment.user_id == user.id))).all()}
+        for dept_id in target_ids - existing_ids:
+            session.add(UserDepartment(user_id=user.id, department_id=dept_id))
+    await session.flush()
+
+
 async def repair_inflight_check_workflows(session: AsyncSession) -> int:
     """One-time self-heal: ensure check-WF instances exist for ECN revisions of
     changes already past kickoff (deployed mid-flight before Phase B).

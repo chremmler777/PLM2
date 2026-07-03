@@ -116,11 +116,11 @@ async def test_seed_impacted_from_relations(client, eng_auth, seed):
 
 
 import pytest_asyncio
-from app.models.workflow import Department
+from app.models.workflow import Department, UserDepartment
 
 
 @pytest_asyncio.fixture
-async def departments(session_factory):
+async def departments(session_factory, seed):
     async with session_factory() as s:
         names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
         ids = {}
@@ -129,6 +129,11 @@ async def departments(session_factory):
             s.add(d)
             await s.flush()
             ids[n] = d.id
+        # These tests drive submit_assessment as the engineer across every
+        # department here; grant membership so complete_task's
+        # department-membership guard doesn't block the blocking (R/A) rows.
+        for dept_id in ids.values():
+            s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
         await s.commit()
         return ids
 
@@ -279,16 +284,14 @@ async def test_attach_document_to_change(client, eng_auth, seed):
 async def test_my_change_tasks_lists_pending_assessments(
     client, eng_auth, seed, departments, session_factory
 ):
-    # assign engineer to "Tool Engineer" department, and map a routing standard so
-    # the change spawns an engine instance: the Tool Engineer stage-1 row links to
-    # an active task, so its effective_status is "active" and my-tasks surfaces it.
-    from app.models.workflow import (
-        UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic,
-    )
+    # The engineer is already a member of "Tool Engineer" (the `departments`
+    # fixture grants membership in every dept it creates); map a routing
+    # standard so the change spawns an engine instance: the Tool Engineer
+    # stage-1 row links to an active task, so its effective_status is
+    # "active" and my-tasks surfaces it.
+    from app.models.workflow import WfTemplate, WfStage, WfStep, WfStepRasic
     from app.models.change import ChangeRoutingStandard
     async with session_factory() as s:
-        s.add(UserDepartment(user_id=seed["engineer_id"],
-                             department_id=departments["Tool Engineer"]))
         t = WfTemplate(name="ECR-MT", description="x", version=1,
                        is_active=True, created_by=1)
         s.add(t); await s.flush()
@@ -323,12 +326,12 @@ async def test_assessment_response_reads_execution_from_task(
     task, and GET /v1/changes/{id}'s assessments array shows it even though the
     assessment row itself stays at its own 'pending' status."""
     from app.models.workflow import (
-        UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfInstanceTask,
+        WfTemplate, WfStage, WfStep, WfStepRasic, WfInstanceTask,
     )
     from app.models.change import ChangeRoutingStandard, ChangeAssessment
     async with session_factory() as s:
-        s.add(UserDepartment(user_id=seed["engineer_id"],
-                             department_id=departments["Tool Engineer"]))
+        # The engineer is already a member of "Tool Engineer" via the
+        # `departments` fixture.
         t = WfTemplate(name="ECR-ART", description="x", version=1,
                        is_active=True, created_by=1)
         s.add(t); await s.flush()
