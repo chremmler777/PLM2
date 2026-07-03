@@ -486,6 +486,7 @@ async def confirm_impact(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 

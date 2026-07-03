@@ -330,6 +330,7 @@ class ChangeService:
             .join(Department, Department.id == ChangeAssessment.department_id)
             .where(ChangeAssessment.change_id.in_(by_id.keys()),
                    ChangeAssessment.status == "active",
+                   ChangeAssessment.wf_instance_task_id.is_(None),
                    ChangeAssessment.due_date.is_not(None),
                    ChangeAssessment.due_date < now))).all()
         for a, dept_name in assessment_rows:

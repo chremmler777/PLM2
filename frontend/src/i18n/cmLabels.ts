@@ -127,5 +127,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.plants': { de: 'Nach Werk', en: 'By plant' },
   'reports.budget': { de: 'Budget', en: 'Budget' },
   'reports.actual': { de: 'Ist', en: 'Actual' },
+  'reports.error': { de: 'Daten konnten nicht geladen werden.', en: 'Failed to load data.' },
+  'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

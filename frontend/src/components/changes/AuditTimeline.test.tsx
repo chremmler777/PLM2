@@ -72,6 +72,26 @@ describe('AuditTimeline', () => {
     expect(screen.getByText(/\(UTC\)/)).toBeDefined()
   })
 
+  it('buckets entries straddling midnight UTC into two distinct day headings', async () => {
+    // One entry 30 minutes before midnight UTC on 2026-07-01, one 30 minutes
+    // after - these must land on two DIFFERENT UTC calendar days. A
+    // local-timezone (non-UTC) grouping bug would merge them into one
+    // heading for browsers ahead of UTC, or could otherwise miscompute the
+    // date. Assert both expected UTC-dated headings are present.
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 2, action: 'gate_decided', timestamp: '2026-07-02T00:30:00Z' }),
+      entry({ id: 1, action: 'wf_started', timestamp: '2026-07-01T23:30:00Z' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    await screen.findByText('gate decided')
+
+    const expectedDay1 = `${new Date('2026-07-01T23:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+    const expectedDay2 = `${new Date('2026-07-02T00:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+    expect(expectedDay1).not.toBe(expectedDay2)
+    expect(screen.getByText(expectedDay1)).toBeDefined()
+    expect(screen.getByText(expectedDay2)).toBeDefined()
+  })
+
   it('shows a truncation notice when entries hit the fetch limit', async () => {
     const many = Array.from({ length: 1000 }, (_, i) => entry({ id: i + 1 }))
     vi.mocked(auditApi.list).mockResolvedValue(many)

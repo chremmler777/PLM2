@@ -165,3 +165,69 @@ async def test_escalations_empty_for_non_lead(client, admin_auth):
     res = await client.get("/api/v1/changes/my-escalations", headers=admin_auth)
     assert res.status_code == 200
     assert res.json() == []
+
+
+async def test_lead_escalations_no_double_count_for_backfilled_linked_row(
+        client, eng_auth, seed, session_factory, part, check_wf_standards):
+    """A backfill-healed legacy change has an open blocking assessment row with
+    raw status 'active' that is ALSO linked (wf_instance_task_id set) to an
+    overdue engine task. That single overdue item must surface exactly once
+    (as kind='wf_task'), not twice (assessment + wf_task)."""
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.change_cost import ChangeGate
+    from app.models.workflow import WfInstanceTask, WfInstance
+    from app.models.part import PartRevision
+    from app.models.workflow import Department
+    from app.services.change_service import ChangeService
+
+    async with session_factory() as s:
+        for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
+            s.add(Department(name=n, flow_type="action", is_active=True))
+        await s.commit()
+    change = await _routed_change(client, eng_auth, seed, session_factory,
+                                  part["part_id"])
+
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, change["id"])
+        c.status = "approved"
+        c.impact_confirmed_by = seed["engineer_id"]
+        c.impact_confirmed_at = datetime.utcnow()
+        await s.execute(update(ChangeGate).where(ChangeGate.change_id == c.id)
+                        .values(decision="yes"))
+        await s.commit()
+
+    async with session_factory() as s:
+        c = await ChangeService.get_change(s, change["id"])
+        await ChangeService.transition(s, c, "in_implementation",
+                                       seed["engineer_id"])
+        await s.commit()
+
+    # Simulate a backfill-healed legacy row: the assessment row's raw status
+    # stayed 'active' (pre-Phase-E data) AND it is linked to the spawned
+    # engine task (wf_instance_task_id set), and that task is overdue.
+    async with session_factory() as s:
+        rev_id = (await s.execute(select(PartRevision.id).where(
+            PartRevision.originating_change_id == change["id"]))).scalars().first()
+        task_id = (await s.execute(
+            select(WfInstanceTask.id)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .where(WfInstance.part_revision_id == rev_id,
+                   WfInstanceTask.status == "active",
+                   WfInstanceTask.is_actionable == True)  # noqa: E712
+        )).scalars().first()
+        await s.execute(update(WfInstanceTask).where(WfInstanceTask.id == task_id)
+                        .values(due_date=datetime.utcnow() - timedelta(days=2)))
+        a = (await s.execute(select(ChangeAssessment)
+             .where(ChangeAssessment.change_id == change["id"])
+             .order_by(ChangeAssessment.id))).scalars().first()
+        a.status = "active"
+        a.wf_instance_task_id = task_id
+        a.due_date = datetime.utcnow() - timedelta(days=5)
+        await s.commit()
+
+    res = await client.get("/api/v1/changes/my-escalations", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    rows = res.json()
+    matching = [r for r in rows if r["change_id"] == change["id"]]
+    assert len(matching) == 1, matching
+    assert matching[0]["kind"] == "wf_task"

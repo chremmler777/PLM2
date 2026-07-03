@@ -183,6 +183,23 @@ function AtRiskList({ rows }: {
   );
 }
 
+function ErrorTile({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return (
+    <div className="bg-slate-800 border border-red-900/50 rounded-lg p-4">
+      <div className="text-sm text-red-400">{t('reports.error')}</div>
+      {message && <div className="text-xs text-slate-500 mt-1">{message}</div>}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-2 text-xs text-blue-400 hover:underline"
+      >
+        {t('reports.retry')}
+      </button>
+    </div>
+  );
+}
+
 function CostBars({ title, rows }: {
   title: string;
   rows: { name: string; budget?: number; actual: number }[];
@@ -223,15 +240,24 @@ function CostBars({ title, rows }: {
 }
 
 export default function ReportsPage() {
-  const { data: pipeline, isLoading: pipelineLoading } = useQuery({
+  const {
+    data: pipeline, isLoading: pipelineLoading, isError: pipelineError,
+    error: pipelineErrorObj, refetch: refetchPipeline,
+  } = useQuery({
     queryKey: ['reports', 'pipeline'],
     queryFn: reportsApi.pipeline,
   });
-  const { data: workload, isLoading: workloadLoading } = useQuery({
+  const {
+    data: workload, isLoading: workloadLoading, isError: workloadError,
+    error: workloadErrorObj, refetch: refetchWorkload,
+  } = useQuery({
     queryKey: ['reports', 'workload'],
     queryFn: reportsApi.workload,
   });
-  const { data: cost, isLoading: costLoading } = useQuery({
+  const {
+    data: cost, isLoading: costLoading, isError: costError,
+    error: costErrorObj, refetch: refetchCost,
+  } = useQuery({
     queryKey: ['reports', 'cost'],
     queryFn: reportsApi.cost,
   });
@@ -243,7 +269,9 @@ export default function ReportsPage() {
       {/* Pipeline */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">{t('reports.pipeline')}</h2>
-        {pipelineLoading || !pipeline ? (
+        {pipelineError ? (
+          <ErrorTile error={pipelineErrorObj} onRetry={() => refetchPipeline()} />
+        ) : pipelineLoading || !pipeline ? (
           <div className="text-sm text-slate-400">Loading…</div>
         ) : (
           <>
@@ -269,7 +297,9 @@ export default function ReportsPage() {
       {/* Workload */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">{t('reports.workload')}</h2>
-        {workloadLoading || !workload ? (
+        {workloadError ? (
+          <ErrorTile error={workloadErrorObj} onRetry={() => refetchWorkload()} />
+        ) : workloadLoading || !workload ? (
           <div className="text-sm text-slate-400">Loading…</div>
         ) : (
           <>
@@ -298,7 +328,9 @@ export default function ReportsPage() {
       {/* Cost */}
       <section>
         <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">{t('reports.cost')}</h2>
-        {costLoading || !cost ? (
+        {costError ? (
+          <ErrorTile error={costErrorObj} onRetry={() => refetchCost()} />
+        ) : costLoading || !cost ? (
           <div className="text-sm text-slate-400">Loading…</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

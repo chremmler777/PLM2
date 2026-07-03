@@ -98,6 +98,31 @@ async def test_confirm_with_zero_impacted_items_409(
     assert confirm.status_code == 409, confirm.text
 
 
+async def test_confirm_response_includes_deadline_state(
+        client, eng_auth, rd_member_auth, seed, part):
+    """The confirm endpoint returns a ChangeResponse; deadline_state must be
+    populated (like the GET endpoints do) rather than left as None/absent."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "impact confirm deadline",
+        "change_type": "physical_part", "lead_id": seed["engineer_id"],
+    }, headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    cid = res.json()["id"]
+    added = await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                              json={"part_id": part["part_id"], "is_lead": True},
+                              headers=eng_auth)
+    assert added.status_code in (200, 201), added.text
+    patched = await client.patch(f"/api/v1/changes/{cid}",
+                                 json={"required_by_date": "2020-01-01T00:00:00"},
+                                 headers=eng_auth)
+    assert patched.status_code == 200, patched.text
+
+    confirm = await client.post(f"/api/v1/changes/{cid}/impact/confirm",
+                                headers=rd_member_auth["auth"])
+    assert confirm.status_code == 200, confirm.text
+    assert confirm.json()["deadline_state"] == "overdue"
+
+
 async def test_confirm_is_idempotent(client, eng_auth, rd_member_auth, seed, part):
     """Re-confirming (e.g. a second R&D reviewer) refreshes who/when instead
     of erroring - the set may legitimately be re-reviewed unchanged."""

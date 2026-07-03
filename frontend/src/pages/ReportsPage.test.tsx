@@ -76,4 +76,18 @@ describe('ReportsPage', () => {
     expect(await screen.findByText('Project X')).toBeDefined()
     expect(screen.getByText(/8[.,]000/)).toBeDefined()
   })
+
+  it('shows an error tile for a failing section without blocking the others', async () => {
+    const { reportsApi } = await import('../api/reports')
+    vi.mocked(reportsApi.workload).mockRejectedValueOnce(new Error('boom'))
+    renderPage()
+
+    // Failing section: error tile, not a permanent spinner.
+    expect(await screen.findByText(/error|failed|fehler/i)).toBeDefined()
+    expect(screen.queryByText('Loading…')).toBeNull()
+
+    // Other sections still render fine.
+    expect(await screen.findByText('3')).toBeDefined()
+    expect(await screen.findByText('Project X')).toBeDefined()
+  })
 })
