@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { changesApi } from '../api/changes';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import StartChangeModal from '../components/changes/StartChangeModal';
@@ -8,7 +8,13 @@ import { DeadlineChip } from '../components/changes/DeadlineChip';
 
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') ?? '');
+
+  const onStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setSearchParams(value ? { status: value } : {}, { replace: true });
+  };
 
   const { data: changes = [], isLoading } = useQuery({
     queryKey: ['changes', statusFilter],
@@ -31,7 +37,7 @@ export default function ChangesPage() {
         <select
           className="border border-slate-700 rounded-lg px-3 py-2 text-sm"
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => onStatusChange(e.target.value)}
         >
           <option value="">All statuses</option>
           {Object.entries(STATUS_LABELS).map(([k, v]) => (
