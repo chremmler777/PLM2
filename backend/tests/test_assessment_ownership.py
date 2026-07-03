@@ -187,6 +187,93 @@ async def test_accept_and_assign_assessment(client, eng_auth, admin_auth, seed,
     assert res.status_code == 400
 
 
+async def test_assign_linked_assessment_lead_carveout(
+        client, eng_auth, seed, session_factory, part):
+    """Important-severity regression: assign_assessment now delegates linked
+    R/A rows to WorkflowService.assign_task (Task 7). set_task_due_date has
+    a change-lead carve-out (admin OR workflow-starter OR change lead); the
+    legacy assign_assessment authz allowed admin OR lead OR department member.
+    assign_task must gain the identical lead carve-out so a change lead who
+    is NOT a department member can still assign a linked, blocking (R/A)
+    assessment task."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.change import ChangeAssessment, ChangeRoutingStandard
+    from app.models.workflow import (
+        Department, WfTemplate, WfStage, WfStep, WfStepRasic, UserDepartment,
+        WfInstanceTask,
+    )
+    from tests.conftest import login, approve_gates
+
+    async with session_factory() as s:
+        dep = {}
+        for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
+            d = Department(name=n, flow_type="change", is_active=True)
+            s.add(d); await s.flush(); dep[n] = d.id
+        t = WfTemplate(name="ECR-tooling-leadassign", description="x", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [(1, [("Tool Engineer", "R"), ("Process Engineer", "R")]),
+                  (2, [("Manufacturing Engineer", "A")])]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=dep[name], rasic_letter=letter))
+        s.add(ChangeRoutingStandard(change_type="tooling", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        # Engineer is a member of Tool Engineer (the assignee's department).
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dep["Tool Engineer"]))
+        # A separate, non-admin, non-member user who will be the change lead.
+        lead = User(
+            organization_id=seed["org_id"], username="lead2", email="lead2@test.io",
+            full_name="Lead Two", hashed_password=get_password_hash("lead2-secret-1"),
+            role="engineer", is_active=True, mfa_enabled=False,
+        )
+        s.add(lead)
+        await s.commit()
+        await s.refresh(lead)
+        lead_id = lead.id
+
+    lead_auth = await login(client, "lead2@test.io", "lead2-secret-1")
+
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "lead-assign", "change_type": "tooling",
+        "lead_id": lead_id}, headers=eng_auth)
+    assert res.status_code in (200, 201), res.text
+    change = res.json()
+    res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                            json={"part_id": part["part_id"], "is_lead": True},
+                            headers=eng_auth)
+    assert res.status_code == 200, res.text
+    await approve_gates(client, lead_auth, change["id"])
+    res = await client.post(f"/api/v1/changes/{change['id']}/transition",
+                            json={"to_status": "in_assessment"}, headers=lead_auth)
+    assert res.status_code == 200, res.text
+
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.department_id == dep["Tool Engineer"]))).scalar_one()
+        assert a.wf_instance_task_id is not None, "stage-1 R row must link to a task"
+        assessment_id, task_id = a.id, a.wf_instance_task_id
+
+    # lead2 is neither admin nor a member of Tool Engineer, but is the change
+    # lead: must be allowed to assign the linked, blocking task.
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/assessments/{assessment_id}/assign",
+        json={"user_id": seed["engineer_id"]}, headers=lead_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["owner_id"] == seed["engineer_id"]
+
+    async with session_factory() as s:
+        task = await s.get(WfInstanceTask, task_id)
+        assert task.owner_id == seed["engineer_id"]
+
+
 async def test_assessment_due_date_lead_only(client, eng_auth, admin_auth, seed,
                                              session_factory, part):
     from datetime import datetime, timedelta

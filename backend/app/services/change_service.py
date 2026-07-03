@@ -893,9 +893,10 @@ class ChangeService:
         from app.services.workflow_service import WorkflowService
         a = await ChangeService._get_assessment(session, change, assessment_id)
         if a.wf_instance_task_id is not None and a.rasic_letter in BLOCKING_LETTERS:
-            # Linked R/A row: delegate to the engine task. Note WorkflowService
-            # .assign_task authorizes admin-or-department-member only; it does
-            # not carry the legacy "change lead may assign" allowance below.
+            # Linked R/A row: delegate to the engine task. WorkflowService
+            # .assign_task authorizes admin-or-department-member, with the
+            # same change-lead carve-out as set_task_due_date, mirroring the
+            # legacy "change lead may assign" allowance below.
             try:
                 await WorkflowService.assign_task(
                     session, a.wf_instance_task_id, assignee_id, actor)

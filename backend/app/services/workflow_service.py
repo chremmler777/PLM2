@@ -489,9 +489,21 @@ class WorkflowService:
     async def assign_task(db: AsyncSession, task_id: int, assignee_id: int,
                           actor) -> WfInstanceTask:
         from app.models.entities import User
+        from app.models.change import ChangeRequest
         task = await WorkflowService._load_open_task(db, task_id)
-        if actor.role != "admin" and not await WorkflowService._is_department_member(
-                db, actor.id, task.department_id):
+        allowed = actor.role == "admin" or await WorkflowService._is_department_member(
+                db, actor.id, task.department_id)
+        if not allowed:
+            if task.instance.change_id is not None:
+                # Change-scoped: authorize against the change lead directly.
+                change = await db.get(ChangeRequest, task.instance.change_id)
+                allowed = change is not None and change.lead_id == actor.id
+            elif task.instance.part_revision_id is not None:
+                rev = await db.get(PartRevision, task.instance.part_revision_id)
+                if rev is not None and rev.originating_change_id is not None:
+                    change = await db.get(ChangeRequest, rev.originating_change_id)
+                    allowed = change is not None and change.lead_id == actor.id
+        if not allowed:
             raise ValueError("Only members of the task's department (or an admin) may assign it")
         assignee = await db.get(User, assignee_id)
         if assignee is None or not assignee.is_active:
