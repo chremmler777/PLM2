@@ -28,13 +28,33 @@ async def _routed_change(client, eng_auth, seed, session_factory, part_id):
 
 async def test_assessments_get_due_date_on_activation(
         client, eng_auth, seed, session_factory, part):
-    from app.models.change import ChangeAssessment
-    from app.models.workflow import Department
-    # Fallback routing (no ChangeRoutingStandard) maps change_type "tooling" to
-    # these department names via TYPE_DISCIPLINES; seed them so rows are created.
+    """Engine activation stamps due dates: the started stage's actionable (R/A)
+    tasks carry a due date (read through by effective_due_date on their linked
+    rows); a not-yet-started stage's rows are effectively pending with no due."""
+    from app.models.change import ChangeAssessment, ChangeRoutingStandard
+    from app.models.workflow import (
+        Department, WfTemplate, WfStage, WfStep, WfStepRasic,
+    )
     async with session_factory() as s:
+        dep = {}
         for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
-            s.add(Department(name=n, flow_type="action", is_active=True))
+            d = Department(name=n, flow_type="change", is_active=True)
+            s.add(d); await s.flush(); dep[n] = d.id
+        # Two-stage standard for "tooling": stage1 R+R (actionable), stage2 A.
+        t = WfTemplate(name="ECR-tooling", description="x", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [(1, [("Tool Engineer", "R"), ("Process Engineer", "R")]),
+                  (2, [("Manufacturing Engineer", "A")])]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=dep[name], rasic_letter=letter))
+        s.add(ChangeRoutingStandard(change_type="tooling", template_id=t.id,
+                                    template_version=1, updated_by=1))
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
@@ -42,19 +62,31 @@ async def test_assessments_get_due_date_on_activation(
         rows = (await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == change["id"]))).scalars().all()
         assert rows
-        active = [a for a in rows if a.status == "active"]
+        active = [a for a in rows if a.effective_status == "active"]
         assert active
-        assert all(a.due_date is not None for a in active)
-        pending = [a for a in rows if a.status == "pending"]
-        assert all(a.due_date is None for a in pending)
+        assert all(a.effective_due_date is not None for a in active)
+        pending = [a for a in rows if a.effective_status == "pending"]
+        assert all(a.effective_due_date is None for a in pending)
 
 
-async def _first_active_assessment(session_factory, change_id):
+async def _activate_first_assessment(session_factory, change_id):
+    """Directly mark the change's first assessment row raw-'active' with a due date.
+
+    Post-Phase-E the normal flow keeps R/A execution state on engine tasks and
+    leaves assessment rows 'pending'; unlinked raw-'active' rows are what routing
+    deviations produce. The assessment-ownership endpoints (accept/assign/
+    due-date) operate on such rows, so we set one up directly here (no engine
+    instance in this fallback change, so the row stays unlinked)."""
+    from datetime import datetime, timedelta
     from app.models.change import ChangeAssessment
     async with session_factory() as s:
-        return (await s.execute(select(ChangeAssessment).where(
-            ChangeAssessment.change_id == change_id,
-            ChangeAssessment.status == "active"))).scalars().first()
+        a = (await s.execute(select(ChangeAssessment)
+             .where(ChangeAssessment.change_id == change_id)
+             .order_by(ChangeAssessment.id))).scalars().first()
+        a.status = "active"
+        a.due_date = datetime.utcnow() + timedelta(days=7)
+        await s.commit()
+        return a
 
 
 async def test_accept_and_assign_assessment(client, eng_auth, admin_auth, seed,
@@ -66,7 +98,7 @@ async def test_accept_and_assign_assessment(client, eng_auth, admin_auth, seed,
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
-    a = await _first_active_assessment(session_factory, change["id"])
+    a = await _activate_first_assessment(session_factory, change["id"])
     async with session_factory() as s:
         s.add(UserDepartment(user_id=seed["engineer_id"], department_id=a.department_id))
         await s.commit()
@@ -103,7 +135,7 @@ async def test_assessment_due_date_lead_only(client, eng_auth, admin_auth, seed,
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
-    a = await _first_active_assessment(session_factory, change["id"])
+    a = await _activate_first_assessment(session_factory, change["id"])
     new_due = (datetime.utcnow() + timedelta(days=3)).isoformat()
 
     # engineer IS the lead (fixture sets lead_id) -> allowed

@@ -73,9 +73,13 @@ async def test_change_my_tasks_owner_fields(client, eng_auth, seed,
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
     async with session_factory() as s:
-        a = (await s.execute(select(ChangeAssessment).where(
-            ChangeAssessment.change_id == change["id"],
-            ChangeAssessment.status == "active"))).scalars().first()
+        a = (await s.execute(select(ChangeAssessment)
+             .where(ChangeAssessment.change_id == change["id"])
+             .order_by(ChangeAssessment.id))).scalars().first()
+        # Post-Phase-E fallback rows stay 'pending' (execution lives on engine
+        # tasks); simulate an unlinked raw-'active' owned row (deviation-style) so
+        # the owner read-through has an active assessment to surface.
+        a.status = "active"
         s.add(UserDepartment(user_id=seed["engineer_id"],
                              department_id=a.department_id))
         a.owner_id = seed["engineer_id"]
@@ -107,11 +111,14 @@ async def test_lead_escalations_roll_up(client, eng_auth, seed, session_factory,
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
 
-    # overdue assessment (5 days)
+    # overdue assessment (5 days). Post-Phase-E fallback rows stay 'pending'
+    # (execution moved onto engine tasks); mark one raw-'active' + overdue so the
+    # assessment-escalation branch (unlinked/deviation rows) has a row to roll up.
     async with session_factory() as s:
-        a = (await s.execute(select(ChangeAssessment).where(
-            ChangeAssessment.change_id == change["id"],
-            ChangeAssessment.status == "active"))).scalars().first()
+        a = (await s.execute(select(ChangeAssessment)
+             .where(ChangeAssessment.change_id == change["id"])
+             .order_by(ChangeAssessment.id))).scalars().first()
+        a.status = "active"
         a.due_date = datetime.utcnow() - timedelta(days=5)
         # drive the change to in_implementation directly to spawn the check WF
         c = await s.get(ChangeRequest, change["id"])

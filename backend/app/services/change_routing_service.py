@@ -22,11 +22,6 @@ from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
 
 
 
-def _first_stage_order(stages) -> int:
-    orders = [s["stage_order"] for s in stages if s["departments"]]
-    return min(orders) if orders else 1
-
-
 class ChangeRoutingService:
 
     @staticmethod
@@ -116,10 +111,10 @@ class ChangeRoutingService:
             )
         # Spawn the change-scoped "ECM Bewertung" instance. The engine creates
         # stage-1 tasks (and links stage-1 assessments) on start; later stages
-        # link lazily as their tasks are created.
-        instance = None
+        # link lazily as their tasks are created. Execution state lives entirely
+        # on engine tasks now — assessment submission drives that engine.
         if routing.template_id is not None:
-            instance = await WorkflowService.start_change_workflow(
+            await WorkflowService.start_change_workflow(
                 session, change.id, routing.template_id, user_id)
         else:
             # Legacy TYPE_DISCIPLINES fallback carries no template — resolve the
@@ -128,14 +123,8 @@ class ChangeRoutingService:
                 select(WfTemplate.id).where(WfTemplate.name == "ECM Bewertung")
             )).scalar_one_or_none()
             if tmpl_id is not None:
-                instance = await WorkflowService.start_change_workflow(
+                await WorkflowService.start_change_workflow(
                     session, change.id, tmpl_id, user_id)
-        if instance is None:
-            # No engine instance (legacy fallback with no seeded template): there
-            # is no task for execution state to live on, so activate stage 1's
-            # rows the legacy way. Task 4 removes this along with activate_stage.
-            await ChangeRoutingService.activate_stage(
-                session, change, _first_stage_order(stages))
         return routing
 
     @staticmethod
@@ -147,75 +136,13 @@ class ChangeRoutingService:
         return list(dict.fromkeys(ids))
 
     @staticmethod
-    async def activate_stage(session: AsyncSession, change: ChangeRequest, stage_order: int) -> None:
-        rows = (await session.execute(
-            select(ChangeAssessment).where(
-                (ChangeAssessment.change_id == change.id)
-                & (ChangeAssessment.stage_order == stage_order)
-            )
-        )).scalars().all()
-        notify = []
-        for a in rows:
-            if a.status == "pending":
-                a.status = "active"
-                a.due_date = datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
-                notify.append(a.department_id)
-        await session.flush()
-        if notify:
-            await NotificationService.notify_departments(
-                session, list(dict.fromkeys(notify)),
-                title=f"Assessment due — {change.change_number}",
-                body=f"Stage {stage_order} of '{change.title}' needs your assessment.",
-                link=f"/changes/{change.id}",
-            )
-
-    @staticmethod
-    async def maybe_advance(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
-        """If the active stage's blocking (R/A) assessments are all submitted, activate
-        the next stage that has rows. C/S never block. Cascades through stages that have
-        no blocking rows (all-C/S stages) until it reaches one that has blocking rows
-        or runs out of stages."""
-        rows = (await session.execute(
-            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
-        )).scalars().all()
-        if not rows:
-            return
-        all_orders = sorted({a.stage_order for a in rows})
-        # The "current" stage is the highest one that has already been activated —
-        # i.e. has any row no longer pending (active or submitted). Later stages are
-        # still entirely pending. A stage advances only once its blocking (R/A) rows
-        # are all submitted; C/S never block.
-        activated_orders = [
-            o for o in all_orders
-            if any(a.stage_order == o and a.status != "pending" for a in rows)
-        ]
-        if not activated_orders:
-            return
-        current = activated_orders[-1]
-        while True:
-            blocking = [a for a in rows if a.stage_order == current and a.rasic_letter in BLOCKING_LETTERS]
-            if any(a.status != "submitted" for a in blocking):
-                return  # still waiting on R/A in the current stage
-            later = sorted({a.stage_order for a in rows if a.stage_order > current})
-            if not later:
-                return  # no more stages
-            nxt = later[0]
-            await ChangeRoutingService.activate_stage(session, change, nxt)
-            # Reflect the activation locally so the loop can re-evaluate the new current stage.
-            for a in rows:
-                if a.stage_order == nxt and a.status == "pending":
-                    a.status = "active"
-            current = nxt
-            # If nxt has no blocking rows, the top-of-loop check passes (empty any()=False)
-            # and we cascade onward to the subsequent stage.
-
-    @staticmethod
     async def blocking_complete(session: AsyncSession, change: ChangeRequest) -> bool:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
         blocking = [a for a in rows if a.rasic_letter in BLOCKING_LETTERS]
-        return bool(blocking) and all(a.status == "submitted" for a in blocking)
+        return bool(blocking) and all(
+            a.effective_status in ("submitted", "waived") for a in blocking)
 
     @staticmethod
     async def _routing(session: AsyncSession, change: ChangeRequest) -> ChangeRouting:

@@ -359,29 +359,44 @@ class WorkflowService:
             )
             template = tmpl_result.scalar_one()
             stages = sorted(template.stages, key=lambda s: s.stage_order)
-            next_stages = [s for s in stages if s.stage_order > instance.current_stage_order]
 
-            if not next_stages:
-                instance.status = "completed"
-                instance.completed_at = datetime.utcnow()
+            # Advance stage by stage, cascading through any stage that carries no
+            # actionable (R/A) task. An optional-only stage (all C/S/I) has no gate
+            # to wait on, so it must not stall the instance — its tasks are still
+            # created (noted) so consulted parties see them, but we keep advancing
+            # until we reach a stage with a real gate or run out of stages.
+            while True:
+                next_stages = [s for s in stages
+                               if s.stage_order > instance.current_stage_order]
+                if not next_stages:
+                    instance.status = "completed"
+                    instance.completed_at = datetime.utcnow()
 
-                await WorkflowService._audit(db, instance, "wf_completed",
-                                             completed_by_id, None)
+                    await WorkflowService._audit(db, instance, "wf_completed",
+                                                 completed_by_id, None)
 
-                from app.services.notification_service import NotificationService
+                    from app.services.notification_service import NotificationService
 
-                part, revision = await WorkflowService._instance_part_context(db, instance)
-                await NotificationService.notify_users(
-                    db,
-                    [instance.started_by],
-                    title=f"Workflow completed: {part.name} {revision.revision_name}",
-                    body="All stages approved.",
-                    link=f"/projects/{part.project_id}?part={part.id}",
-                )
-            else:
+                    part, revision = await WorkflowService._instance_part_context(db, instance)
+                    await NotificationService.notify_users(
+                        db,
+                        [instance.started_by],
+                        title=f"Workflow completed: {part.name} {revision.revision_name}",
+                        body="All stages approved.",
+                        link=f"/projects/{part.project_id}?part={part.id}",
+                    )
+                    break
+
                 next_stage = next_stages[0]
                 instance.current_stage_order = next_stage.stage_order
                 await WorkflowService._create_stage_tasks(db, instance, next_stage)
+                has_actionable = any(
+                    r.rasic_letter in ACTIONABLE_LETTERS
+                    for step in next_stage.steps
+                    for r in step.rasic_assignments)
+                if has_actionable:
+                    break
+                # No gate in this stage -> cascade on to the next one.
 
             await db.flush()
 

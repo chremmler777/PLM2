@@ -103,8 +103,8 @@ async def my_change_tasks(
         )
         for a, c in rows.all():
             # Execution state lives on the linked engine task; surface a row only
-            # when it is *effectively* active (task active, or an unlinked
-            # activate_stage'd later-stage row).
+            # when it is *effectively* active (task active, or an unlinked row
+            # carrying its own "active" status from a routing deviation).
             if a.effective_status != "active":
                 continue
             tasks.append({

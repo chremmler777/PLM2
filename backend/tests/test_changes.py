@@ -278,11 +278,27 @@ async def test_attach_document_to_change(client, eng_auth, seed):
 async def test_my_change_tasks_lists_pending_assessments(
     client, eng_auth, seed, departments, session_factory
 ):
-    # assign engineer to "Tool Engineer" department
-    from app.models.workflow import UserDepartment
+    # assign engineer to "Tool Engineer" department, and map a routing standard so
+    # the change spawns an engine instance: the Tool Engineer stage-1 row links to
+    # an active task, so its effective_status is "active" and my-tasks surfaces it.
+    from app.models.workflow import (
+        UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic,
+    )
+    from app.models.change import ChangeRoutingStandard
     async with session_factory() as s:
         s.add(UserDepartment(user_id=seed["engineer_id"],
                              department_id=departments["Tool Engineer"]))
+        t = WfTemplate(name="ECR-MT", description="x", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        stage = WfStage(template_id=t.id, stage_order=1, name="S1")
+        s.add(stage); await s.flush()
+        step = WfStep(stage_id=stage.id, step_name="S1", position_in_stage=1)
+        s.add(step); await s.flush()
+        s.add(WfStepRasic(step_id=step.id,
+                          department_id=departments["Tool Engineer"], rasic_letter="R"))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
         await s.commit()
 
     change = await _create_change(client, eng_auth, seed["project_id"], lead_id=seed["engineer_id"])

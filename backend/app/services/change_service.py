@@ -16,7 +16,7 @@ from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment, ChangeTransitionDeviation,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
-    SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES,
+    SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
 )
 from app.models.entities import User
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
@@ -803,12 +803,15 @@ class ChangeService:
         )
         rows = result.scalars().all()
         # A department may hold assessment rows across several stages (e.g. R in
-        # stage 1, A in stage 2). Target the currently-actionable one deterministically:
-        # prefer the lowest-stage 'active' row, else the lowest-stage 'pending' row.
-        # submitted/waived rows are done and never re-targeted.
-        open_rows = [r for r in rows if r.status in ("active", "pending")]
+        # stage 1, A in stage 2). Target the currently-actionable one deterministically
+        # via effective_status (which reads execution state through the linked engine
+        # task): prefer the lowest-stage effectively-'active' row, else the lowest-stage
+        # effectively-'pending' row. Rows whose task is already completed read
+        # 'submitted'/'waived' and are done, so they are never re-targeted — even
+        # though their own raw status column stays 'pending'.
+        open_rows = [r for r in rows if r.effective_status not in ("submitted", "waived")]
         if open_rows:
-            a = min(open_rows, key=lambda r: (r.status != "active", r.stage_order))
+            a = min(open_rows, key=lambda r: (r.effective_status != "active", r.stage_order))
         elif not rows:
             # No routing row at all: tolerate a bare submit (pre-routing behaviour).
             a = ChangeAssessment(change_id=change.id, department_id=department_id)
@@ -823,10 +826,19 @@ class ChangeService:
         a.responsible_id = responsible_id
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
-        a.status = "submitted"
         await session.flush()
-        from app.services.change_routing_service import ChangeRoutingService
-        await ChangeRoutingService.maybe_advance(session, change, user_id)
+        # Blocking (R/A) rows linked to an engine task complete that task, which
+        # drives stage advancement through the workflow engine. S/C rows and any
+        # unlinked row (a future stage whose task does not exist yet, or a legacy
+        # bare-submit row) are payload-only: mark the row submitted directly.
+        if a.rasic_letter in BLOCKING_LETTERS and a.wf_instance_task_id is not None:
+            from app.services.workflow_service import WorkflowService
+            await WorkflowService.complete_task(
+                session, a.wf_instance_task_id, "approved",
+                notes or f"Assessment: {verdict}", user_id)
+        else:
+            a.status = "submitted"   # S/C payload-only; unlinked legacy rows too
+        await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_submitted",
             f"Assessment for dept {department_id}: {verdict}", user_id,

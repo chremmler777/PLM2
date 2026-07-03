@@ -181,11 +181,14 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(client, seed
                       json={"department_id": departments["Quality"], "verdict": "feasible"}, headers=auth)
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 400, res.text  # Tool Engineer (R) still pending
-    # Submit Tool Engineer (R) -> stage 1 blocking done -> stage 2 activates (APQP)
+    # Submit Tool Engineer (R) -> stage 1 blocking done -> engine advances to stage 2 (APQP).
+    # Observe advancement through the engine's read-through status (routing view uses
+    # effective_status), not the raw assessment-row column which stays "pending".
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
-    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
-    apqp = next(a for a in detail["assessments"] if a["department_id"] == departments["APQP"])
+    routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
+    apqp = next(d for st in routing["stages"] for d in st["departments"]
+                if d["department_id"] == departments["APQP"])
     assert apqp["status"] == "active"
     # Costing still blocked until APQP (A) submits
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
@@ -408,13 +411,15 @@ async def test_maybe_advance_cascades_through_optional_only_stage(
          "name": "ART-C1", "part_type": "internal_mfg", "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
     await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "in_assessment"}, headers=auth)
-    # submit stage1 Tool Engineer (R) -> should cascade past the C-only stage2 and activate stage3 APQP
+    # submit stage1 Tool Engineer (R) -> the engine advances, cascading THROUGH the
+    # C-only stage 2 (no gate to wait on) and activating stage 3 APQP. Observe via
+    # the routing view (effective_status), since raw assessment rows stay "pending".
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
-    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
-    by_dep = {a["department_id"]: a for a in detail["assessments"]}
-    assert by_dep[departments["APQP"]]["status"] == "active"    # cascaded through stage 2
-    assert by_dep[departments["Quality"]]["status"] == "active"  # the optional stage was also activated
+    routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
+    by_dep = {d["department_id"]: d for st in routing["stages"] for d in st["departments"]}
+    assert by_dep[departments["APQP"]]["status"] == "active"    # cascaded through stage 2 to stage 3
+    assert by_dep[departments["Quality"]]["status"] == "active"  # C task in the skipped stage created (noted -> effective active)
 
 
 @pytest_asyncio.fixture
@@ -472,8 +477,10 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == cid))).scalars().all())
-        assert rows[(te, 1)].status == "submitted"     # stage-1 row taken
-        assert rows[(te, 2)].status == "pending"        # stage-2 row untouched
+        # Execution state reads through the linked engine task: the stage-1 R task
+        # is completed (effective "submitted"); the stage-2 row is untouched.
+        assert rows[(te, 1)].effective_status == "submitted"   # stage-1 row taken
+        assert rows[(te, 2)].effective_status == "pending"     # stage-2 row untouched
 
     # Finish stage-1 blocking (Quality R) -> stage 2 activates, incl. Tool Engineer(A).
     async with session_factory() as s:
@@ -484,7 +491,7 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == cid))).scalars().all())
-        assert rows[(te, 2)].status == "active"         # stage 2 now active
+        assert rows[(te, 2)].effective_status == "active"   # stage 2 now active (linked task)
 
     # Second submit for the SAME dept now targets the stage-2 row.
     async with session_factory() as s:
@@ -494,8 +501,8 @@ async def test_submit_assessment_targets_active_stage_row_for_multistage_dept(
     async with session_factory() as s:
         rows = rows_by((await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == cid))).scalars().all())
-        assert rows[(te, 1)].status == "submitted"
-        assert rows[(te, 2)].status == "submitted"
+        assert rows[(te, 1)].effective_status == "submitted"
+        assert rows[(te, 2)].effective_status == "submitted"
 
 
 async def test_routing_view_reports_per_stage_status_for_multistage_dept(
