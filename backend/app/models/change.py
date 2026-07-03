@@ -93,6 +93,12 @@ class ChangeRequest(Base):
     # Timing stub (sub-project #7)
     timing_milestone_id: Mapped[int | None] = mapped_column(ForeignKey("project_milestones.id"), nullable=True)
 
+    # Sales-settable deadline (sub-project #9)
+    required_by_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    required_by_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    required_by_set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    required_by_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

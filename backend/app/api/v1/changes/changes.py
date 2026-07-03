@@ -76,9 +76,12 @@ async def list_changes(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ChangeService.list_changes(
+    changes = await ChangeService.list_changes(
         db, project_id=project_id, status=status, change_type=change_type, lead_id=lead_id,
     )
+    for change in changes:
+        change.deadline_state = await ChangeService.deadline_state(db, change)
+    return changes
 
 
 @router.get("/my-tasks")
@@ -229,6 +232,7 @@ async def get_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 

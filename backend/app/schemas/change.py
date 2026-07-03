@@ -34,6 +34,8 @@ class ChangeUpdate(BaseModel):
     customer_relevant: Optional[bool] = None
     car_line: Optional[str] = None
     affected_plant_ids: Optional[List[int]] = None
+    required_by_date: Optional[datetime] = None
+    required_by_reason: Optional[str] = None
 
 
 class TransitionRequest(BaseModel):
@@ -182,6 +184,9 @@ class ChangeResponse(BaseModel):
     customer_relevant: bool = False
     car_line: Optional[str] = None
     affected_plant_ids: List[int] = []
+    required_by_date: Optional[datetime] = None
+    required_by_reason: Optional[str] = None
+    deadline_state: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

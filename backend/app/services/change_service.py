@@ -252,6 +252,35 @@ class ChangeService:
         return result.scalars().all()
 
     @staticmethod
+    async def deadline_state(session: AsyncSession, change: ChangeRequest) -> str | None:
+        """Computed on_track/at_risk/overdue state for a Sales-set required-by
+        date. None when no deadline is set or the change is already terminal
+        (done changes don't need a deadline banner)."""
+        if change.required_by_date is None or change.status in TERMINAL_STATUSES:
+            return None
+        from sqlalchemy.orm import selectinload
+        from app.models.workflow import WfInstance, WfTemplate
+        from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS
+
+        now = datetime.utcnow()
+        if change.required_by_date < now:
+            return "overdue"
+        insts = (await session.execute(
+            select(WfInstance).where(WfInstance.status == "active").where(
+                (WfInstance.change_id == change.id)
+                | WfInstance.part_revision_id.in_(
+                    select(PartRevision.id).where(
+                        PartRevision.originating_change_id == change.id))
+            ).options(selectinload(WfInstance.template).selectinload(WfTemplate.stages))
+        )).scalars().all()
+        needed = 0
+        for inst in insts:
+            max_stage = max((s.stage_order for s in inst.template.stages), default=inst.current_stage_order)
+            needed = max(needed, (max_stage - inst.current_stage_order + 1) * DEFAULT_TASK_DUE_DAYS)
+        days_left = (change.required_by_date - now).days
+        return "at_risk" if needed > days_left else "on_track"
+
+    @staticmethod
     async def lead_escalations(session: AsyncSession, user_id: int) -> list[dict]:
         from app.models.workflow import Department, WfInstance, WfInstanceTask, WfStep
 
@@ -331,6 +360,28 @@ class ChangeService:
                 "owner_name": t.owner_name,
                 "due_date": t.due_date.isoformat(),
                 "days_overdue": (now - t.due_date).days,
+            })
+
+        # Sales-set deadlines at risk or already overdue.
+        for c in changes:
+            if c.required_by_date is None:
+                continue
+            state = await ChangeService.deadline_state(session, c)
+            if state not in ("at_risk", "overdue"):
+                continue
+            days_overdue = (now - c.required_by_date).days if state == "overdue" \
+                else -(c.required_by_date - now).days
+            out.append({
+                "kind": "deadline", "change_id": c.id,
+                "change_number": c.change_number, "change_title": c.title,
+                # label mirrors the other escalation kinds so existing
+                # renderers (EscalationsCard) show something meaningful.
+                "label": f"Required by {c.required_by_date.date().isoformat()}",
+                "required_by_date": c.required_by_date.isoformat(),
+                "state": state,
+                # negative for at_risk (days until deadline) so the shared
+                # days_overdue sort ranks true overdues above at-risk rows.
+                "days_overdue": days_overdue,
             })
 
         out.sort(key=lambda r: r["days_overdue"], reverse=True)
@@ -975,6 +1026,25 @@ class ChangeService:
                 f"Invalid implementation_mode '{impl_mode}'. "
                 f"Allowed: {', '.join(IMPLEMENTATION_MODES)}"
             )
+
+        # Sales-settable deadline: handled before the generic loop (not part
+        # of the plain-attribute `allowed` whitelist) so an explicit null
+        # (clear the deadline) is honored rather than skipped by the `v is
+        # not None` guard below.
+        if "required_by_date" in fields:
+            new_date = fields.pop("required_by_date")
+            reason = fields.pop("required_by_reason", None)
+            old = change.required_by_date
+            change.required_by_date = new_date
+            change.required_by_reason = reason
+            change.required_by_set_by = user_id
+            change.required_by_set_at = datetime.utcnow()
+            await ChangeService.append_changelog(
+                session, change, "deadline_set",
+                f"Required-by {old} -> {new_date}", user_id,
+                field_name="required_by_date",
+                old_value=str(old) if old else None,
+                new_value=str(new_date) if new_date else None, notes=reason)
 
         for k, v in fields.items():
             if k in allowed and v is not None:
