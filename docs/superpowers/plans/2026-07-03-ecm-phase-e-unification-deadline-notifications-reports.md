@@ -1451,7 +1451,9 @@ git commit -m "chore(tsc): burn baseline 21 -> 0; typed drafts in WorkflowDesign
 - Consumes: `UserDepartment` junction (`workflow.py` L28-35), `useDepartments()` hook (frontend).
 - Produces: `PUT /v1/users/{id}/departments` body `{"department_ids": [int]}` → replaces the user's memberships, audited via `AuditService.record(entity_type="user", action="departments_set", ...)`; a `seed_dev_department_memberships(session)` create-if-absent seed (test@example.com → R&D; admin@example.com → all departments) wired next to the existing seed calls in `main.py`.
 
-- [ ] **Step 1: Failing tests** — non-admin gets 403 on PUT; PUT replaces set (add 2, then replace with 1, assert exactly 1); GET returns current ids; seed is idempotent (run twice, no duplicates).
+- **Enforcement (re-homed here from Task 4 — Task 4's review confirmed `complete_task` has NO membership guard and never did):** add a department-membership guard to `WorkflowService.complete_task` (actor must be a member of the task's department; admins exempt — mirror how other admin exemptions work in this codebase, check `User` role fields). This lands HERE because only now do membership admin + seeds exist, so real users can satisfy it. Update any test that completes tasks to grant membership via fixtures (most already do since Task 4).
+
+- [ ] **Step 1: Failing tests** — non-admin gets 403 on PUT; PUT replaces set (add 2, then replace with 1, assert exactly 1); GET returns current ids; seed is idempotent (run twice, no duplicates); complete_task by a non-member raises / 403s, member succeeds, admin exempt.
 - [ ] **Step 2: Verify fail** — `cd backend && python3 -m pytest tests/test_user_departments.py -v` → 404/AttributeError.
 - [ ] **Step 3: Implement** endpoints (follow the users router's existing admin-guard pattern), seed function, then UsersPage: per-user multi-select (checkbox dropdown listing departments via `useDepartments`), save via mutation → `PUT`, toast on success, invalidate the users query. Membership chips shown inline per row.
 - [ ] **Step 4: Run** — backend suite + `npx vitest run` + `npx tsc --noEmit` (0 errors, stays 0).
