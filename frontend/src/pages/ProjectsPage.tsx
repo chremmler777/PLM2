@@ -115,7 +115,7 @@ function AddProjectModal({
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
             >
               <option value="">Select a plant</option>
-              {(plants ?? []).map((p) => (
+              {(plants ?? []).filter((p) => p.is_active !== false).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({p.code})
                 </option>

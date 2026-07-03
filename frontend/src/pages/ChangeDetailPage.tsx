@@ -2,6 +2,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
@@ -46,6 +47,13 @@ export default function ChangeDetailPage() {
     queryKey: ['plants'],
     queryFn: plantsApi.list,
   });
+  // The change's project plant, used as the preferred default for new cost-line
+  // rows (Task 21). '/v1/plants/projects' lists every project across plants.
+  const { data: projects = [] } = useQuery<{ id: number; plant_id: number }[]>({
+    queryKey: ['projects'],
+    queryFn: async () => (await client.get('/v1/plants/projects')).data,
+  });
+  const projectPlantId = projects.find((p) => p.id === change?.project_id)?.plant_id ?? null;
   const { data: impl } = useQuery({
     queryKey: ['change', changeId, 'implementation'],
     queryFn: () => changesApi.getImplementation(changeId),
@@ -277,11 +285,14 @@ export default function ChangeDetailPage() {
                 changeId={changeId}
                 assessmentId={a.id}
                 departmentId={a.department_id}
+                projectPlantId={projectPlantId}
                 plants={
                   (change.affected_plant_ids && change.affected_plant_ids.length > 0
                     ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
                     : allPlants
-                  ).map((p) => ({ id: p.id, name: p.name }))
+                  )
+                    .filter((p) => p.is_active !== false)
+                    .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))
                 }
               />
             </div>

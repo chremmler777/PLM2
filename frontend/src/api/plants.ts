@@ -4,6 +4,8 @@ export interface Plant {
   id: number;
   name: string;
   code: string;
+  location?: string | null;
+  is_active?: boolean;
 }
 
 export const plantsApi = {

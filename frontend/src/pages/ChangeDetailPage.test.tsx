@@ -52,6 +52,9 @@ vi.mock('../api/changes', () => ({
 vi.mock('../api/plants', () => ({
   plantsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
+vi.mock('../api/client', () => ({
+  default: { get: vi.fn().mockResolvedValue({ data: [] }) },
+}))
 vi.mock('../hooks/queries/useWorkflows', () => ({
   useDepartments: () => ({ data: [] }),
 }))

@@ -44,10 +44,12 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
     queryFn: () => changesApi.getGates(changeId),
   });
 
-  const { data: allPlants = [] } = useQuery({
+  const { data: plants = [] } = useQuery({
     queryKey: ['plants'],
     queryFn: plantsApi.list,
   });
+  // Inactive plants (e.g. "Main Factory" test data) are never selectable here.
+  const allPlants = plants.filter((p) => p.is_active !== false);
 
   const [fields, setFields] = useState<D1Fields>({
     issuer: '', car_line: '', is_series: false, cm_internal: false,

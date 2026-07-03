@@ -369,6 +369,14 @@ async def seed_test_data():
             if n:
                 logger.info(f"Synthesized {n} change-scoped assessment instances")
 
+            # Self-heal plants (Phase E Task 21): merge the duplicate "USA"
+            # plant into canonical "USA Toccoa" (repointing every plant_id FK)
+            # and deactivate "Main Factory" test junk (idempotent).
+            from app.services.plant_repair import repair_plants
+            plant_report = await repair_plants(session)
+            if plant_report["merged_usa_dup"] or plant_report["deactivated_main_factory"]:
+                logger.info(f"Plant repair: {plant_report}")
+
             await session.commit()
             logger.info("Test data seeded successfully")
         except Exception as e:

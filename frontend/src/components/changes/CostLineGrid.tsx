@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import type { CostLine, CostLineIn, CostKind, DepartmentRateRef } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
+import { defaultPlantId } from '../../lib/plants';
 
 // ── pure helper (exported for unit tests) ────────────────────────────────────
 
@@ -56,7 +57,9 @@ interface CostLineGridProps {
   changeId: number;
   assessmentId: number;
   departmentId: number;
-  plants: { id: number; name: string }[];
+  plants: { id: number; name: string; is_active?: boolean }[];
+  /** The change's project plant, if known — preferred default for new rows. */
+  projectPlantId?: number | null;
 }
 
 export default function CostLineGrid({
@@ -64,6 +67,7 @@ export default function CostLineGrid({
   assessmentId,
   departmentId,
   plants,
+  projectPlantId,
 }: CostLineGridProps) {
   const qc = useQueryClient();
 
@@ -118,7 +122,7 @@ export default function CostLineGrid({
   });
 
   const addRow = () =>
-    setRows((r) => [...r, makeRow(ratedPlants[0]?.id ?? 0)]);
+    setRows((r) => [...r, makeRow(defaultPlantId(ratedPlants, projectPlantId) ?? 0)]);
 
   const update = (i: number, patch: Partial<Row>) =>
     setRows((r) =>
