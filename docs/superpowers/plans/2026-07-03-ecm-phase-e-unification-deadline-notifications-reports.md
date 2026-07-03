@@ -20,11 +20,12 @@
 - Audit: change-level events go through `ChangeService.append_changelog(session, change, action, description, performed_by, *, field_name=, old_value=, new_value=, notes=)` (which calls `AuditService.record` with `correlation_id=change.change_number`). Workflow-instance events go through `WorkflowService._audit`.
 - Frontend labels: DE/EN via `src/i18n/cmLabels.ts` (`cmLabels` map + `t(key, lang)`); status chips via `STATUS_PILL` from `src/lib/changeStatus.ts`; toasts via `sonner`.
 - Query keys in use: `['change', id]`, `['change-routing', id]`, `['change-gates', id]`, `['change-my-tasks']`, `['workflow', ...]`, `['notifications']`, `['notifications-unread']` — reuse for invalidation.
-- **Model tiering:** Tasks 1–6 opus (engine semantics, migration); Tasks 7–15 sonnet; Task 16 haiku; Task 17 opus (review/verification). Never trade correctness for cost.
+- **Model tiering:** Tasks 1–6 opus (engine semantics, migration); Tasks 7–15 and 17–23 sonnet; Task 16 haiku; Task 24 opus (review/verification). Never trade correctness for cost.
+- **Environment (binding):** `alembic` is a console script run from `backend/` (never `python3 -m alembic`). The real dev stack is docker-compose `claude-plm2-*` (backend :8000 bind-mount + --reload, frontend :5173, **Postgres** `claude-plm2-db-1`) — the local `plm.db` SQLite is test-only. Postgres migrations need `sa.false()`-style server defaults for booleans and CASCADE for circular-FK drops. Commits stage explicit paths only — NEVER `git add -A`; never stage `backend/**/__pycache__` or `backend/plm.db` (repo tracks this noise). Dev logins: test@example.com/password, admin@example.com/admin1234.
 
 ## Stream order
 
-Tasks 1–8 = Stream 1 (unification). Tasks 9–10 = Stream 2 (deadline). Tasks 11–12 = Stream 3 (notifications). Tasks 13–15 = Stream 4 + org scoping (reports). Task 16 = tsc debt. Task 17 = verification + merge.
+Tasks 1–8 = Stream 1 (unification). Tasks 9–10 = Stream 2 (deadline). Tasks 11–12 = Stream 3 (notifications). Tasks 13–15 = Stream 4 + org scoping (reports). Task 16 = tsc debt. Tasks 17–23 = Stream 5 "make it a real workflow" (merged kickoff scope — see spec Stream 5; tsc must STAY at 0 from here on). Task 24 = verification + merge.
 
 ---
 
@@ -271,7 +272,7 @@ def downgrade() -> None:
 
 Run: `cd backend && python3 -m pytest tests/test_change_scoped_instances.py -v` → 3 PASS.
 Run: `cd backend && python3 -m pytest` → full suite still green (190 + 3).
-Run: `cd backend && cp plm.db /tmp/plm.db.bak && python3 -m alembic upgrade head && python3 -m alembic current` → `027 (head)`; run it twice to prove idempotence.
+Run: `cd backend && cp plm.db /tmp/plm.db.bak && alembic upgrade head && alembic current` → `027 (head)`; run it twice to prove idempotence.
 
 ```bash
 git add backend/alembic/versions/027_change_scoped_instances.py backend/app/models/workflow.py backend/app/models/change.py backend/tests/test_change_scoped_instances.py
@@ -1017,7 +1018,7 @@ Populate on read: in the endpoints for `GET /changes/{id}` and `GET /changes` (c
 
 - [ ] **Step 5: Run, then commit**
 
-Run: `cd backend && python3 -m pytest tests/test_change_deadline.py -v` → 8 PASS; full suite green. Run `python3 -m alembic upgrade head` twice (idempotence).
+Run: `cd backend && python3 -m pytest tests/test_change_deadline.py -v` → 8 PASS; full suite green. Run `alembic upgrade head` twice (idempotence).
 
 ```bash
 git add backend/alembic/versions/028_change_required_by.py backend/app/models/change.py backend/app/schemas/change.py backend/app/services/change_service.py backend/app/api/v1/changes/changes.py backend/tests/test_change_deadline.py
@@ -1440,7 +1441,124 @@ git commit -m "chore(tsc): burn baseline 21 -> 0; typed drafts in WorkflowDesign
 
 ---
 
-### Task 17: Final verification, review, merge to main
+### Task 17: Department membership admin (Users page) + dev seeds
+
+**Files:**
+- Modify: backend users router (locate: `grep -rn "users" backend/app/api/v1/ --include="*.py" -l`) — add `GET /v1/users/{id}/departments` and `PUT /v1/users/{id}/departments` (admin-only, replace-set semantics like `affected_plant_ids`); `backend/app/services/wf_seed_service.py` (dev membership seeds); `frontend/src/pages/UsersPage.tsx` (multi-select departments dropdown per user row)
+- Test: `backend/tests/test_user_departments.py` (new), extend UsersPage test if one exists
+
+**Interfaces:**
+- Consumes: `UserDepartment` junction (`workflow.py` L28-35), `useDepartments()` hook (frontend).
+- Produces: `PUT /v1/users/{id}/departments` body `{"department_ids": [int]}` → replaces the user's memberships, audited via `AuditService.record(entity_type="user", action="departments_set", ...)`; a `seed_dev_department_memberships(session)` create-if-absent seed (test@example.com → R&D; admin@example.com → all departments) wired next to the existing seed calls in `main.py`.
+
+- [ ] **Step 1: Failing tests** — non-admin gets 403 on PUT; PUT replaces set (add 2, then replace with 1, assert exactly 1); GET returns current ids; seed is idempotent (run twice, no duplicates).
+- [ ] **Step 2: Verify fail** — `cd backend && python3 -m pytest tests/test_user_departments.py -v` → 404/AttributeError.
+- [ ] **Step 3: Implement** endpoints (follow the users router's existing admin-guard pattern), seed function, then UsersPage: per-user multi-select (checkbox dropdown listing departments via `useDepartments`), save via mutation → `PUT`, toast on success, invalidate the users query. Membership chips shown inline per row.
+- [ ] **Step 4: Run** — backend suite + `npx vitest run` + `npx tsc --noEmit` (0 errors, stays 0).
+- [ ] **Step 5: Commit** `feat(workflow): department membership admin + dev seeds` (stage explicit paths).
+
+---
+
+### Task 18: Engineering owns the affected-items decision
+
+Mechanism (spec Stream 5.4): lead proposes impacted items (existing flow unchanged); an R&D department member confirms the set; kickoff is guarded on confirmation.
+
+**Files:**
+- Create: `backend/alembic/versions/030_impact_confirmation.py` (inspect-guarded adds on `change_requests`: `impact_confirmed_by sa.Integer()`, `impact_confirmed_at sa.DateTime()`, both nullable)
+- Modify: `backend/app/models/change.py` (two columns), `backend/app/services/change_service.py` (`_guard`: `in_implementation` requires `impact_confirmed_at`; confirmation invalidated when the impacted-item set changes afterwards — clear both fields on impacted-item add/remove), `backend/app/api/v1/changes/changes.py` (`POST /{change_id}/impact/confirm`, R&D-member-or-admin only), `backend/app/schemas/change.py` (ChangeResponse: `impact_confirmed_by`, `impact_confirmed_at`)
+- Frontend: `frontend/src/components/changes/ImpactTree.tsx` (confirm button + confirmed badge), `frontend/src/components/changes/CockpitSummary.tsx` (blocker row "Impact confirmation pending (R&D)" with act-in-place jump to the impacted tab), `frontend/src/api/changes.ts` (`confirmImpact`), `frontend/src/i18n/cmLabels.ts`
+- Test: `backend/tests/test_impact_confirmation.py` (new), extend `ImpactTree.test.tsx` / `CockpitSummary.test.tsx`
+
+**Interfaces:**
+- Consumes: R&D department resolved by name `"R&D"` via `Department` + `UserDepartment` membership check (reuse `WorkflowService.get_user_department_ids`); Task 17's membership admin makes this assignable.
+- Produces: `POST /v1/changes/{id}/impact/confirm` (403 for non-R&D non-admin; 409 when no impacted items); `_guard` blocks `approved -> in_implementation` with reason `"impact_not_confirmed"` until confirmed — bypassable ONLY via the existing transition-deviation mechanism (it is a soft-block reason like the others, NOT a new hard gate).
+
+- [ ] **Step 1: Failing tests** — confirm as R&D member sets fields + changelog `impact_confirmed`; confirm as non-member → 403; kickoff without confirmation blocked with `impact_not_confirmed` reason; kickoff after confirmation proceeds; adding an impacted item AFTER confirmation clears it (re-confirmation required).
+- [ ] **Step 2: Verify fail**, **Step 3: Implement** (backend then frontend: ImpactTree gets a primary "Confirm impact (R&D)" button visible when the user is an R&D member and unconfirmed; CockpitSummary blocker row jumps via `setTab('impacted')`), **Step 4: Run everything** (suite + vitest + tsc 0), **Step 5: Commit** `feat(change): engineering confirms the impacted-item set before kickoff`.
+
+---
+
+### Task 19: My-Tasks-first cockpit — "what do I do now"
+
+**Files:**
+- Modify: `backend/app/api/v1/changes/changes.py` (`GET /{change_id}/my-actions` — the current user's open actions on THIS change), `frontend/src/components/changes/CockpitSummary.tsx` (a "Your actions" panel, topmost when non-empty), `frontend/src/pages/ChangeDetailPage.tsx` (wire query), `frontend/src/api/changes.ts` (`myActions(changeId)`), `frontend/src/i18n/cmLabels.ts`
+- Test: `backend/tests/test_my_actions.py` (new), extend `CockpitSummary.test.tsx`
+
+**Interfaces:**
+- Consumes: unified engine (change-scoped tasks, Task 3), membership (`get_user_department_ids`), pending deviations/gates data already loaded by the page.
+- Produces: `GET /v1/changes/{id}/my-actions` → `{"actions": [{"kind": "assessment"|"wf_task"|"deviation_decision"|"gate"|"impact_confirm"|"transition", "label": str, "target_tab": str, "task_id"|"assessment_id"|...: int|None}]}` — each action names the tab where it can be performed (`?tab=` deep-link values from Task 12).
+- Role-aware read-only: action buttons across the change page render disabled with a tooltip ("Not your department") when the user cannot act — server enforcement already exists via the engine; this is the client mirror. Implement by threading a `canAct` boolean (computed from `my-actions` content / membership) into AssessmentRouting rows and task buttons.
+
+- [ ] **Step 1: Failing tests** — engineer with an active owned stage-1 task gets `kind=="assessment"` action; change lead with a pending deviation gets `deviation_decision`; R&D member on an unconfirmed approved change gets `impact_confirm`; user with nothing gets `[]`.
+- [ ] **Step 2–4:** implement endpoint (assemble from: active tasks in the user's departments or owned by them; pending transition deviations where user may decide; unconfirmed impact for R&D; gate decisions for admins/lead when a transition is soft-blocked), then the panel (sky-highlighted card, one button per action, click = `setTab(target_tab)`), run suite + vitest + tsc 0.
+- [ ] **Step 5: Commit** `feat(cockpit): your-actions panel — the page tells each role what to do now`.
+
+---
+
+### Task 20: English seed names + rename repair for existing DBs
+
+Standards match templates BY NAME (`ChangeRoutingStandard`, check-workflow standards, `CHECK_TEMPLATE_BY_CATEGORY` in `wf_seed_service.py` L103-107) — rename must be atomic across seeds, standards, live rows, and tests.
+
+**Files:**
+- Modify: `backend/app/services/wf_seed_service.py` (all German template/stage/step names → English), plus a `RENAMES` map + `repair_seed_names(session)` startup repair renaming existing `WfTemplate`/`WfStage`/`WfStep` rows by exact old-name match (idempotent; runs before the standards seed so name-matching still resolves)
+- Modify: `backend/app/main.py` (call repair before seed calls), affected tests (grep: `grep -rln "Bewertung\|Umsetzung\|Machbarkeit\|3D-Daten" backend/ frontend/src --include="*.py" --include="*.ts*" | grep -v __pycache__`)
+- Test: `backend/tests/test_seed_renames.py` (new)
+
+**Interfaces:**
+- Produces the canonical names consumed by Tasks 3/6 fallbacks and the standards: `"ECM Bewertung"` → `"ECM Assessment"`, `"ECN Umsetzung (Werkzeug)"` → `"ECN Implementation (Tool)"`, `"ECN Umsetzung (Artikel)"` → `"ECN Implementation (Article)"`; stage/step names translated 1:1 (e.g. "Machbarkeit & Bewertung" → "Feasibility & Assessment", "3D-Daten aktualisieren" → "Update 3D data"). **Any Task 3/6 code that resolves the template by name must use the new name — grep for the literal after renaming.**
+- [ ] **Step 1: Failing tests** — fresh seed produces English names only (assert no `Bewertung|Umsetzung` in template/stage/step names); repair renames a pre-seeded German row set AND its `ChangeRoutingStandard` mapping still resolves; repair is idempotent.
+- [ ] **Step 2–4:** implement, update every test/fixture asserting German names, full backend suite + grep shows no German seed literals outside the RENAMES map, tsc 0 untouched.
+- [ ] **Step 5: Commit** `feat(seeds): English template/stage/step names + rename repair for live DBs`.
+
+---
+
+### Task 21: Plant consolidation + defaults (USA interim)
+
+**Files:**
+- Modify: `backend/app/services/wf_seed_service.py` or the seed module that creates plants (locate: `grep -rn "Toccoa\|Main Factory\|Weissenburg\|WUG" backend/app --include="*.py"`) — create `repair_plants(session)`: merge duplicate "USA" into "USA Toccoa" (repoint `change_affected_plants`, `assessment_cost_line.plant_id`, `projects.plant_id`, then delete the dup), deactivate "Main Factory" test junk (set `is_active=False`, don't delete — FK safety), and fix whatever seeds Weissenburg as a default (investigate the grep hits; report what was found in the task report)
+- Modify: frontend plant selectors default: where a plant must be preselected (cost-line grid, D1 affected plants, StartChangeModal if applicable) default to the change's project plant, else the plant named "USA Toccoa" (locate via `plantsApi.list` consumers)
+- Test: `backend/tests/test_plant_repair.py` (new)
+
+**Interfaces:**
+- Produces: `repair_plants(session)` (idempotent, wired into startup next to the other repairs); frontend default-plant helper `defaultPlantId(plants, project)` in `frontend/src/lib/` (unit-tested).
+- [ ] **Step 1: Failing tests** — duplicate USA rows merged with FK repoints (seed a cost line on the dup, assert it moves); Main Factory deactivated; idempotent second run.
+- [ ] **Step 2–4:** implement + wire; frontend helper + defaults; suites + tsc 0.
+- [ ] **Step 5: Commit** `feat(plants): consolidate duplicates, USA default (interim), startup repair`.
+
+---
+
+### Task 22: Audit deferral bundle
+
+From the Phase D final review triage (spec Stream 5.7).
+
+**Files:**
+- Modify: `backend/app/api/v1/` audit router (locate: `grep -rn "audit" backend/app/api/v1 -l`): org/role scoping on list + export (non-admin users see only entries whose `correlation_id` belongs to a change in their org — reuse Task 13's `_org_scope` change-number set; admins see all); `verify` endpoint gains optional `?correlation_id=` reporting per-correlation coverage (chain verification stays global — report `{chain_ok, correlation_entries, correlation_ok}` so the badge can say what it actually checked)
+- Modify: `frontend/src/components/changes/AuditTimeline.tsx`: badge label reflects scope ("chain intact (global)"), >limit truncation notice when `entries.length === limit` ("showing newest 1000 — export CSV for the full trail") AND fetch ordered newest-first so truncation drops OLDEST not newest; day headings computed in UTC with a "(UTC)" suffix
+- Modify: `backend/alembic/versions/025_*.py` (downgrade inspect-guard), `backend/app/schemas/change.py` (`ChangeResponse` vars()-validator: merge property-backed fields explicitly so future properties don't silently null — follow the Task 7 read-through validator pattern), ready-to-go badge color (`grep -rn "green-900" frontend/src/components/changes/` → emerald)
+- Test: `backend/tests/test_audit_scoping.py` (new), extend `AuditTimeline.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 13 `_org_scope`, Task 12 URL tabs (unchanged).
+- Produces: org-scoped `GET /v1/audit` + `/export`; `GET /v1/audit/verify?correlation_id=` extended response (backward-compatible — existing fields unchanged).
+- [ ] **Step 1: Failing tests** — org-B user cannot list/export org-A change entries (admin can); verify with correlation returns per-correlation counts; AuditTimeline shows truncation notice at limit and UTC day keys.
+- [ ] **Step 2–4:** implement; full suites; tsc 0.
+- [ ] **Step 5: Commit** `fix(audit): org scoping, scoped verify reporting, truncation notice, UTC day headings + triage cleanups`.
+
+---
+
+### Task 23: Postgres migration dry-run for 027–030
+
+The suite runs on SQLite; the real stack is Postgres — 023/026 needed Postgres fixes after the fact. Catch it up front this time.
+
+**Files:** none new (verification task; fixes go into the migration files if needed)
+
+- [ ] **Step 1:** Spin up a scratch Postgres (`docker run --rm -d --name plm-mig-test -e POSTGRES_PASSWORD=t -p 55432:5432 postgres:16`), run the full chain: `cd backend && DATABASE_URL=postgresql+asyncpg://postgres:t@localhost:55432/postgres alembic upgrade head` (check `alembic/env.py` for the env-var name it actually reads — adjust the invocation to match).
+- [ ] **Step 2:** Expected: upgrade reaches head (030) cleanly, twice (idempotence). If a migration fails on Postgres (boolean defaults, batch_alter semantics, FK adds), fix that migration file guarded so SQLite behavior is unchanged, and re-run BOTH: the Postgres chain AND the SQLite suite.
+- [ ] **Step 3:** Tear down (`docker rm -f plm-mig-test`), commit any fixes: `fix(alembic): postgres compatibility for 027-030`.
+
+---
+
+### Task 24: Final verification, review, merge to main
 
 **Files:** none new — verification + integration.
 
@@ -1448,10 +1566,10 @@ git commit -m "chore(tsc): burn baseline 21 -> 0; typed drafts in WorkflowDesign
 
 Run and record actual output:
 - `cd backend && python3 -m pytest` → expect ~220+ pass, 0 fail
-- `cd backend && python3 -m alembic upgrade head` (twice — idempotent, exits clean)
+- `cd backend && alembic upgrade head` (twice — idempotent, exits clean)
 - `cd frontend && npx vitest run` → expect ~65+ pass
 - `cd frontend && npx tsc --noEmit` → 0 errors; `npm run build` succeeds
-- Manual smoke (dev servers): one change end-to-end — create from part → submit → assessments through the engine → deviation add/remove → costing/quoted/approved with gates → kickoff → deadline set + chip states → bell shows deduped notifications with working deep links → /reports numbers match the walked change → audit timeline verifies (hash chain OK).
+- Manual smoke **on the real docker-compose Postgres stack** (`claude-plm2-*`, backend :8000, frontend :5173 — migrate it to head first): one change end-to-end as the dev users — create from part → Engineering confirms impact → submit assessments through the engine (as department members via the Task 17 memberships) → deviation add/remove → costing/quoted/approved with gates → kickoff → deadline set + chip states → bell shows deduped notifications with working deep links → "Your actions" panel correct per role → /reports numbers match the walked change → audit timeline verifies (org-scoped, UTC headings) → seed names English, plants consolidated.
 
 - [ ] **Step 2: Whole-phase code review**
 
@@ -1465,7 +1583,8 @@ Use superpowers:requesting-code-review on the Phase E commit range (opus tier). 
 
 ## Plan self-review notes (written 2026-07-03)
 
-- **Spec coverage:** unification (Tasks 1–8), deadline (9–10), notifications (11–12), reporting (14–15), org scoping (13), tsc + merge (16–17). Spec's "execution columns no longer written" honored via read-through (Task 7); columns dropped in a later phase as spec states.
+- **Spec coverage:** unification (Tasks 1–8), deadline (9–10), notifications (11–12), reporting (14–15), org scoping (13), tsc (16), Stream 5 "real workflow" merged scope (17–23: membership admin, engineering-owns-impact, my-actions cockpit, EN seed names, plant cleanup, audit deferrals, Postgres dry-run), verification + merge (24). Spec's "execution columns no longer written" honored via read-through (Task 7); columns dropped in a later phase as spec states.
+- **Merged-scope note (2026-07-03):** Tasks 17–23 fold in the previously agreed kickoff scope from `memory/ecm-phase-e-kickoff.md` per user decision; enforcement (kickoff item 2) is delivered by Task 4's engine authz, role-aware read-only by Task 19. Migration numbering: 027 (Task 1), 028 (Task 9), 029 (Task 11), 030 (Task 18).
 - **Deliberate deviations from spec text:** none functional. Compliance-KPI view excluded per user decision (recorded in spec).
 - **Known churn hotspots flagged inline:** `test_change_routing.py` (Task 4), department-membership authz on submit (Task 4 note), backend notification links must use change **id** not number (Task 12 cross-check).
 - **Type consistency check:** `start_change_workflow(db, change_id, template_id, started_by_id)` used in Tasks 2/3/6; `notify_once(db, user_ids, *, kind, subject_key, title, body, link)` in Task 11 tests+sites; `effective_*` property names consistent across Tasks 1/4/7; `_match_step_id` defined in Task 5, imported in Task 6.

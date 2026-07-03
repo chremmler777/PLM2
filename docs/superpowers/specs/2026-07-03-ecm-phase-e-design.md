@@ -176,6 +176,52 @@ review passes; sonnet for Streams 2–4 feature work; haiku for mechanical work
 (label maps, simple CRUD wiring, tsc burn-down mechanics). Never trade
 correctness for cost.
 
+## Stream 5 — "Make it a real workflow" (merged 2026-07-03 from the agreed
+## kickoff scope in memory/ecm-phase-e-kickoff.md)
+
+User decision 2026-07-03: merge the previously agreed Phase E scope into this
+phase rather than deferring it.
+
+1. **Department membership admin:** Users-page multi-select departments
+   dropdown (admin assigns), backed by GET/PUT user-departments endpoints;
+   dev membership seeds so tasks flow immediately on both dev DBs.
+2. **Enforcement:** department membership required to act (falls out of
+   Stream 1 — submissions run through `complete_task`); the change page is
+   role-aware: your actionable pieces highlighted, the rest read-only.
+3. **My-Tasks-first:** cockpit answers "what do I do now" for the current
+   user — a panel listing *their* open actions on this change.
+4. **Engineering owns the affected-items decision** (user decision
+   2026-07-02): the lead proposes impacted items; an R&D department member
+   confirms. Mechanism: `impact_confirmed_by/at` on `ChangeRequest`, a
+   confirm endpoint restricted to R&D members, and the
+   `approved -> in_implementation` guard requires confirmation. Cockpit
+   shows the pending-confirmation state and offers the action in place to
+   R&D users.
+5. **English seed names:** rename seeded template/stage/step names
+   (ECM Bewertung → ECM Assessment, ECN Umsetzung → ECN Implementation, …).
+   Standards match templates BY NAME — existing rows in both dev DBs are
+   renamed by a startup repair; tests updated.
+6. **Plant defaults + cleanup:** consolidate duplicate plants ("USA" vs
+   "USA Toccoa", "Main Factory" test junk), default plant = project plant
+   else USA (interim decision); locate and fix the stray Weissenburg (WUG)
+   default.
+7. **Audit deferral bundle** (from the Phase D final review): audit list/
+   export org/role scoping, correlation-scoped chain-verify reporting,
+   AuditTimeline >1000-row truncation notice, fixed-TZ (UTC) day headings,
+   migration 025 downgrade guard, `ChangeResponse` vars()-validator
+   property fragility, ready-to-go badge color drift.
+
+## Environment facts (binding, from kickoff crib)
+
+- The real dev stack is docker-compose `claude-plm2-*` (backend :8000
+  bind-mount + --reload, frontend :5173, **Postgres**) — final smoke runs
+  there, not only on SQLite.
+- `alembic` runs as a console script from `backend/` (not `python3 -m`).
+- Postgres migrations need `sa.false()` server defaults and CASCADE for
+  circular-FK drops; SQLite needs plain-Integer FK adds + batch_alter_table.
+- Never stage `__pycache__`/`plm.db`; fixers stage explicit paths only.
+- Dev logins: test@example.com/password, admin@example.com/admin1234.
+
 ## Risks
 
 - **Migration fidelity** is the dominant risk: an in-flight change whose
