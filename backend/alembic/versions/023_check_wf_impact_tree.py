@@ -2,14 +2,14 @@
 PartRevision change back-link + no-geometry-change sign-off.
 
 Revision ID: 023
-Revises: 022
+Revises: 022a
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import inspect
 
 revision = "023"
-down_revision = "022"
+down_revision = "022a"
 branch_labels = None
 depends_on = None
 
