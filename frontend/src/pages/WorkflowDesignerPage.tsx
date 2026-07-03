@@ -120,7 +120,7 @@ export default function WorkflowDesignerPage() {
         setSelectedTemplateId(created.id);
       }
       setEditorTemplate(null);
-      } catch (error: any) {
+    } catch (error: any) {
       console.error('Save error:', error);
       const errorMsg = error?.response?.data?.detail || error?.message || 'Failed to save template';
       toast.error(typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg));
@@ -138,15 +138,19 @@ export default function WorkflowDesignerPage() {
   // Handle add stage
   const handleAddStage = () => {
     if (!editorTemplate) return;
-    const newStages = [...(editorTemplate.stages || [])] as DraftStage[];
-    const maxOrder = newStages.length > 0 ? Math.max(...newStages.map((s: any) => s.stage_order)) : 0;
-    const newStage: DraftStage = {
+    const newStages: WfStage[] = [...(editorTemplate.stages || [])];
+    const maxOrder = newStages.length > 0 ? Math.max(...newStages.map((s) => s.stage_order)) : 0;
+    // id/template_id are placeholders until the template is saved; handleSave
+    // only reads stage_order/name/steps when building the save payload.
+    const newStage: WfStage = {
+      id: 0,
+      template_id: editorTemplate.id ?? 0,
       stage_order: maxOrder + 1,
       name: null,
       steps: [],
     };
     newStages.push(newStage);
-    setEditorTemplate({ ...editorTemplate, stages: newStages as any });
+    setEditorTemplate({ ...editorTemplate, stages: newStages });
   };
 
   // Handle delete stage

@@ -24,11 +24,6 @@ interface Viewer3DProps {
   models?: AssemblyModel[]  // Assembly mode: render multiple models in one scene
   onError?: (error: Error) => void
   onLoad?: () => void
-  // Revision tree integration for fullscreen mode
-  articleId?: number
-  selectedRevisionId?: number | null
-  onRevisionSelect?: (revisionId: number) => void
-  sourcingType?: string
 }
 
 interface BoundingBoxInfo {
