@@ -31,9 +31,12 @@ def _org_scope(stmt, viewer: Optional[User]):
     Scoping path: ChangeRequest.project_id -> Project.plant_id ->
     Plant.organization_id. Changes with project_id NULL stay visible to
     everyone (explicit decision - no silent data loss). viewer=None means
-    "internal/service caller" and returns the statement unchanged.
+    "internal/service caller" and returns the statement unchanged. Admins
+    (viewer.role == "admin") also see every organization - mirrors the
+    intent already documented on the dead get_org_filter helper in
+    app/dependencies/auth.py ("Admins see all organizations").
     """
-    if viewer is None:
+    if viewer is None or viewer.role == "admin":
         return stmt
     org_projects = select(Project.id).join(Plant, Project.plant_id == Plant.id).where(
         Plant.organization_id == viewer.organization_id)

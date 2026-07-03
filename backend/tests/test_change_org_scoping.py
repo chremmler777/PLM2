@@ -94,11 +94,12 @@ async def test_org_scope_keeps_null_project_visible_to_everyone(seed):
     We verify the branch exists and behaves correctly by inspecting the
     compiled statement rather than round-tripping a row that the schema
     forbids."""
-    viewer = User(id=1, organization_id=seed["org_id"])
+    viewer = User(id=1, organization_id=seed["org_id"], role="viewer")
     stmt = _org_scope(select(ChangeRequest), viewer)
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
     assert "change_requests.project_id IS NULL" in compiled
     assert "change_requests.project_id IN" in compiled
+    assert " OR " in compiled
 
 
 async def test_list_changes_viewer_none_returns_everything(session_factory, seed, org_b, client, eng_auth, org_b_auth):
@@ -110,3 +111,20 @@ async def test_list_changes_viewer_none_returns_everything(session_factory, seed
         ids = {c.id for c in changes}
         assert change_a["id"] in ids
         assert change_b["id"] in ids
+
+
+async def test_admin_sees_all_organizations(client, admin_auth, org_b_auth, seed, org_b):
+    """An admin viewer (role='admin') bypasses org scoping entirely - the
+    controller decision documented on _org_scope, mirroring the intent
+    already noted on the dead get_org_filter helper."""
+    change_a = await _create_change(client, admin_auth, seed["project_id"])
+    change_b = await _create_change(client, org_b_auth, org_b["project_id"])
+
+    res = await client.get("/api/v1/changes", headers=admin_auth)
+    assert res.status_code == 200, res.text
+    ids = {c["id"] for c in res.json()}
+    assert change_a["id"] in ids
+    assert change_b["id"] in ids
+
+    res = await client.get(f"/api/v1/changes/{change_b['id']}", headers=admin_auth)
+    assert res.status_code == 200, res.text
