@@ -83,6 +83,13 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.title': { de: 'Audit-Trail', en: 'Audit trail' },
   'audit.chainOk': { de: 'Kette intakt', en: 'chain intact' },
   'audit.chainBroken': { de: 'Kette beschädigt', en: 'chain broken' },
+  'audit.chainOkGlobal': { de: 'Kette intakt (global)', en: 'chain intact (global)' },
+  'audit.chainOkScoped': { de: 'Kette intakt (diese Änderung)', en: 'chain intact (this change)' },
+  'audit.chainBrokenScoped': { de: 'Kette beschädigt (diese Änderung)', en: 'chain broken (this change)' },
+  'audit.truncated': {
+    de: 'Zeigt die neuesten 1000 Einträge — für die vollständige Historie CSV exportieren.',
+    en: 'showing the newest 1000 entries — export CSV for the full trail',
+  },
   'audit.export': { de: 'CSV exportieren', en: 'Export CSV' },
   'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
   'audit.all': { de: 'Alle', en: 'All' },

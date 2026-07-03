@@ -26,7 +26,10 @@ describe('AuditTimeline', () => {
       entry({ id: 2, action: 'gate_decided', entity_type: 'change' }),
       entry({ id: 1, action: 'wf_started', entity_type: 'wf_instance', entity_id: 3 }),
     ])
-    vi.mocked(auditApi.verify).mockResolvedValue({ valid: true, checked: 42, first_broken_id: null })
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: true, checked: 42, first_broken_id: null,
+      correlation_entries: 2, correlation_ok: true,
+    })
   })
   afterEach(cleanup)
 
@@ -35,6 +38,16 @@ describe('AuditTimeline', () => {
     expect(await screen.findByText('gate decided')).toBeDefined()
     expect(screen.getByText('wf started')).toBeDefined()
     expect(screen.getByText(/chain intact/)).toBeDefined()
+    expect(auditApi.verify).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007' })
+  })
+
+  it('shows correlation-scoped broken wording when correlation_ok is false', async () => {
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: true, checked: 42, first_broken_id: null,
+      correlation_entries: 2, correlation_ok: false,
+    })
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect(await screen.findByText(/chain broken/)).toBeDefined()
   })
 
   it('filters by entity type and exports', async () => {
@@ -45,5 +58,30 @@ describe('AuditTimeline', () => {
     expect(screen.getByText('wf started')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
     expect(auditApi.downloadCsv).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007' })
+  })
+
+  it('groups entries under UTC day headings suffixed "(UTC)"', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      // 23:30 UTC on 2026-07-01 - a local-timezone browser (e.g. UTC+2)
+      // would incorrectly bucket this into 2026-07-02 if grouping used
+      // local time instead of UTC.
+      entry({ id: 1, action: 'gate_decided', timestamp: '2026-07-01T23:30:00Z' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    await screen.findByText('gate decided')
+    expect(screen.getByText(/\(UTC\)/)).toBeDefined()
+  })
+
+  it('shows a truncation notice when entries hit the fetch limit', async () => {
+    const many = Array.from({ length: 1000 }, (_, i) => entry({ id: i + 1 }))
+    vi.mocked(auditApi.list).mockResolvedValue(many)
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect(await screen.findByText(/newest 1000/)).toBeDefined()
+  })
+
+  it('does not show a truncation notice when under the fetch limit', async () => {
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    await screen.findByText('gate decided')
+    expect(screen.queryByText(/newest 1000/)).toBeNull()
   })
 })

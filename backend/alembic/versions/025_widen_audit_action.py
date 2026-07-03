@@ -24,7 +24,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("audit_logs") as batch:
-        batch.alter_column(
-            "action", type_=sa.String(20), existing_type=sa.String(64),
-            existing_nullable=False)
+    bind = op.get_bind()
+    cols = {c["name"]: c for c in inspect(bind).get_columns("audit_logs")}
+    if "action" in cols:
+        with op.batch_alter_table("audit_logs") as batch:
+            batch.alter_column(
+                "action", type_=sa.String(20), existing_type=sa.String(64),
+                existing_nullable=False)

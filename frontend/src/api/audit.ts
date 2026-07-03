@@ -12,12 +12,20 @@ export interface AuditEntry {
   correlation_id: string | null
   log_level: string
 }
-export interface AuditVerify { valid: boolean; checked: number; first_broken_id: number | null }
+export interface AuditVerify {
+  valid: boolean
+  checked: number
+  first_broken_id: number | null
+  // Only populated when verify() is called with a correlation_id.
+  correlation_entries?: number | null
+  correlation_ok?: boolean | null
+}
 
 export const auditApi = {
   list: (params: { correlation_id?: string; entity_type?: string; limit?: number; offset?: number }) =>
     client.get<AuditEntry[]>('/v1/audit', { params }).then((r) => r.data),
-  verify: () => client.get<AuditVerify>('/v1/audit/verify').then((r) => r.data),
+  verify: (params?: { correlation_id?: string }) =>
+    client.get<AuditVerify>('/v1/audit/verify', { params }).then((r) => r.data),
   downloadCsv: async (params: { correlation_id?: string }) => {
     const res = await client.get('/v1/audit/export', { params, responseType: 'blob' })
     const url = URL.createObjectURL(res.data as Blob)

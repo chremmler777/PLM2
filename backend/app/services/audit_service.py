@@ -72,3 +72,33 @@ class AuditService:
                 return {"valid": False, "checked": len(rows), "first_broken_id": r.id}
             prev = r.entry_hash
         return {"valid": True, "checked": len(rows), "first_broken_id": None}
+
+    @staticmethod
+    async def verify_correlation(session: AsyncSession, correlation_id: str, chain_valid: bool) -> dict:
+        """Per-correlation coverage report for GET /audit/verify?correlation_id=.
+
+        The global chain check (verify_chain) already walks every row in id
+        order, so it is the authoritative tamper check; this method adds a
+        second, independent self-consistency pass over just this
+        correlation's rows (each row's entry_hash re-derived from its own
+        stored fields + its own stored previous_hash, rather than from the
+        chain-walk's recomputed previous link). correlation_ok requires BOTH:
+        the global chain being intact, and every one of this correlation's own
+        rows re-hashing correctly in place. A correlation with zero entries is
+        reported as not ok (nothing was verified)."""
+        rows = (await session.execute(
+            select(AuditLog).where(AuditLog.correlation_id == correlation_id).order_by(AuditLog.id)
+        )).scalars().all()
+        entries_ok = True
+        for r in rows:
+            expected = hashlib.sha256(AuditService._payload(
+                r.entity_type, r.entity_id, r.action, r.old_values, r.new_values,
+                r.user_id, r.timestamp, r.previous_hash, r.correlation_id, r.log_level
+            ).encode()).hexdigest()
+            if expected != r.entry_hash:
+                entries_ok = False
+                break
+        return {
+            "correlation_entries": len(rows),
+            "correlation_ok": chain_valid and entries_ok and len(rows) > 0,
+        }

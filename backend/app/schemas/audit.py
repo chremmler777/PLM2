@@ -25,3 +25,6 @@ class AuditVerifyResponse(BaseModel):
     valid: bool
     checked: int
     first_broken_id: Optional[int] = None
+    # Populated only when GET /audit/verify is called with ?correlation_id=.
+    correlation_entries: Optional[int] = None
+    correlation_ok: Optional[bool] = None

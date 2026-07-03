@@ -47,7 +47,7 @@ export default function ImplementationPanel({ changeId }: Props) {
         data-testid="ready-banner"
         className={`rounded-lg border p-3 text-sm font-semibold ${
           data.ready_to_go
-            ? 'bg-green-900/40 border-green-700 text-green-200'
+            ? 'bg-emerald-900/40 border-emerald-700 text-emerald-200'
             : 'bg-slate-800 border-slate-700 text-slate-300'
         }`}
       >
@@ -76,7 +76,7 @@ export default function ImplementationPanel({ changeId }: Props) {
               {item.instance_status && (
                 <span
                   className={`px-2 py-0.5 rounded-full text-xs ${
-                    item.ready ? 'bg-green-900 text-green-100' : 'bg-blue-900 text-blue-100'
+                    item.ready ? 'bg-emerald-900 text-emerald-100' : 'bg-blue-900 text-blue-100'
                   }`}
                 >
                   {item.ready
@@ -87,7 +87,7 @@ export default function ImplementationPanel({ changeId }: Props) {
               )}
               <span
                 className={`px-2 py-0.5 rounded-full text-xs ${
-                  evidenceOk ? 'bg-green-900 text-green-100' : 'bg-amber-900 text-amber-100'
+                  evidenceOk ? 'bg-emerald-900 text-emerald-100' : 'bg-amber-900 text-amber-100'
                 }`}
               >
                 {evidenceOk

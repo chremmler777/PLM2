@@ -8,13 +8,24 @@ const pretty = (s: string | null): string | null => {
   try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
 }
 
+const LIST_LIMIT = 1000
+
 export default function AuditTimeline({ correlationId }: { correlationId: string }) {
   const [entityFilter, setEntityFilter] = useState<string>('all')
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['audit', correlationId],
-    queryFn: () => auditApi.list({ correlation_id: correlationId, limit: 1000 }),
+    // Newest-first (see backend's list ordering): with LIST_LIMIT truncation
+    // this drops the OLDEST entries, keeping the most recent history visible.
+    queryFn: () => auditApi.list({ correlation_id: correlationId, limit: LIST_LIMIT }),
   })
-  const { data: chain } = useQuery({ queryKey: ['audit-verify'], queryFn: auditApi.verify })
+  // Always correlation-scoped: this component is always shown for one change,
+  // so the chain check is run WITH correlation_id and the badge reports what
+  // was actually verified for this change (not just "some global chain").
+  const { data: chain } = useQuery({
+    queryKey: ['audit-verify', correlationId],
+    queryFn: () => auditApi.verify({ correlation_id: correlationId }),
+  })
+  const truncated = entries.length === LIST_LIMIT
 
   const entityTypes = useMemo(
     () => Array.from(new Set(entries.map((e) => e.entity_type))), [entries])
@@ -27,7 +38,10 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
   const byDay = useMemo(() => {
     const groups = new Map<string, AuditEntry[]>()
     for (const e of shown) {
-      const day = new Date(e.timestamp).toLocaleDateString()
+      // Day grouping is computed in UTC (not the browser's local timezone) so
+      // the heading is stable across viewers - suffixed "(UTC)" so it reads
+      // unambiguously either way.
+      const day = `${new Date(e.timestamp).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
       if (!groups.has(day)) groups.set(day, [])
       groups.get(day)!.push(e)
     }
@@ -43,8 +57,10 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
           <h3 className="text-sm font-semibold text-slate-200">{t('audit.title')}</h3>
           {chain && (
             <span className={`text-xs px-2 py-0.5 rounded-full ${
-              chain.valid ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'}`}>
-              {chain.valid ? `✓ ${t('audit.chainOk')}` : `✗ ${t('audit.chainBroken')}`}
+              chain.correlation_ok ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'}`}>
+              {chain.correlation_ok
+                ? `✓ ${t('audit.chainOkScoped')}`
+                : `✗ ${t('audit.chainBrokenScoped')}`}
             </span>
           )}
         </div>
@@ -65,6 +81,10 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
           </button>
         ))}
       </div>
+
+      {truncated && (
+        <p className="text-xs text-amber-400 mb-3">{t('audit.truncated')}</p>
+      )}
 
       {shown.length === 0 && <p className="text-sm text-slate-500">{t('audit.empty')}</p>}
       {byDay.map(([day, dayEntries]) => (
