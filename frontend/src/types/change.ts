@@ -197,6 +197,26 @@ export interface Gate {
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
 export interface ActivityRef { id: number; department_id: number; label: string; sort_order: number; }
 
+// --- Task 19: "Your actions" cockpit panel ---
+
+export type MyActionKind =
+  | 'assessment' | 'wf_task' | 'deviation_decision' | 'gate' | 'impact_confirm' | 'transition';
+
+export interface MyAction {
+  kind: MyActionKind;
+  label: string;
+  target_tab: string;
+  assessment_id?: number | null;
+  task_id?: number | null;
+  deviation_id?: number | null;
+  gate_key?: GateKey | null;
+}
+
+export interface MyActionsResponse {
+  actions: MyAction[];
+  memberships: number[];
+}
+
 export interface ImpactTreeNode {
   part_id: number;
   part_number: string;

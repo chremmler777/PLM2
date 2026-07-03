@@ -238,6 +238,22 @@ async def get_change(
     return change
 
 
+@router.get("/{change_id}/my-actions")
+async def get_my_actions(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Task 19: 'Your actions' — the current user's open, actionable items on
+    this one change, plus their department memberships (so the frontend can
+    grey out actions that belong to someone else's department)."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    actions = await ChangeService.my_actions(db, change, current_user)
+    memberships = await WorkflowService.get_user_department_ids(db, current_user.id)
+    return {"actions": actions, "memberships": memberships}
+
+
 @router.get("/{change_id}/changelog", response_model=List[ChangelogResponse])
 async def get_changelog(
     change_id: int,
@@ -458,14 +474,10 @@ async def confirm_impact(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if current_user.role != "admin":
-        rd_dept = (await db.execute(
-            select(Department).where(Department.name == "R&D"))).scalar_one_or_none()
-        dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
-        if rd_dept is None or rd_dept.id not in dept_ids:
-            raise HTTPException(
-                status_code=403,
-                detail="Only an R&D department member or an admin may confirm impact")
+    if not await ChangeService.user_can_confirm_impact(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only an R&D department member or an admin may confirm impact")
     if not change.impacted_items:
         raise HTTPException(status_code=409, detail="No impacted items to confirm")
     try:

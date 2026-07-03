@@ -45,6 +45,7 @@ vi.mock('../api/changes', () => ({
     getImplementation: vi.fn().mockResolvedValue({ ready_to_go: false }),
     getGates: vi.fn().mockResolvedValue([]),
     listDeviations: vi.fn().mockResolvedValue([]),
+    myActions: vi.fn().mockResolvedValue({ actions: [], memberships: [] }),
     uploadAttachment: vi.fn(),
   },
 }))
@@ -53,6 +54,9 @@ vi.mock('../api/plants', () => ({
 }))
 vi.mock('../hooks/queries/useWorkflows', () => ({
   useDepartments: () => ({ data: [] }),
+}))
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({ isAdmin: false, role: 'engineer' }),
 }))
 
 vi.mock('../components/changes/AssessmentRouting', () => ({ default: () => <div>mock-assessment-routing</div> }))

@@ -17,9 +17,13 @@ interface Props {
   status: ChangeStatus
   impactConfirmedByName?: string | null
   impactConfirmedAt?: string | null
+  /** Task 19: whether the current user may confirm impact (R&D member or
+      admin — server-mirrored via GET /my-actions). Defaults to true so
+      existing callers that don't pass it keep prior behaviour. */
+  canConfirm?: boolean
 }
 
-export default function ImpactTree({ changeId, status, impactConfirmedByName, impactConfirmedAt }: Props) {
+export default function ImpactTree({ changeId, status, impactConfirmedByName, impactConfirmedAt, canConfirm = true }: Props) {
   const qc = useQueryClient()
   const editable = !LOCKED.includes(status)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -147,7 +151,7 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
               ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '—'} · {new Date(impactConfirmedAt).toLocaleString()}
             </span>
-          ) : (
+          ) : canConfirm ? (
             <button
               onClick={() => confirmImpact.mutate()}
               disabled={confirmImpact.isPending}
@@ -155,6 +159,10 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
             >
               {t('impact.confirm')}
             </button>
+          ) : (
+            <span className="text-amber-300 text-xs" title={t('actions.notYourDepartment')}>
+              {t('impact.pending')}
+            </span>
           )}
           {editable ? (
             <button

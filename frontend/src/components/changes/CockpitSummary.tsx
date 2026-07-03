@@ -1,4 +1,4 @@
-import type { ChangeDetail, Gate, GateKey } from '../../types/change'
+import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineChip } from './DeadlineChip'
@@ -16,9 +16,16 @@ interface Props {
   /** Called when the user clicks the impact-confirmation blocker row — the
       page jumps to the Impacted tab so it can be resolved in place. */
   onShowImpact?: () => void
+  /** Task 19: the current user's open actions on this change (GET
+      /my-actions). Renders as the topmost "Your actions" card when non-empty;
+      hidden entirely otherwise. */
+  actions?: MyAction[]
+  /** Called with an action's target_tab when its button is clicked — the
+      page jumps to where the action is performed. */
+  onAction?: (targetTab: string) => void
 }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction }: Props) {
   const next = NEXT_STATUS[change.status] ?? []
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
@@ -57,7 +64,24 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   }
 
   return (
-    <div className="grid md:grid-cols-3 gap-3 my-4">
+    <div className="my-4">
+      {actions.length > 0 && (
+        <div className="bg-sky-950 border border-sky-700 rounded-lg p-4 mb-3">
+          <h3 className="text-xs uppercase tracking-wide text-sky-300 mb-2">{t('actions.title')}</h3>
+          <div className="flex flex-wrap gap-2">
+            {actions.map((a, i) => (
+              <button
+                key={`${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? i}`}
+                type="button"
+                className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg text-sm"
+                onClick={() => onAction?.(a.target_tab)}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="grid md:grid-cols-3 gap-3">
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.where')}</h3>
         <span className={`px-2.5 py-1 rounded-full text-sm font-semibold ${STATUS_PILL[change.status]}`}>
@@ -139,6 +163,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   )

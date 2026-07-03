@@ -121,4 +121,27 @@ describe('CockpitSummary', () => {
     expect(screen.queryByText(/Impact confirmation pending/)).toBeNull()
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
   })
+
+  it('renders a "Your actions" panel with a button per action and fires onAction with its target_tab', () => {
+    const onAction = vi.fn()
+    render(<CockpitSummary change={change()}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[
+        { kind: 'assessment', label: 'Submit assessment for R&D', target_tab: 'assessments', assessment_id: 1 },
+        { kind: 'deviation_decision', label: 'Decide deviation #12', target_tab: 'overview', deviation_id: 12 },
+      ]}
+      onAction={onAction} />)
+    expect(screen.getByText(/Your actions/)).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Submit assessment for R&D' }))
+    expect(onAction).toHaveBeenCalledWith('assessments')
+    fireEvent.click(screen.getByRole('button', { name: 'Decide deviation #12' }))
+    expect(onAction).toHaveBeenCalledWith('overview')
+  })
+
+  it('hides the "Your actions" panel entirely when there are no actions', () => {
+    render(<CockpitSummary change={change()}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[]} />)
+    expect(screen.queryByText(/Your actions/)).toBeNull()
+  })
 })

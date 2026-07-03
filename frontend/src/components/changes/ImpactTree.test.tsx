@@ -107,6 +107,12 @@ describe('ImpactTree', () => {
     await waitFor(() => expect(changesApi.confirmImpact).toHaveBeenCalledWith(7))
   })
 
+  it('hides the confirm button for a non-member (canConfirm=false)', async () => {
+    wrap(<ImpactTree changeId={7} status="captured" canConfirm={false} />)
+    await screen.findByText('Child')
+    expect(screen.queryByRole('button', { name: /Confirm impact \(R&D\)/ })).toBeNull()
+  })
+
   it('shows a confirmed badge with who/when instead of the button once confirmed', async () => {
     wrap(<ImpactTree changeId={7} status="captured"
       impactConfirmedByName="RD Member" impactConfirmedAt="2026-07-01T12:00:00" />)

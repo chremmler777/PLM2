@@ -880,6 +880,131 @@ class ChangeService:
         return change
 
     @staticmethod
+    async def user_can_confirm_impact(session: AsyncSession, user: User) -> bool:
+        """Task 18's confirm-impact rule (only an R&D department member or an
+        admin), extracted so both POST /impact/confirm (changes.py) and the
+        Task 19 my-actions assembly below use the identical check instead of
+        duplicating it."""
+        if user.role == "admin":
+            return True
+        from app.services.workflow_service import WorkflowService
+        rd_dept = (await session.execute(
+            select(Department).where(Department.name == "R&D"))).scalar_one_or_none()
+        if rd_dept is None:
+            return False
+        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        return rd_dept.id in dept_ids
+
+    @staticmethod
+    async def my_actions(
+        session: AsyncSession, change: ChangeRequest, user: User,
+    ) -> list[dict]:
+        """Task 19: the current user's open, actionable items on this one
+        change - the cockpit's 'Your actions' panel. Every authz check below
+        mirrors the endpoint that actually performs the action; see the
+        docstring on each for the mirrored source."""
+        from app.models.workflow import WfInstance, WfInstanceTask, WfStep
+        from app.services.workflow_service import WorkflowService
+
+        actions: list[dict] = []
+        dept_ids = set(await WorkflowService.get_user_department_ids(session, user.id))
+
+        # kind "assessment": active change-scoped assessment tasks in the
+        # user's departments, or owned by them. Mirrors GET /changes/my-tasks
+        # (changes.py my_change_tasks) narrowed to this one change.
+        assess_dept_ids = {a.department_id for a in change.assessments}
+        dept_names: dict[int, str] = {}
+        if assess_dept_ids:
+            rows = (await session.execute(
+                select(Department.id, Department.name)
+                .where(Department.id.in_(assess_dept_ids)))).all()
+            dept_names = {i: n for i, n in rows}
+        for a in change.assessments:
+            if a.effective_status != "active":
+                continue
+            if a.department_id not in dept_ids and a.effective_owner_id != user.id:
+                continue
+            actions.append({
+                "kind": "assessment",
+                "label": f"Submit assessment for {dept_names.get(a.department_id, a.department_id)}",
+                "target_tab": "assessments",
+                "assessment_id": a.id,
+            })
+
+        # kind "wf_task": active ECN (part-revision-scoped) tasks spawned by
+        # this change, in the user's departments or owned by them. Mirrors
+        # WorkflowService.get_my_tasks, narrowed to this change via
+        # PartRevision.originating_change_id.
+        task_rows = (await session.execute(
+            select(WfInstanceTask, WfStep.step_name)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+            .outerjoin(WfStep, WfStep.id == WfInstanceTask.step_id)
+            .where(
+                PartRevision.originating_change_id == change.id,
+                WfInstance.status == "active",
+                WfInstanceTask.status == "active",
+                WfInstanceTask.is_actionable == True,  # noqa: E712
+            ))).all()
+        for t, step_name in task_rows:
+            if t.department_id not in dept_ids and t.owner_id != user.id:
+                continue
+            actions.append({
+                "kind": "wf_task",
+                "label": f"Complete {step_name or 'workflow'} task",
+                "target_tab": "implementation",
+                "task_id": t.id,
+            })
+
+        # kind "deviation_decision": pending transition deviations this user
+        # may decide. Mirrors ChangeService.decide_transition_deviation's
+        # authz exactly (4-eyes rule + engineer/admin + lead-or-admin).
+        for dev in change.transition_deviations:
+            if dev.status != "pending":
+                continue
+            if dev.proposed_by == user.id:
+                continue
+            if user.role not in ("admin", "engineer"):
+                continue
+            if (user.role != "admin" and user.id != change.lead_id
+                    and dev.proposed_by != change.lead_id):
+                continue
+            actions.append({
+                "kind": "deviation_decision",
+                "label": f"Decide deviation #{dev.id}",
+                "target_tab": "overview",
+                "deviation_id": dev.id,
+            })
+
+        # kind "impact_confirm": approved & not yet confirmed, and this user
+        # may confirm it. Mirrors ChangeService.user_can_confirm_impact /
+        # POST /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
+        if (change.status == "approved" and change.impact_confirmed_at is None
+                and await ChangeService.user_can_confirm_impact(session, user)):
+            actions.append({
+                "kind": "impact_confirm",
+                "label": "Confirm impacted items",
+                "target_tab": "impacted",
+            })
+
+        # kind "gate": a gate that guards the currently-reachable transition,
+        # not yet decided 'yes', decidable by this user. Mirrors put_gate's
+        # authz exactly (changes.py put_gate: admin or the change lead).
+        if user.role == "admin" or user.id == change.lead_id:
+            reachable = ALLOWED_TRANSITIONS.get(change.status, set())
+            for gate in change.gates:
+                target = GATE_TARGET_STATUS.get(gate.gate_key)
+                if target in reachable and gate.decision != "yes":
+                    actions.append({
+                        "kind": "gate",
+                        "label": f"Decide gate '{gate.gate_key}'",
+                        "target_tab": "d1",
+                        "gate_key": gate.gate_key,
+                    })
+
+        return actions
+
+    @staticmethod
     async def seed_impacted_from_relations(
         session: AsyncSession, change: ChangeRequest, user_id: int,
     ) -> int:

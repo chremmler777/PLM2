@@ -17,6 +17,7 @@ import CockpitSummary from '../components/changes/CockpitSummary';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { useDepartments } from '../hooks/queries/useWorkflows';
+import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import { STATUS_LABELS } from '../lib/changeStatus';
 
@@ -58,9 +59,21 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'deviations'],
     queryFn: () => changesApi.listDeviations(changeId),
   });
+  const { data: myActions } = useQuery({
+    queryKey: ['change-my-actions', changeId],
+    queryFn: () => changesApi.myActions(changeId),
+  });
   const { data: departments = [] } = useDepartments();
+  const { isAdmin } = useAuth();
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
+  // Task 19: client-side mirror of the confirm-impact authz (R&D member or
+  // admin) — server enforcement already exists (Task 18); this only decides
+  // whether to show the button. Defaults to true until departments/memberships
+  // have loaded, so the button doesn't flash-hide.
+  const rdDeptId = departments.find((d) => d.name === 'R&D')?.id;
+  const canConfirmImpact = !myActions ? true
+    : isAdmin || (rdDeptId !== undefined && myActions.memberships.includes(rdDeptId));
 
   const transition = useMutation({
     mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
@@ -162,6 +175,8 @@ export default function ChangeDetailPage() {
         advancing={transition.isPending}
         onResolveGate={() => setTab('d1')}
         onShowImpact={() => setTab('impacted')}
+        actions={myActions?.actions ?? []}
+        onAction={(targetTab) => setTab(targetTab as Tab)}
       />
 
       <div className="border-b flex gap-4 text-sm mb-4">
@@ -229,7 +244,8 @@ export default function ChangeDetailPage() {
       {tab === 'impacted' && change && (
         <ImpactTree changeId={change.id} status={change.status}
           impactConfirmedByName={change.impact_confirmed_by_name}
-          impactConfirmedAt={change.impact_confirmed_at} />
+          impactConfirmedAt={change.impact_confirmed_at}
+          canConfirm={canConfirmImpact} />
       )}
 
       {tab === 'implementation' && change && (

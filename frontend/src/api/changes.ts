@@ -3,7 +3,7 @@ import type {
   ChangeRequest, ChangeDetail, ChangeTask,
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
-  TransitionDeviation, ImpactTreeResponse, ImplementationProgress,
+  TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -52,6 +52,9 @@ export const changesApi = {
 
   myTasks: () =>
     client.get<ChangeTask[]>('/v1/changes/my-tasks').then((r) => r.data),
+
+  myActions: (id: number): Promise<MyActionsResponse> =>
+    client.get(`/v1/changes/${id}/my-actions`).then((r) => r.data),
 
   myEscalations: (): Promise<Escalation[]> =>
     client.get('/v1/changes/my-escalations').then((r) => r.data),
