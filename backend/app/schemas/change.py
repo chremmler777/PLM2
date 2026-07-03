@@ -98,6 +98,29 @@ class AssessmentResponse(BaseModel):
     due_date: Optional[datetime] = None
     overdue: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _read_through(cls, data: Any) -> Any:
+        """Map the ORM's execution-state columns through effective_* so the
+        linked WfInstanceTask (Phase E) is the source of truth for status/
+        owner/acceptance/due-date/overdue, while all other fields are copied
+        verbatim from the assessment row itself."""
+        if hasattr(data, "effective_status"):
+            return {
+                **{f: getattr(data, f) for f in (
+                    "id", "department_id", "verdict", "cost_impact",
+                    "lead_time_impact_days", "conditions", "notes",
+                    "responsible_id", "submitted_at", "stage_order",
+                    "rasic_letter")},
+                "status": data.effective_status,
+                "owner_id": data.effective_owner_id,
+                "owner_name": data.effective_owner_name,
+                "accepted_at": data.effective_accepted_at,
+                "due_date": data.effective_due_date,
+                "overdue": data.effective_overdue,
+            }
+        return data
+
     class Config:
         from_attributes = True
 

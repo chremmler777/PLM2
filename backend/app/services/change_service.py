@@ -852,7 +852,9 @@ class ChangeService:
         a = await session.get(ChangeAssessment, assessment_id)
         if a is None or a.change_id != change.id:
             raise ChangeError("Assessment not found on this change")
-        if a.status != "active":
+        # Execution state lives on the linked engine task for R/A rows (Phase E);
+        # the row itself may sit at "pending" while its task is active.
+        if a.effective_status != "active":
             raise ChangeError("Assessment is not active")
         return a
 
@@ -861,13 +863,22 @@ class ChangeService:
                                 assessment_id: int, user) -> ChangeAssessment:
         from app.services.workflow_service import WorkflowService
         a = await ChangeService._get_assessment(session, change, assessment_id)
-        if user.role != "admin" and not await WorkflowService._is_department_member(
-                session, user.id, a.department_id):
-            raise ChangeError("Only members of the assessed department may accept")
-        if a.owner_id is not None and a.owner_id != user.id:
-            raise ChangeError("Assessment is already owned by another user")
-        a.owner_id = user.id
-        a.accepted_at = datetime.utcnow()
+        if a.wf_instance_task_id is not None and a.rasic_letter in BLOCKING_LETTERS:
+            # Linked R/A row: the engine task is the source of truth for
+            # execution state — delegate ownership to it.
+            try:
+                await WorkflowService.accept_task(session, a.wf_instance_task_id, user)
+            except ValueError as e:
+                raise ChangeError(str(e))
+        else:
+            # Legacy/unlinked fallback (e.g. routing-deviation rows).
+            if user.role != "admin" and not await WorkflowService._is_department_member(
+                    session, user.id, a.department_id):
+                raise ChangeError("Only members of the assessed department may accept")
+            if a.owner_id is not None and a.owner_id != user.id:
+                raise ChangeError("Assessment is already owned by another user")
+            a.owner_id = user.id
+            a.accepted_at = datetime.utcnow()
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_accepted",
@@ -881,20 +892,30 @@ class ChangeService:
                                 actor) -> ChangeAssessment:
         from app.services.workflow_service import WorkflowService
         a = await ChangeService._get_assessment(session, change, assessment_id)
-        allowed = (actor.role == "admin" or change.lead_id == actor.id
-                   or await WorkflowService._is_department_member(
-                       session, actor.id, a.department_id))
-        if not allowed:
-            raise ChangeError(
-                "Only an admin, the change lead, or a department member may assign")
-        assignee = await session.get(User, assignee_id)
-        if assignee is None or not assignee.is_active:
-            raise ChangeError("Assignee not found or inactive")
-        if not await WorkflowService._is_department_member(
-                session, assignee_id, a.department_id):
-            raise ChangeError("Assignee must be a member of the assessed department")
-        a.owner_id = assignee_id
-        a.accepted_at = None
+        if a.wf_instance_task_id is not None and a.rasic_letter in BLOCKING_LETTERS:
+            # Linked R/A row: delegate to the engine task. Note WorkflowService
+            # .assign_task authorizes admin-or-department-member only; it does
+            # not carry the legacy "change lead may assign" allowance below.
+            try:
+                await WorkflowService.assign_task(
+                    session, a.wf_instance_task_id, assignee_id, actor)
+            except ValueError as e:
+                raise ChangeError(str(e))
+        else:
+            allowed = (actor.role == "admin" or change.lead_id == actor.id
+                       or await WorkflowService._is_department_member(
+                           session, actor.id, a.department_id))
+            if not allowed:
+                raise ChangeError(
+                    "Only an admin, the change lead, or a department member may assign")
+            assignee = await session.get(User, assignee_id)
+            if assignee is None or not assignee.is_active:
+                raise ChangeError("Assignee not found or inactive")
+            if not await WorkflowService._is_department_member(
+                    session, assignee_id, a.department_id):
+                raise ChangeError("Assignee must be a member of the assessed department")
+            a.owner_id = assignee_id
+            a.accepted_at = None
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_assigned",
@@ -912,11 +933,21 @@ class ChangeService:
     async def set_assessment_due_date(session: AsyncSession, change: ChangeRequest,
                                       assessment_id: int, due_date: datetime,
                                       actor) -> ChangeAssessment:
+        from app.services.workflow_service import WorkflowService
         a = await ChangeService._get_assessment(session, change, assessment_id)
-        if actor.role != "admin" and change.lead_id != actor.id:
-            raise ChangeError("Only the change lead or an admin may set due dates")
-        old = a.due_date.isoformat() if a.due_date else None
-        a.due_date = due_date
+        old = a.effective_due_date.isoformat() if a.effective_due_date else None
+        if a.wf_instance_task_id is not None and a.rasic_letter in BLOCKING_LETTERS:
+            # Linked R/A row: delegate to the engine task, which already
+            # authorizes against the change lead for change-scoped instances.
+            try:
+                await WorkflowService.set_task_due_date(
+                    session, a.wf_instance_task_id, due_date, actor)
+            except ValueError as e:
+                raise ChangeError(str(e))
+        else:
+            if actor.role != "admin" and change.lead_id != actor.id:
+                raise ChangeError("Only the change lead or an admin may set due dates")
+            a.due_date = due_date
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_due_date_set",

@@ -1,5 +1,6 @@
 # backend/tests/test_changes.py
 import pytest
+from sqlalchemy import select
 
 from tests.conftest import approve_gates, force_complete_check_workflows
 
@@ -312,6 +313,65 @@ async def test_my_change_tasks_lists_pending_assessments(
     assert res.status_code == 200, res.text
     tasks = res.json()
     assert any(t["change_id"] == change["id"] and t["kind"] == "assessment" for t in tasks)
+
+
+async def test_assessment_response_reads_execution_from_task(
+    client, eng_auth, seed, departments, session_factory
+):
+    """Task 7: AssessmentResponse's status/owner/accepted_at read through the
+    linked WfInstanceTask — accepting via the API writes ownership onto the
+    task, and GET /v1/changes/{id}'s assessments array shows it even though the
+    assessment row itself stays at its own 'pending' status."""
+    from app.models.workflow import (
+        UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfInstanceTask,
+    )
+    from app.models.change import ChangeRoutingStandard, ChangeAssessment
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"],
+                             department_id=departments["Tool Engineer"]))
+        t = WfTemplate(name="ECR-ART", description="x", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        stage = WfStage(template_id=t.id, stage_order=1, name="S1")
+        s.add(stage); await s.flush()
+        step = WfStep(stage_id=stage.id, step_name="S1", position_in_stage=1)
+        s.add(step); await s.flush()
+        s.add(WfStepRasic(step_id=step.id,
+                          department_id=departments["Tool Engineer"], rasic_letter="R"))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+
+    change = await _create_change(client, eng_auth, seed["project_id"], lead_id=seed["engineer_id"])
+    await approve_gates(client, eng_auth, change["id"])
+    part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-RT")
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part_id}, headers=eng_auth)
+    await _transition(client, eng_auth, change["id"], "in_assessment")
+
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"]))).scalars().one()
+        assert a.wf_instance_task_id is not None
+        assessment_id, task_id = a.id, a.wf_instance_task_id
+
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/assessments/{assessment_id}/accept",
+        headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    detail = (await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)).json()
+    assessment = next(a for a in detail["assessments"] if a["id"] == assessment_id)
+    assert assessment["status"] == "active"
+    assert assessment["owner_id"] == seed["engineer_id"]
+    assert assessment["accepted_at"] is not None
+
+    async with session_factory() as s:
+        row = await s.get(ChangeAssessment, assessment_id)
+        assert row.status == "pending"        # the row itself is untouched
+        assert row.owner_id is None
+        task = await s.get(WfInstanceTask, task_id)
+        assert task.owner_id == seed["engineer_id"]   # task is the source of truth
 
 
 # ── Task-6 gap-fix tests ──────────────────────────────────────────────────────

@@ -69,6 +69,68 @@ async def test_assessments_get_due_date_on_activation(
         assert all(a.effective_due_date is None for a in pending)
 
 
+async def test_accept_assessment_delegates_to_linked_task(
+        client, eng_auth, seed, session_factory, part):
+    """Phase E: for an R/A row linked to an engine task, POST .../accept must
+    write ownership onto the WfInstanceTask (the source of truth) rather than
+    the assessment row, and the response must read it back through
+    effective_owner_id/effective_accepted_at/effective_status."""
+    from app.models.change import ChangeAssessment, ChangeRoutingStandard
+    from app.models.workflow import (
+        Department, WfTemplate, WfStage, WfStep, WfStepRasic, UserDepartment,
+        WfInstanceTask,
+    )
+    async with session_factory() as s:
+        dep = {}
+        for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
+            d = Department(name=n, flow_type="change", is_active=True)
+            s.add(d); await s.flush(); dep[n] = d.id
+        t = WfTemplate(name="ECR-tooling-accept", description="x", version=1,
+                       is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [(1, [("Tool Engineer", "R"), ("Process Engineer", "R")]),
+                  (2, [("Manufacturing Engineer", "A")])]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"S{order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"S{order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=dep[name], rasic_letter=letter))
+        s.add(ChangeRoutingStandard(change_type="tooling", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dep["Tool Engineer"]))
+        await s.commit()
+
+    change = await _routed_change(client, eng_auth, seed, session_factory,
+                                  part["part_id"])
+
+    async with session_factory() as s:
+        a = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.department_id == dep["Tool Engineer"]))).scalar_one()
+        assert a.wf_instance_task_id is not None, "stage-1 R row must link to a task"
+        assessment_id, task_id = a.id, a.wf_instance_task_id
+
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/assessments/{assessment_id}/accept",
+        headers=eng_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["owner_id"] == seed["engineer_id"]
+    assert body["accepted_at"] is not None
+    assert body["status"] == "active"   # effective_status, read through the task
+
+    async with session_factory() as s:
+        a2 = await s.get(ChangeAssessment, assessment_id)
+        assert a2.status == "pending"   # row itself untouched
+        assert a2.owner_id is None
+        assert a2.accepted_at is None
+        task = await s.get(WfInstanceTask, task_id)
+        assert task.owner_id == seed["engineer_id"]   # task is the source of truth
+        assert task.accepted_at is not None
+
+
 async def _activate_first_assessment(session_factory, change_id):
     """Directly mark the change's first assessment row raw-'active' with a due date.
 
