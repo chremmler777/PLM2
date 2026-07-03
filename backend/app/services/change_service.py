@@ -294,12 +294,40 @@ class ChangeService:
                    WfInstanceTask.is_actionable == True,  # noqa: E712
                    WfInstanceTask.due_date.is_not(None),
                    WfInstanceTask.due_date < now))).all()
+        seen_task_ids: set[int] = set()
         for t, step_name, change_id in task_rows:
+            seen_task_ids.add(t.id)
             c = by_id[change_id]
             out.append({
                 "kind": "wf_task", "change_id": c.id,
                 "change_number": c.change_number, "change_title": c.title,
                 "label": step_name, "owner_id": t.owner_id,
+                "owner_name": t.owner_name,
+                "due_date": t.due_date.isoformat(),
+                "days_overdue": (now - t.due_date).days,
+            })
+
+        # Change-scoped instances attach to a change directly (no part
+        # revision, step_id may be null): roll their overdue tasks up too.
+        change_task_rows = (await session.execute(
+            select(WfInstanceTask, Department.name, WfInstance.change_id)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+            .join(Department, Department.id == WfInstanceTask.department_id)
+            .where(WfInstance.change_id.in_(by_id.keys()),
+                   WfInstance.status == "active",
+                   WfInstanceTask.status == "active",
+                   WfInstanceTask.is_actionable == True,  # noqa: E712
+                   WfInstanceTask.due_date.is_not(None),
+                   WfInstanceTask.due_date < now))).all()
+        for t, dept_name, change_id in change_task_rows:
+            if t.id in seen_task_ids:
+                continue
+            seen_task_ids.add(t.id)
+            c = by_id[change_id]
+            out.append({
+                "kind": "wf_task", "change_id": c.id,
+                "change_number": c.change_number, "change_title": c.title,
+                "label": dept_name, "owner_id": t.owner_id,
                 "owner_name": t.owner_name,
                 "due_date": t.due_date.isoformat(),
                 "days_overdue": (now - t.due_date).days,

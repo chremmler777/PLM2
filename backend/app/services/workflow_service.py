@@ -33,23 +33,7 @@ class WorkflowService:
         if existing.scalar_one_or_none():
             raise ValueError("An active workflow already exists for this revision")
 
-        # Load template with full structure
-        tmpl_result = await db.execute(
-            select(WfTemplate)
-            .where(WfTemplate.id == template_id)
-            .options(
-                selectinload(WfTemplate.stages)
-                .selectinload(WfStage.steps)
-                .selectinload(WfStep.rasic_assignments)
-            )
-        )
-        template = tmpl_result.scalar_one_or_none()
-        if not template:
-            raise ValueError("Template not found")
-        if not template.is_active:
-            raise ValueError("Template is not active")
-        if not template.stages:
-            raise ValueError("Template has no stages")
+        template = await WorkflowService._load_template_for_start(db, template_id)
 
         # Create instance
         instance = WfInstance(
@@ -70,6 +54,73 @@ class WorkflowService:
         await WorkflowService._audit(db, instance, "wf_started", started_by_id,
                                      {"template_id": template_id,
                                       "revision_id": revision_id})
+
+        return instance
+
+    @staticmethod
+    async def _load_template_for_start(
+        db: AsyncSession, template_id: int
+    ) -> WfTemplate:
+        """Load a template with its stage/step/RASIC tree and validate that it
+        is startable. Shared by revision- and change-scoped starts."""
+        tmpl_result = await db.execute(
+            select(WfTemplate)
+            .where(WfTemplate.id == template_id)
+            .options(
+                selectinload(WfTemplate.stages)
+                .selectinload(WfStage.steps)
+                .selectinload(WfStep.rasic_assignments)
+            )
+        )
+        template = tmpl_result.scalar_one_or_none()
+        if not template:
+            raise ValueError("Template not found")
+        if not template.is_active:
+            raise ValueError("Template is not active")
+        if not template.stages:
+            raise ValueError("Template has no stages")
+        return template
+
+    @staticmethod
+    async def start_change_workflow(
+        db: AsyncSession,
+        change_id: int,
+        template_id: int,
+        started_by_id: int,
+    ) -> WfInstance:
+        """Start a change-scoped workflow instance (no part revision).
+
+        Idempotent: if an active instance already exists for the change it is
+        returned unchanged rather than raising."""
+        existing = (await db.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change_id,
+                WfInstance.status == "active",
+            )
+        )).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
+        template = await WorkflowService._load_template_for_start(db, template_id)
+
+        instance = WfInstance(
+            template_id=template_id,
+            change_id=change_id,
+            part_revision_id=None,
+            status="active",
+            current_stage_order=1,
+            started_by=started_by_id,
+            started_at=datetime.utcnow(),
+        )
+        db.add(instance)
+        await db.flush()  # generate instance.id
+
+        first_stage = sorted(template.stages, key=lambda s: s.stage_order)[0]
+        await WorkflowService._create_stage_tasks(db, instance, first_stage)
+
+        await WorkflowService._audit(db, instance, "wf_started", started_by_id,
+                                     {"template_id": template_id,
+                                      "change_id": change_id})
 
         return instance
 
@@ -97,10 +148,15 @@ class WorkflowService:
         from app.models.change import ChangeRequest
         from app.services.audit_service import AuditService
         correlation = None
-        rev = await db.get(PartRevision, instance.part_revision_id)
-        if rev is not None and rev.originating_change_id is not None:
-            change = await db.get(ChangeRequest, rev.originating_change_id)
+        if instance.change_id is not None:
+            # Change-scoped instance: correlate to the change directly.
+            change = await db.get(ChangeRequest, instance.change_id)
             correlation = change.change_number if change else None
+        elif instance.part_revision_id is not None:
+            rev = await db.get(PartRevision, instance.part_revision_id)
+            if rev is not None and rev.originating_change_id is not None:
+                change = await db.get(ChangeRequest, rev.originating_change_id)
+                correlation = change.change_number if change else None
         await AuditService.record(
             db, entity_type="wf_instance", entity_id=instance.id, action=action,
             user_id=user_id, new_values=new_values, correlation_id=correlation)
@@ -148,8 +204,27 @@ class WorkflowService:
 
     @staticmethod
     async def _instance_part_context(db: AsyncSession, instance: WfInstance):
-        """Part and revision belonging to a workflow instance."""
+        """Part and revision belonging to a workflow instance.
+
+        For change-scoped instances (no part revision) this returns lightweight
+        stand-ins whose ``name``/``revision_name`` carry the change title and
+        number, so callers building notification text keep working unchanged."""
         from app.models.part import Part
+
+        if instance.part_revision_id is None:
+            from types import SimpleNamespace
+            from app.models.change import ChangeRequest
+
+            change = await db.get(ChangeRequest, instance.change_id) \
+                if instance.change_id is not None else None
+            part = SimpleNamespace(
+                id=None,
+                name=change.title if change else "",
+                project_id=change.project_id if change else None,
+            )
+            revision = SimpleNamespace(
+                revision_name=change.change_number if change else "")
+            return part, revision
 
         result = await db.execute(
             select(PartRevision, Part)
@@ -190,7 +265,11 @@ class WorkflowService:
             raise ValueError("Task is not actionable (S/I/C roles cannot complete tasks)")
 
         step = task.step
-        if step is not None and step.requires_cad_evidence and decision == "approved":
+        # CAD-evidence gate applies to revision-scoped (ECN) instances only;
+        # change-scoped instances have no part revision to attach a CAD file to.
+        if (step is not None and step.requires_cad_evidence
+                and decision == "approved"
+                and task.instance.part_revision_id is not None):
             if not await WorkflowService.has_3d_evidence(db, task.instance.part_revision_id):
                 raise ValueError(
                     "3D evidence required: upload a CAD file to this revision "
@@ -366,10 +445,15 @@ class WorkflowService:
         task = await WorkflowService._load_open_task(db, task_id)
         allowed = actor.role == "admin" or task.instance.started_by == actor.id
         if not allowed:
-            rev = await db.get(PartRevision, task.instance.part_revision_id)
-            if rev is not None and rev.originating_change_id is not None:
-                change = await db.get(ChangeRequest, rev.originating_change_id)
+            if task.instance.change_id is not None:
+                # Change-scoped: authorize against the change lead directly.
+                change = await db.get(ChangeRequest, task.instance.change_id)
                 allowed = change is not None and change.lead_id == actor.id
+            elif task.instance.part_revision_id is not None:
+                rev = await db.get(PartRevision, task.instance.part_revision_id)
+                if rev is not None and rev.originating_change_id is not None:
+                    change = await db.get(ChangeRequest, rev.originating_change_id)
+                    allowed = change is not None and change.lead_id == actor.id
         if not allowed:
             raise ValueError(
                 "Only an admin, the workflow starter, or the change lead may set due dates")
@@ -421,10 +505,14 @@ class WorkflowService:
             return []
         result = await db.execute(
             select(WfInstanceTask)
+            .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
             .where(
                 WfInstanceTask.department_id.in_(department_ids),
                 WfInstanceTask.status == "active",
                 WfInstanceTask.is_actionable == True,
+                # Change-scoped tasks surface via /changes/my-tasks (Task 7),
+                # not here — exclude them to avoid double-appearing.
+                WfInstance.change_id.is_(None),
             )
             .options(
                 selectinload(WfInstanceTask.instance)
