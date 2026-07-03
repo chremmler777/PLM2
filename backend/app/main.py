@@ -349,6 +349,14 @@ async def seed_test_data():
             # Self-heal changes deployed mid-flight before Phase B: back-fill
             # check-WF instances for in-flight ECN revisions (idempotent).
             await repair_inflight_check_workflows(session)
+            # Self-heal changes routed before Phase E's one-engine unification:
+            # synthesize a change-scoped assessment instance mirroring current
+            # state for any routed change that lacks one (idempotent).
+            from app.services.assessment_instance_repair import (
+                repair_change_assessment_instances)
+            n = await repair_change_assessment_instances(session)
+            if n:
+                logger.info(f"Synthesized {n} change-scoped assessment instances")
 
             await session.commit()
             logger.info("Test data seeded successfully")
