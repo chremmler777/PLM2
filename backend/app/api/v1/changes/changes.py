@@ -77,7 +77,8 @@ async def list_changes(
     db: AsyncSession = Depends(get_db),
 ):
     changes = await ChangeService.list_changes(
-        db, project_id=project_id, status=status, change_type=change_type, lead_id=lead_id,
+        db, viewer=current_user, project_id=project_id, status=status,
+        change_type=change_type, lead_id=lead_id,
     )
     for change in changes:
         change.deadline_state = await ChangeService.deadline_state(db, change)
@@ -229,7 +230,7 @@ async def get_change(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     change.deadline_state = await ChangeService.deadline_state(db, change)

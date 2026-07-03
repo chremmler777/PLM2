@@ -18,11 +18,27 @@ from app.models.change import (
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
 )
-from app.models.entities import User
+from app.models.entities import User, Project, Plant
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
 from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
+
+
+def _org_scope(stmt, viewer: Optional[User]):
+    """Restrict a ChangeRequest select to the viewer's organization.
+
+    Scoping path: ChangeRequest.project_id -> Project.plant_id ->
+    Plant.organization_id. Changes with project_id NULL stay visible to
+    everyone (explicit decision - no silent data loss). viewer=None means
+    "internal/service caller" and returns the statement unchanged.
+    """
+    if viewer is None:
+        return stmt
+    org_projects = select(Project.id).join(Plant, Project.plant_id == Plant.id).where(
+        Plant.organization_id == viewer.organization_id)
+    return stmt.where(
+        ChangeRequest.project_id.is_(None) | ChangeRequest.project_id.in_(org_projects))
 
 ALLOWED_TRANSITIONS = {
     "captured":          {"in_assessment", "cancelled", "on_hold"},
@@ -235,19 +251,22 @@ class ChangeService:
         return change
 
     @staticmethod
-    async def get_change(session: AsyncSession, change_id: int) -> Optional[ChangeRequest]:
-        result = await session.execute(
-            select(ChangeRequest).where(ChangeRequest.id == change_id)
-        )
+    async def get_change(
+        session: AsyncSession, change_id: int, viewer: Optional[User] = None,
+    ) -> Optional[ChangeRequest]:
+        q = _org_scope(select(ChangeRequest).where(ChangeRequest.id == change_id), viewer)
+        result = await session.execute(q)
         return result.scalar_one_or_none()
 
     @staticmethod
     async def list_changes(
-        session: AsyncSession, *, project_id: Optional[int] = None,
+        session: AsyncSession, *, viewer: Optional[User] = None,
+        project_id: Optional[int] = None,
         status: Optional[str] = None, change_type: Optional[str] = None,
         lead_id: Optional[int] = None,
     ) -> List[ChangeRequest]:
         q = select(ChangeRequest)
+        q = _org_scope(q, viewer)
         if project_id is not None:
             q = q.where(ChangeRequest.project_id == project_id)
         if status is not None:
