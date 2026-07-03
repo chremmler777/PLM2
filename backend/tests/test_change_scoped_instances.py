@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from app.models.workflow import (
-    WfInstance, WfInstanceTask, WfTemplate, Department, UserDepartment,
+    WfInstance, WfInstanceTask, WfTemplate, WfStep, Department, UserDepartment,
 )
 from app.models.change import ChangeRequest, ChangeAssessment
 from app.services.workflow_service import WorkflowService
@@ -141,6 +141,16 @@ async def test_change_scoped_instance_skips_cad_evidence_gate(session_factory, s
             WfInstanceTask.rasic_letter == "R",
         ).limit(1))).scalars().first()
         assert task is not None
+        # Force the CAD-evidence gate to actually be reached: flip the
+        # backing step's requires_cad_evidence flag on. Without the
+        # part_revision_id-is-not-None guard in complete_task, this would
+        # raise "3D evidence required..." since no CAD file exists and
+        # part_revision_id is None on a change-scoped instance.
+        assert task.step_id is not None
+        step = await session.get(WfStep, task.step_id)
+        assert step is not None
+        step.requires_cad_evidence = True
+        await session.flush()
         # Grant the acting user membership in the task's department (honest
         # fixture: complete_task's 4-eyes guard is satisfied — stage 1 has no
         # prior stage — and the user legitimately belongs to the department).
