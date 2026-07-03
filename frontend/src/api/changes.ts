@@ -95,6 +95,8 @@ export const changesApi = {
     client.post(`/v1/changes/${changeId}/impact-tree/suggest`, { part_ids: partIds }).then((r) => r.data),
   applyImpactSelection: (changeId: number, partIds: number[]): Promise<{ impacted_part_ids: number[] }> =>
     client.put(`/v1/changes/${changeId}/impacted-items`, { part_ids: partIds }).then((r) => r.data),
+  confirmImpact: (changeId: number): Promise<ChangeDetail> =>
+    client.post(`/v1/changes/${changeId}/impact/confirm`).then((r) => r.data),
 
   getImplementation: (changeId: number): Promise<ImplementationProgress> =>
     client.get(`/v1/changes/${changeId}/implementation`).then((r) => r.data),

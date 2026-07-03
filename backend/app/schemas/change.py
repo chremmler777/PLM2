@@ -187,6 +187,9 @@ class ChangeResponse(BaseModel):
     required_by_date: Optional[datetime] = None
     required_by_reason: Optional[str] = None
     deadline_state: Optional[str] = None
+    impact_confirmed_by: Optional[int] = None
+    impact_confirmed_by_name: Optional[str] = None
+    impact_confirmed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -208,6 +211,7 @@ class ChangeResponse(BaseModel):
             row = {k: v for k, v in vars(data).items() if not k.startswith("_")}
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
+            row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             return row
         return data
 

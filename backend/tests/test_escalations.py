@@ -123,6 +123,8 @@ async def test_lead_escalations_roll_up(client, eng_auth, seed, session_factory,
         # drive the change to in_implementation directly to spawn the check WF
         c = await s.get(ChangeRequest, change["id"])
         c.status = "approved"
+        c.impact_confirmed_by = seed["engineer_id"]
+        c.impact_confirmed_at = datetime.utcnow()
         await s.execute(update(ChangeGate).where(ChangeGate.change_id == c.id)
                         .values(decision="yes"))
         await s.commit()

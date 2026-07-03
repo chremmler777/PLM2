@@ -99,6 +99,13 @@ class ChangeRequest(Base):
     required_by_set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     required_by_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Task 18: Engineering (R&D) owns the affected-items decision. Set together
+    # by POST /impact/confirm; cleared together whenever the impacted-item set
+    # changes afterwards (re-confirmation required). in_implementation's soft
+    # guard reads impact_confirmed_at.
+    impact_confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    impact_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -112,10 +119,16 @@ class ChangeRequest(Base):
     lead: Mapped["User | None"] = relationship(
         foreign_keys=[lead_id], lazy="selectin")
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
+    impact_confirmed_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[impact_confirmed_by], lazy="selectin")
 
     @property
     def lead_name(self) -> Optional[str]:
         return self.lead.full_name if self.lead is not None else None
+
+    @property
+    def impact_confirmed_by_name(self) -> Optional[str]:
+        return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
 
     impacted_items: Mapped[list["ChangeImpactedItem"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin"

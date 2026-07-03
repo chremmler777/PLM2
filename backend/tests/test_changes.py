@@ -224,6 +224,9 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
+    # Task 18: Engineering (R&D) must confirm the impacted-item set before kickoff.
+    conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
+    assert conf.status_code == 200, conf.text
     res = await _transition(client, eng_auth, cid, "in_implementation")
     assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
@@ -241,6 +244,8 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
+    conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
+    assert conf.status_code == 200, conf.text
     await _transition(client, eng_auth, cid, "in_implementation")
     res = await _transition(client, eng_auth, cid, "in_validation")
     assert res.status_code == 200, res.text

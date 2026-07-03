@@ -161,6 +161,7 @@ export default function ChangeDetailPage() {
         onAdvance={advance}
         advancing={transition.isPending}
         onResolveGate={() => setTab('d1')}
+        onShowImpact={() => setTab('impacted')}
       />
 
       <div className="border-b flex gap-4 text-sm mb-4">
@@ -226,7 +227,9 @@ export default function ChangeDetailPage() {
       )}
 
       {tab === 'impacted' && change && (
-        <ImpactTree changeId={change.id} status={change.status} />
+        <ImpactTree changeId={change.id} status={change.status}
+          impactConfirmedByName={change.impact_confirmed_by_name}
+          impactConfirmedAt={change.impact_confirmed_at} />
       )}
 
       {tab === 'implementation' && change && (

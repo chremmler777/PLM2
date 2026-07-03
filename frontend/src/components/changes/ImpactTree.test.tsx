@@ -9,6 +9,7 @@ vi.mock('../../api/changes', () => ({
     getImpactTree: vi.fn(),
     suggestImpact: vi.fn(),
     applyImpactSelection: vi.fn(),
+    confirmImpact: vi.fn(),
   },
 }))
 
@@ -43,6 +44,7 @@ describe('ImpactTree', () => {
     vi.mocked(changesApi.getImpactTree).mockResolvedValue(tree)
     vi.mocked(changesApi.suggestImpact).mockResolvedValue({ suggested_part_ids: [1] })
     vi.mocked(changesApi.applyImpactSelection).mockResolvedValue({ impacted_part_ids: [2, 3] })
+    vi.mocked(changesApi.confirmImpact).mockResolvedValue({} as never)
   })
   afterEach(cleanup)
 
@@ -95,5 +97,21 @@ describe('ImpactTree', () => {
     await screen.findByText('Assembly Updated')
 
     expect(sibling.checked).toBe(true)
+  })
+
+  it('shows a Confirm impact (R&D) button when unconfirmed, and calls the API', async () => {
+    wrap(<ImpactTree changeId={7} status="captured" />)
+    await screen.findByText('Child')
+    const btn = screen.getByRole('button', { name: /Confirm impact \(R&D\)/ })
+    fireEvent.click(btn)
+    await waitFor(() => expect(changesApi.confirmImpact).toHaveBeenCalledWith(7))
+  })
+
+  it('shows a confirmed badge with who/when instead of the button once confirmed', async () => {
+    wrap(<ImpactTree changeId={7} status="captured"
+      impactConfirmedByName="RD Member" impactConfirmedAt="2026-07-01T12:00:00" />)
+    await screen.findByText('Child')
+    expect(screen.queryByRole('button', { name: /Confirm impact \(R&D\)/ })).toBeNull()
+    expect(screen.getByText(/RD Member/)).toBeDefined()
   })
 })

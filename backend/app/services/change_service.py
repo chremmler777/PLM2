@@ -502,6 +502,8 @@ class ChangeService:
             if missing:
                 return "Some impacted items have no resulting revision"
         if to_status == "in_implementation":
+            if change.impact_confirmed_at is None:
+                return "impact_not_confirmed"
             from app.models.workflow import CheckWorkflowStandard
             part_ids = [i.part_id for i in change.impacted_items]
             if part_ids:
@@ -776,6 +778,7 @@ class ChangeService:
         if unknown:
             raise ChangeError(f"Parts not in this project: {unknown}")
         current = {i.part_id: i for i in change.impacted_items}
+        changed = False
         for pid, item in list(current.items()):
             if pid in wanted:
                 continue
@@ -789,6 +792,7 @@ class ChangeService:
                 session, change, "impacted_removed",
                 f"Impacted part {pid} removed via impact tree", user_id,
                 old_value={"part_id": pid})
+            changed = True
         for pid in sorted(wanted - set(current)):
             session.add(ChangeImpactedItem(change_id=change.id, part_id=pid,
                                            created_by=user_id))
@@ -796,7 +800,25 @@ class ChangeService:
                 session, change, "impacted_added",
                 f"Impacted part {pid} added via impact tree", user_id,
                 new_value={"part_id": pid})
+            changed = True
         await session.flush()
+        if changed:
+            await ChangeService._reset_impact_confirmation(session, change, user_id)
+
+    @staticmethod
+    async def _reset_impact_confirmation(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> None:
+        """Task 18: the impacted-item set changed after Engineering (R&D)
+        confirmed it - invalidate the confirmation so it must be redone."""
+        if change.impact_confirmed_at is None:
+            return
+        change.impact_confirmed_by = None
+        change.impact_confirmed_at = None
+        await ChangeService.append_changelog(
+            session, change, "impact_confirmation_reset",
+            "Impact confirmation cleared - impacted-item set changed", user_id,
+        )
 
     @staticmethod
     async def add_impacted_item(
@@ -821,6 +843,7 @@ class ChangeService:
             f"Added impacted item {part.part_number}", user_id,
             new_value={"part_id": part_id},
         )
+        await ChangeService._reset_impact_confirmation(session, change, user_id)
         return item
 
     @staticmethod
@@ -836,6 +859,25 @@ class ChangeService:
             f"Removed impacted item {item.part_id}", user_id,
             old_value={"part_id": item.part_id},
         )
+        await ChangeService._reset_impact_confirmation(session, change, user_id)
+
+    @staticmethod
+    async def confirm_impact(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> ChangeRequest:
+        """Task 18: Engineering (R&D) confirms the lead-proposed impacted-item
+        set. Idempotent by design - re-confirming (e.g. by a different R&D
+        member) simply refreshes who/when; it does not error, since the set
+        may legitimately be re-reviewed without having changed."""
+        if not change.impacted_items:
+            raise ChangeError("No impacted items to confirm")
+        change.impact_confirmed_by = user_id
+        change.impact_confirmed_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "impact_confirmed",
+            "Impacted-item set confirmed by Engineering (R&D)", user_id,
+        )
+        return change
 
     @staticmethod
     async def seed_impacted_from_relations(

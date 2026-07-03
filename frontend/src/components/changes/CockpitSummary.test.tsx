@@ -100,4 +100,25 @@ describe('CockpitSummary', () => {
     expect(budgetRow?.textContent).not.toContain('⚠')
     expect(budgetRow?.className).toContain('text-slate-400')
   })
+
+  it('shows an impact-confirmation blocker row when approved and unconfirmed, and jumps via onShowImpact', () => {
+    const onShowImpact = vi.fn()
+    render(<CockpitSummary change={change({ status: 'approved', assessments: [], impact_confirmed_at: null })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onShowImpact={onShowImpact} />)
+    expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+    const row = screen.getByRole('button', { name: /Impact confirmation pending/ })
+    fireEvent.click(row)
+    expect(onShowImpact).toHaveBeenCalled()
+  })
+
+  it('does not show the impact-confirmation blocker once confirmed', () => {
+    render(<CockpitSummary change={change({
+      status: 'approved', assessments: [],
+      impact_confirmed_at: '2026-07-01T00:00:00', impact_confirmed_by: 9,
+    })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+    expect(screen.queryByText(/Impact confirmation pending/)).toBeNull()
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+  })
 })

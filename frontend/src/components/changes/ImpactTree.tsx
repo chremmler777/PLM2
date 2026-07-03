@@ -15,12 +15,23 @@ const errDetail = (e: unknown): string | undefined =>
 interface Props {
   changeId: number
   status: ChangeStatus
+  impactConfirmedByName?: string | null
+  impactConfirmedAt?: string | null
 }
 
-export default function ImpactTree({ changeId, status }: Props) {
+export default function ImpactTree({ changeId, status, impactConfirmedByName, impactConfirmedAt }: Props) {
   const qc = useQueryClient()
   const editable = !LOCKED.includes(status)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+
+  const confirmImpact = useMutation({
+    mutationFn: () => changesApi.confirmImpact(changeId),
+    onSuccess: () => {
+      toast.success(t('impact.confirm'))
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Confirm failed'),
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ['change', changeId, 'impact-tree'],
@@ -131,17 +142,32 @@ export default function ImpactTree({ changeId, status }: Props) {
           <h3 className="text-slate-100 font-semibold">{t('impact.title')}</h3>
           <p className="text-slate-400 text-xs">{t('impact.hint')}</p>
         </div>
-        {editable ? (
-          <button
-            onClick={() => apply.mutate()}
-            disabled={!dirty || apply.isPending}
-            className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-50"
-          >
-            {t('impact.apply')}
-          </button>
-        ) : (
-          <span className="text-amber-300 text-xs">{t('impact.locked')}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {impactConfirmedAt ? (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
+              ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '—'} · {new Date(impactConfirmedAt).toLocaleString()}
+            </span>
+          ) : (
+            <button
+              onClick={() => confirmImpact.mutate()}
+              disabled={confirmImpact.isPending}
+              className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {t('impact.confirm')}
+            </button>
+          )}
+          {editable ? (
+            <button
+              onClick={() => apply.mutate()}
+              disabled={!dirty || apply.isPending}
+              className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-50"
+            >
+              {t('impact.apply')}
+            </button>
+          ) : (
+            <span className="text-amber-300 text-xs">{t('impact.locked')}</span>
+          )}
+        </div>
       </div>
       {data.tree.map(n => renderNode(n, 0))}
     </div>

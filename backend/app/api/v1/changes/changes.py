@@ -19,8 +19,9 @@ from app.models.change import (
     ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment,
     ChangeImpactedItem,
 )
-from app.models.workflow import UserDepartment
+from app.models.workflow import UserDepartment, Department
 from app.services.change_service import ChangeService, ChangeError
+from app.services.workflow_service import WorkflowService
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -445,6 +446,35 @@ async def seed_impacted_items(
     added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
     await db.commit()
     return {"added": added}
+
+
+@router.post("/{change_id}/impact/confirm", response_model=ChangeResponse)
+async def confirm_impact(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Task 18: Engineering (R&D) confirms the lead-proposed impacted-item set.
+    Only an R&D department member or an admin may confirm."""
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if current_user.role != "admin":
+        rd_dept = (await db.execute(
+            select(Department).where(Department.name == "R&D"))).scalar_one_or_none()
+        dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
+        if rd_dept is None or rd_dept.id not in dept_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="Only an R&D department member or an admin may confirm impact")
+    if not change.impacted_items:
+        raise HTTPException(status_code=409, detail="No impacted items to confirm")
+    try:
+        await ChangeService.confirm_impact(db, change, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return change
 
 
 @router.post("/{change_id}/assessments", response_model=AssessmentResponse)

@@ -13,9 +13,12 @@ interface Props {
   /** Called with the gate's key when the user clicks a gate row — the page
       jumps to where the gate is decided (D1 tab). */
   onResolveGate?: (gateKey: GateKey) => void
+  /** Called when the user clicks the impact-confirmation blocker row — the
+      page jumps to the Impacted tab so it can be resolved in place. */
+  onShowImpact?: () => void
 }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact }: Props) {
   const next = NEXT_STATUS[change.status] ?? []
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
@@ -25,8 +28,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const overdue = change.assessments.filter((a) => a.overdue).length
   const unclaimed = change.assessments.filter(
     (a) => a.status === 'active' && a.owner_id === null).length
+  // Task 18: kickoff (approved -> in_implementation) is soft-guarded on R&D's
+  // impact confirmation; surface it as a blocker only once it is the live gate.
+  const impactUnconfirmed = change.status === 'approved' && !change.impact_confirmed_at
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
-    + (overdue > 0 ? 1 : 0)
+    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0)
   const offPath = OFF_PATH_STATUSES.includes(change.status)
 
   const gateRow = (g: Gate, blocking: boolean) => {
@@ -86,6 +92,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             )}
             {overdue > 0 && (
               <li className="text-red-400">⚠ {t('cockpit.overdueAssessments')}: {overdue}</li>
+            )}
+            {impactUnconfirmed && (
+              <li className="text-amber-300">
+                {onShowImpact ? (
+                  <button type="button"
+                    className="text-left hover:underline decoration-dotted underline-offset-2"
+                    onClick={onShowImpact}>
+                    ⚠ {t('impact.pending')} <span className="text-xs opacity-70">→ {t('impact.title')}</span>
+                  </button>
+                ) : <>⚠ {t('impact.pending')}</>}
+              </li>
             )}
             {unclaimed > 0 && (
               <li className="text-slate-400">{t('cockpit.unclaimed')}: {unclaimed}</li>

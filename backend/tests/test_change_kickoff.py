@@ -1,12 +1,15 @@
 # backend/tests/test_change_kickoff.py
 import pytest
+from datetime import datetime
 from sqlalchemy import select, update
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _approved_change(session_factory, seed, part_id):
-    """Change with one lead impacted item, forced to approved with gates yes."""
+    """Change with one lead impacted item, forced to approved with gates yes,
+    and impact already confirmed (Task 18 soft-gate) so kickoff tests exercise
+    what they intend to exercise, not the impact-confirmation guard."""
     from app.services.change_service import ChangeService
     from app.models.change import ChangeImpactedItem
     from app.models.change_cost import ChangeGate
@@ -18,6 +21,8 @@ async def _approved_change(session_factory, seed, part_id):
         s.add(ChangeImpactedItem(change_id=change.id, part_id=part_id,
                                  is_lead=True, created_by=seed["engineer_id"]))
         change.status = "approved"
+        change.impact_confirmed_by = seed["engineer_id"]
+        change.impact_confirmed_at = datetime.utcnow()
         await s.execute(update(ChangeGate).where(ChangeGate.change_id == change.id)
                         .values(decision="yes"))
         await s.commit()
