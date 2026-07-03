@@ -21,27 +21,27 @@ from app.models.workflow import (
 # Step tuple: (step_name, rasic list[(department, letter)], flags dict)
 
 ECM_BEWERTUNG = {
-    "name": "ECM Bewertung",
+    "name": "ECM Assessment",
     "description": "Change-level assessment routing (captured -> approved), D1 matrix",
     "stages": [
-        ("Machbarkeit & Bewertung", [
-            ("Fachbereichsbewertung", [
+        ("Feasibility & Assessment", [
+            ("Department assessment", [
                 ("Sales", "R"), ("R&D", "R"), ("Tool design", "R"), ("IE", "R"),
                 ("Quality", "R"), ("Logistics", "R"), ("Production", "R"),
                 ("Purchasing", "R"), ("Production control", "R"),
                 ("Project Manager", "A"), ("Planner/Scheduler", "I"),
             ], {}),
         ]),
-        ("Summierung & Budget", [
-            ("Kostenzusammenfassung prüfen & Budget freigeben", [
+        ("Summation & Budget", [
+            ("Review cost summary & release budget", [
                 ("Project Manager", "R"), ("Sales", "A"),
                 ("R&D", "C"), ("Tool design", "C"),
                 ("IE", "I"), ("Quality", "I"), ("Logistics", "I"),
                 ("Production", "I"), ("Purchasing", "I"), ("Production control", "I"),
             ], {}),
         ]),
-        ("Kundenaktivitäten", [
-            ("Angebot an Kunde / Kundenantwort erfassen", [
+        ("Customer activities", [
+            ("Send customer quote / record customer response", [
                 ("Sales", "R"), ("Project Manager", "A"),
                 ("Quality", "I"), ("R&D", "I"),
             ], {}),
@@ -55,39 +55,39 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
         "name": name,
         "description": "Check workflow per impacted ECN revision (kickoff -> ready-to-go)",
         "stages": [
-            ("Konstruktion", [
-                ("3D-Daten aktualisieren", [
+            ("Design", [
+                ("Update 3D data", [
                     (konstruktion_r, "R"), ("R&D", "A"), ("Project Manager", "I"),
                 ], {"requires_cad_evidence": True}),
-                ("Zeichnungen & Doku aktualisieren", [
+                ("Update drawings & documentation", [
                     (konstruktion_r, "R"), ("R&D", "A"), ("Quality", "S"),
                 ], {}),
             ]),
-            ("Design-Check", [
-                ("Konstruktionsprüfung", [
+            ("Design check", [
+                ("Design review", [
                     ("R&D", "R"), ("Quality", "A"), ("IE", "C"),
                 ], {"four_eyes": True}),
             ]),
-            ("Industrialisierung", [
-                ("Werkzeugänderung umsetzen", [
+            ("Industrialization", [
+                ("Implement tool change", [
                     ("Production", "R"), ("Tool design", "A"), ("Production control", "I"),
                 ], {}),
-                ("Prozess/Arbeitspläne anpassen", [
+                ("Adjust process / routing sheets", [
                     ("IE", "R"), ("Project Manager", "A"), ("Production", "C"),
                 ], {}),
-                ("Prüfplan / PPAP-Bedarf klären", [
+                ("Clarify inspection plan / PPAP need", [
                     ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
                 ], {}),
-                ("Stammdaten & Logistik aktualisieren", [
+                ("Update master data & logistics", [
                     ("Logistics", "R"), ("Project Manager", "A"),
                     ("Purchasing", "C"), ("Production control", "I"),
                 ], {}),
             ]),
             ("Ready to go", [
-                ("Bemusterung / Trial", [
+                ("Sampling / trial", [
                     ("Quality", "R"), ("Project Manager", "A"), ("Production", "S"),
                 ], {}),
-                ("Finale Freigabe", [
+                ("Final release", [
                     ("Project Manager", "R"), ("Quality", "A"),
                     ("Sales", "I"), ("Logistics", "I"), ("Production control", "I"),
                 ], {}),
@@ -96,16 +96,76 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     }
 
 
-ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Umsetzung (Werkzeug)", "Tool design")
-ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Umsetzung (Artikel)", "R&D")
+ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tool design")
+ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Implementation (Article)", "R&D")
 
 CHECK_WF_CATEGORY_TEMPLATE = {
-    "article": "ECN Umsetzung (Artikel)",
-    "tool": "ECN Umsetzung (Werkzeug)",
-    "assembly_equipment": "ECN Umsetzung (Werkzeug)",
-    "eoat": "ECN Umsetzung (Werkzeug)",
-    "gauge": "ECN Umsetzung (Werkzeug)",
+    "article": "ECN Implementation (Article)",
+    "tool": "ECN Implementation (Tool)",
+    "assembly_equipment": "ECN Implementation (Tool)",
+    "eoat": "ECN Implementation (Tool)",
+    "gauge": "ECN Implementation (Tool)",
 }
+
+# Rename repair for existing DBs (spec: Phase E Task 20). Prior seed literals
+# were German; this maps every old WfTemplate/WfStage/WfStep name to its
+# English replacement so `repair_seed_names` can heal live rows in place
+# before `seed_change_workflows` runs (which is create-if-absent by name, so
+# it must see the new names or it will create English duplicates alongside
+# the old German rows).
+RENAMES = {
+    # Templates
+    "ECM Bewertung": "ECM Assessment",
+    "ECN Umsetzung (Werkzeug)": "ECN Implementation (Tool)",
+    "ECN Umsetzung (Artikel)": "ECN Implementation (Article)",
+    # ECM Assessment stages/steps
+    "Machbarkeit & Bewertung": "Feasibility & Assessment",
+    "Fachbereichsbewertung": "Department assessment",
+    "Summierung & Budget": "Summation & Budget",
+    "Kostenzusammenfassung prüfen & Budget freigeben": "Review cost summary & release budget",
+    "Kundenaktivitäten": "Customer activities",
+    "Angebot an Kunde / Kundenantwort erfassen": "Send customer quote / record customer response",
+    # ECN Implementation stages/steps (shared across Tool/Article templates)
+    "Konstruktion": "Design",
+    "3D-Daten aktualisieren": "Update 3D data",
+    "Zeichnungen & Doku aktualisieren": "Update drawings & documentation",
+    "Design-Check": "Design check",
+    "Konstruktionsprüfung": "Design review",
+    "Industrialisierung": "Industrialization",
+    "Werkzeugänderung umsetzen": "Implement tool change",
+    "Prozess/Arbeitspläne anpassen": "Adjust process / routing sheets",
+    "Prüfplan / PPAP-Bedarf klären": "Clarify inspection plan / PPAP need",
+    "Stammdaten & Logistik aktualisieren": "Update master data & logistics",
+    "Bemusterung / Trial": "Sampling / trial",
+    "Finale Freigabe": "Final release",
+}
+
+
+async def repair_seed_names(session: AsyncSession) -> int:
+    """One-time self-heal for existing DBs seeded before Task 20's English
+    rename: renames WfTemplate/WfStage/WfStep rows matching an old (German)
+    literal in RENAMES to their new English name. Exact-match, idempotent
+    (a second run finds no rows still on the old name), and must run before
+    the seed calls / standards resolution so name-based lookups (the
+    ChangeRoutingStandard/CheckWorkflowStandard fallback-by-name sites and
+    the create-if-absent seed functions) see the new names instead of
+    creating duplicate English templates alongside stale German rows.
+    Returns the number of rows renamed."""
+    renamed = 0
+    for model in (WfTemplate, WfStage, WfStep):
+        name_col = model.step_name if model is WfStep else model.name
+        rows = (await session.execute(
+            select(model).where(name_col.in_(RENAMES.keys())))).scalars().all()
+        for row in rows:
+            old_name = row.step_name if model is WfStep else row.name
+            new_name = RENAMES[old_name]
+            if model is WfStep:
+                row.step_name = new_name
+            else:
+                row.name = new_name
+            renamed += 1
+    await session.flush()
+    return renamed
 
 
 async def _get_or_create_department(session: AsyncSession, name: str) -> Department:

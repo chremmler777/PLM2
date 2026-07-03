@@ -46,7 +46,7 @@ async def repair_change_assessment_instances(session) -> int:
         if not rows:
             continue
         template_id = routing.template_id or (await session.execute(
-            select(WfTemplate.id).where(WfTemplate.name == "ECM Bewertung")
+            select(WfTemplate.id).where(WfTemplate.name == "ECM Assessment")
         )).scalar_one_or_none()
         if template_id is None:
             continue  # cannot synthesize without any template; log and move on

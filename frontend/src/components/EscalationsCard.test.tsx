@@ -28,7 +28,7 @@ describe('EscalationsCard', () => {
   it('lists overdue items with change link and owner', async () => {
     vi.mocked(changesApi.myEscalations).mockResolvedValue([
       { kind: 'wf_task', change_id: 3, change_number: 'CR-2026-0009',
-        change_title: 'Tool fix', label: 'Werkzeugänderung umsetzen',
+        change_title: 'Tool fix', label: 'Implement tool change',
         owner_id: 5, owner_name: 'Eva Eng', due_date: '2026-06-28T00:00:00',
         days_overdue: 4 },
       { kind: 'assessment', change_id: 3, change_number: 'CR-2026-0009',

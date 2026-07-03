@@ -66,18 +66,18 @@ async def rules_template(session_factory, seed):
                           created_by=seed["engineer_id"])
         s.add(tmpl)
         await s.flush()
-        st1 = WfStage(template_id=tmpl.id, stage_order=1, name="Konstruktion")
+        st1 = WfStage(template_id=tmpl.id, stage_order=1, name="Design")
         s.add(st1)
         await s.flush()
-        step1 = WfStep(stage_id=st1.id, step_name="3D-Daten aktualisieren",
+        step1 = WfStep(stage_id=st1.id, step_name="Update 3D data",
                        position_in_stage=1, requires_cad_evidence=True)
         s.add(step1)
         await s.flush()
         s.add(WfStepRasic(step_id=step1.id, department_id=dept.id, rasic_letter="R"))
-        st2 = WfStage(template_id=tmpl.id, stage_order=2, name="Design-Check")
+        st2 = WfStage(template_id=tmpl.id, stage_order=2, name="Design check")
         s.add(st2)
         await s.flush()
-        step2 = WfStep(stage_id=st2.id, step_name="Konstruktionsprüfung",
+        step2 = WfStep(stage_id=st2.id, step_name="Design review",
                        position_in_stage=1, four_eyes=True)
         s.add(step2)
         await s.flush()
@@ -186,7 +186,7 @@ async def _stage_actionable(session_factory, instance_id, stage_order):
 
 async def test_seeded_ecn_template_end_to_end(
         session_factory, seed, part, check_wf_standards):
-    """Drive the SEEDED 'ECN Umsetzung (Artikel)' template end-to-end: evidence
+    """Drive the SEEDED 'ECN Implementation (Article)' template end-to-end: evidence
     gate on stage 1, four-eyes block on stage 2, advance to stage 3, then the
     reject-restart recency rule via implementation_progress."""
     from app.services.workflow_service import WorkflowService
@@ -200,11 +200,11 @@ async def test_seeded_ecn_template_end_to_end(
 
     async with session_factory() as s:
         tmpl = (await s.execute(select(WfTemplate).where(
-            WfTemplate.name == "ECN Umsetzung (Artikel)"))).scalar_one()
+            WfTemplate.name == "ECN Implementation (Article)"))).scalar_one()
         tmpl_id = tmpl.id
         inst = await WorkflowService.start_workflow(
             s, part["revision_id"], tmpl_id, seed["engineer_id"])
-        # Stage 1 ("Konstruktion") is all R&D-R; grant the engineer membership
+        # Stage 1 ("Design") is all R&D-R; grant the engineer membership
         # so complete_task's department-membership guard doesn't block them.
         rd = (await s.execute(select(Department).where(
             Department.name == "R&D"))).scalar_one()
@@ -212,9 +212,9 @@ async def test_seeded_ecn_template_end_to_end(
         await s.commit()
         inst_id = inst.id
 
-    # --- Stage 1 "Konstruktion" ---
+    # --- Stage 1 "Design" ---
     s1 = await _stage_actionable(session_factory, inst_id, 1)
-    three_d = [tid for tid, name in s1 if name == "3D-Daten aktualisieren"]
+    three_d = [tid for tid, name in s1 if name == "Update 3D data"]
     assert three_d, "expected the evidence-gated 3D step to be actionable"
 
     # Evidence gate: approving the 3D R-task without evidence is blocked.
@@ -236,7 +236,7 @@ async def test_seeded_ecn_template_end_to_end(
                 s, tid, "approved", None, seed["engineer_id"])
             await s.commit()
 
-    # --- Stage 2 "Design-Check" (four_eyes) ---
+    # --- Stage 2 "Design check" (four_eyes) ---
     s2 = await _stage_actionable(session_factory, inst_id, 2)
     assert s2, "expected stage 2 to be active"
     # Engineer completed stage 1 -> four-eyes rule blocks them here.

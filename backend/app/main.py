@@ -345,7 +345,13 @@ async def seed_test_data():
             # --- Seeded change-management workflow templates (idempotent) ---
             from app.services.wf_seed_service import (
                 seed_change_workflows, repair_inflight_check_workflows,
-                seed_dev_department_memberships)
+                seed_dev_department_memberships, repair_seed_names)
+            # Self-heal DBs seeded before Task 20's English rename: must run
+            # before seed_change_workflows (create-if-absent by name) so it
+            # sees the new English names instead of creating duplicates.
+            renamed = await repair_seed_names(session)
+            if renamed:
+                logger.info(f"Repaired {renamed} seed names to English")
             await seed_change_workflows(session)
             # Dev-only: give the two well-known dev accounts real department
             # membership so My Tasks and the complete_task membership guard

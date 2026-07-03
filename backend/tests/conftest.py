@@ -150,7 +150,7 @@ async def freeze_revision(session_factory, revision_id: int):
 
 @pytest_asyncio.fixture
 async def check_wf_standards(session_factory, seed):
-    """Seed the ECN Umsetzung check-workflow templates + category mappings."""
+    """Seed the ECN Implementation check-workflow templates + category mappings."""
     from app.services.wf_seed_service import seed_check_standards
     async with session_factory() as s:
         await seed_check_standards(s)

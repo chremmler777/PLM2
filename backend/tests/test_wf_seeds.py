@@ -21,7 +21,7 @@ async def test_seed_check_standards_creates_templates_and_mappings(session_facto
         assert cats == set(CHECK_WF_ITEM_CATEGORIES)
 
         tmpl = (await s.execute(select(WfTemplate).where(
-            WfTemplate.name == "ECN Umsetzung (Werkzeug)"))).scalar_one()
+            WfTemplate.name == "ECN Implementation (Tool)"))).scalar_one()
         stages = (await s.execute(select(WfStage).where(
             WfStage.template_id == tmpl.id))).scalars().all()
         assert len(stages) == 4
@@ -30,9 +30,9 @@ async def test_seed_check_standards_creates_templates_and_mappings(session_facto
             select(WfStep).join(WfStage, WfStep.stage_id == WfStage.id)
             .where(WfStage.template_id == tmpl.id))).scalars().all()
         evidence = [st for st in steps if st.requires_cad_evidence]
-        assert [st.step_name for st in evidence] == ["3D-Daten aktualisieren"]
+        assert [st.step_name for st in evidence] == ["Update 3D data"]
         four_eyes = [st for st in steps if st.four_eyes]
-        assert [st.step_name for st in four_eyes] == ["Konstruktionsprüfung"]
+        assert [st.step_name for st in four_eyes] == ["Design review"]
 
 
 async def test_seed_is_idempotent(session_factory, seed):
@@ -63,7 +63,7 @@ async def test_seed_assessment_standard_maps_all_change_types(session_factory, s
         rows = (await s.execute(select(ChangeRoutingStandard))).scalars().all()
         assert {r.change_type for r in rows} == set(CHANGE_TYPES)
         tmpl = (await s.execute(select(WfTemplate).where(
-            WfTemplate.name == "ECM Bewertung"))).scalar_one()
+            WfTemplate.name == "ECM Assessment"))).scalar_one()
         assert all(r.template_id == tmpl.id for r in rows)
         stages = (await s.execute(select(WfStage).where(
             WfStage.template_id == tmpl.id))).scalars().all()
@@ -133,7 +133,7 @@ async def test_check_standards_api_roundtrip(client, admin_auth, eng_auth, sessi
         await seed_check_standards(s)
         await s.commit()
         artikel = (await s.execute(select(WfTemplate).where(
-            WfTemplate.name == "ECN Umsetzung (Artikel)"))).scalar_one()
+            WfTemplate.name == "ECN Implementation (Article)"))).scalar_one()
 
     res = await client.get("/api/v1/changes/check-standards", headers=eng_auth)
     assert res.status_code == 200, res.text

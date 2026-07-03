@@ -157,7 +157,7 @@ class ChangeRoutingService:
                 body=f"'{change.title}' has started cross-functional assessment.",
                 link=f"/changes/{change.id}",
             )
-        # Spawn the change-scoped "ECM Bewertung" instance. The engine creates
+        # Spawn the change-scoped "ECM Assessment" instance. The engine creates
         # stage-1 tasks (and links stage-1 assessments) on start; later stages
         # link lazily as their tasks are created. Execution state lives entirely
         # on engine tasks now — assessment submission drives that engine.
@@ -166,9 +166,9 @@ class ChangeRoutingService:
                 session, change.id, routing.template_id, user_id)
         else:
             # Legacy TYPE_DISCIPLINES fallback carries no template — resolve the
-            # seeded default by name (a later task renames this and updates the site).
+            # seeded default by name.
             tmpl_id = (await session.execute(
-                select(WfTemplate.id).where(WfTemplate.name == "ECM Bewertung")
+                select(WfTemplate.id).where(WfTemplate.name == "ECM Assessment")
             )).scalar_one_or_none()
             if tmpl_id is not None:
                 await WorkflowService.start_change_workflow(

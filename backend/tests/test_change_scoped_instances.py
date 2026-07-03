@@ -15,7 +15,7 @@ from tests.conftest import approve_gates, ADMIN_PASSWORD
 
 
 async def _mk_template(session):
-    t = WfTemplate(name="ECM Bewertung Test", created_by=1)
+    t = WfTemplate(name="ECM Assessment Test", created_by=1)
     session.add(t)
     await session.flush()
     return t
@@ -94,9 +94,9 @@ async def test_sc_assessment_derives_status_without_task_write(session_factory, 
 
 
 async def _ecm_template(session) -> WfTemplate:
-    await seed_change_workflows(session)   # seeds "ECM Bewertung" + departments
+    await seed_change_workflows(session)   # seeds "ECM Assessment" + departments
     return (await session.execute(select(WfTemplate).where(
-        WfTemplate.name == "ECM Bewertung"))).scalar_one()
+        WfTemplate.name == "ECM Assessment"))).scalar_one()
 
 
 async def _mk_change(session, seed, number: str) -> ChangeRequest:
@@ -176,7 +176,7 @@ async def _seed_two_stage_standard(session_factory, change_type="physical_part")
         for i, n in enumerate(names):
             d = Department(name=n, flow_type="change", is_active=True, sort_order=i)
             s.add(d); await s.flush(); dep[n] = d.id
-        t = WfTemplate(name="ECM Bewertung", description="x", version=1,
+        t = WfTemplate(name="ECM Assessment", description="x", version=1,
                        is_active=True, created_by=1)
         s.add(t); await s.flush()
         layout = [(1, [("E-D1", "R"), ("E-D2", "C")]), (2, [("E-D3", "A"), ("E-D4", "I")])]

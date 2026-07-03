@@ -54,7 +54,7 @@ async def test_kickoff_spawns_backlinked_revision_and_check_wf(
         assert inst.status == "active"
         tmpl = await s.get(WfTemplate, inst.template_id)
         # part fixture is item_category 'article'
-        assert tmpl.name == "ECN Umsetzung (Artikel)"
+        assert tmpl.name == "ECN Implementation (Article)"
 
 
 async def test_kickoff_blocked_without_check_mapping(session_factory, seed, part):
