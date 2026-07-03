@@ -48,6 +48,28 @@ async def _match_step_id(session: AsyncSession, template_id: Optional[int],
     return steps[0].id
 
 
+def _retarget_task(task: WfInstanceTask, rasic_letter: str,
+                   stage_order: Optional[int] = None) -> None:
+    """Apply a re-letter (and optional re-stage) to a linked engine task so it
+    stays consistent with its assessment row. Blocking (R/A) => an active,
+    actionable task with a default due date; non-blocking (S/C) => a noted,
+    non-actionable task with no due date. Shared by the reletter op and the
+    add-on-existing-row path so both mutate the task identically."""
+    is_blocking = rasic_letter in BLOCKING_LETTERS
+    task.rasic_letter = rasic_letter
+    task.is_actionable = is_blocking
+    if stage_order is not None:
+        task.stage_order = stage_order
+    if is_blocking:
+        # non-blocking -> blocking: (re)open with a default due date.
+        task.status = "active"
+        task.due_date = datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+    else:
+        # blocking -> non-blocking: drop to a noted task, no due date.
+        task.status = "noted"
+        task.due_date = None
+
+
 class ChangeRoutingService:
 
     @staticmethod
@@ -236,6 +258,19 @@ class ChangeRoutingService:
             else:
                 existing.rasic_letter = rasic_letter
                 existing.stage_order = order
+                # Re-lettering/re-staging an existing row must carry the same
+                # transitions onto its linked engine task so it doesn't go stale
+                # (e.g. a C-noted task re-added as R must become active/actionable).
+                if existing.wf_instance_task_id is not None:
+                    task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
+                    if task is not None:
+                        _retarget_task(task, rasic_letter, stage_order=order)
+                        task.step_id = await _match_step_id(
+                            session, inst.template_id if inst else None,
+                            order, department_id, rasic_letter)
+                        await session.flush()
+                        if inst is not None:
+                            await WorkflowService._maybe_advance_stage(session, inst)
             desc = f"added dept {department_id} as {rasic_letter} in stage {order}"
         elif op == "remove":
             if existing is not None:
@@ -262,17 +297,7 @@ class ChangeRoutingService:
             if existing.wf_instance_task_id is not None:
                 task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
                 if task is not None:
-                    is_blocking = rasic_letter in BLOCKING_LETTERS
-                    task.rasic_letter = rasic_letter
-                    task.is_actionable = is_blocking
-                    if is_blocking:
-                        # non-blocking -> blocking: reopen with a default due date.
-                        task.status = "active"
-                        task.due_date = datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
-                    else:
-                        # blocking -> non-blocking: drop to a noted task, no due date.
-                        task.status = "noted"
-                        task.due_date = None
+                    _retarget_task(task, rasic_letter)
                     await session.flush()
             # A reletter can add or remove a stage gate; re-check advancement.
             if inst is not None:

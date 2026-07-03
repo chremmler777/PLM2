@@ -363,6 +363,12 @@ class WorkflowService:
         remove/reletter can re-run the same gate after mutating tasks. ``actor_id``
         attributes the completion audit; it is ``None`` for engine-internal
         re-checks (e.g. a deviation removing the last blocking task)."""
+        # A non-active instance (already completed/rejected/canceled) must never
+        # advance again — completing a stray task in a passed stage of a finished
+        # instance would otherwise re-enter the completion branch and emit a
+        # duplicate wf_completed audit + notification.
+        if instance.status != "active":
+            return instance
         # Check if all actionable tasks in the current stage are approved
         stage_tasks_result = await db.execute(
             select(WfInstanceTask).where(
@@ -417,13 +423,23 @@ class WorkflowService:
                 next_stage = next_stages[0]
                 instance.current_stage_order = next_stage.stage_order
                 await WorkflowService._create_stage_tasks(db, instance, next_stage)
-                has_actionable = any(
-                    r.rasic_letter in ACTIONABLE_LETTERS
-                    for step in next_stage.steps
-                    for r in step.rasic_assignments)
-                if has_actionable:
+                # Continuation is decided from the OPEN actionable tasks actually
+                # created for this stage, not the template's RASIC letters. A stage
+                # can be born already complete: _create_stage_tasks mirrors early
+                # payload-submitted assessments onto its fresh tasks, so a stage
+                # whose only actionable tasks are all approved/waived (or which has
+                # none) has no gate left to wait on and must keep cascading —
+                # relying on template letters here would stall the instance forever.
+                stage_actionable = (await db.execute(
+                    select(WfInstanceTask).where(
+                        WfInstanceTask.instance_id == instance.id,
+                        WfInstanceTask.stage_order == next_stage.stage_order,
+                        WfInstanceTask.is_actionable == True,  # noqa: E712
+                    ))).scalars().all()
+                if any(t.status not in ("approved", "waived")
+                       for t in stage_actionable):
                     break
-                # No gate in this stage -> cascade on to the next one.
+                # No open gate in this stage -> cascade on to the next one.
 
             await db.flush()
 
