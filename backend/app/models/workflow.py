@@ -151,7 +151,10 @@ class WfInstance(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     template_id: Mapped[int] = mapped_column(ForeignKey("wf_templates.id"))
-    part_revision_id: Mapped[int] = mapped_column(ForeignKey("part_revisions.id"))
+    part_revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_revisions.id"), nullable=True)
+    change_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_requests.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="active")  # active|completed|canceled|rejected
     current_stage_order: Mapped[int] = mapped_column(Integer, default=1)
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -162,7 +165,7 @@ class WfInstance(Base):
     cancel_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     template: Mapped["WfTemplate"] = relationship()
-    part_revision: Mapped["PartRevision"] = relationship(
+    part_revision: Mapped["PartRevision | None"] = relationship(
         foreign_keys="[WfInstance.part_revision_id]",
     )
     tasks: Mapped[list["WfInstanceTask"]] = relationship(
@@ -180,7 +183,7 @@ class WfInstanceTask(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     instance_id: Mapped[int] = mapped_column(ForeignKey("wf_instances.id"))
     stage_order: Mapped[int] = mapped_column(Integer)  # denormalized for quick filtering
-    step_id: Mapped[int] = mapped_column(ForeignKey("wf_steps.id"))
+    step_id: Mapped[int | None] = mapped_column(ForeignKey("wf_steps.id"), nullable=True)
     department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
     rasic_letter: Mapped[str] = mapped_column(String(1))  # R|A|S|I|C
     status: Mapped[str] = mapped_column(String(20))  # pending|active|approved|rejected|noted
@@ -197,7 +200,7 @@ class WfInstanceTask(Base):
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     instance: Mapped["WfInstance"] = relationship(back_populates="tasks")
-    step: Mapped["WfStep"] = relationship()
+    step: Mapped["WfStep | None"] = relationship()
     department: Mapped["Department"] = relationship()
     completed_by_user: Mapped["User | None"] = relationship(foreign_keys=[completed_by])
     owner: Mapped["User | None"] = relationship(

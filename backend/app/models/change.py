@@ -35,6 +35,13 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
 ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
+
+# Maps a WfInstanceTask.status onto the assessment status vocabulary, so a
+# task-linked R/A assessment reads its execution state through from the task.
+_TASK_TO_ASSESSMENT_STATUS = {
+    "pending": "pending", "active": "active", "approved": "submitted",
+    "waived": "waived", "rejected": "submitted", "noted": "active",
+}
 ROUTING_DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 IMPLEMENTATION_MODES = ("integrated", "separational")
 
@@ -187,6 +194,12 @@ class ChangeAssessment(Base):
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Phase E: 1:1 link to the workflow task that executes this R/A assignment.
+    # When linked, the task is the source of truth for execution state; the
+    # read-through properties below expose it without duplicating writes.
+    wf_instance_task_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("wf_instance_tasks.id"), nullable=True, unique=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -197,6 +210,8 @@ class ChangeAssessment(Base):
     )
     owner: Mapped["User | None"] = relationship(
         foreign_keys=[owner_id], lazy="selectin")
+    task: Mapped["WfInstanceTask | None"] = relationship(
+        "WfInstanceTask", foreign_keys=[wf_instance_task_id], lazy="selectin")
 
     @property
     def owner_name(self) -> Optional[str]:
@@ -206,6 +221,52 @@ class ChangeAssessment(Base):
     def overdue(self) -> bool:
         return (self.due_date is not None and self.status == "active"
                 and self.due_date < datetime.utcnow())
+
+    # ------------------------------------------------------------------
+    # Read-through execution state (Phase E unification)
+    # For R/A rows linked to a workflow task, the task is authoritative;
+    # S/C and unlinked rows fall back to this assessment's own columns.
+    # ------------------------------------------------------------------
+    @property
+    def effective_status(self) -> str:
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return _TASK_TO_ASSESSMENT_STATUS.get(self.task.status, self.status)
+        if self.rasic_letter not in BLOCKING_LETTERS:
+            if self.submitted_at is not None:
+                return "submitted"
+            if self.task is not None:      # its stage has started
+                return "active"
+        return self.status
+
+    @property
+    def effective_owner_id(self):
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return self.task.owner_id
+        return self.owner_id
+
+    @property
+    def effective_owner_name(self):
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return self.task.owner_name
+        return self.owner.full_name if getattr(self, "owner", None) else None
+
+    @property
+    def effective_due_date(self):
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return self.task.due_date
+        return self.due_date
+
+    @property
+    def effective_accepted_at(self):
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return self.task.accepted_at
+        return self.accepted_at
+
+    @property
+    def effective_overdue(self) -> bool:
+        if self.rasic_letter in BLOCKING_LETTERS and self.task is not None:
+            return self.task.overdue
+        return self.overdue
 
 
 class ChangeAttachment(Base):
@@ -312,5 +373,5 @@ class ChangeTransitionDeviation(Base):
 # Import related models for relationship resolution
 from app.models.entities import Project, User, Plant  # noqa: E402,F811
 from app.models.part import Part, PartRevision  # noqa: E402
-from app.models.workflow import Department  # noqa: E402
+from app.models.workflow import Department, WfInstanceTask  # noqa: E402
 from app.models.change_cost import AssessmentCostLine, ChangeGate  # noqa: E402
