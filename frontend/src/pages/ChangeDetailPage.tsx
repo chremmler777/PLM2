@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -24,12 +24,16 @@ const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 type Tab = 'overview' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
+const TABS: Tab[] = ['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
   const changeId = Number(id);
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : 'overview';
+  const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
 
@@ -160,7 +164,7 @@ export default function ChangeDetailPage() {
       />
 
       <div className="border-b flex gap-4 text-sm mb-4">
-        {(['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'] as Tab[]).map((tb) => (
+        {TABS.map((tb) => (
           <button key={tb}
             className={`pb-2 ${tab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
             onClick={() => setTab(tb)}>

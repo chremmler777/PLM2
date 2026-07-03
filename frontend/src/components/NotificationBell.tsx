@@ -66,6 +66,21 @@ export default function NotificationBell({ collapsed }: { collapsed: boolean }) 
 
   const count = unread?.count ?? 0;
 
+  const groupKey = (n: NotificationItem) => n.link?.split('?')[0] ?? '_other';
+
+  const groupedNotifications = (() => {
+    if (!notifications) return [];
+    const groups = new Map<string, NotificationItem[]>();
+    for (const n of notifications) {
+      const key = groupKey(n);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(n);
+    }
+    // groups already inherit newest-first item order from `notifications`;
+    // order groups by their newest member (first item, since items are newest-first).
+    return Array.from(groups.entries());
+  })();
+
   const handleClick = (n: NotificationItem) => {
     if (!n.is_read) markRead.mutate(n.id);
     if (n.link) {
@@ -109,27 +124,34 @@ export default function NotificationBell({ collapsed }: { collapsed: boolean }) 
             {!notifications || notifications.length === 0 ? (
               <p className="px-3 py-4 text-slate-400 text-xs text-center">No notifications</p>
             ) : (
-              notifications.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={`w-full text-left px-3 py-2 border-b border-slate-600/50 last:border-b-0 hover:bg-slate-600 ${
-                    n.is_read ? 'opacity-60' : ''
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    {!n.is_read && <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />}
-                    <div className="min-w-0">
-                      <p className="text-slate-100 text-xs font-medium">{n.title}</p>
-                      {n.body && <p className="text-slate-400 text-xs mt-0.5 line-clamp-2">{n.body}</p>}
-                      {n.created_at && (
-                        <p className="text-slate-500 text-[10px] mt-0.5">
-                          {new Date(n.created_at).toLocaleString()}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </button>
+              groupedNotifications.map(([key, items]) => (
+                <div key={key}>
+                  <p className="px-3 py-1 bg-slate-800 text-slate-400 text-[10px] font-semibold uppercase tracking-wide">
+                    {key === '_other' ? 'Other' : key}
+                  </p>
+                  {items.map((n) => (
+                    <button
+                      key={n.id}
+                      onClick={() => handleClick(n)}
+                      className={`w-full text-left px-3 py-2 border-b border-slate-600/50 last:border-b-0 hover:bg-slate-600 ${
+                        n.is_read ? 'opacity-60' : ''
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {!n.is_read && <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />}
+                        <div className="min-w-0">
+                          <p className="text-slate-100 text-xs font-medium">{n.title}</p>
+                          {n.body && <p className="text-slate-400 text-xs mt-0.5 line-clamp-2">{n.body}</p>}
+                          {n.created_at && (
+                            <p className="text-slate-500 text-[10px] mt-0.5">
+                              {new Date(n.created_at).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
               ))
             )}
           </div>
