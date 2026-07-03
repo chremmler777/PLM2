@@ -170,6 +170,7 @@ class WorkflowService:
         """Create tasks for every RASIC assignment in a stage and notify
         members of the departments that have actionable tasks."""
         actionable_departments: set[int] = set()
+        tasks_created: list[WfInstanceTask] = []
         for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
             for rasic in step.rasic_assignments:
                 is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
@@ -187,7 +188,23 @@ class WorkflowService:
                     if is_actionable else None,
                 )
                 db.add(task)
+                tasks_created.append(task)
         await db.flush()
+
+        # Change-scoped instances: link this stage's assessment payload rows to the
+        # freshly-created tasks (lazy linking — each stage links as its tasks appear).
+        if instance.change_id is not None:
+            from app.models.change import ChangeAssessment
+            rows = (await db.execute(select(ChangeAssessment).where(
+                ChangeAssessment.change_id == instance.change_id,
+                ChangeAssessment.stage_order == stage.stage_order,
+                ChangeAssessment.wf_instance_task_id.is_(None)))).scalars().all()
+            by_key = {(t.department_id, t.rasic_letter): t for t in tasks_created}
+            for a in rows:
+                t = by_key.get((a.department_id, a.rasic_letter))
+                if t is not None:
+                    a.wf_instance_task_id = t.id
+            await db.flush()
 
         if actionable_departments:
             from app.services.notification_service import NotificationService

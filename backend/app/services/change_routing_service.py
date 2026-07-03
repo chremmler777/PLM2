@@ -17,7 +17,7 @@ from app.models.change import (
 )
 from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
 from app.services.notification_service import NotificationService
-from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS
+from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
 
 
 
@@ -95,6 +95,9 @@ class ChangeRoutingService:
             for dep in stage["departments"]:
                 if dep["rasic_letter"] not in TASK_LETTERS:
                     continue  # I => notification only, no row
+                # Every new row is created pending; execution state now lives on the
+                # engine task (linked lazily by _create_stage_tasks), and
+                # ``effective_status`` handles the read-through for display.
                 session.add(ChangeAssessment(
                     change_id=change.id, department_id=dep["department_id"],
                     verdict="pending", stage_order=stage["stage_order"],
@@ -111,8 +114,28 @@ class ChangeRoutingService:
                 body=f"'{change.title}' has started cross-functional assessment.",
                 link=f"/changes/{change.id}",
             )
-        # Activate the first stage that has any rows.
-        await ChangeRoutingService.activate_stage(session, change, _first_stage_order(stages))
+        # Spawn the change-scoped "ECM Bewertung" instance. The engine creates
+        # stage-1 tasks (and links stage-1 assessments) on start; later stages
+        # link lazily as their tasks are created.
+        instance = None
+        if routing.template_id is not None:
+            instance = await WorkflowService.start_change_workflow(
+                session, change.id, routing.template_id, user_id)
+        else:
+            # Legacy TYPE_DISCIPLINES fallback carries no template — resolve the
+            # seeded default by name (a later task renames this and updates the site).
+            tmpl_id = (await session.execute(
+                select(WfTemplate.id).where(WfTemplate.name == "ECM Bewertung")
+            )).scalar_one_or_none()
+            if tmpl_id is not None:
+                instance = await WorkflowService.start_change_workflow(
+                    session, change.id, tmpl_id, user_id)
+        if instance is None:
+            # No engine instance (legacy fallback with no seeded template): there
+            # is no task for execution state to live on, so activate stage 1's
+            # rows the legacy way. Task 4 removes this along with activate_stage.
+            await ChangeRoutingService.activate_stage(
+                session, change, _first_stage_order(stages))
         return routing
 
     @staticmethod

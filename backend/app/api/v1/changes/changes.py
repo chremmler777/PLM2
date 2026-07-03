@@ -98,20 +98,24 @@ async def my_change_tasks(
             .where(
                 ChangeAssessment.department_id.in_(dep_ids)
                 & (ChangeAssessment.verdict == "pending")
-                & (ChangeAssessment.status == "active")
                 & (ChangeRequest.status == "in_assessment")
             )
         )
         for a, c in rows.all():
+            # Execution state lives on the linked engine task; surface a row only
+            # when it is *effectively* active (task active, or an unlinked
+            # activate_stage'd later-stage row).
+            if a.effective_status != "active":
+                continue
             tasks.append({
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
                 "title": c.title, "department_id": a.department_id, "assessment_id": a.id,
-                "owner_id": a.owner_id,
-                "owner_name": a.owner_name,
-                "accepted_at": a.accepted_at,
-                "due_date": a.due_date,
-                "overdue": a.overdue,
-                "mine": a.owner_id == current_user.id,
+                "owner_id": a.effective_owner_id,
+                "owner_name": a.effective_owner_name,
+                "accepted_at": a.effective_accepted_at,
+                "due_date": a.effective_due_date,
+                "overdue": a.effective_overdue,
+                "mine": a.effective_owner_id == current_user.id,
             })
 
         tasks.sort(key=lambda d: (
@@ -270,7 +274,9 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
             deps.append(RoutingDepartment(
                 department_id=d["department_id"], rasic_letter=d["rasic_letter"],
                 tier=_tier(d["rasic_letter"]),
-                status=(a.status if a else None), verdict=(a.verdict if a else None),
+                # Execution state lives on the linked engine task; read it through.
+                status=(a.effective_status if a else None),
+                verdict=(a.verdict if a else None),
                 assessment_id=(a.id if a else None)))
         stages.append(RoutingStage(stage_order=st["stage_order"], departments=deps))
     return RoutingResponse(

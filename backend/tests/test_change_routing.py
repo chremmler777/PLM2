@@ -99,6 +99,7 @@ async def test_build_routing_generates_task_rows_excludes_informed(
         session_factory, seed, ecr_template, departments):
     from app.services.change_routing_service import ChangeRoutingService
     from app.models.change import ChangeRequest, ChangeAssessment, ChangeRouting
+    from app.models.workflow import WfInstanceTask
     cid = await _seeded_change(session_factory, seed)
     async with session_factory() as s:
         change = await s.get(ChangeRequest, cid)
@@ -109,11 +110,22 @@ async def test_build_routing_generates_task_rows_excludes_informed(
         by_dep = {a.department_id: a for a in rows}
         # Sales is I -> no row; Tool Eng(R, stage1), Quality(C, stage1), APQP(A, stage2)
         assert departments["Sales"] not in by_dep
-        assert by_dep[departments["Tool Engineer"]].stage_order == 1
-        assert by_dep[departments["Tool Engineer"]].rasic_letter == "R"
-        assert by_dep[departments["Tool Engineer"]].status == "active"   # stage 1 activated
-        assert by_dep[departments["APQP"]].stage_order == 2
-        assert by_dep[departments["APQP"]].status == "pending"           # stage 2 not active yet
+        te = by_dep[departments["Tool Engineer"]]
+        assert te.stage_order == 1
+        assert te.rasic_letter == "R"
+        # New semantics: execution state lives on the engine task. The ROW stays
+        # pending, its linked TASK is active, and effective_status reads "active".
+        assert te.status == "pending"
+        assert te.wf_instance_task_id is not None
+        task = await s.get(WfInstanceTask, te.wf_instance_task_id)
+        assert task.status == "active"
+        assert te.effective_status == "active"
+        # Stage 2 has not started: row pending, unlinked, effective pending.
+        apqp = by_dep[departments["APQP"]]
+        assert apqp.stage_order == 2
+        assert apqp.status == "pending"
+        assert apqp.wf_instance_task_id is None
+        assert apqp.effective_status == "pending"
         routing = (await s.execute(select(ChangeRouting).where(ChangeRouting.change_id == cid))).scalar_one()
         assert routing.template_id == ecr_template
         assert len(routing.standard_snapshot["stages"]) == 2
