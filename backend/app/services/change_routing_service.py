@@ -15,11 +15,37 @@ from app.models.change import (
     ChangeRequest, ChangeAssessment, ChangeRouting, ChangeRoutingStandard,
     BLOCKING_LETTERS, TASK_LETTERS,
 )
-from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory
+from app.models.workflow import (
+    Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
+    WfInstance, WfInstanceTask,
+)
 from app.services.notification_service import NotificationService
 from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS, WorkflowService
 
 
+async def _match_step_id(session: AsyncSession, template_id: Optional[int],
+                         stage_order: int, department_id: int,
+                         rasic_letter: str) -> Optional[int]:
+    """Resolve the step a deviation task should hang off inside ``template_id``'s
+    stage ``stage_order``: prefer the step carrying a WfStepRasic for
+    (department_id, rasic_letter), else the stage's first step, else ``None`` when
+    the stage has no steps (tasks tolerate a null step_id since Task 1)."""
+    if template_id is None:
+        return None
+    stage = (await session.execute(
+        select(WfStage)
+        .where(WfStage.template_id == template_id,
+               WfStage.stage_order == stage_order)
+        .options(selectinload(WfStage.steps).selectinload(WfStep.rasic_assignments))
+    )).scalar_one_or_none()
+    if stage is None or not stage.steps:
+        return None
+    steps = sorted(stage.steps, key=lambda s: s.position_in_stage)
+    for step in steps:
+        for r in step.rasic_assignments:
+            if r.department_id == department_id and r.rasic_letter == rasic_letter:
+                return step.id
+    return steps[0].id
 
 
 class ChangeRoutingService:
@@ -164,6 +190,14 @@ class ChangeRoutingService:
                 (ChangeAssessment.change_id == change.id)
                 & (ChangeAssessment.department_id == department_id))
         )).scalar_one_or_none()
+        # Change-scoped engine instance (Task 3). When present, deviation ops must
+        # mutate its tasks alongside the assessment rows so engine state stays
+        # consistent. Legacy pre-migration changes have none -> assessment-only.
+        inst = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change.id,
+                WfInstance.status == "active")
+        )).scalar_one_or_none()
 
         if op == "add":
             if rasic_letter not in TASK_LETTERS:
@@ -179,13 +213,45 @@ class ChangeRoutingService:
                               if new_status == "active" else None),
                 )
                 session.add(new_row)
+                await session.flush()
+                # Engine: if the change has a running instance and the target stage
+                # has already started (current or passed), create + link the task so
+                # the assignment gets an actionable surface. A future stage is left
+                # unlinked — lazy linking (Task 3) picks it up when the stage starts.
+                if inst is not None and order <= inst.current_stage_order:
+                    is_blocking = rasic_letter in BLOCKING_LETTERS
+                    task = WfInstanceTask(
+                        instance_id=inst.id, stage_order=order,
+                        step_id=await _match_step_id(
+                            session, inst.template_id, order, department_id, rasic_letter),
+                        department_id=department_id, rasic_letter=rasic_letter,
+                        status="active" if is_blocking else "noted",
+                        is_actionable=is_blocking,
+                        due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+                                  if is_blocking else None),
+                    )
+                    session.add(task)
+                    await session.flush()
+                    new_row.wf_instance_task_id = task.id
             else:
                 existing.rasic_letter = rasic_letter
                 existing.stage_order = order
             desc = f"added dept {department_id} as {rasic_letter} in stage {order}"
         elif op == "remove":
             if existing is not None:
+                # Drop the linked engine task first (null the FK so the row can be
+                # deleted), then the assessment row itself.
+                if existing.wf_instance_task_id is not None:
+                    task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
+                    existing.wf_instance_task_id = None
+                    await session.flush()
+                    if task is not None:
+                        await session.delete(task)
                 await session.delete(existing)
+                await session.flush()
+                # Removing the last open blocking task can unblock the stage.
+                if inst is not None:
+                    await WorkflowService._maybe_advance_stage(session, inst)
             desc = f"removed dept {department_id}"
         elif op == "reletter":
             if rasic_letter not in TASK_LETTERS:
@@ -193,6 +259,24 @@ class ChangeRoutingService:
             if existing is None:
                 raise ValueError("no assessment to reletter")
             existing.rasic_letter = rasic_letter
+            if existing.wf_instance_task_id is not None:
+                task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
+                if task is not None:
+                    is_blocking = rasic_letter in BLOCKING_LETTERS
+                    task.rasic_letter = rasic_letter
+                    task.is_actionable = is_blocking
+                    if is_blocking:
+                        # non-blocking -> blocking: reopen with a default due date.
+                        task.status = "active"
+                        task.due_date = datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS)
+                    else:
+                        # blocking -> non-blocking: drop to a noted task, no due date.
+                        task.status = "noted"
+                        task.due_date = None
+                    await session.flush()
+            # A reletter can add or remove a stage gate; re-check advancement.
+            if inst is not None:
+                await WorkflowService._maybe_advance_stage(session, inst)
             desc = f"re-lettered dept {department_id} to {rasic_letter}"
         else:
             raise ValueError(f"unknown op '{op}'")

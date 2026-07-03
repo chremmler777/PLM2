@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
 pytestmark = pytest.mark.asyncio
@@ -127,3 +128,244 @@ async def test_blocked_transition_requires_approved_deviation(
     log = (await client.get(f"/api/v1/changes/{c['id']}/changelog",
                             headers=eng_auth)).json()
     assert any(e["action"] == "deviated_transition" for e in log)
+
+
+# ---------------------------------------------------------------------------
+# Phase E Task 5: routing deviations mutate engine tasks (add/remove/reletter)
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def dev_departments(session_factory):
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
+        ids = {}
+        for i, n in enumerate(names):
+            d = Department(name=n, flow_type="action", is_active=True, sort_order=i)
+            s.add(d); await s.flush(); ids[n] = d.id
+        await s.commit()
+        return ids
+
+
+@pytest_asyncio.fixture
+async def dev_ecr_template(session_factory, dev_departments):
+    """Two-stage ECR: stage1 Tool Engineer(R) + Quality(C); stage2 APQP(A) + Sales(I)."""
+    from app.models.workflow import WfTemplate, WfStage, WfStep, WfStepRasic
+    from app.models.change import ChangeRoutingStandard
+    async with session_factory() as s:
+        t = WfTemplate(name="ECR", description="Engineering Change Request",
+                       version=1, is_active=True, created_by=1)
+        s.add(t); await s.flush()
+        layout = [
+            (1, [("Tool Engineer", "R"), ("Quality", "C")]),
+            (2, [("APQP", "A"), ("Sales", "I")]),
+        ]
+        for order, deps in layout:
+            stage = WfStage(template_id=t.id, stage_order=order, name=f"Stage {order}")
+            s.add(stage); await s.flush()
+            step = WfStep(stage_id=stage.id, step_name=f"Step {order}", position_in_stage=1)
+            s.add(step); await s.flush()
+            for name, letter in deps:
+                s.add(WfStepRasic(step_id=step.id, department_id=dev_departments[name],
+                                  rasic_letter=letter))
+        s.add(ChangeRoutingStandard(change_type="physical_part", template_id=t.id,
+                                    template_version=1, updated_by=1))
+        await s.commit()
+        return t.id
+
+
+async def _dev_seeded_change(session_factory, seed):
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        c = ChangeRequest(change_number="CR-DVT-1", project_id=seed["project_id"],
+                          title="t", change_type="physical_part", status="captured",
+                          raised_by=seed["engineer_id"], lead_id=seed["engineer_id"])
+        s.add(c); await s.flush()
+        await s.commit()
+        return c.id
+
+
+async def _dev_build_routing(session_factory, seed, cid):
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
+        await s.commit()
+
+
+async def test_deviation_add_creates_task_in_running_instance(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """op=add on a started stage creates a NEW WfInstanceTask (active, actionable)
+    in the change-scoped instance and links the new assessment row to it."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add",
+            department_id=dev_departments["Manufacturing Engineer"],
+            rasic_letter="R", stage_order=1)
+        await s.commit()
+
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Manufacturing Engineer"])
+        ))).scalar_one()
+        assert row.wf_instance_task_id is not None
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert task.status == "active"
+        assert task.is_actionable is True
+        assert task.rasic_letter == "R"
+        assert task.stage_order == 1
+        # task belongs to the change-scoped instance
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
+        assert task.instance_id == inst.id
+        assert row.effective_status == "active"
+
+
+async def test_deviation_remove_deletes_task(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """op=remove on an unsubmitted stage-1 R row deletes the assessment AND its
+    task; with the last blocking task gone, stage 1 advances to stage 2."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
+        ))).scalar_one()
+        task_id = row.wf_instance_task_id
+        assert task_id is not None
+
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="remove",
+            department_id=dev_departments["Tool Engineer"])
+        await s.commit()
+
+    async with session_factory() as s:
+        gone = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
+        ))).scalar_one_or_none()
+        assert gone is None
+        assert await s.get(WfInstanceTask, task_id) is None
+        # Removing the last open blocking task lets stage 1 advance to stage 2.
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
+        assert inst.current_stage_order == 2
+
+
+async def test_deviation_reletter_updates_task(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """op=reletter R->S flips the task to a non-actionable noted task and clears
+    its due date; the assessment reads through the task's S semantics."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.workflow import WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="reletter",
+            department_id=dev_departments["Tool Engineer"], rasic_letter="S")
+        await s.commit()
+
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
+        ))).scalar_one()
+        assert row.rasic_letter == "S"
+        task = await s.get(WfInstanceTask, row.wf_instance_task_id)
+        assert task.rasic_letter == "S"
+        assert task.is_actionable is False
+        assert task.status == "noted"
+        assert task.due_date is None
+        # S row with a live (started) task reads effective 'active' until submitted.
+        assert row.effective_status == "active"
+
+
+async def test_deviation_add_to_passed_stage_task_active_still_blocks(
+        session_factory, seed, dev_ecr_template, dev_departments):
+    """Decision pin: a deviation add targeting a PASSED stage still creates an
+    active blocking task in that stage. The engine's current_stage_order does NOT
+    move backwards, and even after the instance completes, blocking_complete stays
+    False until the passed-stage deviation task is completed."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeService
+    from app.services.workflow_service import WorkflowService
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.workflow import WfInstance, WfInstanceTask
+    cid = await _dev_seeded_change(session_factory, seed)
+    await _dev_build_routing(session_factory, seed, cid)
+
+    # Submit stage-1 R (Tool Engineer) -> engine advances to stage 2.
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.submit_assessment(
+            s, change, dev_departments["Tool Engineer"], "feasible", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid, WfInstance.status == "active"))).scalar_one()
+        assert inst.current_stage_order == 2
+
+    # Add a blocking dept to the PASSED stage 1.
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.apply_deviation(
+            s, change, seed["engineer_id"], op="add",
+            department_id=dev_departments["Manufacturing Engineer"],
+            rasic_letter="R", stage_order=1)
+        await s.commit()
+
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Manufacturing Engineer"])
+        ))).scalar_one()
+        mfg_task_id = row.wf_instance_task_id
+        assert mfg_task_id is not None
+        task = await s.get(WfInstanceTask, mfg_task_id)
+        assert task.status == "active"
+        assert task.is_actionable is True
+        assert task.stage_order == 1
+        # current_stage_order must NOT move backward to the passed stage.
+        inst = await s.get(WfInstance, task.instance_id)
+        assert inst.current_stage_order == 2
+
+    # Submit stage-2 A (APQP) -> stage 2 completes, instance completes. The
+    # passed-stage deviation task is untouched (different stage) and still active.
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.submit_assessment(
+            s, change, dev_departments["APQP"], "feasible", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        # Instance done, yet blocking_complete is False: the passed-stage task gates it.
+        assert await ChangeRoutingService.blocking_complete(s, change) is False
+
+    # Complete the passed-stage deviation task -> blocking now complete.
+    async with session_factory() as s:
+        await WorkflowService.complete_task(
+            s, mfg_task_id, "approved", "done", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        assert await ChangeRoutingService.blocking_complete(s, change) is True

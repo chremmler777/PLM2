@@ -204,6 +204,16 @@ class WorkflowService:
                 t = by_key.get((a.department_id, a.rasic_letter))
                 if t is not None:
                     a.wf_instance_task_id = t.id
+                    # A blocking row the user already submitted while its stage was
+                    # still pending (a payload-only submit) must not be re-opened
+                    # when its task finally materializes — mirror the submission
+                    # onto the freshly-created task so effective_status stays
+                    # 'submitted' and the engine treats the gate as satisfied.
+                    if a.submitted_at is not None and t.is_actionable:
+                        t.status = "approved"
+                        t.decision = "approved"
+                        t.completed_by = a.submitted_by
+                        t.completed_at = a.submitted_at
             await db.flush()
 
         if actionable_departments:
@@ -336,6 +346,23 @@ class WorkflowService:
             )
             return instance
 
+        return await WorkflowService._maybe_advance_stage(
+            db, instance, actor_id=completed_by_id)
+
+    @staticmethod
+    async def _maybe_advance_stage(
+        db: AsyncSession,
+        instance: WfInstance,
+        actor_id: int | None = None,
+    ) -> WfInstance:
+        """Advance the instance if every actionable task in its current stage is
+        resolved (approved/waived), cascading through optional-only stages and
+        completing the instance when no gated stage remains.
+
+        Extracted from ``complete_task`` (unchanged logic) so routing-deviation
+        remove/reletter can re-run the same gate after mutating tasks. ``actor_id``
+        attributes the completion audit; it is ``None`` for engine-internal
+        re-checks (e.g. a deviation removing the last blocking task)."""
         # Check if all actionable tasks in the current stage are approved
         stage_tasks_result = await db.execute(
             select(WfInstanceTask).where(
@@ -373,7 +400,7 @@ class WorkflowService:
                     instance.completed_at = datetime.utcnow()
 
                     await WorkflowService._audit(db, instance, "wf_completed",
-                                                 completed_by_id, None)
+                                                 actor_id, None)
 
                     from app.services.notification_service import NotificationService
 
