@@ -28,13 +28,23 @@ export default function EscalationsCard() {
             >
               {e.change_number}
             </Link>
-            <span className="text-slate-300">{e.label}</span>
-            <span className="text-slate-400">
-              {e.owner_name ?? t('tasks.unclaimed')}
-            </span>
-            <span className="text-red-400 font-semibold">
-              {e.days_overdue}d {t('tasks.overdue')}
-            </span>
+            {e.kind === 'deadline' ? (
+              <span className={e.state === 'overdue' ? 'text-red-400 font-semibold' : 'text-amber-300 font-semibold'}>
+                {e.state === 'overdue'
+                  ? t('deadline.overdue')
+                  : `at risk · due ${new Date(e.required_by_date!).toLocaleDateString('de-DE')}`}
+              </span>
+            ) : (
+              <>
+                <span className="text-slate-300">{e.label}</span>
+                <span className="text-slate-400">
+                  {e.owner_name ?? t('tasks.unclaimed')}
+                </span>
+                <span className="text-red-400 font-semibold">
+                  {e.days_overdue}d {t('tasks.overdue')}
+                </span>
+              </>
+            )}
           </li>
         ))}
       </ul>

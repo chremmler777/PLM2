@@ -116,6 +116,9 @@ export interface ChangeRequest {
   customer_relevant?: boolean;
   car_line?: string | null;
   affected_plant_ids?: number[];
+  required_by_date: string | null;
+  required_by_reason: string | null;
+  deadline_state: 'on_track' | 'at_risk' | 'overdue' | null;
 }
 
 export interface ChangeDetail extends ChangeRequest {

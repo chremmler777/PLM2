@@ -94,5 +94,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.noMatches': { de: 'Keine Treffer — Nummer oder Namen anders schreiben?', en: 'No matches — try a different number or name?' },
   'common.cancel': { de: 'Abbrechen', en: 'Cancel' },
   'common.close': { de: 'Schließen', en: 'Close' },
+  'deadline.title': { de: 'Termin', en: 'Deadline' },
+  'deadline.reason': { de: 'Begründung', en: 'Reason' },
+  'deadline.set': { de: 'Termin setzen', en: 'Set deadline' },
+  'deadline.overdue': { de: 'überfällig', en: 'overdue' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

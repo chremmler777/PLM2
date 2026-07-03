@@ -1,5 +1,5 @@
 import { useParams } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { changesApi } from '../api/changes';
@@ -14,6 +14,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
+import { DeadlineChip } from '../components/changes/DeadlineChip';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { t } from '../i18n/cmLabels';
@@ -79,6 +80,24 @@ export default function ChangeDetailPage() {
     mutationFn: (response: string) => changesApi.customerResponse(changeId, response),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
   });
+  const [deadlineDate, setDeadlineDate] = useState('');
+  const [deadlineReason, setDeadlineReason] = useState('');
+  const deadline = useMutation({
+    mutationFn: (vars: { required_by_date: string | null; required_by_reason: string | null }) =>
+      changesApi.update(changeId, vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+      toast.success('Deadline saved');
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to save deadline'),
+  });
+
+  useEffect(() => {
+    if (change) {
+      setDeadlineDate(change.required_by_date ? change.required_by_date.slice(0, 10) : '');
+      setDeadlineReason(change.required_by_reason ?? '');
+    }
+  }, [change?.id, change?.required_by_date, change?.required_by_reason]);
 
   if (isLoading || !change) return <div className="p-6 text-gray-500">Loading…</div>;
 
@@ -156,6 +175,37 @@ export default function ChangeDetailPage() {
           <p><span className="text-gray-500">Priority:</span> {change.priority}</p>
           <p><span className="text-gray-500">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-gray-500">Reason:</span> {change.reason ?? '—'}</p>
+
+          <div className="pt-3 border-t border-slate-700 mt-3">
+            <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-2">
+              {t('deadline.title')}
+              <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">{t('deadline.title')}</label>
+                <input type="date" value={deadlineDate}
+                  onChange={(e) => setDeadlineDate(e.target.value)}
+                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              </div>
+              <div className="flex-1 min-w-[12rem]">
+                <label className="block text-xs text-slate-500 mb-1">{t('deadline.reason')}</label>
+                <input type="text" value={deadlineReason}
+                  onChange={(e) => setDeadlineReason(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              </div>
+              <button
+                className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"
+                disabled={deadline.isPending}
+                onClick={() => deadline.mutate({
+                  required_by_date: deadlineDate ? new Date(deadlineDate).toISOString() : null,
+                  required_by_reason: deadlineReason || null,
+                })}>
+                {t('deadline.set')}
+              </button>
+            </div>
+          </div>
+
           <div className="pt-3">
             <label className="text-sm text-gray-500">Attach document (PPT, PDF, …)</label>
             <input type="file" className="block mt-1 text-sm"

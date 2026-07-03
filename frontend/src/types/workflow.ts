@@ -113,15 +113,18 @@ export interface WfInstanceTask {
 }
 
 export interface Escalation {
-  kind: 'assessment' | 'wf_task';
+  kind: 'assessment' | 'wf_task' | 'deadline';
   change_id: number;
   change_number: string;
   change_title: string;
   label: string;
-  owner_id: number | null;
-  owner_name: string | null;
-  due_date: string;
+  owner_id?: number | null;
+  owner_name?: string | null;
+  due_date?: string;
   days_overdue: number;
+  /** Present only for kind === 'deadline'. */
+  required_by_date?: string;
+  state?: 'on_track' | 'at_risk' | 'overdue';
 }
 
 export interface WfInstance {

@@ -43,4 +43,28 @@ describe('EscalationsCard', () => {
     const links = screen.getAllByRole('link')
     expect(links.some(l => l.getAttribute('href') === '/changes/3')).toBe(true)
   })
+
+  it('renders deadline escalations with state label instead of raw days_overdue', async () => {
+    vi.mocked(changesApi.myEscalations).mockResolvedValue([
+      { kind: 'deadline', change_id: 4, change_number: 'CR-2026-0011',
+        change_title: 'Bracket update', label: 'Required by 2026-07-12',
+        required_by_date: '2026-07-12T00:00:00', state: 'at_risk',
+        days_overdue: -9 },
+    ])
+    wrap(<EscalationsCard />)
+    expect(await screen.findByText(/at risk/)).toBeDefined()
+    expect(screen.getByText(/12\.0?7\.2026/)).toBeDefined()
+    expect(screen.queryByText(/-9d/)).toBeNull()
+  })
+
+  it('shows overdue label for an overdue deadline', async () => {
+    vi.mocked(changesApi.myEscalations).mockResolvedValue([
+      { kind: 'deadline', change_id: 5, change_number: 'CR-2026-0012',
+        change_title: 'Housing fix', label: 'Required by 2026-06-20',
+        required_by_date: '2026-06-20T00:00:00', state: 'overdue',
+        days_overdue: 12 },
+    ])
+    wrap(<EscalationsCard />)
+    expect(await screen.findByText('overdue')).toBeDefined()
+  })
 })

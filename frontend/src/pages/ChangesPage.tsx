@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { changesApi } from '../api/changes';
-import { STATUS_LABELS } from '../lib/changeStatus';
+import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import StartChangeModal from '../components/changes/StartChangeModal';
+import { DeadlineChip } from '../components/changes/DeadlineChip';
 
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
@@ -51,6 +52,7 @@ export default function ChangesPage() {
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Priority</th>
+                <th className="px-4 py-3">Deadline</th>
               </tr>
             </thead>
             <tbody>
@@ -63,12 +65,19 @@ export default function ChangesPage() {
                   </td>
                   <td className="px-4 py-3">{c.title}</td>
                   <td className="px-4 py-3">{c.change_type}</td>
-                  <td className="px-4 py-3">{STATUS_LABELS[c.status] ?? c.status}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_PILL[c.status]}`}>
+                      {STATUS_LABELS[c.status] ?? c.status}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{c.priority}</td>
+                  <td className="px-4 py-3">
+                    <DeadlineChip date={c.required_by_date} state={c.deadline_state} />
+                  </td>
                 </tr>
               ))}
               {changes.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
               )}
             </tbody>
           </table>
