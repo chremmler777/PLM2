@@ -146,6 +146,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'effort.total': { de: 'Bewertungsaufwand gesamt', en: 'Total assessment effort' },
   'assessment.submit': { de: 'Bewertung abgeben', en: 'Submit assessment' },
   'assessment.verdict': { de: 'Ergebnis', en: 'Verdict' },
+  conditions: { de: 'Bedingungen', en: 'Conditions' },
   'internal.approve': { de: 'Interne Kosten freigeben', en: 'Approve internal costs' },
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
   'internal.note': { de: 'Anmerkung', en: 'Note' },

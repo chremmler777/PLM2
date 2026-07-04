@@ -75,6 +75,26 @@ export default function SummationView({ changeId }: { changeId: number }) {
           </table>
         </div>
       )}
+
+      {data.total_effort_hours > 0 && (
+        <div>
+          <div className="text-xs font-semibold text-slate-300 mb-1">{t('effort.total')}</div>
+          <table className="w-full text-xs">
+            <tbody>
+              {data.effort_by_department.map((row) => (
+                <tr key={row.department_id} className="border-b border-slate-800">
+                  <td className="py-0.5">Dept #{row.department_id}</td>
+                  <td className="text-right tabular-nums">{row.effort_hours.toFixed(2)} h</td>
+                </tr>
+              ))}
+              <tr className="font-semibold">
+                <td>{t('total')}</td>
+                <td className="text-right tabular-nums">{data.total_effort_hours.toFixed(2)} h</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

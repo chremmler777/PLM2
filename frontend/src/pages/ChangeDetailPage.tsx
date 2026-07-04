@@ -6,6 +6,7 @@ import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import AssessmentRouting from '../components/changes/AssessmentRouting';
+import AssessmentSubmitForm from '../components/changes/AssessmentSubmitForm';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostLineGrid from '../components/changes/CostLineGrid';
@@ -39,6 +40,7 @@ export default function ChangeDetailPage() {
   const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [openAssessment, setOpenAssessment] = useState<number | null>(null);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -270,15 +272,34 @@ export default function ChangeDetailPage() {
           <AssessmentRouting changeId={changeId} />
           <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
-            <li key={a.id} className="px-4 py-2 flex justify-between items-center gap-3">
-              <span>{deptName(a.department_id)}</span>
-              <span className="flex items-center gap-3">
-                <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
-                <span className="text-slate-400 text-xs">
-                  {a.owner_name ?? t('tasks.unclaimed')}
-                  {a.overdue && <span className="text-red-400 ml-2">⚠ {t('tasks.overdue')}</span>}
+            <li key={a.id} className="px-4 py-2">
+              <div className="flex justify-between items-center gap-3">
+                <span>{deptName(a.department_id)}</span>
+                <span className="flex items-center gap-3">
+                  <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
+                  <span className="text-slate-400 text-xs">
+                    {a.owner_name ?? t('tasks.unclaimed')}
+                    {a.overdue && <span className="text-red-400 ml-2">⚠ {t('tasks.overdue')}</span>}
+                  </span>
+                  {a.status === 'active' && (
+                    <button
+                      onClick={() => setOpenAssessment(openAssessment === a.id ? null : a.id)}
+                      className="text-xs text-sky-400 hover:text-sky-300">
+                      {openAssessment === a.id ? t('common.close') : t('assessment.submit')}
+                    </button>
+                  )}
                 </span>
-              </span>
+              </div>
+              {a.status === 'active' && openAssessment === a.id && (
+                <div className="mt-2">
+                  <AssessmentSubmitForm
+                    changeId={changeId}
+                    departmentId={a.department_id}
+                    departmentName={deptName(a.department_id)}
+                    onDone={() => setOpenAssessment(null)}
+                  />
+                </div>
+              )}
             </li>
           ))}
           {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
