@@ -54,10 +54,10 @@ describe('CockpitSummary', () => {
   })
 
   it('marks a gate amber only when it guards a currently-available transition', () => {
-    // status 'captured' -> next is 'in_assessment'. feasibility guards
+    // status 'scoping' -> next is 'in_assessment'. feasibility guards
     // in_assessment, so a not-yes feasibility gate IS a real blocker. budget and
     // release guard later transitions, so they render muted, not amber.
-    render(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+    render(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[
         { gate_key: 'feasibility', decision: 'na' },
         { gate_key: 'budget', decision: 'na' },

@@ -1,15 +1,16 @@
 import type { ChangeStatus, GateKey } from '../types/change'
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
-  captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
+  captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
   quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
   in_validation: 'Validation', released: 'Released', closed: 'Closed',
   on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
 }
 
 export const NEXT_STATUS: Partial<Record<ChangeStatus, ChangeStatus[]>> = {
-  captured: ['in_assessment'], in_assessment: ['costing', 'rejected'],
-  costing: ['quoted'], quoted: ['approved', 'rejected'],
+  captured: ['scoping'], scoping: ['in_assessment', 'rejected'],
+  in_assessment: ['costing', 'rejected'],
+  costing: ['quoted', 'approved'], quoted: ['approved', 'rejected'],
   approved: ['in_implementation'], in_implementation: ['in_validation'],
   in_validation: ['released'], released: ['closed'],
 }
@@ -17,6 +18,7 @@ export const NEXT_STATUS: Partial<Record<ChangeStatus, ChangeStatus[]>> = {
 /** pill classes per status, dark-slate theme */
 export const STATUS_PILL: Record<ChangeStatus, string> = {
   captured: 'bg-slate-700 text-slate-200',
+  scoping: 'bg-violet-900 text-violet-200',
   in_assessment: 'bg-sky-900 text-sky-200',
   costing: 'bg-sky-900 text-sky-200',
   quoted: 'bg-indigo-900 text-indigo-200',
