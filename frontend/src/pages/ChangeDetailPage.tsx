@@ -108,6 +108,14 @@ export default function ChangeDetailPage() {
     mutationFn: (response: string) => changesApi.customerResponse(changeId, response),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
   });
+  const internalApprove = useMutation({
+    mutationFn: (note?: string) => changesApi.approveInternalCosts(changeId, note),
+    onSuccess: () => {
+      toast.success(t('internal.approved'))
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Approval failed'),
+  });
   const [deadlineDate, setDeadlineDate] = useState('');
   const [deadlineReason, setDeadlineReason] = useState('');
   const deadline = useMutation({
@@ -335,21 +343,47 @@ export default function ChangeDetailPage() {
 
       {tab === 'commercial' && (
         <div className="space-y-3 text-sm">
-          <p><span className="text-gray-500">Quoted price:</span> {change.quoted_price ?? '—'}</p>
-          <p><span className="text-gray-500">Customer response:</span> {change.customer_response}</p>
-          <div className="flex gap-2">
-            <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('accepted')}>Customer accepted</button>
-            <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('declined')}>Customer declined</button>
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('pm')}>
-              PM sign-off {change.pm_signed_by ? '✓' : ''}
-            </button>
-            <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('quality')}>
-              Quality sign-off {change.quality_signed_by ? '✓' : ''}
-            </button>
-          </div>
-          <p className="text-xs text-gray-400">Approve requires customer acceptance + both sign-offs.</p>
+          {change.customer_relevant ? (
+            <>
+              <p><span className="text-gray-500">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+              <p><span className="text-gray-500">Customer response:</span> {change.customer_response}</p>
+              <div className="flex gap-2">
+                <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('accepted')}>Customer accepted</button>
+                <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('declined')}>Customer declined</button>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('pm')}>
+                  PM sign-off {change.pm_signed_by ? '✓' : ''}
+                </button>
+                <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('quality')}>
+                  Quality sign-off {change.quality_signed_by ? '✓' : ''}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">Approve requires customer acceptance + both sign-offs.</p>
+            </>
+          ) : (
+            <div className="space-y-2">
+              {change.internal_approved_at ? (
+                <div className="border border-emerald-800 bg-emerald-950/40 rounded-lg p-3">
+                  <p className="text-emerald-300 font-medium">✓ {t('internal.approved')}</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {t('internal.amount')}: {change.internal_approved_amount?.toFixed(2) ?? '—'}
+                    {' · '}{new Date(change.internal_approved_at).toLocaleDateString()}
+                  </p>
+                  {change.internal_approval_note && (
+                    <p className="text-xs text-slate-400">{change.internal_approval_note}</p>
+                  )}
+                </div>
+              ) : (
+                <button
+                  className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+                  disabled={change.status !== 'costing' || internalApprove.isPending}
+                  onClick={() => internalApprove.mutate(undefined)}>
+                  {t('internal.approve')}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 

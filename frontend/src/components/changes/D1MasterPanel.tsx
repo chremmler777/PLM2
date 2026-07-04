@@ -2,10 +2,8 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import { plantsApi } from '../../api/plants';
-import type { Gate, GateKey, ChangeDetail } from '../../types/change';
+import type { GateKey, ChangeDetail } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
-
-const GATES: GateKey[] = ['feasibility', 'budget', 'release'];
 
 interface D1Fields {
   issuer: string;
@@ -75,8 +73,6 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
       changesApi.putGate(changeId, key, { decision }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change-gates', changeId] }),
   });
-
-  const byKey: Record<string, Gate> = Object.fromEntries(gates.map((g) => [g.gate_key, g]));
 
   const togglePlant = (plantId: number) => {
     setFields((f) => {
@@ -213,8 +209,8 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
       <div>
         <div className="font-semibold text-slate-100 mb-2">Final assessment</div>
         <div className="space-y-2">
-          {GATES.map((key) => {
-            const g = byKey[key];
+          {gates.map((g) => {
+            const key = g.gate_key;
             const decidedAt = g?.decided_at
               ? new Date(g.decided_at).toLocaleDateString()
               : '—';
