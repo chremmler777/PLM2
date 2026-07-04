@@ -127,6 +127,10 @@ async def test_admin_sees_gate_action_on_soft_blocked_change(
         "lead_id": seed["engineer_id"]}, headers=eng_auth)
     assert res.status_code in (200, 201), res.text
     cid = res.json()["id"]
+    # feasibility gate is no longer pre-seeded; create the row explicitly so
+    # the soft-blocked gate action is present to be surfaced
+    await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+                     json={"decision": "na"}, headers=eng_auth)
 
     out = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=admin_auth)
     assert out.status_code == 200, out.text
