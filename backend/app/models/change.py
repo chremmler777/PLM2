@@ -157,6 +157,7 @@ class ChangeRequest(Base):
     )
     gates: Mapped[list["ChangeGate"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeGate.id",
     )
     transition_deviations: Mapped[list["ChangeTransitionDeviation"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",

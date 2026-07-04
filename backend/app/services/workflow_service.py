@@ -117,6 +117,11 @@ class WorkflowService:
 
         first_stage = sorted(template.stages, key=lambda s: s.stage_order)[0]
         await WorkflowService._create_stage_tasks(db, instance, first_stage)
+        # A change-scoped stage 1 can be born gateless (its only actionable rows
+        # were already payload-submitted, or scoping left it with no R/A task):
+        # cascade immediately so the instance advances instead of stalling on an
+        # already-satisfied stage.
+        await WorkflowService._maybe_advance_stage(db, instance, actor_id=started_by_id)
 
         await WorkflowService._audit(db, instance, "wf_started", started_by_id,
                                      {"template_id": template_id,

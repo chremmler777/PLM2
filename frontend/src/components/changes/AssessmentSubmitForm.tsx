@@ -56,9 +56,14 @@ export default function AssessmentSubmitForm({ changeId, departmentId, departmen
         </div>
       </div>
       {verdict === 'feasible_with_conditions' && (
-        <input type="text" placeholder={t('conditions')}
-          value={conditions} onChange={(e) => setConditions(e.target.value)}
-          className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+        <div>
+          <label htmlFor={`conditions-${departmentId}`} className="block text-xs text-slate-500 mb-1">
+            {t('conditions')}
+          </label>
+          <input id={`conditions-${departmentId}`} type="text"
+            value={conditions} onChange={(e) => setConditions(e.target.value)}
+            className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+        </div>
       )}
       <textarea rows={2} placeholder="Notes" value={notes}
         onChange={(e) => setNotes(e.target.value)}

@@ -148,6 +148,14 @@ class ChangeRoutingService:
                         raise ValueError(
                             "Scoping selection matches no stage-1 department "
                             "of the routing standard")
+                    # An all-informational selection (only S/C/I letters) leaves
+                    # stage 1 with no gate — the engine would stall forever. Require
+                    # at least one responsible/accountable (R/A) department so the
+                    # stage can actually complete and advance.
+                    if not any(d["rasic_letter"] in BLOCKING_LETTERS for d in kept):
+                        raise ValueError(
+                            "Scoping selection contains no responsible/accountable "
+                            "department in stage 1")
                     stage["departments"] = kept
 
         routing = ChangeRouting(
@@ -370,6 +378,20 @@ class ChangeRoutingService:
     async def promote_to_standard(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
         """If the change carries an approved deviation against a mapped template, bump
         that template to v+1 (one step per stage), snapshot history, repoint standard."""
+        # Scoped changes must never promote: a meeting-scoped change carries only the
+        # selected departments in its stage-1 assessment rows, so rebuilding the shared
+        # standard from those rows would silently delete every unselected department
+        # from the org-wide template. Promoting a genuinely scoped-down routing needs
+        # dedicated semantics (merge into, not replace, the standard) — deferred. Skip
+        # promotion entirely whenever any 'proceed' meeting restricted the fan-out.
+        proceed_meetings = (await session.execute(
+            select(ChangeMeeting).where(
+                ChangeMeeting.change_id == change.id,
+                ChangeMeeting.decision == "proceed")
+        )).scalars().all()
+        if any(m.selected_department_ids for m in proceed_meetings):
+            return  # scoped-change promotion semantics deferred (see comment above)
+
         routing = (await session.execute(
             select(ChangeRouting).where(ChangeRouting.change_id == change.id)
         )).scalar_one_or_none()

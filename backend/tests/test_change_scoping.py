@@ -2,7 +2,6 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import login, ADMIN_PASSWORD
 from tests.conftest import record_proceed_meeting, advance_to_assessment
 
 
@@ -172,3 +171,133 @@ async def test_scoping_selection_filters_stage1_fanout(
             WfInstanceTask.stage_order == 1))).scalars().all()
         assert {t.department_id for t in tasks} <= set(picked)
         assert tasks, "picked departments must have stage-1 tasks"
+
+
+async def _ecm_stage1(session):
+    """(template_id, version, {(dept_id, letter)}) for the ECM Assessment
+    template's stage 1 — used to assert promotion left the standard untouched."""
+    from app.models.workflow import WfTemplate, WfStage, WfStep, WfStepRasic
+    tmpl = (await session.execute(
+        select(WfTemplate).where(WfTemplate.name == "ECM Assessment"))).scalar_one()
+    rows = (await session.execute(
+        select(WfStepRasic.department_id, WfStepRasic.rasic_letter)
+        .join(WfStep, WfStep.id == WfStepRasic.step_id)
+        .join(WfStage, WfStage.id == WfStep.stage_id)
+        .where(WfStage.template_id == tmpl.id, WfStage.stage_order == 1))).all()
+    return tmpl.id, tmpl.version, {(d, l) for d, l in rows}
+
+
+@pytest.mark.asyncio
+async def test_scoped_change_does_not_promote_standard(
+        client, admin_auth, seed, part, session_factory):
+    """F1: releasing a meeting-scoped change with an approved routing deviation
+    must NOT rebuild the org-wide standard from its narrowed assessment rows."""
+    from app.models.workflow import Department
+    from app.models.change import ChangeRequest
+    from app.services.wf_seed_service import seed_assessment_standard
+    from app.services.change_routing_service import ChangeRoutingService
+    async with session_factory() as s:
+        await seed_assessment_standard(s)
+        await s.commit()
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        picked = [d for (d,) in await s.execute(
+            select(Department.id).where(Department.name.in_(["Quality", "Logistics"])))]
+    assert len(picked) == 2
+    await advance_to_assessment(client, admin_auth, session_factory,
+                                change["id"], dept_ids=picked)
+    async with session_factory() as s:
+        tid_before, ver_before, rasic_before = await _ecm_stage1(s)
+    # A routing deviation, approved (engineer proposes, admin=lead approves).
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, change["id"])
+        await ChangeRoutingService.apply_deviation(
+            s, c, seed["engineer_id"], op="remove", department_id=picked[0])
+        await ChangeRoutingService.approve_deviation(s, c, seed["admin_id"])
+        await ChangeRoutingService.promote_to_standard(s, c, seed["admin_id"])
+        await s.commit()
+    async with session_factory() as s:
+        tid_after, ver_after, rasic_after = await _ecm_stage1(s)
+    assert tid_after == tid_before
+    assert ver_after == ver_before, "scoped change must not bump the template version"
+    assert rasic_after == rasic_before, "stage-1 RASIC set must be untouched"
+
+
+@pytest.mark.asyncio
+async def test_informational_only_scoping_is_rejected(
+        client, admin_auth, seed, part, session_factory):
+    """F2: selecting only an I-letter department leaves stage 1 with no gate —
+    decide-proceed must fail with a clear message instead of stalling."""
+    from app.models.workflow import Department
+    from app.services.wf_seed_service import seed_assessment_standard
+    async with session_factory() as s:
+        await seed_assessment_standard(s)
+        await s.commit()
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        picked = [d for (d,) in await s.execute(
+            select(Department.id).where(Department.name == "Planner/Scheduler"))]
+    assert len(picked) == 1, "Planner/Scheduler is the I-only stage-1 department"
+    res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
+                            json={"selected_department_ids": picked}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    meeting_id = res.json()["id"]
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/meetings/{meeting_id}/decide",
+        json={"decision": "proceed"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    assert "responsible/accountable" in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_legacy_quoted_internal_change_approves_internally(
+        client, admin_auth, seed, part, session_factory):
+    """F3/F5: an internal change stranded in 'quoted' can still record internal
+    cost approval (and only once), then transition to approved."""
+    from datetime import datetime
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(
+            ChangeRequest.id == change["id"]).values(status="quoted"))
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
+                            json={}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    # F5: a second approval is refused.
+    res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
+                            json={}, headers=admin_auth)
+    assert res.status_code == 400
+    assert "already approved" in res.json()["detail"].lower()
+    res = await client.post(f"/api/v1/changes/{change['id']}/transition",
+                            json={"to_status": "approved"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_on_hold_resume_with_routing_skips_meeting_guard(
+        client, admin_auth, seed, part, session_factory):
+    """F4: a change that already has routing (fan-out happened) may resume from
+    on_hold into in_assessment without re-demanding a proceed meeting."""
+    from sqlalchemy import update
+    from app.models.change import ChangeRequest, ChangeRouting
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        s.add(ChangeRouting(change_id=change["id"], standard_snapshot={"stages": []}))
+        await s.execute(update(ChangeRequest).where(
+            ChangeRequest.id == change["id"]).values(status="on_hold"))
+        await s.commit()
+    res = await client.post(f"/api/v1/changes/{change['id']}/transition",
+                            json={"to_status": "in_assessment"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "in_assessment"

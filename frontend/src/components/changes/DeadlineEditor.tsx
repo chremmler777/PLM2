@@ -28,7 +28,15 @@ export function DeadlineEditor({ change }: { change: ChangeRequest }) {
     <span className="inline-flex items-center gap-1.5">
       <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
       <button type="button" title={t('deadline.set')} data-testid="deadline-edit"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen((o) => {
+          // Re-seed from the current change each time the editor opens, so a
+          // reopen after an external update doesn't show stale local edits.
+          if (!o) {
+            setDate(change.required_by_date?.slice(0, 10) ?? '')
+            setReason(change.required_by_reason ?? '')
+          }
+          return !o
+        })}
         className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
         {change.required_by_date ? '✎' : `+ ${t('deadline.title')}`}
       </button>

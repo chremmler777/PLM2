@@ -131,6 +131,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'scoping.title': { de: 'Vorabklärung', en: 'Scoping' },
   'scoping.newMeeting': { de: 'Meeting erfassen', en: 'Record meeting' },
+  'meeting.save': { de: 'Meeting speichern', en: 'Save meeting' },
   'meeting.date': { de: 'Datum', en: 'Date' },
   'meeting.participants': { de: 'Teilnehmer', en: 'Participants' },
   'meeting.participantsHint': { de: 'Namen, durch Komma getrennt', en: 'Names, comma-separated' },

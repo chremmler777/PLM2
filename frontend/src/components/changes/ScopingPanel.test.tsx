@@ -33,6 +33,6 @@ describe('ScopingPanel', () => {
   })
   it('offers the create form while scoping is open', async () => {
     render(wrap(<ScopingPanel changeId={7} status="scoping" />))
-    expect(await screen.findByRole('button', { name: /record meeting/i })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /save meeting/i })).toBeTruthy()
   })
 })

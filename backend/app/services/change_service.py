@@ -488,13 +488,24 @@ class ChangeService:
                 return "No impacted items added yet"
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
-            proceed = (await session.execute(
-                select(ChangeMeeting.id).where(
-                    ChangeMeeting.change_id == change.id,
-                    ChangeMeeting.decision == "proceed").limit(1)
+            # A change that already has routing has fanned out once — the proceed
+            # meeting was consumed then. Resuming from on_hold back into
+            # in_assessment must not re-demand a fresh meeting (build_routing is
+            # idempotent and won't re-scope). Only require the meeting on the
+            # first entry, when no routing exists yet.
+            from app.models.change import ChangeRouting
+            existing_routing = (await session.execute(
+                select(ChangeRouting.id).where(
+                    ChangeRouting.change_id == change.id).limit(1)
             )).scalar_one_or_none()
-            if proceed is None:
-                return "No scoping meeting with decision 'proceed' recorded"
+            if existing_routing is None:
+                proceed = (await session.execute(
+                    select(ChangeMeeting.id).where(
+                        ChangeMeeting.change_id == change.id,
+                        ChangeMeeting.decision == "proceed").limit(1)
+                )).scalar_one_or_none()
+                if proceed is None:
+                    return "No scoping meeting with decision 'proceed' recorded"
         if to_status == "costing":
             from app.services.change_routing_service import ChangeRoutingService
             if not await ChangeRoutingService.blocking_complete(session, change):
@@ -1351,8 +1362,13 @@ class ChangeService:
         if change.customer_relevant:
             raise ChangeError(
                 "Customer-relevant changes are approved via the customer quote")
-        if change.status != "costing":
-            raise ChangeError("Internal cost approval happens in 'costing'")
+        # 'costing' is the normal branch; 'quoted' is tolerated for legacy internal
+        # changes that were driven through the quote status before the costing-path
+        # split existed — they still need an internal cost approval to reach approved.
+        if change.status not in ("costing", "quoted"):
+            raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
+        if change.internal_approved_at is not None:
+            raise ChangeError("Internal costs are already approved")
         if actor.id != change.lead_id and not await MeetingService.user_is_pm(
                 session, actor):
             raise ChangeError(

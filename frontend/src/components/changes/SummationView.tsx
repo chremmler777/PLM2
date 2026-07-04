@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
+import { useDepartments } from '../../hooks/queries/useWorkflows';
 import { t } from '../../i18n/cmLabels';
 
 export default function SummationView({ changeId }: { changeId: number }) {
@@ -7,6 +8,9 @@ export default function SummationView({ changeId }: { changeId: number }) {
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
   });
+  const { data: departments = [] } = useDepartments();
+  const deptName = (id: number) =>
+    departments.find((d) => d.id === id)?.name ?? `#${id}`;
   if (isLoading) return <div className="text-slate-400 text-sm p-4">Loading…</div>;
   if (!data) return null;
   const tot = data.totals;
@@ -44,7 +48,7 @@ export default function SummationView({ changeId }: { changeId: number }) {
             <tbody>
               {data.by_department.map((row) => (
                 <tr key={row.department_id} className="border-b border-slate-800">
-                  <td className="py-0.5">Dept #{row.department_id}</td>
+                  <td className="py-0.5">{deptName(row.department_id)}</td>
                   <td className="text-right tabular-nums">{row.one_time_internal.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{row.one_time_external.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{row.lifecycle_internal.toFixed(2)}</td>
@@ -83,7 +87,7 @@ export default function SummationView({ changeId }: { changeId: number }) {
             <tbody>
               {data.effort_by_department.map((row) => (
                 <tr key={row.department_id} className="border-b border-slate-800">
-                  <td className="py-0.5">Dept #{row.department_id}</td>
+                  <td className="py-0.5">{deptName(row.department_id)}</td>
                   <td className="text-right tabular-nums">{row.effort_hours.toFixed(2)} h</td>
                 </tr>
               ))}

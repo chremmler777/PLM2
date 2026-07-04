@@ -142,7 +142,7 @@ export default function ScopingPanel({ changeId, status }: {
             className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"
             disabled={create.isPending}
             onClick={() => create.mutate()}>
-            {t('scoping.newMeeting')}
+            {t('meeting.save')}
           </button>
         </div>
       )}
