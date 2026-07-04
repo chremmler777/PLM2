@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CockpitSummary from './CockpitSummary'
 import type { ChangeDetail } from '../../types/change'
 
@@ -11,12 +12,16 @@ const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
   impacted_items: [], assessments: [], attachments: [], ...over,
 } as ChangeDetail)
 
+const wrap = (ui: React.ReactElement) => (
+  <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>
+)
+
 describe('CockpitSummary', () => {
   afterEach(cleanup)
 
   it('shows lead, blockers, and one primary next action', () => {
     const onAdvance = vi.fn()
-    render(<CockpitSummary
+    render(wrap(<CockpitSummary
       change={change({ assessments: [
         { id: 1, department_id: 2, verdict: 'pending', stage_order: 1,
           rasic_letter: 'R', status: 'active', owner_id: null, owner_name: null,
@@ -31,7 +36,7 @@ describe('CockpitSummary', () => {
         { gate_key: 'release', decision: 'na' },
       ]}
       pendingDeviations={1}
-      onAdvance={onAdvance} advancing={false} />)
+      onAdvance={onAdvance} advancing={false} />))
     expect(screen.getByText('Eva Eng')).toBeDefined()
     const budgetRow = screen.getByText(/Budget/).closest('li')
     expect(budgetRow?.textContent).not.toContain('⚠')
@@ -48,8 +53,8 @@ describe('CockpitSummary', () => {
   })
 
   it('shows nothing-blocking empty state', () => {
-    render(<CockpitSummary change={change({ status: 'captured' })}
-      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+    render(wrap(<CockpitSummary change={change({ status: 'captured' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
   })
 
@@ -57,13 +62,13 @@ describe('CockpitSummary', () => {
     // status 'scoping' -> next is 'in_assessment'. feasibility guards
     // in_assessment, so a not-yes feasibility gate IS a real blocker. budget and
     // release guard later transitions, so they render muted, not amber.
-    render(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[
         { gate_key: 'feasibility', decision: 'na' },
         { gate_key: 'budget', decision: 'na' },
         { gate_key: 'release', decision: 'na' },
       ]}
-      pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
     const feasibilityRow = screen.getByText(/Feasibility/).closest('li')
     expect(feasibilityRow?.textContent).toContain('⚠')
@@ -78,13 +83,13 @@ describe('CockpitSummary', () => {
 
   it('gate rows act in place: clicking one calls onResolveGate with its key', () => {
     const onResolveGate = vi.fn()
-    render(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+    render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
       gates={[
         { gate_key: 'feasibility', decision: 'na' },
         { gate_key: 'budget', decision: 'na' },
       ]}
       pendingDeviations={0} onAdvance={() => {}} advancing={false}
-      onResolveGate={onResolveGate} />)
+      onResolveGate={onResolveGate} />))
     fireEvent.click(screen.getByRole('button', { name: /Feasibility/ }))
     expect(onResolveGate).toHaveBeenCalledWith('feasibility')
     fireEvent.click(screen.getByRole('button', { name: /Budget/ }))
@@ -92,9 +97,9 @@ describe('CockpitSummary', () => {
   })
 
   it('keeps the green nothing-blocking state while still listing later gates as muted', () => {
-    render(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
+    render(wrap(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
       gates={[{ gate_key: 'budget', decision: 'na' }]}
-      pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
     const budgetRow = screen.getByText(/Budget/).closest('li')
     expect(budgetRow?.textContent).not.toContain('⚠')
@@ -103,9 +108,9 @@ describe('CockpitSummary', () => {
 
   it('shows an impact-confirmation blocker row when approved and unconfirmed, and jumps via onShowImpact', () => {
     const onShowImpact = vi.fn()
-    render(<CockpitSummary change={change({ status: 'approved', assessments: [], impact_confirmed_at: null })}
+    render(wrap(<CockpitSummary change={change({ status: 'approved', assessments: [], impact_confirmed_at: null })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
-      onShowImpact={onShowImpact} />)
+      onShowImpact={onShowImpact} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
     const row = screen.getByRole('button', { name: /Impact confirmation pending/ })
     fireEvent.click(row)
@@ -113,24 +118,24 @@ describe('CockpitSummary', () => {
   })
 
   it('does not show the impact-confirmation blocker once confirmed', () => {
-    render(<CockpitSummary change={change({
+    render(wrap(<CockpitSummary change={change({
       status: 'approved', assessments: [],
       impact_confirmed_at: '2026-07-01T00:00:00', impact_confirmed_by: 9,
     })}
-      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />)
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByText(/Impact confirmation pending/)).toBeNull()
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
   })
 
   it('renders a "Your actions" panel with a button per action and fires onAction with its target_tab', () => {
     const onAction = vi.fn()
-    render(<CockpitSummary change={change()}
+    render(wrap(<CockpitSummary change={change()}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
       actions={[
         { kind: 'assessment', label: 'Submit assessment for R&D', target_tab: 'assessments', assessment_id: 1 },
         { kind: 'deviation_decision', label: 'Decide deviation #12', target_tab: 'overview', deviation_id: 12 },
       ]}
-      onAction={onAction} />)
+      onAction={onAction} />))
     expect(screen.getByText(/Your actions/)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Submit assessment for R&D' }))
     expect(onAction).toHaveBeenCalledWith('assessments')
@@ -139,9 +144,9 @@ describe('CockpitSummary', () => {
   })
 
   it('hides the "Your actions" panel entirely when there are no actions', () => {
-    render(<CockpitSummary change={change()}
+    render(wrap(<CockpitSummary change={change()}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
-      actions={[]} />)
+      actions={[]} />))
     expect(screen.queryByText(/Your actions/)).toBeNull()
   })
 })

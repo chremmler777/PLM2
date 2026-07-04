@@ -1,7 +1,7 @@
 import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
-import { DeadlineChip } from './DeadlineChip'
+import { DeadlineEditor } from './DeadlineEditor'
 
 interface Props {
   change: ChangeDetail
@@ -91,7 +91,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           {STATUS_LABELS[change.status]}
         </span>
         {' '}
-        <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
+        <DeadlineEditor change={change} />
         <p className="mt-3 text-sm text-slate-300">
           {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '—'}</span>
         </p>
