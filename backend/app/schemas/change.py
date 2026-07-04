@@ -160,6 +160,10 @@ class ChangelogResponse(BaseModel):
         from_attributes = True
 
 
+class InternalApprovalIn(BaseModel):
+    note: Optional[str] = None
+
+
 class ChangeResponse(BaseModel):
     id: int
     change_number: str
@@ -192,6 +196,10 @@ class ChangeResponse(BaseModel):
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
+    internal_approved_by: Optional[int] = None
+    internal_approved_at: Optional[datetime] = None
+    internal_approved_amount: Optional[float] = None
+    internal_approval_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

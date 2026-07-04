@@ -36,6 +36,7 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
+    InternalApprovalIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -631,6 +632,25 @@ async def sign_off(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
+    return change
+
+
+@router.post("/{change_id}/internal-approval", response_model=ChangeResponse)
+async def approve_internal_costs(
+    change_id: int, body: InternalApprovalIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        await ChangeService.approve_internal_costs(
+            db, change, current_user, note=body.note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 

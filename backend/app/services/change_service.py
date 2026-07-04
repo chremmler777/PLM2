@@ -1338,6 +1338,38 @@ class ChangeService:
         return change
 
     @staticmethod
+    async def approve_internal_costs(
+        session: AsyncSession, change: ChangeRequest, actor: User,
+        *, note: Optional[str] = None,
+    ) -> ChangeRequest:
+        """Internal costing branch: PM approves the summation total instead of
+        a customer quote. Amount is snapshotted for the later P&L view."""
+        from app.services.meeting_service import MeetingService
+        if change.customer_relevant:
+            raise ChangeError(
+                "Customer-relevant changes are approved via the customer quote")
+        if change.status != "costing":
+            raise ChangeError("Internal cost approval happens in 'costing'")
+        if actor.id != change.lead_id and not await MeetingService.user_is_pm(
+                session, actor):
+            raise ChangeError(
+                "Only Project Management, the change lead, or an admin "
+                "may approve internal costs")
+        from app.services.cost_service import CostService
+        summ = await CostService.summation(session, change)
+        change.internal_approved_by = actor.id
+        change.internal_approved_at = datetime.utcnow()
+        change.internal_approved_amount = summ["totals"]["grand_total"]
+        change.internal_approval_note = note
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "internal_costs_approved",
+            f"Internal costs approved ({summ['totals']['grand_total']:.2f})",
+            actor.id, field_name="internal_approved_amount",
+            new_value=summ["totals"]["grand_total"], notes=note)
+        return change
+
+    @staticmethod
     async def add_attachment(
         session: AsyncSession, change: ChangeRequest, *, filename: str,
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
