@@ -90,6 +90,35 @@ async def login(client: AsyncClient, email: str, password: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def record_proceed_meeting(session_factory, change_id: int,
+                                 dept_ids: list[int] | None = None,
+                                 actor_id: int = 1):
+    """Insert a decided 'proceed' scoping meeting directly (bypasses the API
+    so state-machine tests don't depend on the meeting endpoints)."""
+    from datetime import datetime
+    from app.models.change import ChangeMeeting
+    async with session_factory() as s:
+        s.add(ChangeMeeting(
+            change_id=change_id, meeting_date=datetime.utcnow(),
+            participants=[{"name": "Test PM"}], notes="scope ok",
+            decision="proceed", selected_department_ids=dept_ids or [],
+            created_by=actor_id, decided_by=actor_id,
+            decided_at=datetime.utcnow()))
+        await s.commit()
+
+
+async def advance_to_assessment(client, auth, session_factory, change_id: int,
+                                dept_ids: list[int] | None = None):
+    """captured -> scoping -> (proceed meeting) -> in_assessment."""
+    res = await client.post(f"/api/v1/changes/{change_id}/transition",
+                            json={"to_status": "scoping"}, headers=auth)
+    assert res.status_code == 200, res.text
+    await record_proceed_meeting(session_factory, change_id, dept_ids)
+    res = await client.post(f"/api/v1/changes/{change_id}/transition",
+                            json={"to_status": "in_assessment"}, headers=auth)
+    assert res.status_code == 200, res.text
+
+
 async def approve_gates(client, auth, change_id: int, *keys):
     """Set the given change gates to 'yes' (all three when no keys given)."""
     for k in keys or ("feasibility", "budget", "release"):

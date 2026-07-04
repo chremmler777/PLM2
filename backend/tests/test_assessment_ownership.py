@@ -9,7 +9,7 @@ pytestmark = pytest.mark.asyncio
 
 async def _routed_change(client, eng_auth, seed, session_factory, part_id):
     """Change routed into in_assessment via the standard flow."""
-    from tests.conftest import approve_gates
+    from tests.conftest import approve_gates, advance_to_assessment
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "own", "change_type": "tooling",
         "lead_id": seed["engineer_id"]}, headers=eng_auth)
@@ -20,9 +20,7 @@ async def _routed_change(client, eng_auth, seed, session_factory, part_id):
                             headers=eng_auth)
     assert res.status_code == 200, res.text
     await approve_gates(client, eng_auth, change["id"])
-    res = await client.post(f"/api/v1/changes/{change['id']}/transition",
-                            json={"to_status": "in_assessment"}, headers=eng_auth)
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
     return change
 
 
@@ -203,7 +201,7 @@ async def test_assign_linked_assessment_lead_carveout(
         Department, WfTemplate, WfStage, WfStep, WfStepRasic, UserDepartment,
         WfInstanceTask,
     )
-    from tests.conftest import login, approve_gates
+    from tests.conftest import login, approve_gates, advance_to_assessment
 
     async with session_factory() as s:
         dep = {}
@@ -249,9 +247,7 @@ async def test_assign_linked_assessment_lead_carveout(
                             headers=eng_auth)
     assert res.status_code == 200, res.text
     await approve_gates(client, lead_auth, change["id"])
-    res = await client.post(f"/api/v1/changes/{change['id']}/transition",
-                            json={"to_status": "in_assessment"}, headers=lead_auth)
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, lead_auth, session_factory, change["id"])
 
     async with session_factory() as s:
         a = (await s.execute(select(ChangeAssessment).where(

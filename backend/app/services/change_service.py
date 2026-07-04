@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
-    ChangeAttachment, ChangeTransitionDeviation,
+    ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
 )
@@ -44,15 +44,16 @@ def _org_scope(stmt, viewer: Optional[User]):
         ChangeRequest.project_id.is_(None) | ChangeRequest.project_id.in_(org_projects))
 
 ALLOWED_TRANSITIONS = {
-    "captured":          {"in_assessment", "cancelled", "on_hold"},
+    "captured":          {"scoping", "cancelled", "on_hold"},
+    "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
     "in_assessment":     {"costing", "rejected", "cancelled", "on_hold"},
-    "costing":           {"quoted", "on_hold", "cancelled"},
+    "costing":           {"quoted", "approved", "on_hold", "cancelled"},
     "quoted":            {"approved", "rejected", "on_hold", "cancelled"},
     "approved":          {"in_implementation", "on_hold", "cancelled"},
     "in_implementation": {"in_validation", "on_hold", "cancelled"},
     "in_validation":     {"released", "in_implementation", "on_hold", "cancelled"},
     "released":          {"closed"},
-    "on_hold":           {"in_assessment", "costing", "quoted", "approved",
+    "on_hold":           {"scoping", "in_assessment", "costing", "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
     "rejected":          set(),
     "closed":            set(),
@@ -487,6 +488,13 @@ class ChangeService:
                 return "No impacted items added yet"
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
+            proceed = (await session.execute(
+                select(ChangeMeeting.id).where(
+                    ChangeMeeting.change_id == change.id,
+                    ChangeMeeting.decision == "proceed").limit(1)
+            )).scalar_one_or_none()
+            if proceed is None:
+                return "No scoping meeting with decision 'proceed' recorded"
         if to_status == "costing":
             from app.services.change_routing_service import ChangeRoutingService
             if not await ChangeRoutingService.blocking_complete(session, change):
@@ -543,12 +551,23 @@ class ChangeService:
         if to_status not in allowed:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
 
-        # HARD gate: quoted -> approved cannot be forced
+        # HARD gates: the approval decision cannot be forced.
         if to_status == "approved":
-            if change.customer_response != "accepted":
-                raise ChangeError("Customer has not accepted the offer")
-            if change.pm_signed_by is None or change.quality_signed_by is None:
-                raise ChangeError("Both PM and Quality sign-off are required")
+            if change.customer_relevant:
+                if change.customer_response != "accepted":
+                    raise ChangeError("Customer has not accepted the offer")
+                if change.pm_signed_by is None or change.quality_signed_by is None:
+                    raise ChangeError("Both PM and Quality sign-off are required")
+                if change.status == "costing":
+                    raise ChangeError(
+                        "Customer-relevant changes must go through the quote")
+            else:
+                if change.internal_approved_at is None:
+                    raise ChangeError(
+                        "Internal cost approval is required before approval")
+        if to_status == "quoted" and not change.customer_relevant:
+            raise ChangeError(
+                "Internal changes skip the quote — record internal cost approval instead")
 
         if to_status == "cancelled":
             if not cancellation_reason:

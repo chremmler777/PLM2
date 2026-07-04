@@ -23,7 +23,7 @@ change_affected_plants = Table(
 CHANGE_TYPES = ("physical_part", "tooling", "document_spec", "process_im", "packaging")
 CHANGE_PRIORITIES = ("low", "medium", "high", "critical")
 CHANGE_STATUSES = (
-    "captured", "in_assessment", "costing", "quoted", "approved",
+    "captured", "scoping", "in_assessment", "costing", "quoted", "approved",
     "in_implementation", "in_validation", "released", "closed",
     "on_hold", "rejected", "cancelled",
 )

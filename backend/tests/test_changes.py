@@ -2,7 +2,9 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import approve_gates, force_complete_check_workflows
+from tests.conftest import (
+    approve_gates, force_complete_check_workflows, advance_to_assessment,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,6 +48,8 @@ async def test_transition_blocked_without_impacted_items(client, eng_auth, seed)
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
+    res = await _transition(client, eng_auth, change["id"], "scoping")
+    assert res.status_code == 200, res.text
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
     assert "deviation" in res.json()["detail"].lower()
@@ -138,7 +142,8 @@ async def departments(session_factory, seed):
         return ids
 
 
-async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments):
+async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments,
+                                                      session_factory):
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
@@ -146,8 +151,7 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
     # enter assessment -> assessments auto-created
-    res = await _transition(client, eng_auth, change["id"], "in_assessment")
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
     assessments = res.json()["assessments"]
     assert len(assessments) >= 1
@@ -165,13 +169,16 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     assert res.status_code == 200, res.text
 
 
-async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
+async def _advance_to_quoted(client, auth, seed, departments, admin_auth, session_factory):
     change = await _create_change(client, auth, seed["project_id"], lead_id=seed["engineer_id"])
     await approve_gates(client, auth, change["id"])
+    # customer-relevant so the change follows the quote path (quoted -> approved)
+    await client.patch(f"/api/v1/changes/{change['id']}",
+                       json={"customer_relevant": True}, headers=auth)
     part_id = await _make_part(client, auth, seed["project_id"], f"ART-Q{change['id']}")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=auth)
-    await _transition(client, auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=auth)
     for a in res.json()["assessments"]:
         await client.post(f"/api/v1/changes/{change['id']}/assessments",
@@ -185,9 +192,10 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
 
 
 async def test_approve_blocked_until_customer_and_dual_signoff(
-    client, eng_auth, admin_auth, seed, departments
+    client, eng_auth, admin_auth, seed, departments, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     # cannot approve yet (no customer acceptance, no sign-off) — hard gate, no override
     res = await _transition(client, eng_auth, cid, "approved")
@@ -215,9 +223,10 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
 
 
 async def test_implementation_spawns_ecn_revision_per_item(
-    client, eng_auth, admin_auth, seed, departments, check_wf_standards
+    client, eng_auth, admin_auth, seed, departments, check_wf_standards, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted"}, headers=eng_auth)
@@ -237,7 +246,8 @@ async def test_implementation_spawns_ecn_revision_per_item(
 async def test_release_activates_revisions_and_stamps_eng_level(
     client, eng_auth, admin_auth, seed, departments, check_wf_standards, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted"}, headers=eng_auth)
@@ -315,7 +325,7 @@ async def test_my_change_tasks_lists_pending_assessments(
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-MT")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
-    await _transition(client, eng_auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
 
     res = await client.get("/api/v1/changes/my-tasks", headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -355,7 +365,7 @@ async def test_assessment_response_reads_execution_from_task(
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-RT")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
-    await _transition(client, eng_auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
 
     async with session_factory() as s:
         a = (await s.execute(select(ChangeAssessment).where(

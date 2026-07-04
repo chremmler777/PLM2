@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import approve_gates
+from tests.conftest import approve_gates, advance_to_assessment
 
 pytestmark = pytest.mark.asyncio
 
@@ -261,8 +261,7 @@ async def test_submit_assessment_blocked_for_non_member(
         "part_type": "internal_mfg", "item_category": "article"}, headers=eng_auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items",
                       json={"part_id": p["id"]}, headers=eng_auth)
-    await client.post(f"/api/v1/changes/{c['id']}/transition",
-                      json={"to_status": "in_assessment"}, headers=eng_auth)
+    await advance_to_assessment(client, eng_auth, session_factory, c["id"])
 
     res = await client.post(
         f"/api/v1/changes/{c['id']}/assessments",
