@@ -26,7 +26,10 @@ interface Props {
 }
 
 export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction }: Props) {
-  const next = NEXT_STATUS[change.status] ?? []
+  const next = (NEXT_STATUS[change.status] ?? []).filter((s) =>
+    change.status !== 'costing'
+      ? true
+      : (change.customer_relevant ? s !== 'approved' : s !== 'quoted'))
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
   // gates seeded 'na' but guarding a later transition are just "outstanding later".

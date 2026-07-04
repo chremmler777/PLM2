@@ -15,6 +15,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
+import ScopingPanel from '../components/changes/ScopingPanel';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -25,8 +26,8 @@ import { STATUS_LABELS } from '../lib/changeStatus';
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-type Tab = 'overview' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
-const TABS: Tab[] = ['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
+type Tab = 'overview' | 'scoping' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
+const TABS: Tab[] = ['overview', 'scoping', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -192,7 +193,7 @@ export default function ChangeDetailPage() {
           <button key={tb}
             className={`pb-2 ${tab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
             onClick={() => setTab(tb)}>
-            {tb === 'implementation' ? t('impl.title') : tb[0].toUpperCase() + tb.slice(1)}
+            {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
           </button>
         ))}
       </div>
@@ -247,6 +248,10 @@ export default function ChangeDetailPage() {
             </ul>
           </div>
         </div>
+      )}
+
+      {tab === 'scoping' && change && (
+        <ScopingPanel changeId={change.id} status={change.status} />
       )}
 
       {tab === 'impacted' && change && (
