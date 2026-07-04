@@ -131,3 +131,44 @@ async def test_customer_change_cannot_bypass_quote(client, admin_auth, seed, par
     res = await client.post(f"/api/v1/changes/{change['id']}/transition",
                             json={"to_status": "approved"}, headers=admin_auth)
     assert res.status_code == 400  # customer branch must go through quote
+
+
+@pytest.mark.asyncio
+async def test_scoping_selection_filters_stage1_fanout(
+        client, admin_auth, seed, part, session_factory):
+    from sqlalchemy import select
+    from app.models.change import ChangeAssessment
+    from app.models.workflow import Department, WfInstance, WfInstanceTask
+    # Seed the ECM Assessment routing standard so a real multi-dept template applies
+    from app.services.wf_seed_service import seed_assessment_standard
+    async with session_factory() as s:
+        await seed_assessment_standard(s)
+        await s.commit()
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        picked = [d for (d,) in await s.execute(
+            select(Department.id).where(Department.name.in_(["Quality", "Logistics"])))]
+    assert len(picked) == 2
+    await advance_to_assessment(client, admin_auth, session_factory,
+                                change["id"], dept_ids=picked)
+    async with session_factory() as s:
+        stage1 = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.stage_order == 1))).scalars().all()
+        assert {a.department_id for a in stage1} == set(picked)
+        # later stages keep template routing (PM/Sales exist beyond stage 1)
+        later = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.stage_order > 1))).scalars().all()
+        assert later, "stage >= 2 rows must not be filtered away"
+        # engine stage-1 tasks are equally scoped
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == change["id"],
+            WfInstance.status == "active"))).scalar_one()
+        tasks = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.instance_id == inst.id,
+            WfInstanceTask.stage_order == 1))).scalars().all()
+        assert {t.department_id for t in tasks} <= set(picked)
+        assert tasks, "picked departments must have stage-1 tasks"

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.change import (
-    ChangeRequest, ChangeAssessment, ChangeRouting, ChangeRoutingStandard,
+    ChangeRequest, ChangeAssessment, ChangeMeeting, ChangeRouting, ChangeRoutingStandard,
     BLOCKING_LETTERS, TASK_LETTERS,
 )
 from app.models.workflow import (
@@ -127,6 +127,28 @@ class ChangeRoutingService:
 
         template_id, template_version, stages = await ChangeRoutingService.resolve_standard(
             session, change.change_type)
+
+        # Scoped fan-out: the latest 'proceed' scoping meeting restricts which
+        # departments take part in stage 1 (the impact-assessment stage).
+        # Later stages are process roles (summation, quote) and stay as the
+        # template defines them.
+        proceed = (await session.execute(
+            select(ChangeMeeting)
+            .where(ChangeMeeting.change_id == change.id,
+                   ChangeMeeting.decision == "proceed")
+            .order_by(ChangeMeeting.decided_at.desc(), ChangeMeeting.id.desc())
+            .limit(1))).scalar_one_or_none()
+        if proceed is not None and proceed.selected_department_ids:
+            allowed = set(proceed.selected_department_ids)
+            for stage in stages:
+                if stage["stage_order"] == 1:
+                    kept = [d for d in stage["departments"]
+                            if d["department_id"] in allowed]
+                    if not kept:
+                        raise ValueError(
+                            "Scoping selection matches no stage-1 department "
+                            "of the routing standard")
+                    stage["departments"] = kept
 
         routing = ChangeRouting(
             change_id=change.id, template_id=template_id, template_version=template_version,

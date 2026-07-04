@@ -48,8 +48,8 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
     async with session_factory() as s:
         # Fresh test DB has no departments seeded; create a couple so the
         # scoping meeting has real department ids to select.
-        s.add_all([Department(name="Meeting-Dept-A", flow_type="action", is_active=True),
-                   Department(name="Meeting-Dept-B", flow_type="action", is_active=True)])
+        s.add_all([Department(name="Quality", flow_type="action", is_active=True),
+                   Department(name="Sales", flow_type="action", is_active=True)])
         await s.commit()
     async with session_factory() as s:
         dept_ids = [d for (d,) in await s.execute(select(Department.id))][:2]
