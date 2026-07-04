@@ -22,6 +22,7 @@ from app.models.change import (
 from app.models.workflow import UserDepartment, Department
 from app.services.change_service import ChangeService, ChangeError
 from app.services.workflow_service import WorkflowService
+from app.services.meeting_service import MeetingService
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -34,6 +35,7 @@ from app.schemas.change import (
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
+    MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -789,3 +791,76 @@ async def decide_deviation(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return dev
+
+
+@router.get("/{change_id}/meetings", response_model=List[MeetingResponse])
+async def list_meetings(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change.meetings
+
+
+@router.post("/{change_id}/meetings", response_model=MeetingResponse)
+async def create_meeting(
+    change_id: int, body: MeetingCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        meeting = await MeetingService.create_meeting(
+            db, change, current_user, meeting_date=body.meeting_date,
+            participants=[p.model_dump() for p in body.participants],
+            notes=body.notes, selected_department_ids=body.selected_department_ids)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+@router.patch("/{change_id}/meetings/{meeting_id}", response_model=MeetingResponse)
+async def update_meeting(
+    change_id: int, meeting_id: int, body: MeetingUpdate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    fields = body.model_dump(exclude_unset=True)
+    if "participants" in fields and fields["participants"] is not None:
+        fields["participants"] = [
+            p if isinstance(p, dict) else p.model_dump() for p in fields["participants"]]
+    try:
+        meeting = await MeetingService.update_meeting(
+            db, change, meeting_id, current_user, **fields)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+@router.post("/{change_id}/meetings/{meeting_id}/decide", response_model=MeetingResponse)
+async def decide_meeting(
+    change_id: int, meeting_id: int, body: MeetingDecideIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        meeting = await MeetingService.decide_meeting(
+            db, change, meeting_id, body.decision, current_user)
+    except ValueError as e:
+        # transition side effects raise ChangeError (a ValueError subclass);
+        # WorkflowService kick-off gates raise plain ValueError.
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting

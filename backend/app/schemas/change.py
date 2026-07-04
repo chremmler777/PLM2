@@ -352,6 +352,46 @@ class GateResponse(BaseModel):
         from_attributes = True
 
 
+class MeetingParticipant(BaseModel):
+    name: str
+    user_id: Optional[int] = None
+
+
+class MeetingCreate(BaseModel):
+    meeting_date: Optional[datetime] = None
+    participants: List[MeetingParticipant] = []
+    notes: Optional[str] = None
+    selected_department_ids: List[int] = []
+
+
+class MeetingUpdate(BaseModel):
+    meeting_date: Optional[datetime] = None
+    participants: Optional[List[MeetingParticipant]] = None
+    notes: Optional[str] = None
+    selected_department_ids: Optional[List[int]] = None
+
+
+class MeetingDecideIn(BaseModel):
+    decision: str  # proceed | reject | needs_info
+
+
+class MeetingResponse(BaseModel):
+    id: int
+    change_id: int
+    meeting_date: datetime
+    participants: List[MeetingParticipant] = []
+    notes: Optional[str] = None
+    decision: Optional[str] = None
+    selected_department_ids: List[int] = []
+    created_by: int
+    created_at: datetime
+    decided_by: Optional[int] = None
+    decided_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ImpactSuggestIn(BaseModel):
     part_ids: List[int]
 
