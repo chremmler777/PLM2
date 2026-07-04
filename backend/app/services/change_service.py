@@ -1062,7 +1062,7 @@ class ChangeService:
     async def submit_assessment(
         session: AsyncSession, change: ChangeRequest, department_id: int,
         verdict: str, user_id: int, *, cost_impact=None, lead_time_impact_days=None,
-        conditions=None, notes=None, responsible_id=None,
+        conditions=None, notes=None, responsible_id=None, effort_hours=None,
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
@@ -1095,6 +1095,7 @@ class ChangeService:
         a.conditions = conditions
         a.notes = notes
         a.responsible_id = responsible_id
+        a.effort_hours = effort_hours
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
         await session.flush()

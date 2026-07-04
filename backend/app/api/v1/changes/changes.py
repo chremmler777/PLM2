@@ -505,6 +505,7 @@ async def submit_assessment(
             db, change, body.department_id, body.verdict, current_user.id,
             cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
             conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
+            effort_hours=body.effort_hours,
         )
     except ValueError as e:
         # Blocking (R/A) submissions delegate to WorkflowService.complete_task,

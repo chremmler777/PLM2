@@ -66,6 +66,7 @@ class AssessmentSubmit(BaseModel):
     conditions: Optional[str] = None
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
+    effort_hours: Optional[float] = Field(None, ge=0)
 
 
 class ImpactedItemResponse(BaseModel):
@@ -90,6 +91,7 @@ class AssessmentResponse(BaseModel):
     conditions: Optional[str] = None
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
+    effort_hours: Optional[float] = None
     submitted_at: Optional[datetime] = None
     stage_order: int = 1
     rasic_letter: str = "R"
@@ -112,8 +114,8 @@ class AssessmentResponse(BaseModel):
                 **{f: getattr(data, f) for f in (
                     "id", "department_id", "verdict", "cost_impact",
                     "lead_time_impact_days", "conditions", "notes",
-                    "responsible_id", "submitted_at", "stage_order",
-                    "rasic_letter")},
+                    "responsible_id", "effort_hours", "submitted_at",
+                    "stage_order", "rasic_letter")},
                 "status": data.effective_status,
                 "owner_id": data.effective_owner_id,
                 "owner_name": data.effective_owner_name,
@@ -330,10 +332,17 @@ class SummationTotals(BaseModel):
     grand_total: float
 
 
+class EffortRollup(BaseModel):
+    department_id: int
+    effort_hours: float
+
+
 class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
     totals: SummationTotals
+    effort_by_department: List[EffortRollup] = []
+    total_effort_hours: float = 0.0
 
 
 class GateDecisionIn(BaseModel):
