@@ -598,6 +598,7 @@ async def update_change(
         .options(selectinload(ChangeRequest.affected_plants))
     )
     change = result.scalar_one()
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 

@@ -1254,10 +1254,13 @@ class ChangeService:
         # not None` guard below.
         if "required_by_date" in fields:
             new_date = fields.pop("required_by_date")
-            reason = fields.pop("required_by_reason", None)
             old = change.required_by_date
             change.required_by_date = new_date
-            change.required_by_reason = reason
+            # Reason only changes when the request explicitly carries it —
+            # a date-only PATCH must not wipe the stored justification.
+            if "required_by_reason" in fields:
+                change.required_by_reason = fields.pop("required_by_reason")
+            reason = change.required_by_reason
             change.required_by_set_by = user_id
             change.required_by_set_at = datetime.utcnow()
             await ChangeService.append_changelog(
