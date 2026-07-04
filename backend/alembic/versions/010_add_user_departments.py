@@ -1,7 +1,7 @@
 """Add user_departments membership table (My Tasks scoping).
 
 Revision ID: 010
-Revises: 009
+Revises: 009a
 Create Date: 2026-06-10
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = '010'
-down_revision = '009'
+down_revision = '009a'
 branch_labels = None
 depends_on = None
 

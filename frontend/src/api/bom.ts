@@ -7,11 +7,6 @@ import type {
   CatalogPartUpdateRequest,
   CatalogPartResponse,
   DuplicateCheckResponse,
-  BOMItemCreateRequest,
-  BOMItemUpdateRequest,
-  BOMItemResponse,
-  BOMResponse,
-  ProjectBOMResponse,
 } from '../types/bom';
 
 export const listCatalogParts = async (params?: {
@@ -51,49 +46,4 @@ export const updateCatalogPart = async (
 
 export const deactivateCatalogPart = async (partId: number): Promise<void> => {
   await client.delete(`/v1/catalog-parts/${partId}`);
-};
-
-export const getBOM = async (articleId: number, revisionId: number): Promise<BOMResponse> => {
-  const response = await client.get(`/v1/articles/${articleId}/revisions/${revisionId}/bom`);
-  return response.data;
-};
-
-export const addBOMItem = async (
-  articleId: number,
-  revisionId: number,
-  data: BOMItemCreateRequest
-): Promise<BOMItemResponse> => {
-  const response = await client.post(
-    `/v1/articles/${articleId}/revisions/${revisionId}/bom/items`,
-    data
-  );
-  return response.data;
-};
-
-export const updateBOMItem = async (
-  articleId: number,
-  revisionId: number,
-  itemId: number,
-  data: BOMItemUpdateRequest
-): Promise<BOMItemResponse> => {
-  const response = await client.put(
-    `/v1/articles/${articleId}/revisions/${revisionId}/bom/items/${itemId}`,
-    data
-  );
-  return response.data;
-};
-
-export const deleteBOMItem = async (
-  articleId: number,
-  revisionId: number,
-  itemId: number
-): Promise<void> => {
-  await client.delete(
-    `/v1/articles/${articleId}/revisions/${revisionId}/bom/items/${itemId}`
-  );
-};
-
-export const getProjectBOM = async (projectId: number): Promise<ProjectBOMResponse> => {
-  const response = await client.get(`/v1/projects/${projectId}/bom-aggregation`);
-  return response.data;
 };

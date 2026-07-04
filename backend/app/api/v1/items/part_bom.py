@@ -16,7 +16,7 @@ from sqlalchemy.orm import joinedload
 from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User, PartBOMItem
-from app.models.article import CatalogPart
+from app.models.catalog import CatalogPart
 from app.models.part import Part, RevisionStatus
 from app.services.part_service import PartService, RevisionService, ChangelogService
 

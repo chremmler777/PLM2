@@ -5,6 +5,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
+import EscalationsCard from '../components/EscalationsCard';
 
 interface DashboardData {
   counts: {
@@ -125,6 +126,10 @@ export default function Dashboard() {
   return (
     <div className="p-6 bg-slate-900 min-h-screen max-w-[1440px] mx-auto rise-in">
       <h1 className="text-3xl font-semibold tracking-tight text-slate-100 mb-6">Dashboard</h1>
+
+      <div className="mb-4">
+        <EscalationsCard />
+      </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">

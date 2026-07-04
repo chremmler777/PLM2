@@ -14,7 +14,7 @@ from app.models import (
 logger = logging.getLogger(__name__)
 
 # Controlled item categories (automotive PLM)
-VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "gauge"}
+VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "eoat", "gauge"}
 
 
 def compute_next_calibration(

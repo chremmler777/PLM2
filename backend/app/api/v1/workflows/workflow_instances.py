@@ -11,6 +11,8 @@ from app.schemas.workflow import (
     StartWorkflowRequest,
     CompleteTaskRequest,
     CancelWorkflowRequest,
+    AssignTaskRequest,
+    DueDateRequest,
 )
 from app.services.workflow_service import WorkflowService
 
@@ -35,6 +37,35 @@ async def _load_instance_full(db: AsyncSession, instance_id: int) -> WfInstance:
     return result.scalar_one()
 
 
+def _serialize_task(t: WfInstanceTask) -> dict:
+    """Build a JSON-serializable dict from a loaded WfInstanceTask.
+
+    Requires ``step`` and ``department`` loaded; ``owner`` is lazy=selectin
+    so ``owner_name``/``overdue`` are safe to read.
+    """
+    return {
+        "id": t.id,
+        "instance_id": t.instance_id,
+        "stage_order": t.stage_order,
+        "step_id": t.step_id,
+        "step_name": t.step.step_name if t.step else "",
+        "department_id": t.department_id,
+        "department_name": t.department.name if t.department else "",
+        "rasic_letter": t.rasic_letter,
+        "status": t.status,
+        "is_actionable": t.is_actionable,
+        "completed_by": t.completed_by,
+        "completed_at": t.completed_at,
+        "decision": t.decision,
+        "notes": t.notes,
+        "owner_id": t.owner_id,
+        "owner_name": t.owner_name,
+        "accepted_at": t.accepted_at,
+        "due_date": t.due_date,
+        "overdue": t.overdue,
+    }
+
+
 def _serialize_instance(instance: WfInstance) -> dict:
     """Build a JSON-serializable dict from a fully loaded WfInstance."""
     return {
@@ -49,26 +80,26 @@ def _serialize_instance(instance: WfInstance) -> dict:
         "completed_at": instance.completed_at,
         "canceled_at": instance.canceled_at,
         "cancel_reason": instance.cancel_reason,
-        "tasks": [
-            {
-                "id": t.id,
-                "instance_id": t.instance_id,
-                "stage_order": t.stage_order,
-                "step_id": t.step_id,
-                "step_name": t.step.step_name if t.step else "",
-                "department_id": t.department_id,
-                "department_name": t.department.name if t.department else "",
-                "rasic_letter": t.rasic_letter,
-                "status": t.status,
-                "is_actionable": t.is_actionable,
-                "completed_by": t.completed_by,
-                "completed_at": t.completed_at,
-                "decision": t.decision,
-                "notes": t.notes,
-            }
-            for t in instance.tasks
-        ],
+        "tasks": [_serialize_task(t) for t in instance.tasks],
     }
+
+
+async def _task_response(db: AsyncSession, task: WfInstanceTask) -> dict:
+    """Reload a task with step/department loaded and serialize it."""
+    result = await db.execute(
+        select(WfInstanceTask)
+        .where(WfInstanceTask.id == task.id)
+        .options(
+            selectinload(WfInstanceTask.step),
+            selectinload(WfInstanceTask.department),
+            selectinload(WfInstanceTask.owner),
+        )
+        # The task may already be in the identity map with a stale ``owner``
+        # relationship (loaded as None before accept/assign set owner_id).
+        # populate_existing forces the loaders to refresh it.
+        .execution_options(populate_existing=True)
+    )
+    return _serialize_task(result.scalar_one())
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +143,7 @@ async def get_my_tasks(
         dept_ids = [department_id]
     else:
         dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
-    return await WorkflowService.get_my_tasks(db, dept_ids)
+    return await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
 
 
 @router.post(
@@ -190,6 +221,61 @@ async def complete_task(
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{instance_id}/tasks/{task_id}/accept")
+async def accept_task(
+    instance_id: int,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept ownership of an actionable task (dept member or admin)."""
+    try:
+        task = await WorkflowService.accept_task(db, task_id, current_user)
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _task_response(db, task)
+
+
+@router.post("/{instance_id}/tasks/{task_id}/assign")
+async def assign_task(
+    instance_id: int,
+    task_id: int,
+    body: AssignTaskRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Assign an actionable task to an active department member."""
+    try:
+        task = await WorkflowService.assign_task(
+            db, task_id, body.user_id, current_user)
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _task_response(db, task)
+
+
+@router.put("/{instance_id}/tasks/{task_id}/due-date")
+async def set_task_due_date(
+    instance_id: int,
+    task_id: int,
+    body: DueDateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a task's due date (admin, workflow starter, or change lead)."""
+    try:
+        task = await WorkflowService.set_task_due_date(
+            db, task_id, body.due_date, current_user)
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    return await _task_response(db, task)
 
 
 @router.post("/{instance_id}/cancel")

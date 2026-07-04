@@ -4,11 +4,22 @@
 
 import { useState } from 'react';
 import { useTemplates, useDepartments, useCreateTemplate, useUpdateTemplate, useDeactivateTemplate } from '../hooks/queries/useWorkflows';
-import { WfTemplate, WfTemplateSave, WfStep, Department } from '../types/workflow';
+import { WfTemplate, WfTemplateSave, WfStep, WfStage, Department } from '../types/workflow';
 import * as workflowApi from '../api/workflows';
 import { toast } from 'sonner';
 import StepEditorModal from '../components/workflows/StepEditorModal';
 import WorkflowFlowChart from '../components/workflows/WorkflowFlowChart';
+
+// Draft types for local editor state (id fields are optional)
+type DraftStage = Omit<WfStage, 'id' | 'template_id'> & { id?: number; template_id?: number };
+type DraftStep = Omit<WfStep, 'id' | 'stage_id' | 'rasic_assignments'> & {
+  id?: number;
+  stage_id?: number;
+  rasic_assignments: Array<{
+    department_id: number;
+    rasic_letter: string;
+  }>;
+};
 
 export default function WorkflowDesignerPage() {
   const { data: templates, isLoading: templatesLoading } = useTemplates();
@@ -17,7 +28,6 @@ export default function WorkflowDesignerPage() {
   const deactivateMutation = useDeactivateTemplate();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
-  const [selectedStepId, setSelectedStepId] = useState<number | null>(null);
 
   // Local editor state
   const [editorTemplate, setEditorTemplate] = useState<Partial<WfTemplate> | null>(null);
@@ -26,7 +36,7 @@ export default function WorkflowDesignerPage() {
 
   // Step editor modal state
   const [editingStage, setEditingStage] = useState<number | null>(null);
-  const [editingStep, setEditingStep] = useState<WfStep | null>(null);
+  const [editingStep, setEditingStep] = useState<DraftStep | null>(null);
 
   const selectedTemplate = selectedTemplateId && templates ? templates.find((t: any) => t.id === selectedTemplateId) : null;
   const updateMutation = useUpdateTemplate(selectedTemplateId || 0);
@@ -39,7 +49,6 @@ export default function WorkflowDesignerPage() {
       stages: [],
     });
     setSelectedTemplateId(null);
-    setSelectedStepId(null);
     setViewMode('edit');
     setVersionHistory([]);
   };
@@ -54,8 +63,7 @@ export default function WorkflowDesignerPage() {
         description: fullTemplate.description,
         stages: JSON.parse(JSON.stringify(fullTemplate.stages)), // Deep copy
       });
-      setSelectedStepId(null);
-
+  
       // Fetch version history
       try {
         console.log('Attempting to fetch version history for template:', templateId);
@@ -112,7 +120,6 @@ export default function WorkflowDesignerPage() {
         setSelectedTemplateId(created.id);
       }
       setEditorTemplate(null);
-      setSelectedStepId(null);
     } catch (error: any) {
       console.error('Save error:', error);
       const errorMsg = error?.response?.data?.detail || error?.message || 'Failed to save template';
@@ -124,7 +131,6 @@ export default function WorkflowDesignerPage() {
   const handleCancel = () => {
     setEditorTemplate(null);
     setSelectedTemplateId(null);
-    setSelectedStepId(null);
     setViewMode('edit');
     setVersionHistory([]);
   };
@@ -132,13 +138,18 @@ export default function WorkflowDesignerPage() {
   // Handle add stage
   const handleAddStage = () => {
     if (!editorTemplate) return;
-    const newStages = [...(editorTemplate.stages || [])];
-    const maxOrder = newStages.length > 0 ? Math.max(...newStages.map((s: any) => s.stage_order)) : 0;
-    newStages.push({
+    const newStages: WfStage[] = [...(editorTemplate.stages || [])];
+    const maxOrder = newStages.length > 0 ? Math.max(...newStages.map((s) => s.stage_order)) : 0;
+    // id/template_id are placeholders until the template is saved; handleSave
+    // only reads stage_order/name/steps when building the save payload.
+    const newStage: WfStage = {
+      id: 0,
+      template_id: editorTemplate.id ?? 0,
       stage_order: maxOrder + 1,
       name: null,
       steps: [],
-    });
+    };
+    newStages.push(newStage);
     setEditorTemplate({ ...editorTemplate, stages: newStages });
   };
 
@@ -156,7 +167,7 @@ export default function WorkflowDesignerPage() {
     if (!stage) return;
 
     const maxPos = stage.steps?.length > 0 ? Math.max(...stage.steps.map((s: any) => s.position_in_stage)) : 0;
-    const newStep = {
+    const newStep: DraftStep = {
       step_name: 'New Step',
       position_in_stage: maxPos + 1,
       rasic_assignments: [],
@@ -167,7 +178,7 @@ export default function WorkflowDesignerPage() {
   };
 
   // Handle save step from modal
-  const handleSaveStep = (updatedStep: WfStep) => {
+  const handleSaveStep = (updatedStep: DraftStep) => {
     if (!editorTemplate || !editingStage) return;
 
     const newStages = (editorTemplate.stages || []).map((stage: any) => {
@@ -361,21 +372,19 @@ export default function WorkflowDesignerPage() {
                     </div>
                   )}
 
-                  {(editorTemplate.stages || []).map((stage: any, idx: number) => (
+                  {(editorTemplate.stages || []).map((stage: any) => (
                     <StageEditor
                       key={stage.stage_order}
                       stage={stage}
                       departments={departments || []}
-                      selectedStepId={selectedStepId}
-                      onSelectStep={setSelectedStepId}
-                      onEditStep={(step) => {
+                      onEditStep={(step: DraftStep) => {
                         setEditingStage(stage.stage_order);
                         setEditingStep(step);
                       }}
                       onAddStep={() => handleAddStep(stage.stage_order)}
-                      onDeleteStep={(pos) => handleDeleteStep(stage.stage_order, pos)}
+                      onDeleteStep={(pos: number) => handleDeleteStep(stage.stage_order, pos)}
                       onDeleteStage={() => handleDeleteStage(stage.stage_order)}
-                      onUpdateStage={(updated) => {
+                      onUpdateStage={(updated: DraftStage) => {
                         const newStages = (editorTemplate.stages || []).map((s: any) =>
                           s.stage_order === stage.stage_order ? updated : s
                         );
@@ -439,7 +448,7 @@ export default function WorkflowDesignerPage() {
 }
 
 // Stage editor component
-function StageEditor({ stage, departments, selectedStepId, onSelectStep, onEditStep, onAddStep, onDeleteStep, onDeleteStage, onUpdateStage }: any) {
+function StageEditor({ stage, departments, onEditStep, onAddStep, onDeleteStep, onDeleteStage, onUpdateStage }: any) {
   return (
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
       <div className="flex justify-between items-center mb-4">
@@ -467,7 +476,6 @@ function StageEditor({ stage, departments, selectedStepId, onSelectStep, onEditS
             <StepCard
               key={step.position_in_stage}
               step={step}
-              isSelected={selectedStepId === step.position_in_stage}
               departments={departments}
               onEdit={() => onEditStep(step)}
               onDelete={() => onDeleteStep(step.position_in_stage)}
@@ -489,7 +497,7 @@ function StageEditor({ stage, departments, selectedStepId, onSelectStep, onEditS
 }
 
 // Step card component
-function StepCard({ step, isSelected, departments, onEdit, onDelete }: any) {
+function StepCard({ step, departments, onEdit, onDelete }: any) {
   const rasicLetters = step.rasic_assignments.map((r: any) => r.rasic_letter).join('');
   const deptNames = step.rasic_assignments
     .map((r: any) => departments.find((d: Department) => d.id === r.department_id)?.name)

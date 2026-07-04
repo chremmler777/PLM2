@@ -19,27 +19,11 @@ depends_on = None
 def upgrade() -> None:
     """Create new part-based revision system tables."""
 
-    # Create enum types for revision phases and statuses
-    revision_phase_enum = sa.Enum(
-        'rfq_phase', 'engineering', 'freeze', 'ecn',
-        name='revisionphase',
-        native_enum=True
-    )
-    revision_phase_enum.create(op.get_bind())
-
-    revision_status_enum = sa.Enum(
-        'draft', 'in_progress', 'in_review', 'approved', 'rejected', 'frozen', 'cancelled',
-        name='revisionstatus',
-        native_enum=True
-    )
-    revision_status_enum.create(op.get_bind())
-
-    test_data_status_enum = sa.Enum(
-        'unconfirmed', 'approved', 'rejected',
-        name='testdatastatus',
-        native_enum=True
-    )
-    test_data_status_enum.create(op.get_bind())
+    # Enum types (revisionphase / revisionstatus / testdatastatus) are created
+    # implicitly when the part_revisions table below is created. Each enum is
+    # used by exactly one table, so the table-create path emits CREATE TYPE
+    # exactly once — no explicit .create() needed (and an explicit create here
+    # would collide with the implicit one on PostgreSQL).
 
     # Create parts table (engineering parts with revisions)
     op.create_table(

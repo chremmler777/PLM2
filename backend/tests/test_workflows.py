@@ -6,7 +6,8 @@ visibility per department.
 """
 import pytest_asyncio
 
-from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepRasic
+from app.models.workflow import (
+    Department, WfTemplate, WfStage, WfStep, WfStepRasic, UserDepartment)
 
 
 @pytest_asyncio.fixture
@@ -67,7 +68,18 @@ def _tasks_by_dept(instance, dept_id, stage=None):
     ]
 
 
-async def test_full_approval_chain_across_departments(client, eng_auth, part, wf_template):
+async def _grant(session_factory, user_id, *dept_ids):
+    """Direct-DB membership grant for tests that complete tasks as a
+    non-admin — complete_task's department-membership guard requires it."""
+    async with session_factory() as s:
+        s.add_all([UserDepartment(user_id=user_id, department_id=d) for d in dept_ids])
+        await s.commit()
+
+
+async def test_full_approval_chain_across_departments(
+        client, eng_auth, part, wf_template, seed, session_factory):
+    await _grant(session_factory, seed["engineer_id"],
+                 wf_template["eng_id"], wf_template["quality_id"])
     rid = part["revision_id"]
     inst = await _start(client, eng_auth, rid, wf_template["template_id"])
 
@@ -106,7 +118,9 @@ async def test_full_approval_chain_across_departments(client, eng_auth, part, wf
     assert inst["completed_at"] is not None
 
 
-async def test_rejection_stops_workflow(client, eng_auth, part, wf_template):
+async def test_rejection_stops_workflow(
+        client, eng_auth, part, wf_template, seed, session_factory):
+    await _grant(session_factory, seed["engineer_id"], wf_template["eng_id"])
     rid = part["revision_id"]
     inst = await _start(client, eng_auth, rid, wf_template["template_id"])
     eng_task = _tasks_by_dept(inst, wf_template["eng_id"], stage=1)[0]

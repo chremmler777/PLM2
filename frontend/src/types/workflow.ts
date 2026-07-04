@@ -86,9 +86,9 @@ export interface WfTemplateSave {
 // Phase 3c: Workflow instance types
 // ============================================================================
 
-export type WfTaskStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'noted';
+export type WfTaskStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'noted' | 'waived';
 export type WfInstanceStatus = 'active' | 'completed' | 'canceled' | 'rejected';
-export type WfDecision = 'approved' | 'rejected';
+export type WfDecision = 'approved' | 'rejected' | 'waived';
 
 export interface WfInstanceTask {
   id: number;
@@ -105,6 +105,26 @@ export interface WfInstanceTask {
   completed_at: string | null;
   decision: WfDecision | null;
   notes: string | null;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
+}
+
+export interface Escalation {
+  kind: 'assessment' | 'wf_task' | 'deadline';
+  change_id: number;
+  change_number: string;
+  change_title: string;
+  label: string;
+  owner_id?: number | null;
+  owner_name?: string | null;
+  due_date?: string;
+  days_overdue: number;
+  /** Present only for kind === 'deadline'. */
+  required_by_date?: string;
+  state?: 'on_track' | 'at_risk' | 'overdue';
 }
 
 export interface WfInstance {
@@ -139,6 +159,12 @@ export interface MyTask {
   revision_id: number;
   revision_name: string;
   instance_started_at: string;
+  owner_id: number | null;
+  owner_name: string | null;
+  accepted_at: string | null;
+  due_date: string | null;
+  overdue: boolean;
+  mine: boolean;
 }
 
 // Instance request types

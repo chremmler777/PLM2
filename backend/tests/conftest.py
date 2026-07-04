@@ -90,6 +90,16 @@ async def login(client: AsyncClient, email: str, password: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def approve_gates(client, auth, change_id: int, *keys):
+    """Set the given change gates to 'yes' (all three when no keys given)."""
+    for k in keys or ("feasibility", "budget", "release"):
+        res = await client.put(
+            f"/api/v1/changes/{change_id}/gates/{k}",
+            json={"decision": "yes"}, headers=auth,
+        )
+        assert res.status_code == 200, res.text
+
+
 @pytest_asyncio.fixture
 async def admin_auth(client):
     return await login(client, "admin@test.io", ADMIN_PASSWORD)
@@ -135,4 +145,33 @@ async def freeze_revision(session_factory, revision_id: int):
         await s.execute(
             update(PartRevision).where(PartRevision.id == revision_id).values(status="frozen")
         )
+        await s.commit()
+
+
+@pytest_asyncio.fixture
+async def check_wf_standards(session_factory, seed):
+    """Seed the ECN Implementation check-workflow templates + category mappings."""
+    from app.services.wf_seed_service import seed_check_standards
+    async with session_factory() as s:
+        await seed_check_standards(s)
+        await s.commit()
+
+
+async def force_complete_check_workflows(session_factory, change_id: int):
+    """Mark every check-WF instance of a change's ECN revisions completed —
+    for tests that need to pass the ready-to-go guard without driving tasks."""
+    from datetime import datetime
+    from sqlalchemy import select, update
+    from app.models.change import ChangeImpactedItem
+    from app.models.workflow import WfInstance
+    async with session_factory() as s:
+        rev_ids = [r for (r,) in await s.execute(
+            select(ChangeImpactedItem.resulting_revision_id).where(
+                ChangeImpactedItem.change_id == change_id,
+                ChangeImpactedItem.resulting_revision_id.is_not(None)))]
+        if rev_ids:
+            await s.execute(update(WfInstance)
+                            .where(WfInstance.part_revision_id.in_(rev_ids))
+                            .values(status="completed",
+                                    completed_at=datetime.utcnow()))
         await s.commit()

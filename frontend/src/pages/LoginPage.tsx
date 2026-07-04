@@ -2,7 +2,7 @@
  * LoginPage - Simple login for testing (Phase 6 will have proper auth)
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import client from '../api/client';
@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);

@@ -31,7 +31,7 @@ def upgrade() -> None:
             sa.Column('phone', sa.String(50), nullable=True),
             sa.Column('address', sa.Text(), nullable=True),
             sa.Column('notes', sa.Text(), nullable=True),
-            sa.Column('is_active', sa.Boolean(), nullable=False, server_default='1'),
+            sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
             sa.Column('created_by', sa.Integer(), sa.ForeignKey('users.id'), nullable=True),
         )
@@ -44,7 +44,7 @@ def upgrade() -> None:
     # Backfill: distinct free-text supplier names become master records
     bind.execute(sa.text(
         "INSERT INTO suppliers (name, is_active, created_at) "
-        "SELECT DISTINCT TRIM(supplier), 1, CURRENT_TIMESTAMP FROM parts "
+        "SELECT DISTINCT TRIM(supplier), TRUE, CURRENT_TIMESTAMP FROM parts "
         "WHERE supplier IS NOT NULL AND TRIM(supplier) != '' "
         "AND TRIM(supplier) NOT IN (SELECT name FROM suppliers)"
     ))

@@ -24,11 +24,6 @@ interface Viewer3DProps {
   models?: AssemblyModel[]  // Assembly mode: render multiple models in one scene
   onError?: (error: Error) => void
   onLoad?: () => void
-  // Revision tree integration for fullscreen mode
-  articleId?: number
-  selectedRevisionId?: number | null
-  onRevisionSelect?: (revisionId: number) => void
-  sourcingType?: string
 }
 
 interface BoundingBoxInfo {
@@ -48,10 +43,6 @@ export default function Viewer3D({
   models,
   onError,
   onLoad,
-  articleId,
-  selectedRevisionId,
-  onRevisionSelect,
-  sourcingType
 }: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const orbitControlsRef = useRef<any>(null)
@@ -279,7 +270,7 @@ export default function Viewer3D({
   }
 
   // Handle visibility toggle from object tree
-  const handleToggleVisibility = (node: SceneNode) => {
+  const handleToggleVisibility = () => {
     // Visibility is handled in the ObjectTree component
     // This is just a callback for any additional logic needed
   }
@@ -361,10 +352,10 @@ export default function Viewer3D({
     <div ref={containerRef} className="w-full h-full flex flex-col relative">
       {/* Loading Overlay - shown on top of Canvas while loading */}
       {loading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-800 rounded-lg">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-            <p className="text-gray-600 dark:text-gray-400 mt-4">Loading 3D model...</p>
+            <p className="text-slate-400 mt-4">Loading 3D model...</p>
           </div>
         </div>
       )}
@@ -388,12 +379,12 @@ export default function Viewer3D({
       <div className="flex-1 flex overflow-hidden">
         {/* Object Tree Sidebar - only shown in fullscreen mode */}
         {showObjectTree && isFullscreen && (
-          <div className="w-64 border-r border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden flex flex-col">
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Scene Objects</h3>
+          <div className="w-64 border-r border-slate-700 bg-slate-800 shadow-sm overflow-hidden flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-300">Scene Objects</h3>
               <button
                 onClick={() => setShowObjectTree(false)}
-                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-lg"
+                className="text-slate-400 hover:text-slate-200 text-lg"
               >
                 ✕
               </button>
@@ -411,7 +402,7 @@ export default function Viewer3D({
         {!showObjectTree && isFullscreen && (
           <button
             onClick={() => setShowObjectTree(true)}
-            className="w-12 flex items-center justify-center border-r border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            className="w-12 flex items-center justify-center border-r border-slate-700 bg-slate-700 hover:bg-slate-600 transition-colors"
             title="Show object tree"
           >
             <span className="text-lg">📦</span>
@@ -419,7 +410,7 @@ export default function Viewer3D({
         )}
 
       {/* 3D Canvas, Error, or No File Message */}
-      <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="flex-1 flex items-center justify-center bg-slate-800">
         {error ? (
           <div className="text-center">
             <p className="text-red-600 dark:text-red-400 font-semibold">Error loading 3D model</p>
@@ -476,8 +467,6 @@ export default function Viewer3D({
               ) : null}
               <CutPlane
                 active={isCutPlaneActive}
-                axis={cutPlaneAxis}
-                position={cutPlanePosition}
               />
               <OrbitControls
                 ref={orbitControlsRef}
@@ -522,7 +511,7 @@ export default function Viewer3D({
             </Suspense>
           </Canvas>
         ) : (
-          <div className="text-center text-gray-500 dark:text-gray-400">
+          <div className="text-center text-slate-400">
             <p className="font-medium">No 3D file available</p>
             <p className="text-sm mt-1">Select a revision with a CAD file to view</p>
           </div>
@@ -532,8 +521,8 @@ export default function Viewer3D({
 
       {/* Exploded View Slider (assembly mode with 2+ models) */}
       {assemblyMode && (models?.length ?? 0) > 1 && !loading && (
-        <div className="absolute bottom-4 left-4 z-20 bg-white/90 dark:bg-gray-800/90 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 flex items-center gap-2 shadow-lg">
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300" title="Exploded view">💥</span>
+        <div className="absolute bottom-4 left-4 z-20 bg-slate-800/90 border border-slate-700 rounded-lg px-3 py-2 flex items-center gap-2 shadow-lg">
+          <span className="text-xs font-medium text-slate-300" title="Exploded view">💥</span>
           <input
             type="range"
             min="0"
@@ -547,7 +536,7 @@ export default function Viewer3D({
           {explodeFactor > 0 && (
             <button
               onClick={() => setExplodeFactor(0)}
-              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              className="text-xs text-slate-400 hover:text-slate-200"
             >
               Reset
             </button>
