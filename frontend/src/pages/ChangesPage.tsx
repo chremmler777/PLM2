@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { changesApi } from '../api/changes';
-import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
+import { STATUS_LABELS, STATUS_PILL, stepPosition } from '../lib/changeStatus';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 
@@ -59,10 +59,13 @@ export default function ChangesPage() {
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Priority</th>
                 <th className="px-4 py-3">Deadline</th>
+                <th className="px-4 py-3">Progress</th>
               </tr>
             </thead>
             <tbody>
-              {changes.map((c) => (
+              {changes.map((c) => {
+                const pos = stepPosition(c.status, c.customer_relevant);
+                return (
                 <tr key={c.id} className="border-t border-slate-700 hover:bg-slate-800/60">
                   <td className="px-4 py-3 font-mono">
                     <Link className="text-blue-600 hover:underline" to={`/changes/${c.id}`}>
@@ -80,10 +83,17 @@ export default function ChangesPage() {
                   <td className="px-4 py-3">
                     <DeadlineChip date={c.required_by_date} state={c.deadline_state} />
                   </td>
+                  <td className="px-4 py-3">
+                    {pos && (
+                      <span className="text-xs text-slate-400" title={`Step ${pos.index + 1} of ${pos.total}`}>
+                        {pos.index + 1}/{pos.total}
+                      </span>
+                    )}
+                  </td>
                 </tr>
-              ))}
+              );})}
               {changes.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
               )}
             </tbody>
           </table>

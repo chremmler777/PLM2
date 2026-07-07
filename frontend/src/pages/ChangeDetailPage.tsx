@@ -166,7 +166,7 @@ export default function ChangeDetailPage() {
         </div>
       </div>
 
-      <LifecycleStepper status={change.status} />
+      <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant} />
 
       {blocked && (
         <DeviationBanner

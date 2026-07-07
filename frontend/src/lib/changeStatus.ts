@@ -1,4 +1,4 @@
-import type { ChangeStatus, GateKey } from '../types/change'
+import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change'
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
@@ -33,6 +33,41 @@ export const STATUS_PILL: Record<ChangeStatus, string> = {
 }
 
 export const OFF_PATH_STATUSES: ChangeStatus[] = ['on_hold', 'rejected', 'cancelled']
+
+/** Plain-language sublabels for on-path statuses, shown as tooltip + current-step hint. */
+export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
+  captured: 'Describe what should change',
+  scoping: 'Meet, decide, pick departments',
+  in_assessment: 'Departments check feasibility & cost',
+  costing: 'Sum up costs',
+  quoted: 'Offer sent to customer',
+  approved: 'Go decision made',
+  in_implementation: 'Doing the work',
+  in_validation: 'Checking results',
+  released: 'Change is live',
+  closed: 'Wrapped up',
+}
+
+/** On-path step order for a given branch: customer-relevant changes keep `quoted`,
+ * non-customer-relevant (internal) changes skip it. `undefined` = unknown, treated as full. */
+export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
+  return customerRelevant === false
+    ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoted')
+    : CHANGE_STATUS_ORDER
+}
+
+/** 0-based index + total on-path steps for `status` given the change's branch, or null
+ * if `status` is off-path (on_hold/rejected/cancelled). */
+export function stepPosition(
+  status: ChangeStatus,
+  customerRelevant?: boolean
+): { index: number; total: number } | null {
+  if (OFF_PATH_STATUSES.includes(status)) return null
+  const order = branchStepOrder(customerRelevant)
+  const index = order.indexOf(status)
+  if (index === -1) return null
+  return { index, total: order.length }
+}
 
 /** Which transition each gate guards. Mirrors GATE_TARGET_STATUS in
  * backend/app/models/change_cost.py — keep values in sync. */

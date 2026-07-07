@@ -16,4 +16,19 @@ describe('LifecycleStepper', () => {
     render(<LifecycleStepper status="on_hold" />)
     expect(screen.getByText('On Hold')).toBeDefined()
   })
+
+  it('omits Quoted for internal (non-customer-relevant) changes', () => {
+    render(<LifecycleStepper status="costing" customerRelevant={false} />)
+    expect(screen.queryByText('Quoted')).toBeNull()
+  })
+
+  it('keeps Quoted for customer-relevant changes', () => {
+    render(<LifecycleStepper status="costing" customerRelevant />)
+    expect(screen.getByText('Quoted')).toBeDefined()
+  })
+
+  it('shows the plain-language hint under the current step', () => {
+    render(<LifecycleStepper status="costing" />)
+    expect(screen.getByText('Sum up costs')).toBeDefined()
+  })
 })
