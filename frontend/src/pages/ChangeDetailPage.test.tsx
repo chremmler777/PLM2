@@ -3,6 +3,8 @@ import { render, screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ChangeDetailPage from './ChangeDetailPage'
+import { changesApi } from '../api/changes'
+import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
 
 // ChangeDetailPage fetches via changesApi (get/getImplementation/getGates/listDeviations),
@@ -20,7 +22,7 @@ const { change } = vi.hoisted(() => ({
     change_type: 'physical_part',
     priority: 'medium',
     status: 'in_assessment',
-    lead_id: null,
+    lead_id: null as number | null,
     lead_name: null,
     raised_by: 1,
     customer_response: 'pending',
@@ -56,7 +58,7 @@ vi.mock('../api/client', () => ({
   default: { get: vi.fn().mockResolvedValue({ data: [] }) },
 }))
 vi.mock('../hooks/queries/useWorkflows', () => ({
-  useDepartments: () => ({ data: [] }),
+  useDepartments: vi.fn(() => ({ data: [] })),
 }))
 const authState = vi.hoisted(() => ({
   current: { isAdmin: false, role: 'engineer', userId: null as number | null },
@@ -117,6 +119,9 @@ describe('ChangeDetailPage governance tab gating', () => {
   afterEach(() => {
     cleanup()
     authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.lead_id = null
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
   })
 
   it('hides D1/Audit buttons and the Governance group for a non-lead, non-admin viewer', async () => {
@@ -142,5 +147,28 @@ describe('ChangeDetailPage governance tab gating', () => {
     expect(overviewButton.className).toContain('border-b-2')
     expect(screen.queryByText('mock-audit-timeline')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+  })
+
+  it('shows the Governance group with D1 and Audit for the change lead', async () => {
+    change.lead_id = 42
+    authState.current = { isAdmin: false, role: 'engineer', userId: 42 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+
+  it('shows the Governance group with D1 and Audit for a Quality department member', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
   })
 })
