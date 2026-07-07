@@ -34,7 +34,7 @@ export function CustomerRelevantEditor({ change, canEdit }: {
 
   return (
     <p className="flex items-center gap-2">
-      <span className="text-gray-500">Customer-relevant:</span>
+      <span className="text-slate-400">Customer-relevant:</span>
       <span>{change.customer_relevant ? 'Yes' : 'No'}</span>
       {editable && !open && (
         <button type="button" data-testid="customer-relevant-edit"

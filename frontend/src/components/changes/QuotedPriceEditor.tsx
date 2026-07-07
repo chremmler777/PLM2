@@ -29,7 +29,7 @@ export function QuotedPriceEditor({ change }: { change: ChangeRequest }) {
   })
 
   if (!editable) {
-    return <p><span className="text-gray-500">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+    return <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '—'}</p>
   }
 
   const parsed = Number(value)
@@ -37,7 +37,7 @@ export function QuotedPriceEditor({ change }: { change: ChangeRequest }) {
 
   return (
     <p className="flex items-center gap-2">
-      <span className="text-gray-500">Quoted price:</span>
+      <span className="text-slate-400">Quoted price:</span>
       <input type="number" step="0.01" value={value}
         onChange={(e) => setValue(e.target.value)}
         className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100 w-32" />
