@@ -96,6 +96,19 @@ describe('CockpitSummary', () => {
     expect(onResolveGate).toHaveBeenCalledWith('budget')
   })
 
+  it('does not render gate rows as jump buttons when the viewer cannot see governance tabs', () => {
+    const onResolveGate = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[
+        { gate_key: 'feasibility', decision: 'na' },
+        { gate_key: 'budget', decision: 'na' },
+      ]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onResolveGate={onResolveGate} canSeeGovernance={false} />))
+    expect(screen.queryByRole('button', { name: /Feasibility/ })).toBeNull()
+    expect(screen.getByText(/Feasibility/)).toBeDefined()
+  })
+
   it('keeps the green nothing-blocking state while still listing later gates as muted', () => {
     render(wrap(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
       gates={[{ gate_key: 'budget', decision: 'na' }]}
