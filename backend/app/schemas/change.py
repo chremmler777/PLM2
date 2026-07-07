@@ -15,6 +15,7 @@ class ChangeCreate(BaseModel):
     priority: str = "medium"
     lead_id: Optional[int] = None
     data_classification: str = "confidential"
+    customer_relevant: Optional[bool] = None
 
 
 class ChangeUpdate(BaseModel):

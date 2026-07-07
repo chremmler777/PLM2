@@ -63,6 +63,7 @@ async def create_change(
             change_type=body.change_type, raised_by=current_user.id,
             reason=body.reason, description=body.description, priority=body.priority,
             lead_id=body.lead_id, data_classification=body.data_classification,
+            customer_relevant=body.customer_relevant,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -19,6 +19,9 @@ import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import AuditTimeline from '../components/changes/AuditTimeline';
+import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
+import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
+import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -33,6 +36,10 @@ const TABS: Tab[] = ['overview', 'scoping', 'impacted', 'implementation', 'asses
 // separate right-aligned group and gated by authz — see `canSeeGovernance` below.
 const EVERYDAY_TABS: Tab[] = ['overview', 'scoping', 'impacted', 'assessments', 'commercial', 'implementation'];
 const GOVERNANCE_TABS: Tab[] = ['d1', 'audit'];
+// F2: before costing there's no cost basis yet — the commercial tab shows an
+// explainer instead of a dead-end disabled control (mirrors PnlCard's hidden
+// rule, which hides the P&L card for the same statuses).
+const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -101,6 +108,13 @@ export default function ChangeDetailPage() {
     (pmDeptId !== undefined && myActions.memberships.includes(pmDeptId))
   );
   const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
+  // F8: the backend enforces "PM and Quality sign-off must be different
+  // users" (4-eyes) and 400s if violated. Disable the button in place and
+  // name the rule instead of letting the user hit the error after clicking.
+  const samePersonBlocksPm = !change?.pm_signed_by
+    && !!change?.quality_signed_by && userId != null && userId === change.quality_signed_by;
+  const samePersonBlocksQuality = !change?.quality_signed_by
+    && !!change?.pm_signed_by && userId != null && userId === change.pm_signed_by;
 
   const transition = useMutation({
     mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
@@ -197,12 +211,13 @@ export default function ChangeDetailPage() {
         onShowImpact={() => setTab('impacted')}
         actions={myActions?.actions ?? []}
         onAction={(targetTab) => setTab(targetTab as Tab)}
+        canSeeGovernance={canSeeGovernance}
       />
 
-      <div className="border-b flex items-center gap-4 text-sm mb-4">
+      <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
         {EVERYDAY_TABS.map((tb) => (
           <button key={tb}
-            className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+            className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
             onClick={() => setTab(tb)}>
             {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
           </button>
@@ -212,7 +227,7 @@ export default function ChangeDetailPage() {
             <span className="ml-auto text-xs uppercase tracking-wide text-slate-500">Governance</span>
             {GOVERNANCE_TABS.map((tb) => (
               <button key={tb}
-                className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+                className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
                 onClick={() => setTab(tb)}>
                 {tb[0].toUpperCase() + tb.slice(1)}
               </button>
@@ -227,6 +242,7 @@ export default function ChangeDetailPage() {
           <p><span className="text-gray-500">Priority:</span> {change.priority}</p>
           <p><span className="text-gray-500">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-gray-500">Reason:</span> {change.reason ?? '—'}</p>
+          <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
 
           <div className="pt-3">
             <label className="text-sm text-gray-500">Attach document (PPT, PDF, …)</label>
@@ -260,6 +276,7 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'assessments' && (
         <div className="space-y-4">
+          <ScopingMappingHint changeId={changeId} assessments={change.assessments} departments={departments} />
           <AssessmentRouting changeId={changeId} />
           <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
@@ -327,22 +344,45 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'commercial' && (
         <div className="space-y-3 text-sm">
           <PnlCard change={change} />
-          {change.customer_relevant ? (
+          {BEFORE_COSTING.includes(change.status) ? (
+            <div className="border border-slate-700 bg-slate-800/60 rounded-lg p-4 text-slate-300">
+              {change.customer_relevant ? (
+                <p>
+                  Quotes are entered once the change reaches Costing. Currently in{' '}
+                  <strong>{STATUS_LABELS[change.status] ?? change.status}</strong> — departments first
+                  assess and cost the change.
+                </p>
+              ) : (
+                <p>
+                  Costs are approved once the change reaches Costing. Currently in{' '}
+                  <strong>{STATUS_LABELS[change.status] ?? change.status}</strong> — departments first
+                  assess and cost the change.
+                </p>
+              )}
+            </div>
+          ) : change.customer_relevant ? (
             <>
-              <p><span className="text-gray-500">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+              <QuotedPriceEditor change={change} />
               <p><span className="text-gray-500">Customer response:</span> {change.customer_response}</p>
               <div className="flex gap-2">
                 <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('accepted')}>Customer accepted</button>
                 <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('declined')}>Customer declined</button>
               </div>
               <div className="flex gap-2 pt-2">
-                <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('pm')}>
+                <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
+                  disabled={!!change.pm_signed_by || samePersonBlocksPm}
+                  onClick={() => signOff.mutate('pm')}>
                   PM sign-off {change.pm_signed_by ? '✓' : ''}
                 </button>
-                <button className="px-3 py-1.5 border rounded-lg" onClick={() => signOff.mutate('quality')}>
+                <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
+                  disabled={!!change.quality_signed_by || samePersonBlocksQuality}
+                  onClick={() => signOff.mutate('quality')}>
                   Quality sign-off {change.quality_signed_by ? '✓' : ''}
                 </button>
               </div>
+              {(samePersonBlocksPm || samePersonBlocksQuality) && (
+                <p className="text-xs text-amber-300">PM and Quality sign-off must be different users</p>
+              )}
               <p className="text-xs text-gray-400">Approve requires customer acceptance + both sign-offs.</p>
             </>
           ) : (

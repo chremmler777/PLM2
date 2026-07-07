@@ -21,13 +21,14 @@ const { change } = vi.hoisted(() => ({
     reason: null,
     change_type: 'physical_part',
     priority: 'medium',
-    status: 'in_assessment',
+    status: 'in_assessment' as ChangeDetail['status'],
     lead_id: null as number | null,
     lead_name: null,
     raised_by: 1,
     customer_response: 'pending',
-    pm_signed_by: null,
-    quality_signed_by: null,
+    customer_relevant: undefined as boolean | undefined,
+    pm_signed_by: null as number | null,
+    quality_signed_by: null as number | null,
     estimated_cost: null,
     quoted_price: null,
     created_at: '2026-07-01T00:00:00',
@@ -49,8 +50,12 @@ vi.mock('../api/changes', () => ({
     listDeviations: vi.fn().mockResolvedValue([]),
     myActions: vi.fn().mockResolvedValue({ actions: [], memberships: [] }),
     uploadAttachment: vi.fn(),
+    signOff: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+    customerResponse: vi.fn().mockResolvedValue({}),
   },
 }))
+vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
 vi.mock('../api/plants', () => ({
   plantsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
@@ -170,5 +175,42 @@ describe('ChangeDetailPage governance tab gating', () => {
     expect(screen.getByText('Governance')).toBeDefined()
     expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+})
+
+describe('ChangeDetailPage commercial tab sign-off (F8)', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    change.pm_signed_by = null
+    change.quality_signed_by = null
+  })
+
+  it('disables the Quality sign-off button and shows the 4-eyes hint when the same user already PM-signed', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    change.pm_signed_by = 42
+    change.quality_signed_by = null
+    wrap('/changes/1?tab=commercial')
+    const qualityButton = await screen.findByRole('button', { name: /Quality sign-off/ })
+    expect(qualityButton).toHaveProperty('disabled', true)
+    expect(screen.getByText('PM and Quality sign-off must be different users')).toBeDefined()
+  })
+
+  it('leaves both sign-off buttons enabled when no one has signed yet', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    change.pm_signed_by = null
+    change.quality_signed_by = null
+    wrap('/changes/1?tab=commercial')
+    const pmButton = await screen.findByRole('button', { name: /PM sign-off/ })
+    const qualityButton = screen.getByRole('button', { name: /Quality sign-off/ })
+    expect(pmButton).toHaveProperty('disabled', false)
+    expect(qualityButton).toHaveProperty('disabled', false)
+    expect(screen.queryByText('PM and Quality sign-off must be different users')).toBeNull()
   })
 })

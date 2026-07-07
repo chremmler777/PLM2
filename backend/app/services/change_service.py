@@ -233,6 +233,7 @@ class ChangeService:
         raised_by: int, reason: Optional[str] = None, description: Optional[str] = None,
         priority: str = "medium", lead_id: Optional[int] = None,
         data_classification: str = "confidential",
+        customer_relevant: Optional[bool] = None,
     ) -> ChangeRequest:
         if change_type not in CHANGE_TYPES:
             raise ChangeError(f"Invalid change_type '{change_type}'")
@@ -243,6 +244,8 @@ class ChangeService:
             priority=priority, lead_id=lead_id, raised_by=raised_by,
             data_classification=data_classification, status="captured",
         )
+        if customer_relevant is not None:
+            change.customer_relevant = customer_relevant
         session.add(change)
         await session.flush()
         # Only the release gate is seeded up front. Feasibility is answered by

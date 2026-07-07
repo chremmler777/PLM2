@@ -25,6 +25,14 @@ async def test_create_change_assigns_number_and_captured_status(client, eng_auth
     assert data["change_type"] == "physical_part"
 
 
+async def test_create_change_accepts_customer_relevant(client, eng_auth, seed):
+    data = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=True)
+    assert data["customer_relevant"] is True
+
+    data2 = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=False)
+    assert data2["customer_relevant"] is False
+
+
 async def test_list_and_get_change(client, eng_auth, seed):
     created = await _create_change(client, eng_auth, seed["project_id"])
     res = await client.get(f"/api/v1/changes?project_id={seed['project_id']}", headers=eng_auth)

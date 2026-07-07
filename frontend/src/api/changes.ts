@@ -18,6 +18,7 @@ export const changesApi = {
   create: (body: {
     project_id: number; title: string; change_type: string;
     reason?: string; description?: string; priority?: string; lead_id?: number;
+    customer_relevant?: boolean;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
 
   update: (id: number, body: Record<string, unknown>) =>

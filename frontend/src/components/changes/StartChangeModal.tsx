@@ -57,6 +57,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [reason, setReason] = useState('');
   const [typeTouched, setTypeTouched] = useState(false);
   const [overrideType, setOverrideType] = useState<ChangeType>('physical_part');
+  const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
 
   const changeType: ChangeType = typeTouched
@@ -98,10 +99,17 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
   if (!open) return null;
 
-  const canSubmit = !!projectId && !!picked && !!title.trim() && !submitting;
+  const missing: string[] = [];
+  if (!projectId) missing.push('project');
+  if (!picked) missing.push('affected item');
+  if (!title.trim()) missing.push('title');
+  if (!reason.trim()) missing.push('reason');
+  if (customerRelevant === undefined) missing.push('customer-relevant choice');
+
+  const canSubmit = missing.length === 0 && !submitting;
 
   const handleSubmit = async () => {
-    if (!projectId || !picked || !title.trim()) return;
+    if (missing.length > 0 || !projectId || !picked) return;
     setSubmitting(true);
     try {
       const change = await changesApi.create({
@@ -110,6 +118,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         change_type: changeType,
         reason: reason.trim() || undefined,
         lead_id: userId ?? undefined,
+        customer_relevant: customerRelevant,
       });
       try {
         await changesApi.addImpactedItem(change.id, { part_id: picked.id, is_lead: true });
@@ -304,7 +313,45 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           />
         </div>
 
-        <div className="flex justify-end gap-2">
+        {/* Customer-relevant */}
+        <fieldset className="mb-6">
+          <legend className="block text-sm text-slate-300 mb-1">{t('start.customerRelevant')}</legend>
+          <div className="space-y-2">
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="sc-customer-relevant"
+                className="mt-1"
+                checked={customerRelevant === true}
+                onChange={() => setCustomerRelevant(true)}
+              />
+              <span>
+                <span className="text-slate-100">{t('common.yes')}</span>
+                <span className="block text-xs text-slate-500">{t('start.customerRelevantYesHint')}</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="sc-customer-relevant"
+                className="mt-1"
+                checked={customerRelevant === false}
+                onChange={() => setCustomerRelevant(false)}
+              />
+              <span>
+                <span className="text-slate-100">{t('common.no')}</span>
+                <span className="block text-xs text-slate-500">{t('start.customerRelevantNoHint')}</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div className="flex justify-end items-center gap-3">
+          {missing.length > 0 && !submitting && (
+            <p className="text-xs text-slate-400">
+              {t('start.missing')}: {missing.join(', ')}
+            </p>
+          )}
           <button
             className="px-4 py-2 text-sm text-slate-300 hover:text-slate-100"
             onClick={onClose}
