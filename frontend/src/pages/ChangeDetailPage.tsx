@@ -29,6 +29,10 @@ const errDetail = (e: unknown): string | undefined =>
 
 type Tab = 'overview' | 'scoping' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
 const TABS: Tab[] = ['overview', 'scoping', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
+// Everyday tab bar order (Task 6). D1/Audit are "governance" tabs, rendered as a
+// separate right-aligned group and gated by authz — see `canSeeGovernance` below.
+const EVERYDAY_TABS: Tab[] = ['overview', 'scoping', 'impacted', 'assessments', 'commercial', 'implementation'];
+const GOVERNANCE_TABS: Tab[] = ['d1', 'audit'];
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -75,7 +79,7 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.myActions(changeId),
   });
   const { data: departments = [] } = useDepartments();
-  const { isAdmin } = useAuth();
+  const { isAdmin, userId } = useAuth();
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
   // Task 19: client-side mirror of the confirm-impact authz (R&D member or
@@ -85,6 +89,18 @@ export default function ChangeDetailPage() {
   const rdDeptId = departments.find((d) => d.name === 'R&D')?.id;
   const canConfirmImpact = !myActions ? true
     : isAdmin || (rdDeptId !== undefined && myActions.memberships.includes(rdDeptId));
+  // Task 6: governance tabs (D1, Audit) are only visible/reachable for admin,
+  // the change lead, or Quality/Project Manager department members — reusing
+  // the myActions/departments data already fetched for this page (no new
+  // API calls). Client-side only; server-side enforcement is out of scope here.
+  const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
+  const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
+  const isChangeLead = userId != null && change?.lead_id != null && userId === change.lead_id;
+  const isGovernanceDept = !!myActions && (
+    (qualityDeptId !== undefined && myActions.memberships.includes(qualityDeptId)) ||
+    (pmDeptId !== undefined && myActions.memberships.includes(pmDeptId))
+  );
+  const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
 
   const transition = useMutation({
     mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
@@ -117,6 +133,10 @@ export default function ChangeDetailPage() {
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Approval failed'),
   });
   if (isLoading || !change) return <div className="p-6 text-gray-500">Loading…</div>;
+
+  // An unauthorized deep link into a governance tab (?tab=d1 / ?tab=audit)
+  // falls back to overview rather than rendering a blank/forbidden tab.
+  const effectiveTab: Tab = GOVERNANCE_TABS.includes(tab) && !canSeeGovernance ? 'overview' : tab;
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
@@ -179,17 +199,29 @@ export default function ChangeDetailPage() {
         onAction={(targetTab) => setTab(targetTab as Tab)}
       />
 
-      <div className="border-b flex gap-4 text-sm mb-4">
-        {TABS.map((tb) => (
+      <div className="border-b flex items-center gap-4 text-sm mb-4">
+        {EVERYDAY_TABS.map((tb) => (
           <button key={tb}
-            className={`pb-2 ${tab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+            className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
             onClick={() => setTab(tb)}>
             {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
           </button>
         ))}
+        {canSeeGovernance && (
+          <>
+            <span className="ml-auto text-xs uppercase tracking-wide text-slate-500">Governance</span>
+            {GOVERNANCE_TABS.map((tb) => (
+              <button key={tb}
+                className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+                onClick={() => setTab(tb)}>
+                {tb[0].toUpperCase() + tb.slice(1)}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
-      {tab === 'overview' && (
+      {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
           <p><span className="text-gray-500">Type:</span> {change.change_type}</p>
           <p><span className="text-gray-500">Priority:</span> {change.priority}</p>
@@ -211,22 +243,22 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {tab === 'scoping' && change && (
+      {effectiveTab === 'scoping' && change && (
         <ScopingPanel changeId={change.id} status={change.status} />
       )}
 
-      {tab === 'impacted' && change && (
+      {effectiveTab === 'impacted' && change && (
         <ImpactTree changeId={change.id} status={change.status}
           impactConfirmedByName={change.impact_confirmed_by_name}
           impactConfirmedAt={change.impact_confirmed_at}
           canConfirm={canConfirmImpact} />
       )}
 
-      {tab === 'implementation' && change && (
+      {effectiveTab === 'implementation' && change && (
         <ImplementationPanel changeId={change.id} />
       )}
 
-      {tab === 'assessments' && (
+      {effectiveTab === 'assessments' && (
         <div className="space-y-4">
           <AssessmentRouting changeId={changeId} />
           <ul className="text-sm divide-y border rounded-lg">
@@ -285,14 +317,14 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {tab === 'd1' && (
+      {effectiveTab === 'd1' && (
         <div className="space-y-4">
           <D1MasterPanel changeId={changeId} />
           <SummationView changeId={changeId} />
         </div>
       )}
 
-      {tab === 'commercial' && (
+      {effectiveTab === 'commercial' && (
         <div className="space-y-3 text-sm">
           <PnlCard change={change} />
           {change.customer_relevant ? (
@@ -339,7 +371,7 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {tab === 'audit' && (
+      {effectiveTab === 'audit' && (
         <AuditTimeline correlationId={change.change_number} />
       )}
     </div>

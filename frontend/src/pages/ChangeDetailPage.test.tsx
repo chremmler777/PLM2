@@ -58,8 +58,11 @@ vi.mock('../api/client', () => ({
 vi.mock('../hooks/queries/useWorkflows', () => ({
   useDepartments: () => ({ data: [] }),
 }))
+const authState = vi.hoisted(() => ({
+  current: { isAdmin: false, role: 'engineer', userId: null as number | null },
+}))
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: false, role: 'engineer' }),
+  useAuth: () => authState.current,
 }))
 
 vi.mock('../components/changes/AssessmentRouting', () => ({ default: () => <div>mock-assessment-routing</div> }))
@@ -89,9 +92,13 @@ function wrap(initialPath: string) {
 }
 
 describe('ChangeDetailPage URL-driven tabs', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
 
-  it('renders with the D1 tab active when ?tab=d1', async () => {
+  it('renders with the D1 tab active when ?tab=d1 for an admin', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1?tab=d1')
     const d1Button = await screen.findByRole('button', { name: 'D1' })
     expect(d1Button.className).toContain('border-b-2')
@@ -103,5 +110,37 @@ describe('ChangeDetailPage URL-driven tabs', () => {
     const overviewButton = await screen.findByRole('button', { name: 'Overview' })
     expect(overviewButton.className).toContain('border-b-2')
     expect(screen.queryByText('mock-d1-panel')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage governance tab gating', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('hides D1/Audit buttons and the Governance group for a non-lead, non-admin viewer', async () => {
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.queryByRole('button', { name: 'D1' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+    expect(screen.queryByText('Governance')).toBeNull()
+  })
+
+  it('shows the Governance group with D1 and Audit for an admin', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+
+  it('falls back to overview content for an unauthorized ?tab=audit deep link', async () => {
+    wrap('/changes/1?tab=audit')
+    const overviewButton = await screen.findByRole('button', { name: 'Overview' })
+    expect(overviewButton.className).toContain('border-b-2')
+    expect(screen.queryByText('mock-audit-timeline')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
   })
 })
