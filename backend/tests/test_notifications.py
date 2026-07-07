@@ -418,3 +418,127 @@ async def test_claimed_overdue_assessment_notifies_lead_and_owner(session_factor
         counts2 = await run_notification_sweep(session)
         await session.commit()
         assert counts2["overdue"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unclaimed_overdue_change_task_notifies_lead(session_factory, seed):
+    """Phase-E primary path: an active, actionable, OVERDUE workflow task with
+    no owner on a change-scoped instance must escalate to the change lead
+    (dedup key task:{id}:overdue:lead, link /changes/{change_id}); a second
+    sweep run is a no-op."""
+    async with session_factory() as session:
+        dept = Department(name="Sweep-Task-Dept-1", flow_type="action")
+        session.add(dept)
+        await session.flush()
+        tmpl = WfTemplate(name="SweepTmpl-Lead-1", created_by=1)
+        session.add(tmpl)
+        await session.flush()
+
+        chg = await _mk_change(session, seed, "C-N-009", lead_id=seed["engineer_id"])
+        inst = WfInstance(template_id=tmpl.id, change_id=chg.id, status="active",
+                          current_stage_order=1, started_by=seed["admin_id"])
+        session.add(inst)
+        await session.flush()
+
+        task = WfInstanceTask(
+            instance_id=inst.id, stage_order=1, step_id=None,
+            department_id=dept.id, rasic_letter="R", status="active",
+            is_actionable=True, owner_id=None,
+            due_date=datetime.utcnow() - timedelta(days=2))
+        session.add(task)
+        await session.flush()
+        task_id, chg_id = task.id, chg.id
+        await session.commit()
+
+        counts = await run_notification_sweep(session)
+        await session.commit()
+        assert counts["overdue"] >= 1
+
+        lead_rows = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.kind == "overdue",
+            Notification.subject_key == f"task:{task_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_rows) == 1
+        assert lead_rows[0].link == f"/changes/{chg_id}"
+
+        # No owner exists -> no owner-scoped notification.
+        owner_rows = (await session.execute(select(Notification).where(
+            Notification.subject_key == f"task:{task_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_rows) == 0
+
+        counts2 = await run_notification_sweep(session)
+        await session.commit()
+        assert counts2["overdue"] == 0
+
+
+@pytest.mark.asyncio
+async def test_owned_overdue_change_task_notifies_owner_and_lead(session_factory, seed):
+    """An owned overdue change-scoped task keeps the existing owner
+    notification AND escalates to the change lead — except when the lead IS
+    the owner, in which case the lead escalation is skipped (no duplicate)."""
+    async with session_factory() as session:
+        dept = Department(name="Sweep-Task-Dept-2", flow_type="action")
+        session.add(dept)
+        await session.flush()
+        tmpl = WfTemplate(name="SweepTmpl-Lead-2", created_by=1)
+        session.add(tmpl)
+        await session.flush()
+
+        chg = await _mk_change(session, seed, "C-N-010", lead_id=seed["engineer_id"])
+        inst = WfInstance(template_id=tmpl.id, change_id=chg.id, status="active",
+                          current_stage_order=1, started_by=seed["admin_id"])
+        session.add(inst)
+        await session.flush()
+
+        # Task A: owned by admin (owner != lead) -> owner + lead notified.
+        task_a = WfInstanceTask(
+            instance_id=inst.id, stage_order=1, step_id=None,
+            department_id=dept.id, rasic_letter="R", status="active",
+            is_actionable=True, owner_id=seed["admin_id"],
+            due_date=datetime.utcnow() - timedelta(days=1))
+        # Task B: owned by the lead themselves -> owner notification only.
+        task_b = WfInstanceTask(
+            instance_id=inst.id, stage_order=1, step_id=None,
+            department_id=dept.id, rasic_letter="A", status="active",
+            is_actionable=True, owner_id=seed["engineer_id"],
+            due_date=datetime.utcnow() - timedelta(days=1))
+        session.add_all([task_a, task_b])
+        await session.flush()
+        task_a_id, task_b_id, chg_id = task_a.id, task_b.id, chg.id
+        await session.commit()
+
+        counts = await run_notification_sweep(session)
+        await session.commit()
+        # owner A + lead A + owner B (no lead B: lead == owner)
+        assert counts["overdue"] >= 3
+
+        owner_a = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["admin_id"],
+            Notification.subject_key == f"task:{task_a_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_a) == 1
+
+        lead_a = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.subject_key == f"task:{task_a_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_a) == 1
+        assert lead_a[0].link == f"/changes/{chg_id}"
+
+        owner_b = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.subject_key == f"task:{task_b_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_b) == 1
+
+        # lead == owner -> no separate lead escalation for task B.
+        lead_b = (await session.execute(select(Notification).where(
+            Notification.subject_key == f"task:{task_b_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_b) == 0
+
+        counts2 = await run_notification_sweep(session)
+        await session.commit()
+        assert counts2["overdue"] == 0
