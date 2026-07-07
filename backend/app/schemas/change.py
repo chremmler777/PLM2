@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.common import NaiveUtcDatetime
+
 
 class ChangeCreate(BaseModel):
     project_id: int
@@ -34,7 +36,7 @@ class ChangeUpdate(BaseModel):
     customer_relevant: Optional[bool] = None
     car_line: Optional[str] = None
     affected_plant_ids: Optional[List[int]] = None
-    required_by_date: Optional[datetime] = None
+    required_by_date: Optional[NaiveUtcDatetime] = None
     required_by_reason: Optional[str] = None
 
 
@@ -134,7 +136,7 @@ class AssessmentAssignIn(BaseModel):
 
 
 class AssessmentDueDateIn(BaseModel):
-    due_date: datetime
+    due_date: NaiveUtcDatetime
 
 
 class AttachmentResponse(BaseModel):
@@ -375,14 +377,14 @@ class MeetingParticipant(BaseModel):
 
 
 class MeetingCreate(BaseModel):
-    meeting_date: Optional[datetime] = None
+    meeting_date: Optional[NaiveUtcDatetime] = None
     participants: List[MeetingParticipant] = []
     notes: Optional[str] = None
     selected_department_ids: List[int] = []
 
 
 class MeetingUpdate(BaseModel):
-    meeting_date: Optional[datetime] = None
+    meeting_date: Optional[NaiveUtcDatetime] = None
     participants: Optional[List[MeetingParticipant]] = None
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None

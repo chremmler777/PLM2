@@ -2,6 +2,8 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from app.schemas.common import NaiveUtcDatetime
+
 
 class DepartmentResponse(BaseModel):
     """Department/role in workflow."""
@@ -171,7 +173,7 @@ class AssignTaskRequest(BaseModel):
 
 class DueDateRequest(BaseModel):
     """Set a task's due date."""
-    due_date: datetime
+    due_date: NaiveUtcDatetime
 
 
 class WfInstanceResponse(BaseModel):

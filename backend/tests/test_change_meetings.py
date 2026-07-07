@@ -1,8 +1,10 @@
 """Meeting module: CRUD, PM authz, decide side effects."""
 import pytest
+from sqlalchemy import select
 
 from tests.conftest import login, ENGINEER_PASSWORD
 from tests.test_change_scoping import create_change, add_item_and_lead
+from app.models.change import ChangeMeeting
 
 
 async def post_meeting(client, auth, change_id, **overrides):
@@ -80,6 +82,30 @@ async def test_reject_decision_rejects_change(client, admin_auth, seed):
     assert res.status_code == 200
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=admin_auth)
     assert res.json()["status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_meeting_create_accepts_tz_aware_date_stored_naive(
+        client, admin_auth, seed, session_factory):
+    """Frontend sends meeting_date as tz-aware ISO-8601 ("...Z"). On
+    Postgres the meeting_date column is TIMESTAMP WITHOUT TIME ZONE, and
+    asyncpg 500s if handed a tz-aware datetime. The schema layer must
+    normalize this to naive UTC before it reaches the DB layer. SQLite
+    doesn't itself enforce this, so we assert on the stored value's
+    tzinfo directly rather than relying on the insert failing."""
+    change = await create_change(client, admin_auth, seed["project_id"])
+    res = await post_meeting(client, admin_auth, change["id"],
+                             meeting_date="2026-07-07T12:00:00Z",
+                             participants=[{"name": "X"}])
+    assert res.status_code == 200, res.text
+    mid = res.json()["id"]
+
+    async with session_factory() as session:
+        row = (await session.execute(
+            select(ChangeMeeting).where(ChangeMeeting.id == mid)
+        )).scalar_one()
+        assert row.meeting_date.tzinfo is None
+        assert row.meeting_date.hour == 12
 
 
 @pytest.mark.asyncio
