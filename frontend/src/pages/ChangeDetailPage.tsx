@@ -16,6 +16,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
+import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -293,6 +294,7 @@ export default function ChangeDetailPage() {
 
       {tab === 'commercial' && (
         <div className="space-y-3 text-sm">
+          <PnlCard change={change} />
           {change.customer_relevant ? (
             <>
               <p><span className="text-gray-500">Quoted price:</span> {change.quoted_price ?? '—'}</p>
