@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow import WfInstanceTask
-from app.models.change import ChangeRequest, TERMINAL_STATUSES
+from app.models.change import ChangeAssessment, ChangeRequest, TERMINAL_STATUSES
 from app.services.notification_service import NotificationService
 
 DUE_SOON_WINDOW = timedelta(days=2)
@@ -49,6 +49,45 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 link="/my-tasks",
             )
             counts["due_soon"] += n
+
+    # Overdue assessments: notify the owner (when claimed) AND the change
+    # lead (always, when set) via distinct dedup keys, so an unclaimed
+    # assessment still escalates instead of dying silently. Rows linked to a
+    # workflow task (wf_instance_task_id set) are covered by the task sweep
+    # above — the task is authoritative for those, so skip here to avoid
+    # double notification.
+    assessments = (await session.execute(
+        select(ChangeAssessment, ChangeRequest.lead_id)
+        .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
+        .where(
+            ChangeAssessment.status == "active",
+            ChangeAssessment.wf_instance_task_id.is_(None),
+            ChangeAssessment.due_date.is_not(None),
+            ChangeAssessment.due_date < now,
+            ChangeRequest.status.not_in(TERMINAL_STATUSES),
+        ))).all()
+
+    for assessment, lead_id in assessments:
+        if assessment.owner_id is not None:
+            n = await NotificationService.notify_once(
+                session, [assessment.owner_id], kind="overdue",
+                subject_key=f"assessment:{assessment.id}:overdue",
+                title="Assessment overdue",
+                body=f"Your assessment is overdue (was due "
+                     f"{assessment.due_date.date().isoformat()}).",
+                link="/my-tasks",
+            )
+            counts["overdue"] += n
+        if lead_id is not None:
+            n = await NotificationService.notify_once(
+                session, [lead_id], kind="overdue",
+                subject_key=f"assessment:{assessment.id}:overdue:lead",
+                title="Assessment overdue (escalation)",
+                body=f"An assessment on your change is overdue (was due "
+                     f"{assessment.due_date.date().isoformat()}).",
+                link=f"/changes/{assessment.change_id}",
+            )
+            counts["overdue"] += n
 
     changes = (await session.execute(
         select(ChangeRequest).where(

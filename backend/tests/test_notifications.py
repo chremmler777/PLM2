@@ -9,7 +9,7 @@ from app.models.workflow import (
     WfInstance, WfInstanceTask, WfTemplate, WfStage, WfStep, WfStepRasic,
     Department, UserDepartment,
 )
-from app.models.change import ChangeRequest
+from app.models.change import ChangeRequest, ChangeAssessment
 from app.services.notification_service import NotificationService
 from app.services.workflow_service import WorkflowService
 from app.services.change_service import ChangeService
@@ -336,3 +336,85 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
         await session.commit()
         assert counts2 == {"due_soon": 0, "overdue": 0,
                            "deadline_at_risk": 0, "deadline_overdue": 0}
+
+
+@pytest.mark.asyncio
+async def test_unclaimed_overdue_assessment_notifies_lead(session_factory, seed):
+    """An overdue assessment with no owner must still escalate: the sweep
+    should notify the change lead (dedup key distinct from the owner's key,
+    so a later claim + owner-notify can fire independently)."""
+    async with session_factory() as session:
+        dept = Department(name="Sweep-Assess-Dept-1", flow_type="action")
+        session.add(dept)
+        await session.flush()
+
+        chg = await _mk_change(session, seed, "C-N-007", lead_id=seed["engineer_id"])
+        assessment = ChangeAssessment(
+            change_id=chg.id, department_id=dept.id, status="active",
+            rasic_letter="R", owner_id=None,
+            due_date=datetime.utcnow() - timedelta(days=1))
+        session.add(assessment)
+        await session.flush()
+        assessment_id = assessment.id
+        await session.commit()
+
+        counts = await run_notification_sweep(session)
+        await session.commit()
+        assert counts["overdue"] >= 1
+
+        lead_rows = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.kind == "overdue",
+            Notification.subject_key == f"assessment:{assessment_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_rows) == 1
+
+        # No owner exists, so no owner-scoped notification should be emitted.
+        owner_rows = (await session.execute(select(Notification).where(
+            Notification.subject_key == f"assessment:{assessment_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_claimed_overdue_assessment_notifies_lead_and_owner(session_factory, seed):
+    """A claimed overdue assessment notifies both the owner AND the change
+    lead, via distinct dedup keys so re-running the sweep doesn't double up
+    on either recipient."""
+    async with session_factory() as session:
+        dept = Department(name="Sweep-Assess-Dept-2", flow_type="action")
+        session.add(dept)
+        await session.flush()
+
+        chg = await _mk_change(session, seed, "C-N-008", lead_id=seed["engineer_id"])
+        assessment = ChangeAssessment(
+            change_id=chg.id, department_id=dept.id, status="active",
+            rasic_letter="R", owner_id=seed["admin_id"],
+            due_date=datetime.utcnow() - timedelta(days=1))
+        session.add(assessment)
+        await session.flush()
+        assessment_id = assessment.id
+        await session.commit()
+
+        counts = await run_notification_sweep(session)
+        await session.commit()
+        assert counts["overdue"] >= 2
+
+        lead_rows = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.kind == "overdue",
+            Notification.subject_key == f"assessment:{assessment_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_rows) == 1
+
+        owner_rows = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["admin_id"],
+            Notification.kind == "overdue",
+            Notification.subject_key == f"assessment:{assessment_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_rows) == 1
+
+        # Re-running is a no-op (both dedup keys already have unread rows).
+        counts2 = await run_notification_sweep(session)
+        await session.commit()
+        assert counts2["overdue"] == 0
