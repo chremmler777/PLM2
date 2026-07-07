@@ -32,17 +32,18 @@ function marginBadgeClasses(v: number | null | undefined): string {
   return v >= 0 ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200';
 }
 
-function Tile({ title, value, sub, accent = 'text-slate-100' }: {
+function Tile({ title, value, sub, subClassName, accent = 'text-slate-100' }: {
   title: string;
   value: string | number;
   sub?: string;
+  subClassName?: string;
   accent?: string;
 }) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
       <div className="text-xs text-slate-400 uppercase tracking-wide">{title}</div>
       <div className={`text-3xl font-bold mt-1 ${accent}`}>{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-1">{sub}</div>}
+      {sub && <div className={subClassName ?? 'text-xs text-slate-500 mt-1'}>{sub}</div>}
     </div>
   );
 }
@@ -175,7 +176,12 @@ export default function PnlPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <Tile title="Revenue" value={fmtMoney(summary.totals.revenue)} />
+            <Tile
+              title="Revenue"
+              value={fmtMoney(summary.totals.revenue)}
+              sub="incl. internal budgets"
+              subClassName="text-[10px] text-slate-500"
+            />
             <Tile
               title="Cost"
               value={fmtMoney(summary.totals.total_cost)}

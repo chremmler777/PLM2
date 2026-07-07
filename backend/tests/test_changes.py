@@ -498,3 +498,53 @@ async def test_change_response_resolves_lead_name(client, eng_auth, seed):
     res = await client.get(f"/api/v1/changes/{change_id}", headers=eng_auth)
     assert res.status_code == 200
     assert res.json()["lead_name"]  # resolved full name, not an id
+
+
+async def test_customer_relevant_locked_after_scoping(
+    client, eng_auth, admin_auth, seed, departments, session_factory
+):
+    """customer_relevant may only flip during capture/scoping — once the
+    change is quoted, changing the value is rejected (400); the same-value
+    PATCH stays a no-op success at any status; and it's still editable while
+    still in scoping."""
+    change = await _advance_to_quoted(
+        client, eng_auth, seed, departments, admin_auth, session_factory
+    )
+    cid = change["id"]
+
+    # Change is quoted and customer_relevant=True: flipping the value 400s.
+    res = await client.patch(
+        f"/api/v1/changes/{cid}",
+        json={"customer_relevant": False},
+        headers=eng_auth,
+    )
+    assert res.status_code == 400, res.text
+    assert "capture or scoping" in res.json()["detail"]
+
+    # Same-value PATCH is idempotent and stays allowed.
+    res = await client.patch(
+        f"/api/v1/changes/{cid}",
+        json={"customer_relevant": True},
+        headers=eng_auth,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is True
+
+    # A change still in scoping can freely change customer_relevant.
+    change2 = await _create_change(client, eng_auth, seed["project_id"],
+                                   customer_relevant=False,
+                                   lead_id=seed["engineer_id"])
+    cid2 = change2["id"]
+    await approve_gates(client, eng_auth, cid2)
+    res = await _transition(client, eng_auth, cid2, "scoping")
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/{cid2}", headers=eng_auth)
+    assert res.json()["status"] == "scoping"
+
+    res = await client.patch(
+        f"/api/v1/changes/{cid2}",
+        json={"customer_relevant": True},
+        headers=eng_auth,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is True

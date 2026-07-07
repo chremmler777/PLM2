@@ -733,7 +733,7 @@ async def get_summation(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     from app.services.cost_service import CostService
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return await CostService.summation(db, change)
@@ -744,7 +744,7 @@ async def get_gates(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return change.gates

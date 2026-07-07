@@ -73,6 +73,6 @@ is one of the checks you're expected to weigh in on alongside the implementation
   membership if you believe you should have access.
 - **A link to `?tab=audit` sends me to Overview instead** — that's the same permission check;
   the deep link falls back rather than showing a blank or forbidden page.
-- **A gate in "Blocked by" links to D1 but the D1 tab isn't visible to me** — this can happen for
-  users without governance access; ask someone with Governance access (lead, PM, Quality, admin)
-  to decide the gate.
+- **A gate in "Blocked by" mentions D1 but the D1 tab isn't visible to me** — the reference renders
+  as plain text (not a link) for users without governance access; ask someone with Governance
+  access (lead, PM, Quality, admin) to decide the gate.

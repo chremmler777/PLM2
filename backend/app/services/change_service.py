@@ -1262,6 +1262,20 @@ class ChangeService:
                 f"Allowed: {', '.join(IMPLEMENTATION_MODES)}"
             )
 
+        # customer_relevant may only be changed during capture/scoping, once
+        # the change has moved on (costing, quoted, etc.) it has already
+        # driven downstream gates/pricing decisions. Idempotent PATCHes
+        # (same value) are allowed at any status.
+        cust_rel = fields.get("customer_relevant")
+        if (
+            cust_rel is not None
+            and cust_rel != change.customer_relevant
+            and change.status not in ("captured", "scoping")
+        ):
+            raise ChangeError(
+                "Customer-relevant can only be changed during capture or scoping"
+            )
+
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null
         # (clear the deadline) is honored rather than skipped by the `v is

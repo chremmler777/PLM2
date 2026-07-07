@@ -36,7 +36,8 @@ Click **P&L 💰** in the sidebar (right after Changes).
 
 ### 2. Read the summary tiles
 
-- **Revenue** — total quoted price across customer-relevant changes in view.
+- **Revenue** — total quoted price across customer-relevant changes in view, plus approved
+  internal budgets for internal-branch changes (labeled "incl. internal budgets" under the tile).
 - **Cost** — total cost, with internal/external split shown underneath.
 - **Margin** and **Margin %** — revenue minus cost, colored emerald (positive) or red (negative).
 

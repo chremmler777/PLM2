@@ -542,3 +542,42 @@ async def test_owned_overdue_change_task_notifies_owner_and_lead(session_factory
         counts2 = await run_notification_sweep(session)
         await session.commit()
         assert counts2["overdue"] == 0
+
+
+@pytest.mark.asyncio
+async def test_owned_overdue_assessment_lead_equals_owner_notifies_once(
+    session_factory, seed
+):
+    """An overdue assessment claimed by the change lead themselves must only
+    produce the owner-keyed notification — the lead escalation is skipped to
+    avoid a duplicate ping (mirrors the change-task lead==owner behavior)."""
+    async with session_factory() as session:
+        dept = Department(name="Sweep-Assess-Dept-3", flow_type="action")
+        session.add(dept)
+        await session.flush()
+
+        chg = await _mk_change(session, seed, "C-N-011", lead_id=seed["engineer_id"])
+        assessment = ChangeAssessment(
+            change_id=chg.id, department_id=dept.id, status="active",
+            rasic_letter="R", owner_id=seed["engineer_id"],
+            due_date=datetime.utcnow() - timedelta(days=1))
+        session.add(assessment)
+        await session.flush()
+        assessment_id = assessment.id
+        await session.commit()
+
+        counts = await run_notification_sweep(session)
+        await session.commit()
+        assert counts["overdue"] == 1
+
+        owner_rows = (await session.execute(select(Notification).where(
+            Notification.user_id == seed["engineer_id"],
+            Notification.kind == "overdue",
+            Notification.subject_key == f"assessment:{assessment_id}:overdue",
+        ))).scalars().all()
+        assert len(owner_rows) == 1
+
+        lead_rows = (await session.execute(select(Notification).where(
+            Notification.subject_key == f"assessment:{assessment_id}:overdue:lead",
+        ))).scalars().all()
+        assert len(lead_rows) == 0

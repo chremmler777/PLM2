@@ -113,6 +113,30 @@ async def test_list_changes_viewer_none_returns_everything(session_factory, seed
         assert change_b["id"] in ids
 
 
+async def test_get_summation_out_of_org_scope_is_404(client, eng_auth, org_b_auth, seed, org_b):
+    """GET /{id}/summation must be org-scoped like the sibling endpoints —
+    a cross-org viewer gets 404, not a leaked cost summary."""
+    change_b = await _create_change(client, org_b_auth, org_b["project_id"])
+
+    res = await client.get(f"/api/v1/changes/{change_b['id']}/summation", headers=eng_auth)
+    assert res.status_code == 404, res.text
+
+    res = await client.get(f"/api/v1/changes/{change_b['id']}/summation", headers=org_b_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_get_gates_out_of_org_scope_is_404(client, eng_auth, org_b_auth, seed, org_b):
+    """GET /{id}/gates must be org-scoped like the sibling endpoints — a
+    cross-org viewer gets 404, not another org's gate decisions."""
+    change_b = await _create_change(client, org_b_auth, org_b["project_id"])
+
+    res = await client.get(f"/api/v1/changes/{change_b['id']}/gates", headers=eng_auth)
+    assert res.status_code == 404, res.text
+
+    res = await client.get(f"/api/v1/changes/{change_b['id']}/gates", headers=org_b_auth)
+    assert res.status_code == 200, res.text
+
+
 async def test_admin_sees_all_organizations(client, admin_auth, org_b_auth, seed, org_b):
     """An admin viewer (role='admin') bypasses org scoping entirely - the
     controller decision documented on _org_scope, mirroring the intent

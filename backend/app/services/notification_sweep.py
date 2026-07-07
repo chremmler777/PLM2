@@ -86,11 +86,12 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         counts["overdue"] += n
 
     # Overdue assessments: notify the owner (when claimed) AND the change
-    # lead (always, when set) via distinct dedup keys, so an unclaimed
-    # assessment still escalates instead of dying silently. Rows linked to a
-    # workflow task (wf_instance_task_id set) are covered by the task sweep
-    # above — the task is authoritative for those, so skip here to avoid
-    # double notification.
+    # lead (when set and not the owner) via distinct dedup keys, so an
+    # unclaimed assessment still escalates instead of dying silently. lead ==
+    # owner is skipped to avoid a duplicate ping. Rows linked to a workflow
+    # task (wf_instance_task_id set) are covered by the task sweep above —
+    # the task is authoritative for those, so skip here to avoid double
+    # notification.
     assessments = (await session.execute(
         select(ChangeAssessment, ChangeRequest.lead_id)
         .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
@@ -113,7 +114,7 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
                 link="/my-tasks",
             )
             counts["overdue"] += n
-        if lead_id is not None:
+        if lead_id is not None and lead_id != assessment.owner_id:
             n = await NotificationService.notify_once(
                 session, [lead_id], kind="overdue",
                 subject_key=f"assessment:{assessment.id}:overdue:lead",
