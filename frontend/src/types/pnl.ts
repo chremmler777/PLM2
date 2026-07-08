@@ -59,4 +59,6 @@ export interface PnlFilters {
   plant_id?: number;
   branch?: PnlBranch;
   status_group?: PnlStatusGroup;
+  date_from?: string;
+  date_to?: string;
 }

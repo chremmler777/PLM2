@@ -109,3 +109,23 @@ async def test_invalid_branch_422(client, admin_auth):
 async def test_invalid_status_group_422(client, admin_auth):
     res = await client.get("/api/v1/pnl/summary?status_group=bogus", headers=admin_auth)
     assert res.status_code == 422
+
+
+async def test_date_range_passthrough(client, admin_auth, seed, pnl_api_data):
+    res = await client.get(
+        "/api/v1/pnl/changes?date_from=2020-01-01&date_to=2020-12-31",
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    ids = {r["change_id"] for r in res.json()["rows"]}
+    assert pnl_api_data["cust_id"] not in ids
+    assert pnl_api_data["internal_id"] not in ids
+
+
+async def test_invalid_date_from_422(client, admin_auth):
+    res = await client.get("/api/v1/pnl/changes?date_from=not-a-date", headers=admin_auth)
+    assert res.status_code == 422
+
+
+async def test_invalid_date_to_422(client, admin_auth):
+    res = await client.get("/api/v1/pnl/summary?date_to=not-a-date", headers=admin_auth)
+    assert res.status_code == 422

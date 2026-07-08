@@ -7,6 +7,7 @@ changes. Cost is the sum of AssessmentCostLine actuals joined through
 ChangeAssessment. Only changes in status 'costing' or beyond are in scope -
 mirrors ReportService's org-scoping via `_org_scope`.
 """
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -27,6 +28,12 @@ def _round(value: Optional[float]) -> Optional[float]:
     return None if value is None else round(value, 2)
 
 
+def _parse_date(value: Optional[str]) -> Optional[date]:
+    if value is None:
+        return None
+    return date.fromisoformat(value)
+
+
 class PnlService:
 
     @staticmethod
@@ -34,6 +41,7 @@ class PnlService:
         session: AsyncSession, viewer: Optional[User], *,
         project_id: Optional[int] = None, plant_id: Optional[int] = None,
         branch: Optional[str] = None, status_group: Optional[str] = None,
+        date_from: Optional[str] = None, date_to: Optional[str] = None,
     ) -> list[dict]:
         if status_group == "pipeline":
             statuses = PIPELINE_STATUSES
@@ -49,6 +57,14 @@ class PnlService:
             stmt = stmt.where(ChangeRequest.customer_relevant.is_(True))
         elif branch == "internal":
             stmt = stmt.where(ChangeRequest.customer_relevant.is_(False))
+        parsed_from = _parse_date(date_from)
+        if parsed_from is not None:
+            stmt = stmt.where(ChangeRequest.raised_at >= datetime.combine(
+                parsed_from, datetime.min.time()))
+        parsed_to = _parse_date(date_to)
+        if parsed_to is not None:
+            stmt = stmt.where(ChangeRequest.raised_at < datetime.combine(
+                parsed_to, datetime.min.time()) + timedelta(days=1))
         stmt = _org_scope(stmt, viewer)
         changes = (await session.execute(stmt)).scalars().all()
         if not changes:
@@ -131,10 +147,12 @@ class PnlService:
         session: AsyncSession, viewer: Optional[User], *,
         project_id: Optional[int] = None, plant_id: Optional[int] = None,
         branch: Optional[str] = None, status_group: Optional[str] = None,
+        date_from: Optional[str] = None, date_to: Optional[str] = None,
     ) -> dict:
         rows = await PnlService.changes_pnl(
             session, viewer, project_id=project_id, plant_id=plant_id,
-            branch=branch, status_group=status_group)
+            branch=branch, status_group=status_group,
+            date_from=date_from, date_to=date_to)
 
         def _agg(subset: list[dict]) -> dict:
             revenue = sum(r["revenue"] or 0.0 for r in subset)

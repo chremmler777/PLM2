@@ -5,6 +5,8 @@ revenue is `quoted_price` (customer changes) or `internal_approved_amount`
 (internal changes); cost is the sum of AssessmentCostLine actuals joined via
 ChangeAssessment. Only changes in status 'costing' or beyond are in scope.
 """
+from datetime import datetime
+
 import pytest
 from sqlalchemy import select
 
@@ -37,6 +39,7 @@ async def pnl_data(session_factory, seed):
             change_type="physical_part", project_id=seed["project_id"],
             raised_by=seed["admin_id"], status="quoted",
             customer_relevant=True, quoted_price=10000.0,
+            raised_at=datetime(2026, 1, 15),
         )
         s.add(cust)
         await s.flush()
@@ -57,6 +60,7 @@ async def pnl_data(session_factory, seed):
             change_type="physical_part", project_id=seed["project_id"],
             raised_by=seed["admin_id"], status="costing",
             customer_relevant=False, internal_approved_amount=None,
+            raised_at=datetime(2026, 3, 10),
         )
         s.add(internal)
         await s.flush()
@@ -196,6 +200,38 @@ async def test_filters(session_factory, seed, pnl_data):
         assert pnl_data["approved_id"] not in pipeline_ids
         assert pnl_data["cust_id"] in pipeline_ids
         assert pnl_data["internal_id"] in pipeline_ids
+
+
+async def test_date_range_filter(session_factory, seed, pnl_data):
+    from app.services.pnl_service import PnlService
+    async with session_factory() as session:
+        admin = await session.get(User, seed["admin_id"])
+
+        # In range: only cust (raised 2026-01-15).
+        rows = await PnlService.changes_pnl(
+            session, admin, date_from="2026-01-01", date_to="2026-01-31")
+        ids = {r["change_id"] for r in rows}
+        assert ids == {pnl_data["cust_id"]}
+
+        # date_from only: excludes cust, includes internal (2026-03-10).
+        rows = await PnlService.changes_pnl(session, admin, date_from="2026-02-01")
+        ids = {r["change_id"] for r in rows}
+        assert pnl_data["cust_id"] not in ids
+        assert pnl_data["internal_id"] in ids
+
+        # date_to only: includes cust, excludes internal.
+        rows = await PnlService.changes_pnl(session, admin, date_to="2026-01-31")
+        ids = {r["change_id"] for r in rows}
+        assert ids == {pnl_data["cust_id"]}
+
+        # date_to is inclusive of the whole day.
+        rows = await PnlService.changes_pnl(session, admin, date_to="2026-01-15")
+        ids = {r["change_id"] for r in rows}
+        assert pnl_data["cust_id"] in ids
+
+        s = await PnlService.summary(
+            session, admin, date_from="2026-01-01", date_to="2026-01-31")
+        assert s["count"] == 1
 
 
 async def test_summary_shape_and_totals(session_factory, seed, pnl_data):

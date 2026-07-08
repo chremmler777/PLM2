@@ -83,6 +83,13 @@ function useProjects() {
   });
 }
 
+function usePlants() {
+  return useQuery({
+    queryKey: ['plants'],
+    queryFn: async () => (await client.get('/v1/plants')).data as { id: number; name: string }[],
+  });
+}
+
 const BRANCH_OPTIONS: { value: PnlBranch | ''; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'customer', label: 'Customer' },
@@ -97,17 +104,24 @@ const STATUS_GROUP_OPTIONS: { value: PnlStatusGroup | ''; label: string }[] = [
 
 export default function PnlPage() {
   const [projectId, setProjectId] = useState<number | ''>('');
+  const [plantId, setPlantId] = useState<number | ''>('');
   const [branch, setBranch] = useState<PnlBranch | ''>('');
   const [statusGroup, setStatusGroup] = useState<PnlStatusGroup | ''>('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const { data: projects } = useProjects();
+  const { data: plants } = usePlants();
 
   const filters: PnlFilters = {
     ...(projectId !== '' ? { project_id: projectId } : {}),
+    ...(plantId !== '' ? { plant_id: plantId } : {}),
     ...(branch !== '' ? { branch } : {}),
     ...(statusGroup !== '' ? { status_group: statusGroup } : {}),
+    ...(dateFrom !== '' ? { date_from: dateFrom } : {}),
+    ...(dateTo !== '' ? { date_to: dateTo } : {}),
   };
-  const filterKey = [projectId, branch, statusGroup];
+  const filterKey = [projectId, plantId, branch, statusGroup, dateFrom, dateTo];
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['pnl', 'summary', ...filterKey],
@@ -133,6 +147,18 @@ export default function PnlPage() {
         >
           <option value="">All projects</option>
           {projects?.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+
+        <select
+          aria-label="Plant"
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+          value={plantId}
+          onChange={(e) => setPlantId(e.target.value ? Number(e.target.value) : '')}
+        >
+          <option value="">All plants</option>
+          {plants?.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
@@ -168,6 +194,28 @@ export default function PnlPage() {
             </button>
           ))}
         </div>
+
+        <label className="flex items-center gap-2 text-sm text-slate-400">
+          From
+          <input
+            aria-label="From"
+            type="date"
+            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-slate-400">
+          To
+          <input
+            aria-label="To"
+            type="date"
+            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
+        </label>
       </div>
 
       {/* Summary tiles */}

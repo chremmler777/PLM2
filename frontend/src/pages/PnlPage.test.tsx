@@ -43,7 +43,12 @@ vi.mock('../api/pnl', () => ({
 
 vi.mock('../api/client', () => ({
   default: {
-    get: vi.fn().mockResolvedValue({ data: [{ id: 1, name: 'Project X' }] }),
+    get: vi.fn((url: string) => {
+      if (url === '/v1/plants') {
+        return Promise.resolve({ data: [{ id: 9, name: 'Plant A', code: 'PA' }] })
+      }
+      return Promise.resolve({ data: [{ id: 1, name: 'Project X' }] })
+    }),
   },
 }))
 
@@ -95,6 +100,39 @@ describe('PnlPage', () => {
 
     await waitFor(() => {
       expect(changesMock).toHaveBeenCalledWith(expect.objectContaining({ branch: 'internal' }))
+    })
+  })
+
+  it('triggers a refetch with the plant_id param when the plant filter changes', async () => {
+    renderPage()
+    await screen.findByRole('link', { name: 'GB-CM-0001' })
+    changesMock.mockClear()
+    summaryMock.mockClear()
+
+    const select = await screen.findByLabelText(/plant/i)
+    fireEvent.change(select, { target: { value: '9' } })
+
+    await waitFor(() => {
+      expect(changesMock).toHaveBeenCalledWith(expect.objectContaining({ plant_id: 9 }))
+    })
+  })
+
+  it('triggers a refetch with date_from/date_to params when the date filters change', async () => {
+    renderPage()
+    await screen.findByRole('link', { name: 'GB-CM-0001' })
+    changesMock.mockClear()
+    summaryMock.mockClear()
+
+    fireEvent.change(screen.getByLabelText(/from/i), { target: { value: '2026-01-01' } })
+    await waitFor(() => {
+      expect(changesMock).toHaveBeenCalledWith(expect.objectContaining({ date_from: '2026-01-01' }))
+    })
+
+    fireEvent.change(screen.getByLabelText(/to/i), { target: { value: '2026-01-31' } })
+    await waitFor(() => {
+      expect(changesMock).toHaveBeenCalledWith(
+        expect.objectContaining({ date_from: '2026-01-01', date_to: '2026-01-31' })
+      )
     })
   })
 })
