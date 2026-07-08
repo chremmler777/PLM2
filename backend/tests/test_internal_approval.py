@@ -49,11 +49,42 @@ async def test_internal_approval_guards(client, admin_auth, seed, part,
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
                             json={}, headers=admin_auth)
     assert res.status_code == 400
-    # non-PM engineer refused on an internal change
+    # non-PM engineer refused on an internal change (not admin, not PM member)
     change2 = await create_change(client, admin_auth, seed["project_id"],
                                   lead_id=seed["admin_id"])
     await to_costing(session_factory, change2["id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await client.post(f"/api/v1/changes/{change2['id']}/internal-approval",
                             json={}, headers=eng_auth)
-    assert res.status_code == 400
+    assert res.status_code == 403
+
+    # even the change lead is refused if they aren't a PM member or admin —
+    # the pragmatic PM-gated rule drops the old bare-lead bypass.
+    change3 = await create_change(client, admin_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
+    await to_costing(session_factory, change3["id"])
+    res = await client.post(f"/api/v1/changes/{change3['id']}/internal-approval",
+                            json={}, headers=eng_auth)
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_internal_approval_allows_pm_department_member(
+        client, admin_auth, seed, part, session_factory):
+    """A Project Manager department member (not admin, not the lead) may
+    approve internal costs — no second-signer restriction."""
+    from app.models.workflow import Department, UserDepartment
+    async with session_factory() as s:
+        dept = Department(name="Project Manager", flow_type="action", is_active=True)
+        s.add(dept)
+        await s.flush()
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept.id))
+        await s.commit()
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await to_costing(session_factory, change["id"])
+    eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
+    res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
+                            json={"note": "pm approved"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["internal_approved_by"] == seed["engineer_id"]

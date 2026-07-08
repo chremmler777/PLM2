@@ -17,7 +17,7 @@ from app.dependencies import get_current_user
 from app.models import get_db, User
 from app.models.change import (
     ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment,
-    ChangeImpactedItem,
+    ChangeImpactedItem, SIGN_OFF_ROLES,
 )
 from app.models.workflow import UserDepartment, Department
 from app.services.change_service import ChangeService, ChangeError
@@ -585,9 +585,15 @@ async def update_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    fields = body.model_dump(exclude_unset=True)
+    if "quoted_price" in fields and fields["quoted_price"] != change.quoted_price:
+        if not await ChangeService.user_can_set_quoted_price(db, current_user, change):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the change lead, a Sales department member, or "
+                       "an admin may set the quoted price")
     try:
-        await ChangeService.update_change(db, change, current_user.id,
-                                          **body.model_dump(exclude_unset=True))
+        await ChangeService.update_change(db, change, current_user.id, **fields)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -628,6 +634,13 @@ async def sign_off(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    if body.role in SIGN_OFF_ROLES and not await ChangeService.user_can_sign_off(
+            db, current_user, body.role):
+        dept_name = "Quality" if body.role == "quality" else "Project Manager"
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only a {dept_name} department member or an admin may "
+                   f"sign off as {body.role}")
     try:
         await ChangeService.sign_off(db, change, body.role, current_user.id)
     except ChangeError as e:
@@ -645,6 +658,11 @@ async def approve_internal_costs(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_approve_internal_costs(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Project Manager department member or an admin "
+                   "may approve internal costs")
     try:
         await ChangeService.approve_internal_costs(
             db, change, current_user, note=body.note)

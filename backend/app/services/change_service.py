@@ -932,6 +932,46 @@ class ChangeService:
         return rd_dept.id in dept_ids
 
     @staticmethod
+    async def _user_in_department(session: AsyncSession, user: User, department_name: str) -> bool:
+        """Admin, or member of the named department. Shared by the sign-off,
+        quoted-price and internal-cost-approval authz checks below."""
+        if user.role == "admin":
+            return True
+        from app.services.workflow_service import WorkflowService
+        dept = (await session.execute(
+            select(Department).where(Department.name == department_name))
+        ).scalar_one_or_none()
+        if dept is None:
+            return False
+        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        return dept.id in dept_ids
+
+    @staticmethod
+    async def user_can_sign_off(session: AsyncSession, user: User, role: str) -> bool:
+        """Quality & PM sign-off are department-gated: role='quality' requires
+        admin or 'Quality' membership, role='pm' requires admin or 'Project
+        Manager' membership."""
+        dept_name = "Quality" if role == "quality" else "Project Manager"
+        return await ChangeService._user_in_department(session, user, dept_name)
+
+    @staticmethod
+    async def user_can_set_quoted_price(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Quoted price is Sales territory: admin, the change lead, or a
+        'Sales' department member may set it."""
+        if user.id == change.lead_id:
+            return True
+        return await ChangeService._user_in_department(session, user, "Sales")
+
+    @staticmethod
+    async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:
+        """Internal cost approval is PM territory: admin or a 'Project
+        Manager' department member. No lead bypass — a lead who isn't a PM
+        member and isn't admin may not approve their own change's costs."""
+        return await ChangeService._user_in_department(session, user, "Project Manager")
+
+    @staticmethod
     async def my_actions(
         session: AsyncSession, change: ChangeRequest, user: User,
     ) -> list[dict]:
@@ -1374,8 +1414,10 @@ class ChangeService:
         *, note: Optional[str] = None,
     ) -> ChangeRequest:
         """Internal costing branch: PM approves the summation total instead of
-        a customer quote. Amount is snapshotted for the later P&L view."""
-        from app.services.meeting_service import MeetingService
+        a customer quote. Amount is snapshotted for the later P&L view.
+        Authorization (admin or Project Manager department member) is
+        enforced by the caller via user_can_approve_internal_costs — see
+        POST /{id}/internal-approval in changes.py."""
         if change.customer_relevant:
             raise ChangeError(
                 "Customer-relevant changes are approved via the customer quote")
@@ -1386,11 +1428,6 @@ class ChangeService:
             raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
         if change.internal_approved_at is not None:
             raise ChangeError("Internal costs are already approved")
-        if actor.id != change.lead_id and not await MeetingService.user_is_pm(
-                session, actor):
-            raise ChangeError(
-                "Only Project Management, the change lead, or an admin "
-                "may approve internal costs")
         from app.services.cost_service import CostService
         summ = await CostService.summation(session, change)
         change.internal_approved_by = actor.id

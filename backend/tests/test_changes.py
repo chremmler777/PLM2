@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy import select
 
 from tests.conftest import (
-    approve_gates, force_complete_check_workflows, advance_to_assessment,
+    approve_gates, force_complete_check_workflows, advance_to_assessment, login,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -134,7 +134,8 @@ from app.models.workflow import Department, UserDepartment
 @pytest_asyncio.fixture
 async def departments(session_factory, seed):
     async with session_factory() as s:
-        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
+        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales",
+                 "Project Manager"]
         ids = {}
         for i, n in enumerate(names):
             d = Department(name=n, flow_type="action", is_active=True, sort_order=i)
@@ -548,3 +549,77 @@ async def test_customer_relevant_locked_after_scoping(
     )
     assert res.status_code == 200, res.text
     assert res.json()["customer_relevant"] is True
+
+
+async def _make_user(session_factory, org_id, email, password, username):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        user = User(organization_id=org_id, username=username, email=email,
+                    full_name=username, hashed_password=get_password_hash(password),
+                    role="engineer", is_active=True, mfa_enabled=False)
+        s.add(user)
+        await s.commit()
+        await s.refresh(user)
+        return user.id
+
+
+async def test_sign_off_department_gating(
+    client, eng_auth, admin_auth, seed, departments, session_factory,
+):
+    """Task: Quality & PM sign-off are department-gated (admin bypasses)."""
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
+    cid = change["id"]
+    await client.post(f"/api/v1/changes/{cid}/customer-response",
+                      json={"response": "accepted"}, headers=eng_auth)
+
+    # eng is a Quality department member (departments fixture) -> quality sign-off OK
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "quality"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    # a user with no department memberships is refused pm sign-off
+    outsider_id = await _make_user(session_factory, seed["org_id"],
+                                   "outsider@test.io", "outsider-secret-1", "outsider")
+    outsider_auth = await login(client, "outsider@test.io", "outsider-secret-1")
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "pm"}, headers=outsider_auth)
+    assert res.status_code == 403, res.text
+
+    # admin bypasses department membership entirely
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "pm"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_quoted_price_role_gating(
+    client, eng_auth, admin_auth, seed, departments, session_factory,
+):
+    """Task: quoted_price PATCH is role-gated — admin, the change lead, or a
+    Sales department member may set it; others are refused."""
+    lead_id = await _make_user(session_factory, seed["org_id"],
+                               "leaduser@test.io", "lead-secret-12", "leaduser")
+    lead_auth = await login(client, "leaduser@test.io", "lead-secret-12")
+    change = await _create_change(client, admin_auth, seed["project_id"], lead_id=lead_id)
+    cid = change["id"]
+
+    # unrelated user (not lead, not Sales, not admin) is refused
+    bystander_id = await _make_user(session_factory, seed["org_id"],
+                                    "bystander@test.io", "bystander-secret-1", "bystander")
+    bystander_auth = await login(client, "bystander@test.io", "bystander-secret-1")
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 500.0}, headers=bystander_auth)
+    assert res.status_code == 403, res.text
+
+    # the change lead may set it
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 500.0}, headers=lead_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["quoted_price"] == 500.0
+
+    # a Sales department member (eng, from the departments fixture) may set it too
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 750.0}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["quoted_price"] == 750.0
