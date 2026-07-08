@@ -49,9 +49,11 @@ export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
 }
 
 /** On-path step order for a given branch: customer-relevant changes keep `quoted`,
- * non-customer-relevant (internal) changes skip it. `undefined` = unknown, treated as full. */
+ * non-customer-relevant (internal) changes skip it. Mirrors the backend, which treats
+ * any falsy customer_relevant (false OR null/undefined — e.g. a legacy change captured
+ * before the flag existed) as internal, so `undefined` is treated as internal too. */
 export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
-  return customerRelevant === false
+  return !customerRelevant
     ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoted')
     : CHANGE_STATUS_ORDER
 }

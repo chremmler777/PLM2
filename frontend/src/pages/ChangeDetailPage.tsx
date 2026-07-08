@@ -102,12 +102,23 @@ export default function ChangeDetailPage() {
   // API calls). Client-side only; server-side enforcement is out of scope here.
   const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
+  const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
   const isChangeLead = userId != null && change?.lead_id != null && userId === change.lead_id;
-  const isGovernanceDept = !!myActions && (
-    (qualityDeptId !== undefined && myActions.memberships.includes(qualityDeptId)) ||
-    (pmDeptId !== undefined && myActions.memberships.includes(pmDeptId))
-  );
+  const isQualityMember = !!myActions && qualityDeptId !== undefined
+    && myActions.memberships.includes(qualityDeptId);
+  const isPmMember = !!myActions && pmDeptId !== undefined
+    && myActions.memberships.includes(pmDeptId);
+  const isSalesMember = !!myActions && salesDeptId !== undefined
+    && myActions.memberships.includes(salesDeptId);
+  const isGovernanceDept = isQualityMember || isPmMember;
   const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
+  // Governance authz (mirrors the backend 403 gates in change_service.py):
+  // sign-off is department-gated with no lead bypass; quoted price and
+  // internal-cost approval keep the lead/PM exceptions the backend allows.
+  const canSignPm = isAdmin || isPmMember;
+  const canSignQuality = isAdmin || isQualityMember;
+  const canApproveInternalCosts = isAdmin || isPmMember;
+  const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
   // F8: the backend enforces "PM and Quality sign-off must be different
   // users" (4-eyes) and 400s if violated. Disable the button in place and
   // name the rule instead of letting the user hit the error after clicking.
@@ -146,7 +157,7 @@ export default function ChangeDetailPage() {
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Approval failed'),
   });
-  if (isLoading || !change) return <div className="p-6 text-gray-500">Loading…</div>;
+  if (isLoading || !change) return <div className="p-6 text-slate-400">Loading…</div>;
 
   // An unauthorized deep link into a governance tab (?tab=d1 / ?tab=audit)
   // falls back to overview rather than rendering a blank/forbidden tab.
@@ -162,7 +173,7 @@ export default function ChangeDetailPage() {
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-semibold flex items-center gap-3">
           <span>
-            <span className="font-mono text-gray-500">{change.change_number}</span> — {change.title}
+            <span className="font-mono text-slate-400">{change.change_number}</span> — {change.title}
           </span>
           {impl?.ready_to_go && (
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100">
@@ -238,14 +249,14 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
-          <p><span className="text-gray-500">Type:</span> {change.change_type}</p>
-          <p><span className="text-gray-500">Priority:</span> {change.priority}</p>
-          <p><span className="text-gray-500">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
-          <p><span className="text-gray-500">Reason:</span> {change.reason ?? '—'}</p>
+          <p><span className="text-slate-400">Type:</span> {change.change_type}</p>
+          <p><span className="text-slate-400">Priority:</span> {change.priority}</p>
+          <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
+          <p><span className="text-slate-400">Reason:</span> {change.reason ?? '—'}</p>
           <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
 
           <div className="pt-3">
-            <label className="text-sm text-gray-500">Attach document (PPT, PDF, …)</label>
+            <label className="text-sm text-slate-400">Attach document (PPT, PDF, …)</label>
             <input type="file" className="block mt-1 text-sm"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
@@ -310,7 +321,7 @@ export default function ChangeDetailPage() {
               )}
             </li>
           ))}
-          {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
+          {change.assessments.length === 0 && <li className="px-4 py-3 text-slate-400">No assessments.</li>}
           </ul>
           {change.assessments.map((a) => (
             <div key={a.id}>
@@ -362,28 +373,32 @@ export default function ChangeDetailPage() {
             </div>
           ) : change.customer_relevant ? (
             <>
-              <QuotedPriceEditor change={change} />
-              <p><span className="text-gray-500">Customer response:</span> {change.customer_response}</p>
+              <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
+              <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
               <div className="flex gap-2">
                 <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('accepted')}>Customer accepted</button>
                 <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('declined')}>Customer declined</button>
               </div>
               <div className="flex gap-2 pt-2">
-                <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
-                  disabled={!!change.pm_signed_by || samePersonBlocksPm}
-                  onClick={() => signOff.mutate('pm')}>
-                  PM sign-off {change.pm_signed_by ? '✓' : ''}
-                </button>
-                <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
-                  disabled={!!change.quality_signed_by || samePersonBlocksQuality}
-                  onClick={() => signOff.mutate('quality')}>
-                  Quality sign-off {change.quality_signed_by ? '✓' : ''}
-                </button>
+                {canSignPm && (
+                  <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
+                    disabled={!!change.pm_signed_by || samePersonBlocksPm}
+                    onClick={() => signOff.mutate('pm')}>
+                    PM sign-off {change.pm_signed_by ? '✓' : ''}
+                  </button>
+                )}
+                {canSignQuality && (
+                  <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
+                    disabled={!!change.quality_signed_by || samePersonBlocksQuality}
+                    onClick={() => signOff.mutate('quality')}>
+                    Quality sign-off {change.quality_signed_by ? '✓' : ''}
+                  </button>
+                )}
               </div>
               {(samePersonBlocksPm || samePersonBlocksQuality) && (
                 <p className="text-xs text-amber-300">PM and Quality sign-off must be different users</p>
               )}
-              <p className="text-xs text-gray-400">Approve requires customer acceptance + both sign-offs.</p>
+              <p className="text-xs text-slate-400">Approve requires customer acceptance + both sign-offs.</p>
             </>
           ) : (
             <div className="space-y-2">
@@ -398,13 +413,17 @@ export default function ChangeDetailPage() {
                     <p className="text-xs text-slate-400">{change.internal_approval_note}</p>
                   )}
                 </div>
-              ) : (
+              ) : canApproveInternalCosts ? (
                 <button
                   className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
                   disabled={change.status !== 'costing' || internalApprove.isPending}
                   onClick={() => internalApprove.mutate(undefined)}>
                   {t('internal.approve')}
                 </button>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Only a Project Manager department member or an admin may approve internal costs.
+                </p>
               )}
             </div>
           )}

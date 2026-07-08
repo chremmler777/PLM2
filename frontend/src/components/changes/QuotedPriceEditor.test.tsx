@@ -48,4 +48,12 @@ describe('QuotedPriceEditor', () => {
     expect(screen.getByText(/Quoted price/)).toBeDefined()
     expect(screen.getByText('1000')).toBeDefined()
   })
+
+  it('hides the edit control when the viewer is not admin/lead/Sales (canEdit=false)', () => {
+    render(wrap(<QuotedPriceEditor change={change({ status: 'costing', quoted_price: 1000 })} canEdit={false} />))
+    expect(screen.queryByRole('spinbutton')).toBeNull()
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
+    expect(screen.getByText(/Quoted price/)).toBeDefined()
+    expect(screen.getByText('1000')).toBeDefined()
+  })
 })

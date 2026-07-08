@@ -164,5 +164,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'internal.approved': { de: 'Interne Kosten freigegeben', en: 'Internal costs approved' },
   'internal.note': { de: 'Anmerkung', en: 'Note' },
   'internal.amount': { de: 'Freigegebener Betrag', en: 'Approved amount' },
+  'stepper.hint.captured': { de: 'Beschreiben, was geändert werden soll', en: 'Describe what should change' },
+  'stepper.hint.scoping': { de: 'Treffen, entscheiden, Abteilungen auswählen', en: 'Meet, decide, pick departments' },
+  'stepper.hint.in_assessment': { de: 'Abteilungen prüfen Machbarkeit & Kosten', en: 'Departments check feasibility & cost' },
+  'stepper.hint.costing': { de: 'Kosten summieren', en: 'Sum up costs' },
+  'stepper.hint.quoted': { de: 'Angebot an Kunden gesendet', en: 'Offer sent to customer' },
+  'stepper.hint.approved': { de: 'Go-Entscheidung getroffen', en: 'Go decision made' },
+  'stepper.hint.in_implementation': { de: 'Umsetzung läuft', en: 'Doing the work' },
+  'stepper.hint.in_validation': { de: 'Ergebnisse werden geprüft', en: 'Checking results' },
+  'stepper.hint.released': { de: 'Änderung ist live', en: 'Change is live' },
+  'stepper.hint.closed': { de: 'Abgeschlossen', en: 'Wrapped up' },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

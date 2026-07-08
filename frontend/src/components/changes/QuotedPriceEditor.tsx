@@ -13,10 +13,16 @@ const EDITABLE_STATUSES = ['costing', 'quoted']
  * F7: inline quoted-price editor for the commercial tab (customer branch).
  * Editable while the change is in costing/quoted — the window in which
  * Sales enters or revises the quote before customer acceptance.
+ *
+ * `canEdit` mirrors the backend's role gate (admin, the change lead, or a
+ * Sales department member — see ChangeService.user_can_set_quoted_price)
+ * and hides the input entirely for anyone else, falling back to the
+ * read-only line. Defaults to true so callers that don't yet know the
+ * viewer's identity aren't forced into a read-only flash.
  */
-export function QuotedPriceEditor({ change }: { change: ChangeRequest }) {
+export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRequest; canEdit?: boolean }) {
   const qc = useQueryClient()
-  const editable = EDITABLE_STATUSES.includes(change.status)
+  const editable = canEdit && EDITABLE_STATUSES.includes(change.status)
   const [value, setValue] = useState(change.quoted_price != null ? String(change.quoted_price) : '')
 
   const save = useMutation({

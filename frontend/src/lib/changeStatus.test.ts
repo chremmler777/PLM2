@@ -35,8 +35,11 @@ describe('changeStatus', () => {
       expect(stepPosition('closed', true)).toEqual({ index: 9, total: 10 })
     })
 
-    it('treats undefined customerRelevant as full order', () => {
-      expect(stepPosition('quoted', undefined)).toEqual({ index: 4, total: 10 })
+    it('treats undefined customerRelevant as internal order (matches backend falsy semantics)', () => {
+      // A legacy null-flag change shows the 9-step internal path — it can never
+      // reach 'quoted', so that step must not appear for it.
+      expect(stepPosition('costing', undefined)).toEqual({ index: 3, total: 9 })
+      expect(stepPosition('quoted', undefined)).toBeNull()
     })
 
     it('omits quoted from the internal (non-customer-relevant) order', () => {
