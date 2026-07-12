@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.change import (
-    ChangeRequest, ChangeAssessment, ChangeRouting, ChangeRoutingStandard,
+    ChangeRequest, ChangeAssessment, ChangeMeeting, ChangeRouting, ChangeRoutingStandard,
     BLOCKING_LETTERS, TASK_LETTERS,
 )
 from app.models.workflow import (
@@ -127,6 +127,36 @@ class ChangeRoutingService:
 
         template_id, template_version, stages = await ChangeRoutingService.resolve_standard(
             session, change.change_type)
+
+        # Scoped fan-out: the latest 'proceed' scoping meeting restricts which
+        # departments take part in stage 1 (the impact-assessment stage).
+        # Later stages are process roles (summation, quote) and stay as the
+        # template defines them.
+        proceed = (await session.execute(
+            select(ChangeMeeting)
+            .where(ChangeMeeting.change_id == change.id,
+                   ChangeMeeting.decision == "proceed")
+            .order_by(ChangeMeeting.decided_at.desc(), ChangeMeeting.id.desc())
+            .limit(1))).scalar_one_or_none()
+        if proceed is not None and proceed.selected_department_ids:
+            allowed = set(proceed.selected_department_ids)
+            for stage in stages:
+                if stage["stage_order"] == 1:
+                    kept = [d for d in stage["departments"]
+                            if d["department_id"] in allowed]
+                    if not kept:
+                        raise ValueError(
+                            "Scoping selection matches no stage-1 department "
+                            "of the routing standard")
+                    # An all-informational selection (only S/C/I letters) leaves
+                    # stage 1 with no gate — the engine would stall forever. Require
+                    # at least one responsible/accountable (R/A) department so the
+                    # stage can actually complete and advance.
+                    if not any(d["rasic_letter"] in BLOCKING_LETTERS for d in kept):
+                        raise ValueError(
+                            "Scoping selection contains no responsible/accountable "
+                            "department in stage 1")
+                    stage["departments"] = kept
 
         routing = ChangeRouting(
             change_id=change.id, template_id=template_id, template_version=template_version,
@@ -348,6 +378,20 @@ class ChangeRoutingService:
     async def promote_to_standard(session: AsyncSession, change: ChangeRequest, user_id: int) -> None:
         """If the change carries an approved deviation against a mapped template, bump
         that template to v+1 (one step per stage), snapshot history, repoint standard."""
+        # Scoped changes must never promote: a meeting-scoped change carries only the
+        # selected departments in its stage-1 assessment rows, so rebuilding the shared
+        # standard from those rows would silently delete every unselected department
+        # from the org-wide template. Promoting a genuinely scoped-down routing needs
+        # dedicated semantics (merge into, not replace, the standard) — deferred. Skip
+        # promotion entirely whenever any 'proceed' meeting restricted the fan-out.
+        proceed_meetings = (await session.execute(
+            select(ChangeMeeting).where(
+                ChangeMeeting.change_id == change.id,
+                ChangeMeeting.decision == "proceed")
+        )).scalars().all()
+        if any(m.selected_department_ids for m in proceed_meetings):
+            return  # scoped-change promotion semantics deferred (see comment above)
+
         routing = (await session.execute(
             select(ChangeRouting).where(ChangeRouting.change_id == change.id)
         )).scalar_one_or_none()

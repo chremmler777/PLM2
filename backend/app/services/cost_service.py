@@ -1,7 +1,7 @@
 """Cost-line math + Summierung roll-up for the digitized Änderungsmitteilung."""
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeRequest, ChangeAssessment
@@ -102,8 +102,19 @@ class CostService:
                 bucket[f"{pk}_external"] += line.external_cost
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])
+
+        efforts = (await session.execute(
+            select(ChangeAssessment.department_id,
+                   func.coalesce(func.sum(ChangeAssessment.effort_hours), 0.0))
+            .where(ChangeAssessment.change_id == change.id,
+                   ChangeAssessment.effort_hours.is_not(None))
+            .group_by(ChangeAssessment.department_id))).all()
+
         return {
             "by_plant": [{"plant_id": pid, **vals} for pid, vals in sorted(by_plant.items())],
             "by_department": [{"department_id": did, **vals} for did, vals in sorted(by_dep.items())],
             "totals": totals,
+            "effort_by_department": [
+                {"department_id": d, "effort_hours": h} for d, h in sorted(efforts)],
+            "total_effort_hours": float(sum(h for _, h in efforts)),
         }

@@ -20,4 +20,11 @@ describe('DeadlineChip', () => {
     render(<DeadlineChip date={past} state="overdue" />)
     expect(screen.getByTestId('deadline-chip').className).toContain('red')
   })
+  it('does not show a same-day end-of-day deadline as overdue-negative', () => {
+    const today = new Date()
+    const iso = `${today.toISOString().slice(0, 10)}T23:59:59Z`
+    render(<DeadlineChip date={iso} state="on_track" />)
+    const chip = screen.getByTestId('deadline-chip')
+    expect(chip.textContent).not.toMatch(/over/)
+  })
 })

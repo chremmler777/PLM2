@@ -22,6 +22,7 @@ import LessonsKpiBoardPage from './pages/LessonsKpiBoardPage';
 import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
+import PnlPage from './pages/PnlPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -142,6 +143,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pnl"
+        element={
+          <ProtectedRoute>
+            <PnlPage />
           </ProtectedRoute>
         }
       />

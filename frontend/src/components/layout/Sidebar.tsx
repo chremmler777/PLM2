@@ -25,20 +25,56 @@ export default function Sidebar() {
   });
   const openTasks = taskCount?.count ?? 0;
 
-  const navItems = [
+  const dailyItems = [
     { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
     { path: '/projects', label: 'Projects', icon: '📁' },
     { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
     { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
     { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
     { path: '/changes', label: 'Changes', icon: '🔄' },
+    { path: '/pnl', label: 'P&L', icon: '💰' },
     { path: '/reports', label: 'Reports', icon: '📊' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
+  ];
+
+  const setupItems = [
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
     ...(isAdmin ? [{ path: '/users', label: 'Users', icon: '👥' }] : []),
   ];
 
+  const showSetup = role === 'admin' || role === 'engineer';
+
   const isActive = (path: string) => location.pathname === path;
+
+  const renderNavItem = (item: { path: string; label: string; icon: string }) => {
+    const active = isActive(item.path);
+    return (
+      <button
+        key={item.path}
+        onClick={() => navigate(item.path)}
+        aria-current={active ? 'page' : undefined}
+        className={`relative w-full text-left px-3 py-2.5 rounded-md text-sm font-medium ${
+          isCollapsed ? 'justify-center' : ''
+        } flex items-center gap-3 ${
+          active
+            ? 'bg-sky-500/10 text-sky-300'
+            : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200 hover:translate-x-0.5'
+        }`}
+        title={isCollapsed ? item.label : ''}
+      >
+        {active && (
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-sky-400" />
+        )}
+        <span className={`text-base flex-shrink-0 ${active ? '' : 'opacity-80'}`}>{item.icon}</span>
+        {!isCollapsed && <span className="flex-1">{item.label}</span>}
+        {item.path === '/my-tasks' && openTasks > 0 && (
+          <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0">
+            {openTasks}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   return (
     <aside className={`bg-slate-800/80 border-r border-slate-700/70 min-h-screen flex flex-col transition-all duration-200 ${
@@ -75,35 +111,17 @@ export default function Sidebar() {
 
       {/* Navigation Items */}
       <nav className="flex-1 p-2 space-y-0.5">
-        {navItems.map((item) => {
-          const active = isActive(item.path);
-          return (
-            <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              aria-current={active ? 'page' : undefined}
-              className={`relative w-full text-left px-3 py-2.5 rounded-md text-sm font-medium ${
-                isCollapsed ? 'justify-center' : ''
-              } flex items-center gap-3 ${
-                active
-                  ? 'bg-sky-500/10 text-sky-300'
-                  : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200 hover:translate-x-0.5'
-              }`}
-              title={isCollapsed ? item.label : ''}
-            >
-              {active && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-sky-400" />
-              )}
-              <span className={`text-base flex-shrink-0 ${active ? '' : 'opacity-80'}`}>{item.icon}</span>
-              {!isCollapsed && <span className="flex-1">{item.label}</span>}
-              {item.path === '/my-tasks' && openTasks > 0 && (
-                <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0">
-                  {openTasks}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {dailyItems.map(renderNavItem)}
+        {showSetup && (
+          <>
+            {!isCollapsed ? (
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">SETUP</p>
+            ) : (
+              <div className="border-t border-slate-700/70 mt-2 pt-2" />
+            )}
+            {setupItems.map(renderNavItem)}
+          </>
+        )}
       </nav>
 
       {/* User block + Logout */}

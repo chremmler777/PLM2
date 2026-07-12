@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
-    ChangeAttachment, ChangeTransitionDeviation,
+    ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
 )
@@ -44,15 +44,16 @@ def _org_scope(stmt, viewer: Optional[User]):
         ChangeRequest.project_id.is_(None) | ChangeRequest.project_id.in_(org_projects))
 
 ALLOWED_TRANSITIONS = {
-    "captured":          {"in_assessment", "cancelled", "on_hold"},
+    "captured":          {"scoping", "cancelled", "on_hold"},
+    "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
     "in_assessment":     {"costing", "rejected", "cancelled", "on_hold"},
-    "costing":           {"quoted", "on_hold", "cancelled"},
+    "costing":           {"quoted", "approved", "on_hold", "cancelled"},
     "quoted":            {"approved", "rejected", "on_hold", "cancelled"},
     "approved":          {"in_implementation", "on_hold", "cancelled"},
     "in_implementation": {"in_validation", "on_hold", "cancelled"},
     "in_validation":     {"released", "in_implementation", "on_hold", "cancelled"},
     "released":          {"closed"},
-    "on_hold":           {"in_assessment", "costing", "quoted", "approved",
+    "on_hold":           {"scoping", "in_assessment", "costing", "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
     "rejected":          set(),
     "closed":            set(),
@@ -232,6 +233,7 @@ class ChangeService:
         raised_by: int, reason: Optional[str] = None, description: Optional[str] = None,
         priority: str = "medium", lead_id: Optional[int] = None,
         data_classification: str = "confidential",
+        customer_relevant: Optional[bool] = None,
     ) -> ChangeRequest:
         if change_type not in CHANGE_TYPES:
             raise ChangeError(f"Invalid change_type '{change_type}'")
@@ -242,10 +244,14 @@ class ChangeService:
             priority=priority, lead_id=lead_id, raised_by=raised_by,
             data_classification=data_classification, status="captured",
         )
+        if customer_relevant is not None:
+            change.customer_relevant = customer_relevant
         session.add(change)
         await session.flush()
-        for key in GATE_KEYS:
-            session.add(ChangeGate(change_id=change.id, gate_key=key))
+        # Only the release gate is seeded up front. Feasibility is answered by
+        # the scoping meeting decision; budget by the costing path split
+        # (customer quote acceptance / internal cost approval).
+        session.add(ChangeGate(change_id=change.id, gate_key="release"))
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "created", f"Change {number} created", raised_by,
@@ -485,6 +491,24 @@ class ChangeService:
                 return "No impacted items added yet"
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
+            # A change that already has routing has fanned out once — the proceed
+            # meeting was consumed then. Resuming from on_hold back into
+            # in_assessment must not re-demand a fresh meeting (build_routing is
+            # idempotent and won't re-scope). Only require the meeting on the
+            # first entry, when no routing exists yet.
+            from app.models.change import ChangeRouting
+            existing_routing = (await session.execute(
+                select(ChangeRouting.id).where(
+                    ChangeRouting.change_id == change.id).limit(1)
+            )).scalar_one_or_none()
+            if existing_routing is None:
+                proceed = (await session.execute(
+                    select(ChangeMeeting.id).where(
+                        ChangeMeeting.change_id == change.id,
+                        ChangeMeeting.decision == "proceed").limit(1)
+                )).scalar_one_or_none()
+                if proceed is None:
+                    return "No scoping meeting with decision 'proceed' recorded"
         if to_status == "costing":
             from app.services.change_routing_service import ChangeRoutingService
             if not await ChangeRoutingService.blocking_complete(session, change):
@@ -541,12 +565,23 @@ class ChangeService:
         if to_status not in allowed:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
 
-        # HARD gate: quoted -> approved cannot be forced
+        # HARD gates: the approval decision cannot be forced.
         if to_status == "approved":
-            if change.customer_response != "accepted":
-                raise ChangeError("Customer has not accepted the offer")
-            if change.pm_signed_by is None or change.quality_signed_by is None:
-                raise ChangeError("Both PM and Quality sign-off are required")
+            if change.customer_relevant:
+                if change.customer_response != "accepted":
+                    raise ChangeError("Customer has not accepted the offer")
+                if change.pm_signed_by is None or change.quality_signed_by is None:
+                    raise ChangeError("Both PM and Quality sign-off are required")
+                if change.status == "costing":
+                    raise ChangeError(
+                        "Customer-relevant changes must go through the quote")
+            else:
+                if change.internal_approved_at is None:
+                    raise ChangeError(
+                        "Internal cost approval is required before approval")
+        if to_status == "quoted" and not change.customer_relevant:
+            raise ChangeError(
+                "Internal changes skip the quote — record internal cost approval instead")
 
         if to_status == "cancelled":
             if not cancellation_reason:
@@ -897,6 +932,46 @@ class ChangeService:
         return rd_dept.id in dept_ids
 
     @staticmethod
+    async def _user_in_department(session: AsyncSession, user: User, department_name: str) -> bool:
+        """Admin, or member of the named department. Shared by the sign-off,
+        quoted-price and internal-cost-approval authz checks below."""
+        if user.role == "admin":
+            return True
+        from app.services.workflow_service import WorkflowService
+        dept = (await session.execute(
+            select(Department).where(Department.name == department_name))
+        ).scalar_one_or_none()
+        if dept is None:
+            return False
+        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        return dept.id in dept_ids
+
+    @staticmethod
+    async def user_can_sign_off(session: AsyncSession, user: User, role: str) -> bool:
+        """Quality & PM sign-off are department-gated: role='quality' requires
+        admin or 'Quality' membership, role='pm' requires admin or 'Project
+        Manager' membership."""
+        dept_name = "Quality" if role == "quality" else "Project Manager"
+        return await ChangeService._user_in_department(session, user, dept_name)
+
+    @staticmethod
+    async def user_can_set_quoted_price(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Quoted price is Sales territory: admin, the change lead, or a
+        'Sales' department member may set it."""
+        if user.id == change.lead_id:
+            return True
+        return await ChangeService._user_in_department(session, user, "Sales")
+
+    @staticmethod
+    async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:
+        """Internal cost approval is PM territory: admin or a 'Project
+        Manager' department member. No lead bypass — a lead who isn't a PM
+        member and isn't admin may not approve their own change's costs."""
+        return await ChangeService._user_in_department(session, user, "Project Manager")
+
+    @staticmethod
     async def my_actions(
         session: AsyncSession, change: ChangeRequest, user: User,
     ) -> list[dict]:
@@ -1041,7 +1116,7 @@ class ChangeService:
     async def submit_assessment(
         session: AsyncSession, change: ChangeRequest, department_id: int,
         verdict: str, user_id: int, *, cost_impact=None, lead_time_impact_days=None,
-        conditions=None, notes=None, responsible_id=None,
+        conditions=None, notes=None, responsible_id=None, effort_hours=None,
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
@@ -1074,6 +1149,7 @@ class ChangeService:
         a.conditions = conditions
         a.notes = notes
         a.responsible_id = responsible_id
+        a.effort_hours = effort_hours
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
         await session.flush()
@@ -1226,16 +1302,33 @@ class ChangeService:
                 f"Allowed: {', '.join(IMPLEMENTATION_MODES)}"
             )
 
+        # customer_relevant may only be changed during capture/scoping, once
+        # the change has moved on (costing, quoted, etc.) it has already
+        # driven downstream gates/pricing decisions. Idempotent PATCHes
+        # (same value) are allowed at any status.
+        cust_rel = fields.get("customer_relevant")
+        if (
+            cust_rel is not None
+            and cust_rel != change.customer_relevant
+            and change.status not in ("captured", "scoping")
+        ):
+            raise ChangeError(
+                "Customer-relevant can only be changed during capture or scoping"
+            )
+
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null
         # (clear the deadline) is honored rather than skipped by the `v is
         # not None` guard below.
         if "required_by_date" in fields:
             new_date = fields.pop("required_by_date")
-            reason = fields.pop("required_by_reason", None)
             old = change.required_by_date
             change.required_by_date = new_date
-            change.required_by_reason = reason
+            # Reason only changes when the request explicitly carries it —
+            # a date-only PATCH must not wipe the stored justification.
+            if "required_by_reason" in fields:
+                change.required_by_reason = fields.pop("required_by_reason")
+            reason = change.required_by_reason
             change.required_by_set_by = user_id
             change.required_by_set_at = datetime.utcnow()
             await ChangeService.append_changelog(
@@ -1313,6 +1406,40 @@ class ChangeService:
             session, change, "signed_off", f"{role} sign-off", user_id,
             field_name=f"{role}_signed_by", new_value=user_id,
         )
+        return change
+
+    @staticmethod
+    async def approve_internal_costs(
+        session: AsyncSession, change: ChangeRequest, actor: User,
+        *, note: Optional[str] = None,
+    ) -> ChangeRequest:
+        """Internal costing branch: PM approves the summation total instead of
+        a customer quote. Amount is snapshotted for the later P&L view.
+        Authorization (admin or Project Manager department member) is
+        enforced by the caller via user_can_approve_internal_costs — see
+        POST /{id}/internal-approval in changes.py."""
+        if change.customer_relevant:
+            raise ChangeError(
+                "Customer-relevant changes are approved via the customer quote")
+        # 'costing' is the normal branch; 'quoted' is tolerated for legacy internal
+        # changes that were driven through the quote status before the costing-path
+        # split existed — they still need an internal cost approval to reach approved.
+        if change.status not in ("costing", "quoted"):
+            raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
+        if change.internal_approved_at is not None:
+            raise ChangeError("Internal costs are already approved")
+        from app.services.cost_service import CostService
+        summ = await CostService.summation(session, change)
+        change.internal_approved_by = actor.id
+        change.internal_approved_at = datetime.utcnow()
+        change.internal_approved_amount = summ["totals"]["grand_total"]
+        change.internal_approval_note = note
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "internal_costs_approved",
+            f"Internal costs approved ({summ['totals']['grand_total']:.2f})",
+            actor.id, field_name="internal_approved_amount",
+            new_value=summ["totals"]["grand_total"], notes=note)
         return change
 
     @staticmethod

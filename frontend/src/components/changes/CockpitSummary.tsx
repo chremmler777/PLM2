@@ -1,7 +1,7 @@
 import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
-import { DeadlineChip } from './DeadlineChip'
+import { DeadlineEditor } from './DeadlineEditor'
 
 interface Props {
   change: ChangeDetail
@@ -23,10 +23,18 @@ interface Props {
   /** Called with an action's target_tab when its button is clicked — the
       page jumps to where the action is performed. */
   onAction?: (targetTab: string) => void
+  /** F11: whether the current viewer can see the D1/Audit governance tabs.
+      Gate rows jump there via onResolveGate — for viewers who can't see those
+      tabs the row must not offer a dead-end jump affordance. Defaults to
+      true so existing callers that don't pass it keep prior behavior. */
+  canSeeGovernance?: boolean
 }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction }: Props) {
-  const next = NEXT_STATUS[change.status] ?? []
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true }: Props) {
+  const next = (NEXT_STATUS[change.status] ?? []).filter((s) =>
+    change.status !== 'costing'
+      ? true
+      : (change.customer_relevant ? s !== 'approved' : s !== 'quoted'))
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
   // gates seeded 'na' but guarding a later transition are just "outstanding later".
@@ -51,7 +59,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     )
     return (
       <li key={g.gate_key} className={blocking ? 'text-amber-300' : 'text-slate-400'}>
-        {onResolveGate ? (
+        {onResolveGate && canSeeGovernance ? (
           <button type="button"
             className="text-left hover:underline decoration-dotted underline-offset-2"
             onClick={() => onResolveGate(g.gate_key)}
@@ -88,7 +96,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           {STATUS_LABELS[change.status]}
         </span>
         {' '}
-        <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
+        <DeadlineEditor change={change} />
         <p className="mt-3 text-sm text-slate-300">
           {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '—'}</span>
         </p>

@@ -76,6 +76,32 @@ async def test_patch_sets_required_by_and_audits(client, eng_auth, seed, session
 
 
 @pytest.mark.asyncio
+async def test_patch_accepts_tz_aware_z_suffix_stored_naive(
+        client, eng_auth, seed, session_factory):
+    """Frontend sends required_by_date as tz-aware ISO-8601 with a "Z"
+    suffix. On Postgres the column is TIMESTAMP WITHOUT TIME ZONE, and
+    asyncpg 500s on a tz-aware value. The schema layer must normalize it
+    to naive UTC before it reaches the DB layer."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Deadline Z-suffix", "reason": "r",
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "required_by_date": "2026-08-01T09:30:00Z",
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    async with session_factory() as session:
+        chg = (await session.execute(
+            select(ChangeRequest).where(ChangeRequest.id == cid)
+        )).scalar_one()
+        assert chg.required_by_date.tzinfo is None
+        assert chg.required_by_date.hour == 9
+        assert chg.required_by_date.minute == 30
+
+
+@pytest.mark.asyncio
 async def test_deadline_set_writes_audit_log(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "Deadline Audit", "reason": "r",
@@ -208,3 +234,35 @@ async def test_patch_clears_deadline_with_explicit_null(client, eng_auth, seed):
 
     res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
     assert res.json()["deadline_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_response_recomputes_deadline_state(client, admin_auth, seed):
+    # create a change (mirror this file's existing creation helper)
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "deadline", "change_type": "physical_part",
+    }, headers=admin_auth)
+    change_id = res.json()["id"]
+    future = (datetime.utcnow() + timedelta(days=30)).isoformat()
+    res = await client.patch(f"/api/v1/changes/{change_id}",
+                             json={"required_by_date": future,
+                                   "required_by_reason": "customer SOP"},
+                             headers=admin_auth)
+    assert res.status_code == 200
+    assert res.json()["deadline_state"] == "on_track"   # was null before the fix
+
+
+@pytest.mark.asyncio
+async def test_patch_date_only_keeps_reason(client, admin_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "deadline2", "change_type": "physical_part",
+    }, headers=admin_auth)
+    change_id = res.json()["id"]
+    d1 = (datetime.utcnow() + timedelta(days=10)).isoformat()
+    d2 = (datetime.utcnow() + timedelta(days=20)).isoformat()
+    await client.patch(f"/api/v1/changes/{change_id}",
+                       json={"required_by_date": d1, "required_by_reason": "SOP"},
+                       headers=admin_auth)
+    res = await client.patch(f"/api/v1/changes/{change_id}",
+                             json={"required_by_date": d2}, headers=admin_auth)
+    assert res.json()["required_by_reason"] == "SOP"    # was nulled before the fix

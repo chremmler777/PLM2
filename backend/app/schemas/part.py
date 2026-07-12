@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
+from app.schemas.common import NaiveUtcDatetime
+
 
 # Part Schemas
 class PartBase(BaseModel):
@@ -25,6 +27,10 @@ class PartCreate(PartBase):
     """Create a new part."""
     project_id: int
     parent_part_id: Optional[int] = None  # Can be a child of a sub-assembly
+    # Input-only normalization; PartResponse must keep plain datetime fields
+    # so serialization never silently strips tzinfo.
+    last_calibrated_at: Optional[NaiveUtcDatetime] = None
+    next_calibration_due: Optional[NaiveUtcDatetime] = None
 
 
 class PartUpdate(BaseModel):
@@ -38,7 +44,7 @@ class PartUpdate(BaseModel):
     parent_part_id: Optional[int] = None
     item_category: Optional[str] = None
     calibration_interval_months: Optional[int] = Field(None, ge=1, le=120)
-    last_calibrated_at: Optional[datetime] = None
+    last_calibrated_at: Optional[NaiveUtcDatetime] = None
 
 
 class PartResponse(PartBase):

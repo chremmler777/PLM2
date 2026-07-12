@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.common import NaiveUtcDatetime
+
 
 class ChangeCreate(BaseModel):
     project_id: int
@@ -13,6 +15,7 @@ class ChangeCreate(BaseModel):
     priority: str = "medium"
     lead_id: Optional[int] = None
     data_classification: str = "confidential"
+    customer_relevant: Optional[bool] = None
 
 
 class ChangeUpdate(BaseModel):
@@ -34,7 +37,7 @@ class ChangeUpdate(BaseModel):
     customer_relevant: Optional[bool] = None
     car_line: Optional[str] = None
     affected_plant_ids: Optional[List[int]] = None
-    required_by_date: Optional[datetime] = None
+    required_by_date: Optional[NaiveUtcDatetime] = None
     required_by_reason: Optional[str] = None
 
 
@@ -66,6 +69,7 @@ class AssessmentSubmit(BaseModel):
     conditions: Optional[str] = None
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
+    effort_hours: Optional[float] = Field(None, ge=0)
 
 
 class ImpactedItemResponse(BaseModel):
@@ -90,6 +94,7 @@ class AssessmentResponse(BaseModel):
     conditions: Optional[str] = None
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
+    effort_hours: Optional[float] = None
     submitted_at: Optional[datetime] = None
     stage_order: int = 1
     rasic_letter: str = "R"
@@ -112,8 +117,8 @@ class AssessmentResponse(BaseModel):
                 **{f: getattr(data, f) for f in (
                     "id", "department_id", "verdict", "cost_impact",
                     "lead_time_impact_days", "conditions", "notes",
-                    "responsible_id", "submitted_at", "stage_order",
-                    "rasic_letter")},
+                    "responsible_id", "effort_hours", "submitted_at",
+                    "stage_order", "rasic_letter")},
                 "status": data.effective_status,
                 "owner_id": data.effective_owner_id,
                 "owner_name": data.effective_owner_name,
@@ -132,7 +137,7 @@ class AssessmentAssignIn(BaseModel):
 
 
 class AssessmentDueDateIn(BaseModel):
-    due_date: datetime
+    due_date: NaiveUtcDatetime
 
 
 class AttachmentResponse(BaseModel):
@@ -156,6 +161,10 @@ class ChangelogResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class InternalApprovalIn(BaseModel):
+    note: Optional[str] = None
 
 
 class ChangeResponse(BaseModel):
@@ -190,6 +199,10 @@ class ChangeResponse(BaseModel):
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
+    internal_approved_by: Optional[int] = None
+    internal_approved_at: Optional[datetime] = None
+    internal_approved_amount: Optional[float] = None
+    internal_approval_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -330,10 +343,17 @@ class SummationTotals(BaseModel):
     grand_total: float
 
 
+class EffortRollup(BaseModel):
+    department_id: int
+    effort_hours: float
+
+
 class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
     totals: SummationTotals
+    effort_by_department: List[EffortRollup] = []
+    total_effort_hours: float = 0.0
 
 
 class GateDecisionIn(BaseModel):
@@ -347,6 +367,46 @@ class GateResponse(BaseModel):
     decided_by: Optional[int] = None
     decided_at: Optional[datetime] = None
     remark: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MeetingParticipant(BaseModel):
+    name: str
+    user_id: Optional[int] = None
+
+
+class MeetingCreate(BaseModel):
+    meeting_date: Optional[NaiveUtcDatetime] = None
+    participants: List[MeetingParticipant] = []
+    notes: Optional[str] = None
+    selected_department_ids: List[int] = []
+
+
+class MeetingUpdate(BaseModel):
+    meeting_date: Optional[NaiveUtcDatetime] = None
+    participants: Optional[List[MeetingParticipant]] = None
+    notes: Optional[str] = None
+    selected_department_ids: Optional[List[int]] = None
+
+
+class MeetingDecideIn(BaseModel):
+    decision: str  # proceed | reject | needs_info
+
+
+class MeetingResponse(BaseModel):
+    id: int
+    change_id: int
+    meeting_date: datetime
+    participants: List[MeetingParticipant] = []
+    notes: Optional[str] = None
+    decision: Optional[str] = None
+    selected_department_ids: List[int] = []
+    created_by: int
+    created_at: datetime
+    decided_by: Optional[int] = None
+    decided_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

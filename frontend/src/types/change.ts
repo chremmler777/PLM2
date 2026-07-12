@@ -1,5 +1,5 @@
 export type ChangeStatus =
-  | 'captured' | 'in_assessment' | 'costing' | 'quoted' | 'approved'
+  | 'captured' | 'scoping' | 'in_assessment' | 'costing' | 'quoted' | 'approved'
   | 'in_implementation' | 'in_validation' | 'released' | 'closed'
   | 'on_hold' | 'rejected' | 'cancelled';
 
@@ -7,7 +7,7 @@ export type ChangeType =
   | 'physical_part' | 'tooling' | 'document_spec' | 'process_im' | 'packaging';
 
 export const CHANGE_STATUS_ORDER: ChangeStatus[] = [
-  'captured', 'in_assessment', 'costing', 'quoted', 'approved',
+  'captured', 'scoping', 'in_assessment', 'costing', 'quoted', 'approved',
   'in_implementation', 'in_validation', 'released', 'closed',
 ];
 
@@ -39,6 +39,7 @@ export interface Assessment {
   accepted_at: string | null;
   due_date: string | null;
   overdue: boolean;
+  effort_hours?: number | null;
 }
 
 export interface RoutingDepartment {
@@ -122,6 +123,10 @@ export interface ChangeRequest {
   impact_confirmed_by?: number | null;
   impact_confirmed_by_name?: string | null;
   impact_confirmed_at?: string | null;
+  internal_approved_by?: number | null;
+  internal_approved_at?: string | null;
+  internal_approved_amount?: number | null;
+  internal_approval_note?: string | null;
 }
 
 export interface ChangeDetail extends ChangeRequest {
@@ -183,6 +188,8 @@ export interface Summation {
   by_department: DeptRollup[];
   totals: { one_time_internal: number; one_time_external: number;
             lifecycle_internal: number; lifecycle_external: number; grand_total: number };
+  effort_by_department: { department_id: number; effort_hours: number }[];
+  total_effort_hours: number;
 }
 
 export type GateKey = 'feasibility' | 'budget' | 'release';
@@ -256,6 +263,22 @@ export interface ImplementationItem {
 export interface ImplementationProgress {
   ready_to_go: boolean;
   items: ImplementationItem[];
+}
+
+export interface MeetingParticipant { name: string; user_id?: number | null }
+
+export interface ChangeMeeting {
+  id: number;
+  change_id: number;
+  meeting_date: string;
+  participants: MeetingParticipant[];
+  notes: string | null;
+  decision: 'proceed' | 'reject' | 'needs_info' | null;
+  selected_department_ids: number[];
+  created_by: number;
+  created_at: string;
+  decided_by: number | null;
+  decided_at: string | null;
 }
 
 export interface TransitionDeviation {

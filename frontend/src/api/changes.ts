@@ -4,6 +4,7 @@ import type {
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
+  ChangeMeeting, MeetingParticipant,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -17,6 +18,7 @@ export const changesApi = {
   create: (body: {
     project_id: number; title: string; change_type: string;
     reason?: string; description?: string; priority?: string; lead_id?: number;
+    customer_relevant?: boolean;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
 
   update: (id: number, body: Record<string, unknown>) =>
@@ -41,7 +43,7 @@ export const changesApi = {
   seedImpacted: (id: number) =>
     client.post(`/v1/changes/${id}/impacted-items/seed`).then((r) => r.data),
 
-  submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string }) =>
+  submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number }) =>
     client.post(`/v1/changes/${id}/assessments`, body).then((r) => r.data),
 
   customerResponse: (id: number, response: string) =>
@@ -105,4 +107,17 @@ export const changesApi = {
     client.get(`/v1/changes/${changeId}/implementation`).then((r) => r.data),
   signNoGeometryChange: (partId: number, revisionId: number, reason: string) =>
     client.post(`/v1/parts/${partId}/revisions/${revisionId}/no-geometry-change`, { reason }).then((r) => r.data),
+
+  listMeetings: (id: number) =>
+    client.get<ChangeMeeting[]>(`/v1/changes/${id}/meetings`).then((r) => r.data),
+  createMeeting: (id: number, body: {
+    meeting_date?: string; participants: MeetingParticipant[];
+    notes?: string; selected_department_ids: number[];
+  }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
+  updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
+    client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
+  decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info') =>
+    client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision }).then((r) => r.data),
+  approveInternalCosts: (id: number, note?: string) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/internal-approval`, { note: note ?? null }).then((r) => r.data),
 };

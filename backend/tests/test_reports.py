@@ -133,7 +133,7 @@ async def test_pipeline_report(client, eng_auth, seed, report_data):
     body = res.json()
 
     funnel = {row["status"]: row["count"] for row in body["funnel"]}
-    assert len(body["funnel"]) == 12
+    assert len(body["funnel"]) == 13  # includes the new 'scoping' status
     assert funnel["in_assessment"] == 1
     assert funnel["released"] == 1
     assert funnel["captured"] == 0
@@ -199,7 +199,7 @@ async def test_empty_db_zero_filled_shapes(client, eng_auth, seed):
     res = await client.get("/api/v1/reports/pipeline", headers=eng_auth)
     assert res.status_code == 200, res.text
     body = res.json()
-    assert len(body["funnel"]) == 12
+    assert len(body["funnel"]) == 13  # includes the new 'scoping' status
     assert all(row["count"] == 0 for row in body["funnel"])
     assert len(body["throughput"]) == 12
     assert all(m["released"] == 0 for m in body["throughput"])

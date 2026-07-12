@@ -17,11 +17,12 @@ from app.dependencies import get_current_user
 from app.models import get_db, User
 from app.models.change import (
     ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment,
-    ChangeImpactedItem,
+    ChangeImpactedItem, SIGN_OFF_ROLES,
 )
 from app.models.workflow import UserDepartment, Department
 from app.services.change_service import ChangeService, ChangeError
 from app.services.workflow_service import WorkflowService
+from app.services.meeting_service import MeetingService
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -34,6 +35,8 @@ from app.schemas.change import (
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
+    MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
+    InternalApprovalIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,7 @@ async def create_change(
             change_type=body.change_type, raised_by=current_user.id,
             reason=body.reason, description=body.description, priority=body.priority,
             lead_id=body.lead_id, data_classification=body.data_classification,
+            customer_relevant=body.customer_relevant,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -503,6 +507,7 @@ async def submit_assessment(
             db, change, body.department_id, body.verdict, current_user.id,
             cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
             conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
+            effort_hours=body.effort_hours,
         )
     except ValueError as e:
         # Blocking (R/A) submissions delegate to WorkflowService.complete_task,
@@ -580,9 +585,15 @@ async def update_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    fields = body.model_dump(exclude_unset=True)
+    if "quoted_price" in fields and fields["quoted_price"] != change.quoted_price:
+        if not await ChangeService.user_can_set_quoted_price(db, current_user, change):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the change lead, a Sales department member, or "
+                       "an admin may set the quoted price")
     try:
-        await ChangeService.update_change(db, change, current_user.id,
-                                          **body.model_dump(exclude_unset=True))
+        await ChangeService.update_change(db, change, current_user.id, **fields)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -594,6 +605,7 @@ async def update_change(
         .options(selectinload(ChangeRequest.affected_plants))
     )
     change = result.scalar_one()
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 
@@ -622,12 +634,43 @@ async def sign_off(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    if body.role in SIGN_OFF_ROLES and not await ChangeService.user_can_sign_off(
+            db, current_user, body.role):
+        dept_name = "Quality" if body.role == "quality" else "Project Manager"
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only a {dept_name} department member or an admin may "
+                   f"sign off as {body.role}")
     try:
         await ChangeService.sign_off(db, change, body.role, current_user.id)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
+    return change
+
+
+@router.post("/{change_id}/internal-approval", response_model=ChangeResponse)
+async def approve_internal_costs(
+    change_id: int, body: InternalApprovalIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_approve_internal_costs(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Project Manager department member or an admin "
+                   "may approve internal costs")
+    try:
+        await ChangeService.approve_internal_costs(
+            db, change, current_user, note=body.note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 
@@ -708,7 +751,7 @@ async def get_summation(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     from app.services.cost_service import CostService
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return await CostService.summation(db, change)
@@ -719,7 +762,7 @@ async def get_gates(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return change.gates
@@ -789,3 +832,76 @@ async def decide_deviation(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return dev
+
+
+@router.get("/{change_id}/meetings", response_model=List[MeetingResponse])
+async def list_meetings(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change.meetings
+
+
+@router.post("/{change_id}/meetings", response_model=MeetingResponse)
+async def create_meeting(
+    change_id: int, body: MeetingCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        meeting = await MeetingService.create_meeting(
+            db, change, current_user, meeting_date=body.meeting_date,
+            participants=[p.model_dump() for p in body.participants],
+            notes=body.notes, selected_department_ids=body.selected_department_ids)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+@router.patch("/{change_id}/meetings/{meeting_id}", response_model=MeetingResponse)
+async def update_meeting(
+    change_id: int, meeting_id: int, body: MeetingUpdate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    fields = body.model_dump(exclude_unset=True)
+    if "participants" in fields and fields["participants"] is not None:
+        fields["participants"] = [
+            p if isinstance(p, dict) else p.model_dump() for p in fields["participants"]]
+    try:
+        meeting = await MeetingService.update_meeting(
+            db, change, meeting_id, current_user, **fields)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+@router.post("/{change_id}/meetings/{meeting_id}/decide", response_model=MeetingResponse)
+async def decide_meeting(
+    change_id: int, meeting_id: int, body: MeetingDecideIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        meeting = await MeetingService.decide_meeting(
+            db, change, meeting_id, body.decision, current_user)
+    except ValueError as e:
+        # transition side effects raise ChangeError (a ValueError subclass);
+        # WorkflowService kick-off gates raise plain ValueError.
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting

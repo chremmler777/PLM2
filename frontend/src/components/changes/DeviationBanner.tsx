@@ -13,10 +13,10 @@ interface Props {
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-800',
-  approved: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-700',
-  consumed: 'bg-gray-100 text-gray-500',
+  pending: 'bg-amber-900 text-amber-200',
+  approved: 'bg-emerald-900 text-emerald-200',
+  rejected: 'bg-red-900 text-red-200',
+  consumed: 'bg-slate-700 text-slate-400',
 };
 
 export default function DeviationBanner({ changeId, blockedTo, blockedReason, onRetry, onClose }: Props) {
@@ -36,7 +36,8 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
     mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected' }) =>
       changesApi.decideDeviation(changeId, vars.devId, { decision: vars.decision }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] }),
-    onError: (e: any) => toast.error(e?.response?.data?.detail ?? 'Decision failed'),
+    onError: (e: Error & { response?: { data?: { detail?: string } } }) =>
+      toast.error(e.response?.data?.detail ?? 'Decision failed'),
   });
 
   const relevant = deviations.filter((d) => d.to_status === blockedTo);
@@ -44,13 +45,13 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
   const hasPending = relevant.some((d) => d.status === 'pending');
 
   return (
-    <div className="border border-amber-300 bg-amber-50 rounded-xl p-4 my-3 text-sm" data-testid="deviation-banner">
+    <div className="border border-amber-700 bg-amber-900/30 rounded-xl p-4 my-3 text-sm" data-testid="deviation-banner">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-medium text-amber-900">Transition blocked</p>
-          <p className="text-amber-800 mt-0.5">{blockedReason}</p>
+          <p className="font-medium text-amber-200">Transition blocked</p>
+          <p className="text-amber-200 mt-0.5">{blockedReason}</p>
         </div>
-        <button className="text-amber-700 text-xs" onClick={onClose}>Dismiss</button>
+        <button className="text-amber-200 text-xs" onClick={onClose}>Dismiss</button>
       </div>
 
       {relevant.length > 0 && (
@@ -58,12 +59,12 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
           {relevant.map((d) => (
             <li key={d.id} className="flex items-center gap-2">
               <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_STYLE[d.status]}`}>{d.status}</span>
-              <span className="text-gray-700">{d.reason}</span>
+              <span className="text-slate-400">{d.reason}</span>
               {d.status === 'pending' && (
                 <span className="ml-auto flex gap-1">
-                  <button className="px-2 py-0.5 text-xs border rounded-lg text-green-700"
+                  <button className="px-2 py-0.5 text-xs border border-emerald-700 text-emerald-200 rounded-lg hover:bg-emerald-900/30"
                           onClick={() => decide.mutate({ devId: d.id, decision: 'approved' })}>Approve</button>
-                  <button className="px-2 py-0.5 text-xs border rounded-lg text-red-600"
+                  <button className="px-2 py-0.5 text-xs border border-red-700 text-red-200 rounded-lg hover:bg-red-900/30"
                           onClick={() => decide.mutate({ devId: d.id, decision: 'rejected' })}>Reject</button>
                 </span>
               )}
@@ -74,11 +75,11 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
 
       <div className="flex gap-2 mt-3">
         {!hasPending && !hasApproved && (
-          <button className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs"
+          <button className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs"
                   onClick={() => setDialogOpen(true)}>Request deviation</button>
         )}
         {hasApproved && (
-          <button className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs"
+          <button className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs"
                   onClick={onRetry}>Retry transition</button>
         )}
       </div>

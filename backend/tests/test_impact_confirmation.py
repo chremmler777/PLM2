@@ -187,13 +187,15 @@ async def test_kickoff_proceeds_after_confirmation(
         assert item.resulting_revision_id is not None
 
 
-async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departments):
+async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
+                                   session_factory):
     """Drive a real change all the way to 'approved' through the HTTP API
     (reuses test_changes.py's flow helper) so the impact_not_confirmed guard
     and its deviation bypass are exercised through the actual endpoint."""
     from tests.test_changes import _advance_to_quoted, _transition
 
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted"}, headers=eng_auth)
@@ -205,8 +207,10 @@ async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departmen
 
 
 async def test_kickoff_blocked_via_api_with_reason(
-        client, eng_auth, admin_auth, seed, departments, check_wf_standards):
-    cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments)
+        client, eng_auth, admin_auth, seed, departments, check_wf_standards,
+        session_factory):
+    cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
+                                         session_factory)
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",
                                 json={"to_status": "in_implementation"}, headers=eng_auth)
     assert blocked.status_code == 400
@@ -214,8 +218,10 @@ async def test_kickoff_blocked_via_api_with_reason(
 
 
 async def test_deviation_bypasses_impact_confirmation_guard(
-        client, eng_auth, admin_auth, seed, departments, check_wf_standards):
-    cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments)
+        client, eng_auth, admin_auth, seed, departments, check_wf_standards,
+        session_factory):
+    cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
+                                         session_factory)
     dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
         "to_status": "in_implementation", "reason": "kickoff before R&D signs off"},
         headers=eng_auth)).json()

@@ -23,7 +23,7 @@ change_affected_plants = Table(
 CHANGE_TYPES = ("physical_part", "tooling", "document_spec", "process_im", "packaging")
 CHANGE_PRIORITIES = ("low", "medium", "high", "critical")
 CHANGE_STATUSES = (
-    "captured", "in_assessment", "costing", "quoted", "approved",
+    "captured", "scoping", "in_assessment", "costing", "quoted", "approved",
     "in_implementation", "in_validation", "released", "closed",
     "on_hold", "rejected", "cancelled",
 )
@@ -44,6 +44,7 @@ _TASK_TO_ASSESSMENT_STATUS = {
 }
 ROUTING_DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 IMPLEMENTATION_MODES = ("integrated", "separational")
+MEETING_DECISIONS = ("proceed", "reject", "needs_info")
 
 
 class ChangeRequest(Base):
@@ -99,6 +100,14 @@ class ChangeRequest(Base):
     required_by_set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     required_by_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Internal branch of the costing path split: PM approves the summation
+    # total for non-customer-relevant changes (no quote step). Amount is a
+    # snapshot of the summation grand total at approval time (P&L hook).
+    internal_approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    internal_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    internal_approved_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    internal_approval_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Task 18: Engineering (R&D) owns the affected-items decision. Set together
     # by POST /impact/confirm; cleared together whenever the impacted-item set
     # changes afterwards (re-confirmation required). in_implementation's soft
@@ -148,12 +157,17 @@ class ChangeRequest(Base):
     )
     gates: Mapped[list["ChangeGate"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeGate.id",
     )
     transition_deviations: Mapped[list["ChangeTransitionDeviation"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
     )
     affected_plants: Mapped[list["Plant"]] = relationship(
         secondary=change_affected_plants, lazy="selectin",
+    )
+    meetings: Mapped[list["ChangeMeeting"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeMeeting.id",
     )
 
 
@@ -197,6 +211,9 @@ class ChangeAssessment(Base):
     contact_person: Mapped[str | None] = mapped_column(String(120), nullable=True)
     approval_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     lifecycle_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Time the assessor spent on the feasibility check itself (effort tracking).
+    effort_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     stage_order: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     rasic_letter: Mapped[str] = mapped_column(String(1), default="R", server_default="R")
@@ -305,6 +322,29 @@ class ChangeAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="attachments", foreign_keys=[change_id])
+
+
+class ChangeMeeting(Base):
+    """A pre-determination (scoping) meeting record. The 'proceed' decision is
+    what kicks off assessment; its selected_department_ids scope the stage-1
+    fan-out. A change may hold several meetings (needs_info -> follow-up)."""
+    __tablename__ = "change_meetings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+
+    meeting_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    participants: Mapped[list] = mapped_column(JSON, default=list)   # [{"name": str, "user_id": int|None}]
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(20), nullable=True)  # proceed|reject|needs_info
+    selected_department_ids: Mapped[list] = mapped_column(JSON, default=list)
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
 
 
 class ChangeChangelog(Base):

@@ -11,7 +11,7 @@ from app.models.workflow import (
 from app.models.change import ChangeRequest, ChangeAssessment, ChangeRoutingStandard
 from app.services.workflow_service import WorkflowService
 from app.services.wf_seed_service import seed_change_workflows
-from tests.conftest import approve_gates, ADMIN_PASSWORD
+from tests.conftest import approve_gates, ADMIN_PASSWORD, advance_to_assessment
 
 
 async def _mk_template(session):
@@ -207,9 +207,7 @@ async def test_submit_spawns_assessment_instance_with_linked_stage1(
          "part_number": "ART-SP", "name": "ART-SP", "part_type": "internal_mfg",
          "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items", json={"part_id": p["id"]}, headers=auth)
-    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
-                            json={"to_status": "in_assessment"}, headers=auth)
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, auth, session_factory, c["id"])
 
     # Assert via a fresh session that submit spawned the change-scoped instance and
     # stage-1 assessments linked lazily to its tasks; stage-2 rows remain unlinked.
@@ -249,7 +247,7 @@ async def _admin_auth(client):
     return {"Authorization": f"Bearer {tok}"}
 
 
-async def _change_in_assessment(client, auth, seed, part_number):
+async def _change_in_assessment(client, auth, seed, part_number, session_factory):
     """Create a physical_part change, approve gates, add an impacted part, and
     transition it into in_assessment (spawning the change-scoped instance)."""
     body = {"project_id": seed["project_id"], "title": "t", "change_type": "physical_part",
@@ -261,9 +259,7 @@ async def _change_in_assessment(client, auth, seed, part_number):
          "item_category": "article"}, headers=auth)).json()
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items",
                       json={"part_id": p["id"]}, headers=auth)
-    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
-                            json={"to_status": "in_assessment"}, headers=auth)
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, auth, session_factory, c["id"])
     return c["id"]
 
 
@@ -274,7 +270,7 @@ async def test_ra_submission_completes_task_and_engine_advances(
     which advances the instance to stage 2 and lazily links the stage-2 (A) row."""
     dep = await _seed_two_stage_standard(session_factory)
     auth = await _admin_auth(client)
-    cid = await _change_in_assessment(client, auth, seed, "ART-RA")
+    cid = await _change_in_assessment(client, auth, seed, "ART-RA", session_factory)
 
     # Grant the submitting user membership in stage-1's R department. complete_task
     # does not gate on membership today, but this keeps the fixture honest with the
@@ -314,7 +310,7 @@ async def test_sc_submission_is_payload_only(client, session_factory, seed):
     task stays 'noted', the stage does not advance."""
     dep = await _seed_two_stage_standard(session_factory)
     auth = await _admin_auth(client)
-    cid = await _change_in_assessment(client, auth, seed, "ART-SC")
+    cid = await _change_in_assessment(client, auth, seed, "ART-SC", session_factory)
 
     # E-D2 is C (non-blocking) in stage 1, linked to a 'noted' task.
     res = await client.post(f"/api/v1/changes/{cid}/assessments",
@@ -346,7 +342,7 @@ async def test_future_stage_only_submit_is_payload_only_no_advance(
     starts (its effective_status will read through the fresh task then)."""
     dep = await _seed_two_stage_standard(session_factory)
     auth = await _admin_auth(client)
-    cid = await _change_in_assessment(client, auth, seed, "ART-FS")
+    cid = await _change_in_assessment(client, auth, seed, "ART-FS", session_factory)
 
     # E-D3 (A) exists only in stage 2, which has NOT started — its row is unlinked.
     res = await client.post(f"/api/v1/changes/{cid}/assessments",

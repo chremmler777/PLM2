@@ -3,6 +3,8 @@ import { render, screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ChangeDetailPage from './ChangeDetailPage'
+import { changesApi } from '../api/changes'
+import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
 
 // ChangeDetailPage fetches via changesApi (get/getImplementation/getGates/listDeviations),
@@ -19,15 +21,16 @@ const { change } = vi.hoisted(() => ({
     reason: null,
     change_type: 'physical_part',
     priority: 'medium',
-    status: 'in_assessment',
-    lead_id: null,
+    status: 'in_assessment' as ChangeDetail['status'],
+    lead_id: null as number | null,
     lead_name: null,
     raised_by: 1,
     customer_response: 'pending',
-    pm_signed_by: null,
-    quality_signed_by: null,
+    customer_relevant: undefined as boolean | undefined,
+    pm_signed_by: null as number | null,
+    quality_signed_by: null as number | null,
     estimated_cost: null,
-    quoted_price: null,
+    quoted_price: null as number | null,
     created_at: '2026-07-01T00:00:00',
     updated_at: '2026-07-01T00:00:00',
     required_by_date: null,
@@ -47,8 +50,12 @@ vi.mock('../api/changes', () => ({
     listDeviations: vi.fn().mockResolvedValue([]),
     myActions: vi.fn().mockResolvedValue({ actions: [], memberships: [] }),
     uploadAttachment: vi.fn(),
+    signOff: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+    customerResponse: vi.fn().mockResolvedValue({}),
   },
 }))
+vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
 vi.mock('../api/plants', () => ({
   plantsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
@@ -56,10 +63,13 @@ vi.mock('../api/client', () => ({
   default: { get: vi.fn().mockResolvedValue({ data: [] }) },
 }))
 vi.mock('../hooks/queries/useWorkflows', () => ({
-  useDepartments: () => ({ data: [] }),
+  useDepartments: vi.fn(() => ({ data: [] })),
+}))
+const authState = vi.hoisted(() => ({
+  current: { isAdmin: false, role: 'engineer', userId: null as number | null },
 }))
 vi.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdmin: false, role: 'engineer' }),
+  useAuth: () => authState.current,
 }))
 
 vi.mock('../components/changes/AssessmentRouting', () => ({ default: () => <div>mock-assessment-routing</div> }))
@@ -89,9 +99,13 @@ function wrap(initialPath: string) {
 }
 
 describe('ChangeDetailPage URL-driven tabs', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
 
-  it('renders with the D1 tab active when ?tab=d1', async () => {
+  it('renders with the D1 tab active when ?tab=d1 for an admin', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1?tab=d1')
     const d1Button = await screen.findByRole('button', { name: 'D1' })
     expect(d1Button.className).toContain('border-b-2')
@@ -103,5 +117,180 @@ describe('ChangeDetailPage URL-driven tabs', () => {
     const overviewButton = await screen.findByRole('button', { name: 'Overview' })
     expect(overviewButton.className).toContain('border-b-2')
     expect(screen.queryByText('mock-d1-panel')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage governance tab gating', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.lead_id = null
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  it('hides D1/Audit buttons and the Governance group for a non-lead, non-admin viewer', async () => {
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.queryByRole('button', { name: 'D1' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+    expect(screen.queryByText('Governance')).toBeNull()
+  })
+
+  it('shows the Governance group with D1 and Audit for an admin', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+
+  it('falls back to overview content for an unauthorized ?tab=audit deep link', async () => {
+    wrap('/changes/1?tab=audit')
+    const overviewButton = await screen.findByRole('button', { name: 'Overview' })
+    expect(overviewButton.className).toContain('border-b-2')
+    expect(screen.queryByText('mock-audit-timeline')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+  })
+
+  it('shows the Governance group with D1 and Audit for the change lead', async () => {
+    change.lead_id = 42
+    authState.current = { isAdmin: false, role: 'engineer', userId: 42 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+
+  it('shows the Governance group with D1 and Audit for a Quality department member', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Overview' })
+    expect(screen.getByText('Governance')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+  })
+})
+
+describe('ChangeDetailPage commercial tab sign-off (F8)', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    change.pm_signed_by = null
+    change.quality_signed_by = null
+  })
+
+  it('disables the Quality sign-off button and shows the 4-eyes hint when the same user already PM-signed', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    change.pm_signed_by = 42
+    change.quality_signed_by = null
+    wrap('/changes/1?tab=commercial')
+    const qualityButton = await screen.findByRole('button', { name: /Quality sign-off/ })
+    expect(qualityButton).toHaveProperty('disabled', true)
+    expect(screen.getByText('PM and Quality sign-off must be different users')).toBeDefined()
+  })
+
+  it('leaves both sign-off buttons enabled when no one has signed yet', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    change.pm_signed_by = null
+    change.quality_signed_by = null
+    wrap('/changes/1?tab=commercial')
+    const pmButton = await screen.findByRole('button', { name: /PM sign-off/ })
+    const qualityButton = screen.getByRole('button', { name: /Quality sign-off/ })
+    expect(pmButton).toHaveProperty('disabled', false)
+    expect(qualityButton).toHaveProperty('disabled', false)
+    expect(screen.queryByText('PM and Quality sign-off must be different users')).toBeNull()
+  })
+
+  it('hides both sign-off buttons for a non-member, non-admin, non-PM viewer', async () => {
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    await screen.findByText(/Customer response/)
+    expect(screen.queryByRole('button', { name: /PM sign-off/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Quality sign-off/ })).toBeNull()
+  })
+
+  it('shows only the Quality sign-off button for a Quality department member', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    const qualityButton = await screen.findByRole('button', { name: /Quality sign-off/ })
+    expect(qualityButton).toBeDefined()
+    expect(screen.queryByRole('button', { name: /PM sign-off/ })).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage commercial tab quoted-price and internal-approval authz', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    change.lead_id = null
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  it('hides the quoted-price edit control for a non-lead, non-Sales, non-admin viewer', async () => {
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'costing'
+    change.customer_relevant = true
+    change.quoted_price = 1000
+    wrap('/changes/1?tab=commercial')
+    await screen.findByText(/Quoted price/)
+    expect(screen.queryByRole('spinbutton')).toBeNull()
+  })
+
+  it('shows the quoted-price edit control for the change lead', async () => {
+    change.lead_id = 5
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'costing'
+    change.customer_relevant = true
+    change.quoted_price = 1000
+    wrap('/changes/1?tab=commercial')
+    await screen.findByText(/Quoted price/)
+    expect(screen.queryByRole('spinbutton')).not.toBeNull()
+  })
+
+  it('hides the internal-approve button for a non-PM, non-admin viewer', async () => {
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'costing'
+    change.customer_relevant = false
+    wrap('/changes/1?tab=commercial')
+    await screen.findByText(/Project Manager department member/)
+    expect(screen.queryByText('Approve internal costs')).toBeNull()
+  })
+
+  it('shows the internal-approve button for a Project Manager department member', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'costing'
+    change.customer_relevant = false
+    wrap('/changes/1?tab=commercial')
+    expect(await screen.findByText('Approve internal costs')).toBeDefined()
   })
 })

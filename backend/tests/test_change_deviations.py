@@ -104,6 +104,10 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
 async def test_blocked_transition_requires_approved_deviation(
         client, eng_auth, admin_auth, seed):
     c = await _change(client, eng_auth, seed)  # no impacted items -> guard blocks
+    # captured -> scoping is the legal edge; the guard then blocks scoping -> in_assessment
+    scop = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                             json={"to_status": "scoping"}, headers=eng_auth)
+    assert scop.status_code == 200, scop.text
     blocked = await client.post(f"/api/v1/changes/{c['id']}/transition",
                                 json={"to_status": "in_assessment"}, headers=eng_auth)
     assert blocked.status_code == 400

@@ -2,7 +2,9 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import approve_gates, force_complete_check_workflows
+from tests.conftest import (
+    approve_gates, force_complete_check_workflows, advance_to_assessment, login,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -21,6 +23,14 @@ async def test_create_change_assigns_number_and_captured_status(client, eng_auth
     assert data["status"] == "captured"
     assert data["change_number"].startswith("CR-")
     assert data["change_type"] == "physical_part"
+
+
+async def test_create_change_accepts_customer_relevant(client, eng_auth, seed):
+    data = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=True)
+    assert data["customer_relevant"] is True
+
+    data2 = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=False)
+    assert data2["customer_relevant"] is False
 
 
 async def test_list_and_get_change(client, eng_auth, seed):
@@ -46,6 +56,8 @@ async def test_transition_blocked_without_impacted_items(client, eng_auth, seed)
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
+    res = await _transition(client, eng_auth, change["id"], "scoping")
+    assert res.status_code == 200, res.text
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
     assert "deviation" in res.json()["detail"].lower()
@@ -122,7 +134,8 @@ from app.models.workflow import Department, UserDepartment
 @pytest_asyncio.fixture
 async def departments(session_factory, seed):
     async with session_factory() as s:
-        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"]
+        names = ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales",
+                 "Project Manager"]
         ids = {}
         for i, n in enumerate(names):
             d = Department(name=n, flow_type="action", is_active=True, sort_order=i)
@@ -138,7 +151,8 @@ async def departments(session_factory, seed):
         return ids
 
 
-async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments):
+async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, departments,
+                                                      session_factory):
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
@@ -146,8 +160,7 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
     # enter assessment -> assessments auto-created
-    res = await _transition(client, eng_auth, change["id"], "in_assessment")
-    assert res.status_code == 200, res.text
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)
     assessments = res.json()["assessments"]
     assert len(assessments) >= 1
@@ -165,13 +178,16 @@ async def test_assessment_created_on_enter_and_submit(client, eng_auth, seed, de
     assert res.status_code == 200, res.text
 
 
-async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
+async def _advance_to_quoted(client, auth, seed, departments, admin_auth, session_factory):
     change = await _create_change(client, auth, seed["project_id"], lead_id=seed["engineer_id"])
     await approve_gates(client, auth, change["id"])
+    # customer-relevant so the change follows the quote path (quoted -> approved)
+    await client.patch(f"/api/v1/changes/{change['id']}",
+                       json={"customer_relevant": True}, headers=auth)
     part_id = await _make_part(client, auth, seed["project_id"], f"ART-Q{change['id']}")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=auth)
-    await _transition(client, auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=auth)
     for a in res.json()["assessments"]:
         await client.post(f"/api/v1/changes/{change['id']}/assessments",
@@ -185,9 +201,10 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth):
 
 
 async def test_approve_blocked_until_customer_and_dual_signoff(
-    client, eng_auth, admin_auth, seed, departments
+    client, eng_auth, admin_auth, seed, departments, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     # cannot approve yet (no customer acceptance, no sign-off) — hard gate, no override
     res = await _transition(client, eng_auth, cid, "approved")
@@ -215,9 +232,10 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
 
 
 async def test_implementation_spawns_ecn_revision_per_item(
-    client, eng_auth, admin_auth, seed, departments, check_wf_standards
+    client, eng_auth, admin_auth, seed, departments, check_wf_standards, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted"}, headers=eng_auth)
@@ -237,7 +255,8 @@ async def test_implementation_spawns_ecn_revision_per_item(
 async def test_release_activates_revisions_and_stamps_eng_level(
     client, eng_auth, admin_auth, seed, departments, check_wf_standards, session_factory
 ):
-    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth)
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
                       json={"response": "accepted"}, headers=eng_auth)
@@ -315,7 +334,7 @@ async def test_my_change_tasks_lists_pending_assessments(
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-MT")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
-    await _transition(client, eng_auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
 
     res = await client.get("/api/v1/changes/my-tasks", headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -355,7 +374,7 @@ async def test_assessment_response_reads_execution_from_task(
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-RT")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
-    await _transition(client, eng_auth, change["id"], "in_assessment")
+    await advance_to_assessment(client, eng_auth, session_factory, change["id"])
 
     async with session_factory() as s:
         a = (await s.execute(select(ChangeAssessment).where(
@@ -480,3 +499,127 @@ async def test_change_response_resolves_lead_name(client, eng_auth, seed):
     res = await client.get(f"/api/v1/changes/{change_id}", headers=eng_auth)
     assert res.status_code == 200
     assert res.json()["lead_name"]  # resolved full name, not an id
+
+
+async def test_customer_relevant_locked_after_scoping(
+    client, eng_auth, admin_auth, seed, departments, session_factory
+):
+    """customer_relevant may only flip during capture/scoping — once the
+    change is quoted, changing the value is rejected (400); the same-value
+    PATCH stays a no-op success at any status; and it's still editable while
+    still in scoping."""
+    change = await _advance_to_quoted(
+        client, eng_auth, seed, departments, admin_auth, session_factory
+    )
+    cid = change["id"]
+
+    # Change is quoted and customer_relevant=True: flipping the value 400s.
+    res = await client.patch(
+        f"/api/v1/changes/{cid}",
+        json={"customer_relevant": False},
+        headers=eng_auth,
+    )
+    assert res.status_code == 400, res.text
+    assert "capture or scoping" in res.json()["detail"]
+
+    # Same-value PATCH is idempotent and stays allowed.
+    res = await client.patch(
+        f"/api/v1/changes/{cid}",
+        json={"customer_relevant": True},
+        headers=eng_auth,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is True
+
+    # A change still in scoping can freely change customer_relevant.
+    change2 = await _create_change(client, eng_auth, seed["project_id"],
+                                   customer_relevant=False,
+                                   lead_id=seed["engineer_id"])
+    cid2 = change2["id"]
+    await approve_gates(client, eng_auth, cid2)
+    res = await _transition(client, eng_auth, cid2, "scoping")
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/{cid2}", headers=eng_auth)
+    assert res.json()["status"] == "scoping"
+
+    res = await client.patch(
+        f"/api/v1/changes/{cid2}",
+        json={"customer_relevant": True},
+        headers=eng_auth,
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is True
+
+
+async def _make_user(session_factory, org_id, email, password, username):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        user = User(organization_id=org_id, username=username, email=email,
+                    full_name=username, hashed_password=get_password_hash(password),
+                    role="engineer", is_active=True, mfa_enabled=False)
+        s.add(user)
+        await s.commit()
+        await s.refresh(user)
+        return user.id
+
+
+async def test_sign_off_department_gating(
+    client, eng_auth, admin_auth, seed, departments, session_factory,
+):
+    """Task: Quality & PM sign-off are department-gated (admin bypasses)."""
+    change = await _advance_to_quoted(client, eng_auth, seed, departments, admin_auth,
+                                      session_factory)
+    cid = change["id"]
+    await client.post(f"/api/v1/changes/{cid}/customer-response",
+                      json={"response": "accepted"}, headers=eng_auth)
+
+    # eng is a Quality department member (departments fixture) -> quality sign-off OK
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "quality"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    # a user with no department memberships is refused pm sign-off
+    outsider_id = await _make_user(session_factory, seed["org_id"],
+                                   "outsider@test.io", "outsider-secret-1", "outsider")
+    outsider_auth = await login(client, "outsider@test.io", "outsider-secret-1")
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "pm"}, headers=outsider_auth)
+    assert res.status_code == 403, res.text
+
+    # admin bypasses department membership entirely
+    res = await client.post(f"/api/v1/changes/{cid}/sign-off",
+                            json={"role": "pm"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_quoted_price_role_gating(
+    client, eng_auth, admin_auth, seed, departments, session_factory,
+):
+    """Task: quoted_price PATCH is role-gated — admin, the change lead, or a
+    Sales department member may set it; others are refused."""
+    lead_id = await _make_user(session_factory, seed["org_id"],
+                               "leaduser@test.io", "lead-secret-12", "leaduser")
+    lead_auth = await login(client, "leaduser@test.io", "lead-secret-12")
+    change = await _create_change(client, admin_auth, seed["project_id"], lead_id=lead_id)
+    cid = change["id"]
+
+    # unrelated user (not lead, not Sales, not admin) is refused
+    bystander_id = await _make_user(session_factory, seed["org_id"],
+                                    "bystander@test.io", "bystander-secret-1", "bystander")
+    bystander_auth = await login(client, "bystander@test.io", "bystander-secret-1")
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 500.0}, headers=bystander_auth)
+    assert res.status_code == 403, res.text
+
+    # the change lead may set it
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 500.0}, headers=lead_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["quoted_price"] == 500.0
+
+    # a Sales department member (eng, from the departments fixture) may set it too
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"quoted_price": 750.0}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["quoted_price"] == 750.0

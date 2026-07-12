@@ -212,7 +212,8 @@ describe('SummationView', () => {
     );
     render(<SummationView changeId={1} />, { wrapper });
     await waitFor(() => {
-      expect(screen.getByText('Dept #5')).toBeDefined();
+      // No department list loaded in this test -> name falls back to '#<id>'.
+      expect(screen.getByText('#5')).toBeDefined();
     });
   });
 

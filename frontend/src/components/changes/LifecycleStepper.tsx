@@ -1,9 +1,17 @@
-import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES } from '../../lib/changeStatus'
+import type { ChangeStatus } from '../../types/change'
+import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, branchStepOrder } from '../../lib/changeStatus'
+import { t } from '../../i18n/cmLabels'
 
-export default function LifecycleStepper({ status }: { status: ChangeStatus }) {
+export default function LifecycleStepper({
+  status,
+  customerRelevant,
+}: {
+  status: ChangeStatus
+  customerRelevant?: boolean
+}) {
   const offPath = OFF_PATH_STATUSES.includes(status)
-  const idx = CHANGE_STATUS_ORDER.indexOf(status)
+  const order = branchStepOrder(customerRelevant)
+  const idx = order.indexOf(status)
   return (
     <div className="flex items-center gap-1 text-xs flex-wrap">
       {offPath && (
@@ -11,16 +19,26 @@ export default function LifecycleStepper({ status }: { status: ChangeStatus }) {
           {STATUS_LABELS[status]}
         </span>
       )}
-      {CHANGE_STATUS_ORDER.map((s, i) => (
-        <div key={s} className="flex items-center gap-1">
-          <span className={`px-2 py-1 rounded-full ${
-            offPath ? 'bg-slate-800 text-slate-600'
-            : i < idx ? 'bg-emerald-900 text-emerald-200'
-            : i === idx ? 'bg-sky-600 text-white'
-            : 'bg-slate-800 text-slate-500'}`}>{STATUS_LABELS[s]}</span>
-          {i < CHANGE_STATUS_ORDER.length - 1 && <span className="text-slate-600">→</span>}
-        </div>
-      ))}
+      {order.map((s, i) => {
+        const hint = t(`stepper.hint.${s}`)
+        return (
+          <div key={s} className="flex items-center gap-1">
+            <div className="flex flex-col items-center">
+              <span
+                title={hint}
+                className={`px-2 py-1 rounded-full ${
+                  offPath ? 'bg-slate-800 text-slate-600'
+                  : i < idx ? 'bg-emerald-900 text-emerald-200'
+                  : i === idx ? 'bg-sky-600 text-white'
+                  : 'bg-slate-800 text-slate-500'}`}>{STATUS_LABELS[s]}</span>
+              {!offPath && i === idx && (
+                <span className="text-[10px] text-slate-400">{hint}</span>
+              )}
+            </div>
+            {i < order.length - 1 && <span className="text-slate-600">→</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }

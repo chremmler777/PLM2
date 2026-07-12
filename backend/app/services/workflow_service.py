@@ -117,6 +117,11 @@ class WorkflowService:
 
         first_stage = sorted(template.stages, key=lambda s: s.stage_order)[0]
         await WorkflowService._create_stage_tasks(db, instance, first_stage)
+        # A change-scoped stage 1 can be born gateless (its only actionable rows
+        # were already payload-submitted, or scoping left it with no R/A task):
+        # cascade immediately so the instance advances instead of stalling on an
+        # already-satisfied stage.
+        await WorkflowService._maybe_advance_stage(db, instance, actor_id=started_by_id)
 
         await WorkflowService._audit(db, instance, "wf_started", started_by_id,
                                      {"template_id": template_id,
@@ -172,8 +177,31 @@ class WorkflowService:
         actionable_departments: set[int] = set()
         fyi_departments: set[int] = set()
         tasks_created: list[WfInstanceTask] = []
+
+        # Change-scoped instances execute the change's routing *snapshot*, which
+        # may be scoped down from the template (scoping-meeting department
+        # selection, deviations). Skip template assignments absent from the
+        # snapshot so engine tasks never outnumber the governed routing.
+        allowed_pairs: set | None = None
+        if instance.change_id is not None:
+            from app.models.change import ChangeRouting
+            routing = (await db.execute(
+                select(ChangeRouting).where(
+                    ChangeRouting.change_id == instance.change_id)
+            )).scalar_one_or_none()
+            if routing is not None:
+                snap_stage = next(
+                    (st for st in routing.standard_snapshot.get("stages", [])
+                     if st["stage_order"] == stage.stage_order), None)
+                if snap_stage is not None:
+                    allowed_pairs = {(d["department_id"], d["rasic_letter"])
+                                     for d in snap_stage["departments"]}
+
         for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
             for rasic in step.rasic_assignments:
+                if allowed_pairs is not None and \
+                        (rasic.department_id, rasic.rasic_letter) not in allowed_pairs:
+                    continue
                 is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
                 if is_actionable:
                     actionable_departments.add(rasic.department_id)
