@@ -25,3 +25,4 @@ frontend/.playwright-cli/
 *.db-shm
 *.db-wal
 backend/app.db
+backend/plm-before-reset.dump
