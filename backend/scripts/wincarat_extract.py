@@ -94,9 +94,12 @@ def extract(cur) -> dict:
     # 3b) GLOBAL article name/type map (all ARTIKEL) — used to resolve BOM
     #     children that live outside the active projects (raw material 40-*,
     #     clips 50-*, hardware 65-*), whose names sit on their own article row.
+    #     EIGENKZ (own-manufacture flag) is the make/buy signal: 1 = in-house
+    #     (internal_mfg / sub_assembly), 0 = bought (purchased).
     art_meta = {r["ARTNR"]: {"matchcode": r.get("MATCHCODE") or r.get("TEXT"),
-                             "teileart": r.get("TEILEART")}
-                for r in query(cur, "select ARTNR, MATCHCODE, TEXT, TEILEART from KWA.ARTIKEL")}
+                             "teileart": r.get("TEILEART"),
+                             "eigenkz": r.get("EIGENKZ")}
+                for r in query(cur, "select ARTNR, MATCHCODE, TEXT, TEILEART, EIGENKZ from KWA.ARTIKEL")}
 
     # 4) all articles for the active projects (one bulk pull)
     #    Oracle IN-list cap is 1000; chunk the project numbers.
@@ -107,7 +110,7 @@ def extract(cur) -> dict:
         placeholders = ",".join(f":p{j}" for j in range(len(chunk)))
         articles += query(cur, f"""
             select ARTNR, MATCHCODE, TEXT, KDARTNR, KDNR, PROJEKTNR, TEILEART,
-                   STUELINR, ZEICHNR, GEWICHTNETTO, ZUSTAND, LETZTERLIEFERANT
+                   STUELINR, ZEICHNR, GEWICHTNETTO, ZUSTAND, LETZTERLIEFERANT, EIGENKZ
               from KWA.ARTIKEL where PROJEKTNR in ({placeholders})
         """, **binds)
 
@@ -142,6 +145,7 @@ def extract(cur) -> dict:
             "zeichnr": a.get("ZEICHNR"),
             "gewichtnetto": a.get("GEWICHTNETTO"),
             "zustand": a.get("ZUSTAND"),
+            "eigenkz": a.get("EIGENKZ"),
         }
         if a.get("TEILEART") == "W" and artnr in tools:
             t = tools[artnr]
@@ -163,6 +167,7 @@ def extract(cur) -> dict:
                 "name": (art_meta.get(b.get("CHILD_ARTNR"), {}).get("matchcode")
                          or b.get("BENENNUNG")),
                 "child_teileart": art_meta.get(b.get("CHILD_ARTNR"), {}).get("teileart"),
+                "child_eigenkz": art_meta.get(b.get("CHILD_ARTNR"), {}).get("eigenkz"),
                 "verschleissteil": bool(b.get("VERSCHLEISSTEIL")),
                 "ersatzteil": bool(b.get("ERSATZTEIL")),
             }
