@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((res) => {
         if (!active) return;
         setUsername(res.data.username ?? null);
-        setUserId(res.data.sub ? Number(res.data.sub) : null);
+        setUserId(res.data.user_id ?? null);
         setRoles(res.data.plm2_roles ?? []);
         setIsAuthenticated(true);
       })

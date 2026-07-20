@@ -57,6 +57,11 @@ async def get_current_user(
     if "plm2_Admin" not in hub_roles and request.method not in SAFE_METHODS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
 
+    # NOTE: the AdminPanel hub token currently mints {sub, username, department,
+    # roles, auth_time} with NO "email" claim, so this always falls through to
+    # payload["username"] in practice — the bridge is effectively keyed on the
+    # hub username today. "email" is read first only for forward-compatibility
+    # if/when the hub starts including it; no deeper re-keying is done here.
     email = payload.get("email") or payload.get("username")
     if not email:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing email/username")

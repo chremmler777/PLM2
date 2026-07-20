@@ -28,6 +28,7 @@ async def me(request: Request, user=Depends(get_current_user)) -> dict:
     payload = getattr(request.state, "hub_payload", {})
     return {
         "sub": payload.get("sub"),
+        "user_id": user.id,
         "username": user.username,
         "roles": payload.get("roles", []),
         "plm2_roles": plm2_roles(payload),

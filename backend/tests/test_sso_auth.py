@@ -9,6 +9,7 @@ async def test_me_returns_identity_and_plm2_roles(client, seed):
     body = r.json()
     assert body["plm2_roles"] == ["plm2_Admin"]
     assert body["system"] == "plm2"
+    assert body["user_id"] == seed["admin_id"]
 
 
 @pytest.mark.asyncio
@@ -99,3 +100,39 @@ async def test_auto_provision_disambiguates_username_collision(client, seed, ses
         new_user = (await s.execute(select(User).where(User.email == "other@ktx.io"))).scalar_one()
         assert new_user.username != "collide"
         assert new_user.username.startswith("collide")
+
+
+@pytest.mark.asyncio
+async def test_no_email_claim_bridges_on_username(client, seed, session_factory):
+    """AdminPanel hub tokens carry no 'email' claim today; the bridge falls back
+    to 'username' as the effective key. Provisioning must be idempotent on it."""
+    from datetime import datetime, timedelta
+    from jose import jwt
+    from sqlalchemy import select
+    from app.models.entities import User
+    from app.core.config import get_settings
+
+    s_cfg = get_settings()
+
+    def _token():
+        return jwt.encode(
+            {
+                "sub": "42",
+                "username": "legacyless",
+                "roles": [{"name": "plm2_Admin", "system": s_cfg.role_system}],
+                "exp": datetime.utcnow() + timedelta(hours=1),
+            },
+            s_cfg.jwt_secret, algorithm=s_cfg.jwt_algorithm,
+        )
+
+    headers = {"Cookie": f"{s_cfg.jwt_cookie_name}={_token()}"}
+
+    r1 = await client.get("/api/v1/auth/me", headers=headers)
+    assert r1.status_code == 200, r1.text
+
+    r2 = await client.get("/api/v1/auth/me", headers={"Cookie": f"{s_cfg.jwt_cookie_name}={_token()}"})
+    assert r2.status_code == 200, r2.text
+
+    async with session_factory() as s:
+        rows = (await s.execute(select(User).where(User.email == "legacyless"))).scalars().all()
+        assert len(rows) == 1
