@@ -1,58 +1,89 @@
-"""Authentication dependencies for FastAPI route protection."""
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Authentication dependencies for FastAPI route protection (shared-cookie SSO)."""
+from fastapi import Depends, HTTPException, Request, status
+from jose import jwt, JWTError
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models import User, get_db
-from app.auth import verify_token
+from app.models.entities import Organization
 
-security = HTTPBearer()
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+_HUB_MANAGED = "!"  # sentinel hashed_password for auto-provisioned hub users
+
+
+def plm2_roles(payload: dict) -> list[str]:
+    system = get_settings().role_system
+    return [
+        r.get("name")
+        for r in payload.get("roles", [])
+        if isinstance(r, dict) and r.get("system") == system
+    ]
+
+
+def _local_role(hub_roles: list[str]) -> str:
+    return "admin" if "plm2_Admin" in hub_roles else "viewer"
+
+
+async def _default_org_id(db: AsyncSession) -> int:
+    org = (await db.execute(select(Organization).order_by(Organization.id))).scalars().first()
+    if org is None:
+        org = Organization(name="KTX", code="ktx", is_active=True)
+        db.add(org)
+        await db.flush()
+    return org.id
 
 
 async def get_current_user(
-    credentials=Depends(security),
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Extract and validate current user from JWT bearer token."""
-    token = credentials.credentials
-    payload = verify_token(token)
-
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user_id_str: str | None = payload.get("sub")
-    if user_id_str is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+    """Validate the shared AdminPanel JWT cookie and bridge to a local User row."""
+    settings = get_settings()
+    token = request.cookies.get(settings.jwt_cookie_name)
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing access_token cookie")
     try:
-        user_id = int(user_id_str)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+
+    hub_roles = plm2_roles(payload)
+    if not hub_roles:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No plm2 role in token")
+
+    # plm2_Viewer is read-only: block non-safe methods unless the caller is plm2_Admin.
+    if "plm2_Admin" not in hub_roles and request.method not in SAFE_METHODS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "plm2_Viewer is read-only")
+
+    email = payload.get("email") or payload.get("username")
+    if not email:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token missing email/username")
+
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if user is None:
+        user = User(
+            organization_id=await _default_org_id(db),
+            email=email,
+            username=(payload.get("username") or email),
+            full_name=payload.get("username") or email,
+            hashed_password=_HUB_MANAGED,
+            role=_local_role(hub_roles),
+            is_active=True,
+            mfa_enabled=False,
         )
+        db.add(user)
+        await db.flush()
+        await db.commit()
+    elif user.hashed_password == _HUB_MANAGED and user.role != _local_role(hub_roles):
+        # keep hub-provisioned users' local role in sync; never touch real local users
+        user.role = _local_role(hub_roles)
+        await db.commit()
 
-    # Fetch user from database
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "User is inactive")
 
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+    request.state.hub_payload = payload
     return user
 
 

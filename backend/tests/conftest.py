@@ -1,8 +1,12 @@
 """Shared test fixtures: isolated SQLite DB per test, app client, seeded users."""
+from datetime import datetime, timedelta
+
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from jose import jwt as _jwt
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
+from app.core.config import get_settings
 from app.main import app
 from app.models import get_db
 from app.models.database import Base
@@ -83,11 +87,26 @@ async def client(session_factory, seed):
     app.dependency_overrides.clear()
 
 
-async def login(client: AsyncClient, email: str, password: str) -> dict:
-    res = await client.post("/api/v1/auth/login", json={"email": email, "password": password})
-    assert res.status_code == 200, res.text
-    token = res.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+def _mint_cookie(email: str, admin: bool = True) -> dict:
+    s = get_settings()
+    role = "plm2_Admin" if admin else "plm2_Viewer"
+    token = _jwt.encode(
+        {
+            "sub": "1",
+            "email": email,
+            "username": email.split("@")[0],
+            "roles": [{"name": role, "system": s.role_system}],
+            "exp": datetime.utcnow() + timedelta(hours=1),
+        },
+        s.jwt_secret,
+        algorithm=s.jwt_algorithm,
+    )
+    return {"Cookie": f"{s.jwt_cookie_name}={token}"}
+
+
+async def login(client, email: str, password: str | None = None, admin: bool = True) -> dict:
+    # SSO mode: password ignored; returns a Cookie header for the shared JWT.
+    return _mint_cookie(email, admin=admin)
 
 
 async def record_proceed_meeting(session_factory, change_id: int,
