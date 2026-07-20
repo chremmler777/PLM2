@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # Shared-cookie SSO (AdminPanel hub). jwt_secret reads env JWT_SECRET and
+    # MUST match AdminPanel's SECRET_KEY. See docs plm2 hub-sso plan.
+    jwt_secret: str = "dev-secret-key-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_cookie_name: str = "access_token"
+    role_system: str = "plm2"
+
     # Admin setup
     admin_registration_code: str = "CHANGE-THIS-ADMIN-CODE-IN-PRODUCTION"
 
