@@ -11,7 +11,7 @@ from app.models.workflow import (
 from app.models.change import ChangeRequest, ChangeAssessment, ChangeRoutingStandard
 from app.services.workflow_service import WorkflowService
 from app.services.wf_seed_service import seed_change_workflows
-from tests.conftest import approve_gates, ADMIN_PASSWORD, advance_to_assessment
+from tests.conftest import approve_gates, advance_to_assessment, login
 
 
 async def _mk_template(session):
@@ -197,7 +197,7 @@ async def _seed_two_stage_standard(session_factory, change_type="physical_part")
 async def test_submit_spawns_assessment_instance_with_linked_stage1(
         client, session_factory, seed):
     dep = await _seed_two_stage_standard(session_factory)
-    auth = {"Authorization": f"Bearer {(await client.post('/api/v1/auth/login', json={'email': 'admin@test.io', 'password': ADMIN_PASSWORD})).json()['access_token']}"}
+    auth = await login(client, "admin@test.io")
 
     body = {"project_id": seed["project_id"], "title": "spawn", "change_type": "physical_part",
             "reason": "x", "lead_id": seed["admin_id"]}
@@ -242,9 +242,7 @@ async def test_submit_spawns_assessment_instance_with_linked_stage1(
 
 
 async def _admin_auth(client):
-    tok = (await client.post("/api/v1/auth/login", json={
-        "email": "admin@test.io", "password": ADMIN_PASSWORD})).json()["access_token"]
-    return {"Authorization": f"Bearer {tok}"}
+    return await login(client, "admin@test.io")
 
 
 async def _change_in_assessment(client, auth, seed, part_number, session_factory):

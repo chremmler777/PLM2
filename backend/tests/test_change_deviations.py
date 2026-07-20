@@ -2,6 +2,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from tests.conftest import login
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -87,9 +89,7 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
         )
         s.add(viewer)
         await s.commit()
-    login = await client.post("/api/v1/auth/login", json={
-        "email": "viewer2@test.io", "password": "viewer-secret-1"})
-    viewer_auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    viewer_auth = await login(client, "viewer2@test.io")
 
     c = await _change(client, eng_auth, seed)  # lead is the engineer (proposer)
     dev = (await client.post(f"/api/v1/changes/{c['id']}/deviations", json={

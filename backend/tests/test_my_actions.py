@@ -5,6 +5,8 @@ performs it (see ChangeService.my_actions for the mirrored source)."""
 import pytest
 import pytest_asyncio
 
+from tests.conftest import login
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -29,10 +31,7 @@ async def rd_member_auth(client, session_factory, seed):
         s.add(UserDepartment(user_id=user.id, department_id=dept.id))
         await s.commit()
 
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": "rd@test.io", "password": "rd-secret-12"})
-    assert login.status_code == 200, login.text
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    return await login(client, "rd@test.io")
 
 
 async def test_engineer_with_owned_active_task_gets_assessment_action(

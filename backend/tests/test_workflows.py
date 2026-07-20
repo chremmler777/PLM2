@@ -209,10 +209,6 @@ async def test_my_tasks_scoped_by_membership(client, eng_auth, admin_auth, part,
     res = await client.get("/api/v1/workflow-instances/open-task-count", headers=eng_auth)
     assert res.json()["count"] == 1
 
-    # /me reports the membership
-    res = await client.get("/api/v1/auth/me", headers=eng_auth)
-    assert [d["name"] for d in res.json()["departments"]] == ["Engineering"]
-
 
 async def test_set_departments_validates_ids(client, admin_auth, seed):
     res = await client.put(

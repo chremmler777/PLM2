@@ -60,15 +60,15 @@ async def pnl_api_data(session_factory, seed):
 
 
 async def test_changes_requires_auth(client):
-    # HTTPBearer() with no Authorization header returns 403 (not 401 - that's
-    # reserved for an invalid/expired token); consistent app-wide behavior.
+    # Cookie-based get_current_user: no cookie -> 401 (see
+    # test_sso_auth.py::test_missing_cookie_401), consistent app-wide behavior.
     res = await client.get("/api/v1/pnl/changes")
-    assert res.status_code == 403
+    assert res.status_code == 401
 
 
 async def test_summary_requires_auth(client):
     res = await client.get("/api/v1/pnl/summary")
-    assert res.status_code == 403
+    assert res.status_code == 401
 
 
 async def test_changes_shape_for_admin(client, admin_auth, seed, pnl_api_data):

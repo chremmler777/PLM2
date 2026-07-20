@@ -6,7 +6,7 @@ from app.models.workflow import Department, WfTemplate, WfStage, WfStep, WfStepR
 from app.models.change import (
     ChangeRouting, ChangeRoutingStandard, BLOCKING_LETTERS, TASK_LETTERS,
 )
-from tests.conftest import approve_gates, advance_to_assessment
+from tests.conftest import approve_gates, advance_to_assessment, login
 
 pytestmark = pytest.mark.asyncio
 
@@ -167,13 +167,11 @@ async def test_build_routing_is_idempotent(
 
 
 async def _login(client):
-    res = await client.post("/api/v1/auth/login", json={"email": "eng@test.io", "password": "eng-secret-12"})
-    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+    return await login(client, "eng@test.io")
 
 
 async def _login_admin(client):
-    res = await client.post("/api/v1/auth/login", json={"email": "admin@test.io", "password": "admin-secret-1"})
-    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+    return await login(client, "admin@test.io")
 
 
 async def _api_change_in_assessment(client, auth, seed, session_factory):

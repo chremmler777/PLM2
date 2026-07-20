@@ -8,6 +8,7 @@ import pytest_asyncio
 from datetime import datetime
 from sqlalchemy import select, update
 
+from tests.conftest import login
 from tests.test_changes import departments  # noqa: F401 (reused fixture)
 
 pytestmark = pytest.mark.asyncio
@@ -36,10 +37,7 @@ async def rd_member_auth(client, session_factory, seed):
         user_id = user.id
         dept_id = dept.id
 
-    login = await client.post("/api/v1/auth/login",
-                              json={"email": "rd@test.io", "password": "rd-secret-12"})
-    assert login.status_code == 200, login.text
-    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    auth = await login(client, "rd@test.io")
     return {"auth": auth, "user_id": user_id, "dept_id": dept_id}
 
 
