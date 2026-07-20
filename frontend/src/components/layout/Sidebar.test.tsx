@@ -7,7 +7,7 @@ import Sidebar from './Sidebar'
 const clientMocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 
-const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, isAdmin: true, username: 'tester', logout: vi.fn() } }))
+const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn() } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
 
 function wrap(ui: React.ReactElement) {
@@ -30,16 +30,16 @@ describe('Sidebar nav groups', () => {
   })
   afterEach(cleanup)
 
-  it('shows SETUP heading plus Workflows and Users for admin', async () => {
-    authMock.current = { role: 'admin', isAdmin: true, username: 'tester', logout: vi.fn() }
+  it('shows SETUP heading plus Workflows for admin, no Users', async () => {
+    authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     expect(await screen.findByText('SETUP')).toBeDefined()
     expect(screen.getByText('Workflows')).toBeDefined()
-    expect(screen.getByText('Users')).toBeDefined()
+    expect(screen.queryByText('Users')).toBeNull()
   })
 
   it('shows SETUP and Workflows but not Users for engineer', async () => {
-    authMock.current = { role: 'engineer', isAdmin: false, username: 'tester', logout: vi.fn() }
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     expect(await screen.findByText('SETUP')).toBeDefined()
     expect(screen.getByText('Workflows')).toBeDefined()
@@ -47,7 +47,7 @@ describe('Sidebar nav groups', () => {
   })
 
   it('hides SETUP heading and Workflows for viewer role', async () => {
-    authMock.current = { role: 'viewer', isAdmin: false, username: 'tester', logout: vi.fn() }
+    authMock.current = { role: 'viewer', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     await screen.findByText('Dashboard')
     expect(screen.queryByText('SETUP')).toBeNull()
@@ -56,7 +56,7 @@ describe('Sidebar nav groups', () => {
   })
 
   it('renders My Tasks badge with open task count', async () => {
-    authMock.current = { role: 'admin', isAdmin: true, username: 'tester', logout: vi.fn() }
+    authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     expect(await screen.findByText('3')).toBeDefined()
   })

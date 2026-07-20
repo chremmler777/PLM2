@@ -6,7 +6,6 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
-import ChangePasswordModal from '../ChangePasswordModal';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
 import client from '../../api/client';
@@ -14,9 +13,8 @@ import client from '../../api/client';
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout, username, role, isAdmin } = useAuth();
+  const { logout, username, role } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const { data: taskCount } = useQuery<{ count: number }>({
     queryKey: ['open-task-count'],
@@ -39,7 +37,6 @@ export default function Sidebar() {
 
   const setupItems = [
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
-    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: '👥' }] : []),
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';
@@ -144,13 +141,6 @@ export default function Sidebar() {
         )}
         <NotificationBell collapsed={isCollapsed} />
         <button
-          onClick={() => setShowChangePassword(true)}
-          className="w-full px-3 py-2 rounded-md text-slate-400 hover:bg-slate-700/60 hover:text-slate-200 font-medium text-sm text-left"
-          title="Change password"
-        >
-          {isCollapsed ? '🔑' : '🔑 Change password'}
-        </button>
-        <button
           onClick={logout}
           className="w-full px-3 py-2 rounded-md border border-slate-700 text-slate-400 hover:border-red-500/50 hover:text-red-300 hover:bg-red-500/10 font-medium text-sm"
           title={isCollapsed ? 'Logout' : ''}
@@ -158,8 +148,6 @@ export default function Sidebar() {
           {isCollapsed ? '↪' : 'Logout'}
         </button>
       </div>
-
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </aside>
   );
 }
