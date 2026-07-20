@@ -53,3 +53,9 @@ async def test_unknown_email_is_auto_provisioned(client, seed, session_factory):
         u = (await s.execute(select(User).where(User.email == "newhub@ktx.io"))).scalar_one()
         assert u.role == "admin"
         assert u.hashed_password == "!"
+
+
+@pytest.mark.asyncio
+async def test_local_login_is_gone(client, seed):
+    r = await client.post("/api/v1/auth/login", json={"email": "admin@test.io", "password": "x"})
+    assert r.status_code == 410
