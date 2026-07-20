@@ -24,4 +24,5 @@ Sequence the user wants AFTER pushing the P&L/usability branch to main (main now
 - **SP-C** `backfill_g65_changes.py` — 41 G65 history-sheet rows → closed ChangeRequests under project 1748 (id 12), `PHS-<part>-<row>` numbers, issuer 'Part History Sheet (backfill)'. Sheets copied to container /tmp/g65_sheets.
 - **SP-D** `g65_backfeed_tasklist.py` → `docs/PartHistorySheets/G65/backfeed-tasklist.md` — per-department worklist of missing PLM fields.
 - Spec `docs/superpowers/specs/2026-07-12-wincarat-import-and-g65-backfill-design.md`; plan `docs/superpowers/plans/2026-07-12-wincarat-import-and-reset.md`.
-- **NEXT:** user wanted (from 12:20) push to main + /clear. Confirm merge. VW426 sheets still pending — `backfill_g65_changes.py` is generic, point `--sheets-dir` at them when they arrive.
+- **MERGED to main Jul 20 2026** (merge commit 57185bce, pushed). VW426 sheets still pending — `backfill_g65_changes.py` is generic, point `--sheets-dir` at them when they arrive.
+- **NEXT (stated Jul 20):** integrate PLM into the adminpanel + SSO on the server — user will drive this in a separate chat. Brainstorm was started then deferred; nothing designed yet.
