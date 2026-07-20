@@ -68,16 +68,26 @@ def plants_only(cur):
         print(f"  plant {r['WERKNREIGEN']!r}: {r['NAME1']} ({r['LANDNAME']}, {r['ORT']})")
 
 
-def extract(cur) -> dict:
-    # 1) active, non-empty projects with customer name
-    projects = query(cur, """
+def extract(cur, project_filter=None) -> dict:
+    # 1) active, non-empty projects with customer name.
+    #    Default scope is active status (SERIES/PRE-SERI); pass an explicit
+    #    project_filter (list of PROJEKTNR) to pull specific projects
+    #    regardless of status — e.g. the status-less VW426 Atlas (1864).
+    if project_filter:
+        binds = {f"pf{j}": v for j, v in enumerate(project_filter)}
+        placeholders = ",".join(f":pf{j}" for j in range(len(project_filter)))
+        where = f"p.PROJEKTNR in ({placeholders})"
+    else:
+        binds = {}
+        where = "p.PROJEKTSTATUS in ('SERIES','PRE-SERI')"
+    projects = query(cur, f"""
         select p.PROJEKTNR, p.PROJEKTNREXT, p.BESCHREIBUNG, p.KDNR, p.PROJEKTSTATUS,
                k.MATCHCODE as CUSTOMER,
                (select count(*) from KWA.ARTIKEL a where a.PROJEKTNR = p.PROJEKTNR) as NART
           from KWA.PROJEKTSTAMM p
           left join KWA.KUNDE k on k.KDNR = p.KDNR
-         where p.PROJEKTSTATUS in ('SERIES','PRE-SERI')
-    """)
+         where {where}
+    """, **binds)
     projects = [p for p in projects if (p.get("NART") or 0) > 0]
     projnrs = [p["PROJEKTNR"] for p in projects]
 
@@ -193,6 +203,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out")
     ap.add_argument("--plants-only", action="store_true")
+    ap.add_argument("--projects", help="comma-separated PROJEKTNR to extract "
+                    "regardless of status (default: all SERIES/PRE-SERI)")
     args = ap.parse_args()
 
     conn = connect()
@@ -201,7 +213,8 @@ def main():
         if args.plants_only:
             plants_only(cur)
             return
-        data = extract(cur)
+        pf = [x.strip() for x in args.projects.split(",")] if args.projects else None
+        data = extract(cur, project_filter=pf)
     finally:
         conn.close()
 

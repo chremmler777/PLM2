@@ -1,6 +1,6 @@
-# G65 backfilled changes — department backfeed tasklist
+# G6X UBV (project 1748) — department backfeed tasklist
 
-**41 auto-created `closed` changes** were backfilled from the G65 (BMW G6X, project 1748) part-history sheets. They were implemented before PLM existed, so they carry only what the sheets recorded. Each department below owns filling the gaps so these historical changes become complete PLM records.
+**41 auto-created `closed` changes** were backfilled from the G6X UBV (project 1748) part-history sheets. They were implemented before PLM existed, so they carry only what the sheets recorded. Each department below owns filling the gaps so these historical changes become complete PLM records.
 
 ## Scope
 
@@ -82,46 +82,46 @@ For all 41 backfilled changes:
 
 ## Appendix — what each sheet row already provides
 
-| Change | Affects | Occasion | Cust. level | EC number | Int. level | Drawing idx | Agreed by |
-|---|---|---|---|---|---|---|---|
-| PHS-20-3342-001-0-1 | 20-3342-001-0 | First Part - BBG | AI04 | NFT05C | Q1 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-2 | 20-3342-001-0 | VS0 - Tool Maker Parts | AI04 | EF8S5E | Q2 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-3 | 20-3342-001-0 | VS0 - Tool Maker Parts | AI04 | EF8S5E | Q3 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-4 | 20-3342-001-0 | VS0 - Tool Maker Parts | AI04 | EF8S5E | Q4 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-5 | 20-3342-001-0 | VS1 - Homeline Parts | AI04 | EF8S5E | Q5 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-6 | 20-3342-001-0 | VS1 - Homeline Parts | AI04 | EF8S5E | Q6 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-7 | 20-3342-001-0 | VS1 - Homeline Parts | AI04 | EF8S5E | Q7 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3342-001-0-8 | 20-3342-001-0 | R@R | AI04 | EF8S5E | Q8 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-1 | 20-3346-001-0 | First Part - BBG | AI02 | NFT04C | Q1 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-2 | 20-3346-001-0 | VS0 - Toolshop - Trial 1: | AI04 | EFS85E | Q2 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-3 | 20-3346-001-0 | VS0 - Toolshop - Trial 2 | AI04 | EFS85E | Q3 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-4 | 20-3346-001-0 | VS0 - Toolshop - Trial 3 | AI04 | EFS85E | Q4 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-5 | 20-3346-001-0 | VS1 - Homeline - Trial 1 (KM 1000-3) | AI04 | EFS85E | Q5 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3346-001-0-6 | 20-3346-001-0 | VS1 - Homeline - Trial 2 (KM 1000-2) | AI04 | EFS85E | Q5 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-1 | 20-3354-001-0 | First Part - BBG | AI04 | EFT40C | Q1 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-2 | 20-3354-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q2 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-3 | 20-3354-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q3 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-4 | 20-3354-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q4 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-5 | 20-3354-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q5 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-6 | 20-3354-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q6 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-7 | 20-3354-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q7 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3354-001-0-8 | 20-3354-001-0 | R@R | AI04 | EF8S5E | Q8 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-1 | 20-3369-001-0 | First Part - BBG | AI04 | EFT40C | Q1 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-2 | 20-3369-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q2 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-3 | 20-3369-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q3 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-4 | 20-3369-001-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q4 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-5 | 20-3369-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q5 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-6 | 20-3369-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q6 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-7 | 20-3369-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q7 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-8 | 20-3369-001-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q8 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-001-0-9 | 20-3369-001-0 | R@R | AI04 | EF8S5E | Q8 | I1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-1 | 20-3369-002-0 | First Part - BBG | AI03 | E6E35D | Q1 | H1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-2 | 20-3369-002-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q2 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-3 | 20-3369-002-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q3 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-4 | 20-3369-002-0 | VS0 - Tool Maker Parts | AI04 | EFS85E | Q4 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-5 | 20-3369-002-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q5 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-6 | 20-3369-002-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q6 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-7 | 20-3369-002-0 | VS1 - Homeline Parts | AI04 | EFS85E | Q7 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-8 | 20-3369-002-0 | VS4 - Homeline Parts | AI04 | EFS85E | Q8 | L1A | Mr. Wolfgang Schubert |
-| PHS-20-3369-002-0-9 | 20-3369-002-0 | R@R | AI04 | EF8S5E | Q8 | L1A | Mr. Wolfgang Schubert |
-| PHS-50-0331-1 | 50-0331 | First Part - Clip | - | 3 | - | 7311312 - D | Mr. Wolfgang Schubert |
+| Change | Affects | Occasion / Process | Drawing idx | EC / sample status |
+|---|---|---|---|---|
+| PHS-20-3342-001-0-1 | 20-3342-001-0 | First Part - BBG | H1A | NFT05C |
+| PHS-20-3342-001-0-2 | 20-3342-001-0 | VS0 - Tool Maker Parts | H1A | EF8S5E |
+| PHS-20-3342-001-0-3 | 20-3342-001-0 | VS0 - Tool Maker Parts | H1A | EF8S5E |
+| PHS-20-3342-001-0-4 | 20-3342-001-0 | VS0 - Tool Maker Parts | H1A | EF8S5E |
+| PHS-20-3342-001-0-5 | 20-3342-001-0 | VS1 - Homeline Parts | I1A | EF8S5E |
+| PHS-20-3342-001-0-6 | 20-3342-001-0 | VS1 - Homeline Parts | I1A | EF8S5E |
+| PHS-20-3342-001-0-7 | 20-3342-001-0 | VS1 - Homeline Parts | I1A | EF8S5E |
+| PHS-20-3342-001-0-8 | 20-3342-001-0 | R@R | I1A | EF8S5E |
+| PHS-20-3346-001-0-1 | 20-3346-001-0 | First Part - BBG | H1A | NFT04C |
+| PHS-20-3346-001-0-2 | 20-3346-001-0 | VS0 - Toolshop - Trial 1: | H1A | EFS85E |
+| PHS-20-3346-001-0-3 | 20-3346-001-0 | VS0 - Toolshop - Trial 2 | H1A | EFS85E |
+| PHS-20-3346-001-0-4 | 20-3346-001-0 | VS0 - Toolshop - Trial 3 | H1A | EFS85E |
+| PHS-20-3346-001-0-5 | 20-3346-001-0 | VS1 - Homeline - Trial 1 (KM 1000-3) | H1A | EFS85E |
+| PHS-20-3346-001-0-6 | 20-3346-001-0 | VS1 - Homeline - Trial 2 (KM 1000-2) | H1A | EFS85E |
+| PHS-20-3354-001-0-1 | 20-3354-001-0 | First Part - BBG | H1A | EFT40C |
+| PHS-20-3354-001-0-2 | 20-3354-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-3 | 20-3354-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-4 | 20-3354-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-5 | 20-3354-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-6 | 20-3354-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-7 | 20-3354-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3354-001-0-8 | 20-3354-001-0 | R@R | I1A | EF8S5E |
+| PHS-20-3369-001-0-1 | 20-3369-001-0 | First Part - BBG | H1A | EFT40C |
+| PHS-20-3369-001-0-2 | 20-3369-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-3 | 20-3369-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-4 | 20-3369-001-0 | VS0 - Tool Maker Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-5 | 20-3369-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-6 | 20-3369-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-7 | 20-3369-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-8 | 20-3369-001-0 | VS1 - Homeline Parts | H1A | EFS85E |
+| PHS-20-3369-001-0-9 | 20-3369-001-0 | R@R | I1A | EF8S5E |
+| PHS-20-3369-002-0-1 | 20-3369-002-0 | First Part - BBG | H1A | E6E35D |
+| PHS-20-3369-002-0-2 | 20-3369-002-0 | VS0 - Tool Maker Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-3 | 20-3369-002-0 | VS0 - Tool Maker Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-4 | 20-3369-002-0 | VS0 - Tool Maker Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-5 | 20-3369-002-0 | VS1 - Homeline Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-6 | 20-3369-002-0 | VS1 - Homeline Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-7 | 20-3369-002-0 | VS1 - Homeline Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-8 | 20-3369-002-0 | VS4 - Homeline Parts | L1A | EFS85E |
+| PHS-20-3369-002-0-9 | 20-3369-002-0 | R@R | L1A | EF8S5E |
+| PHS-50-0331-1 | 50-0331 | First Part - Clip | 7311312 - D | 3 |

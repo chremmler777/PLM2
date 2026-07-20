@@ -79,14 +79,24 @@ _FIELD = lambda desc, label: (re.search(rf"{label}:\s*(.*)", desc) or [None, Non
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--project-code", help="limit to one project (e.g. 1748=G65, "
+                    "1864=VW426); default: all backfilled programs")
     args = ap.parse_args()
 
     engine = create_async_engine(os.environ["DATABASE_URL"])
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as s:
+        proj_filter = None
+        program = "All backfilled programs"
+        if args.project_code:
+            proj_filter = (await s.execute(
+                select(Project).where(Project.code == args.project_code))).scalar_one()
+            program = f"{proj_filter.name} (project {proj_filter.code})"
+        stmt = select(ChangeRequest).where(ChangeRequest.issuer == ISSUER)
+        if proj_filter is not None:
+            stmt = stmt.where(ChangeRequest.project_id == proj_filter.id)
         changes = (await s.execute(
-            select(ChangeRequest).where(ChangeRequest.issuer == ISSUER)
-            .order_by(ChangeRequest.change_number))).scalars().all()
+            stmt.order_by(ChangeRequest.change_number))).scalars().all()
         # affected part number per change
         impacted = defaultdict(list)
         for ii, pn in (await s.execute(
@@ -104,9 +114,9 @@ async def main():
 
     lines = []
     w = lines.append
-    w("# G65 backfilled changes — department backfeed tasklist\n")
-    w(f"**{len(changes)} auto-created `closed` changes** were backfilled from the G65 "
-      "(BMW G6X, project 1748) part-history sheets. They were implemented before PLM "
+    w(f"# {program} — department backfeed tasklist\n")
+    w(f"**{len(changes)} auto-created `closed` changes** were backfilled from the "
+      f"{program} part-history sheets. They were implemented before PLM "
       "existed, so they carry only what the sheets recorded. Each department below owns "
       "filling the gaps so these historical changes become complete PLM records.\n")
 
@@ -128,22 +138,17 @@ async def main():
         w("")
 
     w("## Appendix — what each sheet row already provides\n")
-    w("| Change | Affects | Occasion | Cust. level | EC number | Int. level | Drawing idx | Agreed by |")
-    w("|---|---|---|---|---|---|---|---|")
+    w("| Change | Affects | Occasion / Process | Drawing idx | EC / sample status |")
+    w("|---|---|---|---|---|")
     for c in changes:
         d = c.description or ""
-        occ = (c.title.split("—", 1)[-1].strip() if "—" in c.title else "")
-        row = [
-            c.change_number,
-            (impacted.get(c.id) or ["—"])[0],
-            occ,
-            _FIELD(d, "Customer Level") or "—",
-            _FIELD(d, "EC Number") or "—",
-            _FIELD(d, "Internal Level") or "—",
-            _FIELD(d, "Drawing Index") or "—",
-            _FIELD(d, "Agreed by") or "—",
-        ]
-        w("| " + " | ".join(str(x) for x in row) + " |")
+        occ = _FIELD(d, "Occasion/Process") or (
+            c.title.split("—", 1)[-1].strip() if "—" in c.title else "—")
+        drawing = _FIELD(d, "Drawing Index") or _FIELD(d, "Drawing index/level") or "—"
+        extra = (_FIELD(d, "EC Number") or _FIELD(d, "Sample status") or "—")
+        row = [c.change_number, (impacted.get(c.id) or ["—"])[0],
+               occ, drawing, extra]
+        w("| " + " | ".join(str(x).replace("|", "/") for x in row) + " |")
     w("")
 
     with open(args.out, "w") as f:
