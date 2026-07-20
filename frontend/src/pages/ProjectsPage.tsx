@@ -155,11 +155,22 @@ function AddProjectModal({
   );
 }
 
+// Extract the numeric part of a project number for sorting (e.g. "VW426" -> 426).
+function projectNumberValue(code: string | null | undefined): number {
+  const m = (code ?? '').match(/\d+/);
+  return m ? parseInt(m[0], 10) : -1;
+}
+
 export default function ProjectsPage() {
   const navigate = useNavigate();
   const [showAddModal, setShowAddModal] = useState(false);
   const { data: projects, isLoading } = useProjects();
   const { data: plants } = usePlants();
+
+  // Largest project number first (VW426 near top, GO1 near the bottom).
+  const sortedProjects = [...(projects ?? [])].sort(
+    (a, b) => projectNumberValue(b.code) - projectNumberValue(a.code)
+  );
 
   return (
     <div className="p-6">
@@ -189,21 +200,23 @@ export default function ProjectsPage() {
           </button>
         </div>
       ) : (
-        <div className="grid gap-3">
-          {(projects ?? []).map((p) => (
+        <div className="grid gap-2">
+          {sortedProjects.map((p) => (
             <button
               key={p.id}
               onClick={() => navigate(`/projects/${p.id}`)}
-              className="text-left p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition"
+              className="text-left px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md transition"
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-100">{p.name}</h3>
-                  <p className="text-sm text-slate-400 mt-1">{p.code}</p>
-                  {p.description && <p className="text-sm text-slate-300 mt-1">{p.description}</p>}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-baseline gap-3 min-w-0">
+                  <span className="text-base font-bold text-slate-100 tabular-nums shrink-0">{p.code}</span>
+                  <span className="text-sm text-slate-400 truncate">{p.name}</span>
+                  {p.description && (
+                    <span className="text-xs text-slate-500 truncate hidden md:inline">{p.description}</span>
+                  )}
                 </div>
                 <span
-                  className={`px-3 py-1 rounded-full text-xs font-medium ${
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
                     p.status === 'active' ? 'bg-green-900/60 text-green-300' : 'bg-slate-700 text-slate-400'
                   }`}
                 >

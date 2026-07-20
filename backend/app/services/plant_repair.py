@@ -32,6 +32,9 @@ from app.models.change_cost import AssessmentCostLine, DepartmentRate
 CANONICAL_USA_NAME = "USA Toccoa"
 DUP_USA_NAME = "USA"
 MAIN_FACTORY_NAME = "Main Factory"
+# Weissenburg (DE) was retired in favour of Silao Mexico. We deactivate rather
+# than delete so historical cost lines / rates / projects keep their FK target.
+WEISSENBURG_NAME = "Weissenburg"
 
 
 async def _repoint_change_affected_plants(session: AsyncSession, dup_id: int, target_id: int) -> int:
@@ -96,6 +99,7 @@ async def repair_plants(session: AsyncSession) -> dict:
         "projects_repointed": 0,
         "department_rates_repointed": 0,
         "deactivated_main_factory": False,
+        "deactivated_weissenburg": False,
     }
 
     dup = (await session.execute(
@@ -139,6 +143,12 @@ async def repair_plants(session: AsyncSession) -> dict:
     if main_factory is not None and main_factory.is_active:
         main_factory.is_active = False
         report["deactivated_main_factory"] = True
+
+    weissenburg = (await session.execute(
+        select(Plant).where(Plant.name == WEISSENBURG_NAME))).scalar_one_or_none()
+    if weissenburg is not None and weissenburg.is_active:
+        weissenburg.is_active = False
+        report["deactivated_weissenburg"] = True
 
     await session.flush()
     return report

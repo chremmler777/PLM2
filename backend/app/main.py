@@ -156,7 +156,7 @@ async def seed_test_data():
             if org is not None:
                 plants = {p.name: p for p in (await session.execute(
                     select(Plant).where(Plant.organization_id == org.id))).scalars().all()}
-                for name, code, loc, factor in [("Weissenburg", "WUG", "DE", 0.6), ("USA", "USA", "US", 0.36)]:
+                for name, code, loc, factor in [("Silao Mexico", "SIL", "MX", 0.6), ("USA", "USA", "US", 0.36)]:
                     if name not in plants:
                         p = Plant(organization_id=org.id, name=name, code=code, location=loc)
                         session.add(p)
@@ -170,12 +170,12 @@ async def seed_test_data():
                 }
                 existing_rates = {(r.department_id, r.plant_id) for r in (await session.execute(
                     select(DepartmentRate))).scalars().all()}
-                for dep_name, (wug, usa) in rate_table.items():
+                for dep_name, (mx, usa) in rate_table.items():
                     dep = (await session.execute(
                         select(_Dep).where(_Dep.name == dep_name))).scalar_one_or_none()
                     if dep is None:
                         continue
-                    for plant_name, rate, factor in [("Weissenburg", wug, 0.6), ("USA", usa, 0.36)]:
+                    for plant_name, rate, factor in [("Silao Mexico", mx, 0.6), ("USA", usa, 0.36)]:
                         if rate is None:
                             continue
                         pid = plants[plant_name].id
