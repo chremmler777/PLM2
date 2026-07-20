@@ -7,7 +7,6 @@ import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import LoginPage from './pages/LoginPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import PartDetail from './pages/PartDetail';
@@ -28,20 +27,18 @@ import AppLayout from './components/layout/AppLayout';
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? (
-    <AppLayout>{children}</AppLayout>
-  ) : (
-    <Navigate to="/login" />
-  );
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return null; // or a spinner
+  if (!isAuthenticated) {
+    window.location.href = '/';
+    return null;
+  }
+  return <AppLayout>{children}</AppLayout>;
 }
 
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
-
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
       <Route
         path="/dashboard"
         element={
@@ -162,10 +159,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/"
-        element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />}
-      />
+      <Route path="/" element={<Navigate to="/dashboard" />} />
     </Routes>
   );
 }
@@ -175,7 +169,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <BrowserRouter>
+          <BrowserRouter basename="/plm2">
             <AppRoutes />
             <Toaster position="top-right" />
           </BrowserRouter>
