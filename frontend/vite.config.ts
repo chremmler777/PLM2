@@ -8,7 +8,15 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
-    allowedHosts: ['localhost', 'plm2-frontend'],
+    allowedHosts: ['localhost', 'plm2-frontend', 'apps.ad.us.ktx.group'],
+  },
+  // prod may serve the built bundle via `vite preview` behind nginx (TWOS/KPI
+  // pattern); nginx forwards the browser's Host header, so allow the prod name
+  preview: {
+    host: '0.0.0.0',
+    port: 5173,
+    strictPort: true,
+    allowedHosts: ['localhost', 'plm2-frontend', 'apps.ad.us.ktx.group'],
   },
   build: { outDir: 'dist', sourcemap: false, minify: 'esbuild' },
 })
