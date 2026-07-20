@@ -59,3 +59,43 @@ async def test_unknown_email_is_auto_provisioned(client, seed, session_factory):
 async def test_local_login_is_gone(client, seed):
     r = await client.post("/api/v1/auth/login", json={"email": "admin@test.io", "password": "x"})
     assert r.status_code == 410
+
+
+@pytest.mark.asyncio
+async def test_auto_provision_disambiguates_username_collision(client, seed, session_factory):
+    from datetime import datetime, timedelta
+    from jose import jwt
+    from sqlalchemy import select
+    from app.core.config import get_settings
+    from app.models.entities import User
+
+    # Pre-existing plm2-local user with a REAL (non-hub-managed) password and
+    # the username our hub payload below will also derive.
+    async with session_factory() as s:
+        s.add(User(
+            organization_id=seed["org_id"], username="collide", email="collide@local.io",
+            full_name="Collide Local", hashed_password="$2b$12$notarealhashbutnonhub",
+            role="engineer", is_active=True, mfa_enabled=False,
+        ))
+        await s.commit()
+
+    s_cfg = get_settings()
+    token = jwt.encode(
+        {
+            "sub": "99",
+            "email": "other@ktx.io",
+            "username": "collide",
+            "roles": [{"name": "plm2_Admin", "system": s_cfg.role_system}],
+            "exp": datetime.utcnow() + timedelta(hours=1),
+        },
+        s_cfg.jwt_secret, algorithm=s_cfg.jwt_algorithm,
+    )
+    headers = {"Cookie": f"{s_cfg.jwt_cookie_name}={token}"}
+
+    r = await client.get("/api/v1/auth/me", headers=headers)
+    assert r.status_code == 200, r.text
+
+    async with session_factory() as s:
+        new_user = (await s.execute(select(User).where(User.email == "other@ktx.io"))).scalar_one()
+        assert new_user.username != "collide"
+        assert new_user.username.startswith("collide")

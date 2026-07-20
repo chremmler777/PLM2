@@ -2,6 +2,7 @@
 from fastapi import Depends, HTTPException, Request, status
 from jose import jwt, JWTError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -62,19 +63,40 @@ async def get_current_user(
 
     user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if user is None:
-        user = User(
-            organization_id=await _default_org_id(db),
-            email=email,
-            username=(payload.get("username") or email),
-            full_name=payload.get("username") or email,
-            hashed_password=_HUB_MANAGED,
-            role=_local_role(hub_roles),
-            is_active=True,
-            mfa_enabled=False,
-        )
-        db.add(user)
-        await db.flush()
-        await db.commit()
+        base_username = payload.get("username") or email
+        org_id = await _default_org_id(db)
+        username = base_username
+        attempt = 0
+        while True:
+            user = User(
+                organization_id=org_id,
+                email=email,
+                username=username,
+                full_name=payload.get("username") or email,
+                hashed_password=_HUB_MANAGED,
+                role=_local_role(hub_roles),
+                is_active=True,
+                mfa_enabled=False,
+            )
+            db.add(user)
+            try:
+                await db.flush()
+                await db.commit()
+                break
+            except IntegrityError:
+                await db.rollback()
+                # A concurrent request may already have created this email row.
+                existing = (await db.execute(
+                    select(User).where(User.email == email)
+                )).scalar_one_or_none()
+                if existing is not None:
+                    user = existing
+                    break
+                # Otherwise the collision is on username; disambiguate and retry.
+                attempt += 1
+                if attempt >= 10:
+                    raise
+                username = f"{base_username}-{attempt}"
     elif user.hashed_password == _HUB_MANAGED and user.role != _local_role(hub_roles):
         # keep hub-provisioned users' local role in sync; never touch real local users
         user.role = _local_role(hub_roles)
