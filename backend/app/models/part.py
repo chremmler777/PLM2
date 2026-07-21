@@ -133,6 +133,15 @@ class PartRevision(Base):
     # e.g., ENG1.1 approved becomes ENG2 (supersedes ENG1)
     supersedes_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
+    # Phase B: bidirectional change link + 3D-evidence sign-off
+    originating_change_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_requests.id"), nullable=True, index=True)
+    no_geometry_change: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    no_geometry_change_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    no_geometry_change_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    no_geometry_change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Metadata
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # What changed
     change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # Why the change

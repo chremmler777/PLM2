@@ -18,5 +18,10 @@ class Notification(Base):
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)  # frontend path
 
+    # Dedup key: kind + subject_key identify "the same event" for a user so a
+    # repeat emission (e.g. a sweep re-run) doesn't spam an unread notification.
+    kind: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    subject_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

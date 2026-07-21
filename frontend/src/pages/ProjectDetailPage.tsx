@@ -15,6 +15,7 @@ import MilestoneStrip from '../components/MilestoneStrip';
 import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
+import StartChangeModal from '../components/changes/StartChangeModal';
 import { toast } from 'sonner';
 
 // Types
@@ -148,6 +149,26 @@ function useAssemblyFiles(partId: number) {
   });
 }
 
+// Order by the embedded tool number: "3450" for a tool, the middle "3450" for
+// an article like "20-3450-001-0". Groups each tool with the articles it produces
+// (tool first), so the list runs 3450 → 3457 instead of all 10-/20- prefixes first.
+function toolNumber(partNumber: string): number {
+  const segs = partNumber.split('-');
+  const n = parseInt(segs.length > 1 ? segs[1] : segs[0], 10);
+  return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
+}
+
+function comparePartNodes(a: TreeNode, b: TreeNode): number {
+  const ta = toolNumber(a.part.part_number);
+  const tb = toolNumber(b.part.part_number);
+  if (ta !== tb) return ta - tb;
+  // Within the same tool number, the tool (no hyphen) comes before its articles.
+  const ha = a.part.part_number.includes('-') ? 1 : 0;
+  const hb = b.part.part_number.includes('-') ? 1 : 0;
+  if (ha !== hb) return ha - hb;
+  return a.part.part_number.localeCompare(b.part.part_number);
+}
+
 // Build tree structure from flat parts list
 function buildPartTree(parts: Part[]): TreeNode[] {
   const partMap = new Map<number, Part>(parts.map((p) => [p.id, p]));
@@ -169,6 +190,7 @@ function buildPartTree(parts: Part[]): TreeNode[] {
       }
     }
 
+    children.sort(comparePartNodes);
     return { part, children };
   }
 
@@ -180,6 +202,7 @@ function buildPartTree(parts: Part[]): TreeNode[] {
     }
   }
 
+  roots.sort(comparePartNodes);
   return roots;
 }
 
@@ -444,7 +467,7 @@ function TreeNodeComponent({
         )}
 
         <div className={`truncate flex-1 min-w-0 ${isHeadline ? 'text-slate-50 text-sm font-bold' : 'text-slate-100 text-sm font-medium'}`}>
-          <span className="text-slate-400 text-xs">{node.part.id}</span>
+          <span className="text-slate-400 text-xs">{node.part.part_number}</span>
           <span className="mx-1">•</span>
           <span>{node.part.name}</span>
           {hasChildren && (
@@ -871,6 +894,7 @@ export default function ProjectDetailPage() {
   const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
@@ -1014,13 +1038,29 @@ export default function ProjectDetailPage() {
             <MilestoneStrip projectId={id} />
           </div>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
-        >
-          + Add Part
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowStartChange(true)}
+            className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
+          >
+            Start change
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
+          >
+            + Add Part
+          </button>
+        </div>
       </div>
+
+      {showStartChange && (
+        <StartChangeModal
+          open
+          onClose={() => setShowStartChange(false)}
+          prefill={{ projectId: id }}
+        />
+      )}
 
       <ProjectSepSection projectId={id} />
 

@@ -14,12 +14,12 @@ export function CutPlaneControls({
   onClose,
 }: CutPlaneControlsProps) {
   return (
-    <div className="absolute bottom-4 left-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 w-64 z-20">
+    <div className="absolute bottom-4 left-4 bg-slate-800 rounded-lg shadow-lg p-4 w-64 z-20">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Cut Plane</h3>
+        <h3 className="text-sm font-semibold text-slate-300">Cut Plane</h3>
         <button
           onClick={onClose}
-          className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-lg leading-none"
+          className="text-slate-400 hover:text-slate-200 text-lg leading-none"
         >
           ✕
         </button>
@@ -27,7 +27,7 @@ export function CutPlaneControls({
 
       {/* Axis Selector */}
       <div className="mb-4">
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Axis</label>
+        <label className="block text-xs font-medium text-slate-400 mb-2">Axis</label>
         <div className="flex gap-2">
           {(['x', 'y', 'z'] as const).map((a) => (
             <button
@@ -36,7 +36,7 @@ export function CutPlaneControls({
               className={`flex-1 py-1 text-xs font-medium rounded transition-colors ${
                 axis === a
                   ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}
             >
               {a.toUpperCase()}
@@ -47,7 +47,7 @@ export function CutPlaneControls({
 
       {/* Position Slider */}
       <div className="mb-4">
-        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+        <label className="block text-xs font-medium text-slate-400 mb-2">
           Position: {position.toFixed(2)}
         </label>
         <input
@@ -57,9 +57,9 @@ export function CutPlaneControls({
           step="0.01"
           value={position}
           onChange={(e) => onPositionChange(parseFloat(e.target.value))}
-          className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+          className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
         />
-        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <div className="flex justify-between text-xs text-slate-400 mt-1">
           <span>-1</span>
           <span>0</span>
           <span>1</span>
@@ -67,7 +67,7 @@ export function CutPlaneControls({
       </div>
 
       {/* Info */}
-      <p className="text-xs text-gray-500 dark:text-gray-400">
+      <p className="text-xs text-slate-400">
         Drag the slider to adjust the cutting plane position along the {axis.toUpperCase()} axis.
       </p>
     </div>

@@ -7,6 +7,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import StartChangeModal from '../components/changes/StartChangeModal';
 
 interface Revision {
   id: number;
@@ -25,17 +26,19 @@ interface Part {
   name: string;
   part_type: string;
   data_classification: string;
+  item_category: string;
+  project_id: number;
   revisions: Revision[];
 }
 
 function getStatusColor(status: string) {
   switch (status) {
     case 'draft':
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-slate-700 text-slate-200';
     case 'rejected':
       return 'bg-red-100 text-red-800';
     case 'archived':
-      return 'bg-slate-100 text-slate-700';
+      return 'bg-slate-800 text-slate-500';
     case 'approved':
       return 'bg-green-100 text-green-800';
     case 'frozen':
@@ -56,7 +59,7 @@ function getPhaseColor(phase: string) {
     case 'ecn':
       return 'bg-pink-100 text-pink-700';
     default:
-      return 'bg-gray-100 text-gray-700';
+      return 'bg-slate-700 text-slate-300';
   }
 }
 
@@ -122,17 +125,6 @@ function getLatestFreezeMajor(revisions: Revision[]): Revision | null {
     })[0] || null;
 }
 
-function getLatestProposalForParent(parentId: number, revisions: Revision[]): Revision | null {
-  // Get the latest proposal under a major version
-  const proposals = revisions.filter((r) => r.parent_revision_id === parentId);
-  return proposals
-    .sort((a, b) => {
-      const numA = parseInt(a.revision_name.split('.')[1] || '0');
-      const numB = parseInt(b.revision_name.split('.')[1] || '0');
-      return numB - numA;
-    })[0] || null;
-}
-
 function getActiveRevisionLevel(revisions: Revision[]): string {
   // Get the latest non-rejected major for current phase
   // Priority: Freeze > Engineering > RFQ
@@ -167,6 +159,7 @@ export default function PartDetail() {
   const [proposalSummary, setProposalSummary] = useState('');
   const [showRejectDraftsModal, setShowRejectDraftsModal] = useState(false);
   const [showRejectFreezeDraftsModal, setShowRejectFreezeDraftsModal] = useState(false);
+  const [showStartChange, setShowStartChange] = useState(false);
 
   // Fetch part
   const { data: part, isLoading, error: partError, refetch } = useQuery({
@@ -422,7 +415,7 @@ export default function PartDetail() {
 
   if (partError) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className="min-h-screen bg-slate-900 p-8">
         <div className="max-w-4xl mx-auto">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6">
             <h2 className="text-lg font-bold text-red-800 mb-2">Error loading part</h2>
@@ -435,7 +428,7 @@ export default function PartDetail() {
 
   if (!part) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
+      <div className="min-h-screen bg-slate-900 p-8">
         <div className="max-w-4xl mx-auto">
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
             <h2 className="text-lg font-bold text-yellow-800">Part not found</h2>
@@ -455,7 +448,7 @@ export default function PartDetail() {
   }, {});
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-slate-900 p-8">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="mb-8">
@@ -473,8 +466,30 @@ export default function PartDetail() {
                 {getActiveRevisionLevel(part.revisions)}
               </p>
             </div>
+            <button
+              onClick={() => setShowStartChange(true)}
+              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
+            >
+              Start change
+            </button>
           </div>
         </div>
+
+        {showStartChange && (
+          <StartChangeModal
+            open
+            onClose={() => setShowStartChange(false)}
+            prefill={{
+              projectId: part.project_id,
+              part: {
+                id: part.id,
+                part_number: part.part_number,
+                name: part.name,
+                item_category: part.item_category,
+              },
+            }}
+          />
+        )}
 
         {/* Part Info */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
@@ -499,11 +514,11 @@ export default function PartDetail() {
 
           {Object.keys(majorVersions).length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-500 mb-4">No revisions yet.</p>
+              <p className="text-slate-400 mb-4">No revisions yet.</p>
               <button
                 onClick={() => createRfqMutation.mutate(false)}
                 disabled={createRfqMutation.isPending}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 font-medium"
               >
                 {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
               </button>
@@ -538,17 +553,17 @@ export default function PartDetail() {
                       key={major}
                       className={`border rounded-lg p-4 ${
                         majorRev && majorRev.status !== 'rejected' && majorRev === getLatestActiveRFQMajor(part.revisions)
-                          ? 'border-blue-400 bg-blue-900 shadow-md'
+                          ? 'border-blue-400 bg-blue-900 shadow-panel'
                           : majorRev && majorRev.phase === 'engineering' && majorRev === getLatestEngineeringMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-purple-400 bg-purple-900 shadow-md'
+                          ? 'border-purple-400 bg-purple-900 shadow-panel'
                           : majorRev && majorRev.phase === 'freeze' && majorRev === getLatestFreezeMajor(part.revisions) && majorRev.status !== 'rejected'
-                          ? 'border-orange-400 bg-orange-900 shadow-md'
-                          : 'border-gray-200'
+                          ? 'border-orange-400 bg-orange-900 shadow-panel'
+                          : 'border-slate-700'
                       }`}
                     >
                       {/* Major Version */}
                       {majorRev && (
-                        <div className="mb-4 pb-4 border-b border-gray-200">
+                        <div className="mb-4 pb-4 border-b border-slate-700">
                           <div className="flex justify-between items-start mb-2">
                             <div>
                               <div className="flex items-center gap-2 mb-1">
@@ -645,7 +660,7 @@ export default function PartDetail() {
                                 <button
                                   onClick={() => createRfqMutation.mutate(false)}
                                   disabled={createRfqMutation.isPending}
-                                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-400"
+                                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-slate-600"
                                 >
                                   {createRfqMutation.isPending ? 'Creating...' : '+ New RFQ'}
                                 </button>
@@ -654,7 +669,7 @@ export default function PartDetail() {
                                 <button
                                   onClick={() => createEngineeringMajorMutation.mutate()}
                                   disabled={createEngineeringMajorMutation.isPending}
-                                  className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-gray-400"
+                                  className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-slate-600"
                                 >
                                   {createEngineeringMajorMutation.isPending ? 'Creating...' : '+ New ENG'}
                                 </button>
@@ -663,7 +678,7 @@ export default function PartDetail() {
                                 <button
                                   onClick={() => createFreezeMajorMutation.mutate(false)}
                                   disabled={createFreezeMajorMutation.isPending}
-                                  className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:bg-gray-400"
+                                  className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 disabled:bg-slate-600"
                                 >
                                   {createFreezeMajorMutation.isPending ? 'Creating...' : '+ New IND'}
                                 </button>
@@ -677,7 +692,7 @@ export default function PartDetail() {
                       {proposals.length > 0 && (
                         <div className="space-y-3 mb-4">
                           {proposals.map((proposal) => (
-                            <div key={proposal.id} className="pl-4 border-l-2 border-gray-300">
+                            <div key={proposal.id} className="pl-4 border-l-2 border-slate-700">
                               <div className="flex justify-between items-start">
                                 <div>
                                   <div className="flex items-center gap-2 mb-1">
@@ -742,7 +757,7 @@ export default function PartDetail() {
                             value={proposalSummary}
                             onChange={(e) => setProposalSummary(e.target.value)}
                             placeholder="Proposal notes..."
-                            className="w-full p-2 border border-gray-300 rounded text-sm mb-2"
+                            className="w-full p-2 border border-slate-700 rounded text-sm mb-2 bg-slate-800 text-slate-100"
                             rows={3}
                           />
                           <div className="flex gap-2">
@@ -757,7 +772,7 @@ export default function PartDetail() {
                                 }
                               }}
                               disabled={createProposalMutation.isPending || createEngineeringProposalMutation.isPending || createFreezeProposalMutation.isPending}
-                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:bg-gray-400"
+                              className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:bg-slate-600"
                             >
                               Create Proposal
                             </button>
@@ -801,7 +816,7 @@ export default function PartDetail() {
                   <button
                     onClick={() => createRfqMutation.mutate(true)}
                     disabled={createRfqMutation.isPending}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-medium"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-slate-600 font-medium"
                   >
                     {createRfqMutation.isPending ? 'Creating...' : 'Reject & Create RFQ'}
                   </button>
@@ -832,7 +847,7 @@ export default function PartDetail() {
                   <button
                     onClick={() => createFreezeMajorMutation.mutate(true)}
                     disabled={createFreezeMajorMutation.isPending}
-                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-400 font-medium"
+                    className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-slate-600 font-medium"
                   >
                     {createFreezeMajorMutation.isPending ? 'Creating...' : 'Reject & Create IND'}
                   </button>

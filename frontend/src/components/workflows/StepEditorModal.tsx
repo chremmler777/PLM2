@@ -121,9 +121,7 @@ export default function StepEditorModal({ step, departments, onSave, onCancel }:
             <p className="text-xs text-slate-400 mb-3">No assignments yet</p>
           ) : (
             <div className="space-y-2 mb-3">
-              {assignments.map((assignment, idx) => {
-                const dept = departments.find((d) => d.id === assignment.department_id);
-                return (
+              {assignments.map((assignment, idx) => (
                   <div key={idx} className="flex gap-2 items-center">
                     <select
                       value={assignment.department_id}
@@ -165,8 +163,7 @@ export default function StepEditorModal({ step, departments, onSave, onCancel }:
                       ×
                     </button>
                   </div>
-                );
-              })}
+              ))}
             </div>
           )}
 

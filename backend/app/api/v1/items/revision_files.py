@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -111,6 +112,20 @@ async def _get_revision_or_404(db: AsyncSession, revision_id: int):
     return revision
 
 
+async def _load_revision(
+    db: AsyncSession, part_id: int, revision_id: int, *, mismatch_status: int = status.HTTP_404_NOT_FOUND
+):
+    """Load a revision, 404 on missing; on part mismatch raise `mismatch_status`
+    (404 by default, or 400 to preserve the upload endpoint's existing contract)."""
+    revision = await RevisionService.get_revision(db, revision_id)
+    if not revision:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if revision.part_id != part_id:
+        detail = "Revision not found" if mismatch_status == status.HTTP_404_NOT_FOUND else "Revision does not belong to this part"
+        raise HTTPException(status_code=mismatch_status, detail=detail)
+    return revision
+
+
 async def _get_file_or_404(db: AsyncSession, file_id: int) -> RevisionFile:
     result = await db.execute(
         select(RevisionFile).where(RevisionFile.id == file_id, RevisionFile.is_deleted == False)  # noqa: E712
@@ -155,12 +170,7 @@ async def upload_revision_file(
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
 
-        revision = await _get_revision_or_404(db, revision_id)
-        if revision.part_id != part_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Revision does not belong to this part",
-            )
+        revision = await _load_revision(db, part_id, revision_id, mismatch_status=status.HTTP_400_BAD_REQUEST)
         if _status_value(revision.status) in LOCKED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -230,6 +240,76 @@ async def upload_revision_file(
         await db.rollback()
         logger.error(f"Failed to upload file to revision {revision_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+class NoGeometryChangeIn(BaseModel):
+    reason: str
+
+
+@router.post("/{part_id}/revisions/{revision_id}/no-geometry-change")
+async def sign_no_geometry_change(
+    part_id: int,
+    revision_id: int,
+    body: NoGeometryChangeIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner-signed statement that this ECN revision has no geometry change -
+    the alternative 3D evidence to a CAD upload (spec: 3D-evidence decision).
+
+    One-way and idempotency-hostile by design: a second sign is rejected.
+    """
+    revision = await _load_revision(db, part_id, revision_id)
+    if _status_value(revision.status) in LOCKED_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Revision {revision.revision_name} is {_status_value(revision.status)}; evidence is locked",
+        )
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Reason is required")
+    if revision.no_geometry_change:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already signed")
+
+    revision.no_geometry_change = True
+    revision.no_geometry_change_by = current_user.id
+    revision.no_geometry_change_at = datetime.utcnow()
+    revision.no_geometry_change_reason = reason
+
+    await ChangelogService.log_action(
+        db,
+        part_id=part_id,
+        revision_id=revision_id,
+        action="no_geometry_change_signed",
+        action_description=f"No-geometry-change signed: {reason}",
+        performed_by=current_user.id,
+    )
+
+    from app.services.audit_service import AuditService
+
+    correlation = None
+    if revision.originating_change_id is not None:
+        from app.models.change import ChangeRequest
+
+        change = await db.get(ChangeRequest, revision.originating_change_id)
+        correlation = change.change_number if change else None
+    await AuditService.record(
+        db,
+        entity_type="part_revision",
+        entity_id=revision_id,
+        action="no_geometry_change_signed",
+        user_id=current_user.id,
+        new_values={"reason": reason},
+        correlation_id=correlation,
+    )
+
+    await db.commit()
+    return {
+        "revision_id": revision_id,
+        "no_geometry_change": True,
+        "no_geometry_change_by": current_user.id,
+        "no_geometry_change_at": revision.no_geometry_change_at.isoformat(),
+    }
 
 
 @router.get("/{part_id}/assembly-files", response_model=List[dict])

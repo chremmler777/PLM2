@@ -1,102 +1,199 @@
-import { useParams } from 'react-router-dom';
-import { useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import client from '../api/client';
 import { changesApi } from '../api/changes';
-import { CHANGE_STATUS_ORDER } from '../types/change';
+import { plantsApi } from '../api/plants';
+import AssessmentRouting from '../components/changes/AssessmentRouting';
+import D1MasterPanel from '../components/changes/D1MasterPanel';
+import SummationView from '../components/changes/SummationView';
+import CostLineGrid from '../components/changes/CostLineGrid';
+import DeviationBanner from '../components/changes/DeviationBanner';
+import ReasonDialog from '../components/changes/ReasonDialog';
+import ImpactTree from '../components/changes/ImpactTree';
+import ImplementationPanel from '../components/changes/ImplementationPanel';
+import LifecycleStepper from '../components/changes/LifecycleStepper';
+import CockpitSummary from '../components/changes/CockpitSummary';
+import { DeadlineChip } from '../components/changes/DeadlineChip';
+import AuditTimeline from '../components/changes/AuditTimeline';
+import { useDepartments } from '../hooks/queries/useWorkflows';
+import { useAuth } from '../contexts/AuthContext';
+import { t } from '../i18n/cmLabels';
+import { STATUS_LABELS } from '../lib/changeStatus';
 
-const STATUS_LABELS: Record<string, string> = {
-  captured: 'Captured', in_assessment: 'In Assessment', costing: 'Costing',
-  quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
-  in_validation: 'Validation', released: 'Released', closed: 'Closed',
-};
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-const NEXT_STATUS: Record<string, string[]> = {
-  captured: ['in_assessment'], in_assessment: ['costing', 'rejected'],
-  costing: ['quoted'], quoted: ['approved', 'rejected'],
-  approved: ['in_implementation'], in_implementation: ['in_validation'],
-  in_validation: ['released'], released: ['closed'],
-};
-
-type Tab = 'overview' | 'impacted' | 'assessments' | 'commercial' | 'audit';
+type Tab = 'overview' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
+const TABS: Tab[] = ['overview', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
   const changeId = Number(id);
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get('tab');
+  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : 'overview';
+  const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
+  const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
     queryFn: () => changesApi.get(changeId),
   });
-  const { data: changelog = [] } = useQuery({
-    queryKey: ['change', changeId, 'changelog'],
-    queryFn: () => changesApi.changelog(changeId),
-    enabled: tab === 'audit',
+  const { data: allPlants = [] } = useQuery({
+    queryKey: ['plants'],
+    queryFn: plantsApi.list,
   });
+  // The change's project plant, used as the preferred default for new cost-line
+  // rows (Task 21). '/v1/plants/projects' lists every project across plants.
+  const { data: projects = [] } = useQuery<{ id: number; plant_id: number }[]>({
+    queryKey: ['projects'],
+    queryFn: async () => (await client.get('/v1/plants/projects')).data,
+  });
+  const projectPlantId = projects.find((p) => p.id === change?.project_id)?.plant_id ?? null;
+  const { data: impl } = useQuery({
+    queryKey: ['change', changeId, 'implementation'],
+    queryFn: () => changesApi.getImplementation(changeId),
+    enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
+  });
+  const { data: gates = [] } = useQuery({
+    queryKey: ['change', changeId, 'gates'],
+    queryFn: () => changesApi.getGates(changeId),
+  });
+  const { data: deviations = [] } = useQuery({
+    queryKey: ['change', changeId, 'deviations'],
+    queryFn: () => changesApi.listDeviations(changeId),
+  });
+  const { data: myActions } = useQuery({
+    queryKey: ['change-my-actions', changeId],
+    queryFn: () => changesApi.myActions(changeId),
+  });
+  const { data: departments = [] } = useDepartments();
+  const { isAdmin } = useAuth();
+  const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
+  // Task 19: client-side mirror of the confirm-impact authz (R&D member or
+  // admin) — server enforcement already exists (Task 18); this only decides
+  // whether to show the button. Defaults to true until departments/memberships
+  // have loaded, so the button doesn't flash-hide.
+  const rdDeptId = departments.find((d) => d.name === 'R&D')?.id;
+  const canConfirmImpact = !myActions ? true
+    : isAdmin || (rdDeptId !== undefined && myActions.memberships.includes(rdDeptId));
 
   const transition = useMutation({
-    mutationFn: (vars: { to: string; justification?: string; cancellation_reason?: string }) =>
+    mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
       changesApi.transition(changeId, vars.to, vars),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Transition failed'),
+    onSuccess: () => {
+      setBlocked(null);
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+    },
+    onError: (e: unknown, vars) => {
+      const detail = errDetail(e) ?? 'Transition failed';
+      if (vars.to !== 'cancelled') setBlocked({ to: vars.to, reason: detail });
+      else toast.error(detail);
+    },
   });
   const signOff = useMutation({
     mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(changeId, role),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: any) => alert(e?.response?.data?.detail ?? 'Sign-off failed'),
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
   });
   const customer = useMutation({
     mutationFn: (response: string) => changesApi.customerResponse(changeId, response),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
   });
+  const [deadlineDate, setDeadlineDate] = useState('');
+  const [deadlineReason, setDeadlineReason] = useState('');
+  const deadline = useMutation({
+    mutationFn: (vars: { required_by_date: string | null; required_by_reason: string | null }) =>
+      changesApi.update(changeId, vars),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+      toast.success('Deadline saved');
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to save deadline'),
+  });
+
+  useEffect(() => {
+    if (change) {
+      setDeadlineDate(change.required_by_date ? change.required_by_date.slice(0, 10) : '');
+      setDeadlineReason(change.required_by_reason ?? '');
+    }
+  }, [change?.id, change?.required_by_date, change?.required_by_reason]);
 
   if (isLoading || !change) return <div className="p-6 text-gray-500">Loading…</div>;
 
   const advance = (to: string) => {
-    let justification: string | undefined;
-    if (to !== 'rejected') {
-      justification = window.prompt(
-        `Move to "${STATUS_LABELS[to] ?? to}". If data is incomplete, enter a justification to override (or leave blank):`
-      ) ?? undefined;
-    }
-    const cancellation_reason = to === 'cancelled'
-      ? window.prompt('Cancellation reason:') ?? undefined : undefined;
-    transition.mutate({ to, justification: justification || undefined, cancellation_reason });
+    if (to === 'cancelled') { setCancelOpen(true); return; }
+    transition.mutate({ to });
   };
 
   return (
     <div className="max-w-5xl mx-auto p-6">
       <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-semibold">
-          <span className="font-mono text-gray-500">{change.change_number}</span> — {change.title}
+        <h1 className="text-2xl font-semibold flex items-center gap-3">
+          <span>
+            <span className="font-mono text-gray-500">{change.change_number}</span> — {change.title}
+          </span>
+          {impl?.ready_to_go && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100">
+              ✓ {t('impl.readyToGo')}
+            </span>
+          )}
         </h1>
-        <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
-                onClick={() => advance('cancelled')}>Cancel</button>
+        <div className="flex gap-2">
+          {change.status === 'on_hold' && (
+            <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
+                    onClick={() => advance('in_assessment')}>Resume</button>
+          )}
+          <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
+                  onClick={() => advance('cancelled')}>Cancel</button>
+        </div>
       </div>
 
-      <Stepper status={change.status} />
+      <LifecycleStepper status={change.status} />
 
-      <div className="flex gap-2 my-4">
-        {(NEXT_STATUS[change.status] ?? []).map((to) => (
-          <button key={to}
-            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-50"
-            disabled={transition.isPending}
-            onClick={() => advance(to)}>
-            → {STATUS_LABELS[to] ?? to}
-          </button>
-        ))}
-        {change.status === 'on_hold' && (
-          <button className="px-4 py-2 rounded-lg border text-sm"
-                  onClick={() => advance('in_assessment')}>Resume</button>
-        )}
-      </div>
+      {blocked && (
+        <DeviationBanner
+          changeId={changeId}
+          blockedTo={blocked.to}
+          blockedReason={blocked.reason}
+          onRetry={() => transition.mutate({ to: blocked.to })}
+          onClose={() => setBlocked(null)}
+        />
+      )}
+      <ReasonDialog
+        open={cancelOpen}
+        title="Cancel change"
+        label="Cancellation reason (required, audited)"
+        submitLabel="Cancel change"
+        onSubmit={(reason) => { setCancelOpen(false); transition.mutate({ to: 'cancelled', cancellation_reason: reason }); }}
+        onClose={() => setCancelOpen(false)}
+      />
+
+      <CockpitSummary
+        change={change}
+        gates={gates}
+        pendingDeviations={pendingDeviations}
+        impl={impl}
+        onAdvance={advance}
+        advancing={transition.isPending}
+        onResolveGate={() => setTab('d1')}
+        onShowImpact={() => setTab('impacted')}
+        actions={myActions?.actions ?? []}
+        onAction={(targetTab) => setTab(targetTab as Tab)}
+      />
 
       <div className="border-b flex gap-4 text-sm mb-4">
-        {(['overview', 'impacted', 'assessments', 'commercial', 'audit'] as Tab[]).map((t) => (
-          <button key={t}
-            className={`pb-2 ${tab === t ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
-            onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
+        {TABS.map((tb) => (
+          <button key={tb}
+            className={`pb-2 ${tab === tb ? 'border-b-2 border-blue-600 font-medium' : 'text-gray-500'}`}
+            onClick={() => setTab(tb)}>
+            {tb === 'implementation' ? t('impl.title') : tb[0].toUpperCase() + tb.slice(1)}
+          </button>
         ))}
       </div>
 
@@ -106,6 +203,37 @@ export default function ChangeDetailPage() {
           <p><span className="text-gray-500">Priority:</span> {change.priority}</p>
           <p><span className="text-gray-500">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-gray-500">Reason:</span> {change.reason ?? '—'}</p>
+
+          <div className="pt-3 border-t border-slate-700 mt-3">
+            <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2 flex items-center gap-2">
+              {t('deadline.title')}
+              <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">{t('deadline.title')}</label>
+                <input type="date" value={deadlineDate}
+                  onChange={(e) => setDeadlineDate(e.target.value)}
+                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              </div>
+              <div className="flex-1 min-w-[12rem]">
+                <label className="block text-xs text-slate-500 mb-1">{t('deadline.reason')}</label>
+                <input type="text" value={deadlineReason}
+                  onChange={(e) => setDeadlineReason(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              </div>
+              <button
+                className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"
+                disabled={deadline.isPending}
+                onClick={() => deadline.mutate({
+                  required_by_date: deadlineDate ? new Date(deadlineDate).toISOString() : null,
+                  required_by_reason: deadlineReason || null,
+                })}>
+                {t('deadline.set')}
+              </button>
+            </div>
+          </div>
+
           <div className="pt-3">
             <label className="text-sm text-gray-500">Attach document (PPT, PDF, …)</label>
             <input type="file" className="block mt-1 text-sm"
@@ -121,31 +249,62 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {tab === 'impacted' && (
-        <ul className="text-sm divide-y border rounded-lg">
-          {change.impacted_items.map((i) => (
-            <li key={i.id} className="px-4 py-2 flex justify-between">
-              <span>Part #{i.part_id} {i.impact_note ? `— ${i.impact_note}` : ''}</span>
-              <span className="text-gray-500">
-                {i.resulting_revision_id ? `rev #${i.resulting_revision_id}` : 'no revision'}
-                {i.eng_level_after ? ` (${i.eng_level_after})` : ''}
-              </span>
-            </li>
-          ))}
-          {change.impacted_items.length === 0 && <li className="px-4 py-3 text-gray-400">None.</li>}
-        </ul>
+      {tab === 'impacted' && change && (
+        <ImpactTree changeId={change.id} status={change.status}
+          impactConfirmedByName={change.impact_confirmed_by_name}
+          impactConfirmedAt={change.impact_confirmed_at}
+          canConfirm={canConfirmImpact} />
+      )}
+
+      {tab === 'implementation' && change && (
+        <ImplementationPanel changeId={change.id} />
       )}
 
       {tab === 'assessments' && (
-        <ul className="text-sm divide-y border rounded-lg">
+        <div className="space-y-4">
+          <AssessmentRouting changeId={changeId} />
+          <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
-            <li key={a.id} className="px-4 py-2 flex justify-between">
-              <span>Dept #{a.department_id}</span>
-              <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
+            <li key={a.id} className="px-4 py-2 flex justify-between items-center gap-3">
+              <span>{deptName(a.department_id)}</span>
+              <span className="flex items-center gap-3">
+                <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
+                <span className="text-slate-400 text-xs">
+                  {a.owner_name ?? t('tasks.unclaimed')}
+                  {a.overdue && <span className="text-red-400 ml-2">⚠ {t('tasks.overdue')}</span>}
+                </span>
+              </span>
             </li>
           ))}
           {change.assessments.length === 0 && <li className="px-4 py-3 text-gray-400">No assessments.</li>}
-        </ul>
+          </ul>
+          {change.assessments.map((a) => (
+            <div key={a.id}>
+              <div className="text-xs text-slate-400 mb-1">Cost lines — {deptName(a.department_id)}</div>
+              <CostLineGrid
+                changeId={changeId}
+                assessmentId={a.id}
+                departmentId={a.department_id}
+                projectPlantId={projectPlantId}
+                plants={
+                  (change.affected_plant_ids && change.affected_plant_ids.length > 0
+                    ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
+                    : allPlants
+                  )
+                    .filter((p) => p.is_active !== false)
+                    .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))
+                }
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'd1' && (
+        <div className="space-y-4">
+          <D1MasterPanel changeId={changeId} />
+          <SummationView changeId={changeId} />
+        </div>
       )}
 
       {tab === 'commercial' && (
@@ -169,32 +328,8 @@ export default function ChangeDetailPage() {
       )}
 
       {tab === 'audit' && (
-        <ol className="text-sm space-y-2">
-          {changelog.map((e) => (
-            <li key={e.id} className="flex gap-3">
-              <span className="text-gray-400 font-mono">{new Date(e.performed_at).toLocaleString()}</span>
-              <span>{e.action_description}</span>
-            </li>
-          ))}
-        </ol>
+        <AuditTimeline correlationId={change.change_number} />
       )}
-    </div>
-  );
-}
-
-function Stepper({ status }: { status: string }) {
-  const idx = CHANGE_STATUS_ORDER.indexOf(status as any);
-  return (
-    <div className="flex items-center gap-1 text-xs">
-      {CHANGE_STATUS_ORDER.map((s, i) => (
-        <div key={s} className="flex items-center gap-1">
-          <span className={`px-2 py-1 rounded-full ${
-            i < idx ? 'bg-green-100 text-green-700'
-            : i === idx ? 'bg-blue-600 text-white'
-            : 'bg-gray-100 text-gray-400'}`}>{STATUS_LABELS[s] ?? s}</span>
-          {i < CHANGE_STATUS_ORDER.length - 1 && <span className="text-gray-300">→</span>}
-        </div>
-      ))}
     </div>
   );
 }

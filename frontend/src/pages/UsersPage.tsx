@@ -6,6 +6,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
+import { useDepartments } from '../hooks/queries/useWorkflows';
+
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
 
 interface UserRecord {
   id: number;
@@ -24,17 +28,38 @@ interface DepartmentRecord {
   is_active?: boolean;
 }
 
+function useUserDepartments(userId: number) {
+  return useQuery<DepartmentRecord[]>({
+    queryKey: ['user-departments', userId],
+    queryFn: async () => (await client.get(`/v1/users/${userId}/departments`)).data,
+  });
+}
+
+function DepartmentChips({ userId }: { userId: number }) {
+  const { data: memberships, isLoading } = useUserDepartments(userId);
+  if (isLoading) return <span className="text-slate-500 text-xs">...</span>;
+  if (!memberships || memberships.length === 0) {
+    return <span className="text-slate-500 text-xs italic">no departments</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {memberships.map((d) => (
+        <span
+          key={d.id}
+          className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-200 text-xs"
+        >
+          {d.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function DepartmentsModal({ user, onClose }: { user: UserRecord; onClose: () => void }) {
   const queryClient = useQueryClient();
 
-  const { data: allDepartments } = useQuery<DepartmentRecord[]>({
-    queryKey: ['departments'],
-    queryFn: async () => (await client.get('/v1/workflow-templates/departments')).data,
-  });
-  const { data: memberships } = useQuery<DepartmentRecord[]>({
-    queryKey: ['user-departments', user.id],
-    queryFn: async () => (await client.get(`/v1/users/${user.id}/departments`)).data,
-  });
+  const { data: allDepartments } = useDepartments();
+  const { data: memberships } = useUserDepartments(user.id);
 
   const [selected, setSelected] = useState<Set<number> | null>(null);
   const effective = selected ?? new Set(memberships?.map((d) => d.id) ?? []);
@@ -50,8 +75,8 @@ function DepartmentsModal({ user, onClose }: { user: UserRecord; onClose: () => 
       queryClient.invalidateQueries({ queryKey: ['user-departments', user.id] });
       onClose();
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Failed to update departments');
+    onError: (error: unknown) => {
+      toast.error(errDetail(error) || 'Failed to update departments');
     },
   });
 
@@ -112,6 +137,34 @@ function roleColor(role: string): string {
   return colors[role] || 'bg-slate-700 text-slate-300';
 }
 
+function SetPasswordModal({ userName, onSubmit, onClose }: {
+  userName: string
+  onSubmit: (password: string) => void
+  onClose: () => void
+}) {
+  const [pw, setPw] = useState('')
+  const canSubmit = pw.length >= 8
+  const submit = () => { onSubmit(pw); onClose() }
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-slate-100 mb-3">Set password — {userName}</h2>
+        <input type="password" autoFocus minLength={8}
+          className="w-full rounded-lg px-3 py-2 text-sm bg-slate-700 border border-slate-600 text-slate-100"
+          placeholder="New password (min 8 characters)"
+          value={pw} onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) submit() }} />
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 rounded" onClick={onClose}>Cancel</button>
+          <button className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm disabled:opacity-50 hover:bg-sky-500"
+            disabled={!canSubmit}
+            onClick={submit}>Set password</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CreateUserModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
@@ -134,8 +187,8 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       onClose();
     },
-    onError: (error: any) => {
-      const detail = error.response?.data?.detail;
+    onError: (error: unknown) => {
+      const detail = errDetail(error);
       toast.error(typeof detail === 'string' ? detail : 'Failed to create user');
     },
   });
@@ -213,6 +266,7 @@ export default function UsersPage() {
   const { userId } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [departmentsUser, setDepartmentsUser] = useState<UserRecord | null>(null);
+  const [passwordModalUser, setPasswordModalUser] = useState<UserRecord | null>(null);
 
   const { data: users, isLoading, error } = useQuery<UserRecord[]>({
     queryKey: ['users'],
@@ -227,20 +281,21 @@ export default function UsersPage() {
       toast.success('User updated');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (err: any) => {
-      const detail = err.response?.data?.detail;
+    onError: (err: unknown) => {
+      const detail = errDetail(err);
       toast.error(typeof detail === 'string' ? detail : 'Failed to update user');
     },
   });
 
   const resetPassword = (user: UserRecord) => {
-    const pw = window.prompt(`New password for ${user.username} (min 8 characters):`);
-    if (!pw) return;
-    if (pw.length < 8) {
-      toast.error('Password must be at least 8 characters');
-      return;
+    setPasswordModalUser(user);
+  };
+
+  const handlePasswordSubmit = (password: string) => {
+    if (passwordModalUser) {
+      updateMutation.mutate({ id: passwordModalUser.id, password });
+      setPasswordModalUser(null);
     }
-    updateMutation.mutate({ id: user.id, password: pw });
   };
 
   if (error) {
@@ -276,6 +331,7 @@ export default function UsersPage() {
                 <th className="text-left px-4 py-3 font-medium">User</th>
                 <th className="text-left px-4 py-3 font-medium">Email</th>
                 <th className="text-left px-4 py-3 font-medium">Role</th>
+                <th className="text-left px-4 py-3 font-medium">Departments</th>
                 <th className="text-left px-4 py-3 font-medium">Status</th>
                 <th className="text-right px-4 py-3 font-medium">Actions</th>
               </tr>
@@ -304,6 +360,9 @@ export default function UsersPage() {
                           <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <DepartmentChips userId={user.id} />
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${user.is_active ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}`}>
@@ -347,6 +406,7 @@ export default function UsersPage() {
 
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
       {departmentsUser && <DepartmentsModal user={departmentsUser} onClose={() => setDepartmentsUser(null)} />}
+      {passwordModalUser && <SetPasswordModal userName={passwordModalUser.username} onSubmit={handlePasswordSubmit} onClose={() => setPasswordModalUser(null)} />}
     </div>
   );
 }

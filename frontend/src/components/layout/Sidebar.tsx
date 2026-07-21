@@ -32,6 +32,7 @@ export default function Sidebar() {
     { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
     { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
     { path: '/changes', label: 'Changes', icon: '🔄' },
+    { path: '/reports', label: 'Reports', icon: '📊' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
     ...(isAdmin ? [{ path: '/users', label: 'Users', icon: '👥' }] : []),

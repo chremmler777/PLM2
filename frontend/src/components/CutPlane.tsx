@@ -3,11 +3,9 @@ import { useThree } from '@react-three/fiber'
 
 interface CutPlaneProps {
   active: boolean
-  axis: 'x' | 'y' | 'z'
-  position: number
 }
 
-export function CutPlane({ active, axis, position }: CutPlaneProps) {
+export function CutPlane({ active }: CutPlaneProps) {
   const { gl } = useThree()
 
   useEffect(() => {

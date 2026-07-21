@@ -51,6 +51,13 @@ def upgrade() -> None:
 
     # Data migration to the new state machine
     conn = op.get_bind()
+    # +30 days date arithmetic isn't portable: SQLite uses datetime(x, '+30 days'),
+    # Postgres uses interval arithmetic.
+    if conn.dialect.name == "postgresql":
+        plus_30_days = "(COALESCE(approved_at, created_at) + INTERVAL '30 days')"
+    else:
+        plus_30_days = "datetime(COALESCE(approved_at, created_at), '+30 days')"
+
     conn.execute(sa.text(
         "UPDATE lessons_learned SET status = 'in_review' WHERE status IN ('draft', 'submitted')"
     ))
@@ -59,14 +66,14 @@ def upgrade() -> None:
     conn.execute(sa.text(
         "UPDATE lessons_learned SET status = 'in_work', "
         "accepted_at = COALESCE(approved_at, created_at), "
-        "target_date = COALESCE(target_date, datetime(COALESCE(approved_at, created_at), '+30 days')) "
+        f"target_date = COALESCE(target_date, {plus_30_days}) "
         "WHERE status = 'approved'"
     ))
     # implemented = work finished, awaiting verification under the new flow
     conn.execute(sa.text(
         "UPDATE lessons_learned SET status = 'verification', "
         "accepted_at = COALESCE(approved_at, created_at), "
-        "target_date = COALESCE(target_date, datetime(COALESCE(approved_at, created_at), '+30 days')), "
+        f"target_date = COALESCE(target_date, {plus_30_days}), "
         "verification_requested_at = CURRENT_TIMESTAMP "
         "WHERE status = 'implemented'"
     ))
