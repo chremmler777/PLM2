@@ -1,6 +1,7 @@
 """Workflow system models - templates, instances, and tasks."""
 from datetime import datetime
 from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean, JSON
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 
@@ -21,6 +22,7 @@ class Department(Base):
     name: Mapped[str] = mapped_column(String(50), unique=True)  # Developer, Tool Engineer, APQP, etc.
     flow_type: Mapped[str] = mapped_column(String(20))  # action | info
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_start_change: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
