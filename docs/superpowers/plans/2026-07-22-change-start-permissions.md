@@ -447,26 +447,33 @@ Add these static methods to `ChangeService`:
 
 - [ ] **Step 5: Guard `create_change`**
 
-`create_change` currently receives `raised_by` (a user id), not a `User`. Change the router to pass the user object through. In `change_service.py`, add a keyword-only parameter and guard at the top of `create_change`:
+`create_change` (`change_service.py:231`) currently receives `raised_by` (a user id),
+not a `User`. Add one keyword-only parameter `actor` and a guard, changing nothing
+else about the signature or body:
 
 ```python
     @staticmethod
     async def create_change(
-        session: AsyncSession, project_id: int, title: str, change_type: str,
-        raised_by: int, *, actor=None, **kwargs,
+        session: AsyncSession, *, project_id: int, title: str, change_type: str,
+        raised_by: int, reason: Optional[str] = None, description: Optional[str] = None,
+        priority: str = "medium", lead_id: Optional[int] = None,
+        data_classification: str = "confidential",
+        customer_relevant: Optional[bool] = None,
+        actor: Optional["User"] = None,
     ) -> ChangeRequest:
         if actor is not None and not await ChangeService.can_start_change(session, actor):
             names = await ChangeService.starter_department_names(session)
             raise ChangePermissionError(
                 "Starting a change is restricted to: " + ", ".join(names)
             )
-        ...  # existing body unchanged
+        if change_type not in CHANGE_TYPES:
+            raise ChangeError(f"Invalid change_type '{change_type}'")
+        # ... rest of the existing body unchanged, from generate_change_number onward
 ```
 
-Keep the existing explicit keyword parameters (`reason`, `description`, `priority`,
-`lead_id`, `data_classification`, `customer_relevant`) exactly as they are — only
-`actor` is new. `actor=None` means "no caller identity supplied, skip the check", which
-keeps the backfill scripts in `backend/scripts/` working unchanged.
+`actor=None` means "no caller identity supplied, skip the check". That keeps the
+backfill scripts in `backend/scripts/` working unchanged — they call `create_change`
+directly with no request user.
 
 - [ ] **Step 6: Map the error to 403 in the router**
 
@@ -647,83 +654,84 @@ git commit -m "feat(changes): add GET /changes/permissions"
 
 **Files:**
 - Modify: `backend/app/services/change_service.py:63-69` (delete `TYPE_DISCIPLINES`)
-- Modify: `backend/app/services/change_routing_service.py` (the fallback call site)
+- Modify: `backend/app/services/change_routing_service.py:4` (docstring), `:105-112`
+  (the fallback branch in `resolve_standard`), `:197-205` (the now-dead
+  `template_id is None` branch in `build_routing`)
+- Modify: `backend/tests/test_assessment_effort.py:10` (depends on the fallback)
 - Test: `backend/tests/test_change_routing.py` (extend)
 
 **Interfaces:**
-- Consumes: nothing from earlier tasks.
-- Produces: `ChangeError("No routing standard configured for change type '<type>'")` when no `ChangeRoutingStandard` matches.
+- Consumes: `can_start_changes` fixture from Task 2.
+- Produces: `ChangeRoutingService.resolve_standard` raises
+  `ChangeError("No routing standard configured for change type '<type>'")` when no
+  `ChangeRoutingStandard` row matches.
 
 `TYPE_DISCIPLINES` names `Process Engineer` and `Packaging Engineer`, neither of which
 exists in `wf_departments`. A fallback onto non-existent departments produces a change
 whose routing is silently wrong, which is worse than a loud failure.
 
-- [ ] **Step 1: Locate the fallback call site**
+Note: `GET /{change_id}/routing` only *reads* an existing snapshot — it returns empty
+stages when no routing was built. The fallback lives in `resolve_standard`, so the test
+must exercise that directly rather than going through the read endpoint.
 
-Run: `grep -rn "TYPE_DISCIPLINES" backend/`
-Note every file and line. Read the surrounding function in
-`change_routing_service.py` before editing so the replacement preserves the
-signature and the surrounding control flow.
-
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 Append to `backend/tests/test_change_routing.py`:
 
 ```python
-async def test_unmapped_change_type_fails_loudly(
-    client, eng_auth, seed, can_start_changes, session_factory
-):
-    """With no ChangeRoutingStandard for the type, routing must raise, not
-    silently fall back onto a hardcoded discipline list."""
-    from sqlalchemy import delete
-    from app.models.change import ChangeRoutingStandard
+async def test_unmapped_change_type_raises_instead_of_falling_back(session_factory):
+    """With no ChangeRoutingStandard for the type, resolve_standard must raise,
+    not silently fall back onto a hardcoded discipline-name list."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.services.change_service import ChangeError
+
     async with session_factory() as s:
-        await s.execute(delete(ChangeRoutingStandard))
-        await s.commit()
-
-    res = await client.post(
-        "/api/v1/changes",
-        json={"project_id": seed["project_id"], "title": "Unmapped",
-              "change_type": "packaging"},
-        headers=eng_auth,
-    )
-    change_id = res.json()["id"]
-
-    res = await client.get(f"/api/v1/changes/{change_id}/routing", headers=eng_auth)
-    assert res.status_code == 400, res.text
-    assert "routing standard" in res.json()["detail"].lower()
+        with pytest.raises(ChangeError, match="routing standard"):
+            await ChangeRoutingService.resolve_standard(s, "packaging")
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/test_change_routing.py::test_unmapped_change_type_fails_loudly -v`
-Expected: FAIL — returns 200 with a routing built from the hardcoded fallback.
+Run: `python3 -m pytest tests/test_change_routing.py::test_unmapped_change_type_raises_instead_of_falling_back -v`
+Expected: FAIL — `resolve_standard` returns `(None, None, [{"stage_order": 1, "departments": []}])` instead of raising.
 
-- [ ] **Step 4: Delete the fallback**
+- [ ] **Step 3: Delete the fallback**
 
 Remove the `TYPE_DISCIPLINES` dict from `change_service.py:63-69`. In
-`change_routing_service.py`, replace the fallback branch with:
+`change_routing_service.py`, replace the fallback branch at the end of
+`resolve_standard` (lines 105-112) with:
 
 ```python
-        if standard is None:
-            raise ChangeError(
-                f"No routing standard configured for change type "
-                f"'{change.change_type}'"
-            )
+        raise ChangeError(
+            f"No routing standard configured for change type '{change_type}'"
+        )
 ```
 
-Ensure `ChangeError` is imported there.
+Add `ChangeError` to the imports. Then remove the now-unreachable `else:` branch in
+`build_routing` (lines 197-205) that looked up the `"ECM Assessment"` template by name
+to compensate for a fallback with no `template_id` — `resolve_standard` can no longer
+return `template_id is None`, so `if routing.template_id is not None:` becomes
+unconditional. Also update the module docstring (line 4), which still describes the
+fallback.
+
+- [ ] **Step 4: Repair `test_assessment_effort.py`**
+
+Its fixture (line 10) creates departments matching `TYPE_DISCIPLINES["physical_part"]`
+so routing resolves without a `ChangeRoutingStandard`. Give it an explicit template plus
+a `ChangeRoutingStandard` row for `physical_part` instead — follow the `ecr_template`
+fixture in `tests/test_change_routing.py:55` for how to build a `WfTemplate` with
+stages, steps and RASIC rows. Do not restore the dict.
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python3 -m pytest tests/test_change_routing.py -v`
-Expected: PASS, whole file green.
+Run: `python3 -m pytest tests/test_change_routing.py tests/test_assessment_effort.py -v`
+Expected: PASS, both files green.
 
 - [ ] **Step 6: Run the full backend suite**
 
 Run: `python3 -m pytest -q`
-Expected: 364 passed (363 + 1 new). If other tests relied on the fallback, give them an
-explicit `ChangeRoutingStandard` row rather than restoring the dict.
+Expected: 364 passed (363 + 1 new). Any other test that relied on the fallback gets an
+explicit `ChangeRoutingStandard` row, never a restored dict.
 
 - [ ] **Step 7: Commit**
 
