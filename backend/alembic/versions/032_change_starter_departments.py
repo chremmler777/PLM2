@@ -54,6 +54,11 @@ def upgrade() -> None:
                       server_default=sa.false()),
         )
 
+    _merge_and_retire(op.get_bind())
+
+
+def _merge_and_retire(bind) -> None:
+    insp = inspect(bind)
     tables = set(insp.get_table_names())
 
     for dup_name, target_name in MERGES:
