@@ -188,6 +188,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'scoping.newMeeting': { de: 'Meeting erfassen', en: 'Record meeting' },
   'scoping.deadline': { de: 'Termin', en: 'Deadline' },
   'meeting.addAttendee': { de: 'Teilnehmer hinzufügen…', en: 'Add attendee…' },
+  'meeting.recommended': { de: 'Empfohlen (Bewertung)', en: 'Recommended (assessment)' },
+  'meeting.recommendedHint': { de: '★ vorausgewählt', en: '★ pre-selected' },
   'channel.label': { de: 'Kanal', en: 'Channel' },
   'channel.meeting': { de: 'Besprechung', en: 'Meeting' },
   'channel.chat': { de: 'Chat', en: 'Chat' },

@@ -281,6 +281,38 @@ async def get_implementation_progress(
     return await ChangeService.implementation_progress(db, change)
 
 
+@router.get("/{change_id}/recommended-departments")
+async def recommended_departments(
+    change_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Departments to pre-mark in the scoping decision: the Responsible/
+    Accountable assessors of the change type's stage-1 routing. The lead can
+    then narrow the fan-out to those relevant for this specific change."""
+    from app.services.change_routing_service import ChangeRoutingService
+    from app.models.change import BLOCKING_LETTERS
+    from app.models.workflow import Department
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    try:
+        _, _, stages = await ChangeRoutingService.resolve_standard(db, change.change_type)
+    except ChangeError:
+        return []
+    stage1 = next((s for s in stages if s["stage_order"] == 1), None)
+    if not stage1:
+        return []
+    rec = {d["department_id"] for d in stage1["departments"]
+           if d["rasic_letter"] in BLOCKING_LETTERS}
+    if not rec:
+        return []
+    rows = (await db.execute(
+        select(Department.id, Department.name)
+        .where(Department.id.in_(rec), Department.is_active.is_(True))
+        .order_by(Department.sort_order, Department.name))).all()
+    return [{"id": i, "name": n} for i, n in rows]
+
+
 @router.get("/{change_id}/routing", response_model=RoutingResponse)
 async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):

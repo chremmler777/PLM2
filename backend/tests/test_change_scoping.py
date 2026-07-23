@@ -66,6 +66,26 @@ async def test_captured_goes_to_scoping_not_assessment(client, admin_auth, seed,
 
 
 @pytest.mark.asyncio
+async def test_recommended_departments_are_stage1_responsible(
+        client, admin_auth, seed, part, session_factory):
+    """The scoping picker recommends the technical assessors — stage-1
+    Responsible departments of the change type's routing."""
+    from app.services.wf_seed_service import seed_assessment_standard
+    async with session_factory() as s:
+        await seed_assessment_standard(s)
+        await s.commit()
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    res = await client.get(
+        f"/api/v1/changes/{change['id']}/recommended-departments", headers=admin_auth)
+    assert res.status_code == 200, res.text
+    names = {d["name"] for d in res.json()}
+    assert names == {"R&D", "Tool design", "IE", "Process Engineer", "APQP", "Quality"}
+    # support functions (Informed) are not recommended
+    assert "Sales" not in names and "Logistics" not in names
+
+
+@pytest.mark.asyncio
 async def test_scoping_decision_records_channel(client, admin_auth, seed, part):
     """The scoping decision can be logged as a meeting, chat, or email — the
     record itself is the traceable proof, no evidence attachment required."""
@@ -196,8 +216,9 @@ async def test_scoping_selection_filters_stage1_fanout(
                                  lead_id=seed["admin_id"])
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
+        # Two Responsible stage-1 assessors (both produce assessment rows).
         picked = [d for (d,) in await s.execute(
-            select(Department.id).where(Department.name.in_(["Quality", "Logistics"])))]
+            select(Department.id).where(Department.name.in_(["Quality", "R&D"])))]
     assert len(picked) == 2
     await advance_to_assessment(client, admin_auth, session_factory,
                                 change["id"], dept_ids=picked)
@@ -289,8 +310,8 @@ async def test_informational_only_scoping_is_rejected(
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
         picked = [d for (d,) in await s.execute(
-            select(Department.id).where(Department.name == "Planner/Scheduler"))]
-    assert len(picked) == 1, "Planner/Scheduler is the I-only stage-1 department"
+            select(Department.id).where(Department.name == "Logistics"))]
+    assert len(picked) == 1, "Logistics is an I-only stage-1 department"
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
                             json={"selected_department_ids": picked}, headers=admin_auth)
     assert res.status_code == 200, res.text

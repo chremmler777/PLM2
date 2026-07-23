@@ -80,6 +80,10 @@ export const changesApi = {
   deleteAttachment: (id: number, attachmentId: number) =>
     client.delete(`/v1/changes/${id}/attachments/${attachmentId}`).then((r) => r.data),
 
+  recommendedDepartments: (id: number) =>
+    client.get<{ id: number; name: string }[]>(`/v1/changes/${id}/recommended-departments`)
+      .then((r) => r.data),
+
   getRouting: (id: number) =>
     client.get<ChangeRouting>(`/v1/changes/${id}/routing`).then((r) => r.data),
 

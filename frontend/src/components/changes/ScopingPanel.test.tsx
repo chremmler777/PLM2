@@ -13,6 +13,7 @@ vi.mock('../../api/changes', () => ({
       decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
     }]),
     createMeeting: vi.fn(), decideMeeting: vi.fn(), update: vi.fn(),
+    recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality' }]),
   },
 }))
 vi.mock('../../hooks/queries/useWorkflows', () => ({
@@ -52,6 +53,12 @@ describe('ScopingPanel', () => {
     render(wrap(<ScopingPanel change={change({ required_by_date: '2026-09-01', deadline_state: 'on_track' })} />))
     await screen.findByText(/PM Jane/)
     expect(screen.queryByText(/required before assessment/i)).toBeNull()
+  })
+  it('pre-marks the recommended assessor departments with a star', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    // "Quality" is recommended → button pre-selected (sky bg) and starred.
+    const qualityBtn = await screen.findByRole('button', { name: /★\s*Quality/ })
+    expect(qualityBtn.className).toContain('bg-sky-600')
   })
   it('appends a picked contact to the participants list', async () => {
     render(wrap(<ScopingPanel change={change()} />))

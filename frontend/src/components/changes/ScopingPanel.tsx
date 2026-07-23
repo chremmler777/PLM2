@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
@@ -32,6 +32,23 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   const [addName, setAddName] = useState('')
   const [notes, setNotes] = useState('')
   const [deptIds, setDeptIds] = useState<number[]>([])
+  const [deptTouched, setDeptTouched] = useState(false)
+
+  // Recommended assessors for this change type (stage-1 Responsible depts): the
+  // technical disciplines who each assess their part. Pre-marked in the picker;
+  // the lead can narrow the fan-out to those relevant for this change.
+  const { data: recommended = [] } = useQuery({
+    queryKey: ['recommended-departments', changeId],
+    queryFn: () => changesApi.recommendedDepartments(changeId),
+    enabled: status === 'captured' || status === 'scoping',
+  })
+  const recommendedIds = recommended.map((d) => d.id)
+  useEffect(() => {
+    // Seed the selection from the recommendation once, until the user edits it.
+    if (!deptTouched && recommendedIds.length > 0 && deptIds.length === 0) {
+      setDeptIds(recommendedIds)
+    }
+  }, [recommended]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attendee autofill: the signed-in user's Entra "relevant people" via the hub,
   // or local PLM2 users in dev. Free-text still allowed for external attendees.
@@ -61,7 +78,10 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       notes: notes || undefined,
       selected_department_ids: deptIds,
     }),
-    onSuccess: () => { setNotes(''); setParticipants(''); setAddName(''); invalidate() },
+    onSuccess: () => {
+      setNotes(''); setParticipants(''); setAddName('')
+      setDeptTouched(false); setDeptIds(recommendedIds); invalidate()
+    },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
   })
   const decide = useMutation({
@@ -72,8 +92,11 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   })
 
   const open = status === 'captured' || status === 'scoping'
-  const toggleDept = (id: number) => setDeptIds((prev) =>
-    prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
+  const toggleDept = (id: number) => {
+    setDeptTouched(true)
+    setDeptIds((prev) =>
+      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
+  }
 
   const hasDeadline = change.required_by_date != null
 
@@ -192,16 +215,25 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
               className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">{t('meeting.departments')}</label>
+            <label className="block text-xs text-slate-500 mb-1">
+              {t('meeting.departments')}
+              {recommendedIds.length > 0 && (
+                <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
+              )}
+            </label>
             <div className="flex flex-wrap gap-2">
-              {departments.map((d) => (
-                <button key={d.id} type="button" onClick={() => toggleDept(d.id)}
-                  className={`px-2.5 py-1 rounded-full text-xs border ${deptIds.includes(d.id)
-                    ? 'bg-sky-600 text-white border-sky-500'
-                    : 'bg-slate-900 text-slate-300 border-slate-600'}`}>
-                  {d.name}
-                </button>
-              ))}
+              {departments.map((d) => {
+                const isRec = recommendedIds.includes(d.id)
+                return (
+                  <button key={d.id} type="button" onClick={() => toggleDept(d.id)}
+                    title={isRec ? t('meeting.recommended') : undefined}
+                    className={`px-2.5 py-1 rounded-full text-xs border ${deptIds.includes(d.id)
+                      ? 'bg-sky-600 text-white border-sky-500'
+                      : 'bg-slate-900 text-slate-300 border-slate-600'}`}>
+                    {isRec && <span className="mr-1">★</span>}{d.name}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <button

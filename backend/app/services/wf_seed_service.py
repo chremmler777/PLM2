@@ -26,10 +26,11 @@ ECM_BEWERTUNG = {
     "stages": [
         ("Feasibility & Assessment", [
             ("Department assessment", [
-                ("Sales", "R"), ("R&D", "R"), ("Tool design", "R"), ("IE", "R"),
-                ("Quality", "R"), ("Logistics", "R"), ("Production", "R"),
-                ("Purchasing", "R"), ("Production control", "R"),
-                ("Project Manager", "A"), ("Planner/Scheduler", "I"),
+                # Technical disciplines each assess their own scope (Responsible);
+                # support functions are Informed. See migration 034.
+                ("R&D", "R"), ("Tool design", "R"), ("IE", "R"),
+                ("Process Engineer", "R"), ("APQP", "R"), ("Quality", "R"),
+                ("Logistics", "I"), ("Project Manager", "I"), ("Sales", "I"),
             ], {}),
         ]),
         ("Summation & Budget", [
