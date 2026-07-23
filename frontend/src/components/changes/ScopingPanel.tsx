@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
+import { DeadlineEditor } from './DeadlineEditor'
 import { t } from '../../i18n/cmLabels'
-import type { ChangeStatus, ChangeMeeting } from '../../types/change'
+import type { ChangeMeeting, ChangeRequest } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -14,9 +16,9 @@ const DECISION_LABEL: Record<string, string> = {
   needs_info: t('meeting.needsInfo'),
 }
 
-export default function ScopingPanel({ changeId, status }: {
-  changeId: number; status: ChangeStatus
-}) {
+export default function ScopingPanel({ change }: { change: ChangeRequest }) {
+  const changeId = change.id
+  const status = change.status
   const qc = useQueryClient()
   const { data: meetings = [] } = useQuery({
     queryKey: ['change-meetings', changeId],
@@ -25,9 +27,26 @@ export default function ScopingPanel({ changeId, status }: {
   const { data: departments = [] } = useDepartments()
 
   const [date, setDate] = useState('')
+  const [channel, setChannel] = useState<'meeting' | 'chat' | 'email'>('meeting')
   const [participants, setParticipants] = useState('')
+  const [addName, setAddName] = useState('')
   const [notes, setNotes] = useState('')
   const [deptIds, setDeptIds] = useState<number[]>([])
+
+  // Attendee autofill: the signed-in user's Entra "relevant people" via the hub,
+  // or local PLM2 users in dev. Free-text still allowed for external attendees.
+  const { data: contacts = [] } = useQuery({
+    queryKey: ['contacts'], queryFn: () => contactsApi.list(),
+    enabled: status === 'captured' || status === 'scoping',
+    staleTime: 60 * 60 * 1000,
+  })
+  const appendParticipant = (name: string) => {
+    const n = name.trim()
+    if (!n) return
+    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
+    if (!cur.includes(n)) setParticipants([...cur, n].join(', '))
+    setAddName('')
+  }
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
@@ -36,12 +55,13 @@ export default function ScopingPanel({ changeId, status }: {
   const create = useMutation({
     mutationFn: () => changesApi.createMeeting(changeId, {
       meeting_date: date ? `${date}T12:00:00Z` : undefined,
+      channel,
       participants: participants.split(',').map((n) => n.trim())
         .filter(Boolean).map((name) => ({ name })),
       notes: notes || undefined,
       selected_department_ids: deptIds,
     }),
-    onSuccess: () => { setNotes(''); setParticipants(''); invalidate() },
+    onSuccess: () => { setNotes(''); setParticipants(''); setAddName(''); invalidate() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
   })
   const decide = useMutation({
@@ -55,13 +75,29 @@ export default function ScopingPanel({ changeId, status }: {
   const toggleDept = (id: number) => setDeptIds((prev) =>
     prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
 
+  const hasDeadline = change.required_by_date != null
+
   return (
     <div className="space-y-4 text-sm">
+      {/* Deadline is required to leave scoping — surface it here so the user
+          can set it in place rather than hunting for it after being blocked. */}
+      <div className={`rounded-lg border p-3 flex items-center gap-3 flex-wrap ${
+        hasDeadline ? 'border-slate-700 bg-slate-800' : 'border-amber-700/60 bg-amber-950/30'}`}>
+        <span className="text-slate-300 font-medium">{t('scoping.deadline')}</span>
+        <DeadlineEditor change={change} />
+        {!hasDeadline && (
+          <span className="text-xs text-amber-300">{t('scoping.deadlineRequired')}</span>
+        )}
+      </div>
+
       <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">
         {meetings.map((m: ChangeMeeting) => (
           <li key={m.id} className="p-3 space-y-1">
             <div className="flex justify-between items-center">
-              <span className="text-slate-200">
+              <span className="text-slate-200 flex items-center gap-2">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+                  {t(`channel.${m.channel ?? 'meeting'}`)}
+                </span>
                 {new Date(m.meeting_date).toLocaleDateString()} — {' '}
                 {m.participants.map((p) => p.name).join(', ') || '—'}
               </span>
@@ -108,6 +144,15 @@ export default function ScopingPanel({ changeId, status }: {
           <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
           <div className="flex flex-wrap gap-3">
             <div>
+              <label className="block text-xs text-slate-500 mb-1">{t('channel.label')}</label>
+              <select value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)}
+                className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100">
+                <option value="meeting">{t('channel.meeting')}</option>
+                <option value="chat">{t('channel.chat')}</option>
+                <option value="email">{t('channel.email')}</option>
+              </select>
+            </div>
+            <div>
               <label className="block text-xs text-slate-500 mb-1">{t('meeting.date')}</label>
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
@@ -116,8 +161,29 @@ export default function ScopingPanel({ changeId, status }: {
               <label className="block text-xs text-slate-500 mb-1">
                 {t('meeting.participants')} <span className="opacity-60">({t('meeting.participantsHint')})</span>
               </label>
-              <input type="text" value={participants} onChange={(e) => setParticipants(e.target.value)}
+              <input
+                type="text" list="sc-contacts" value={addName}
+                placeholder={t('meeting.addAttendee')}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setAddName(v)
+                  // Picking a suggestion sets the full name in one change event.
+                  if (contacts.some((c) => c.name === v)) appendParticipant(v)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); appendParticipant(addName) }
+                }}
                 className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              <datalist id="sc-contacts">
+                {contacts.map((c) => (
+                  <option key={c.email ?? c.name} value={c.name}>
+                    {c.email ?? ''}
+                  </option>
+                ))}
+              </datalist>
+              <input
+                type="text" value={participants} onChange={(e) => setParticipants(e.target.value)}
+                className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
             </div>
           </div>
           <div>

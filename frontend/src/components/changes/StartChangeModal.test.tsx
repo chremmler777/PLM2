@@ -33,7 +33,7 @@ describe('StartChangeModal', () => {
     vi.mocked(changesApi.create).mockClear()
     clientMocks.get.mockImplementation((url: string) => {
       if (url.includes('/plants/projects'))
-        return Promise.resolve({ data: [{ id: 1, name: 'VW426 Atlas' }] })
+        return Promise.resolve({ data: [{ id: 1, code: '1864', name: 'VW426 Atlas' }] })
       if (url.includes('/parts/project/'))
         return Promise.resolve({ data: [
           { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
@@ -44,20 +44,21 @@ describe('StartChangeModal', () => {
   })
   afterEach(cleanup)
 
-  it('infers tooling type from a tool prefill and creates change + lead item', async () => {
+  it('starts a physical-part change and creates change + lead item', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{
       projectId: 1,
-      part: { id: 9, part_number: '3450', name: 'Tool 3450', item_category: 'tool' },
+      part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
     }} />)
-    expect((screen.getByLabelText(/Change type/) as HTMLSelectElement).value).toBe('tooling')
-    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'Fix cavity' } })
-    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Warpage on cavity 3' } })
+    // Only physical-part changes are enabled today; the type picker sits below project.
+    expect((screen.getByLabelText(/Change type/) as HTMLSelectElement).value).toBe('physical_part')
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'Fix clip' } })
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Rattle at clip' } })
     fireEvent.click(screen.getByRole('radio', { name: /^No/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 1, change_type: 'tooling', lead_id: 5, customer_relevant: false })))
+      expect.objectContaining({ project_id: 1, change_type: 'physical_part', lead_id: 5, customer_relevant: false })))
     await waitFor(() => expect(changesApi.addImpactedItem).toHaveBeenCalledWith(
-      42, { part_id: 9, is_lead: true }))
+      42, { part_id: 4, is_lead: true }))
     expect(navigate).toHaveBeenCalledWith('/changes/42')
   })
 
@@ -82,9 +83,9 @@ describe('StartChangeModal', () => {
     expect(screen.getByText(/customer-relevant choice/)).toBeDefined()
   })
 
-  it('shows the locked project name instead of a raw id when prefilled', async () => {
+  it('shows the locked project number-first instead of a raw id when prefilled', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
-    expect(await screen.findByText('VW426 Atlas')).toBeTruthy()
+    expect(await screen.findByText('1864 · VW426 Atlas')).toBeTruthy()
     expect(screen.queryByText('#1')).toBeNull()
   })
 
@@ -97,5 +98,26 @@ describe('StartChangeModal', () => {
     fireEvent.change(screen.getByPlaceholderText(/Search item/), { target: { value: 'clip' } })
     fireEvent.click(await screen.findByText(/20-3450-001-0/))
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', false)
+  })
+
+  it('hides non-physical articles (packaging/material prefixes) under a physical-part change', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/plants/projects'))
+        return Promise.resolve({ data: [{ id: 1, code: '1864', name: 'VW426 Atlas' }] })
+      if (url.includes('/parts/project/'))
+        return Promise.resolve({ data: [
+          { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
+          { id: 7, part_number: '40-9001-000-0', name: 'Box', item_category: 'article' },
+          { id: 8, part_number: '65-1000-000-0', name: 'Resin', item_category: 'article' },
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    // Physical part (20-) is offered; packaging (40-) and material (65-) are not.
+    expect(await screen.findByText('20-3450-001-0')).toBeTruthy()
+    expect(screen.queryByText('40-9001-000-0')).toBeNull()
+    expect(screen.queryByText('65-1000-000-0')).toBeNull()
+    // The two hidden ones are counted, not silently dropped.
+    expect(screen.getByText(/2 non-physical items hidden/)).toBeTruthy()
   })
 })

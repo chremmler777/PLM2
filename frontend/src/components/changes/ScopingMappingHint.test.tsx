@@ -22,7 +22,7 @@ const assessment = (department_id: number): Assessment => ({
 })
 
 const meeting = (over: Partial<ChangeMeeting> = {}): ChangeMeeting => ({
-  id: 1, change_id: 7, meeting_date: '2026-07-01T00:00:00', participants: [],
+  id: 1, change_id: 7, meeting_date: '2026-07-01T00:00:00', channel: 'meeting', participants: [],
   notes: null, decision: 'proceed', selected_department_ids: [1, 2, 3],
   created_by: 1, created_at: '2026-07-01T00:00:00', decided_by: 1, decided_at: '2026-07-01T00:00:00',
   ...over,

@@ -8,6 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { t } from '../../i18n/cmLabels';
 import type { ChangeType } from '../../types/change';
 
+// Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
   { value: 'physical_part', label: 'Physical Part' },
   { value: 'tooling', label: 'Tooling' },
@@ -16,11 +17,21 @@ export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
   { value: 'packaging', label: 'Packaging' },
 ];
 
+// Types offered in the UI today. We start with physical-part changes (the most
+// common) and add tooling / process / material / packaging as each flow is ready.
+export const ENABLED_CHANGE_TYPES: ChangeType[] = ['physical_part'];
+
+// WinCarat encodes the real part class in the number prefix (all rows are
+// item_category 'article' in PLM). Physical parts are the 10/11/20/22 families;
+// 40 = packaging, 65 = material, etc. get their own flows later. A change type
+// with no entry here imposes no prefix filter.
+const partPrefix = (partNumber: string): string => partNumber.split('-')[0];
+const TYPE_PART_PREFIXES: Partial<Record<ChangeType, Set<string>>> = {
+  physical_part: new Set(['10', '11', '20', '22']),
+};
+
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-
-const inferType = (category: string): ChangeType =>
-  ['tool', 'gauge', 'equipment'].includes(category) ? 'tooling' : 'physical_part';
 
 interface PickedPart {
   id: number;
@@ -42,8 +53,13 @@ export interface StartChangeModalProps {
 
 interface ProjectRef {
   id: number;
+  code: string;
   name: string;
 }
+
+// Projects read number-first: "1864 · VW426 Atlas".
+const projectLabel = (p: ProjectRef): string =>
+  p.code ? `${p.code} · ${p.name}` : p.name;
 
 export default function StartChangeModal({ open, onClose, prefill }: StartChangeModalProps) {
   const navigate = useNavigate();
@@ -55,16 +71,12 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [search, setSearch] = useState('');
   const [title, setTitle] = useState('');
   const [reason, setReason] = useState('');
-  const [typeTouched, setTypeTouched] = useState(false);
-  const [overrideType, setOverrideType] = useState<ChangeType>('physical_part');
+  // Change type is chosen up front and scopes the item picker. Only physical-part
+  // changes are enabled today (see ENABLED_CHANGE_TYPES).
+  const [changeType, setChangeType] = useState<ChangeType>('physical_part');
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
-
-  const changeType: ChangeType = typeTouched
-    ? overrideType
-    : picked
-    ? inferType(picked.item_category)
-    : 'physical_part';
+  const [showTools, setShowTools] = useState(false);
 
   const { data: projects = [] } = useQuery<ProjectRef[]>({
     queryKey: ['projects'],
@@ -87,15 +99,22 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             p.name.toLowerCase().includes(q),
         )
       : parts;
-    const articles = matches.filter((p) => p.item_category === 'article');
+    const allArticles = matches.filter((p) => p.item_category === 'article');
     const tools = matches.filter((p) => p.item_category !== 'article');
-    return { articles, tools };
-  }, [parts, search]);
+    // Scope articles to the selected change type's part families (physical parts
+    // only, today). Anything outside is hidden but counted, so it never looks
+    // like the project simply has no parts.
+    const allow = TYPE_PART_PREFIXES[changeType];
+    const articles = allow
+      ? allArticles.filter((p) => allow.has(partPrefix(p.part_number)))
+      : allArticles;
+    return { articles, tools, hiddenArticles: allArticles.length - articles.length };
+  }, [parts, search, changeType]);
 
-  const lockedProjectName = useMemo(
-    () => projects.find((p) => p.id === projectId)?.name,
-    [projects, projectId],
-  );
+  const lockedProjectName = useMemo(() => {
+    const p = projects.find((pr) => pr.id === projectId);
+    return p ? projectLabel(p) : undefined;
+  }, [projects, projectId]);
 
   if (!open) return null;
 
@@ -136,7 +155,6 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
   const selectPart = (p: PickedPart) => {
     setPicked(p);
-    setTypeTouched(false);
     setSearch('');
   };
 
@@ -174,17 +192,37 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
               onChange={(e) => {
                 setProjectId(e.target.value ? Number(e.target.value) : undefined);
                 setPicked(undefined);
-                setTypeTouched(false);
               }}
             >
               <option value="">—</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {projectLabel(p)}
                 </option>
               ))}
             </select>
           )}
+        </div>
+
+        {/* Change type — chosen up front; scopes which items the picker offers.
+            Only physical-part changes are enabled today; more are added over time. */}
+        <div className="mb-4">
+          <label htmlFor="sc-type" className="block text-sm text-slate-300 mb-1">
+            {t('start.type')}
+          </label>
+          <select
+            id="sc-type"
+            className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
+            value={changeType}
+            onChange={(e) => setChangeType(e.target.value as ChangeType)}
+          >
+            {ENABLED_CHANGE_TYPES.map((v) => (
+              <option key={v} value={v}>
+                {CHANGE_TYPES.find((ct) => ct.value === v)?.label ?? v}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">{t('start.typeMoreSoon')}</p>
         </div>
 
         {/* Item picker */}
@@ -193,12 +231,12 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             {t('start.item')}
           </label>
           {picked ? (
-            <div className="flex items-center gap-2 rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm">
-              <span className="font-mono text-slate-100">{picked.part_number}</span>
-              <span className="text-slate-400 truncate">{picked.name}</span>
+            <div className="flex items-center gap-2 rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm whitespace-nowrap overflow-hidden">
+              <span className="font-mono text-slate-100 flex-shrink-0">{picked.part_number}</span>
+              <span className="text-slate-400 truncate min-w-0">{picked.name}</span>
               <button
                 type="button"
-                className="ml-auto text-slate-400 hover:text-slate-200"
+                className="ml-auto flex-shrink-0 text-slate-400 hover:text-slate-200"
                 onClick={() => setPicked(undefined)}
                 aria-label={t('start.clearItem')}
               >
@@ -218,44 +256,59 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
               />
               {projectId && (
                 <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-slate-700 divide-y divide-slate-700/60">
-                  {filtered.articles.length > 0 && (
-                    <div>
-                      <div className="px-3 py-1 text-xs uppercase tracking-wide text-slate-500 bg-slate-900/60">
-                        {t('start.articles')}
-                      </div>
-                      {filtered.articles.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex items-center gap-2"
-                          onClick={() => selectPart(p)}
-                        >
-                          <span className="font-mono text-slate-100">{p.part_number}</span>
-                          <span className="text-slate-400 truncate">{p.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {/* Articles — the common change target, always open on top. */}
+                  {filtered.articles.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+                      onClick={() => selectPart(p)}
+                    >
+                      <span className="font-mono text-slate-100 flex-shrink-0">{p.part_number}</span>
+                      <span className="text-slate-400 truncate min-w-0">{p.name}</span>
+                    </button>
+                  ))}
+
+                  {/* Tools & equipment — rarely changed alone, collapsed by default. */}
                   {filtered.tools.length > 0 && (
                     <div>
-                      <div className="px-3 py-1 text-xs uppercase tracking-wide text-slate-500 bg-slate-900/60">
-                        {t('start.tools')}
-                      </div>
-                      {filtered.tools.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex items-center gap-2"
-                          onClick={() => selectPart(p)}
-                        >
-                          <span className="font-mono text-slate-100">{p.part_number}</span>
-                          <span className="text-slate-400 truncate">{p.name}</span>
-                        </button>
-                      ))}
+                      <button
+                        type="button"
+                        className="w-full text-left px-3 py-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 bg-slate-900/60 hover:text-slate-300"
+                        onClick={() => setShowTools((v) => !v)}
+                      >
+                        <span className="flex-shrink-0">{showTools ? '▾' : '▸'}</span>
+                        <span className="truncate">{t('start.toolsRarely')}</span>
+                        <span className="ml-auto flex-shrink-0 normal-case">{filtered.tools.length}</span>
+                      </button>
+                      {showTools && (
+                        <>
+                          <p className="px-3 py-2 text-xs text-slate-500 bg-slate-900/40 normal-case">
+                            {t('start.toolsNote')}
+                          </p>
+                          {filtered.tools.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex items-center gap-2 whitespace-nowrap overflow-hidden"
+                              onClick={() => selectPart(p)}
+                            >
+                              <span className="font-mono text-slate-100 flex-shrink-0">{p.part_number}</span>
+                              <span className="text-slate-400 truncate min-w-0">{p.name}</span>
+                            </button>
+                          ))}
+                        </>
+                      )}
                     </div>
                   )}
+
                   {filtered.articles.length === 0 && filtered.tools.length === 0 && (
                     <div className="px-3 py-3 text-sm text-slate-500">{t('start.noMatches')}</div>
+                  )}
+                  {filtered.hiddenArticles > 0 && (
+                    <div className="px-3 py-1.5 text-xs text-slate-500 bg-slate-900/40">
+                      {t('start.hiddenNonPhysical').replace('{n}', String(filtered.hiddenArticles))}
+                    </div>
                   )}
                 </div>
               )}
@@ -275,28 +328,6 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-        </div>
-
-        {/* Change type */}
-        <div className="mb-4">
-          <label htmlFor="sc-type" className="block text-sm text-slate-300 mb-1">
-            {t('start.type')}
-          </label>
-          <select
-            id="sc-type"
-            className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
-            value={changeType}
-            onChange={(e) => {
-              setTypeTouched(true);
-              setOverrideType(e.target.value as ChangeType);
-            }}
-          >
-            {CHANGE_TYPES.map((ct) => (
-              <option key={ct.value} value={ct.value}>
-                {ct.label}
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* Reason */}

@@ -67,8 +67,18 @@ export const changesApi = {
   uploadAttachment: (id: number, file: File) => {
     const fd = new FormData();
     fd.append('file', file);
-    return client.post(`/v1/changes/${id}/attachments`, fd).then((r) => r.data);
+    // The client sets a global Content-Type: application/json default; it must
+    // be cleared here so the browser sets multipart/form-data WITH its boundary.
+    // Otherwise FastAPI can't find the `file` field and returns 422.
+    return client
+      .post(`/v1/changes/${id}/attachments`, fd, {
+        headers: { 'Content-Type': undefined },
+      })
+      .then((r) => r.data);
   },
+
+  deleteAttachment: (id: number, attachmentId: number) =>
+    client.delete(`/v1/changes/${id}/attachments/${attachmentId}`).then((r) => r.data),
 
   getRouting: (id: number) =>
     client.get<ChangeRouting>(`/v1/changes/${id}/routing`).then((r) => r.data),
@@ -111,7 +121,8 @@ export const changesApi = {
   listMeetings: (id: number) =>
     client.get<ChangeMeeting[]>(`/v1/changes/${id}/meetings`).then((r) => r.data),
   createMeeting: (id: number, body: {
-    meeting_date?: string; participants: MeetingParticipant[];
+    meeting_date?: string; channel?: 'meeting' | 'chat' | 'email';
+    participants: MeetingParticipant[];
     notes?: string; selected_department_ids: number[];
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>

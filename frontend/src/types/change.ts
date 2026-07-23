@@ -77,6 +77,7 @@ export interface Attachment {
   filename: string;
   content_type: string;
   size_bytes: number;
+  phase: 'baseline' | 'post_scoping';
   created_at: string;
 }
 
@@ -267,10 +268,13 @@ export interface ImplementationProgress {
 
 export interface MeetingParticipant { name: string; user_id?: number | null }
 
+export type MeetingChannel = 'meeting' | 'chat' | 'email';
+
 export interface ChangeMeeting {
   id: number;
   change_id: number;
   meeting_date: string;
+  channel: MeetingChannel;
   participants: MeetingParticipant[];
   notes: string | null;
   decision: 'proceed' | 'reject' | 'needs_info' | null;

@@ -2,6 +2,7 @@
  * App - Main application component with routing
  */
 
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
@@ -156,6 +157,22 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // A file dropped anywhere outside an explicit drop zone would otherwise make
+  // the browser navigate to open the file, blanking the SPA. Swallow stray
+  // file-drops at the window level. Real drop zones still receive and handle
+  // their own drop event; this only cancels the browser's default navigation.
+  useEffect(() => {
+    const swallow = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

@@ -18,6 +18,8 @@ import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
+import ChangeAttachments from '../components/changes/ChangeAttachments';
+import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
 import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
@@ -36,6 +38,15 @@ const TABS: Tab[] = ['overview', 'scoping', 'impacted', 'implementation', 'asses
 // separate right-aligned group and gated by authz — see `canSeeGovernance` below.
 const EVERYDAY_TABS: Tab[] = ['overview', 'scoping', 'impacted', 'assessments', 'commercial', 'implementation'];
 const GOVERNANCE_TABS: Tab[] = ['d1', 'audit'];
+
+// Which tab represents the change's current phase — so the tab bar shows what
+// is ACTIVE, not just what the user clicked. Terminal statuses map to nothing.
+const STATUS_ACTIVE_TAB: Record<string, Tab> = {
+  captured: 'scoping', scoping: 'scoping',
+  in_assessment: 'assessments',
+  costing: 'commercial', quoted: 'commercial', approved: 'commercial',
+  in_implementation: 'implementation', in_validation: 'implementation',
+};
 // F2: before costing there's no cost basis yet — the commercial tab shows an
 // explainer instead of a dead-end disabled control (mirrors PnlCard's hidden
 // rule, which hides the P&L card for the same statuses).
@@ -226,13 +237,20 @@ export default function ChangeDetailPage() {
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
-        {EVERYDAY_TABS.map((tb) => (
-          <button key={tb}
-            className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-            onClick={() => setTab(tb)}>
-            {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
-          </button>
-        ))}
+        {EVERYDAY_TABS.map((tb) => {
+          const isActivePhase = STATUS_ACTIVE_TAB[change.status] === tb;
+          return (
+            <button key={tb}
+              title={isActivePhase ? t('tab.activePhase') : undefined}
+              className={`pb-2 flex items-center gap-1.5 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+              onClick={() => setTab(tb)}>
+              {isActivePhase && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-label={t('tab.activePhase')} />
+              )}
+              {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
+            </button>
+          );
+        })}
         {canSeeGovernance && (
           <>
             <span className="ml-auto text-xs uppercase tracking-wide text-slate-500">Governance</span>
@@ -250,28 +268,20 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
           <p><span className="text-slate-400">Type:</span> {change.change_type}</p>
-          <p><span className="text-slate-400">Priority:</span> {change.priority}</p>
+          <p className="flex items-center gap-2">
+            <span className="text-slate-400">Priority:</span>
+            <PriorityEditor change={change} canEdit={isAdmin || isChangeLead} />
+          </p>
           <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '—'}</p>
           <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
 
-          <div className="pt-3">
-            <label className="text-sm text-slate-400">Attach document (PPT, PDF, …)</label>
-            <input type="file" className="block mt-1 text-sm"
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                if (f) { await changesApi.uploadAttachment(changeId, f);
-                         qc.invalidateQueries({ queryKey: ['change', changeId] }); }
-              }} />
-            <ul className="mt-2 text-sm">
-              {change.attachments.map((a) => <li key={a.id}>📎 {a.filename}</li>)}
-            </ul>
-          </div>
+          <ChangeAttachments change={change} />
         </div>
       )}
 
       {effectiveTab === 'scoping' && change && (
-        <ScopingPanel changeId={change.id} status={change.status} />
+        <ScopingPanel change={change} />
       )}
 
       {effectiveTab === 'impacted' && change && (
