@@ -75,4 +75,25 @@ describe('ScopingPanel', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /remove dana lee/i })).toBeNull())
   })
+
+  it('confirms the best-matching contact on Enter from a partial name', async () => {
+    const { container } = render(wrap(<ScopingPanel change={change()} />))
+    const add = await screen.findByPlaceholderText(/add attendee/i)
+    await waitFor(() =>
+      expect(container.querySelector('option[value="Dana Lee"]')).toBeTruthy())
+    fireEvent.change(add, { target: { value: 'dana' } })
+    fireEvent.keyDown(add, { key: 'Enter' })
+    // "dana" resolves to the full contact name as a chip — no mouse needed.
+    expect(await screen.findByRole('button', { name: /remove dana lee/i })).toBeTruthy()
+  })
+
+  it('confirms the best match on Tab too', async () => {
+    const { container } = render(wrap(<ScopingPanel change={change()} />))
+    const add = await screen.findByPlaceholderText(/add attendee/i)
+    await waitFor(() =>
+      expect(container.querySelector('option[value="Dana Lee"]')).toBeTruthy())
+    fireEvent.change(add, { target: { value: 'dana' } })
+    fireEvent.keyDown(add, { key: 'Tab' })
+    expect(await screen.findByRole('button', { name: /remove dana lee/i })).toBeTruthy()
+  })
 })

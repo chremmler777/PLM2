@@ -70,6 +70,19 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   }
   const participantList = participants.split(',').map((s) => s.trim()).filter(Boolean)
 
+  // Resolve the typed text to the best contact match so Enter/Tab confirms the
+  // suggestion (exact > prefix > contains); falls back to the raw text for
+  // external attendees not in the directory.
+  const bestMatch = (q: string): string => {
+    const s = q.trim().toLowerCase()
+    if (!s) return ''
+    const exact = contacts.find((c) => c.name.toLowerCase() === s)
+    const prefix = contacts.find((c) => c.name.toLowerCase().startsWith(s))
+    const contains = contacts.find((c) => c.name.toLowerCase().includes(s))
+    return (exact ?? prefix ?? contains)?.name ?? q.trim()
+  }
+  const confirmTyped = () => appendParticipant(bestMatch(addName))
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
@@ -211,7 +224,10 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                     if (contacts.some((c) => c.name === v)) appendParticipant(v)
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); appendParticipant(addName) }
+                    if (e.key === 'Enter') { e.preventDefault(); confirmTyped() }
+                    // Tab confirms the suggestion when text is typed; an empty
+                    // field lets Tab move focus normally.
+                    else if (e.key === 'Tab' && addName.trim()) { e.preventDefault(); confirmTyped() }
                     else if (e.key === 'Backspace' && !addName && participantList.length) {
                       removeParticipant(participantList[participantList.length - 1])
                     }
