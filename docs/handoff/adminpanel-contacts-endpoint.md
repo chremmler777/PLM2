@@ -1,5 +1,13 @@
 # Handoff → AdminPanel chat: `/api/v1/contacts` for PLM2 attendee autofill
 
+> **STATUS 2026-07-23: DELIVERED — hub endpoint live on localhost AND prod
+> (interim CSV source, Toccoa directory, `source: "csv"`).** PLM2 needed no
+> code change; the proxy switches on via `HUB_API_BASE: http://admin-backend:8000`
+> in the compose `plm2-backend` env (set in both the local parent compose and
+> prod `/data/compose/docker-compose.yml`). The live Graph/`People.Read`
+> upgrade is deferred (avoiding a DENWERIT consent ask); details in
+> adminpanel `docs/plm2-contacts-endpoint-request.md`.
+
 **Context.** PLM2's scoping panel autofills meeting attendees. PLM2 already
 ships the consuming side: a proxy `GET /api/v1/contacts` (forwards the caller's
 SSO cookie to the hub) and a datalist autocomplete. Today it falls back to
