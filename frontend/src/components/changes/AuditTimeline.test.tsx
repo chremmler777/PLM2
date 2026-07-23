@@ -10,7 +10,8 @@ vi.mock('../../api/audit', () => ({
 
 const entry = (over: Record<string, unknown>) => ({
   id: 1, entity_type: 'change', entity_id: 7, action: 'status_changed',
-  user_id: 5, timestamp: '2026-07-01T10:00:00', old_values: '{"status": "captured"}',
+  user_id: 5, user_name: 'Dana Lee', timestamp: '2026-07-01T10:00:00',
+  old_values: '{"status": "captured"}',
   new_values: '{"status": "in_assessment"}', correlation_id: 'CR-2026-0007',
   log_level: 'info', ...over,
 })
@@ -39,6 +40,32 @@ describe('AuditTimeline', () => {
     expect(screen.getByText('wf started')).toBeDefined()
     expect(screen.getByText(/chain intact/)).toBeDefined()
     expect(auditApi.verify).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007' })
+  })
+
+  it('shows who acted and renders the change as prose, not raw JSON', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 3, action: 'status_changed', user_name: 'Dana Lee',
+              old_values: '"captured"', new_values: '"in_assessment"' }),
+      entry({ id: 2, action: 'attachment_added', user_name: 'Sam Ito',
+              old_values: null, new_values: '{"filename": "deck.pptx"}' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    // Who
+    expect(await screen.findByText('Dana Lee')).toBeDefined()
+    expect(screen.getByText('Sam Ito')).toBeDefined()
+    // Human-readable payload, no braces/quotes/keys-as-JSON
+    expect(screen.getByText(/captured → in_assessment/)).toBeDefined()
+    expect(screen.getByText(/deck\.pptx/)).toBeDefined()
+    expect(screen.queryByText(/\{/)).toBeNull()
+    expect(screen.queryByText(/"filename"/)).toBeNull()
+  })
+
+  it('falls back to "System" when there is no actor', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 1, action: 'gate_decided', user_name: null, user_id: null }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect(await screen.findByText('System')).toBeDefined()
   })
 
   it('shows correlation-scoped broken wording when correlation_ok is false', async () => {

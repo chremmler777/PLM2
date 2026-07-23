@@ -6,6 +6,7 @@ export interface AuditEntry {
   entity_id: number
   action: string
   user_id: number | null
+  user_name: string | null
   timestamp: string
   old_values: string | null
   new_values: string | null

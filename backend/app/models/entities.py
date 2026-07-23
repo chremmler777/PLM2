@@ -203,6 +203,15 @@ class AuditLog(Base):
 
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 
+    @property
+    def user_name(self) -> str | None:
+        """Display name of the actor, for the audit timeline. Requires the
+        `user` relationship to be loaded (the audit list query eager-loads it)."""
+        u = self.user
+        if u is None:
+            return None
+        return u.full_name or u.username
+
 
 class LoginHistory(Base):
     """Authentication event tracking for security audit."""

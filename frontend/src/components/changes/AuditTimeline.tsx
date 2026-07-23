@@ -3,9 +3,33 @@ import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
 import { t } from '../../i18n/cmLabels'
 
-const pretty = (s: string | null): string | null => {
+// Turn a stored JSON value into a plain phrase — no braces, quotes or keys-as-noise.
+const humanValue = (v: unknown): string => {
+  if (v === null || v === undefined) return '—'
+  if (Array.isArray(v)) return v.length ? v.map(humanValue).join(', ') : '(none)'
+  if (typeof v === 'object') {
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => `${k.replace(/_/g, ' ')}: ${humanValue(val)}`)
+      .join(', ')
+  }
+  return String(v)
+}
+
+const parse = (s: string | null): unknown => {
   if (!s) return null
-  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
+  try { return JSON.parse(s) } catch { return s }
+}
+
+// A human sentence for what changed: "captured → scoping", "pads.pdf", or null.
+const describeChange = (oldRaw: string | null, newRaw: string | null): string | null => {
+  const o = parse(oldRaw)
+  const n = parse(newRaw)
+  const hasO = o !== null && o !== undefined
+  const hasN = n !== null && n !== undefined
+  if (hasO && hasN) return `${humanValue(o)} → ${humanValue(n)}`
+  if (hasN) return humanValue(n)
+  if (hasO) return humanValue(o)
+  return null
 }
 
 const LIST_LIMIT = 1000
@@ -91,23 +115,20 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
         <div key={day} className="mb-4">
           <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{day}</h4>
           <ol className="space-y-1.5 border-l border-slate-700 pl-4">
-            {dayEntries.map((e) => (
-              <li key={e.id} className="text-sm">
-                <span className="font-mono text-xs text-slate-500 mr-2">
-                  {new Date(e.timestamp).toLocaleTimeString()}
-                </span>
-                <span className="text-slate-100">{e.action.replace(/_/g, ' ')}</span>
-                <span className="ml-2 text-xs text-slate-500">{e.entity_type}#{e.entity_id}</span>
-                {(e.old_values || e.new_values) && (
-                  <details className="ml-6 mt-0.5">
-                    <summary className="text-xs text-slate-500 cursor-pointer">details</summary>
-                    <pre className="text-xs text-slate-400 bg-slate-900 rounded p-2 mt-1 overflow-x-auto">
-{pretty(e.old_values) ? `- ${pretty(e.old_values)}\n` : ''}{pretty(e.new_values) ? `+ ${pretty(e.new_values)}` : ''}
-                    </pre>
-                  </details>
-                )}
-              </li>
-            ))}
+            {dayEntries.map((e) => {
+              const detail = describeChange(e.old_values, e.new_values)
+              return (
+                <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-mono text-xs text-slate-500">
+                    {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="font-medium text-slate-200">{e.user_name ?? t('audit.system')}</span>
+                  <span className="text-slate-300">{e.action.replace(/_/g, ' ')}</span>
+                  {detail && <span className="text-slate-400">— {detail}</span>}
+                  <span className="text-xs text-slate-600">{e.entity_type}#{e.entity_id}</span>
+                </li>
+              )
+            })}
           </ol>
         </div>
       ))}

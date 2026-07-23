@@ -19,6 +19,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
@@ -73,6 +74,8 @@ async def list_audit(
 ):
     q = _filtered(correlation_id, entity_type, entity_id, user_id, date_from, date_to)
     q = _apply_org_scope(q, current_user)
+    # Eager-load the actor so AuditLog.user_name resolves without a lazy load.
+    q = q.options(selectinload(AuditLog.user))
     # Newest-first by id so a limit-truncated result drops the OLDEST entries,
     # not the newest (the frontend timeline re-sorts for display either way).
     rows = (await db.execute(q.order_by(AuditLog.id.desc()).limit(limit).offset(offset))).scalars().all()

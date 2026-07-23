@@ -11,6 +11,7 @@ class AuditEntryResponse(BaseModel):
     entity_id: int
     action: str
     user_id: Optional[int] = None
+    user_name: Optional[str] = None
     timestamp: datetime
     old_values: Optional[str] = None
     new_values: Optional[str] = None
