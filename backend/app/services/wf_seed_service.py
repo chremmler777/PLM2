@@ -28,7 +28,7 @@ ECM_BEWERTUNG = {
             ("Department assessment", [
                 # Technical disciplines each assess their own scope (Responsible);
                 # support functions are Informed. See migration 034.
-                ("R&D", "R"), ("Tool design", "R"), ("IE", "R"),
+                ("R&D", "R"), ("Tooling Engineer", "R"), ("Manufacturing Engineer", "R"),
                 ("Process Engineer", "R"), ("APQP", "R"), ("Quality", "R"),
                 ("Logistics", "I"), ("Project Manager", "I"), ("Sales", "I"),
             ], {}),
@@ -36,8 +36,8 @@ ECM_BEWERTUNG = {
         ("Summation & Budget", [
             ("Review cost summary & release budget", [
                 ("Project Manager", "R"), ("Sales", "A"),
-                ("R&D", "C"), ("Tool design", "C"),
-                ("IE", "I"), ("Quality", "I"), ("Logistics", "I"),
+                ("R&D", "C"), ("Tooling Engineer", "C"),
+                ("Manufacturing Engineer", "I"), ("Quality", "I"), ("Logistics", "I"),
                 ("Production", "I"), ("Purchasing", "I"), ("Production control", "I"),
             ], {}),
         ]),
@@ -66,15 +66,15 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
             ]),
             ("Design check", [
                 ("Design review", [
-                    ("R&D", "R"), ("Quality", "A"), ("IE", "C"),
+                    ("R&D", "R"), ("Quality", "A"), ("Manufacturing Engineer", "C"),
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
                 ("Implement tool change", [
-                    ("Production", "R"), ("Tool design", "A"), ("Production control", "I"),
+                    ("Production", "R"), ("Tooling Engineer", "A"), ("Production control", "I"),
                 ], {}),
                 ("Adjust process / routing sheets", [
-                    ("IE", "R"), ("Project Manager", "A"), ("Production", "C"),
+                    ("Manufacturing Engineer", "R"), ("Project Manager", "A"), ("Production", "C"),
                 ], {}),
                 ("Clarify inspection plan / PPAP need", [
                     ("Quality", "R"), ("Project Manager", "A"), ("Sales", "C"),
@@ -97,7 +97,7 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     }
 
 
-ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tool design")
+ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tooling Engineer")
 ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Implementation (Article)", "R&D")
 
 CHECK_WF_CATEGORY_TEMPLATE = {

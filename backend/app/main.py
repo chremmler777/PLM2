@@ -115,8 +115,6 @@ async def seed_test_data():
             # Create workflow departments
             departments_data = [
                 ("Developer", "action", 1),
-                ("Tool Engineer", "action", 2),
-                ("Manufacturing Engineer", "action", 3),
                 ("APQP", "action", 4),
                 ("Sales", "action", 5),
                 ("Project Manager", "action", 6),
@@ -124,13 +122,14 @@ async def seed_test_data():
                 ("Operations Manager", "info", 8),
                 # Change-management cost departments (D2–D10)
                 ("R&D", "action", 9),
-                ("Tool design", "action", 10),
-                ("IE", "action", 11),
+                ("Tooling Engineer", "action", 10),
+                ("Manufacturing Engineer", "action", 11),
                 ("Quality", "action", 12),
                 ("Logistics", "action", 13),
                 ("Production", "action", 14),
                 ("Purchasing", "action", 15),
                 ("Production control", "action", 16),
+                ("Process Engineer", "action", 17),
             ]
             for dept_name, flow_type, sort_order in departments_data:
                 result = await session.execute(
@@ -163,8 +162,8 @@ async def seed_test_data():
                         await session.flush()
                         plants[name] = p
                 rate_table = {
-                    "Sales": (50.0, None), "R&D": (65.0, 21.5), "Tool design": (65.0, 21.5),
-                    "IE": (65.0, 21.5), "Quality": (45.0, 21.5), "Logistics": (50.0, 21.5),
+                    "Sales": (50.0, None), "R&D": (65.0, 21.5), "Tooling Engineer": (65.0, 21.5),
+                    "Manufacturing Engineer": (65.0, 21.5), "Quality": (45.0, 21.5), "Logistics": (50.0, 21.5),
                     "Production": (55.0, 21.5), "Purchasing": (50.0, 21.5),
                     "Production control": (50.0, 21.5),
                 }
@@ -218,7 +217,7 @@ async def seed_test_data():
                         "Aktualisierung Zeichnungen / Update drawings",
                         "SC/CC- Merkmale// SC/CC- features",
                     ],
-                    "Tool design": [
+                    "Tooling Engineer": [
                         "2D-Konstruktion Betriebsmittel / 2D construction equipment",
                         "3D-Konstruktion Betriebsmittel / 3D construction equipment",
                         "Stückliste / equipment object list",
@@ -235,7 +234,7 @@ async def seed_test_data():
                         "Abmusterung und Bewertung",
                         "Werkzeugvermessung / tool measurement",
                     ],
-                    "IE": [
+                    "Manufacturing Engineer": [
                         "Neue Zeitaufnahme notwendig / time study necessary",
                         "Material anlegen/ändern;// open/change materials",
                         "Stückliste anlegen/ändern; //open/change bill of materials BOM",

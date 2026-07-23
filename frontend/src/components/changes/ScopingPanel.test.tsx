@@ -60,14 +60,19 @@ describe('ScopingPanel', () => {
     const qualityBtn = await screen.findByRole('button', { name: /★\s*Quality/ })
     expect(qualityBtn.className).toContain('bg-sky-600')
   })
-  it('appends a picked contact to the participants list', async () => {
-    render(wrap(<ScopingPanel change={change()} />))
+  it('adds a picked contact as a removable chip', async () => {
+    const { container } = render(wrap(<ScopingPanel change={change()} />))
     const add = await screen.findByPlaceholderText(/add attendee/i)
+    // Wait for the contacts datalist to populate before "picking" one.
+    await waitFor(() =>
+      expect(container.querySelector('option[value="Dana Lee"]')).toBeTruthy())
     // Selecting a datalist option fires a change with the full contact name.
     fireEvent.change(add, { target: { value: 'Dana Lee' } })
-    await waitFor(() => {
-      const list = screen.getByDisplayValue('Dana Lee')
-      expect(list).toBeTruthy()
-    })
+    // It becomes a chip with a remove control, not free-editable text.
+    const remove = await screen.findByRole('button', { name: /remove dana lee/i })
+    expect(remove).toBeTruthy()
+    fireEvent.click(remove)
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /remove dana lee/i })).toBeNull())
   })
 })

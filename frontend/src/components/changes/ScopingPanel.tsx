@@ -64,6 +64,11 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
     if (!cur.includes(n)) setParticipants([...cur, n].join(', '))
     setAddName('')
   }
+  const removeParticipant = (name: string) => {
+    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
+    setParticipants(cur.filter((n) => n !== name).join(', '))
+  }
+  const participantList = participants.split(',').map((s) => s.trim()).filter(Boolean)
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
@@ -182,21 +187,37 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
             </div>
             <div className="flex-1 min-w-[14rem]">
               <label className="block text-xs text-slate-500 mb-1">
-                {t('meeting.participants')} <span className="opacity-60">({t('meeting.participantsHint')})</span>
+                {t('meeting.participants')}
               </label>
-              <input
-                type="text" list="sc-contacts" value={addName}
-                placeholder={t('meeting.addAttendee')}
-                onChange={(e) => {
-                  const v = e.target.value
-                  setAddName(v)
-                  // Picking a suggestion sets the full name in one change event.
-                  if (contacts.some((c) => c.name === v)) appendParticipant(v)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { e.preventDefault(); appendParticipant(addName) }
-                }}
-                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
+              {/* Picked names live as removable chips — grouped, contained, not
+                  free-editable text that can be accidentally mangled. */}
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem]">
+                {participantList.map((name) => (
+                  <span key={name}
+                    className="inline-flex items-center gap-1 rounded-md bg-slate-700 text-slate-100 text-xs px-2 py-0.5">
+                    {name}
+                    <button type="button" aria-label={`Remove ${name}`}
+                      className="text-slate-400 hover:text-red-300"
+                      onClick={() => removeParticipant(name)}>×</button>
+                  </span>
+                ))}
+                <input
+                  type="text" list="sc-contacts" value={addName}
+                  placeholder={participantList.length ? '' : t('meeting.addAttendee')}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setAddName(v)
+                    // Picking a suggestion sets the full name in one change event.
+                    if (contacts.some((c) => c.name === v)) appendParticipant(v)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); appendParticipant(addName) }
+                    else if (e.key === 'Backspace' && !addName && participantList.length) {
+                      removeParticipant(participantList[participantList.length - 1])
+                    }
+                  }}
+                  className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-100 outline-none" />
+              </div>
               <datalist id="sc-contacts">
                 {contacts.map((c) => (
                   <option key={c.email ?? c.name} value={c.name}>
@@ -204,9 +225,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                   </option>
                 ))}
               </datalist>
-              <input
-                type="text" value={participants} onChange={(e) => setParticipants(e.target.value)}
-                className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
             </div>
           </div>
           <div>

@@ -80,7 +80,8 @@ async def test_recommended_departments_are_stage1_responsible(
         f"/api/v1/changes/{change['id']}/recommended-departments", headers=admin_auth)
     assert res.status_code == 200, res.text
     names = {d["name"] for d in res.json()}
-    assert names == {"R&D", "Tool design", "IE", "Process Engineer", "APQP", "Quality"}
+    assert names == {"R&D", "Tooling Engineer", "Manufacturing Engineer",
+                     "Process Engineer", "APQP", "Quality"}
     # support functions (Informed) are not recommended
     assert "Sales" not in names and "Logistics" not in names
 

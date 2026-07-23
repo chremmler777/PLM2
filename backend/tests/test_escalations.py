@@ -68,7 +68,10 @@ async def test_change_my_tasks_owner_fields(client, eng_auth, seed,
     from app.models.change import ChangeAssessment
     async with session_factory() as s:
         for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
-            s.add(Department(name=n, flow_type="action", is_active=True))
+            # get-or-create: some of these are now seeded by the ECM template
+            if (await s.execute(select(Department).where(
+                    Department.name == n))).scalar_one_or_none() is None:
+                s.add(Department(name=n, flow_type="action", is_active=True))
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
@@ -106,7 +109,10 @@ async def test_lead_escalations_roll_up(client, eng_auth, seed, session_factory,
 
     async with session_factory() as s:
         for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
-            s.add(Department(name=n, flow_type="action", is_active=True))
+            # get-or-create: some of these are now seeded by the ECM template
+            if (await s.execute(select(Department).where(
+                    Department.name == n))).scalar_one_or_none() is None:
+                s.add(Department(name=n, flow_type="action", is_active=True))
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
@@ -182,7 +188,10 @@ async def test_lead_escalations_no_double_count_for_backfilled_linked_row(
 
     async with session_factory() as s:
         for n in ("Tool Engineer", "Process Engineer", "Manufacturing Engineer"):
-            s.add(Department(name=n, flow_type="action", is_active=True))
+            # get-or-create: some of these are now seeded by the ECM template
+            if (await s.execute(select(Department).where(
+                    Department.name == n))).scalar_one_or_none() is None:
+                s.add(Department(name=n, flow_type="action", is_active=True))
         await s.commit()
     change = await _routed_change(client, eng_auth, seed, session_factory,
                                   part["part_id"])
