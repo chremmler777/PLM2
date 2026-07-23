@@ -715,6 +715,33 @@ async def download_attachment(
                         media_type=att.content_type or "application/octet-stream")
 
 
+@router.delete("/{change_id}/attachments/{attachment_id}", status_code=204)
+async def delete_attachment(
+    change_id: int, attachment_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    att = await db.get(ChangeAttachment, attachment_id)
+    if not att or att.change_id != change_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    # Baseline documents freeze once scoping ends — the record a decision was
+    # made on can't be removed afterwards (VDA/IATF traceability).
+    from app.models.change import SCOPING_STATUSES
+    if att.phase == "baseline" and change.status not in SCOPING_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Baseline documents are frozen once scoping ends and cannot be deleted.")
+    stored_path = await ChangeService.delete_attachment(db, change, att, current_user.id)
+    await db.commit()
+    if stored_path and os.path.exists(stored_path):
+        try:
+            os.remove(stored_path)
+        except OSError:
+            pass
+
+
 @router.get("/{change_id}/assessments/{aid}/cost-lines", response_model=List[CostLineResponse])
 async def get_cost_lines(
     change_id: int, aid: int,
@@ -857,7 +884,8 @@ async def create_meeting(
         meeting = await MeetingService.create_meeting(
             db, change, current_user, meeting_date=body.meeting_date,
             participants=[p.model_dump() for p in body.participants],
-            notes=body.notes, selected_department_ids=body.selected_department_ids)
+            notes=body.notes, selected_department_ids=body.selected_department_ids,
+            channel=body.channel)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -45,6 +45,9 @@ _TASK_TO_ASSESSMENT_STATUS = {
 ROUTING_DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 IMPLEMENTATION_MODES = ("integrated", "separational")
 MEETING_DECISIONS = ("proceed", "reject", "needs_info")
+MEETING_CHANNELS = ("meeting", "chat", "email")
+ATTACHMENT_PHASES = ("baseline", "post_scoping")
+SCOPING_STATUSES = ("captured", "scoping")
 
 
 class ChangeRequest(Base):
@@ -317,6 +320,9 @@ class ChangeAttachment(Base):
     content_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
+    # "baseline" (uploaded during capture/scoping — frozen once scoping ends) or
+    # "post_scoping" (documents added afterwards). See migration 033.
+    phase: Mapped[str] = mapped_column(String(20), default="baseline", server_default="baseline")
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -334,6 +340,9 @@ class ChangeMeeting(Base):
     change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
 
     meeting_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # How the decision was communicated: meeting | chat | email. The record is
+    # the VDA/IATF-traceable proof; no attached evidence required. Migration 033.
+    channel: Mapped[str] = mapped_column(String(20), default="meeting", server_default="meeting")
     participants: Mapped[list] = mapped_column(JSON, default=list)   # [{"name": str, "user_id": int|None}]
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision: Mapped[str | None] = mapped_column(String(20), nullable=True)  # proceed|reject|needs_info

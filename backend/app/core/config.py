@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     jwt_cookie_name: str = "access_token"
     role_system: str = "plm2"
 
+    # AdminPanel hub API base for server-to-server calls (e.g. the contacts
+    # directory backed by the user's Entra/Graph token). Empty in dev, where the
+    # /contacts endpoint falls back to local PLM2 users.
+    hub_api_base: str = ""
+
     # Admin setup
     admin_registration_code: str = "CHANGE-THIS-ADMIN-CODE-IN-PRODUCTION"
 

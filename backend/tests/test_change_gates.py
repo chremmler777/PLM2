@@ -32,6 +32,10 @@ async def test_gate_blocks_transition_until_yes(client, eng_auth, seed, session_
         "part_type": "sub_assembly", "data_classification": "confidential"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": pres.json()["id"]}, headers=eng_auth)
+    # A required-by deadline is a scoping-exit gate too; set it so the block
+    # below is the feasibility gate, not the deadline.
+    await client.patch(f"/api/v1/changes/{cid}",
+                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=eng_auth)
     # captured -> scoping, then record a proceed meeting so the in_assessment
     # guard reaches the gate check (not the proceed-meeting guard).
     scop = await client.post(f"/api/v1/changes/{cid}/transition",
@@ -73,6 +77,8 @@ async def test_gates_exist_from_creation_and_block_by_default(client, eng_auth, 
         headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": pres.json()["id"]}, headers=eng_auth)
+    await client.patch(f"/api/v1/changes/{cid}",
+                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=eng_auth)
     # captured -> scoping + proceed meeting so the other in_assessment guards pass
     scop = await client.post(f"/api/v1/changes/{cid}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)

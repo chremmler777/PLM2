@@ -145,6 +145,7 @@ class AttachmentResponse(BaseModel):
     filename: str
     content_type: str
     size_bytes: int
+    phase: str = "baseline"
     created_at: datetime
 
     class Config:
@@ -379,6 +380,7 @@ class MeetingParticipant(BaseModel):
 
 class MeetingCreate(BaseModel):
     meeting_date: Optional[NaiveUtcDatetime] = None
+    channel: str = "meeting"  # meeting | chat | email
     participants: List[MeetingParticipant] = []
     notes: Optional[str] = None
     selected_department_ids: List[int] = []
@@ -399,6 +401,7 @@ class MeetingResponse(BaseModel):
     id: int
     change_id: int
     meeting_date: datetime
+    channel: str = "meeting"
     participants: List[MeetingParticipant] = []
     notes: Optional[str] = None
     decision: Optional[str] = None

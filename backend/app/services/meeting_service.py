@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change import ChangeRequest, ChangeMeeting, MEETING_DECISIONS
+from app.models.change import ChangeRequest, ChangeMeeting, MEETING_DECISIONS, MEETING_CHANNELS
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services.change_service import ChangeService, ChangeError
@@ -55,23 +55,26 @@ class MeetingService:
         meeting_date: Optional[datetime] = None,
         participants: Optional[list] = None, notes: Optional[str] = None,
         selected_department_ids: Optional[list[int]] = None,
+        channel: str = "meeting",
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         if change.status not in ("captured", "scoping"):
             raise ChangeError(
-                "Scoping meetings can only be recorded before assessment starts")
+                "Scoping decisions can only be recorded before assessment starts")
+        if channel not in MEETING_CHANNELS:
+            raise ChangeError(f"Invalid channel '{channel}'")
         dept_ids = await MeetingService._validate_departments(
             session, selected_department_ids or [])
         meeting = ChangeMeeting(
             change_id=change.id, meeting_date=meeting_date or datetime.utcnow(),
-            participants=participants or [], notes=notes,
+            channel=channel, participants=participants or [], notes=notes,
             selected_department_ids=dept_ids, created_by=user.id)
         session.add(meeting)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_recorded",
-            f"Scoping meeting #{meeting.id} recorded", user.id,
-            new_value={"meeting_id": meeting.id})
+            f"Scoping decision #{meeting.id} recorded ({channel})", user.id,
+            new_value={"meeting_id": meeting.id, "channel": channel})
         return meeting
 
     @staticmethod

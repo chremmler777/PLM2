@@ -128,9 +128,13 @@ async def record_proceed_meeting(session_factory, change_id: int,
 
 async def advance_to_assessment(client, auth, session_factory, change_id: int,
                                 dept_ids: list[int] | None = None):
-    """captured -> scoping -> (proceed meeting) -> in_assessment."""
+    """captured -> scoping -> (deadline + proceed meeting) -> in_assessment."""
     res = await client.post(f"/api/v1/changes/{change_id}/transition",
                             json={"to_status": "scoping"}, headers=auth)
+    assert res.status_code == 200, res.text
+    # A required-by deadline is a scoping-exit gate (see ChangeService._guard).
+    res = await client.patch(f"/api/v1/changes/{change_id}",
+                             json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
     assert res.status_code == 200, res.text
     await record_proceed_meeting(session_factory, change_id, dept_ids)
     res = await client.post(f"/api/v1/changes/{change_id}/transition",

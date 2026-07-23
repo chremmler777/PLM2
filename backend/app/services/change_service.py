@@ -491,6 +491,8 @@ class ChangeService:
                 return "No impacted items added yet"
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
+            if change.required_by_date is None:
+                return "No deadline set — define the required-by date in scoping"
             # A change that already has routing has fanned out once — the proceed
             # meeting was consumed then. Resuming from on_hold back into
             # in_assessment must not re-demand a fresh meeting (build_routing is
@@ -1447,15 +1449,36 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, *, filename: str,
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
     ) -> ChangeAttachment:
+        # Documents uploaded during capture/scoping are the baseline a decision
+        # is made on; later ones are tracked separately as post_scoping changes.
+        from app.models.change import SCOPING_STATUSES
+        phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
             content_type=content_type, size_bytes=size_bytes, sha256=sha256,
-            uploaded_by=user_id,
+            uploaded_by=user_id, phase=phase,
         )
         session.add(att)
         await session.flush()
         await ChangeService.append_changelog(
-            session, change, "attachment_added", f"Attached {filename}", user_id,
-            new_value={"filename": filename},
+            session, change, "attachment_added",
+            f"Attached {filename} ({phase})", user_id,
+            new_value={"filename": filename, "phase": phase},
         )
         return att
+
+    @staticmethod
+    async def delete_attachment(
+        session: AsyncSession, change: ChangeRequest, att: ChangeAttachment, user_id: int,
+    ) -> str:
+        """Remove an attachment row and log it. Returns the stored path so the
+        caller (which owns filesystem access) can unlink the file."""
+        filename = att.filename
+        stored_path = att.stored_path
+        await session.delete(att)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "attachment_removed", f"Removed {filename}", user_id,
+            old_value={"filename": filename},
+        )
+        return stored_path

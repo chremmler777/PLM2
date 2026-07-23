@@ -305,6 +305,83 @@ async def test_attach_document_to_change(client, eng_auth, seed):
     assert detail["attachments"][0]["filename"] == "ecr-start.pptx"
 
 
+async def test_delete_attachment_from_change(client, eng_auth, seed):
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    files = {"file": ("draft.pdf", b"%PDF-1.4 fake", "application/pdf")}
+    up = await client.post(f"/api/v1/changes/{change['id']}/attachments",
+                           files=files, headers=eng_auth)
+    att_id = up.json()["id"]
+
+    res = await client.delete(
+        f"/api/v1/changes/{change['id']}/attachments/{att_id}", headers=eng_auth)
+    assert res.status_code == 204, res.text
+
+    detail = (await client.get(f"/api/v1/changes/{change['id']}", headers=eng_auth)).json()
+    assert detail["attachments"] == []
+    # the removal is logged
+    log = (await client.get(f"/api/v1/changes/{change['id']}/changelog", headers=eng_auth)).json()
+    assert "attachment_removed" in [e["action"] for e in log]
+
+
+async def test_delete_missing_attachment_is_404(client, eng_auth, seed):
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    res = await client.delete(
+        f"/api/v1/changes/{change['id']}/attachments/99999", headers=eng_auth)
+    assert res.status_code == 404, res.text
+
+
+async def _upload(client, auth, cid, name="doc.pdf"):
+    return await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": (name, b"%PDF bytes", "application/pdf")}, headers=auth)
+
+
+async def test_attachment_phase_baseline_then_post_scoping(
+    client, admin_auth, seed, part, session_factory
+):
+    from tests.conftest import advance_to_assessment
+    change = await _create_change(client, admin_auth, seed["project_id"],
+                                  lead_id=seed["admin_id"])
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part["part_id"], "is_lead": True}, headers=admin_auth)
+    # uploaded while captured -> baseline
+    up = await _upload(client, admin_auth, change["id"], "baseline.pdf")
+    assert up.status_code == 201, up.text
+    await advance_to_assessment(client, admin_auth, session_factory, change["id"])
+    # uploaded after scoping -> post_scoping
+    await _upload(client, admin_auth, change["id"], "later.pdf")
+
+    detail = (await client.get(f"/api/v1/changes/{change['id']}", headers=admin_auth)).json()
+    phases = {a["filename"]: a["phase"] for a in detail["attachments"]}
+    assert phases["baseline.pdf"] == "baseline"
+    assert phases["later.pdf"] == "post_scoping"
+
+
+async def test_baseline_attachment_frozen_after_scoping(
+    client, admin_auth, seed, part, session_factory
+):
+    from tests.conftest import advance_to_assessment
+    change = await _create_change(client, admin_auth, seed["project_id"],
+                                  lead_id=seed["admin_id"])
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part["part_id"], "is_lead": True}, headers=admin_auth)
+    up = await _upload(client, admin_auth, change["id"], "baseline.pdf")
+    aid = up.json()["id"]
+    # deletable while still in scoping-phase statuses
+    # (re-upload one to delete so the change keeps a baseline for the later step)
+    up2 = await _upload(client, admin_auth, change["id"], "scratch.pdf")
+    d = await client.delete(f"/api/v1/changes/{change['id']}/attachments/{up2.json()['id']}",
+                            headers=admin_auth)
+    assert d.status_code == 204, d.text
+
+    await advance_to_assessment(client, admin_auth, session_factory, change["id"])
+    # now the baseline doc is frozen
+    blocked = await client.delete(
+        f"/api/v1/changes/{change['id']}/attachments/{aid}", headers=admin_auth)
+    assert blocked.status_code == 400, blocked.text
+    assert "frozen" in blocked.json()["detail"].lower()
+
+
 async def test_my_change_tasks_lists_pending_assessments(
     client, eng_auth, seed, departments, session_factory
 ):

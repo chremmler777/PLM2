@@ -45,6 +45,11 @@ async def add_item_and_lead(client, auth, change_id, part_id):
     res = await client.post(f"/api/v1/changes/{change_id}/impacted-items",
                             json={"part_id": part_id, "is_lead": True}, headers=auth)
     assert res.status_code == 200, res.text
+    # A required-by deadline is a scoping-exit gate; set it so these tests
+    # exercise the meeting/routing guards rather than blocking on the deadline.
+    res = await client.patch(f"/api/v1/changes/{change_id}",
+                             json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
+    assert res.status_code == 200, res.text
 
 
 @pytest.mark.asyncio
@@ -58,6 +63,50 @@ async def test_captured_goes_to_scoping_not_assessment(client, admin_auth, seed,
                             json={"to_status": "scoping"}, headers=admin_auth)
     assert res.status_code == 200
     assert res.json()["status"] == "scoping"
+
+
+@pytest.mark.asyncio
+async def test_scoping_decision_records_channel(client, admin_auth, seed, part):
+    """The scoping decision can be logged as a meeting, chat, or email — the
+    record itself is the traceable proof, no evidence attachment required."""
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
+                            json={"channel": "email", "notes": "agreed by email with PM"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["channel"] == "email"
+    # invalid channel is rejected
+    bad = await client.post(f"/api/v1/changes/{change['id']}/meetings",
+                            json={"channel": "smoke_signal"}, headers=admin_auth)
+    assert bad.status_code == 400, bad.text
+
+
+@pytest.mark.asyncio
+async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
+                                              session_factory):
+    """A required-by deadline must be set in scoping before assessment starts."""
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    # add_item_and_lead sets a deadline; add the item WITHOUT it here.
+    res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                            json={"part_id": part["part_id"], "is_lead": True},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    await client.post(f"/api/v1/changes/{change['id']}/transition",
+                      json={"to_status": "scoping"}, headers=admin_auth)
+    await record_proceed_meeting(session_factory, change["id"], actor_id=seed["admin_id"])
+    blocked = await client.post(f"/api/v1/changes/{change['id']}/transition",
+                                json={"to_status": "in_assessment"}, headers=admin_auth)
+    assert blocked.status_code == 400
+    assert "deadline" in blocked.json()["detail"].lower()
+    # set the deadline -> now allowed
+    await client.patch(f"/api/v1/changes/{change['id']}",
+                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=admin_auth)
+    ok = await client.post(f"/api/v1/changes/{change['id']}/transition",
+                           json={"to_status": "in_assessment"}, headers=admin_auth)
+    assert ok.status_code == 200, ok.text
 
 
 @pytest.mark.asyncio
