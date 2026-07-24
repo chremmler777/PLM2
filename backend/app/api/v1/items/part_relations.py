@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/parts", tags=["part-relations"])
 
-VALID_RELATION_TYPES = {"produces", "checks", "assembles", "related"}
+VALID_RELATION_TYPES = {"produces", "checks", "assembles", "related",
+                        "serves", "feeds"}
 
 # Human-readable labels per direction
 RELATION_LABELS = {
@@ -24,6 +25,10 @@ RELATION_LABELS = {
     "checks": ("checks", "checked by"),
     "assembles": ("assembles", "assembled by"),
     "related": ("related to", "related to"),
+    # serves: equipment -> every tool it covers (see equipment_numbering.py).
+    # feeds: tool -> downstream tool whose station consumes its parts.
+    "serves": ("serves", "served by"),
+    "feeds": ("feeds", "fed by"),
 }
 
 
