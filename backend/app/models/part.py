@@ -318,7 +318,9 @@ class PartRelation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     from_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
     to_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
-    relation_type: Mapped[str] = mapped_column(String(30))  # produces, checks, assembles, related
+    # produces, checks, assembles, related, serves, feeds
+    # (serves/feeds link equipment and tools — see app/services/equipment_numbering.py)
+    relation_type: Mapped[str] = mapped_column(String(30))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
