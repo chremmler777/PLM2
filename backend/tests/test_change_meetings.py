@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import login, ENGINEER_PASSWORD
+from tests.conftest import login, ENGINEER_PASSWORD, lock_impact
 from tests.test_change_scoping import create_change, add_item_and_lead
 from app.models.change import ChangeMeeting
 
@@ -64,7 +64,9 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
         f"/api/v1/changes/{change['id']}/meetings/{res2.json()['id']}/decide",
         json={"decision": "proceed"}, headers=admin_auth)
     assert res3.status_code == 400
-    # proceed with departments: captured -> scoping -> in_assessment in one call
+    # proceed with departments: captured -> scoping -> in_assessment in one call.
+    # Entering assessment is hard-gated on the impact lock, so lock it first.
+    await lock_impact(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
                             json={"decision": "proceed"}, headers=admin_auth)
     assert res.status_code == 200, res.text

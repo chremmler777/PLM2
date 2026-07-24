@@ -43,9 +43,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const overdue = change.assessments.filter((a) => a.overdue).length
   const unclaimed = change.assessments.filter(
     (a) => a.status === 'active' && a.owner_id === null).length
-  // Task 18: kickoff (approved -> in_implementation) is soft-guarded on R&D's
-  // impact confirmation; surface it as a blocker only once it is the live gate.
-  const impactUnconfirmed = change.status === 'approved' && !change.impact_confirmed_at
+  // Blocks two transitions on the same signal: entering assessment (from scoping,
+  // hard-gated) and kickoff (from approved, soft-guarded). Only meaningful once
+  // there is an impacted set to lock.
+  const impactUnconfirmed = !change.impact_confirmed_at
+    && (change.impacted_items?.length ?? 0) > 0
+    && (change.status === 'scoping' || change.status === 'approved')
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
     + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0)
   const offPath = OFF_PATH_STATUSES.includes(change.status)

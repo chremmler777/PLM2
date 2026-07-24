@@ -46,7 +46,7 @@ def _org_scope(stmt, viewer: Optional[User]):
 ALLOWED_TRANSITIONS = {
     "captured":          {"scoping", "cancelled", "on_hold"},
     "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
-    "in_assessment":     {"costing", "rejected", "cancelled", "on_hold"},
+    "in_assessment":     {"scoping", "costing", "rejected", "cancelled", "on_hold"},
     "costing":           {"quoted", "approved", "on_hold", "cancelled"},
     "quoted":            {"approved", "rejected", "on_hold", "cancelled"},
     "approved":          {"in_implementation", "on_hold", "cancelled"},
@@ -585,6 +585,16 @@ class ChangeService:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
 
+        # HARD precondition: recall (in_assessment -> scoping) is a correction for
+        # a premature submit, not a silent undo of real work. Allowed only while no
+        # assessment has been submitted or carries a non-pending verdict.
+        if change.status == "in_assessment" and to_status == "scoping":
+            started = [a for a in change.assessments
+                       if a.verdict != "pending" or a.effective_status == "submitted"]
+            if started:
+                raise ChangeError(
+                    "Cannot recall: assessment work has already started")
+
         if to_status == "cancelled":
             if not cancellation_reason:
                 raise ChangeError("cancellation_reason is required to cancel")
@@ -600,9 +610,24 @@ class ChangeService:
             if deviation is None:
                 raise ChangeError(
                     f"{reason}. An approved deviation is required to proceed.")
+
+        # HARD gate: assessment cannot start on an unlocked impacted set. Not in
+        # _guard, so no approved transition deviation can bypass it — defining and
+        # locking the impacted set is always doable and cheap. Evaluated after the
+        # soft guards so their more specific reasons surface first, and before the
+        # deviation is consumed so a refused attempt does not burn it.
+        if to_status == "in_assessment" and change.impact_confirmed_at is None:
+            raise ChangeError(
+                "Impacted set is not locked — confirm impacted items before "
+                "starting assessment")
+
+        if deviation is not None:
             deviation.status = "consumed"
 
         # Side effects on entry
+        if to_status == "scoping" and change.status == "in_assessment":
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.teardown_routing(session, change, user_id)
         if to_status == "in_assessment":
             await ChangeService.ensure_assessments(session, change, user_id)
         if to_status == "in_implementation":
@@ -1054,10 +1079,13 @@ class ChangeService:
                 "deviation_id": dev.id,
             })
 
-        # kind "impact_confirm": approved & not yet confirmed, and this user
-        # may confirm it. Mirrors ChangeService.user_can_confirm_impact /
+        # kind "impact_confirm": scoping & impacted items exist & not yet locked,
+        # and this user may confirm it. Locking is the step that unblocks
+        # assessment (see the -> in_assessment hard gate in transition()).
+        # Mirrors ChangeService.user_can_confirm_impact /
         # POST /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
-        if (change.status == "approved" and change.impact_confirmed_at is None
+        if (change.status == "scoping" and change.impact_confirmed_at is None
+                and change.impacted_items
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",

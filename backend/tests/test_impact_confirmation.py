@@ -185,6 +185,16 @@ async def test_kickoff_proceeds_after_confirmation(
         assert item.resulting_revision_id is not None
 
 
+async def _clear_impact_confirmation(session_factory, change_id: int):
+    """Drop the impacted-set lock the way an edit to the set would
+    (ChangeService._reset_impact_confirmation), without going through the API."""
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        await s.execute(update(ChangeRequest).where(ChangeRequest.id == change_id)
+                        .values(impact_confirmed_by=None, impact_confirmed_at=None))
+        await s.commit()
+
+
 async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
                                    session_factory):
     """Drive a real change all the way to 'approved' through the HTTP API
@@ -209,6 +219,10 @@ async def test_kickoff_blocked_via_api_with_reason(
         session_factory):
     cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
                                          session_factory)
+    # Entering assessment now hard-requires the lock, so an approved change always
+    # carries one. The kickoff guard fires when a later edit to the impacted set
+    # invalidates it (_reset_impact_confirmation).
+    await _clear_impact_confirmation(session_factory, cid)
     blocked = await client.post(f"/api/v1/changes/{cid}/transition",
                                 json={"to_status": "in_implementation"}, headers=eng_auth)
     assert blocked.status_code == 400

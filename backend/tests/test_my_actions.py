@@ -82,7 +82,7 @@ async def test_lead_with_pending_deviation_gets_deviation_decision(
     assert "deviation_decision" in kinds
 
 
-async def test_rd_member_on_unconfirmed_approved_change_gets_impact_confirm(
+async def test_rd_member_on_unlocked_scoping_change_gets_impact_confirm(
         client, eng_auth, rd_member_auth, seed, part, session_factory):
     from app.models.change import ChangeRequest
 
@@ -96,9 +96,11 @@ async def test_rd_member_on_unconfirmed_approved_change_gets_impact_confirm(
                               headers=eng_auth)
     assert added.status_code in (200, 201), added.text
 
+    # Locking the impacted set is a scoping-stage action now — it is what
+    # unblocks the (hard-gated) move into assessment.
     async with session_factory() as s:
         chg = await s.get(ChangeRequest, cid)
-        chg.status = "approved"
+        chg.status = "scoping"
         await s.commit()
 
     out = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=rd_member_auth)

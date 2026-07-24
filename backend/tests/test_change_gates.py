@@ -1,6 +1,6 @@
 import pytest
 
-from tests.conftest import record_proceed_meeting
+from tests.conftest import record_proceed_meeting, lock_impact
 
 pytestmark = pytest.mark.asyncio
 
@@ -52,6 +52,7 @@ async def test_gate_blocks_transition_until_yes(client, eng_auth, seed, session_
     # flip to yes -> allowed
     await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
                      json={"decision": "yes"}, headers=eng_auth)
+    await lock_impact(session_factory, cid)  # -> in_assessment hard gate
     ok = await client.post(f"/api/v1/changes/{cid}/transition",
                            json={"to_status": "in_assessment"}, headers=eng_auth)
     assert ok.status_code == 200, ok.text

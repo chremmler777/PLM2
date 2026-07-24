@@ -126,6 +126,18 @@ async def record_proceed_meeting(session_factory, change_id: int,
         await s.commit()
 
 
+async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
+    """Stamp the impacted-set lock directly (bypasses confirm authz) so
+    state-machine tests can cross the -> in_assessment hard gate."""
+    from datetime import datetime
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, change_id)
+        change.impact_confirmed_by = actor_id
+        change.impact_confirmed_at = datetime.utcnow()
+        await s.commit()
+
+
 async def advance_to_assessment(client, auth, session_factory, change_id: int,
                                 dept_ids: list[int] | None = None):
     """captured -> scoping -> (deadline + proceed meeting) -> in_assessment."""
@@ -137,6 +149,7 @@ async def advance_to_assessment(client, auth, session_factory, change_id: int,
                              json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
     assert res.status_code == 200, res.text
     await record_proceed_meeting(session_factory, change_id, dept_ids)
+    await lock_impact(session_factory, change_id)  # cross the -> in_assessment hard gate
     res = await client.post(f"/api/v1/changes/{change_id}/transition",
                             json={"to_status": "in_assessment"}, headers=auth)
     assert res.status_code == 200, res.text

@@ -2,7 +2,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from tests.conftest import login
+from tests.conftest import login, lock_impact
 
 pytestmark = pytest.mark.asyncio
 
@@ -102,7 +102,7 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
 
 
 async def test_blocked_transition_requires_approved_deviation(
-        client, eng_auth, admin_auth, seed):
+        client, eng_auth, admin_auth, seed, session_factory):
     c = await _change(client, eng_auth, seed)  # no impacted items -> guard blocks
     # captured -> scoping is the legal edge; the guard then blocks scoping -> in_assessment
     scop = await client.post(f"/api/v1/changes/{c['id']}/transition",
@@ -119,6 +119,10 @@ async def test_blocked_transition_requires_approved_deviation(
     await client.post(f"/api/v1/changes/{c['id']}/deviations/{dev['id']}/decide",
                       json={"decision": "approved"}, headers=admin_auth)
 
+    # The deviation waives the soft guard only; the impact lock is a separate hard
+    # gate (see test_assessment_impact_gate.py). Stamp it so this test stays about
+    # deviation consumption.
+    await lock_impact(session_factory, c["id"])
     ok = await client.post(f"/api/v1/changes/{c['id']}/transition",
                            json={"to_status": "in_assessment"}, headers=eng_auth)
     assert ok.status_code == 200, ok.text

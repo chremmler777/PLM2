@@ -121,7 +121,10 @@ describe('CockpitSummary', () => {
 
   it('shows an impact-confirmation blocker row when approved and unconfirmed, and jumps via onShowImpact', () => {
     const onShowImpact = vi.fn()
-    render(wrap(<CockpitSummary change={change({ status: 'approved', assessments: [], impact_confirmed_at: null })}
+    render(wrap(<CockpitSummary change={change({
+      status: 'approved', assessments: [], impact_confirmed_at: null,
+      impacted_items: [{ id: 1, part_id: 9 }] as ChangeDetail['impacted_items'],
+    })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
       onShowImpact={onShowImpact} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
@@ -154,6 +157,27 @@ describe('CockpitSummary', () => {
     expect(onAction).toHaveBeenCalledWith('assessments')
     fireEvent.click(screen.getByRole('button', { name: 'Decide deviation #12' }))
     expect(onAction).toHaveBeenCalledWith('overview')
+  })
+
+  it('flags an unlocked impacted set as a blocker during scoping', () => {
+    render(wrap(<CockpitSummary
+      change={change({
+        status: 'scoping',
+        impact_confirmed_at: null,
+        impacted_items: [{ id: 1, part_id: 9 }] as ChangeDetail['impacted_items'],
+      })}
+      gates={[]} pendingDeviations={0}
+      onAdvance={vi.fn()} advancing={false} />))
+    expect(screen.getByText(/impact/i)).toBeDefined()
+    expect(screen.queryByText(/nothing/i)).toBeNull()
+  })
+
+  it('does not flag impact lock during scoping when no impacted items exist', () => {
+    render(wrap(<CockpitSummary
+      change={change({ status: 'scoping', impact_confirmed_at: null, impacted_items: [] })}
+      gates={[]} pendingDeviations={0}
+      onAdvance={vi.fn()} advancing={false} />))
+    expect(screen.queryByText(/nothing/i)).not.toBeNull()
   })
 
   it('hides the "Your actions" panel entirely when there are no actions', () => {

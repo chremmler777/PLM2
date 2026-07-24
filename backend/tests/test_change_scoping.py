@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import record_proceed_meeting, advance_to_assessment
+from tests.conftest import record_proceed_meeting, advance_to_assessment, lock_impact
 
 
 async def create_change(client, auth, project_id, **overrides):
@@ -125,6 +125,7 @@ async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
     # set the deadline -> now allowed
     await client.patch(f"/api/v1/changes/{change['id']}",
                        json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=admin_auth)
+    await lock_impact(session_factory, change["id"])  # -> in_assessment hard gate
     ok = await client.post(f"/api/v1/changes/{change['id']}/transition",
                            json={"to_status": "in_assessment"}, headers=admin_auth)
     assert ok.status_code == 200, ok.text
@@ -144,6 +145,7 @@ async def test_assessment_requires_proceed_meeting(client, admin_auth, seed, par
     assert "proceed" in res.json()["detail"].lower()
     await record_proceed_meeting(session_factory, change["id"],
                                  actor_id=seed["admin_id"])
+    await lock_impact(session_factory, change["id"])  # -> in_assessment hard gate
     res = await client.post(f"/api/v1/changes/{change['id']}/transition",
                             json={"to_status": "in_assessment"}, headers=admin_auth)
     assert res.status_code == 200, res.text
@@ -313,6 +315,9 @@ async def test_informational_only_scoping_is_rejected(
         picked = [d for (d,) in await s.execute(
             select(Department.id).where(Department.name == "Logistics"))]
     assert len(picked) == 1, "Logistics is an I-only stage-1 department"
+    # deciding 'proceed' auto-advances into assessment, which is hard-gated on the
+    # impact lock — lock it so this test reaches the I-only routing check.
+    await lock_impact(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
                             json={"selected_department_ids": picked}, headers=admin_auth)
     assert res.status_code == 200, res.text
@@ -368,6 +373,7 @@ async def test_on_hold_resume_with_routing_skips_meeting_guard(
         await s.execute(update(ChangeRequest).where(
             ChangeRequest.id == change["id"]).values(status="on_hold"))
         await s.commit()
+    await lock_impact(session_factory, change["id"])  # -> in_assessment hard gate
     res = await client.post(f"/api/v1/changes/{change['id']}/transition",
                             json={"to_status": "in_assessment"}, headers=admin_auth)
     assert res.status_code == 200, res.text

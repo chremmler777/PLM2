@@ -206,6 +206,36 @@ class ChangeRoutingService:
         return routing
 
     @staticmethod
+    async def teardown_routing(session: AsyncSession, change: ChangeRequest,
+                               user_id: int) -> None:
+        """Remove all assessment scaffolding built on entry to assessment, so a
+        corrected impacted set rebuilds cleanly on re-submit. Caller must ensure
+        no assessment work has started.
+
+        ``user_id`` is the actor initiating the recall; reserved for future audit-log
+        attribution and intentionally unused here.
+        """
+        assessments = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        for a in assessments:
+            a.wf_instance_task_id = None      # break FK before task rows go
+        await session.flush()
+        for a in assessments:
+            await session.delete(a)
+        instances = (await session.execute(
+            select(WfInstance).where(WfInstance.change_id == change.id)
+        )).scalars().all()
+        for inst in instances:
+            await session.delete(inst)        # cascade deletes its WfInstanceTasks
+        routing = (await session.execute(
+            select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+        )).scalar_one_or_none()
+        if routing is not None:
+            await session.delete(routing)
+        await session.flush()
+
+    @staticmethod
     def _involved_department_ids(stages) -> list[int]:
         ids = []
         for stage in stages:
