@@ -10,6 +10,7 @@ import CADUploader from '../components/CADUploader';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
 import PartBOMSection from '../components/PartBOMSection';
 import PartRelationsSection from '../components/PartRelationsSection';
+import ProcessFlowSection from '../components/ProcessFlowSection';
 import PPAPSection from '../components/PPAPSection';
 import MilestoneStrip from '../components/MilestoneStrip';
 import ProjectLessonsSection from '../components/ProjectLessonsSection';
@@ -1306,6 +1307,14 @@ export default function ProjectDetailPage() {
                   </>
                 )}
               </div>
+
+              {/* Process route, derived from serves/feeds (tools and equipment only) */}
+              {selectedPart.item_category !== 'article' && (
+                <ProcessFlowSection
+                  partId={selectedPart.id}
+                  onSelectPart={setSelectedPartId}
+                />
+              )}
 
               {/* Item Relations (tool produces / gauge checks / equipment assembles) */}
               <PartRelationsSection
