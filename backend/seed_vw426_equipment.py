@@ -1,11 +1,12 @@
 """Seed the VW426 (project 1864) cell equipment. Dry run by default; --write commits.
 
 Facts, per Christoph 2026-07-24:
+  - All eight tools have an EOAT.
   - 3450, 3451, 3452, 3453, 3456 each have a degater and are finished after degating.
   - 3454 and 3455 share one punch-and-weld station; it is numbered after the
     lowest tool it serves, so 3454-30.
   - 3457 has no degater. Its brackets are welded downstream: two into 3454 and
-    two into 3455.
+    two into 3455. They are measured by caliber, so 3457 has no gauge.
 """
 import asyncio
 import sys
@@ -18,6 +19,7 @@ from app.services.equipment_numbering import equipment_number, item_category_for
 
 CREATED_BY = 3  # chris
 
+EOAT_TOOLS = ["3450", "3451", "3452", "3453", "3454", "3455", "3456", "3457"]
 DEGATER_TOOLS = ["3450", "3451", "3452", "3453", "3456"]
 PW_STATION_SERVES = ["3454", "3455", "3457"]
 FEEDS = [("3457", "3454", "2 brackets"), ("3457", "3455", "2 brackets")]
@@ -28,15 +30,18 @@ async def main(write: bool) -> None:
         rows = (await s.execute(
             select(Part.part_number, Part.id, Part.project_id).where(
                 Part.item_category == "tool",
-                Part.part_number.in_(DEGATER_TOOLS + PW_STATION_SERVES)))).all()
+                Part.part_number.in_(
+                    EOAT_TOOLS + DEGATER_TOOLS + PW_STATION_SERVES)))).all()
         by_number = {r.part_number: r for r in rows}
 
-        missing = set(DEGATER_TOOLS + PW_STATION_SERVES) - set(by_number)
+        missing = set(EOAT_TOOLS + DEGATER_TOOLS + PW_STATION_SERVES) - set(by_number)
         if missing:
             print(f"ABORT: missing tool parts {sorted(missing)}")
             return
 
         planned: list[tuple[str, str, list[str]]] = []
+        for tool in EOAT_TOOLS:
+            planned.append((equipment_number(tool, 1, 0), "EOAT", [tool]))
         for tool in DEGATER_TOOLS:
             planned.append((equipment_number(tool, 2, 0), "Degate station", [tool]))
         planned.append((equipment_number("3454", 3, 0),
@@ -69,9 +74,15 @@ async def main(write: bool) -> None:
             for tool in serves:
                 s.add(PartRelation(from_part_id=eq.id, to_part_id=by_number[tool].id,
                                    relation_type="serves", created_by=CREATED_BY))
+        existing_feeds = {
+            (r.from_part_id, r.to_part_id) for r in (await s.execute(
+                select(PartRelation).where(
+                    PartRelation.relation_type == "feeds"))).scalars().all()}
         for src, dst, note in FEEDS:
-            s.add(PartRelation(from_part_id=by_number[src].id,
-                               to_part_id=by_number[dst].id,
+            key = (by_number[src].id, by_number[dst].id)
+            if key in existing_feeds:
+                continue
+            s.add(PartRelation(from_part_id=key[0], to_part_id=key[1],
                                relation_type="feeds", notes=note,
                                created_by=CREATED_BY))
         await s.commit()

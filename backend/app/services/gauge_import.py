@@ -13,6 +13,13 @@ from app.services.equipment_numbering import equipment_number, normalise_tool_re
 GAUGE_FAMILY = 4
 MAX_PER_TOOL = 10
 
+# Sheet rows that are not gauges. Keyed by (zero-padded tool, legacy no) with the
+# reason, so a re-import cannot silently resurrect them.
+EXCLUSIONS: dict[tuple[str, str], str] = {
+    ("3457", "P1403"): "PDC brackets are measured by caliber, not gauged "
+                       "(Christoph, 2026-07-24)",
+}
+
 
 @dataclass
 class GaugeRow:
@@ -67,6 +74,11 @@ def plan_import(
         if len(tools) > 1:
             report.append(f"COLLAPSE {r.tool_ref!r} -> owner {owner}, "
                           f"serves {', '.join(tools)} ({r.legacy_no})")
+
+        reason = EXCLUSIONS.get((owner, r.legacy_no))
+        if reason is not None:
+            report.append(f"EXCLUDE {owner} / {r.legacy_no}: {reason}")
+            continue
 
         if (owner, r.legacy_no) in existing:
             report.append(f"SKIP already imported: {owner} / {r.legacy_no}")

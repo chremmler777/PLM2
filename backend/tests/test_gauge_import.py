@@ -77,3 +77,15 @@ def test_eleventh_gauge_on_one_tool_is_reported_not_crashed():
     plan, report = plan_import(rows, TOOLS, set())
     assert len(plan) == 10
     assert any("P10" in line for line in report)
+
+
+def test_excluded_row_is_reported_and_never_imported():
+    """P1403 is a caliber measurement, not a gauge — it must not come back on a
+    re-import after being deleted from the database."""
+    from app.services.gauge_import import EXCLUSIONS
+
+    assert ("3457", "P1403") in EXCLUSIONS
+    plan, report = plan_import(
+        [row("3457", desc="PDC Bracket", legacy="P1403")], TOOLS | {"3457"}, set())
+    assert plan == []
+    assert any("P1403" in line and "caliber" in line for line in report)
