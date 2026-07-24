@@ -41,11 +41,21 @@ cell serving 3454, 3455 and the 3457 brackets is `3454-30`; the gauge covering
 
 ### Namespace collision
 
-Existing second-tool numbering already uses a suffix: `0674-2`, `0674-3`. Op codes
-are always two digits, so `0674-2` (second tool) and `0674-20` (in-cell station)
-are distinguishable. The parser MUST treat a one-digit suffix as a second-tool
-marker and only a two-digit suffix as an op code, and MUST reject a three-digit
-suffix rather than silently truncating.
+The tool namespace already uses hyphens two different ways:
+
+- Second tools carry a **one-digit** suffix: `0674` is tool 1, `0674-2` is tool 2,
+  `0674-3` is tool 3. Each is a tool in its own right.
+- One family numbers tools with a **four-digit** suffix: `91-0001` … `91-0010`.
+
+So an equipment number is read by splitting on the **last** hyphen. The trailing
+segment is an op code only when it is exactly two digits whose first digit names a
+known family (1–4). Anything else — one digit, three digits, four digits — belongs
+to the tool's own number.
+
+A second tool therefore owns its equipment nestedly: the gauge for `0674-2` is
+`0674-2-40`, and `parse_equipment_number` returns `("0674-2", "40")`. A two-digit
+suffix in an unknown family (`-50`) is rejected as a typo rather than absorbed into
+the tool number.
 
 ## 2. Storage
 
@@ -138,8 +148,9 @@ boundary is explicit.
 
 ## Testing
 
-- Number parser: bare number → mold; `-10`/`-20`/`-40` → correct kind; `-2`
-  → second-tool marker, not an op code; three-digit suffix → rejected.
+- Number parser: bare number → mold; `-10`/`-20`/`-40` → correct kind; `0674-2`
+  → a tool, not an op code; `0674-2-40` → gauge on the second tool; `91-0001`
+  → a tool; `-50` → rejected as an unknown family.
 - Lowest-ID rule: `3454/3455` → `3454-40` with `serves` rows for both tools.
 - Index allocation: two gauges on one tool → `-40` and `-41`.
 - Importer: dry run writes nothing; a second real run adds no duplicates; an

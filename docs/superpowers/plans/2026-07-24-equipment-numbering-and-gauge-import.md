@@ -13,7 +13,7 @@
 - Backend tests run from `backend/` with `pytest`. Async tests need `pytestmark = pytest.mark.asyncio`.
 - **No migration is needed.** `parts.item_category` is a plain `String(30)` with no CHECK constraint, and `app/models/part.py:54` already documents the vocabulary as `article, tool, assembly_equipment, gauge`. Use `assembly_equipment` and `gauge` verbatim — do NOT invent an `equipment` value, and do NOT write an alembic revision.
 - `part_relations.relation_type` is `String(30)`, documented at `app/models/part.py:321` as `produces, checks, assembles, related`. This plan adds `serves` and `feeds`. Update that comment when you add them.
-- Op codes are exactly two digits. A one-digit suffix (`0674-2`) is the existing second-tool marker and MUST NOT be read as an op code.
+- Equipment numbers are read by splitting on the **last** hyphen. The trailing segment is an op code only when it is exactly two digits whose first digit names a known family (1-4). The tool namespace already uses hyphens two other ways — one-digit second-tool suffixes (`0674-2` is tool 2) and four-digit suffixes (`91-0001` … `91-0010`) — and both belong to the tool's own number. A second tool owns its equipment nestedly: `0674-2-40`.
 - `parts.project_id` and `parts.part_type` are NOT NULL. Equipment inherits `project_id` from the tool it is numbered after, and uses `part_type="purchased"` (matching how tools are created in `import_atlas.py:101`).
 - Tool numbers are zero-padded to 4 characters in `parts` (`0745`, `0918`) but appear unpadded in the gauge sheet (`745`, `918/919`). Every lookup normalises by zero-padding to width 4.
 - Commit after each task. Commit messages end with:
@@ -47,7 +47,7 @@ Pure functions, no database. Everything later depends on these names.
   - `OP_CODE_KINDS: dict[int, str]` — first-digit → kind.
   - `normalise_tool_ref(raw: str) -> list[str]` — sheet cell → sorted, zero-padded 4-char tool numbers.
   - `classify(op_code: str) -> str` — `"10"` → `"eoat"`. Raises `ValueError` on unknown.
-  - `parse_equipment_number(number: str) -> tuple[str, str | None]` — `("3454", "40")`; `("0674", None)` for a mold or second-tool number. Raises `ValueError` on a 3+ digit suffix.
+  - `parse_equipment_number(number: str) -> tuple[str, str | None]` — `("3454", "40")`; `("0674-2", None)` for a second tool; `("0674-2", "40")` for its gauge. Raises `ValueError` only on a two-digit suffix in an unknown family.
   - `equipment_number(tool: str, op_family: int, index: int) -> str` — `("3454", 4, 1)` → `"3454-41"`.
   - `item_category_for(op_code: str) -> str` — `"gauge"` for the 40 family, `"assembly_equipment"` otherwise.
 
@@ -110,14 +110,24 @@ def test_parse_treats_bare_number_as_mold():
     assert parse_equipment_number("3454") == ("3454", None)
 
 
-def test_parse_treats_single_digit_suffix_as_second_tool_not_op_code():
-    # 0674-2 is the existing 'second tool' marker and must not become op code 2.
-    assert parse_equipment_number("0674-2") == ("0674", None)
+def test_parse_treats_single_digit_suffix_as_a_second_tool():
+    # 0674 is tool 1, 0674-2 is tool 2 — a tool in its own right, not op code 2.
+    assert parse_equipment_number("0674-2") == ("0674-2", None)
 
 
-def test_parse_rejects_three_digit_suffix():
+def test_parse_reads_equipment_on_a_second_tool():
+    assert parse_equipment_number("0674-2-40") == ("0674-2", "40")
+
+
+def test_parse_keeps_four_digit_suffix_tools_intact():
+    # The 91-xxxx family numbers tools with a four-digit suffix.
+    assert parse_equipment_number("91-0001") == ("91-0001", None)
+    assert parse_equipment_number("91-0001-40") == ("91-0001", "40")
+
+
+def test_parse_rejects_unknown_two_digit_family():
     with pytest.raises(ValueError):
-        parse_equipment_number("3454-400")
+        parse_equipment_number("3454-50")
 
 
 def test_equipment_number_indexes_within_family():
@@ -201,18 +211,18 @@ def classify(op_code: str) -> str:
 def parse_equipment_number(number: str) -> tuple[str, str | None]:
     """Split an equipment number into (tool number, op code or None).
 
-    A bare number is a mold. A ONE-digit suffix is the pre-existing 'second tool'
-    marker ('0674-2') and yields None, not an op code — the two namespaces share a
-    separator and only length tells them apart.
+    Split on the LAST hyphen: the tool namespace already uses hyphens two other
+    ways — '0674-2' is the second tool of 0674, and the 91-xxxx family numbers
+    tools '91-0001'. Only a two-digit tail in a known family is an op code;
+    everything else belongs to the tool. So a second tool owns its equipment
+    nestedly: '0674-2-40' -> ('0674-2', '40').
     """
-    head, sep, tail = number.partition("-")
+    head, sep, tail = number.rpartition("-")
     if not sep:
-        return head, None
-    if len(tail) == 1 and tail.isdigit():
-        return head, None
+        return number, None
     if not re.fullmatch(r"\d{2}", tail):
-        raise ValueError(f"Not a valid op-code suffix: {number!r}")
-    classify(tail)  # reject an unknown family here rather than downstream
+        return number, None          # part of the tool's own number
+    classify(tail)                   # a bad family is a typo, not a tool number
     return head, tail
 
 
@@ -238,7 +248,7 @@ def item_category_for(op_code: str) -> str:
 - [ ] **Step 4: Run the tests**
 
 Run: `cd backend && pytest tests/test_equipment_numbering.py -q`
-Expected: 13 passed.
+Expected: 15 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -873,7 +883,7 @@ State the pass/fail counts and the two dry-run summaries. The live writes (`--wr
 ## Self-Review
 
 **Spec coverage:**
-- §1 numbering, including the one-digit second-tool collision rule → Task 1. ✓
+- §1 numbering, including last-hyphen splitting and nested second-tool equipment → Task 1. ✓
 - §2 storage: `assembly_equipment`/`gauge` categories, legacy no + location in notes, no side table → Tasks 1 (`item_category_for`), 3 (`notes`), 4 (write). ✓
 - §3 linkage: `serves` and `feeds`, lowest-ID ownership → Tasks 2, 3, 5. ✓
 - §4 import: dry-run first, collapse report, unmatched report, idempotent re-run → Tasks 3, 4. ✓
