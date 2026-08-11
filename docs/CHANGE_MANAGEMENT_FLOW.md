@@ -160,6 +160,25 @@ One quote-by, one release-by; at any moment at most one is *active*
   addressed") — `POST .../concerns/{id}/withdraw`; author-only, audited with
   the note.
 
+### Assessment shape (2026-08-11, in build)
+
+- **One expandable bucket per routed department**; collapsed = status +
+  verdict, expanded = that department's working surface. Members work only
+  their own bucket; everyone sees all statuses.
+- **Buckets auto-populate with the department's domain objects**, derived
+  from the impacted parts via the serves links: Tool Engineer → tools/molds,
+  Manufacturing Engineer → equipment, APQP → gauges + documents,
+  Development → the part design itself.
+- **Physical-part changes route exactly five departments**: Development,
+  Tool Engineer, Manufacturing Engineer, APQP, Packaging Engineer. Packaging's
+  bucket opens with "packaging impacted?" — if yes: layout change / packaging
+  type / modification; "not impacted" is a complete assessment. Sales, PM,
+  Scheduling and Quality carry no assessment tasks for physical part changes.
+- **No cost fields at assessment.** Cost (the workbook's per-department
+  activity grids — hours × rates per plant, one-time vs lifecycle) belongs to
+  `costing`; the workbook D-tab → role mapping for those catalogs is still
+  open (Production's studies, Logistics' activities, Purchasing).
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be Development-locked.
   *"Impacted set is not locked — confirm impacted items before starting
