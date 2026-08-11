@@ -12,7 +12,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change_cost import (
-    ChangeGate, AssessmentActivity, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS,
+    ChangeGate, AssessmentActivity, AssessmentCostLine,
+    GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS,
 )
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
@@ -1435,6 +1436,77 @@ class ChangeService:
         "APQP": ("gauge",),
         "Development": ("article",),
     }
+
+    @staticmethod
+    async def set_cost_lead_time(
+        session: AsyncSession, change: ChangeRequest, department_id: int,
+        lead_time_days: int, actor: User,
+    ) -> ChangeAssessment:
+        """Record how many days THIS department's work adds to the timeline.
+
+        It lives on the department's own assessment row rather than a new
+        table: it is that department's answer, changes when they resubmit, and
+        the summation already reads the row. Writable by a member of that
+        department (their own number) or by the people accountable for the
+        change as a whole — PM, Sales, the lead, an admin — who routinely fill
+        it in on someone's behalf during the costing meeting.
+        """
+        if lead_time_days < 0:
+            raise ChangeError("Lead time cannot be negative")
+        rows = (await session.execute(
+            select(ChangeAssessment).where(
+                ChangeAssessment.change_id == change.id,
+                ChangeAssessment.department_id == department_id)
+            .order_by(ChangeAssessment.stage_order))).scalars().all()
+        if not rows:
+            raise ChangeError(
+                f"Department {department_id} has no assessment on this change")
+        from app.services.workflow_service import WorkflowService
+        from app.services.meeting_service import MeetingService
+        privileged = (
+            actor.effective_role == "admin"
+            or change.lead_id == actor.id
+            or await MeetingService.user_is_pm_member(session, actor)
+            or await ChangeService._user_in_department(session, actor, "Sales"))
+        if not privileged and not await WorkflowService.actor_in_department(
+                session, actor, department_id):
+            raise ChangeError(
+                "Only a member of that department, the change lead, Project "
+                "Management, Sales or an admin may set its lead time")
+        a = rows[0]
+        old_value = a.lead_time_impact_days
+        a.lead_time_impact_days = lead_time_days
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "cost_lead_time_set",
+            f"Lead time for dept {department_id}: {lead_time_days} day(s)",
+            actor.id, field_name="lead_time_impact_days",
+            old_value=old_value, new_value=lead_time_days)
+        return a
+
+    @staticmethod
+    async def costing_pending_department_ids(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[int]:
+        """Departments that said the change is feasible but have priced
+        nothing yet — the costing phase's open work.
+
+        Only while the change is IN costing: before that nobody owes a number,
+        and afterwards the totals are already snapshotted. A department that
+        genuinely costs nothing says so with a zero line, which is an answer;
+        no lines at all is silence."""
+        if change.status != "costing":
+            return []
+        rows = (await session.execute(
+            select(ChangeAssessment.department_id,
+                   func.count(AssessmentCostLine.id))
+            .outerjoin(AssessmentCostLine,
+                       AssessmentCostLine.assessment_id == ChangeAssessment.id)
+            .where(ChangeAssessment.change_id == change.id,
+                   ChangeAssessment.verdict.in_(
+                       ("feasible", "feasible_with_conditions")))
+            .group_by(ChangeAssessment.department_id))).all()
+        return sorted({d for d, count in rows if not count})
 
     @staticmethod
     async def _validate_impacts(

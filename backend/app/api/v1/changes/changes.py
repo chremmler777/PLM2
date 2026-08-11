@@ -39,6 +39,7 @@ from app.schemas.change import (
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
+    CostLeadTimeIn,
     InternalApprovalIn,
 )
 
@@ -143,6 +144,8 @@ async def my_change_tasks(
                         question clears it, settling stays with the asker
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
+      costing_input     the change is in costing and this caller's department
+                        found it feasible but has priced nothing yet
       close_question    an ANSWERED question still open, for the department
                         that raised it and always for Project Management —
                         somebody has to say whether the answer settles it
@@ -242,6 +245,16 @@ async def my_change_tasks(
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})
+
+        # Costing is a queue too: a department that called the change feasible
+        # owes a number, and "no lines at all" is silence rather than a zero.
+        if c.status == "costing" and dep_ids:
+            pending = await ChangeService.costing_pending_department_ids(db, c)
+            for dept_id in sorted(set(pending) & dep_ids):
+                tasks.append({
+                    **await _base(c), "kind": "costing_input",
+                    "department_id": dept_id,
+                })
 
         # Independent of the stage chain: a question can be waiting on Sales at
         # any live status, and it is one errand per change however many people
@@ -394,6 +407,8 @@ async def get_change(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     change.deadline_state = await ChangeService.deadline_state(db, change)
+    change.costing_pending_department_ids = (
+        await ChangeService.costing_pending_department_ids(db, change))
     return change
 
 
@@ -1041,6 +1056,25 @@ async def put_cost_lines(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return lines
+
+
+@router.post("/{change_id}/cost-lead-time", response_model=AssessmentResponse)
+async def set_cost_lead_time(
+    change_id: int, body: CostLeadTimeIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """How many days this department's work adds to the timeline."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        a = await ChangeService.set_cost_lead_time(
+            db, change, body.department_id, body.lead_time_days, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(a)
+    return a
 
 
 @router.get("/{change_id}/summation", response_model=SummationResponse)

@@ -233,6 +233,9 @@ class ChangeResponse(BaseModel):
     active_deadline: Optional[str] = None  # quote | release | None
     # Departments soft-held by an open assessment concern (badge source).
     blocked_department_ids: List[int] = []
+    # Departments that found the change feasible but have priced nothing yet.
+    # Populated only while the change is in costing (see the endpoint).
+    costing_pending_department_ids: List[int] = []
     release_due_date: Optional[datetime] = None
     release_due_reason: Optional[str] = None
     impact_confirmed_by: Optional[int] = None
@@ -346,6 +349,9 @@ class CostLineIn(BaseModel):
     external_cost: float = 0.0
     activity_id: Optional[int] = None
     activity_label: Optional[str] = None
+    # Lifecycle cost per part. Negative means the change SAVES cycle time, so
+    # no ge= constraint here on purpose.
+    minutes_per_part: Optional[float] = None
     note: Optional[str] = None
 
 
@@ -363,6 +369,7 @@ class CostLineResponse(BaseModel):
     rate_snapshot: float
     internal_cost: float
     external_cost: float
+    minutes_per_part: Optional[float] = None
     note: Optional[str] = None
 
     class Config:
@@ -394,6 +401,7 @@ class DeptPlantRollup(BaseModel):
     lifecycle_internal: float
     lifecycle_external: float
     demand_hours: float = 0.0
+    minutes_per_part: float = 0.0
 
 
 class SummationTotals(BaseModel):
@@ -409,6 +417,16 @@ class EffortRollup(BaseModel):
     effort_hours: float
 
 
+class LeadTimeRollup(BaseModel):
+    department_id: int
+    lead_time_days: int
+
+
+class PlantMinutesRollup(BaseModel):
+    plant_id: int
+    minutes_per_part: float
+
+
 class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
@@ -416,6 +434,11 @@ class SummationResponse(BaseModel):
     totals: SummationTotals
     effort_by_department: List[EffortRollup] = []
     total_effort_hours: float = 0.0
+    lead_time_by_department: List[LeadTimeRollup] = []
+    # The slowest department, not the sum: they wait in parallel.
+    max_lead_time_days: int = 0
+    lifecycle_minutes_by_plant: List[PlantMinutesRollup] = []
+    total_minutes_per_part: float = 0.0
 
 
 class GateDecisionIn(BaseModel):
@@ -460,6 +483,11 @@ class ConcernCreate(BaseModel):
     # Required while the change is in assessment (the raiser's own
     # department); must stay unset during scoping.
     department_id: Optional[int] = None
+
+
+class CostLeadTimeIn(BaseModel):
+    department_id: int
+    lead_time_days: int = Field(ge=0)
 
 
 class ConcernAnswerIn(BaseModel):

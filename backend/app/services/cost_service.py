@@ -131,6 +131,9 @@ class CostService:
                 cost_kind=cost_kind, demand_hours=demand_hours, rate_snapshot=rate,
                 internal_cost=demand_hours * rate,
                 external_cost=float(spec.get("external_cost") or 0.0),
+                minutes_per_part=(
+                    None if spec.get("minutes_per_part") is None
+                    else float(spec["minutes_per_part"])),
                 note=spec.get("note"),
             )
             session.add(line)
@@ -165,19 +168,39 @@ class CostService:
         # plant. by_plant and by_department are its margins; neither can be
         # derived from the other, so the matrix is its own rollup.
         by_cell: dict[tuple, dict] = {}
+        # Per-part minutes roll up by PLANT, not by department: the number that
+        # matters is what one part costs on one line, whoever added the time.
+        minutes_by_plant: dict[int, float] = {}
         totals = _blank()
         for line, department_id in rows:
             pk = "one_time" if line.cost_kind == "one_time" else "lifecycle"
-            cell = by_cell.setdefault((department_id, line.plant_id),
-                                      {**_blank(), "demand_hours": 0.0})
+            cell = by_cell.setdefault(
+                (department_id, line.plant_id),
+                {**_blank(), "demand_hours": 0.0, "minutes_per_part": 0.0})
             for bucket in (by_plant.setdefault(line.plant_id, _blank()),
                            by_dep.setdefault(department_id, _blank()),
                            cell, totals):
                 bucket[f"{pk}_internal"] += line.internal_cost
                 bucket[f"{pk}_external"] += line.external_cost
             cell["demand_hours"] += line.demand_hours
+            if line.minutes_per_part is not None:
+                cell["minutes_per_part"] += line.minutes_per_part
+                minutes_by_plant[line.plant_id] = (
+                    minutes_by_plant.get(line.plant_id, 0.0) + line.minutes_per_part)
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])
+
+        # Lead time is the slowest department, not the sum of them: they wait in
+        # parallel. Reported per department too, so the long pole is visible
+        # rather than just its length.
+        lead_rows = (await session.execute(
+            select(ChangeAssessment.department_id,
+                   ChangeAssessment.lead_time_impact_days)
+            .where(ChangeAssessment.change_id == change.id,
+                   ChangeAssessment.lead_time_impact_days.is_not(None)))).all()
+        lead_by_dept: dict[int, int] = {}
+        for department_id, days in lead_rows:
+            lead_by_dept[department_id] = max(lead_by_dept.get(department_id, 0), days)
 
         efforts = (await session.execute(
             select(ChangeAssessment.department_id,
@@ -196,4 +219,12 @@ class CostService:
             "effort_by_department": [
                 {"department_id": d, "effort_hours": h} for d, h in sorted(efforts)],
             "total_effort_hours": float(sum(h for _, h in efforts)),
+            "lead_time_by_department": [
+                {"department_id": d, "lead_time_days": v}
+                for d, v in sorted(lead_by_dept.items())],
+            "max_lead_time_days": max(lead_by_dept.values(), default=0),
+            "lifecycle_minutes_by_plant": [
+                {"plant_id": pid, "minutes_per_part": mins}
+                for pid, mins in sorted(minutes_by_plant.items())],
+            "total_minutes_per_part": float(sum(minutes_by_plant.values())),
         }

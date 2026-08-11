@@ -52,6 +52,9 @@ class AssessmentCostLine(Base):
     rate_snapshot: Mapped[float] = mapped_column(Float, default=0.0)
     internal_cost: Mapped[float] = mapped_column(Float, default=0.0)
     external_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    # Lifecycle lines price the change per part: minutes added (or, negative,
+    # saved) on every shot for the life of the programme.
+    minutes_per_part: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     assessment: Mapped["ChangeAssessment"] = relationship(back_populates="cost_lines")
