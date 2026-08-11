@@ -127,8 +127,14 @@ class MeetingService:
 
         In assessment the department is the concern's teeth: it soft-holds that
         department's own assessment submit. So it is required, and it must be
-        the raiser's own department (admins may raise for any)."""
-        await MeetingService._authz(session, change, user)
+        the raiser's own department (admins may raise for any).
+
+        Authz is deliberately open: ANY authenticated user may flag a concern.
+        This is the one thing the feature exists for — an objection that only
+        the lead or a PM could file is not a parallel team voice, it is the
+        meeting again. The scoping-meeting gate (_authz) belongs to meetings,
+        not to this. Withdrawal has its own rule: author only, no exceptions.
+        """
         in_assessment = change.status == "in_assessment"
         if change.status not in SCOPING_STATUSES and not in_assessment:
             raise ChangeError(

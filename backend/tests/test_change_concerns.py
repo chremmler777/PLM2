@@ -398,3 +398,87 @@ async def test_withdrawing_an_attributed_scoping_concern_still_needs_a_note(
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
                             headers=eng_auth, json={"resolution_note": "Drawing arrived"})
     assert res.status_code == 200, res.text
+
+
+# --- who may flag: anyone. Who may clear it: only its author ---------------
+
+async def _plain_member(client, session_factory, seed, dept_name="Tool Engineer"):
+    """A user who is neither the change lead, nor PM, nor admin — the case the
+    scoping-meeting gate used to swallow."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    from tests.conftest import login
+    async with session_factory() as s:
+        dept = Department(name=dept_name, flow_type="action", is_active=True)
+        s.add(dept)
+        await s.flush()
+        u = User(organization_id=seed["org_id"], username="toolguy",
+                 email="toolguy@test.io", full_name="Tool Guy",
+                 hashed_password=get_password_hash("tool-secret-12"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=dept.id))
+        await s.commit()
+        return {"auth": await login(client, "toolguy@test.io"),
+                "user_id": u.id, "dept_id": dept.id}
+
+
+async def test_any_member_may_raise_a_scoping_concern(
+        client, eng_auth, seed, session_factory):
+    """Not the lead, not PM, not admin — the flag must still land, both as a
+    whole-team point and attributed to a department."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "W1")
+    member = await _plain_member(client, session_factory, seed)
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns",
+                            headers=member["auth"],
+                            json={"kind": "reject_proposal", "note": "Team point"})
+    assert res.status_code == 200, res.text
+    assert res.json()["department_id"] is None
+    assert res.json()["raised_by"] == member["user_id"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns",
+                            headers=member["auth"],
+                            json={"kind": "needs_info", "note": "Tooling point",
+                                  "department_id": member["dept_id"]})
+    assert res.status_code == 200, res.text
+    assert res.json()["department_id"] == member["dept_id"]
+
+
+async def test_admin_acting_as_development_may_raise_an_assessment_concern(
+        client, admin_auth, seed, session_factory):
+    cid, dept_ids = await _change_in_assessment(
+        client, admin_auth, seed, session_factory, "W2")
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_ids[0])}
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
+                            json={"kind": "needs_info", "note": "Need the CAD",
+                                  "department_id": dept_ids[0]})
+    assert res.status_code == 200, res.text
+    assert res.json()["department_id"] == dept_ids[0]
+
+
+async def test_only_the_author_may_withdraw_even_without_meeting_rights(
+        client, eng_auth, admin_auth, seed, session_factory):
+    """Opening up raising must not open up clearing: the author rule is the
+    whole authz on withdrawal."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "W3")
+    member = await _plain_member(client, session_factory, seed)
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=member["auth"],
+        json={"kind": "reject_proposal", "note": "Mine"})).json()["id"]
+
+    # the lead cannot clear someone else's objection...
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=eng_auth)
+    assert res.status_code == 400
+    assert "who raised" in res.json()["detail"]
+    # ...nor can an admin
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=admin_auth)
+    assert res.status_code == 400
+    # its author can
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=member["auth"])
+    assert res.status_code == 200, res.text
