@@ -101,3 +101,14 @@ describe('ScopingPanel', () => {
     expect(await screen.findByRole('button', { name: /remove dana lee/i })).toBeTruthy()
   })
 })
+
+describe('ScopingPanel meeting recording is scoping-only', () => {
+  afterEach(cleanup)
+
+  it('offers no meeting form or decision buttons while the change is captured', async () => {
+    render(wrap(<ScopingPanel change={change({ status: 'captured' })} />))
+    await screen.findByText(/PM Jane/)
+    expect(screen.queryByRole('button', { name: /save meeting/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^proceed$/i })).toBeNull()
+  })
+})

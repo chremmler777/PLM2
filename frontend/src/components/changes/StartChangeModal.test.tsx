@@ -281,4 +281,21 @@ describe('StartChangeModal', () => {
     // The two hidden ones are counted, not silently dropped.
     expect(screen.getByText(/2 non-physical items hidden/)).toBeTruthy()
   })
+
+  it('shows the API refusal (403 detail) in the modal instead of swallowing it', async () => {
+    vi.mocked(changesApi.create).mockRejectedValueOnce({
+      response: { status: 403, data: { detail: 'Only Sales may start a change' } },
+    })
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{
+      projectId: 1,
+      part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
+    }} />)
+    await screen.findByText('20-3450-001-0 - Clip')
+    fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+    const alert = await screen.findByTestId('start-error')
+    expect(alert.textContent).toContain('Only Sales may start a change')
+    expect(navigate).not.toHaveBeenCalled()
+  })
 })

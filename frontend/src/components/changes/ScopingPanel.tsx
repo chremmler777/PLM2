@@ -118,6 +118,9 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
     { meetingId: number; decision: 'reject' | 'needs_info' } | null>(null)
 
   const open = status === 'captured' || status === 'scoping'
+  // Meetings belong to scoping: the backend refuses to create one while the
+  // change is still being captured, so the recording UI stays hidden there.
+  const meetingOpen = status === 'scoping'
   // The most recent decision that leaves a ball in our court: a rejection the
   // customer has to be told about, or missing information somebody has to go
   // and get. Cleared once a later meeting reaches 'proceed'.
@@ -192,7 +195,7 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
                   {DECISION_LABEL[m.decision] ?? m.decision}
                 </span>
-              ) : open && (
+              ) : meetingOpen && (
                 <span className="flex gap-2">
                   <button className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
                     disabled={decide.isPending}
@@ -233,7 +236,7 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
         )}
       </ul>
 
-      {open && (
+      {meetingOpen && (
         <div className="border border-slate-700 rounded-lg p-4 space-y-3">
           <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
           <div className="flex flex-wrap gap-3">

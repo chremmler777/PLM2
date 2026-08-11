@@ -3,6 +3,7 @@ import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
+import { StageResponsibleBadge } from './StageResponsibleBadge'
 
 interface Props {
   change: ChangeDetail
@@ -50,6 +51,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const impactUnconfirmed = !change.impact_confirmed_at
     && (change.impacted_items?.length ?? 0) > 0
     && (change.status === 'scoping' || change.status === 'approved')
+  // Kickoff (captured -> scoping) needs a description, something attached, and —
+  // for customer work — the quote-by date. The gate is soft on the backend, so
+  // this warns and names what is missing rather than blocking the button.
+  const kickoffMissing: string[] = change.status !== 'captured' ? [] : [
+    ...(change.description?.trim() ? [] : [t('kickoff.description')]),
+    ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
+    ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
+  ]
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
     + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0)
   const offPath = OFF_PATH_STATUSES.includes(change.status)
@@ -99,6 +108,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         <span className={`px-2.5 py-1 rounded-full text-sm font-semibold ${STATUS_PILL[change.status]}`}>
           {STATUS_LABELS[change.status]}
         </span>
+        {' '}
+        <StageResponsibleBadge status={change.status} />
         {' '}
         {/* Phase-aware: release deadline once active, otherwise the frozen
             quote verdict, otherwise the quote deadline for customer work. */}
@@ -162,6 +173,21 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <span className="inline-block mb-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
             ✓ {t('impl.readyToGo')}
           </span>
+        )}
+        {kickoffMissing.length > 0 && (
+          <div data-testid="kickoff-hint"
+            className="mb-2 rounded-lg border border-amber-700/60 bg-amber-950/30 p-2 text-xs">
+            <p className="text-amber-200">⚠ {t('kickoff.title')}</p>
+            <ul className="mt-1 list-disc list-inside text-amber-100/80">
+              {kickoffMissing.map((m) => <li key={m}>{m}</li>)}
+            </ul>
+            <p className="mt-1 text-slate-400">{t('kickoff.soft')}</p>
+          </div>
+        )}
+        {change.status === 'captured' && kickoffMissing.length === 0 && (
+          <p data-testid="kickoff-ready" className="mb-2 text-xs text-emerald-400">
+            ✓ {t('kickoff.ready')}
+          </p>
         )}
         {DECIDED_BY_MEETING.includes(change.status) ? (
           // The decision lives in the meeting record, not on a button here.

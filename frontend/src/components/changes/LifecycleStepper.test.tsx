@@ -38,3 +38,13 @@ describe('LifecycleStepper', () => {
     expect(screen.getByText(t('stepper.hint.in_validation'))).toBeDefined()
   })
 })
+
+describe('LifecycleStepper stage responsibility', () => {
+  it('tags the captured stage node with Sales and tags no other stage', () => {
+    render(<LifecycleStepper status="scoping" customerRelevant />)
+    const tags = screen.getAllByTestId('stage-responsible')
+    expect(tags).toHaveLength(1)
+    expect(tags[0].textContent).toContain(t('role.sales'))
+    expect(tags[0].parentElement?.textContent).toContain('Captured')
+  })
+})

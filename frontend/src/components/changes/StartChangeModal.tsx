@@ -106,6 +106,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [changeType, setChangeType] = useState<ChangeType>('physical_part');
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+  // Server-side refusals (e.g. 403 for a user outside a change-starting
+  // department) are shown in place, not only as a toast that scrolls away.
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const { data: projects = [] } = useQuery<ProjectRef[]>({
     queryKey: ['projects'],
@@ -170,6 +173,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
     setSubmitting(true);
+    setCreateError(null);
     try {
       const change = await changesApi.create({
         project_id: projectId,
@@ -198,7 +202,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
       onClose();
       navigate(`/changes/${change.id}`);
     } catch (e) {
-      toast.error(errDetail(e) ?? 'Could not start the change.');
+      const message = errDetail(e) ?? 'Could not start the change.';
+      setCreateError(message);
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
@@ -463,6 +469,13 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
             </label>
           </div>
         </fieldset>
+
+        {createError && (
+          <p role="alert" data-testid="start-error"
+            className="mb-3 rounded-lg border border-red-800/60 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+            {createError}
+          </p>
+        )}
 
         <div className="flex justify-end items-center gap-3">
           {missing.length > 0 && !submitting && (

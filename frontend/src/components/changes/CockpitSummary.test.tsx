@@ -245,3 +245,56 @@ describe('CockpitSummary phase-aware deadline widget', () => {
     expect(screen.queryByTestId('deadline-edit')).toBeNull()
   })
 })
+
+describe('CockpitSummary kickoff readiness at capture', () => {
+  afterEach(cleanup)
+
+  const captured = (over: Partial<ChangeDetail> = {}) => render(wrap(
+    <CockpitSummary change={change({ status: 'captured', ...over })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+
+  it('names every missing kickoff requirement for a customer change', () => {
+    captured({ customer_relevant: true, description: null, attachments: [], required_by_date: null })
+    const hint = screen.getByTestId('kickoff-hint')
+    expect(hint.textContent).toContain(t('kickoff.description'))
+    expect(hint.textContent).toContain(t('kickoff.attachment'))
+    expect(hint.textContent).toContain(t('deadline.quote'))
+  })
+
+  it('drops the requirement it already has and never asks internal changes for a quote date', () => {
+    captured({
+      customer_relevant: false, description: 'Clip rattles', required_by_date: null,
+      attachments: [] as ChangeDetail['attachments'],
+    })
+    const hint = screen.getByTestId('kickoff-hint')
+    expect(hint.textContent).not.toContain(t('kickoff.description'))
+    expect(hint.textContent).not.toContain(t('deadline.quote'))
+    expect(hint.textContent).toContain(t('kickoff.attachment'))
+  })
+
+  it('reports readiness once description, attachment and date are there', () => {
+    captured({
+      customer_relevant: true, description: 'Clip rattles',
+      required_by_date: '2026-09-01T23:59:59',
+      attachments: [{ id: 1 }] as unknown as ChangeDetail['attachments'],
+    })
+    expect(screen.queryByTestId('kickoff-hint')).toBeNull()
+    expect(screen.getByTestId('kickoff-ready')).toBeDefined()
+  })
+
+  it('says nothing about kickoff once the change has left capture', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', description: null })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('kickoff-hint')).toBeNull()
+    expect(screen.queryByTestId('kickoff-ready')).toBeNull()
+  })
+
+  it('tags capture with the responsible role, and other stages with none', () => {
+    captured()
+    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.sales'))
+    cleanup()
+    render(wrap(<CockpitSummary change={change({ status: 'scoping' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('stage-responsible')).toBeNull()
+  })
+})
