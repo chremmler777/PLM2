@@ -110,6 +110,8 @@ async def my_change_tasks(
       scoping_wrapup    scoping, for Project Manager — drive it to a decision
       impact_confirm    scoping and unlocked, for Development
       assessment        in_assessment, the department's own pending answer
+      obtain_info       scoping, a needs_info decision still unanswered,
+                        for Sales — who owns the customer relationship
       customer_response quoted and unanswered, for Sales
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
@@ -187,6 +189,12 @@ async def my_change_tasks(
                 })
             if can_confirm and c.impact_confirmed_at is None:
                 tasks.append({**await _base(c), "kind": "impact_confirm"})
+            asked = ChangeService.pending_info_request(c)
+            if asked is not None and in_sales:
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "reason": asked.decision_reason,
+                })
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})

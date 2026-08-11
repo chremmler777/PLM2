@@ -73,3 +73,122 @@ async def test_link_validations(client, admin_auth, seed):
     res = await _upload(client, admin_auth, other, "x.pdf", kind="info_response",
                         responds_to_id=q["id"])
     assert res.status_code == 400
+
+
+# --- part 2: the decision raises the Team flag itself -----------------------
+
+async def _departments(session_factory):
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    from app.services.wf_seed_service import seed_assessment_standard
+    async with session_factory() as s:
+        await seed_assessment_standard(s)
+        await s.commit()
+    async with session_factory() as s:
+        return [d for (d,) in await s.execute(select(Department.id).limit(1))]
+
+
+async def _meeting(client, auth, cid, dept_ids):
+    res = await client.post(f"/api/v1/changes/{cid}/meetings", json={
+        "channel": "meeting", "participants": [{"name": "Eva"}],
+        "selected_department_ids": dept_ids}, headers=auth)
+    assert res.status_code == 200, res.text
+    return res.json()["id"]
+
+
+async def _decide(client, auth, cid, mid, decision, reason=None):
+    body = {"decision": decision}
+    if reason:
+        body["reason"] = reason
+    return await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide",
+                             json=body, headers=auth)
+
+
+async def test_needs_info_decision_raises_one_team_flag(
+        client, admin_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "5")
+    depts = await _departments(session_factory)
+    mid = await _meeting(client, admin_auth, cid, depts)
+    res = await _decide(client, admin_auth, cid, mid, "needs_info",
+                        "Customer drawing missing")
+    assert res.status_code == 200, res.text
+
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    open_ = [c for c in concerns if c["is_open"]]
+    assert len(open_) == 1
+    assert open_[0]["kind"] == "needs_info"
+    assert open_[0]["department_id"] is None          # a Team flag
+    assert open_[0]["note"] == "Customer drawing missing"
+    assert open_[0]["raised_by"] == seed["admin_id"]  # the decider owns it
+
+    # ...and it behaves like any other open concern: proceed is blocked
+    mid2 = await _meeting(client, admin_auth, cid, depts)
+    blocked = await _decide(client, admin_auth, cid, mid2, "proceed")
+    assert blocked.status_code == 400
+    assert "open concern" in blocked.json()["detail"]
+
+    # a second needs_info from the same decider is the same question, not a new one
+    res = await _decide(client, admin_auth, cid, mid2, "needs_info", "Still missing")
+    assert res.status_code == 200, res.text
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    assert len([c for c in concerns if c["is_open"]]) == 1
+
+
+# --- part 3: Sales owns going and getting it -------------------------------
+
+async def _sales_member(client, session_factory, seed):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    from sqlalchemy import select
+    async with session_factory() as s:
+        dept = (await s.execute(select(Department).where(
+            Department.name == "Sales"))).scalar_one_or_none()
+        if dept is None:
+            dept = Department(name="Sales", flow_type="action", is_active=True)
+            s.add(dept)
+            await s.flush()
+        u = User(organization_id=seed["org_id"], username="salesperson",
+                 email="salesperson@test.io", full_name="Sales Person",
+                 hashed_password=get_password_hash("sales-secret-12"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=dept.id))
+        await s.commit()
+        return await login(client, "salesperson@test.io")
+
+
+async def test_obtain_info_row_appears_for_sales_and_clears_on_a_decision(
+        client, admin_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "6")
+    depts = await _departments(session_factory)
+    sales = await _sales_member(client, session_factory, seed)
+
+    async def rows():
+        res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+        assert res.status_code == 200, res.text
+        return [t for t in res.json()
+                if t["kind"] == "obtain_info" and t["change_id"] == cid]
+
+    assert await rows() == []
+
+    mid = await _meeting(client, admin_auth, cid, depts)
+    await _decide(client, admin_auth, cid, mid, "needs_info", "Send us the CAD")
+    got = await rows()
+    assert len(got) == 1
+    assert got[0]["reason"] == "Send us the CAD"
+    assert got[0]["project_number"] == "proj"
+
+    # a follow-up decision closes the loop; the row goes away
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    open_id = next(c["id"] for c in concerns if c["is_open"])
+    await client.delete(f"/api/v1/changes/{cid}/concerns/{open_id}",
+                        headers=admin_auth)
+    mid2 = await _meeting(client, admin_auth, cid, depts)
+    res = await _decide(client, admin_auth, cid, mid2, "reject", "Not economical")
+    assert res.status_code == 200, res.text
+    assert await rows() == []

@@ -1251,13 +1251,9 @@ class ChangeService:
         # is accountable for going and getting it — the action is addressed to
         # them by name rather than left as a note nobody owns. Cleared by
         # recording a follow-up meeting that reaches a real decision.
-        undecided_needs_info = [
-            m for m in change.meetings if m.decision == "needs_info"]
-        if (undecided_needs_info
-                and change.status in SCOPING_STATUSES
-                and not any(m.decision in ("proceed", "reject") for m in change.meetings)
+        latest = ChangeService.pending_info_request(change)
+        if (latest is not None
                 and await ChangeService._user_in_department(session, user, "Sales")):
-            latest = undecided_needs_info[-1]
             actions.append({
                 "kind": "needs_info",
                 "label": "Sales: obtain missing information — "
@@ -1281,6 +1277,21 @@ class ChangeService:
                     })
 
         return actions
+
+    @staticmethod
+    def pending_info_request(change: ChangeRequest):
+        """The needs_info decision still waiting on an answer, or None.
+
+        Single source of truth for "this change is stuck asking a question":
+        the per-change my-action and the Sales my-task row both read it, so the
+        two can never disagree about whether the loop is still open. Cleared by
+        a follow-up meeting that reaches a real decision."""
+        if change.status not in SCOPING_STATUSES:
+            return None
+        if any(m.decision in ("proceed", "reject") for m in change.meetings):
+            return None
+        asked = [m for m in change.meetings if m.decision == "needs_info"]
+        return asked[-1] if asked else None
 
     @staticmethod
     async def seed_impacted_from_relations(

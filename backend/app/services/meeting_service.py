@@ -220,6 +220,37 @@ class MeetingService:
         return concern
 
     @staticmethod
+    async def _flag_missing_information(
+        session: AsyncSession, change: ChangeRequest, user: User, reason: str,
+    ) -> Optional[ChangeConcern]:
+        """A needs_info decision IS an open point against the change, so it
+        becomes a Team concern in its own right rather than a note in a meeting
+        row nobody watches. From there it obeys every existing rule: it blocks
+        'proceed', only its author clears it, and the follow-up decision
+        resolves it.
+
+        Idempotent per decider: the same person deciding needs_info twice in a
+        row is one open question, not two. Raised directly (not via
+        raise_concern) because the decision has already been authorized and
+        validated — re-running those checks here could only reject a decision
+        that has already been written."""
+        if any(c.is_open and c.kind == "needs_info" and c.department_id is None
+               and c.raised_by == user.id for c in change.concerns):
+            return None
+        concern = ChangeConcern(
+            change_id=change.id, kind="needs_info", note=reason.strip(),
+            raised_by=user.id, department_id=None)
+        session.add(concern)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_raised",
+            f"Concern (needs_info): {concern.note}", user.id,
+            new_value={"concern_id": concern.id, "kind": "needs_info",
+                       "department_id": None},
+            notes=concern.note)
+        return concern
+
+    @staticmethod
     def open_department_concerns(
         change: ChangeRequest, department_id: int,
     ) -> list[ChangeConcern]:
@@ -272,6 +303,9 @@ class MeetingService:
         meeting.decided_by = user.id
         meeting.decided_at = datetime.utcnow()
         await session.flush()
+        if decision == "needs_info":
+            await MeetingService._flag_missing_information(
+                session, change, user, reason)
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_decided",
             f"Scoping meeting #{meeting.id}: {decision}"
