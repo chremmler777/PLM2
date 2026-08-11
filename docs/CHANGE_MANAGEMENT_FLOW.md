@@ -42,7 +42,7 @@ checked field-by-field. Do this before writing the formal description.
 
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales (only members of a `can_start_change` department, or an admin, may raise a change) |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
 | `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + cost per the D1 matrix | Departments (RASIC) |
 | `costing` | Costs summed | — |
