@@ -18,6 +18,7 @@ import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { toast } from 'sonner';
+import { UploadedBy } from '../components/common/UploadedBy';
 
 // Types
 interface Project {
@@ -115,6 +116,8 @@ interface RevisionFile {
   cad_format: string | null;
   has_viewer: boolean;
   uploaded_at: string;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
 }
 
 function useRevisionFiles(revisionId: number) {
@@ -137,6 +140,10 @@ interface AssemblyFileEntry {
   revision_id: number;
   revision_name: string;
   file_id: number;
+  // Optional throughout: files uploaded before provenance was recorded have none.
+  uploaded_at?: string | null;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
 }
 
 function useAssemblyFiles(partId: number) {
@@ -801,7 +808,7 @@ function fileTypeColor(fileType: string): string {
 }
 
 // Revision File List Item
-function RevisionFileRow({
+export function RevisionFileRow({
   file,
   isViewing,
   locked,
@@ -843,6 +850,8 @@ function RevisionFileRow({
           <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
           {noPreview && <span className="text-yellow-400 text-xs">No 3D preview available</span>}
         </div>
+        {/* Who put the file on the record and when. */}
+        <UploadedBy name={file.uploaded_by_name} at={file.uploaded_at} className="block" />
       </div>
       <div className="ml-1 flex gap-1 flex-shrink-0">
         {file.has_viewer && onView && (
@@ -916,7 +925,9 @@ export default function ProjectDetailPage() {
       assemblyFiles?.map((f) => ({
         id: f.file_id,
         url: `${API_BASE_URL}/v1/parts/revision-files/${f.file_id}/viewer`,
-        label: `${f.part_name} (${f.revision_name})`,
+        label: f.uploaded_by_name
+          ? `${f.part_name} (${f.revision_name}) · ${f.uploaded_by_name}`
+          : `${f.part_name} (${f.revision_name})`,
       })),
     [assemblyFiles]
   );

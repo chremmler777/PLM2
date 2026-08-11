@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import { UploadedBy } from '../components/common/UploadedBy';
 
 interface Lesson {
   id: number;
@@ -61,6 +62,8 @@ interface LessonFile {
   filename: string;
   size_bytes: number;
   created_at: string;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
 }
 
 interface LessonDetail extends Lesson {
@@ -399,7 +402,7 @@ function NewLessonModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: () => void }) {
+export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { data: projects } = useProjects();
   const { data: users } = usePickerUsers();
@@ -900,6 +903,8 @@ function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onClose: (
                   {f.filename}
                 </button>
                 <span className="text-xs text-slate-500">{(f.size_bytes / 1024).toFixed(0)} KB</span>
+                {/* Who attached the evidence, and when. */}
+                <UploadedBy name={f.uploaded_by_name} at={f.created_at} />
                 {workable && (
                   <button
                     onClick={() => deleteFile.mutate(f.id)}

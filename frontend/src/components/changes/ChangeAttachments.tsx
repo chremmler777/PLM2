@@ -13,6 +13,7 @@ import { changesApi } from '../../api/changes'
 import { apiErrorMessage } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { t } from '../../i18n/cmLabels'
+import { UploadedBy } from '../common/UploadedBy'
 import type { Attachment, ChangeDetail } from '../../types/change'
 
 const isScopingPhase = (status: string) => status === 'captured' || status === 'scoping'
@@ -54,10 +55,7 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
       <span className="min-w-0">
         <span className="block truncate">📎 {a.filename}</span>
         {/* Who put it there and when — the provenance every file list owes. */}
-        <span className="block text-xs text-slate-500">
-          {a.uploaded_by_name ? `${a.uploaded_by_name} · ` : ''}
-          {new Date(a.created_at).toLocaleDateString()}
-        </span>
+        <UploadedBy name={a.uploaded_by_name} at={a.created_at} className="block" />
       </span>
     </li>
   )
