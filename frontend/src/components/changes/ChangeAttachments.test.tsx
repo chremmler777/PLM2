@@ -54,3 +54,26 @@ describe('ChangeAttachments', () => {
     expect(screen.getByLabelText('Delete later.pdf')).toBeTruthy()
   })
 })
+
+describe('ChangeAttachments provenance', () => {
+  afterEach(cleanup)
+
+  it('names who uploaded the file and when', () => {
+    wrap(<ChangeAttachments change={change({
+      attachments: [att({
+        id: 1, filename: 'base.pdf', created_at: '2026-07-01T00:00:00',
+        uploaded_by: 5, uploaded_by_name: 'Eva Eng',
+      })],
+    })} />)
+    const line = screen.getByText(/Eva Eng/)
+    expect(line.textContent).toContain(new Date('2026-07-01T00:00:00').toLocaleDateString())
+  })
+
+  it('falls back to the date alone when the uploader is unknown', () => {
+    wrap(<ChangeAttachments change={change({
+      attachments: [att({ id: 1, filename: 'base.pdf', created_at: '2026-07-01T00:00:00' })],
+    })} />)
+    const line = screen.getByText(new Date('2026-07-01T00:00:00').toLocaleDateString())
+    expect(line.textContent).not.toContain('·')
+  })
+})

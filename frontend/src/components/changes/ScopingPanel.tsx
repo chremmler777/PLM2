@@ -147,7 +147,9 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       />
 
       {/* Raised before or during the meeting, by anyone, in parallel. */}
-      <ConcernStrip changeId={changeId} editable={open} />
+      {/* Scoping concerns may name a department as attribution — optional, and
+          open to anyone; "Team" is the default. */}
+      <ConcernStrip changeId={changeId} editable={open} departments={departments} />
 
       {outstanding && (
         <div className={`rounded-lg border p-3 space-y-2 ${

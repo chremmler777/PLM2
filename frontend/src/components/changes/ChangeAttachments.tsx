@@ -51,7 +51,14 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
           ✕
         </button>
       )}
-      <span className="truncate min-w-0">📎 {a.filename}</span>
+      <span className="min-w-0">
+        <span className="block truncate">📎 {a.filename}</span>
+        {/* Who put it there and when — the provenance every file list owes. */}
+        <span className="block text-xs text-slate-500">
+          {a.uploaded_by_name ? `${a.uploaded_by_name} · ` : ''}
+          {new Date(a.created_at).toLocaleDateString()}
+        </span>
+      </span>
     </li>
   )
 

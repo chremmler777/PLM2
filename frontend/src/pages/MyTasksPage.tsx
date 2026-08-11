@@ -12,6 +12,7 @@ import { rasicColors } from '../lib/constants';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
+import type { ChangeTask } from '../types/change';
 import { toast } from 'sonner';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -191,6 +192,49 @@ function SepItemsSection() {
   );
 }
 
+
+// Where each kind of change task is actually done, and how it reads in a list.
+const TASK_TAB: Record<string, string> = {
+  kickoff: '', scoping_wrapup: '?tab=scoping',
+  impact_confirm: '?tab=impacted', customer_response: '',
+};
+
+const kickoffHint = (missing?: string[]): string => {
+  const parts = (missing ?? []).map((m) =>
+    m === 'description' ? t('kickoff.description')
+    : m === 'attachment' ? t('kickoff.attachment')
+    : m === 'date' ? t('deadline.quote') : m);
+  return parts.length === 0
+    ? t('tasks.hint.kickoffReady')
+    : t('tasks.hint.kickoff').replace('{x}', parts.join(', '));
+};
+
+const taskHint = (task: ChangeTask): string | null => {
+  switch (task.kind) {
+    case 'kickoff':
+      return kickoffHint(task.missing);
+    case 'scoping_wrapup': {
+      const open = [
+        ...(task.impact_confirmed ? [] : [t('tasks.hint.impactOpen')]),
+        ...(task.has_decision ? [] : [t('tasks.hint.decisionOpen')]),
+      ];
+      return open.length > 0 ? open.join(', ') : t('tasks.hint.wrapup');
+    }
+    case 'impact_confirm':
+      return t('tasks.hint.impact_confirm');
+    case 'customer_response':
+      return t('tasks.hint.customer_response');
+    default:
+      return null;
+  }
+};
+
+// An unknown kind from a newer backend still names itself rather than blowing up.
+const taskLabel = (kind: string): string => {
+  const label = t(`tasks.kind.${kind}`);
+  return label === `tasks.kind.${kind}` ? kind : label;
+};
+
 function ChangeTasksSection() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -216,7 +260,7 @@ function ChangeTasksSection() {
   return (
     <div>
       <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        🔄 Change Assessments ({tasks.length})
+        🔄 {t('tasks.changeWork')} ({tasks.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -224,7 +268,7 @@ function ChangeTasksSection() {
             <tr className="border-b border-slate-700 bg-slate-900">
               <th className="text-left px-4 py-3 text-slate-400 font-medium">Change</th>
               <th className="text-left px-4 py-3 text-slate-400 font-medium">Title</th>
-              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.owner')}</th>
+              <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.task')}</th>
               <th className="text-left px-4 py-3 text-slate-400 font-medium">{t('tasks.due')}</th>
               <th className="px-4 py-3" />
             </tr>
@@ -232,7 +276,7 @@ function ChangeTasksSection() {
           <tbody>
             {tasks.map((task) => (
               <tr
-                key={`${task.change_id}-${task.assessment_id}`}
+                key={`${task.kind}-${task.change_id}-${task.assessment_id ?? 0}`}
                 className={`border-b border-slate-700 last:border-0 hover:bg-slate-750${
                   task.mine ? ' border-l-2 border-sky-500' : ''
                 }`}
@@ -242,18 +286,30 @@ function ChangeTasksSection() {
                 </td>
                 <td className="px-4 py-3 text-slate-100">{task.title}</td>
                 <td className="px-4 py-3">
-                  {task.owner_id !== null ? (
-                    <span className="text-slate-200">{task.owner_name}</span>
+                  {task.kind === 'assessment' ? (
+                    task.owner_id != null ? (
+                      <span className="text-slate-200">{task.owner_name}</span>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          accept.mutate({
+                            changeId: task.change_id,
+                            assessmentId: task.assessment_id as number,
+                          })
+                        }
+                        disabled={accept.isPending}
+                        className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
+                      >
+                        {t('tasks.accept')}
+                      </button>
+                    )
                   ) : (
-                    <button
-                      onClick={() =>
-                        accept.mutate({ changeId: task.change_id, assessmentId: task.assessment_id })
-                      }
-                      disabled={accept.isPending}
-                      className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
-                    >
-                      {t('tasks.accept')}
-                    </button>
+                    <span className="block">
+                      <span className="text-slate-200">{taskLabel(task.kind)}</span>
+                      {taskHint(task) && (
+                        <span className="block text-xs text-slate-400">{taskHint(task)}</span>
+                      )}
+                    </span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-xs">
@@ -268,10 +324,11 @@ function ChangeTasksSection() {
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
-                    onClick={() => navigate(`/changes/${task.change_id}`)}
+                    onClick={() => navigate(
+                      `/changes/${task.change_id}${TASK_TAB[task.kind] ?? ''}`)}
                     className="text-xs px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"
                   >
-                    Assess
+                    {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}
                   </button>
                 </td>
               </tr>

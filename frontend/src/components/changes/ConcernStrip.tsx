@@ -43,12 +43,16 @@ export default function ConcernStrip({
   const [withdrawing, setWithdrawing] = useState<number | null>(null)
   const [resolution, setResolution] = useState('')
 
-  // You flag for your own department; an admin may flag for any of them.
+  // In assessment you flag for your own department (admins for any). In scoping
+  // the department is mere attribution — anyone may say "this concerns Packaging"
+  // — and "Team" (no department) is the default.
   const selectable = departments.filter((d) => d.is_active !== false)
-  const options = isAdmin ? selectable
+  const options = !scoped ? selectable
+    : isAdmin ? selectable
     : selectable.filter((d) => myDepartmentIds.includes(d.id))
   const [deptId, setDeptId] = useState<number | undefined>(undefined)
-  const effectiveDept = deptId ?? options[0]?.id
+  // Scoping starts on "Team"; assessment starts on the first department offered.
+  const effectiveDept = deptId ?? (scoped ? options[0]?.id : undefined)
   const deptName = (id?: number | null) =>
     id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
 
@@ -62,8 +66,7 @@ export default function ConcernStrip({
   }
 
   const raise = useMutation({
-    mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim(),
-      scoped ? effectiveDept : undefined),
+    mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim(), effectiveDept),
     onSuccess: () => { setNote(''); setAdding(false); invalidate() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not raise the flag'),
   })
@@ -166,10 +169,11 @@ export default function ConcernStrip({
             <option value="needs_info">{t('concern.wantsInfo')}</option>
             <option value="reject_proposal">{t('concern.wouldReject')}</option>
           </select>
-          {scoped && (
+          {(scoped || options.length > 0) && (
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-              onChange={(e) => setDeptId(Number(e.target.value))}
+              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
+              {!scoped && <option value="">{t('concern.team')}</option>}
               {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           )}

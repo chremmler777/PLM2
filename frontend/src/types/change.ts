@@ -79,6 +79,9 @@ export interface Attachment {
   size_bytes: number;
   phase: 'baseline' | 'post_scoping';
   created_at: string;
+  /** Who put the file on the record — optional until every endpoint sends it. */
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
 }
 
 export interface ChangelogEntry {
@@ -146,19 +149,34 @@ export interface ChangeDetail extends ChangeRequest {
   attachments: Attachment[];
 }
 
+/** Stage-responsibility rows my-tasks returns besides the assessment ones. */
+export type ChangeTaskKind =
+  | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response';
+
+/**
+ * A row of my-tasks. Every row carries the change and its active deadline; the
+ * rest is per-kind and therefore optional, so an unknown kind from a newer
+ * backend still renders as a plain row instead of crashing the page.
+ */
 export interface ChangeTask {
-  kind: string;
+  kind: ChangeTaskKind | (string & {});
   change_id: number;
   change_number: string;
   title: string;
-  department_id: number;
-  assessment_id: number;
-  owner_id: number | null;
-  owner_name: string | null;
-  accepted_at: string | null;
   due_date: string | null;
   overdue: boolean;
-  mine: boolean;
+  // assessment rows
+  department_id?: number;
+  assessment_id?: number;
+  owner_id?: number | null;
+  owner_name?: string | null;
+  accepted_at?: string | null;
+  mine?: boolean;
+  // kickoff rows: which of description / attachment / date is still missing
+  missing?: string[];
+  // scoping wrap-up rows
+  impact_confirmed?: boolean;
+  has_decision?: boolean;
 }
 
 // --- Cost & summation types (sub-project A) ---

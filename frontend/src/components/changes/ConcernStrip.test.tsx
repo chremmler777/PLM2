@@ -150,3 +150,56 @@ describe('ConcernStrip in the assessment phase', () => {
     expect(screen.getByText(/gauge ordered/)).toBeDefined()
   })
 })
+
+describe('ConcernStrip attribution in scoping', () => {
+  const depts = [
+    { id: 2, name: 'Quality', is_active: true },
+    { id: 6, name: 'Packaging Engineer', is_active: true },
+    { id: 8, name: 'Logistics', is_active: false },
+  ]
+
+  beforeEach(() => {
+    authState.current = { userId: 5, isAdmin: false }
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    vi.mocked(changesApi.raiseConcern).mockClear()
+    vi.mocked(changesApi.withdrawConcern).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('defaults to Team and sends no department', async () => {
+    wrap(<ConcernStrip changeId={7} editable departments={depts} />)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
+    expect(picker.value).toBe('')
+    // Team plus the two active departments — no membership restriction here.
+    expect(picker.querySelectorAll('option')).toHaveLength(3)
+    expect(screen.queryByText('Logistics')).toBeNull()
+    fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'whole team issue' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }))
+    await waitFor(() => expect(changesApi.raiseConcern)
+      .toHaveBeenCalledWith(7, 'needs_info', 'whole team issue', undefined))
+  })
+
+  it('attributes the flag to a department when one is picked', async () => {
+    wrap(<ConcernStrip changeId={7} editable departments={depts} />)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '6' } })
+    fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'box will not fit' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }))
+    await waitFor(() => expect(changesApi.raiseConcern)
+      .toHaveBeenCalledWith(7, 'needs_info', 'box will not fit', 6))
+  })
+
+  it('chips the attributed department and still frees a team flag to be dropped without a note', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, raised_by: 5, department_id: 6, note: 'box will not fit' }),
+      concern({ id: 2, raised_by: 5, department_id: null, note: 'team-wide' }),
+    ] as never)
+    wrap(<ConcernStrip changeId={7} editable departments={depts} />)
+    expect(await screen.findByText('Packaging Engineer')).toBeDefined()
+    // The team flag needs no resolution note; the attributed one does.
+    const withdrawLinks = screen.getAllByRole('button', { name: /withdraw/ })
+    fireEvent.click(withdrawLinks[1])
+    expect((screen.getByTestId('concern-withdraw-confirm') as HTMLButtonElement).disabled).toBe(false)
+  })
+})
