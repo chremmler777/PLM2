@@ -32,26 +32,30 @@ def _has_flag(bind) -> bool:
     return "can_start_change" in {c["name"] for c in insp.get_columns("wf_departments")}
 
 
+# Core expressions, not raw SQL: the flag is a real BOOLEAN on Postgres but an
+# INTEGER on SQLite, so literal 0/1 comparisons only work on one of them.
+_dept = sa.table(
+    "wf_departments",
+    sa.column("name", sa.String),
+    sa.column("can_start_change", sa.Boolean),
+)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     if not _has_flag(bind):
         return
-    bind.execute(sa.text(
-        "UPDATE wf_departments SET can_start_change = 0 "
-        "WHERE can_start_change <> 0"))
-    bind.execute(sa.text(
-        "UPDATE wf_departments SET can_start_change = 1 WHERE name = :n"),
-        {"n": "Sales"})
+    bind.execute(_dept.update().values(can_start_change=sa.false()))
+    bind.execute(_dept.update()
+                 .where(_dept.c.name == "Sales")
+                 .values(can_start_change=sa.true()))
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     if not _has_flag(bind):
         return
-    bind.execute(sa.text(
-        "UPDATE wf_departments SET can_start_change = 0 "
-        "WHERE can_start_change <> 0"))
-    for name in _032_STARTERS:
-        bind.execute(sa.text(
-            "UPDATE wf_departments SET can_start_change = 1 WHERE name = :n"),
-            {"n": name})
+    bind.execute(_dept.update().values(can_start_change=sa.false()))
+    bind.execute(_dept.update()
+                 .where(_dept.c.name.in_(_032_STARTERS))
+                 .values(can_start_change=sa.true()))
