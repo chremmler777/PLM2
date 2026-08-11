@@ -77,7 +77,10 @@ export const changesApi = {
 
   uploadAttachment: (
     id: number, file: File,
-    opts?: { kind?: AttachmentKind; respondsToId?: number; concernId?: number },
+    opts?: {
+      kind?: AttachmentKind; respondsToId?: number;
+      concernId?: number; assessmentId?: number;
+    },
   ) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -85,8 +88,10 @@ export const changesApi = {
     // document sends neither field and stays 'general' server-side.
     if (opts?.kind) fd.append('kind', opts.kind);
     if (opts?.respondsToId !== undefined) fd.append('responds_to_id', String(opts.respondsToId));
-    // Belongs to one needs-info container, so it lands in that card and no other.
+    // Belongs to one container — a question card or a department's assessment —
+    // so it lands there and nowhere else.
     if (opts?.concernId !== undefined) fd.append('concern_id', String(opts.concernId));
+    if (opts?.assessmentId !== undefined) fd.append('assessment_id', String(opts.assessmentId));
     // The client sets a global Content-Type: application/json default; it must
     // be cleared here so the browser sets multipart/form-data WITH its boundary.
     // Otherwise FastAPI can't find the `file` field and returns 422.

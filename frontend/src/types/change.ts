@@ -109,6 +109,8 @@ export interface Attachment {
   responds_to_id?: number | null;
   /** The needs-info container this document belongs to, if any. */
   concern_id?: number | null;
+  /** The assessment this document is evidence for — exclusive with concern_id. */
+  assessment_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;

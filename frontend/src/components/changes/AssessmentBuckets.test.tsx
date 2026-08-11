@@ -17,6 +17,11 @@ vi.mock('../../api/changes', () => ({
   },
 }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
+vi.mock('./AttachmentDropzone', () => ({
+  default: (p: { assessmentId?: number }) => (
+    <div data-testid="dropzone" data-assessment={p.assessmentId ?? ''} />
+  ),
+}))
 
 const DEPTS = [
   { id: 2, name: 'Development', is_active: true },
@@ -273,5 +278,112 @@ describe('AssessmentBuckets checklist', () => {
     const list = screen.getByTestId('bucket-impacts-2')
     expect(list.textContent).toContain('Tool rework — insert')
     expect(list.textContent).not.toContain('Fixture')
+  })
+})
+
+describe('AssessmentBuckets with a re-routed history', () => {
+  beforeEach(() => {
+    // The department appears twice: the live row from the current template and
+    // a leftover from the one it replaced.
+    vi.mocked(changesApi.getRouting).mockResolvedValue({
+      change_id: 7, template_id: 2, template_version: 2, has_deviation: false,
+      deviation_status: 'none',
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 4, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+      ] }],
+    } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+  })
+  afterEach(cleanup)
+
+  const twoRows = () => change({ assessments: [
+    assessment({ id: 9, department_id: 4, rasic_letter: 'C', stage_order: 2,
+      status: 'pending', verdict: 'pending' }),
+    assessment({ id: 8, department_id: 4, rasic_letter: 'R', stage_order: 1,
+      status: 'active', verdict: 'pending' }),
+  ] })
+
+  it('gives the department one bucket, bound to the row it can actually work', async () => {
+    buckets({ myDepartmentIds: [4], change: twoRows() })
+    // One bucket, not two.
+    expect(await screen.findByTestId('bucket-4')).toBeTruthy()
+    expect(screen.getAllByTestId(/^bucket-\d+$/)).toHaveLength(1)
+    // The live R row, not the stale C leftover.
+    expect(screen.getByTestId('bucket-toggle-4').textContent).toContain('R')
+    expect(screen.getByTestId('bucket-stale-4').textContent).toBe('+1')
+    // And the member gets their entry mask.
+    fireEvent.click(screen.getByTestId('bucket-toggle-4'))
+    await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
+  })
+
+  it('falls back to the earliest pending row when none is active', async () => {
+    buckets({ myDepartmentIds: [4], change: change({ assessments: [
+      assessment({ id: 9, department_id: 4, rasic_letter: 'C', stage_order: 2,
+        status: 'pending', verdict: 'pending' }),
+      assessment({ id: 8, department_id: 4, rasic_letter: 'S', stage_order: 1,
+        status: 'pending', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-toggle-4')).textContent).toContain('S')
+  })
+
+  it('keeps a submitted answer visible when every row is done', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [
+      assessment({ id: 8, department_id: 4, rasic_letter: 'R', stage_order: 1,
+        status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00' }),
+      assessment({ id: 9, department_id: 4, rasic_letter: 'C', stage_order: 2,
+        status: 'waived', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-state-4')).textContent).toBe(t('bucket.submitted'))
+  })
+})
+
+describe('AssessmentBuckets evidence', () => {
+  const evidence = (over: Record<string, unknown> = {}) => ({
+    id: 50, filename: 'measurement.pdf', content_type: 'application/pdf',
+    size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
+    kind: 'general', responds_to_id: null, concern_id: null, assessment_id: 1, ...over,
+  })
+
+  beforeEach(() => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+      deviation_status: 'none',
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+        { department_id: 4, rasic_letter: 'S', tier: 'optional', status: 'active', verdict: 'pending' },
+      ] }],
+    } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+  })
+  afterEach(cleanup)
+
+  const withEvidence = () => change({
+    assessments: [assessment({ id: 1, department_id: 2 }),
+      assessment({ id: 2, department_id: 4 })],
+    attachments: [evidence({ id: 50, assessment_id: 1 }),
+      evidence({ id: 51, filename: 'other-dept.pdf', assessment_id: 2 })],
+  })
+
+  it('shows a department its own evidence and nobody else’s', async () => {
+    buckets({ myDepartmentIds: [2], change: withEvidence() })
+    expect((await screen.findByTestId('bucket-evidence-count-2')).textContent).toContain('1')
+    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
+    const block = screen.getByTestId('bucket-evidence-2')
+    expect(block.textContent).toContain('measurement.pdf')
+    expect(block.textContent).not.toContain('other-dept.pdf')
+    expect(screen.getByRole('link', { name: 'measurement.pdf' })).toBeTruthy()
+  })
+
+  it('files an upload against that department’s assessment', async () => {
+    buckets({ myDepartmentIds: [2], change: withEvidence() })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('dropzone').getAttribute('data-assessment')).toBe('1')
+  })
+
+  it('lets a privileged reader see evidence without an upload slot', async () => {
+    buckets({ canSeeAll: true, change: withEvidence() })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-evidence-2').textContent).toContain('measurement.pdf')
+    expect(screen.queryByTestId('dropzone')).toBeNull()
   })
 })

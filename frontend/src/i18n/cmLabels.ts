@@ -386,6 +386,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'No linked objects — assess generally',
   },
   'bucket.via': { de: 'über Teil', en: 'via part' },
+  'bucket.evidence': { de: 'Nachweise', en: 'Evidence' },
+  'bucket.evidenceHint': {
+    de: 'Berichte oder Ergebnisse anhängen, falls vorhanden',
+    en: 'Attach reports or results if needed',
+  },
+  'bucket.evidenceSlot': { de: 'Nachweis ablegen', en: 'Drop evidence here' },
+  'bucket.staleRowsHint': {
+    de: 'Weitere Zeilen aus einer früheren Routing-Version — nicht mehr aktiv',
+    en: 'Further rows from an earlier routing version — no longer active',
+  },
   'bucket.othersHidden': {
     de: 'Antworten anderer Fachbereiche sind nicht einsehbar',
     en: 'Other departments’ answers are not shared',
