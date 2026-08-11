@@ -5,7 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
-  AssessmentObjectsResponse,
+  AssessmentObjectsResponse, ChecklistItemDef,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -141,6 +141,11 @@ export const changesApi = {
     client.put<Gate>(`/v1/changes/${id}/gates/${gateKey}`, body).then((r) => r.data),
   referenceRates: () =>
     client.get<DepartmentRateRef[]>('/v1/changes/reference/rates').then((r) => r.data),
+  // What a department is asked at assessment: the common questions plus its own.
+  assessmentChecklist: (departmentId: number) =>
+    client.get<ChecklistItemDef[]>('/v1/changes/reference/assessment-checklist',
+      { params: { department_id: departmentId } }).then((r) => r.data),
+
   referenceActivities: (departmentId: number) =>
     client.get<ActivityRef[]>('/v1/changes/reference/activities', { params: { department_id: departmentId } }).then((r) => r.data),
 

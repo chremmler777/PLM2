@@ -123,6 +123,9 @@ export default function AssessmentBuckets({
 }) {
   const changeId = change.id
   const [openDept, setOpenDept] = useState<number | null>(null)
+  // What each open form currently says, so the evidence block can shout when the
+  // verdict turns the explanation into a requirement.
+  const [verdictOf, setVerdictOf] = useState<Record<number, string>>({})
   const qc = useQueryClient()
   const evidenceOf = (assessmentId?: number) =>
     assessmentId == null ? []
@@ -273,6 +276,10 @@ export default function AssessmentBuckets({
                 ) : canSubmit ? (
                   <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
                     departmentName={deptName(row.id)} showEffort={false}
+                    evidenceCount={evidenceOf(a?.id).length}
+                    assessmentId={a?.id} evidence={evidenceOf(a?.id)}
+                    onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })}
+                    onVerdictChange={(v) => setVerdictOf((m) => ({ ...m, [row.id]: v }))}
                     onDone={() => setOpenDept(null)} />
                 ) : (
                   <p className="text-xs text-slate-500" data-testid={`bucket-readonly-${row.id}`}>
@@ -281,11 +288,22 @@ export default function AssessmentBuckets({
                 )}
                 {/* Evidence: reports and results behind the answer. Optional —
                     nothing here gates the submit. */}
-                {a && (
-                  <div className="space-y-1" data-testid={`bucket-evidence-${row.id}`}>
-                    <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                {a && (() => {
+                  const required = verdictOf[row.id] === 'not_feasible'
+                    && evidenceOf(a.id).length === 0
+                  return (
+                  <div data-testid={`bucket-evidence-${row.id}`}
+                    className={`space-y-1 ${required
+                      ? 'rounded border border-amber-700/60 bg-amber-950/20 p-2' : ''}`}>
+                    <p className={`text-[11px] uppercase tracking-wide ${
+                      required ? 'text-amber-300' : 'text-slate-500'}`}>
                       {t('bucket.evidence')}
                     </p>
+                    {required && (
+                      <p className="text-xs text-amber-200" data-testid={`bucket-evidence-required-${row.id}`}>
+                        {t('check.evidenceRequired')}
+                      </p>
+                    )}
                     {evidenceOf(a.id).length > 0 && (
                       <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
                         {evidenceOf(a.id).map((att) => (
@@ -301,7 +319,8 @@ export default function AssessmentBuckets({
                       <p className="text-xs text-slate-600">{t('bucket.evidenceHint')}</p>
                     )}
                   </div>
-                )}
+                  )
+                })()}
 
                 {/* What they ticked, for whoever may read the bucket. */}
                 {impactsOf(a?.details).filter((i) => i.impacted).length > 0 && (

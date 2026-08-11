@@ -96,7 +96,7 @@ export interface DeviationRequest {
 }
 
 export type AttachmentKind =
-  | 'general' | 'info_request' | 'info_response' | 'rejection_letter';
+  | 'general' | 'info_request' | 'info_response' | 'rejection_letter' | 'rfq';
 
 export interface Attachment {
   id: number;
@@ -288,6 +288,17 @@ export interface Gate {
   decided_by?: number | null;
   decided_at?: string | null;
   remark?: string | null;
+}
+
+/** A checklist question the backend defines for a department's assessment. */
+export interface ChecklistItemDef {
+  key: string;
+  label_de: string;
+  label_en: string;
+  /** false for the common set, true for a department's own additions. */
+  extra: boolean;
+  /** When present the ticked row must also pick one of these. */
+  choices?: string[];
 }
 
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }

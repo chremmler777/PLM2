@@ -15,12 +15,14 @@ const KIND_LABEL: Record<string, string> = {
   info_request: 'attach.infoRequest',
   info_response: 'attach.infoResponse',
   rejection_letter: 'attach.rejectionLetter',
+  rfq: 'attach.rfq',
 }
 
 const KIND_STYLE: Record<string, string> = {
   info_request: 'bg-amber-900/70 text-amber-200',
   info_response: 'bg-emerald-900/70 text-emerald-200',
   rejection_letter: 'bg-red-900/70 text-red-200',
+  rfq: 'bg-violet-900/70 text-violet-200',
 }
 
 export function KindChip({ kind }: { kind?: string | null }) {

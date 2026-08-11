@@ -12,14 +12,16 @@ vi.mock('../../api/changes', () => ({
     submitAssessment: vi.fn().mockResolvedValue({}),
     listConcerns: vi.fn().mockResolvedValue([]),
     referenceActivities: vi.fn().mockResolvedValue([]),
+    assessmentChecklist: vi.fn().mockResolvedValue([]),
     withdrawConcern: vi.fn(),
     raiseConcern: vi.fn(),
   },
 }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 vi.mock('./AttachmentDropzone', () => ({
-  default: (p: { assessmentId?: number }) => (
-    <div data-testid="dropzone" data-assessment={p.assessmentId ?? ''} />
+  default: (p: { assessmentId?: number; kind?: string }) => (
+    <div data-testid="dropzone" data-assessment={p.assessmentId ?? ''}
+      data-kind={p.kind ?? ''} />
   ),
 }))
 
@@ -210,6 +212,25 @@ describe('AssessmentBuckets department questionnaires', () => {
 })
 
 describe('AssessmentBuckets checklist', () => {
+  // Whatever the endpoint serves is what renders — the list grows backend-side.
+  const CHECKLIST = [
+    { key: 'cycle_time_change', label_de: 'Zykluszeit-Änderung nötig',
+      label_en: 'Cycle time change', extra: false },
+    { key: 'sparepart_required', label_de: 'Ersatzteil erforderlich',
+      label_en: 'Spare part required', extra: false },
+    { key: 'prototyping_required', label_de: 'Prototypen/Musterbau erforderlich',
+      label_en: 'Prototyping required', extra: false },
+    { key: 'matching_required', label_de: 'Abmusterung/Matching erforderlich',
+      label_en: 'Matching/sampling required', extra: false },
+    { key: 'modification_internal', label_de: 'Interne Änderung/Umbau',
+      label_en: 'Internal modification', extra: false },
+    { key: 'modification_external', label_de: 'Externe Änderung/Umbau (Lieferant)',
+      label_en: 'External modification (supplier)', extra: false },
+    { key: 'article_design_update', label_de: 'Artikeldesign-Änderung',
+      label_en: 'Article design update', extra: true,
+      choices: ['internal', 'customer_given'] },
+  ]
+
   beforeEach(() => {
     vi.mocked(changesApi.getRouting).mockResolvedValue({
       change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
@@ -219,65 +240,178 @@ describe('AssessmentBuckets checklist', () => {
       ] }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
-    vi.mocked(changesApi.referenceActivities).mockResolvedValue([
-      { id: 31, department_id: 2, label: 'Tool rework', sort_order: 1 },
-      { id: 32, department_id: 2, label: 'Gauge change', sort_order: 2 },
-    ] as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue(CHECKLIST as never)
     vi.mocked(changesApi.submitAssessment).mockClear()
   })
   afterEach(cleanup)
 
-  it('sends the ticked areas with their remarks, and nothing for untouched ones', async () => {
+  const open2 = async () => {
     buckets({ myDepartmentIds: [2] })
     fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
-    await waitFor(() => expect(screen.getByTestId('check-31')).toBeTruthy())
-    // The remark only exists once the row is ticked.
-    expect(screen.queryByTestId('check-remark-31')).toBeNull()
-    fireEvent.click(screen.getByTestId('check-31'))
-    fireEvent.change(screen.getByTestId('check-remark-31'),
-      { target: { value: 'new insert needed' } })
+    return screen.findByTestId('check-cycle_time_change')
+  }
+
+  it('asks the backend’s questions, whatever they are, and sends keyed answers', async () => {
+    await open2()
+    // Every served item renders — the list is the backend's business, not ours.
+    CHECKLIST.forEach((i) => expect(screen.getByTestId(`check-${i.key}`)).toBeTruthy())
+    expect(screen.queryByTestId('check-remark-cycle_time_change')).toBeNull()
+    fireEvent.click(screen.getByTestId('check-cycle_time_change'))
+    fireEvent.change(screen.getByTestId('check-remark-cycle_time_change'),
+      { target: { value: '+2s per part' } })
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        department_id: 2, verdict: 'feasible',
         details: { impacts: [
-          { activity_id: 31, label: 'Tool rework', impacted: true, remark: 'new insert needed' },
+          { key: 'cycle_time_change', impacted: true, remark: '+2s per part' },
         ] },
       })))
   })
 
-  it('takes a free line the catalog does not cover', async () => {
-    buckets({ myDepartmentIds: [2] })
+  it('asks for the RFQ where supplier work was ticked, and files it there', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
     fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
-    fireEvent.click(await screen.findByTestId('check-add-item'))
-    const input = screen.getByTestId('check-free-input-0')
-    fireEvent.blur(input, { target: { value: 'operator training' } })
+    await screen.findByTestId('check-modification_external')
+    // Nothing asked until the box is ticked.
+    expect(screen.queryByTestId('check-rfq-modification_external')).toBeNull()
+    fireEvent.click(screen.getByTestId('check-modification_external'))
+    const slot = screen.getByTestId('check-rfq-modification_external')
+    expect(slot).toBeTruthy()
+    // A hint, not a gate: a feasible verdict still submits without the RFQ.
+    expect(screen.getByTestId('check-rfq-missing')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
+    const zone = screen.getAllByTestId('dropzone')
+      .find((z) => z.getAttribute('data-kind') === 'rfq')
+    expect(zone?.getAttribute('data-assessment')).toBe('1')
+    // Internal modification is tickable on its own and asks for nothing.
+    fireEvent.click(screen.getByTestId('check-modification_internal'))
+    expect(screen.queryByTestId('check-rfq-modification_internal')).toBeNull()
+  })
+
+  it('shows an RFQ already on file under its row', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })],
+      attachments: [{ id: 60, filename: 'rfq-supplier.pdf', content_type: 'application/pdf',
+        size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
+        kind: 'rfq', responds_to_id: null, concern_id: null, assessment_id: 1 }] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    fireEvent.click(await screen.findByTestId('check-modification_external'))
+    expect(screen.getByTestId('check-rfq-modification_external').textContent)
+      .toContain('rfq-supplier.pdf')
+    expect(screen.queryByTestId('check-rfq-missing')).toBeNull()
+    // It is an assessment document like any other, so the evidence list has it too.
+    expect(screen.getByTestId('bucket-evidence-2').textContent).toContain('rfq-supplier.pdf')
+  })
+
+  it('makes a choice-bearing item say which kind it is', async () => {
+    await open2()
+    fireEvent.click(screen.getByTestId('check-article_design_update'))
+    fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         details: { impacts: [
-          { activity_id: null, label: 'operator training', impacted: true },
+          { key: 'article_design_update', impacted: true, choice: 'customer_given' },
         ] },
       })))
+  })
+
+  it('takes a free line the checklist does not cover', async () => {
+    await open2()
+    fireEvent.click(screen.getByTestId('check-add-item'))
+    fireEvent.blur(screen.getByTestId('check-free-input-0'),
+      { target: { value: 'operator training' } })
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    fireEvent.click(screen.getByTestId('assessment-submit'))
+    await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
+      expect.objectContaining({
+        details: { impacts: [{ label: 'operator training', impacted: true }] },
+      })))
+  })
+
+  it('shows answers stored under the old catalog shape without offering to edit them', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00',
+      details: { impacts: [
+        { activity_id: 31, label: 'Tool rework', impacted: true, remark: 'insert' },
+      ] },
+    })] }) })
+    // Counted and listed, but no checkbox to change history with.
+    expect((await screen.findByTestId('bucket-areas-2')).textContent)
+      .toBe(t('check.impactedOne'))
+    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-impacts-2').textContent).toContain('Tool rework — insert')
   })
 
   it('counts the impacted areas on the collapsed row once submitted', async () => {
     buckets({ canSeeAll: true, change: change({ assessments: [assessment({
       status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00',
       details: { impacts: [
-        { activity_id: 31, label: 'Tool rework', impacted: true, remark: 'insert' },
-        { activity_id: 32, label: 'Gauge change', impacted: true },
-        { activity_id: 33, label: 'Fixture', impacted: false },
+        { key: 'cycle_time_change', impacted: true, remark: '+2s' },
+        { key: 'sparepart_required', impacted: true },
+        { key: 'visual_risk', impacted: false },
       ] },
     })] }) })
     expect((await screen.findByTestId('bucket-areas-2')).textContent)
       .toBe(t('check.impactedCount').replace('{n}', '2'))
-    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
-    const list = screen.getByTestId('bucket-impacts-2')
-    expect(list.textContent).toContain('Tool rework — insert')
-    expect(list.textContent).not.toContain('Fixture')
+  })
+})
+
+describe('AssessmentBuckets not-feasible needs its explanation', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+      deviation_status: 'none',
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+      ] }],
+    } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue([] as never)
+    vi.mocked(changesApi.submitAssessment).mockClear()
+  })
+  afterEach(cleanup)
+
+  const evidence = {
+    id: 50, filename: 'why-not.pptx', content_type: 'application/vnd.ms-powerpoint',
+    size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
+    kind: 'general', responds_to_id: null, concern_id: null, assessment_id: 1,
+  }
+
+  it('gates the submit until the explanation is attached', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    // The evidence block says what is owed, and the submit waits for it.
+    expect(screen.getByTestId('bucket-evidence-required-2').textContent)
+      .toBe(t('check.evidenceRequired'))
+    expect(screen.getByTestId('assessment-evidence-required')).toBeTruthy()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('lets it through once the explanation is on the assessment', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [evidence] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('asks nothing extra of a feasible verdict', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    expect(screen.queryByTestId('assessment-evidence-required')).toBeNull()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 })
 

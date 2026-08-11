@@ -299,7 +299,19 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.noAnswerYet': { de: 'Noch keine Antwort', en: 'No answer yet' },
   'concern.addDoc': { de: '+ Dokument', en: '+ Document' },
   'concern.noDocs': { de: 'Keine Unterlagen', en: 'No documents' },
+  'check.choice': { de: 'Auslöser', en: 'Trigger' },
+  'check.choice.internal': { de: 'intern', en: 'internal' },
+  'check.choice.customer_given': { de: 'kundenseitig', en: 'customer-given' },
+  'check.legacy': {
+    de: 'Aus einer früheren Bewertung übernommen',
+    en: 'Carried over from an earlier assessment',
+  },
   'check.title': { de: 'Betroffene Bereiche', en: 'Impacted areas' },
+  'check.evidenceRequired': {
+    de: 'Erklärung (PPT) für den Kunden anhängen — wird von der verantwortlichen '
+      + 'Seite versendet.',
+    en: 'Attach the explanation (PPT) for the customer — sent by the responsible side.',
+  },
   'check.hint': {
     de: 'Was aus Ihrem Katalog ist betroffen? Angehakte Punkte werden in der '
       + 'Kostenerfassung vorbelegt.',
@@ -540,6 +552,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'attach.infoRequest': { de: 'Rückfrage', en: 'Info request' },
   'attach.infoResponse': { de: 'Antwort', en: 'Response' },
   'attach.rejectionLetter': { de: 'Absageschreiben', en: 'Rejection letter' },
+  'attach.rfq': { de: 'RFQ', en: 'RFQ' },
+  'attach.rfqSlot': {
+    de: 'RFQ hochladen — Kosten & Timing beim Lieferanten anfragen',
+    en: 'Upload RFQ — request costs & timing from supplier',
+  },
+  'attach.rfqMissing': {
+    de: 'Noch keine RFQ hinterlegt',
+    en: 'No RFQ attached yet',
+  },
   'attach.rejectionSlot': {
     de: 'Absageschreiben hier ablegen',
     en: 'Drop the rejection letter here',
