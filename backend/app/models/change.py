@@ -177,8 +177,13 @@ class ChangeRequest(Base):
 
     @property
     def blocked_department_ids(self) -> list[int]:
-        """Departments currently soft-held by an open assessment concern —
-        the badge source. `concerns` is selectin-loaded, so this is free."""
+        """Departments currently soft-held by an open assessment concern — the
+        badge source. Scoping-phase attribution does NOT hold anything (its
+        teeth there are blocking the 'proceed' decision), so the hold only
+        exists while the change is in assessment. `concerns` is selectin-loaded,
+        so this is free."""
+        if self.status != "in_assessment":
+            return []
         return sorted({c.department_id for c in self.concerns
                        if c.department_id is not None and c.is_open})
 
@@ -380,6 +385,15 @@ class ChangeAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="attachments", foreign_keys=[change_id])
+    # selectin so a list of attachments resolves uploader names in one extra
+    # query rather than one per row (same pattern as ChangeRequest.lead).
+    uploaded_by_user: Mapped["User"] = relationship(
+        foreign_keys=[uploaded_by], lazy="selectin")
+
+    @property
+    def uploaded_by_name(self) -> Optional[str]:
+        return (self.uploaded_by_user.full_name
+                if self.uploaded_by_user is not None else None)
 
 
 class ChangeMeeting(Base):
@@ -436,8 +450,8 @@ class ChangeConcern(Base):
     kind: Mapped[str] = mapped_column(String(20))   # reject_proposal | needs_info
     note: Mapped[str] = mapped_column(Text)
 
-    # Assessment-phase concerns belong to ONE department and hold only that
-    # department's own assessment. NULL for scoping-phase, change-level ones.
+    # In assessment: the department this concern soft-holds (required there).
+    # In scoping: optional attribution — NULL means the whole team's point.
     department_id: Mapped[int | None] = mapped_column(
         ForeignKey("wf_departments.id"), nullable=True, index=True)
 

@@ -160,6 +160,8 @@ class AttachmentResponse(BaseModel):
     size_bytes: int
     phase: str = "baseline"
     created_at: datetime
+    uploaded_by: int
+    uploaded_by_name: Optional[str] = None
 
     class Config:
         from_attributes = True

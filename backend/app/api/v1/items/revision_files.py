@@ -89,8 +89,20 @@ def _uploads_dir(revision_id: int) -> str:
     return os.path.join(os.getcwd(), "uploads", "revisions", str(revision_id))
 
 
-def _file_response_dict(f: RevisionFile) -> dict:
+async def _uploader_names(db: AsyncSession, user_ids: set) -> dict:
+    """id -> display name, in one query. File lists must never resolve the
+    uploader per row."""
+    ids = {i for i in user_ids if i is not None}
+    if not ids:
+        return {}
+    rows = (await db.execute(
+        select(User.id, User.full_name, User.username).where(User.id.in_(ids)))).all()
+    return {uid: (full or username) for uid, full, username in rows}
+
+
+def _file_response_dict(f: RevisionFile, uploader_name: str | None = None) -> dict:
     return {
+        "uploaded_by_name": uploader_name,
         "id": f.id,
         "revision_id": f.revision_id,
         "filename": f.filename,
@@ -367,8 +379,15 @@ async def get_assembly_files(
             "revision_id": display_rev.id,
             "revision_name": display_rev.revision_name,
             "file_id": rev_file.id,
+            # Provenance of the file actually being shown.
+            "uploaded_at": (rev_file.uploaded_at.isoformat()
+                            if rev_file.uploaded_at else None),
+            "uploaded_by": rev_file.uploaded_by,
         })
 
+    names = await _uploader_names(db, {e["uploaded_by"] for e in entries})
+    for e in entries:
+        e["uploaded_by_name"] = names.get(e["uploaded_by"])
     return entries
 
 
@@ -385,7 +404,9 @@ async def list_revision_files(
         .where(RevisionFile.revision_id == revision_id, RevisionFile.is_deleted == False)  # noqa: E712
         .order_by(RevisionFile.uploaded_at)
     )
-    return [_file_response_dict(f) for f in result.scalars().all()]
+    files = result.scalars().all()
+    names = await _uploader_names(db, {f.uploaded_by for f in files})
+    return [_file_response_dict(f, names.get(f.uploaded_by)) for f in files]
 
 
 @router.get("/revision-files/{file_id}/status")

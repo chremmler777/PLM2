@@ -713,6 +713,9 @@ async def get_lesson(
     files = (await db.execute(
         select(LessonFile).where(LessonFile.lesson_id == lesson_id).order_by(LessonFile.id)
     )).scalars().all()
+    # Uploader names in one query, same batch helper the rest of this payload
+    # uses — never a lookup per file.
+    file_names = await _user_names(db, {f.uploaded_by for f in files})
     data["files"] = [
         {
             "id": f.id,
@@ -720,6 +723,8 @@ async def get_lesson(
             "size_bytes": f.size_bytes,
             "content_type": f.content_type,
             "created_at": f.created_at.isoformat() if f.created_at else None,
+            "uploaded_by": f.uploaded_by,
+            "uploaded_by_name": file_names.get(f.uploaded_by),
         }
         for f in files
     ]
