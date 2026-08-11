@@ -792,3 +792,23 @@ async def test_cancelled_stays_terminal(client, eng_auth, seed):
     res = await _transition(client, eng_auth, cid, "scoping")
     assert res.status_code == 400, res.text
     assert "cannot move from 'cancelled'" in res.json()["detail"].lower()
+
+
+async def test_change_responses_name_their_project(client, eng_auth, seed):
+    """List and detail both carry the project number (Project.code) and name —
+    the UI should never need a second call to say which project a change is on.
+    """
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    cid = change["id"]
+    assert change["project_number"] == "proj"
+    assert change["project_name"] == "Project"
+
+    listed = (await client.get(f"/api/v1/changes?project_id={seed['project_id']}",
+                               headers=eng_auth)).json()
+    row = next(c for c in listed if c["id"] == cid)
+    assert row["project_number"] == "proj"
+    assert row["project_name"] == "Project"
+
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    assert detail["project_number"] == "proj"
+    assert detail["project_name"] == "Project"

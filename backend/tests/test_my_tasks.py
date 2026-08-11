@@ -171,3 +171,12 @@ async def test_admin_acting_as_sales_sees_sales_work_only(
     # Sales does not wrap up scoping, and does not lock the impacted set
     assert "scoping_wrapup" not in kinds
     assert "impact_confirm" not in kinds
+
+
+async def test_rows_carry_the_project_identity(client, seed, roles):
+    sales = await _auth(client, "Sales")
+    cid = await _create(client, sales, seed, "project on the row")
+    row = [t for t in await _tasks(client, sales) if t["change_id"] == cid][0]
+    assert row["project_id"] == seed["project_id"]
+    assert row["project_number"] == "proj"      # Project.code
+    assert row["project_name"] == "Project"

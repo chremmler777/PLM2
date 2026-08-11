@@ -12,6 +12,8 @@ REASON_MAX_LENGTH = 100
 
 class ChangeCreate(BaseModel):
     project_id: int
+    project_number: Optional[str] = None
+    project_name: Optional[str] = None
     title: str = Field(min_length=1, max_length=255)
     change_type: str = "physical_part"
     # A one-line "what is wrong", not an essay. The long form belongs in the
@@ -258,6 +260,8 @@ class ChangeResponse(BaseModel):
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
+            row["project_number"] = data.project_number
+            row["project_name"] = data.project_name
             return row
         return data
 

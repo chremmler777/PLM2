@@ -146,12 +146,24 @@ class ChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    project: Mapped["Project"] = relationship(foreign_keys=[project_id])
+    # selectin, not lazy: every change response names its project, and a list
+    # endpoint must not pay one query per row for it.
+    project: Mapped["Project"] = relationship(
+        foreign_keys=[project_id], lazy="selectin")
     lead: Mapped["User | None"] = relationship(
         foreign_keys=[lead_id], lazy="selectin")
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
     impact_confirmed_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[impact_confirmed_by], lazy="selectin")
+
+    @property
+    def project_number(self) -> Optional[str]:
+        """Project.code is the number people quote in meetings."""
+        return self.project.code if self.project is not None else None
+
+    @property
+    def project_name(self) -> Optional[str]:
+        return self.project.name if self.project is not None else None
 
     @property
     def lead_name(self) -> Optional[str]:

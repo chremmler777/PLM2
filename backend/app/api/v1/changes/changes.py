@@ -133,7 +133,10 @@ async def my_change_tasks(
                 continue
             tasks.append({
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
-                "title": c.title, "department_id": a.department_id, "assessment_id": a.id,
+                "title": c.title,
+                "project_id": c.project_id, "project_number": c.project_number,
+                "project_name": c.project_name,
+                "department_id": a.department_id, "assessment_id": a.id,
                 "owner_id": a.effective_owner_id,
                 "owner_name": a.effective_owner_name,
                 "accepted_at": a.effective_accepted_at,
@@ -152,6 +155,8 @@ async def my_change_tasks(
         state = await ChangeService.deadline_state(db, c)
         return {
             "change_id": c.id, "change_number": c.change_number, "title": c.title,
+            "project_id": c.project_id, "project_number": c.project_number,
+            "project_name": c.project_name,
             "due_date": due, "overdue": state == "overdue",
         }
 
