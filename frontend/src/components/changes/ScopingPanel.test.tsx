@@ -20,11 +20,14 @@ vi.mock('../../api/changes', () => ({
     recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality' }]),
   },
 }))
-vi.mock('../../hooks/queries/useWorkflows', () => ({
-  useDepartments: () => ({ data: [
+const deptState = vi.hoisted(() => ({
+  current: [
     { id: 2, name: 'Quality', is_active: true },
     { id: 8, name: 'Logistics', is_active: false },
-  ] }),
+  ] as { id: number; name: string; is_active: boolean }[],
+}))
+vi.mock('../../hooks/queries/useWorkflows', () => ({
+  useDepartments: () => ({ data: deptState.current }),
 }))
 // ConcernStrip has its own suite and its own auth/query needs; this file is
 // about the meeting flow.
@@ -464,5 +467,51 @@ describe('ScopingPanel recycles one question flow', () => {
     // An objection has no answer flow: it is left with the strip, not carded.
     expect(screen.getByTestId('concern-strip').getAttribute('data-hidden')).toBe('')
     expect(screen.queryByTestId('needs-info-card-13')).toBeNull()
+  })
+})
+
+describe('ScopingPanel meeting routing selection', () => {
+  const FIVE = [
+    { id: 2, name: 'Development' },
+    { id: 3, name: 'Tool Engineer' },
+    { id: 4, name: 'Manufacturing Engineer' },
+    { id: 5, name: 'APQP' },
+    { id: 6, name: 'Packaging Engineer' },
+  ]
+
+  beforeEach(() => {
+    deptState.current = FIVE.map((d) => ({ ...d, is_active: true }))
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([] as never)
+    // The endpoint resolves the change type's own template; the panel just shows
+    // what it is told and lets the lead narrow it.
+    vi.mocked(changesApi.recommendedDepartments).mockResolvedValue(FIVE as never)
+    vi.mocked(changesApi.createMeeting).mockClear()
+  })
+  afterEach(() => {
+    cleanup()
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 8, name: 'Logistics', is_active: false },
+    ]
+  })
+
+  it('preselects the change type’s recommended departments and honours a deselection', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    // All five arrive ticked …
+    const chips = await Promise.all(FIVE.map((d) =>
+      screen.findByRole('button', { name: d.name })))
+    // The recommendation seeds the selection once it arrives.
+    await waitFor(() => chips.forEach((chip) =>
+      expect(chip.className).toContain('bg-sky-600')))
+
+    // … and dropping one is respected, not re-seeded.
+    fireEvent.click(chips[4])
+    expect(chips[4].className).not.toContain('bg-sky-600')
+
+    fireEvent.click(screen.getByRole('button', { name: t('meeting.save') }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
+    expect(body.selected_department_ids).toEqual([2, 3, 4, 5])
   })
 })

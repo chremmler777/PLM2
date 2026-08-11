@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import ConcernStrip from './ConcernStrip'
+import { impactedCount, impactsOf } from './departmentForms/ActivityChecklist'
 import { t } from '../../i18n/cmLabels'
 import type {
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
@@ -90,7 +91,7 @@ function ObjectList({ objects }: { objects: AssessmentObject[] }) {
 }
 
 export default function AssessmentBuckets({
-  change, departments, myDepartmentIds, editable, isPm = false,
+  change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -99,6 +100,8 @@ export default function AssessmentBuckets({
   editable: boolean
   /** Project Management may settle any department's flag. */
   isPm?: boolean
+  /** PM, Sales, the change lead and admins may read any department's work. */
+  canSeeAll?: boolean
 }) {
   const changeId = change.id
   const [openDept, setOpenDept] = useState<number | null>(null)
@@ -150,7 +153,11 @@ export default function AssessmentBuckets({
         const a = row.assessment
         const state = stateOf(a, row.onHold)
         const isMine = myDepartmentIds.includes(row.id)
-        const expanded = openDept === row.id
+        // Another department's answers are theirs; ordinary members see the
+        // status board only. The overview belongs to PM/Sales/lead/admin.
+        const mayOpen = isMine || canSeeAll
+        const expanded = mayOpen && openDept === row.id
+        const areas = impactedCount(a?.details)
         const canSubmit = isMine && editable && a?.status === 'active'
         return (
           <section key={row.id} data-testid={`bucket-${row.id}`}
@@ -158,11 +165,13 @@ export default function AssessmentBuckets({
               expanded ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-800/50'}`}>
             <button type="button" data-testid={`bucket-toggle-${row.id}`}
               aria-expanded={expanded}
-              title={expanded ? t('bucket.collapse') : t('bucket.expand')}
-              onClick={() => setOpenDept(expanded ? null : row.id)}
-              className="w-full flex items-center gap-3 px-3 py-2 text-left">
+              disabled={!mayOpen}
+              title={mayOpen ? (expanded ? t('bucket.collapse') : t('bucket.expand'))
+                : t('bucket.othersHidden')}
+              onClick={() => { if (mayOpen) setOpenDept(expanded ? null : row.id) }}
+              className="w-full flex items-center gap-3 px-3 py-2 text-left disabled:cursor-default">
               <span aria-hidden className="text-slate-500 text-xs w-3 flex-shrink-0">
-                {expanded ? '▾' : '▸'}
+                {mayOpen ? (expanded ? '▾' : '▸') : ''}
               </span>
               {row.rasic && (
                 <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] leading-tight text-slate-300 flex-shrink-0">
@@ -179,6 +188,13 @@ export default function AssessmentBuckets({
                   className={`text-sm flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
                   title={a.verdict}>
                   {VERDICT_ICON[a.verdict] ?? ''}
+                </span>
+              )}
+              {areas > 0 && (
+                <span data-testid={`bucket-areas-${row.id}`}
+                  className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
+                  {areas === 1 ? t('check.impactedOne')
+                    : t('check.impactedCount').replace('{n}', String(areas))}
                 </span>
               )}
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
@@ -223,6 +239,17 @@ export default function AssessmentBuckets({
                   <p className="text-xs text-slate-500" data-testid={`bucket-readonly-${row.id}`}>
                     {t('bucket.readOnly')}
                   </p>
+                )}
+                {/* What they ticked, for whoever may read the bucket. */}
+                {impactsOf(a?.details).filter((i) => i.impacted).length > 0 && (
+                  <ul className="text-xs text-slate-400 space-y-0.5"
+                    data-testid={`bucket-impacts-${row.id}`}>
+                    {impactsOf(a?.details).filter((i) => i.impacted).map((i) => (
+                      <li key={`${i.activity_id ?? 'free'}-${i.label}`}>
+                        ✓ {i.label}{i.remark ? ` — ${i.remark}` : ''}
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}

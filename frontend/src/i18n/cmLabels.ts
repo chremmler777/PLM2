@@ -299,6 +299,21 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.noAnswerYet': { de: 'Noch keine Antwort', en: 'No answer yet' },
   'concern.addDoc': { de: '+ Dokument', en: '+ Document' },
   'concern.noDocs': { de: 'Keine Unterlagen', en: 'No documents' },
+  'check.title': { de: 'Betroffene Bereiche', en: 'Impacted areas' },
+  'check.hint': {
+    de: 'Was aus Ihrem Katalog ist betroffen? Angehakte Punkte werden in der '
+      + 'Kostenerfassung vorbelegt.',
+    en: 'What from your catalog is impacted? Ticked items are pre-seeded into '
+      + 'cost input.',
+  },
+  'check.remark': { de: 'Bemerkung', en: 'Remark' },
+  'check.remarkPlaceholder': { de: 'Was ist zu tun?', en: 'What has to be done?' },
+  'check.addItem': { de: '+ Eigener Punkt', en: '+ Own item' },
+  'check.itemLabel': { de: 'Eigener Punkt', en: 'Own item' },
+  'check.itemPlaceholder': { de: 'Nicht im Katalog …', en: 'Not in the catalog …' },
+  'check.empty': { de: 'Kein Katalog hinterlegt', en: 'No catalog configured' },
+  'check.impactedCount': { de: '{n} Bereiche betroffen', en: '{n} areas impacted' },
+  'check.impactedOne': { de: '1 Bereich betroffen', en: '1 area impacted' },
   'pkg.impacted': { de: 'Verpackung betroffen?', en: 'Packaging impacted?' },
   'pkg.layout': { de: 'Layout-Änderung', en: 'Layout change' },
   'pkg.type': { de: 'Verpackungsart ändern', en: 'Change packaging type' },
@@ -361,6 +376,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'No linked objects — assess generally',
   },
   'bucket.via': { de: 'über Teil', en: 'via part' },
+  'bucket.othersHidden': {
+    de: 'Antworten anderer Fachbereiche sind nicht einsehbar',
+    en: 'Other departments’ answers are not shared',
+  },
   'bucket.readOnly': {
     de: 'Nur Mitglieder dieses Fachbereichs bewerten hier',
     en: 'Only members of this department assess here',

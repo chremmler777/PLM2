@@ -455,7 +455,8 @@ export default function ChangeDetailPage() {
               separate routing list or loose submit form lives inside it. */}
           <AssessmentBuckets change={change} departments={departments}
             myDepartmentIds={myActions?.memberships ?? []}
-            editable={change.status === 'in_assessment'} isPm={isPmMember} />
+            editable={change.status === 'in_assessment'} isPm={isPmMember}
+            canSeeAll={canSeeCosts} />
         </div>
       )}
 

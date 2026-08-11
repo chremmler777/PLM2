@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import { DEPARTMENT_FIELDS } from './departmentForms'
+import ActivityChecklist from './departmentForms/ActivityChecklist'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -36,7 +37,9 @@ export default function AssessmentSubmitForm({
       verdict: notImpacted ? 'feasible' : verdict,
       ...(showEffort ? { effort_hours: parseFloat(effort) } : {}),
       conditions: conditions || undefined, notes: notes || undefined,
-      ...(Fields ? { details } : {}),
+      // One envelope for everything the department answered: the checklist and,
+      // where it has one, its own questionnaire.
+      details,
     }),
     onSuccess: () => {
       toast.success(`${departmentName}: ${verdict}`)
@@ -52,6 +55,11 @@ export default function AssessmentSubmitForm({
   return (
     <div className="border border-slate-700 rounded-lg p-3 space-y-2 text-sm">
       {Fields && <Fields value={details} onChange={setDetails} />}
+      {/* The workbook's checklist: their catalog, off by default. Skipped once a
+          questionnaire has said the department is not impacted at all. */}
+      {!notImpacted && (
+        <ActivityChecklist departmentId={departmentId} value={details} onChange={setDetails} />
+      )}
       {/* Not impacted answers everything: the rest of the form would only ask
           about work that does not exist. */}
       {!notImpacted && (

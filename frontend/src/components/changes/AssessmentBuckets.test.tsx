@@ -11,6 +11,7 @@ vi.mock('../../api/changes', () => ({
     assessmentObjects: vi.fn(),
     submitAssessment: vi.fn().mockResolvedValue({}),
     listConcerns: vi.fn().mockResolvedValue([]),
+    referenceActivities: vi.fn().mockResolvedValue([]),
     withdrawConcern: vi.fn(),
     raiseConcern: vi.fn(),
   },
@@ -77,7 +78,7 @@ describe('AssessmentBuckets', () => {
   })
 
   it('shows the verdict once submitted and keeps the answer readable', async () => {
-    buckets({ change: change({ assessments: [assessment({
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
       verdict: 'feasible_with_conditions', status: 'submitted',
       submitted_at: '2026-08-01T00:00:00', conditions: 'needs a new gauge' })] }) })
     expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.submitted'))
@@ -96,10 +97,28 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('assessment-submit')).toBeTruthy()
   })
 
-  it('leaves a non-member the objects but no form', async () => {
+  it('gives an ordinary member the status board and nothing else of another department', async () => {
     buckets({ myDepartmentIds: [4] })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    const toggle = await screen.findByTestId('bucket-toggle-2') as HTMLButtonElement
+    // Status is public; the work behind it is not.
+    expect(screen.getByTestId('bucket-state-2')).toBeTruthy()
+    expect(toggle.disabled).toBe(true)
+    expect(toggle.getAttribute('title')).toBe(t('bucket.othersHidden'))
+    fireEvent.click(toggle)
+    expect(screen.queryByText('20-3450-001-0')).toBeNull()
+    expect(screen.queryByTestId('bucket-readonly-2')).toBeNull()
+    // Their own bucket still opens.
+    fireEvent.click(await screen.findByTestId('bucket-toggle-4'))
+    expect(screen.getByTestId('bucket-readonly-4')).toBeTruthy()
+  })
+
+  it('lets PM, Sales, the lead and admin read any bucket', async () => {
+    buckets({ myDepartmentIds: [4], canSeeAll: true })
+    const toggle = await screen.findByTestId('bucket-toggle-2') as HTMLButtonElement
+    expect(toggle.disabled).toBe(false)
+    fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByText('20-3450-001-0')).toBeTruthy())
+    // Read-only: the overview never becomes an edit right.
     expect(screen.queryByTestId('assessment-submit')).toBeNull()
     expect(screen.getByTestId('bucket-readonly-2').textContent).toBe(t('bucket.readOnly'))
   })
@@ -182,5 +201,77 @@ describe('AssessmentBuckets department questionnaires', () => {
     buckets({ myDepartmentIds: [2] })
     fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     expect(screen.queryByText(t('pkg.impacted'))).toBeNull()
+  })
+})
+
+describe('AssessmentBuckets checklist', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({
+      change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+      deviation_status: 'none',
+      stages: [{ stage_order: 1, departments: [
+        { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+      ] }],
+    } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.referenceActivities).mockResolvedValue([
+      { id: 31, department_id: 2, label: 'Tool rework', sort_order: 1 },
+      { id: 32, department_id: 2, label: 'Gauge change', sort_order: 2 },
+    ] as never)
+    vi.mocked(changesApi.submitAssessment).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('sends the ticked areas with their remarks, and nothing for untouched ones', async () => {
+    buckets({ myDepartmentIds: [2] })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    await waitFor(() => expect(screen.getByTestId('check-31')).toBeTruthy())
+    // The remark only exists once the row is ticked.
+    expect(screen.queryByTestId('check-remark-31')).toBeNull()
+    fireEvent.click(screen.getByTestId('check-31'))
+    fireEvent.change(screen.getByTestId('check-remark-31'),
+      { target: { value: 'new insert needed' } })
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    fireEvent.click(screen.getByTestId('assessment-submit'))
+    await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
+      expect.objectContaining({
+        department_id: 2, verdict: 'feasible',
+        details: { impacts: [
+          { activity_id: 31, label: 'Tool rework', impacted: true, remark: 'new insert needed' },
+        ] },
+      })))
+  })
+
+  it('takes a free line the catalog does not cover', async () => {
+    buckets({ myDepartmentIds: [2] })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    fireEvent.click(await screen.findByTestId('check-add-item'))
+    const input = screen.getByTestId('check-free-input-0')
+    fireEvent.blur(input, { target: { value: 'operator training' } })
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
+    fireEvent.click(screen.getByTestId('assessment-submit'))
+    await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
+      expect.objectContaining({
+        details: { impacts: [
+          { activity_id: null, label: 'operator training', impacted: true },
+        ] },
+      })))
+  })
+
+  it('counts the impacted areas on the collapsed row once submitted', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00',
+      details: { impacts: [
+        { activity_id: 31, label: 'Tool rework', impacted: true, remark: 'insert' },
+        { activity_id: 32, label: 'Gauge change', impacted: true },
+        { activity_id: 33, label: 'Fixture', impacted: false },
+      ] },
+    })] }) })
+    expect((await screen.findByTestId('bucket-areas-2')).textContent)
+      .toBe(t('check.impactedCount').replace('{n}', '2'))
+    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
+    const list = screen.getByTestId('bucket-impacts-2')
+    expect(list.textContent).toContain('Tool rework — insert')
+    expect(list.textContent).not.toContain('Fixture')
   })
 })
