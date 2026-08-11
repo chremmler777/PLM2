@@ -713,3 +713,117 @@ async def test_pm_sees_both_kinds_and_counts_them_once_per_change(
     rows = await _close_rows(client, tool["auth"], cid)
     assert len(rows) == 1 and rows[0]["question_count"] == 1
     assert rows[0]["concern_id"] == dept
+
+
+# --- a department hold is answered with a proposal, by anyone ---------------
+
+async def _dept_concern_in_assessment(client, admin_auth, seed, session_factory,
+                                      suffix):
+    """A change in assessment carrying an open Tool Engineer hold."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import Department
+    cid = await _change_in_scoping(client, admin_auth, seed, suffix)
+    async with session_factory() as s:
+        dept = Department(name="Tool Engineer", flow_type="action", is_active=True)
+        s.add(dept)
+        await s.flush()
+        dept_id = dept.id
+        c = await s.get(ChangeRequest, cid)
+        c.status = "in_assessment"
+        await s.commit()
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
+                            json={"kind": "needs_info",
+                                  "note": "Tolerance cannot be held",
+                                  "department_id": dept_id})
+    assert res.status_code == 200, res.text
+    return cid, res.json()["id"], dept_id
+
+
+async def test_anyone_may_propose_a_solution_with_its_documentation(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid, concern_id, _ = await _dept_concern_in_assessment(
+        client, admin_auth, seed, session_factory, "24")
+
+    # text alone is a conversation, not a proposal
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "We could shim it"}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "documentation attached" in res.json()["detail"]
+
+    up = await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("proposal.pptx", b"PK x", "application/vnd."
+                        "openxmlformats-officedocument.presentationml.presentation")},
+        data={"kind": "info_response", "concern_id": str(concern_id)},
+        headers=eng_auth)
+    assert up.status_code in (200, 201), up.text
+
+    # ...and a non-Sales team member may put it forward
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Shim + revised tolerance, see deck"},
+                            headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is True          # the raiser still decides
+
+
+async def test_only_the_raising_department_or_pm_closes_the_loop(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid, concern_id, dept_id = await _dept_concern_in_assessment(
+        client, admin_auth, seed, session_factory, "25")
+    await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("proposal.pptx", b"PK x", "application/pdf")},
+        data={"kind": "info_response", "concern_id": str(concern_id)},
+        headers=eng_auth)
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                      json={}, headers=eng_auth)
+
+    # the proposer cannot accept their own proposal
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "good enough"}, headers=eng_auth)
+    assert res.status_code == 400
+
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "Shim accepted"}, headers=acting)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is False
+
+
+async def test_customer_questions_stay_sales_only(
+        client, admin_auth, eng_auth, seed, session_factory):
+    """The scoping-phase rule is untouched: words are enough, Sales answers."""
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "26")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "I asked the customer"}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "Sales" in res.json()["detail"]
+
+    sales = await _sales_member(client, session_factory, seed)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Customer sent rev C"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_a_department_attribution_during_scoping_stays_sales_only(
+        client, admin_auth, eng_auth, seed, session_factory):
+    """Attribution at scoping is a label on a customer question, not a hold —
+    so it keeps the Sales rule while the change is still in scoping."""
+    from app.models.workflow import Department
+    cid = await _change_in_scoping(client, admin_auth, seed, "27")
+    async with session_factory() as s:
+        dept = Department(name="APQP", flow_type="action", is_active=True)
+        s.add(dept)
+        await s.commit()
+        dept_id = dept.id
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+        json={"kind": "needs_info", "note": "Which tolerance class?",
+              "department_id": dept_id})).json()["id"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Class 2"}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "Sales" in res.json()["detail"]

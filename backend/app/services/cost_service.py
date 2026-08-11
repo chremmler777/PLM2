@@ -64,14 +64,29 @@ class CostService:
         rate = await CostService.rate_for(
             session, assessment.department_id, plant_id) or 0.0
 
+        from app.models.workflow import Department
+        from app.services import assessment_checklist as checklist
+        dept = await session.get(Department, assessment.department_id)
+        dept_name = dept.name if dept is not None else None
+
         await session.refresh(assessment, ["cost_lines"])
         seeded = []
         for item in impacts:
+            key = item.get("key")
+            # Checklist items are keyed; the label comes from the definition so
+            # the grid reads in the same words the question did. Rows stored
+            # before the checklist was fixed still carry their own label.
+            label = (checklist.label_for(key, dept_name) if key else None) \
+                or item.get("label") or key
+            # Cycle time is charged per part for the life of the programme;
+            # everything else is a one-off.
+            cost_kind = ("lifecycle" if key in checklist.LIFECYCLE_KEYS
+                         else "one_time")
             line = AssessmentCostLine(
                 assessment_id=assessment.id, plant_id=plant_id,
                 activity_id=item.get("activity_id"),
-                activity_label=item.get("label"),
-                cost_kind="one_time", demand_hours=0.0, rate_snapshot=rate,
+                activity_label=label,
+                cost_kind=cost_kind, demand_hours=0.0, rate_snapshot=rate,
                 internal_cost=0.0, external_cost=0.0,
                 # The remark from the checklist travels with the line: it is
                 # the reason this row exists.

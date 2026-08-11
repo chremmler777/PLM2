@@ -312,17 +312,39 @@ class MeetingService:
             raise ChangeError("Concern not found on this change")
         if not concern.is_open:
             raise ChangeError("Concern is no longer open")
-        if not await ChangeService._user_in_department(session, user, "Sales"):
-            raise ChangeError(
-                "Only a Sales department member may answer a concern")
         note = (note or "").strip()
-        # An answer needs content — either words, or the document that carries
-        # them filed into this question's container.
-        if not note and not await ChangeService.has_info_response(
-                session, change, concern_id=concern.id):
-            raise ChangeError(
-                "An answer needs content — write it or attach the response "
-                "document")
+        # Two shapes of answer, told apart by where the change is standing.
+        #
+        # A CUSTOMER question (scoping) is Sales' to answer: they own the
+        # relationship, and words are enough.
+        #
+        # A DEPARTMENT hold during assessment is a technical problem, and the
+        # answer is a PROPOSAL — anyone on the team may put one forward, but it
+        # arrives as a document. "We could shim it" in a text box is a
+        # conversation; the PPT is the proposal the raising department is asked
+        # to accept or refuse.
+        #
+        # Keyed on the change's CURRENT status rather than a stored phase: the
+        # question is what this concern is doing now, and adding a column to
+        # remember which room it was raised in would answer a different one.
+        departmental = (concern.department_id is not None
+                        and change.status == "in_assessment")
+        if departmental:
+            if not await ChangeService.has_info_response(
+                    session, change, concern_id=concern.id):
+                raise ChangeError(
+                    "A proposal needs its documentation attached (PPT)")
+        else:
+            if not await ChangeService._user_in_department(session, user, "Sales"):
+                raise ChangeError(
+                    "Only a Sales department member may answer a concern")
+            # An answer needs content — either words, or the document that
+            # carries them filed into this question's container.
+            if not note and not await ChangeService.has_info_response(
+                    session, change, concern_id=concern.id):
+                raise ChangeError(
+                    "An answer needs content — write it or attach the response "
+                    "document")
         concern.answer_note = note or None
         concern.answered_at = datetime.utcnow()
         concern.answered_by = user.id

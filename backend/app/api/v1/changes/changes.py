@@ -383,6 +383,26 @@ async def reference_rates(db: AsyncSession = Depends(get_db),
              "hourly_rate": r.hourly_rate, "min_factor": r.min_factor} for r in rows]
 
 
+@router.get("/reference/assessment-checklist")
+async def reference_assessment_checklist(
+    department_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The questions a department answers at assessment.
+
+    Config, not data (app/services/assessment_checklist.py) — served so the
+    frontend renders the same list the backend validates against, instead of
+    keeping its own copy that drifts.
+    """
+    from app.services import assessment_checklist as checklist
+    name = None
+    if department_id is not None:
+        dept = await db.get(Department, department_id)
+        name = dept.name if dept is not None else None
+    return checklist.items_for(name)
+
+
 @router.get("/reference/activities")
 async def reference_activities(department_id: Optional[int] = Query(None),
                                db: AsyncSession = Depends(get_db),
@@ -409,6 +429,12 @@ async def get_change(
     change.deadline_state = await ChangeService.deadline_state(db, change)
     change.costing_pending_department_ids = (
         await ChangeService.costing_pending_department_ids(db, change))
+    evidence = await ChangeService.assessment_evidence_state(db, change)
+    for a in change.assessments:
+        state = evidence.get(a.id, {})
+        a.has_evidence = state.get("has_evidence", False)
+        a.has_rfq = state.get("has_rfq", False)
+        a.rfq_expected = state.get("rfq_expected", False)
     return change
 
 
@@ -942,6 +968,9 @@ async def upload_attachment(
     # Files the document into one concern's container (any authenticated user
     # may add to an open concern: the asker explains, Sales answers).
     concern_id: Optional[int] = Form(None),
+    # Evidence for one department's assessment. Mutually exclusive with
+    # concern_id — a document belongs to one container.
+    assessment_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -963,7 +992,8 @@ async def upload_attachment(
             content_type=file.content_type or "application/octet-stream",
             size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
             user_id=current_user.id, kind=kind, responds_to_id=responds_to_id,
-            concern_id=concern_id,
+            concern_id=concern_id, assessment_id=assessment_id,
+            actor=current_user,
         )
     except ChangeError as e:
         os.remove(stored_path)      # do not leave an orphan on a rejected upload
@@ -971,7 +1001,7 @@ async def upload_attachment(
     await db.commit()
     return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
             "kind": att.kind, "responds_to_id": att.responds_to_id,
-            "concern_id": att.concern_id}
+            "concern_id": att.concern_id, "assessment_id": att.assessment_id}
 
 
 @router.get("/{change_id}/attachments/{attachment_id}/download")

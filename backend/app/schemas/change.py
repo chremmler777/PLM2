@@ -113,6 +113,12 @@ class AssessmentResponse(BaseModel):
     responsible_id: Optional[int] = None
     effort_hours: Optional[float] = None
     submitted_at: Optional[datetime] = None
+    # Evidence filed against this assessment, and whether its checklist implies
+    # an RFQ is owed (modification_external). Both advisory — only
+    # "not feasible" actually requires a document.
+    has_evidence: bool = False
+    has_rfq: bool = False
+    rfq_expected: bool = False
     stage_order: int = 1
     rasic_letter: str = "R"
     status: str = "active"
@@ -144,6 +150,10 @@ class AssessmentResponse(BaseModel):
                 "due_date": data.effective_due_date,
                 "overdue": data.effective_overdue,
                 "details": data.details_dict,
+                # Set by the detail endpoint; absent elsewhere, hence getattr.
+                "has_evidence": getattr(data, "has_evidence", False),
+                "has_rfq": getattr(data, "has_rfq", False),
+                "rfq_expected": getattr(data, "rfq_expected", False),
             }
         return data
 
@@ -168,6 +178,7 @@ class AttachmentResponse(BaseModel):
     kind: str = "general"          # general | info_request | info_response
     responds_to_id: Optional[int] = None
     concern_id: Optional[int] = None
+    assessment_id: Optional[int] = None
     created_at: datetime
     uploaded_by: int
     uploaded_by_name: Optional[str] = None

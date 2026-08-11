@@ -38,8 +38,10 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 # "rejection_letter" is the explanation sent to the customer when a change is
 # turned down — the document a rejected customer-relevant change cannot close
 # without.
+# "rfq" is the costs-and-timing request sent to a supplier, filed against the
+# assessment that called for external work.
 ATTACHMENT_KINDS = ("general", "info_request", "info_response",
-                    "rejection_letter")
+                    "rejection_letter", "rfq")
 
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
@@ -438,6 +440,10 @@ class ChangeAttachment(Base):
     # documents live in it, not loose on the change.
     concern_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_concerns.id"), nullable=True, index=True)
+    # Evidence for one department's assessment (moldflow report, test results).
+    # Mutually exclusive with concern_id: a document belongs to one container.
+    assessment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_assessments.id"), nullable=True, index=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

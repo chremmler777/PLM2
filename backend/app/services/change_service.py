@@ -23,6 +23,7 @@ from app.models.change import (
     SCOPING_STATUSES, ATTACHMENT_KINDS,
 )
 from app.models.entities import User, Project, Plant
+from app.services import assessment_checklist as checklist
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
 from app.models.workflow import Department
 
@@ -1438,6 +1439,52 @@ class ChangeService:
     }
 
     @staticmethod
+    async def assessment_evidence_state(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> dict:
+        """Per assessment: does it have evidence, does it have an RFQ, and does
+        its checklist say an RFQ is expected? Cheap enough to answer for the
+        whole change in one query, so the UI can nudge without asking per row.
+        """
+        rows = (await session.execute(
+            select(ChangeAttachment.assessment_id, ChangeAttachment.kind)
+            .where(ChangeAttachment.change_id == change.id,
+                   ChangeAttachment.assessment_id.is_not(None)))).all()
+        out: dict[int, dict] = {}
+        for assessment_id, kind in rows:
+            state = out.setdefault(assessment_id,
+                                   {"has_evidence": False, "has_rfq": False})
+            state["has_evidence"] = True
+            if kind == "rfq":
+                state["has_rfq"] = True
+        for a in change.assessments:
+            state = out.setdefault(a.id,
+                                   {"has_evidence": False, "has_rfq": False})
+            keys = {i.get("key") for i in (a.details_dict.get("impacts") or [])
+                    if isinstance(i, dict) and i.get("impacted")}
+            state["rfq_expected"] = bool(keys & checklist.RFQ_EXPECTED_KEYS)
+        for state in out.values():
+            state.setdefault("rfq_expected", False)
+        return out
+
+    @staticmethod
+    async def _may_attach_evidence(
+        session: AsyncSession, change: ChangeRequest,
+        assessment: ChangeAssessment, actor: User,
+    ) -> bool:
+        """The assessed department, or whoever is accountable for the change as
+        a whole. Same shape as the lead-time rule — evidence and the number it
+        supports are the same conversation."""
+        from app.services.workflow_service import WorkflowService
+        from app.services.meeting_service import MeetingService
+        if (actor.effective_role == "admin" or change.lead_id == actor.id
+                or await MeetingService.user_is_pm_member(session, actor)
+                or await ChangeService._user_in_department(session, actor, "Sales")):
+            return True
+        return await WorkflowService.actor_in_department(
+            session, actor, assessment.department_id)
+
+    @staticmethod
     async def set_cost_lead_time(
         session: AsyncSession, change: ChangeRequest, department_id: int,
         lead_time_days: int, actor: User,
@@ -1523,18 +1570,39 @@ class ChangeService:
             return
         if not isinstance(impacts, list):
             raise ChangeError("details.impacts must be a list")
-        catalog = {a for (a,) in await session.execute(
-            select(AssessmentActivity.id).where(
-                AssessmentActivity.department_id == department_id))}
+        dept = await session.get(Department, department_id)
+        dept_name = dept.name if dept is not None else None
+        allowed_keys = checklist.keys_for(dept_name)
+        catalog = None
         for entry in impacts:
             if not isinstance(entry, dict):
                 raise ChangeError("Each impacts entry must be an object")
+            key = entry.get("key")
+            if key is not None:
+                if key not in allowed_keys:
+                    raise ChangeError(
+                        f"'{key}' is not a checklist item for this department")
+                choice = entry.get("choice")
+                if choice is not None:
+                    valid = checklist.choices_for(key, dept_name)
+                    if choice not in valid:
+                        raise ChangeError(
+                            f"'{choice}' is not a valid choice for '{key}'")
+                continue
+            # Read-tolerant: rows stored before the checklist became a fixed
+            # set still carry an activity id or a bare label. They are accepted
+            # as they are rather than rewritten, so an old assessment can be
+            # resubmitted without losing what it said.
             activity_id = entry.get("activity_id")
             if activity_id is None:
                 if not (entry.get("label") or "").strip():
                     raise ChangeError(
-                        "A free-text checklist item needs a label")
+                        "A checklist item needs a key (or a legacy label)")
                 continue
+            if catalog is None:
+                catalog = {a for (a,) in await session.execute(
+                    select(AssessmentActivity.id).where(
+                        AssessmentActivity.department_id == department_id))}
             if activity_id not in catalog:
                 raise ChangeError(
                     f"Activity {activity_id} is not in this department's catalog")
@@ -1701,6 +1769,28 @@ class ChangeService:
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
+        # A "not feasible" is the answer that stops a change dead, and it is
+        # the one the customer will ask to see in writing. So it arrives with
+        # the document that explains it — evidence filed against THIS
+        # assessment, not a promise to send something later. Every other
+        # verdict is ungated: evidence stays "if needed".
+        if verdict == "not_feasible":
+            target = (await session.execute(
+                select(ChangeAssessment).where(
+                    ChangeAssessment.change_id == change.id,
+                    ChangeAssessment.department_id == department_id)
+                .order_by(ChangeAssessment.stage_order))).scalars().first()
+            evidence = 0
+            if target is not None:
+                evidence = (await session.execute(
+                    select(func.count()).select_from(ChangeAttachment).where(
+                        ChangeAttachment.change_id == change.id,
+                        ChangeAttachment.assessment_id == target.id))).scalar() or 0
+            if not evidence:
+                raise ChangeError(
+                    "Not feasible requires the explanation document (PPT) for "
+                    "the customer")
+
         # Soft hold: a department that flagged an open concern on this change
         # cannot sign its own answer off until that point is withdrawn with a
         # resolution note. Scoped to this one department — nobody else's
@@ -2119,7 +2209,8 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, *, filename: str,
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
         kind: str = "general", responds_to_id: Optional[int] = None,
-        concern_id: Optional[int] = None,
+        concern_id: Optional[int] = None, assessment_id: Optional[int] = None,
+        actor: Optional[User] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
@@ -2150,11 +2241,30 @@ class ChangeService:
                 raise ChangeError(
                     "That concern is already settled — attach to the change "
                     "instead")
+        # A document belongs to ONE container: filing it into both a question
+        # and an assessment would make "where does this live" unanswerable.
+        if concern_id is not None and assessment_id is not None:
+            raise ChangeError(
+                "An attachment belongs to a concern or an assessment, not both")
+        if assessment_id is not None:
+            a = await session.get(ChangeAssessment, assessment_id)
+            if a is None or a.change_id != change.id:
+                raise ChangeError(
+                    f"Assessment {assessment_id} not found on this change")
+            # Evidence is the department's own claim, so the department (or
+            # whoever is accountable for the change) files it.
+            if actor is not None and not await ChangeService._may_attach_evidence(
+                    session, change, a, actor):
+                raise ChangeError(
+                    "Only a member of the assessed department, the change "
+                    "lead, Project Management, Sales or an admin may attach "
+                    "evidence to that assessment")
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
             content_type=content_type, size_bytes=size_bytes, sha256=sha256,
             uploaded_by=user_id, phase=phase, kind=kind,
             responds_to_id=responds_to_id, concern_id=concern_id,
+            assessment_id=assessment_id,
         )
         session.add(att)
         await session.flush()
@@ -2163,7 +2273,8 @@ class ChangeService:
             f"Attached {filename} ({phase}, {kind})", user_id,
             new_value={"filename": filename, "phase": phase, "kind": kind,
                        "responds_to_id": responds_to_id,
-                       "concern_id": concern_id},
+                       "concern_id": concern_id,
+                       "assessment_id": assessment_id},
         )
         return att
 

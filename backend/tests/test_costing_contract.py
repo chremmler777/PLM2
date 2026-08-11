@@ -239,3 +239,83 @@ async def test_costing_input_task_reaches_the_department(
          "cost_kind": "one_time", "demand_hours": 2.0},
     ]}, headers=tool_member)
     assert await rows() == []
+
+
+# --- assessment evidence ----------------------------------------------------
+
+async def _upload(client, auth, change_id, **form):
+    return await client.post(
+        f"/api/v1/changes/{change_id}/attachments",
+        files={"file": ("moldflow.pdf", b"%PDF-1.4 x", "application/pdf")},
+        data={k: str(v) for k, v in form.items()}, headers=auth)
+
+
+async def test_department_files_evidence_on_its_own_assessment(
+        client, session_factory, seed, costing):
+    tool_member = await _member(client, session_factory, seed, costing["tool"],
+                                "tooling3@test.io")
+    aid = costing["assessments"]["Tool Engineer"]
+    res = await _upload(client, tool_member, costing["change_id"], assessment_id=aid)
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["assessment_id"] == aid
+    assert res.json()["concern_id"] is None
+
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=tool_member)).json()
+    filed = [a for a in detail["attachments"] if a["assessment_id"] == aid]
+    assert len(filed) == 1
+    assert filed[0]["filename"] == "moldflow.pdf"
+
+
+async def test_another_department_cannot_file_evidence_for_yours(
+        client, session_factory, seed, costing):
+    outsider = await _member(client, session_factory, seed, costing["dev"],
+                             "devperson2@test.io")
+    res = await _upload(client, outsider, costing["change_id"],
+                        assessment_id=costing["assessments"]["Tool Engineer"])
+    assert res.status_code == 400
+    assert "assessed department" in res.json()["detail"]
+
+
+async def test_the_lead_may_file_evidence_for_a_department(
+        client, admin_auth, costing):
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        assessment_id=costing["assessments"]["Development"])
+    assert res.status_code in (200, 201), res.text
+
+
+async def test_evidence_must_belong_to_this_change(client, admin_auth, costing):
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        assessment_id=999_999)
+    assert res.status_code == 400
+    assert "not found on this change" in res.json()["detail"]
+
+
+async def test_a_document_belongs_to_one_container(
+        client, admin_auth, costing, session_factory):
+    from app.models.change import ChangeConcern
+    async with session_factory() as s:
+        c = ChangeConcern(change_id=costing["change_id"], kind="needs_info",
+                          note="q", raised_by=seed_admin(costing))
+        s.add(c)
+        await s.commit()
+        concern_id = c.id
+
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        assessment_id=costing["assessments"]["Tool Engineer"],
+                        concern_id=concern_id)
+    assert res.status_code == 400
+    assert "not both" in res.json()["detail"]
+
+
+def seed_admin(costing):
+    # the fixture's change is raised by the seed admin
+    return 1
+
+
+async def test_evidence_is_optional_for_submission(client, admin_auth, costing):
+    """Evidence is "if needed" — no gate depends on it."""
+    res = await client.post(f"/api/v1/changes/{costing['change_id']}/assessments",
+                            json={"department_id": costing["tool"],
+                                  "verdict": "feasible"}, headers=admin_auth)
+    assert res.status_code == 200, res.text

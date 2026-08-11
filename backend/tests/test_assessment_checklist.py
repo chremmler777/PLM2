@@ -57,40 +57,127 @@ async def _submit(client, auth, tab, impacts, **extra):
                              headers=auth)
 
 
-async def test_the_catalog_is_readable_at_assessment(client, admin_auth, tab):
+async def test_the_checklist_definitions_are_served_per_department(
+        client, admin_auth, tab, session_factory):
+    """Config, not data: the frontend renders the list the backend validates."""
+    from app.models.workflow import Department
+    from sqlalchemy import select
     res = await client.get(
-        f"/api/v1/changes/reference/activities?department_id={tab['department_id']}",
-        headers=admin_auth)
+        "/api/v1/changes/reference/assessment-checklist"
+        f"?department_id={tab['department_id']}", headers=admin_auth)
     assert res.status_code == 200, res.text
-    labels = [r["label"] for r in res.json()]
-    assert labels == ["2D construction", "3D construction", "Tool trial"]
-    assert all(r["department_id"] == tab["department_id"] for r in res.json())
+    items = res.json()
+    keys = [i["key"] for i in items]
+    assert keys == ["cycle_time_change", "scrap_increase", "maintenance_increase",
+                    "threed_change", "dimensional_risk", "visual_risk",
+                    "work_instruction_update", "new_process",
+                    "sparepart_required", "modification_internal",
+                    "modification_external", "prototyping_required",
+                    "matching_required"]
+    assert all(i["extra"] is False for i in items)      # Tool Engineer has no extras
+    spare = next(i for i in items if i["key"] == "sparepart_required")
+    assert spare["label_de"] == "Ersatzteil erforderlich"
+    assert spare["label_en"] == "Spare part required"
+    ext = next(i for i in items if i["key"] == "modification_external")
+    assert ext["label_de"] == "Externe Änderung/Umbau (Lieferant)"
+
+    async with session_factory() as sess:
+        apqp = (await sess.execute(select(Department).where(
+            Department.name == "APQP"))).scalar_one()
+        apqp_id = apqp.id
+    res = await client.get(
+        "/api/v1/changes/reference/assessment-checklist"
+        f"?department_id={apqp_id}", headers=admin_auth)
+    extras = [i for i in res.json() if i["extra"]]
+    assert [i["key"] for i in extras] == ["pfmea_update", "control_plan_update"]
 
 
-async def test_checklist_round_trips_with_remarks(client, admin_auth, tab):
+async def test_development_extra_carries_its_choices(
+        client, admin_auth, seed, session_factory):
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        dev = Department(name="Development", flow_type="action", is_active=True)
+        s.add(dev)
+        await s.commit()
+        dev_id = dev.id
+    res = await client.get(
+        "/api/v1/changes/reference/assessment-checklist"
+        f"?department_id={dev_id}", headers=admin_auth)
+    item = next(i for i in res.json() if i["key"] == "article_design_update")
+    assert item["extra"] is True
+    assert [c["value"] for c in item["choices"]] == ["internal", "customer_given"]
+
+
+async def test_keyed_checklist_round_trips_with_remarks(client, admin_auth, tab):
     impacts = [
-        {"activity_id": tab["activity_ids"][0], "label": "2D construction",
-         "impacted": True, "remark": "Two views change"},
-        {"activity_id": tab["activity_ids"][1], "label": "3D construction",
-         "impacted": False},
-        {"label": "Bespoke fixture review", "impacted": True,
-         "remark": "Not in the catalog"},
+        {"key": "cycle_time_change", "impacted": True, "remark": "+0.4s"},
+        {"key": "scrap_increase", "impacted": False},
+        {"key": "modification_external", "impacted": True,
+         "remark": "Supplier rebuild"},
     ]
     res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
     assert res.json()["details"]["impacts"] == impacts
 
-    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
-                               headers=admin_auth)).json()
-    row = next(a for a in detail["assessments"]
-               if a["department_id"] == tab["department_id"])
-    assert row["details"]["impacts"] == impacts
+
+async def test_an_unknown_key_is_refused(client, admin_auth, tab):
+    res = await _submit(client, admin_auth, tab,
+                        [{"key": "invented_item", "impacted": True}])
+    assert res.status_code == 400
+    assert "not a checklist item" in res.json()["detail"]
+
+
+async def test_a_departments_extra_is_not_everyones(client, admin_auth, tab):
+    """Tool Engineer cannot answer APQP's questions."""
+    res = await _submit(client, admin_auth, tab,
+                        [{"key": "pfmea_update", "impacted": True}])
+    assert res.status_code == 400
+
+
+async def test_the_sub_choice_is_validated(client, admin_auth, seed,
+                                           session_factory):
+    from app.models.change import ChangeAssessment, ChangeRequest
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        dev = Department(name="Development", flow_type="action", is_active=True)
+        s.add(dev)
+        await s.flush()
+        c = ChangeRequest(change_number="C-CL-DEV", title="dev", reason="r",
+                          change_type="physical_part", project_id=seed["project_id"],
+                          raised_by=seed["admin_id"], status="in_assessment")
+        s.add(c)
+        await s.flush()
+        s.add(ChangeAssessment(change_id=c.id, department_id=dev.id, stage_order=1))
+        await s.commit()
+        cid, dev_id = c.id, dev.id
+
+    async def submit(choice):
+        return await client.post(f"/api/v1/changes/{cid}/assessments", json={
+            "department_id": dev_id, "verdict": "feasible",
+            "details": {"impacts": [{"key": "article_design_update",
+                                     "impacted": True, "choice": choice}]}},
+            headers=admin_auth)
+
+    bad = await submit("whatever")
+    assert bad.status_code == 400
+    assert "not a valid choice" in bad.json()["detail"]
+    assert (await submit("customer_given")).status_code == 200
+
+
+async def test_legacy_rows_are_still_accepted(client, admin_auth, tab):
+    """Assessments stored before the checklist was fixed can be resubmitted."""
+    res = await _submit(client, admin_auth, tab, [
+        {"activity_id": tab["activity_ids"][0], "label": "2D construction",
+         "impacted": True},
+        {"label": "Bespoke fixture review", "impacted": True},
+    ])
+    assert res.status_code == 200, res.text
 
 
 async def test_checklist_coexists_with_department_specific_keys(
         client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        [{"activity_id": tab["activity_ids"][0], "impacted": True}],
+                        [{"key": "new_process", "impacted": True}],
                         packaging_impacted=False)
     assert res.status_code == 200, res.text
     body = res.json()["details"]
@@ -98,75 +185,106 @@ async def test_checklist_coexists_with_department_specific_keys(
     assert len(body["impacts"]) == 1
 
 
-async def test_another_departments_activity_is_refused(client, admin_auth, tab):
+async def test_not_feasible_requires_the_explanation_document(
+        client, admin_auth, tab):
+    """The verdict that stops a change dead arrives with what the customer
+    will be shown."""
+    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                            json={"department_id": tab["department_id"],
+                                  "verdict": "not_feasible"}, headers=admin_auth)
+    assert res.status_code == 400
+    assert "explanation document" in res.json()["detail"]
+
+    up = await client.post(
+        f"/api/v1/changes/{tab['change_id']}/attachments",
+        files={"file": ("why-not.pptx", b"PK x",
+                        "application/vnd.openxmlformats-officedocument."
+                        "presentationml.presentation")},
+        data={"assessment_id": str(tab["assessment_id"])}, headers=admin_auth)
+    assert up.status_code in (200, 201), up.text
+
+    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                            json={"department_id": tab["department_id"],
+                                  "verdict": "not_feasible"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_other_verdicts_need_no_evidence(client, admin_auth, tab):
+    res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
+                            json={"department_id": tab["department_id"],
+                                  "verdict": "feasible_with_conditions",
+                                  "conditions": "if the tool is freed up"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_rfq_expectation_is_reported_not_enforced(client, admin_auth, tab):
+    """Checking external modification is a promise to ask a supplier; the RFQ
+    is expected, and submitting without it still works."""
     res = await _submit(client, admin_auth, tab,
-                        [{"activity_id": tab["foreign_activity"], "impacted": True}])
-    assert res.status_code == 400
-    assert "catalog" in res.json()["detail"]
+                        [{"key": "modification_external", "impacted": True}])
+    assert res.status_code == 200, res.text
+
+    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
+                               headers=admin_auth)).json()
+    row = next(a for a in detail["assessments"]
+               if a["department_id"] == tab["department_id"])
+    assert row["rfq_expected"] is True
+    assert row["has_rfq"] is False
+    assert row["has_evidence"] is False
+
+    up = await client.post(
+        f"/api/v1/changes/{tab['change_id']}/attachments",
+        files={"file": ("rfq.pdf", b"%PDF x", "application/pdf")},
+        data={"assessment_id": str(tab["assessment_id"]), "kind": "rfq"},
+        headers=admin_auth)
+    assert up.status_code in (200, 201), up.text
+    assert up.json()["kind"] == "rfq"
+
+    detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
+                               headers=admin_auth)).json()
+    row = next(a for a in detail["assessments"]
+               if a["department_id"] == tab["department_id"])
+    assert row["has_rfq"] is True and row["has_evidence"] is True
 
 
-async def test_free_text_needs_a_label(client, admin_auth, tab):
-    res = await _submit(client, admin_auth, tab, [{"impacted": True, "remark": "?"}])
-    assert res.status_code == 400
-    assert "label" in res.json()["detail"]
-
-    res = await _submit(client, admin_auth, tab, {"not": "a list"})
-    assert res.status_code == 400
-
-
-async def test_costing_starts_from_the_checked_items(
-        client, admin_auth, tab, session_factory):
-    impacts = [
-        {"activity_id": tab["activity_ids"][0], "label": "2D construction",
-         "impacted": True, "remark": "Two views change"},
-        {"activity_id": tab["activity_ids"][1], "label": "3D construction",
-         "impacted": False},
-        {"label": "Bespoke fixture review", "impacted": True},
-    ]
-    assert (await _submit(client, admin_auth, tab, impacts)).status_code == 200
-
+async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
+    """Cycle time is charged per part; everything else is a one-off."""
+    await _submit(client, admin_auth, tab, [
+        {"key": "cycle_time_change", "impacted": True, "remark": "+0.4s"},
+        {"key": "scrap_increase", "impacted": False},
+        {"key": "sparepart_required", "impacted": True},
+        {"key": "modification_external", "impacted": True},
+        {"key": "prototyping_required", "impacted": True},
+        {"key": "matching_required", "impacted": False},
+    ])
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
-    res = await client.get(url, headers=admin_auth)
-    assert res.status_code == 200, res.text
-    lines = res.json()
-    # only the checked items, unchecked one absent
-    assert len(lines) == 2
-    assert [l["activity_label"] for l in lines] == ["2D construction",
-                                                    "Bespoke fixture review"]
-    assert lines[0]["activity_id"] == tab["activity_ids"][0]
-    assert lines[1]["activity_id"] is None          # free text
-    # zero hours, but priced at the department's current rate
+    lines = (await client.get(url, headers=admin_auth)).json()
+    assert [l["activity_label"] for l in lines] == [
+        "Cycle time change", "Spare part required",
+        "External modification (supplier)", "Prototyping required"]
+    assert [l["cost_kind"] for l in lines] == [
+        "lifecycle", "one_time", "one_time", "one_time"]
+    assert all(l["activity_id"] is None for l in lines)   # keys, not catalog ids
     assert all(l["demand_hours"] == 0.0 for l in lines)
     assert all(l["rate_snapshot"] == 65.0 for l in lines)
-    assert all(l["internal_cost"] == 0.0 for l in lines)
-    assert all(l["plant_id"] == tab["plant_id"] for l in lines)
-    # the checklist remark travels with the line it explains
-    assert lines[0]["note"] == "Two views change"
+    assert lines[0]["note"] == "+0.4s"
 
 
-async def test_seeding_is_idempotent_and_respects_deletions(
-        client, admin_auth, tab, session_factory):
-    impacts = [{"activity_id": tab["activity_ids"][0], "label": "2D construction",
-                "impacted": True}]
-    await _submit(client, admin_auth, tab, impacts)
+async def test_seeding_stays_idempotent_with_keys(client, admin_auth, tab):
+    await _submit(client, admin_auth, tab,
+                  [{"key": "new_process", "impacted": True}])
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
-
     first = (await client.get(url, headers=admin_auth)).json()
     again = (await client.get(url, headers=admin_auth)).json()
-    assert len(first) == 1 and len(again) == 1
-    assert [l["id"] for l in first] == [l["id"] for l in again]
-
-    # a line the department deliberately removed stays removed
-    res = await client.put(url, json={"lines": []}, headers=admin_auth)
-    assert res.status_code == 200, res.text
-    assert (await client.get(url, headers=admin_auth)).json() == []
+    assert len(first) == 1 and [l["id"] for l in first] == [l["id"] for l in again]
 
 
 async def test_nothing_checked_seeds_nothing(client, admin_auth, tab):
     await _submit(client, admin_auth, tab,
-                  [{"activity_id": tab["activity_ids"][0], "impacted": False}])
+                  [{"key": "new_process", "impacted": False}])
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     assert (await client.get(url, headers=admin_auth)).json() == []
