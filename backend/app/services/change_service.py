@@ -1481,6 +1481,21 @@ class ChangeService:
                 old_value=str(old) if old else None,
                 new_value=str(new_date) if new_date else None, notes=reason)
 
+        # Release deadline: born at acceptance / internal approval (Tasks 3-4);
+        # PATCH only ever *moves* it, with the same audited-set pattern.
+        if "release_due_date" in fields:
+            new_date = fields.pop("release_due_date")
+            if change.release_due_date is None:
+                raise ChangeError(
+                    "Release deadline is first set at customer acceptance "
+                    "or internal cost approval")
+            if new_date is None:
+                raise ChangeError("Release deadline cannot be cleared")
+            reason = (fields.pop("release_due_reason")
+                      if "release_due_reason" in fields else None)
+            await ChangeService._apply_release_deadline(
+                session, change, new_date, reason, user_id)
+
         for k, v in fields.items():
             if k in allowed and v is not None:
                 setattr(change, k, v)

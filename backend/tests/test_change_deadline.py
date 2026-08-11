@@ -455,3 +455,51 @@ async def test_acceptance_release_deadline_audited(client, eng_auth, seed, sessi
         assert rows[0].field_name == "release_due_date"
         assert rows[0].old_value is None
         assert rows[0].new_value is not None
+
+
+async def _accepted_change(client, eng_auth, seed, title):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": title, "reason": "r",
+        "customer_relevant": True,
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+    due = (datetime.utcnow() + timedelta(days=45)).isoformat()
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
+        "response": "accepted", "release_due_date": due,
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_release_deadline_editable_after_acceptance(client, eng_auth, seed):
+    cid = await _accepted_change(client, eng_auth, seed, "Edit release DL")
+    new_due = (datetime.utcnow() + timedelta(days=60)).isoformat()
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": new_due, "release_due_reason": "customer moved SOP",
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["release_due_reason"] == "customer moved SOP"
+
+
+@pytest.mark.asyncio
+async def test_release_deadline_not_settable_before_acceptance(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Too early", "reason": "r",
+        "customer_relevant": True,
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": (datetime.utcnow() + timedelta(days=60)).isoformat(),
+    }, headers=eng_auth)
+    assert res.status_code == 400
+    assert "acceptance or internal cost approval" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_release_deadline_cannot_be_cleared(client, eng_auth, seed):
+    cid = await _accepted_change(client, eng_auth, seed, "No clearing")
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "release_due_date": None,
+    }, headers=eng_auth)
+    assert res.status_code == 400
