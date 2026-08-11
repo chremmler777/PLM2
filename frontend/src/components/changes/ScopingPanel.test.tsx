@@ -51,13 +51,13 @@ describe('ScopingPanel', () => {
     render(wrap(<ScopingPanel change={change()} />))
     expect(await screen.findByRole('button', { name: /save meeting/i })).toBeTruthy()
   })
-  it('warns that a deadline is required when none is set', async () => {
-    render(wrap(<ScopingPanel change={change({ required_by_date: null })} />))
-    expect(await screen.findByText(/required before assessment/i)).toBeTruthy()
-  })
-  it('does not warn once a deadline is set', async () => {
-    render(wrap(<ScopingPanel change={change({ required_by_date: '2026-09-01', deadline_state: 'on_track' })} />))
+  it('leaves the deadline to the cockpit — no second editor here', async () => {
+    render(wrap(<ScopingPanel change={change({ required_by_date: null, customer_relevant: true })} />))
     await screen.findByText(/PM Jane/)
+    // The date is demanded at kickoff and lives in the cockpit banner; the
+    // scoping panel no longer carries its own copy.
+    expect(screen.queryByTestId('deadline-edit')).toBeNull()
+    expect(screen.queryByTestId('deadline-chip')).toBeNull()
     expect(screen.queryByText(/required before assessment/i)).toBeNull()
   })
   it('pre-marks the recommended assessor departments with a star', async () => {

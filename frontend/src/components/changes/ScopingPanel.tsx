@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
-import { DeadlineEditor } from './DeadlineEditor'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
 import ConcernStrip from './ConcernStrip'
@@ -131,8 +130,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
   }
 
-  const hasDeadline = change.required_by_date != null
-
   return (
     <div className="space-y-4 text-sm">
       <ReasonDialog
@@ -148,16 +145,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
         }}
         onClose={() => setPending(null)}
       />
-      {/* Deadline is required to leave scoping — surface it here so the user
-          can set it in place rather than hunting for it after being blocked. */}
-      <div className={`rounded-lg border p-3 flex items-center gap-3 flex-wrap ${
-        hasDeadline ? 'border-slate-700 bg-slate-800' : 'border-amber-700/60 bg-amber-950/30'}`}>
-        <span className="text-slate-300 font-medium">{t('scoping.deadline')}</span>
-        {change.customer_relevant && <DeadlineEditor change={change} kind="quote" />}
-        {!hasDeadline && (
-          <span className="text-xs text-amber-300">{t('scoping.deadlineRequired')}</span>
-        )}
-      </div>
 
       {/* Raised before or during the meeting, by anyone, in parallel. */}
       <ConcernStrip changeId={changeId} editable={open} />
