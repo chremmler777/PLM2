@@ -329,7 +329,7 @@ export default function ChangeDetailPage() {
           return (
             <button key={tb}
               disabled={locked}
-              title={locked ? t('tab.lockedUntilScoping')
+              title={locked ? (tb === 'scoping' ? t('tab.scopingHandoff') : t('tab.lockedUntilScoping'))
                 : isActivePhase ? t('tab.activePhase') : undefined}
               className={`pb-2 flex items-center gap-1.5 ${
                 locked ? 'text-slate-600 cursor-not-allowed'

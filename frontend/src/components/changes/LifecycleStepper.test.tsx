@@ -46,7 +46,21 @@ describe('LifecycleStepper stage responsibility', () => {
     expect(tags).toHaveLength(2)
     expect(tags[0].textContent).toContain(t('role.sales'))
     expect(tags[0].parentElement?.textContent).toContain('Captured')
-    expect(tags[1].textContent).toContain(t('role.pm'))
+    expect(tags[1].textContent).toContain(t('role.pmShort'))
     expect(tags[1].parentElement?.textContent).toContain('Scoping')
+  })
+})
+
+describe('LifecycleStepper scoping handoff note', () => {
+  afterEach(cleanup)
+
+  it('tells the capture author who takes over at scoping', () => {
+    render(<LifecycleStepper status="captured" customerRelevant />)
+    expect(screen.getByTitle(t('tab.scopingHandoff')).textContent).toBe('Scoping')
+  })
+
+  it('keeps the ordinary scoping hint once scoping is running', () => {
+    render(<LifecycleStepper status="scoping" customerRelevant />)
+    expect(screen.queryByTitle(t('tab.scopingHandoff'))).toBeNull()
   })
 })

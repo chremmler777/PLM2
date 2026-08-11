@@ -295,7 +295,7 @@ describe('CockpitSummary kickoff readiness at capture', () => {
     cleanup()
     render(wrap(<CockpitSummary change={change({ status: 'scoping' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.pm'))
+    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.pmShort'))
     cleanup()
     render(wrap(<CockpitSummary change={change({ status: 'in_assessment' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))

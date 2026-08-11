@@ -82,6 +82,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'responsible.label': { de: 'Verantwortlich', en: 'Responsible' },
   'role.sales': { de: 'Vertrieb', en: 'Sales' },
   'role.pm': { de: 'Projektmanagement', en: 'Project Management' },
+  // Badge-sized variant — the stage chips are tiny, so they carry the short form.
+  'role.pmShort': { de: 'PM', en: 'PM' },
   'cockpit.where': { de: 'Status', en: 'Status' },
   'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
   'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },
@@ -316,6 +318,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'tab.activePhase': { de: 'Aktuelle Phase', en: 'Current phase' },
   'tab.lockedUntilScoping': { de: 'Ab dem Scoping verfügbar', en: 'Available from scoping' },
+  'tab.scopingHandoff': {
+    de: 'Nach dem Kickoff übernimmt das Projektteam',
+    en: 'After kickoff this is handled by the project team',
+  },
   'description.label': { de: 'Beschreibung', en: 'Description' },
   'description.placeholder': {
     de: 'Was soll geändert werden — und warum?',

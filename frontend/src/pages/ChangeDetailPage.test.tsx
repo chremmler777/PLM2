@@ -413,8 +413,11 @@ describe('ChangeDetailPage capture phase', () => {
     wrap('/changes/1')
     const scoping = await screen.findByRole('button', { name: /Scoping/ })
     expect((scoping as HTMLButtonElement).disabled).toBe(true)
-    expect(scoping.getAttribute('title')).toBe(t('tab.lockedUntilScoping'))
-    expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(true)
+    // Scoping gets the handoff note; the other locked tabs the generic one.
+    expect(scoping.getAttribute('title')).toBe(t('tab.scopingHandoff'))
+    const impacted = screen.getByRole('button', { name: /Impacted/ })
+    expect((impacted as HTMLButtonElement).disabled).toBe(true)
+    expect(impacted.getAttribute('title')).toBe(t('tab.lockedUntilScoping'))
     expect((screen.getByRole('button', { name: /Overview/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 

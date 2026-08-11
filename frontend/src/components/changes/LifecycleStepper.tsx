@@ -21,7 +21,10 @@ export default function LifecycleStepper({
         </span>
       )}
       {order.map((s, i) => {
-        const hint = t(`stepper.hint.${s}`)
+        // At capture, the scoping node says who takes over next rather than
+        // repeating its generic hint.
+        const hint = status === 'captured' && s === 'scoping'
+          ? t('tab.scopingHandoff') : t(`stepper.hint.${s}`)
         return (
           <div key={s} className="flex items-center gap-1">
             <div className="flex flex-col items-center">

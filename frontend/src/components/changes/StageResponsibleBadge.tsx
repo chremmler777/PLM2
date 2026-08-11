@@ -3,12 +3,14 @@ import type { ChangeStatus } from '../../types/change'
 
 /**
  * Which role owns a change while it sits in a given stage: Sales writes the
- * request, project management runs the scoping. The map is the extension point
- * for the remaining stages once their ownership is agreed.
+ * request, project management runs the scoping. The badge is chip-sized, so the
+ * map points at short labels ('PM', later 'Team') rather than the full role
+ * names. It is the extension point for the remaining stages once their
+ * ownership is agreed.
  */
 export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   captured: 'role.sales',
-  scoping: 'role.pm',
+  scoping: 'role.pmShort',
 }
 
 export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {
@@ -16,7 +18,7 @@ export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {
   if (!key) return null
   return (
     <span data-testid="stage-responsible" title={t('responsible.label')}
-      className="inline-flex items-center rounded-full bg-fuchsia-900/60 text-fuchsia-200 px-2 py-0.5 text-[11px] font-medium align-middle">
+      className="inline-flex items-center rounded bg-fuchsia-900/60 text-fuchsia-200 px-1 py-0 text-[10px] leading-tight font-medium align-middle">
       {t(key)}
     </span>
   )
