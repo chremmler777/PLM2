@@ -137,10 +137,16 @@ export const changesApi = {
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
   listConcerns: (id: number) =>
     client.get<ChangeConcern[]>(`/v1/changes/${id}/concerns`).then((r) => r.data),
-  raiseConcern: (id: number, kind: ConcernKind, note: string) =>
-    client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, { kind, note }).then((r) => r.data),
-  withdrawConcern: (id: number, concernId: number) =>
-    client.delete<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}`).then((r) => r.data),
+  raiseConcern: (id: number, kind: ConcernKind, note: string, departmentId?: number) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, {
+      kind, note, ...(departmentId !== undefined ? { department_id: departmentId } : {}),
+    }).then((r) => r.data),
+  // Withdrawal is a recorded act, not a delete: the note says how the point was
+  // addressed (mandatory for department-scoped concerns, optional in scoping).
+  withdrawConcern: (id: number, concernId: number, resolutionNote?: string) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/withdraw`, {
+      resolution_note: resolutionNote ?? null,
+    }).then((r) => r.data),
   decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info', reason?: string) =>
     client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision, reason }).then((r) => r.data),
   approveInternalCosts: (

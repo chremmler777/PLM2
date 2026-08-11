@@ -38,13 +38,14 @@ const { change } = vi.hoisted(() => ({
     required_by_reason: null,
     deadline_state: null,
     impact_confirmed_at: null as string | null,
+    blocked_department_ids: [] as number[],
     quoted_at: null,
     quoted_on_time: null as boolean | null,
     active_deadline: null as 'quote' | 'release' | null,
     release_due_date: null,
     release_due_reason: null,
     impacted_items: [],
-    assessments: [],
+    assessments: [] as ChangeDetail['assessments'],
     attachments: [],
   } satisfies ChangeDetail,
 }))
@@ -533,5 +534,38 @@ describe('ChangeDetailPage impacted-tab attention dot', () => {
     wrap('/changes/1')
     await screen.findByRole('button', { name: /Impacted/ })
     expect(screen.queryByTestId('tab-open-work')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage department on-hold badge', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment'
+    change.blocked_department_ids = []
+    change.assessments = []
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+  })
+
+  it('marks only the departments held by an open concern', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [
+        { id: 2, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 },
+        { id: 4, name: 'Tooling', flow_type: 'action', is_active: true, sort_order: 2 },
+      ],
+    } as unknown as ReturnType<typeof useDepartments>)
+    change.status = 'in_assessment' as ChangeDetail['status']
+    change.blocked_department_ids = [4]
+    change.assessments = [
+      { id: 1, department_id: 2, verdict: 'pending', stage_order: 1, rasic_letter: 'R',
+        status: 'active', owner_id: null, owner_name: null, accepted_at: null,
+        due_date: null, overdue: false },
+      { id: 2, department_id: 4, verdict: 'pending', stage_order: 1, rasic_letter: 'R',
+        status: 'active', owner_id: null, owner_name: null, accepted_at: null,
+        due_date: null, overdue: false },
+    ] as ChangeDetail['assessments']
+    wrap('/changes/1?tab=assessments')
+    const badges = await screen.findAllByTestId('dept-on-hold')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].closest('span')?.parentElement?.textContent).toContain('Tooling')
   })
 })

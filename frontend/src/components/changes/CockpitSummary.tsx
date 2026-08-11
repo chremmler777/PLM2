@@ -59,8 +59,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
     ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
   ]
+  // Departments whose own assessment submit is held by an open concern.
+  const blockedDepts = change.status === 'in_assessment'
+    ? (change.blocked_department_ids?.length ?? 0) : 0
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
-    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0)
+    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + (blockedDepts > 0 ? 1 : 0)
   const offPath = OFF_PATH_STATUSES.includes(change.status)
 
   const gateRow = (g: Gate, blocking: boolean) => {
@@ -157,6 +160,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                     ⚠ {t('impact.pending')} <span className="text-xs opacity-70">→ {t('impact.title')}</span>
                   </button>
                 ) : <>⚠ {t('impact.pending')}</>}
+              </li>
+            )}
+            {blockedDepts > 0 && (
+              <li className="text-amber-300">
+                {onAction ? (
+                  <button type="button"
+                    className="text-left hover:underline decoration-dotted underline-offset-2"
+                    onClick={() => onAction('assessments')}>
+                    ⚠ {t('cockpit.blockedDepartments').replace('{n}', String(blockedDepts))}
+                  </button>
+                ) : <>⚠ {t('cockpit.blockedDepartments').replace('{n}', String(blockedDepts))}</>}
               </li>
             )}
             {unclaimed > 0 && (

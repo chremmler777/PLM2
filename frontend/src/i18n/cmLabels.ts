@@ -92,6 +92,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
   'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
+  'cockpit.blockedDepartments': {
+    de: '{n} Fachbereiche durch offene Einwände blockiert',
+    en: '{n} departments blocked by open concerns',
+  },
   'cockpit.decideInMeeting': {
     de: 'Entscheidung im Scoping-Termin festhalten — Freigabe, Rückfrage oder Ablehnung →',
     en: 'Record the decision in the scoping meeting — proceed, needs info or reject →',
@@ -211,6 +215,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'concern.theirs': { de: 'fremd', en: "theirs" },
   'concern.kind': { de: 'Art des Einwands', en: 'Concern kind' },
+  'concern.department': { de: 'Fachbereich', en: 'Department' },
+  'concern.resolution': { de: 'Wie wurde der Punkt geklärt?', en: 'How was it addressed?' },
+  'concern.resolved': { de: 'Geklärt', en: 'Addressed' },
+  'concern.onHold': { de: 'Wartet', en: 'On hold' },
   'concern.note': { de: 'Einwand', en: 'Concern' },
   'concern.notePlaceholder': {
     de: 'Was spricht dagegen bzw. was fehlt?',

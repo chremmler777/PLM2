@@ -124,6 +124,8 @@ export interface ChangeRequest {
   required_by_date: string | null;
   required_by_reason: string | null;
   deadline_state: 'on_track' | 'at_risk' | 'overdue' | null;
+  /** Departments with an open assessment concern — their submit is blocked. */
+  blocked_department_ids?: number[];
   quoted_at: string | null;
   quoted_on_time: boolean | null;
   active_deadline: 'quote' | 'release' | null;
@@ -293,6 +295,10 @@ export interface ChangeConcern {
   withdrawn_at?: string | null;
   resolved_by_meeting_id?: number | null;
   is_open: boolean;
+  /** Set for assessment-phase concerns: the department the flag is scoped to. */
+  department_id?: number | null;
+  /** How the concern was addressed — required to withdraw a scoped one. */
+  resolution_note?: string | null;
 }
 
 export interface ChangeMeeting {

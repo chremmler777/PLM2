@@ -23,14 +23,33 @@ const KIND_STYLE: Record<ConcernKind, string> = {
  *
  * Deliberately no "clear all": only the person who raised a flag may drop it.
  */
-export default function ConcernStrip({ changeId, editable }: {
-  changeId: number; editable: boolean
+export default function ConcernStrip({
+  changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
+}: {
+  changeId: number
+  editable: boolean
+  /** Assessment phase: every flag belongs to a department, and dropping one
+   *  needs a written resolution. */
+  scoped?: boolean
+  departments?: { id: number; name: string }[]
+  myDepartmentIds?: number[]
 }) {
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
   const [kind, setKind] = useState<ConcernKind>('needs_info')
   const [note, setNote] = useState('')
   const [adding, setAdding] = useState(false)
+  // Which concern is being withdrawn, and the note explaining how it was met.
+  const [withdrawing, setWithdrawing] = useState<number | null>(null)
+  const [resolution, setResolution] = useState('')
+
+  // You flag for your own department; an admin may flag for any of them.
+  const options = isAdmin ? departments
+    : departments.filter((d) => myDepartmentIds.includes(d.id))
+  const [deptId, setDeptId] = useState<number | undefined>(undefined)
+  const effectiveDept = deptId ?? options[0]?.id
+  const deptName = (id?: number | null) =>
+    id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
 
   const { data: concerns = [] } = useQuery({
     queryKey: ['change', changeId, 'concerns'],
@@ -42,13 +61,15 @@ export default function ConcernStrip({ changeId, editable }: {
   }
 
   const raise = useMutation({
-    mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim()),
+    mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim(),
+      scoped ? effectiveDept : undefined),
     onSuccess: () => { setNote(''); setAdding(false); invalidate() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not raise the flag'),
   })
   const withdraw = useMutation({
-    mutationFn: (concernId: number) => changesApi.withdrawConcern(changeId, concernId),
-    onSuccess: invalidate,
+    mutationFn: (vars: { concernId: number; note: string }) =>
+      changesApi.withdrawConcern(changeId, vars.concernId, vars.note.trim() || undefined),
+    onSuccess: () => { setWithdrawing(null); setResolution(''); invalidate() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not withdraw'),
   })
 
@@ -84,17 +105,48 @@ export default function ConcernStrip({ changeId, editable }: {
               {c.kind === 'reject_proposal' ? t('concern.wouldReject') : t('concern.wantsInfo')}
             </span>
             <span className="min-w-0 flex-1">
+              {c.department_id != null && (
+                <span className="mr-1.5 rounded bg-slate-800/80 px-1 py-0 text-[10px] leading-tight align-middle">
+                  {deptName(c.department_id)}
+                </span>
+              )}
               <span className={c.is_open ? '' : 'line-through'}>{c.note}</span>
               <span className="block text-xs opacity-70">
                 {c.raised_by_name ?? `#${c.raised_by}`}
                 {!c.is_open && ` — ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
               </span>
+              {!c.is_open && c.resolution_note && (
+                <span className="block text-xs opacity-70">
+                  {t('concern.resolved')}: {c.resolution_note}
+                </span>
+              )}
+              {withdrawing === c.id && (
+                <span className="mt-1 flex flex-wrap items-center gap-2">
+                  <input value={resolution} onChange={(e) => setResolution(e.target.value)}
+                    data-testid="concern-withdraw-note"
+                    placeholder={t('concern.resolution')} aria-label={t('concern.resolution')}
+                    className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                  <button data-testid="concern-withdraw-confirm"
+                    className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                    disabled={withdraw.isPending
+                      || (c.department_id != null && !resolution.trim())}
+                    onClick={() => withdraw.mutate({ concernId: c.id, note: resolution })}>
+                    {t('concern.withdraw')}
+                  </button>
+                  <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
+                    onClick={() => { setWithdrawing(null); setResolution('') }}>
+                    {t('common.cancel')}
+                  </button>
+                </span>
+              )}
             </span>
             {/* Only its author may drop it — not the lead, not an admin. */}
-            {c.is_open && editable && c.raised_by === userId && (
+            {c.is_open && editable && c.raised_by === userId && withdrawing !== c.id && (
               <button className="text-xs underline decoration-dotted flex-shrink-0"
                 disabled={withdraw.isPending}
-                onClick={() => withdraw.mutate(c.id)}>{t('concern.withdraw')}</button>
+                onClick={() => { setWithdrawing(c.id); setResolution('') }}>
+                {t('concern.withdraw')}
+              </button>
             )}
             {c.is_open && isAdmin && c.raised_by !== userId && (
               <span className="text-xs opacity-60 flex-shrink-0" title={t('concern.authorOnly')}>
@@ -113,11 +165,18 @@ export default function ConcernStrip({ changeId, editable }: {
             <option value="needs_info">{t('concern.wantsInfo')}</option>
             <option value="reject_proposal">{t('concern.wouldReject')}</option>
           </select>
+          {scoped && (
+            <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
+              onChange={(e) => setDeptId(Number(e.target.value))}
+              className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
+              {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          )}
           <input value={note} onChange={(e) => setNote(e.target.value)}
             placeholder={t('concern.notePlaceholder')} aria-label={t('concern.note')}
             className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
           <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
-            disabled={!note.trim() || raise.isPending}
+            disabled={!note.trim() || raise.isPending || (scoped && effectiveDept === undefined)}
             onClick={() => raise.mutate()}>{t('concern.raise')}</button>
           <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
             onClick={() => { setAdding(false); setNote('') }}>{t('common.cancel')}</button>

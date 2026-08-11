@@ -25,6 +25,7 @@ import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEd
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
+import ConcernStrip from '../components/changes/ConcernStrip';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -422,12 +423,25 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'assessments' && (
         <div className="space-y-4">
           <ScopingMappingHint changeId={changeId} assessments={change.assessments} departments={departments} />
+          {/* Assessment-phase concerns are department-scoped: an open one holds
+              that department's own submit, not the whole change. */}
+          <ConcernStrip changeId={changeId} editable={change.status === 'in_assessment'}
+            scoped departments={departments}
+            myDepartmentIds={myActions?.memberships ?? []} />
           <AssessmentRouting changeId={changeId} />
           <ul className="text-sm divide-y border rounded-lg">
           {change.assessments.map((a) => (
             <li key={a.id} className="px-4 py-2">
               <div className="flex justify-between items-center gap-3">
-                <span>{deptName(a.department_id)}</span>
+                <span className="flex items-center gap-1.5">
+                  {deptName(a.department_id)}
+                  {change.blocked_department_ids?.includes(a.department_id) && (
+                    <span data-testid="dept-on-hold" title={t('concern.title')}
+                      className="inline-flex items-center rounded bg-amber-900/70 text-amber-200 px-1 py-0 text-[10px] leading-tight font-medium">
+                      {t('concern.onHold')}
+                    </span>
+                  )}
+                </span>
                 <span className="flex items-center gap-3">
                   <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
                   <span className="text-slate-400 text-xs">

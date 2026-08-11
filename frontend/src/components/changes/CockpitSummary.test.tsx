@@ -302,3 +302,27 @@ describe('CockpitSummary kickoff readiness at capture', () => {
     expect(screen.queryByTestId('stage-responsible')).toBeNull()
   })
 })
+
+describe('CockpitSummary blocked departments', () => {
+  afterEach(cleanup)
+
+  it('counts the departments an open concern is holding and points at the tab', () => {
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change({
+      status: 'in_assessment', blocked_department_ids: [2, 4], assessments: [],
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onAction={onAction} />))
+    const line = screen.getByText(new RegExp(
+      t('cockpit.blockedDepartments').replace('{n}', '2')))
+    fireEvent.click(line)
+    expect(onAction).toHaveBeenCalledWith('assessments')
+  })
+
+  it('says nothing when no department is blocked', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'in_assessment', blocked_department_ids: [], assessments: [],
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByText(/blocked by open concerns/)).toBeNull()
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+  })
+})
