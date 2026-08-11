@@ -327,12 +327,74 @@ async def test_scoping_concerns_keep_their_old_shape(
     assert res.json()["resolution_note"] is None
 
 
-async def test_department_id_is_refused_during_scoping(client, eng_auth, seed,
-                                                       session_factory):
-    cid = await _change_in_scoping(client, eng_auth, seed, "A5")
-    dept_ids = await _dept_ids(session_factory)
+
+
+# --- scoping attribution: a department is a label there, not a hold ---------
+
+async def _a_department(session_factory, name="Tool Engineer", active=True):
+    from app.models.workflow import Department
+    async with session_factory() as s:
+        d = Department(name=name, flow_type="action", is_active=active)
+        s.add(d)
+        await s.commit()
+        return d.id
+
+
+async def test_scoping_concern_may_name_a_department_without_membership(
+        client, eng_auth, seed, session_factory):
+    """At scoping the department is attribution, not a submission gate — so no
+    membership is required (unlike assessment)."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "S1")
+    dept_id = await _a_department(session_factory)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
+                            json={"kind": "needs_info", "note": "Tooling unclear",
+                                  "department_id": dept_id})
+    assert res.status_code == 200, res.text
+    assert res.json()["department_id"] == dept_id
+    # attribution does NOT soft-hold anything
+    got = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    assert got["blocked_department_ids"] == []
+
+
+async def test_scoping_concern_without_a_department_is_the_whole_team(
+        client, eng_auth, seed):
+    cid = await _change_in_scoping(client, eng_auth, seed, "S2")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
+                            json={"kind": "needs_info", "note": "Change info missing"})
+    assert res.status_code == 200, res.text
+    assert res.json()["department_id"] is None
+
+
+async def test_scoping_concern_department_must_exist_and_be_active(
+        client, eng_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, eng_auth, seed, "S3")
     res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
                             json={"kind": "needs_info", "note": "x",
-                                  "department_id": dept_ids[0]})
+                                  "department_id": 999_999})
     assert res.status_code == 400
-    assert "assessment phase" in res.json()["detail"]
+    assert "Unknown or inactive" in res.json()["detail"]
+
+    dead = await _a_department(session_factory, name="Retired dept", active=False)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
+                            json={"kind": "needs_info", "note": "x",
+                                  "department_id": dead})
+    assert res.status_code == 400
+
+
+async def test_withdrawing_an_attributed_scoping_concern_still_needs_a_note(
+        client, eng_auth, seed, session_factory):
+    """The rule keys off department_id, not the phase — naming a department
+    means the withdrawal says how the point was addressed."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "S4")
+    dept_id = await _a_department(session_factory)
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
+        json={"kind": "needs_info", "note": "Tooling unclear",
+              "department_id": dept_id})).json()["id"]
+
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=eng_auth)
+    assert res.status_code == 400
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            headers=eng_auth, json={"resolution_note": "Drawing arrived"})
+    assert res.status_code == 200, res.text

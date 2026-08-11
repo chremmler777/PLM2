@@ -119,11 +119,15 @@ class MeetingService:
         session: AsyncSession, change: ChangeRequest, user: User,
         kind: str, note: str, department_id: Optional[int] = None,
     ) -> ChangeConcern:
-        """Two phases, two shapes. In scoping a concern is change-level: it
-        feeds the scoping decision and blocks 'proceed'. In assessment it is
-        one department's soft hold on its OWN assessment — so it must name the
-        department, and the raiser must belong to it (admins may raise for
-        any)."""
+        """Two phases, two meanings for department_id.
+
+        In scoping a concern feeds the decision and blocks 'proceed'. Naming a
+        department there is pure attribution — "this is a Tooling point" vs the
+        whole team's — so it is optional and needs no membership.
+
+        In assessment the department is the concern's teeth: it soft-holds that
+        department's own assessment submit. So it is required, and it must be
+        the raiser's own department (admins may raise for any)."""
         await MeetingService._authz(session, change, user)
         in_assessment = change.status == "in_assessment"
         if change.status not in SCOPING_STATUSES and not in_assessment:
@@ -148,8 +152,11 @@ class MeetingService:
                     raise ChangeError(
                         "You can only raise a concern for your own department")
         elif department_id is not None:
-            raise ChangeError(
-                "Department-scoped concerns belong to the assessment phase")
+            # Scoping: attribution only — any active department, no membership.
+            dept = await session.get(Department, department_id)
+            if dept is None or not dept.is_active:
+                raise ChangeError(
+                    f"Unknown or inactive department {department_id}")
         # One open concern per person per kind — a second is an edit, not a
         # vote. Scoped per department during assessment, so a person sitting in
         # two departments can still hold each of them.

@@ -1324,6 +1324,8 @@ class ChangeService:
         # cannot sign its own answer off until that point is withdrawn with a
         # resolution note. Scoped to this one department — nobody else's
         # assessment, the change status and the deadlines are untouched.
+        # Scoping-phase attribution cannot reach here: an open concern blocks
+        # the 'proceed' decision, so no change enters assessment carrying one.
         held = (await session.execute(
             select(ChangeConcern).where(
                 ChangeConcern.change_id == change.id,
