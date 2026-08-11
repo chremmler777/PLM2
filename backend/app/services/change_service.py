@@ -215,9 +215,9 @@ class ChangeService:
             raise ChangeError(f"Deviation is '{dev.status}', not pending")
         if dev.proposed_by == actor.id:
             raise ChangeError("Cannot decide your own deviation (4-eyes rule)")
-        if actor.role not in ("admin", "engineer"):
+        if actor.effective_role not in ("admin", "engineer"):
             raise ChangeError("Deviation decisions require an engineer or admin role")
-        if (actor.role != "admin" and actor.id != change.lead_id
+        if (actor.effective_role != "admin" and actor.id != change.lead_id
                 and dev.proposed_by != change.lead_id):
             raise ChangeError("Only the change lead or an admin may decide this deviation")
         dev.status = decision
@@ -1058,21 +1058,21 @@ class ChangeService:
         admin), extracted so both POST /impact/confirm (changes.py) and the
         Task 19 my-actions assembly below use the identical check instead of
         duplicating it."""
-        if user.role == "admin":
+        if user.effective_role == "admin":
             return True
         from app.services.workflow_service import WorkflowService
         rd_dept = (await session.execute(
             select(Department).where(Department.name == "Development"))).scalar_one_or_none()
         if rd_dept is None:
             return False
-        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
         return rd_dept.id in dept_ids
 
     @staticmethod
     async def _user_in_department(session: AsyncSession, user: User, department_name: str) -> bool:
         """Admin, or member of the named department. Shared by the sign-off,
         quoted-price and internal-cost-approval authz checks below."""
-        if user.role == "admin":
+        if user.effective_role == "admin":
             return True
         from app.services.workflow_service import WorkflowService
         dept = (await session.execute(
@@ -1080,7 +1080,7 @@ class ChangeService:
         ).scalar_one_or_none()
         if dept is None:
             return False
-        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
         return dept.id in dept_ids
 
     @staticmethod
@@ -1089,7 +1089,7 @@ class ChangeService:
         admin or a member of a department flagged can_start_change (Sales in
         the seeded data). The flag has existed on wf_departments since
         migration 032; this is where it finally bites."""
-        if user.role == "admin":
+        if user.effective_role == "admin":
             return True
         # Nothing flagged anywhere means the org has not designated who
         # captures yet — locking every non-admin out of the entry point would
@@ -1100,7 +1100,7 @@ class ChangeService:
         if configured == 0:
             return True
         from app.services.workflow_service import WorkflowService
-        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        dept_ids = await WorkflowService.effective_department_ids(session, user)
         if not dept_ids:
             return False
         starter = (await session.execute(
@@ -1147,7 +1147,7 @@ class ChangeService:
         from app.services.workflow_service import WorkflowService
 
         actions: list[dict] = []
-        dept_ids = set(await WorkflowService.get_user_department_ids(session, user.id))
+        dept_ids = set(await WorkflowService.effective_department_ids(session, user))
 
         # kind "assessment": active change-scoped assessment tasks in the
         # user's departments, or owned by them. Mirrors GET /changes/my-tasks
@@ -1204,9 +1204,9 @@ class ChangeService:
                 continue
             if dev.proposed_by == user.id:
                 continue
-            if user.role not in ("admin", "engineer"):
+            if user.effective_role not in ("admin", "engineer"):
                 continue
-            if (user.role != "admin" and user.id != change.lead_id
+            if (user.effective_role != "admin" and user.id != change.lead_id
                     and dev.proposed_by != change.lead_id):
                 continue
             actions.append({
@@ -1255,7 +1255,7 @@ class ChangeService:
         # kind "gate": a gate that guards the currently-reachable transition,
         # not yet decided 'yes', decidable by this user. Mirrors put_gate's
         # authz exactly (changes.py put_gate: admin or the change lead).
-        if user.role == "admin" or user.id == change.lead_id:
+        if user.effective_role == "admin" or user.id == change.lead_id:
             reachable = ALLOWED_TRANSITIONS.get(change.status, set())
             for gate in change.gates:
                 target = GATE_TARGET_STATUS.get(gate.gate_key)
@@ -1403,8 +1403,8 @@ class ChangeService:
                 raise ChangeError(str(e))
         else:
             # Legacy/unlinked fallback (e.g. routing-deviation rows).
-            if user.role != "admin" and not await WorkflowService._is_department_member(
-                    session, user.id, a.department_id):
+            if user.effective_role != "admin" and not await WorkflowService.actor_in_department(
+                    session, user, a.department_id):
                 raise ChangeError("Only members of the assessed department may accept")
             if a.owner_id is not None and a.owner_id != user.id:
                 raise ChangeError("Assessment is already owned by another user")
@@ -1434,9 +1434,9 @@ class ChangeService:
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
-            allowed = (actor.role == "admin" or change.lead_id == actor.id
-                       or await WorkflowService._is_department_member(
-                           session, actor.id, a.department_id))
+            allowed = (actor.effective_role == "admin" or change.lead_id == actor.id
+                       or await WorkflowService.actor_in_department(
+                           session, actor, a.department_id))
             if not allowed:
                 raise ChangeError(
                     "Only an admin, the change lead, or a department member may assign")
@@ -1477,7 +1477,7 @@ class ChangeService:
             except ValueError as e:
                 raise ChangeError(str(e))
         else:
-            if actor.role != "admin" and change.lead_id != actor.id:
+            if actor.effective_role != "admin" and change.lead_id != actor.id:
                 raise ChangeError("Only the change lead or an admin may set due dates")
             a.due_date = due_date
         await session.flush()

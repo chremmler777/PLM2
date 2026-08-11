@@ -1,5 +1,6 @@
 """Core entity models: Organization, Plant, User, Project."""
 from datetime import datetime
+from typing import ClassVar, Optional
 from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
@@ -77,6 +78,26 @@ class User(Base):
         foreign_keys="[CADFile.uploaded_by]"
     )
     workflow_roles: Mapped[list["UserWorkflowRole"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+    # --- acts-as (request-scoped, NEVER persisted) -------------------------
+    # ClassVar keeps declarative from mapping it; the auth dependency sets it
+    # on the instance for the lifetime of one request when a real admin sends
+    # X-Acts-As-Department. `role` itself is never rewritten — writing to a
+    # mapped column would be flushed straight into the users table.
+    acts_as_department_id: ClassVar[Optional[int]] = None
+
+    @property
+    def effective_role(self) -> str:
+        """The role permission checks must use. Acting-as drops the admin
+        bypass (spec D2), otherwise gates stay invisible to the very admin
+        who is trying to walk them."""
+        return "engineer" if self.acts_as_department_id is not None else self.role
+
+    @property
+    def is_real_admin(self) -> bool:
+        """The authenticated row's own role — acts-as never changes this, and
+        only this decides who may act as someone else (spec D4)."""
+        return self.role == "admin"
 
 
 class Project(Base):
@@ -200,6 +221,14 @@ class AuditLog(Base):
     entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     log_level: Mapped[str] = mapped_column(String(10), default="info")
     correlation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    # Acts-as (spec D5): user_id keeps the EFFECTIVE identity so existing
+    # queries and the hash chain are unchanged; these two name the human
+    # behind it. Both null on every ordinary request.
+    acting_as_department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wf_departments.id"), nullable=True)
+    real_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
 
     user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
 

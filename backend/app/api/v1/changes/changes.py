@@ -100,11 +100,9 @@ async def list_changes(
 async def my_change_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    # departments the user belongs to
-    dep_rows = await db.execute(
-        select(UserDepartment.department_id).where(UserDepartment.user_id == current_user.id)
-    )
-    dep_ids = {r[0] for r in dep_rows.all()}
+    # departments the user belongs to. Acts-as swaps these for the single
+    # department a real admin is currently acting as (spec D2).
+    dep_ids = set(await WorkflowService.effective_department_ids(db, current_user))
     tasks = []
     if dep_ids:
         rows = await db.execute(
@@ -260,7 +258,7 @@ async def get_my_actions(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     actions = await ChangeService.my_actions(db, change, current_user)
-    memberships = await WorkflowService.get_user_department_ids(db, current_user.id)
+    memberships = await WorkflowService.effective_department_ids(db, current_user)
     return {"actions": actions, "memberships": memberships}
 
 
@@ -477,7 +475,7 @@ async def apply_impact_selection(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if current_user.role != "admin" and change.lead_id != current_user.id:
+    if current_user.effective_role != "admin" and change.lead_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="Only the change lead or an admin may edit the impact selection")
@@ -848,7 +846,7 @@ async def put_gate(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if current_user.role != "admin" and change.lead_id != current_user.id:
+    if current_user.effective_role != "admin" and change.lead_id != current_user.id:
         raise HTTPException(status_code=403,
                             detail="Only the change lead or an admin may decide gates")
     try:

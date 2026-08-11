@@ -124,7 +124,7 @@ async def get_open_task_count(
             WfInstanceTask.is_actionable == True,  # noqa: E712
         )
     )
-    dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
+    dept_ids = await WorkflowService.effective_department_ids(db, current_user)
     if dept_ids:
         stmt = stmt.where(WfInstanceTask.department_id.in_(dept_ids))
     result = await db.execute(stmt)
@@ -142,7 +142,7 @@ async def get_my_tasks(
     if department_id is not None:
         dept_ids = [department_id]
     else:
-        dept_ids = await WorkflowService.get_user_department_ids(db, current_user.id)
+        dept_ids = await WorkflowService.effective_department_ids(db, current_user)
     return await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
 
 

@@ -349,8 +349,8 @@ class WorkflowService:
         actor = await db.get(User, completed_by_id)
         if actor is None:
             raise ValueError("Actor not found")
-        if actor.role != "admin" and not await WorkflowService._is_department_member(
-                db, completed_by_id, task.department_id):
+        if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
+                db, actor, task.department_id):
             raise ValueError(
                 "Only members of the task's department (or an admin) may complete it")
 
@@ -509,6 +509,24 @@ class WorkflowService:
         return instance
 
     @staticmethod
+    async def effective_department_ids(db: AsyncSession, actor) -> list[int]:
+        """The departments a permission check must see. While a real admin is
+        acting as a department (X-Acts-As-Department), that is the ONLY one —
+        the whole point of the switch is that their real memberships and the
+        admin bypass step aside (spec D2)."""
+        if getattr(actor, "acts_as_department_id", None) is not None:
+            return [actor.acts_as_department_id]
+        return await WorkflowService.get_user_department_ids(db, actor.id)
+
+    @staticmethod
+    async def actor_in_department(db: AsyncSession, actor,
+                                  department_id: int) -> bool:
+        """Membership check that honours acts-as. Use this wherever an actor
+        object is in hand; _is_department_member stays for id-only call
+        sites."""
+        return department_id in await WorkflowService.effective_department_ids(db, actor)
+
+    @staticmethod
     async def _is_department_member(db: AsyncSession, user_id: int,
                                     department_id: int) -> bool:
         from app.models.workflow import UserDepartment
@@ -535,8 +553,8 @@ class WorkflowService:
     @staticmethod
     async def accept_task(db: AsyncSession, task_id: int, user) -> WfInstanceTask:
         task = await WorkflowService._load_open_task(db, task_id)
-        if user.role != "admin" and not await WorkflowService._is_department_member(
-                db, user.id, task.department_id):
+        if user.effective_role != "admin" and not await WorkflowService.actor_in_department(
+                db, user, task.department_id):
             raise ValueError("Only members of the task's department may accept it")
         if task.owner_id is not None and task.owner_id != user.id:
             raise ValueError("Task is already owned by another user")
@@ -554,8 +572,8 @@ class WorkflowService:
         from app.models.entities import User
         from app.models.change import ChangeRequest
         task = await WorkflowService._load_open_task(db, task_id)
-        allowed = actor.role == "admin" or await WorkflowService._is_department_member(
-                db, actor.id, task.department_id)
+        allowed = actor.effective_role == "admin" or await WorkflowService.actor_in_department(
+                db, actor, task.department_id)
         if not allowed:
             if task.instance.change_id is not None:
                 # Change-scoped: authorize against the change lead directly.
@@ -596,7 +614,7 @@ class WorkflowService:
                                 due_date: datetime, actor) -> WfInstanceTask:
         from app.models.change import ChangeRequest
         task = await WorkflowService._load_open_task(db, task_id)
-        allowed = actor.role == "admin" or task.instance.started_by == actor.id
+        allowed = actor.effective_role == "admin" or task.instance.started_by == actor.id
         if not allowed:
             if task.instance.change_id is not None:
                 # Change-scoped: authorize against the change lead directly.

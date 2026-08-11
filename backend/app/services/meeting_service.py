@@ -20,7 +20,7 @@ class MeetingService:
     async def user_is_pm(session: AsyncSession, user: User) -> bool:
         """Admin, or member of the 'Project Manager' department (mirrors the
         pattern of ChangeService.user_can_confirm_impact for Development)."""
-        if user.role == "admin":
+        if user.effective_role == "admin":
             return True
         from app.services.workflow_service import WorkflowService
         pm_dept = (await session.execute(
@@ -28,8 +28,8 @@ class MeetingService:
         ).scalar_one_or_none()
         if pm_dept is None:
             return False
-        return pm_dept.id in await WorkflowService.get_user_department_ids(
-            session, user.id)
+        return pm_dept.id in await WorkflowService.effective_department_ids(
+            session, user)
 
     @staticmethod
     async def _authz(session: AsyncSession, change: ChangeRequest, user: User):
@@ -141,9 +141,9 @@ class MeetingService:
             dept = await session.get(Department, department_id)
             if dept is None:
                 raise ChangeError(f"Department {department_id} not found")
-            if user.role != "admin":
+            if user.effective_role != "admin":
                 from app.services.workflow_service import WorkflowService
-                mine = await WorkflowService.get_user_department_ids(session, user.id)
+                mine = await WorkflowService.effective_department_ids(session, user)
                 if department_id not in mine:
                     raise ChangeError(
                         "You can only raise a concern for your own department")

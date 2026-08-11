@@ -6,8 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.auth.acts_as import HEADER as ACTS_AS_HEADER, set_acts_as
 from app.models import User, get_db
 from app.models.entities import Organization
+from app.models.workflow import Department
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _HUB_MANAGED = "!"  # sentinel hashed_password for auto-provisioned hub users
@@ -111,7 +113,42 @@ async def get_current_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "User is inactive")
 
     request.state.hub_payload = payload
+    await _apply_acts_as(request, db, user)
     return user
+
+
+async def _apply_acts_as(request: Request, db: AsyncSession, user: User) -> None:
+    """Resolve X-Acts-As-Department onto the request's User instance.
+
+    Absent header -> untouched, so every existing request behaves exactly as
+    before. Present but the REAL user is not an admin -> 403: a non-admin
+    sending it is either a bug or an escalation attempt and both deserve to be
+    loud (spec D4). Unknown or inactive department -> 400.
+
+    Note this runs AFTER the plm2_Viewer read-only check above, which reads the
+    hub roles — a viewer cannot buy write access with a header.
+    """
+    raw = request.headers.get(ACTS_AS_HEADER)
+    if raw is None or not raw.strip():
+        return
+    if not user.is_real_admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only an admin may act as another department")
+    try:
+        dept_id = int(raw)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Invalid {ACTS_AS_HEADER} header")
+    dept = (await db.execute(
+        select(Department).where(Department.id == dept_id))).scalar_one_or_none()
+    if dept is None or not dept.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown or inactive department {dept_id}")
+    user.acts_as_department_id = dept.id
+    request.state.acts_as_department = dept
+    # Audit picks both identities up from here (spec D5).
+    request.state.acts_as_token = set_acts_as(user.id, dept.id)
 
 
 async def get_current_active_user(

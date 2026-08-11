@@ -7,6 +7,8 @@ write-next pattern is race-free here; revisit if moving to Postgres with
 concurrent writers (advisory lock or per-correlation chains)."""
 import hashlib
 import json
+
+from app.auth.acts_as import current_acts_as
 from datetime import datetime
 from typing import Optional
 
@@ -44,11 +46,18 @@ class AuditService:
         old_s = json.dumps(old_values) if old_values is not None else None
         new_s = json.dumps(new_values) if new_values is not None else None
         ts = datetime.utcnow()
+        # Acts-as: stamp the human behind the assumed department (spec D5).
+        # Deliberately OUTSIDE the hash envelope — _payload defines the chain
+        # every existing row was signed with, and widening it would invalidate
+        # them all retroactively.
+        acting = current_acts_as()
+        real_user_id, acting_dept_id = acting if acting else (None, None)
         entry = AuditLog(
             entity_type=entity_type, entity_id=entity_id, action=action,
             user_id=user_id, timestamp=ts, old_values=old_s, new_values=new_s,
             correlation_id=correlation_id, log_level=log_level,
             previous_hash=prev,
+            real_user_id=real_user_id, acting_as_department_id=acting_dept_id,
             entry_hash=hashlib.sha256(AuditService._payload(
                 entity_type, entity_id, action, old_s, new_s, user_id, ts, prev,
                 correlation_id, log_level
