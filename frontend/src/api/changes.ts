@@ -121,6 +121,13 @@ export const changesApi = {
     client.get<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`).then((r) => r.data),
   putCostLines: (id: number, aid: number, lines: CostLineIn[]) =>
     client.put<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`, { lines }).then((r) => r.data),
+  // How long this department needs once the work starts — the timing half of
+  // costing, kept next to the money it belongs with.
+  setCostLeadTime: (id: number, departmentId: number, days: number) =>
+    client.post(`/v1/changes/${id}/cost-lead-time`, {
+      department_id: departmentId, lead_time_days: days,
+    }).then((r) => r.data),
+
   getSummation: (id: number) =>
     client.get<Summation>(`/v1/changes/${id}/summation`).then((r) => r.data),
   getGates: (id: number) =>

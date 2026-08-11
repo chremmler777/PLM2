@@ -10,7 +10,8 @@ import WaitBanner from '../components/changes/WaitBanner';
 import { resolveWaitStates } from '../lib/waitStates';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
-import CostLineGrid from '../components/changes/CostLineGrid';
+import CostingBuckets from '../components/changes/CostingBuckets';
+import QuoteBasis from '../components/changes/QuoteBasis';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
@@ -177,6 +178,9 @@ export default function ChangeDetailPage() {
   const canSignQuality = isAdmin || isQualityMember;
   const canApproveInternalCosts = isAdmin || isPmMember;
   const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
+  // The whole cost picture is PM/Sales/lead/admin business; a department sees
+  // its own bucket and nobody else's figures.
+  const canSeeCosts = isAdmin || isChangeLead || isSalesMember || isPmMember;
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
   const canEditDescription = isAdmin || isChangeLead || isSalesMember;
@@ -452,38 +456,35 @@ export default function ChangeDetailPage() {
           <AssessmentBuckets change={change} departments={departments}
             myDepartmentIds={myActions?.memberships ?? []}
             editable={change.status === 'in_assessment'} />
-          {change.assessments.map((a) => (
-            <div key={a.id}>
-              <div className="text-xs text-slate-400 mb-1">Cost lines — {deptName(a.department_id)}</div>
-              <CostLineGrid
-                changeId={changeId}
-                assessmentId={a.id}
-                departmentId={a.department_id}
-                projectPlantId={projectPlantId}
-                plants={
-                  (change.affected_plant_ids && change.affected_plant_ids.length > 0
-                    ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
-                    : allPlants
-                  )
-                    .filter((p) => p.is_active !== false)
-                    .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))
-                }
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {effectiveTab === 'd1' && (
-        <div className="space-y-4">
-          <D1MasterPanel changeId={changeId} />
-          <SummationView changeId={changeId} />
         </div>
       )}
 
       {effectiveTab === 'commercial' && (
         <div className="space-y-3 text-sm">
           <PnlCard change={change} />
+          {/* Costing is department work first: each bucket holds its own lines
+              and lead time; the whole picture lives in the summation below, for
+              the people entitled to see it. */}
+          {!BEFORE_COSTING.includes(change.status) && (
+            <CostingBuckets change={change} departments={departments}
+              myDepartmentIds={myActions?.memberships ?? []}
+              plants={(change.affected_plant_ids && change.affected_plant_ids.length > 0
+                ? allPlants.filter((p) => change.affected_plant_ids!.includes(p.id))
+                : allPlants)
+                .filter((p) => p.is_active !== false)
+                .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))}
+              projectPlantId={projectPlantId}
+              canSeeAll={canSeeCosts} editable={change.status === 'costing'} />
+          )}
+          {/* The whole picture, for the people who answer for it — and, at
+              quoting, the basis the price is judged against. */}
+          {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
+            <SummationView changeId={changeId}
+              plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+              deadline={change.active_deadline === 'release'
+                ? { date: change.release_due_date, label: t('deadline.release') }
+                : { date: change.required_by_date, label: t('deadline.quote') }} />
+          )}
           {BEFORE_COSTING.includes(change.status) ? (
             <div className="border border-slate-700 bg-slate-800/60 rounded-lg p-4 text-slate-300">
               {change.customer_relevant ? (
@@ -502,6 +503,11 @@ export default function ChangeDetailPage() {
             </div>
           ) : change.customer_relevant ? (
             <>
+              {/* The basis, stated next to the entry: what the change costs and
+                  what it does to production time. The price itself stays a
+                  judgement — nothing here sums into it. */}
+              {canSeeCosts && <QuoteBasis changeId={changeId}
+                plants={allPlants.map((p) => ({ id: p.id, name: p.name }))} />}
               <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
               <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
               <div className="flex flex-wrap items-center gap-2">
@@ -596,6 +602,10 @@ export default function ChangeDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {effectiveTab === 'd1' && (
+        <D1MasterPanel changeId={changeId} />
       )}
 
       {effectiveTab === 'audit' && (

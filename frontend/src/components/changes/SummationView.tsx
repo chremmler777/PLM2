@@ -3,7 +3,12 @@ import { changesApi } from '../../api/changes';
 import { useDepartments } from '../../hooks/queries/useWorkflows';
 import { t } from '../../i18n/cmLabels';
 
-export default function SummationView({ changeId }: { changeId: number }) {
+export default function SummationView({ changeId, deadline, plants = [] }: {
+  changeId: number
+  /** The deadline the timing roll-up is measured against, when there is one. */
+  deadline?: { date: string | null; label: string }
+  plants?: { id: number; name: string }[]
+}) {
   const { data, isLoading } = useQuery({
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
@@ -11,6 +16,7 @@ export default function SummationView({ changeId }: { changeId: number }) {
   const { data: departments = [] } = useDepartments();
   const deptName = (id: number) =>
     departments.find((d) => d.id === id)?.name ?? `#${id}`;
+  const plantName = (id: number) => plants.find((p) => p.id === id)?.name ?? `Plant #${id}`;
   if (isLoading) return <div className="text-slate-400 text-sm p-4">Loading…</div>;
   if (!data) return null;
   const tot = data.totals;
@@ -68,13 +74,61 @@ export default function SummationView({ changeId }: { changeId: number }) {
             <tbody>
               {data.by_plant.map((row) => (
                 <tr key={row.plant_id} className="border-b border-slate-800">
-                  <td className="py-0.5">Plant #{row.plant_id}</td>
+                  <td className="py-0.5">{plantName(row.plant_id)}</td>
                   <td className="text-right tabular-nums">{row.one_time_internal.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{row.one_time_external.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{row.lifecycle_internal.toFixed(2)}</td>
                   <td className="text-right tabular-nums">{row.lifecycle_external.toFixed(2)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Timing: the change is only as quick as its slowest department, and the
+          production-time delta is what the piece price will have to carry. */}
+      {(data.max_lead_time_days != null || data.total_minutes_per_part != null) && (
+        <div data-testid="summation-timing">
+          <div className="text-xs font-semibold text-slate-300 mb-1">{t('summation.timing')}</div>
+          <table className="w-full text-xs">
+            <tbody>
+              {data.max_lead_time_days != null && (
+                <tr className="border-b border-slate-800">
+                  <td className="py-0.5">{t('summation.maxLeadTime')}</td>
+                  <td className="text-right tabular-nums" data-testid="summation-lead-time">
+                    {data.max_lead_time_days} {t('summation.days')}
+                    {deadline?.date && (
+                      <span className="block text-slate-500">
+                        {t('summation.earliestDone')}:{' '}
+                        {new Date(Date.now() + data.max_lead_time_days * 864e5).toLocaleDateString()}
+                        {' · '}{deadline.label}:{' '}
+                        {new Date(deadline.date).toLocaleDateString()}
+                        {Date.now() + data.max_lead_time_days * 864e5
+                          > new Date(deadline.date).getTime() && (
+                          <span className="text-red-400"> ⚠ {t('summation.pastDeadline')}</span>
+                        )}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              )}
+              {(data.lifecycle_minutes_by_plant ?? []).map((row) => (
+                <tr key={row.plant_id} className="border-b border-slate-800">
+                  <td className="py-0.5">{plantName(row.plant_id)}</td>
+                  <td className="text-right tabular-nums">
+                    {row.minutes_per_part > 0 ? '+' : ''}{row.minutes_per_part} {t('summation.perPart')}
+                  </td>
+                </tr>
+              ))}
+              {data.total_minutes_per_part != null && (
+                <tr className="font-semibold">
+                  <td>{t('costing.minutesShort')}</td>
+                  <td className="text-right tabular-nums" data-testid="summation-minutes">
+                    {data.total_minutes_per_part > 0 ? '+' : ''}{data.total_minutes_per_part}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -25,6 +25,7 @@ function makeRow(plantId: number): Row {
   return {
     plant_id: plantId,
     cost_kind: 'one_time',
+    minutes_per_part: 0,
     demand_hours: 0,
     external_cost: 0,
     activity_id: null,
@@ -38,6 +39,7 @@ function lineToRow(l: CostLine, rates: DepartmentRateRef[], departmentId: number
   return {
     plant_id: l.plant_id,
     cost_kind: l.cost_kind,
+    minutes_per_part: l.minutes_per_part ?? 0,
     demand_hours: l.demand_hours,
     external_cost: l.external_cost,
     activity_id: l.activity_id ?? null,
@@ -129,7 +131,9 @@ export default function CostLineGrid({
       r.map((row, j) => {
         if (j !== i) return row;
         const merged = { ...row, ...patch };
-        // Recompute internal cost whenever hours or plant changes
+        // Only one-time work is hours × rate; a lifecycle line is a time delta
+        // per part, whose money effect is the piece price, not this grid.
+        if (merged.cost_kind === 'lifecycle') merged.demand_hours = 0
         merged._internal = internalCost(rates, departmentId, merged.plant_id, merged.demand_hours);
         return merged;
       }),
@@ -169,6 +173,9 @@ export default function CostLineGrid({
             <th className="text-left pb-1">{t('plant')}</th>
             <th className="text-left pb-1">{t('kind')}</th>
             <th className="text-right pb-1">{t('hours')}</th>
+            <th className="text-right pb-1" title={t('costing.minutesHint')}>
+              {t('costing.minutesShort')}
+            </th>
             <th className="text-right pb-1">{t('internal')}</th>
             <th className="text-right pb-1">{t('external')}</th>
             <th className="pb-1"></th>
@@ -217,16 +224,40 @@ export default function CostLineGrid({
                   <option value="lifecycle">{t('lifecycle')}</option>
                 </select>
               </td>
-              {/* Demand hours */}
+              {/* Demand hours — one-time work is bought in hours × rate. */}
               <td className="py-1 pr-1">
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  className="bg-slate-900 border border-slate-600 rounded w-16 text-right px-1 text-slate-100 text-xs"
-                  value={row.demand_hours}
-                  onChange={(e) => update(i, { demand_hours: Number(e.target.value) })}
-                />
+                {row.cost_kind === 'one_time' ? (
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    aria-label={t('hours')}
+                    data-testid={`cost-hours-${i}`}
+                    className="bg-slate-900 border border-slate-600 rounded w-16 text-right px-1 text-slate-100 text-xs"
+                    value={row.demand_hours}
+                    onChange={(e) => update(i, { demand_hours: Number(e.target.value) })}
+                  />
+                ) : (
+                  <span className="block text-right text-slate-600 text-xs">—</span>
+                )}
+              </td>
+              {/* Lifecycle lines carry a production-time delta per part instead:
+                  minutes the part gains or loses, every time it is made. */}
+              <td className="py-1 pr-1">
+                {row.cost_kind === 'lifecycle' ? (
+                  <input
+                    type="number"
+                    step={0.1}
+                    aria-label={t('costing.minutes')}
+                    title={t('costing.minutesHint')}
+                    data-testid={`cost-minutes-${i}`}
+                    className="bg-slate-900 border border-slate-600 rounded w-20 text-right px-1 text-slate-100 text-xs"
+                    value={row.minutes_per_part ?? 0}
+                    onChange={(e) => update(i, { minutes_per_part: Number(e.target.value) })}
+                  />
+                ) : (
+                  <span className="block text-right text-slate-600 text-xs">—</span>
+                )}
               </td>
               {/* Internal (auto) */}
               <td className="py-1 pr-1 text-right text-slate-400 text-xs tabular-nums">
@@ -265,7 +296,7 @@ export default function CostLineGrid({
               if (!pt || (pt.internal === 0 && pt.external === 0)) return null;
               return (
                 <tr key={p.id} className="text-xs text-slate-500 border-t border-slate-800">
-                  <td colSpan={4} className="text-right pr-1 pt-1 italic">
+                  <td colSpan={5} className="text-right pr-1 pt-1 italic">
                     {p.name}
                   </td>
                   <td className="text-right tabular-nums pt-1">{pt.internal.toFixed(2)}</td>

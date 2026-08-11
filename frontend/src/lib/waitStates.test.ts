@@ -4,7 +4,7 @@ import { t } from '../i18n/cmLabels'
 
 const change = (over: Record<string, unknown> = {}) => ({
   status: 'scoping', customer_relevant: true, blocked_department_ids: [],
-  rejection_sent_at: null, ...over,
+  costing_pending_department_ids: [], rejection_sent_at: null, ...over,
 }) as never
 
 const concern = (over: Record<string, unknown> = {}) => ({
@@ -45,6 +45,17 @@ describe('resolveWaitStates', () => {
     // Only while the assessment is the live phase.
     expect(resolveWaitStates(
       change({ status: 'costing', blocked_department_ids: [2] }), [], deptName)).toEqual([])
+  })
+
+  it('names the departments still owing cost input, while costing', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'costing', costing_pending_department_ids: [2, 4] }), [], deptName)
+    expect(waits[0].key).toBe('costing-input')
+    expect(waits[0].text).toContain('Development, Tool Engineer')
+    expect(waits[0].tab).toBe('commercial')
+    // Only while costing is the live phase.
+    expect(resolveWaitStates(
+      change({ status: 'quoted', costing_pending_department_ids: [2] }), [], deptName)).toEqual([])
   })
 
   it('waits on the rejection letter until the customer has been told', () => {

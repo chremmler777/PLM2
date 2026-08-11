@@ -24,7 +24,7 @@ const excerpt = (s: string, max = 90) =>
 
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
-    | 'rejection_sent_at'>,
+    | 'rejection_sent_at' | 'costing_pending_department_ids'>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
 ): WaitState[] {
@@ -54,6 +54,16 @@ export function resolveWaitStates(
       key: 'blocked-departments',
       text: t('wait.onDepartments').replace('{x}', blocked.map(departmentName).join(', ')),
       tab: 'assessments',
+    })
+  }
+
+  // Costing waits on the departments that have not entered their numbers.
+  if (change.status === 'costing' && (change.costing_pending_department_ids?.length ?? 0) > 0) {
+    waits.push({
+      key: 'costing-input',
+      text: t('wait.onCosting').replace('{x}',
+        change.costing_pending_department_ids!.map(departmentName).join(', ')),
+      tab: 'commercial',
     })
   }
 

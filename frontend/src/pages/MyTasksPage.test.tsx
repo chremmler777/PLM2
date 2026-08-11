@@ -156,6 +156,14 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(screen.getByText(t('tasks.hint.send_rejection_send'))).toBeDefined()
   })
 
+  it('sends a costing-input row to the commercial tab', async () => {
+    await renderWith(changeTask({ kind: 'costing_input' }))
+    expect(screen.getByText(t('tasks.kind.costing_input'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.costing_input'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

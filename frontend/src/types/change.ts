@@ -164,6 +164,8 @@ export interface ChangeRequest {
   /** The project the change belongs to, denormalised for lists and headers. */
   project_number?: string | null;
   project_name?: string | null;
+  /** Departments that still owe their cost input while the change is costing. */
+  costing_pending_department_ids?: number[];
   /** Departments with an open assessment concern — their submit is blocked. */
   blocked_department_ids?: number[];
   quoted_at: string | null;
@@ -189,7 +191,7 @@ export interface ChangeDetail extends ChangeRequest {
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
-  | 'obtain_info' | 'send_rejection';
+  | 'obtain_info' | 'send_rejection' | 'costing_input';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -233,6 +235,9 @@ export interface CostLine {
   activity_id?: number | null;
   activity_label?: string | null;
   cost_kind: CostKind;
+  /** Lifecycle lines: the production-time delta per part, in minutes.
+   *  Negative when the change makes the part faster to produce. */
+  minutes_per_part?: number | null;
   demand_hours: number;
   rate_snapshot: number;
   internal_cost: number;
@@ -243,6 +248,7 @@ export interface CostLine {
 export interface CostLineIn {
   plant_id: number;
   cost_kind: CostKind;
+  minutes_per_part?: number | null;
   demand_hours: number;
   external_cost: number;
   activity_id?: number | null;
@@ -263,6 +269,12 @@ export interface Summation {
             lifecycle_internal: number; lifecycle_external: number; grand_total: number };
   effort_by_department: { department_id: number; effort_hours: number }[];
   total_effort_hours: number;
+  /** Timing roll-up: the change is only as fast as its slowest department. */
+  lead_time_by_department?: { department_id: number; lead_time_days: number }[];
+  max_lead_time_days?: number;
+  /** Production-time delta the change carries per part, summed per plant. */
+  lifecycle_minutes_by_plant?: { plant_id: number; minutes_per_part: number }[];
+  total_minutes_per_part?: number;
 }
 
 export type GateKey = 'feasibility' | 'budget' | 'release';

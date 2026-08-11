@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { internalCost } from './CostLineGrid';
 import CostLineGrid from './CostLineGrid';
+import { changesApi } from '../../api/changes';
 
 // ── pure calc helper ─────────────────────────────────────────────────────────
 
@@ -200,3 +201,38 @@ describe('CostLineGrid component', () => {
     expect(lines[0]).not.toHaveProperty('_internal');
   });
 });
+
+describe('CostLineGrid lifecycle lines carry production time', () => {
+  afterEach(cleanup)
+
+  const renderGrid = () => render(
+    <CostLineGrid changeId={1} assessmentId={2} departmentId={1} plants={PLANTS} />,
+    { wrapper: makeWrapper() })
+
+  it('asks minutes per part on a lifecycle line and hours on a one-time line', async () => {
+    renderGrid()
+    fireEvent.click(await screen.findByText(/\+ row/))
+    // One-time: hours, no minutes.
+    expect(screen.getByTestId('cost-hours-0')).toBeTruthy()
+    expect(screen.queryByTestId('cost-minutes-0')).toBeNull()
+    const kindSelect = screen.getAllByRole('combobox')
+      .find((el) => (el as HTMLSelectElement).value === 'one_time')!
+    fireEvent.change(kindSelect, { target: { value: 'lifecycle' } })
+    // Lifecycle: minutes per part, no hours.
+    expect(screen.getByTestId('cost-minutes-0')).toBeTruthy()
+    expect(screen.queryByTestId('cost-hours-0')).toBeNull()
+  })
+
+  it('sends a negative production-time delta as entered', async () => {
+    renderGrid()
+    fireEvent.click(await screen.findByText(/\+ row/))
+    const kindSelect = screen.getAllByRole('combobox')
+      .find((el) => (el as HTMLSelectElement).value === 'one_time')!
+    fireEvent.change(kindSelect, { target: { value: 'lifecycle' } })
+    fireEvent.change(screen.getByTestId('cost-minutes-0'), { target: { value: '-1.5' } })
+    fireEvent.click(screen.getByText(/save/i))
+    await waitFor(() => expect(changesApi.putCostLines).toHaveBeenCalledWith(1, 2, [
+      expect.objectContaining({ cost_kind: 'lifecycle', minutes_per_part: -1.5, demand_hours: 0 }),
+    ]))
+  })
+})
