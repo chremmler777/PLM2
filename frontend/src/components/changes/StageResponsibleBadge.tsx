@@ -2,12 +2,13 @@ import { t } from '../../i18n/cmLabels'
 import type { ChangeStatus } from '../../types/change'
 
 /**
- * Which role owns a change while it sits in a given stage. Only capture is
- * mapped today (Sales writes the request); the map is the extension point for
- * the remaining stages once their ownership is agreed.
+ * Which role owns a change while it sits in a given stage: Sales writes the
+ * request, project management runs the scoping. The map is the extension point
+ * for the remaining stages once their ownership is agreed.
  */
 export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   captured: 'role.sales',
+  scoping: 'role.pm',
 }
 
 export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {

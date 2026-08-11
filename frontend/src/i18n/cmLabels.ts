@@ -81,6 +81,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'kickoff.ready': { de: 'Bereit fürs Scoping', en: 'Ready for scoping' },
   'responsible.label': { de: 'Verantwortlich', en: 'Responsible' },
   'role.sales': { de: 'Vertrieb', en: 'Sales' },
+  'role.pm': { de: 'Projektmanagement', en: 'Project Management' },
   'cockpit.where': { de: 'Status', en: 'Status' },
   'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
   'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },

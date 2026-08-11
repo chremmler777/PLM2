@@ -40,11 +40,13 @@ describe('LifecycleStepper', () => {
 })
 
 describe('LifecycleStepper stage responsibility', () => {
-  it('tags the captured stage node with Sales and tags no other stage', () => {
+  it('tags captured with Sales, scoping with project management, nothing else', () => {
     render(<LifecycleStepper status="scoping" customerRelevant />)
     const tags = screen.getAllByTestId('stage-responsible')
-    expect(tags).toHaveLength(1)
+    expect(tags).toHaveLength(2)
     expect(tags[0].textContent).toContain(t('role.sales'))
     expect(tags[0].parentElement?.textContent).toContain('Captured')
+    expect(tags[1].textContent).toContain(t('role.pm'))
+    expect(tags[1].parentElement?.textContent).toContain('Scoping')
   })
 })

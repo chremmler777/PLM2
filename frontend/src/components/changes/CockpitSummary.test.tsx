@@ -289,11 +289,15 @@ describe('CockpitSummary kickoff readiness at capture', () => {
     expect(screen.queryByTestId('kickoff-ready')).toBeNull()
   })
 
-  it('tags capture with the responsible role, and other stages with none', () => {
+  it('tags capture with Sales, scoping with project management, and leaves later stages untagged', () => {
     captured()
     expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.sales'))
     cleanup()
     render(wrap(<CockpitSummary change={change({ status: 'scoping' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.pm'))
+    cleanup()
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByTestId('stage-responsible')).toBeNull()
   })
