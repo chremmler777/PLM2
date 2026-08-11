@@ -130,6 +130,28 @@ describe('NeedsInfoCard roles', () => {
 describe('NeedsInfoCard containment', () => {
   afterEach(cleanup)
 
+  it('renders its documents as rows with a download link and their uploader', () => {
+    card({ canAnswer: true, attachments: [
+      doc({ id: 100, filename: 'questions.msg', uploaded_by_name: 'PM Jane' }),
+      doc({ id: 101, filename: 'reply.msg', kind: 'info_response',
+        uploaded_by_name: 'Sam Sales', created_at: '2026-08-02T00:00:00' }),
+    ] })
+    // Both sides of the exchange are readable on the card itself.
+    expect(screen.getByText(t('concern.questionDocs'))).toBeTruthy()
+    expect(screen.getByText(t('concern.answerDocs'))).toBeTruthy()
+    const link = screen.getByRole('link', { name: 'questions.msg' })
+    expect(link.getAttribute('href')).toContain('/v1/changes/7/attachments/100/download')
+    expect(screen.getByTestId('needs-info-card-1').textContent).toContain('PM Jane')
+    expect(screen.getByTestId('needs-info-card-1').textContent).toContain('Sam Sales')
+    expect(screen.getByTestId('attach-kind-info_response')).toBeTruthy()
+  })
+
+  it('leaves out a document heading with nothing under it', () => {
+    card({ canAnswer: true, attachments: [doc({ id: 100, filename: 'questions.msg' })] })
+    expect(screen.getByText(t('concern.questionDocs'))).toBeTruthy()
+    expect(screen.queryByText(t('concern.answerDocs'))).toBeNull()
+  })
+
   it('holds only its own documents, never a sibling question’s', () => {
     card({ canAnswer: true, attachments: [
       doc({ id: 100, filename: 'ours.msg', concern_id: 1 }),

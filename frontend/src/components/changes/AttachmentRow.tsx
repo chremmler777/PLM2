@@ -100,8 +100,11 @@ export function InfoRequestBlock({ changeId, request, responses, onChanged, onDe
       {responses.length === 0 && (
         answering ? (
           <div className="ml-6 mt-1">
+            {/* Inherit the question's container, so an answer filed from the
+                attachments list lands in the same card as its question. */}
             <AttachmentDropzone changeId={changeId} kind="info_response"
-              respondsToId={request.id} label={t('attach.responseSlot')}
+              respondsToId={request.id} concernId={request.concern_id ?? undefined}
+              label={t('attach.responseSlot')}
               onUploaded={() => { setAnswering(false); onChanged() }} />
           </div>
         ) : (

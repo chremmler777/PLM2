@@ -63,19 +63,19 @@ export default function NeedsInfoCard({
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the question'),
   })
 
+  // A heading with nothing under it is noise; the card shows a section only
+  // once it has something to show.
   const docList = (docs: Attachment[], label: string) => (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-0.5">{label}</p>
-      {docs.length === 0 ? (
-        <p className="text-xs text-slate-600">{t('concern.noDocs')}</p>
-      ) : (
-        <ul className="text-sm">
+    docs.length === 0 ? null : (
+      <div>
+        <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-0.5">{label}</p>
+        <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
           {docs.map((a) => (
             <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
           ))}
         </ul>
-      )}
-    </div>
+      </div>
+    )
   )
 
   if (solved && !expanded) {

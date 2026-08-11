@@ -164,6 +164,11 @@ export default function ScopingPanel(
   // rather than fetching again.
   const attachments = change.attachments ?? []
   const rejectionLetters = attachments.filter((a) => a.kind === 'rejection_letter')
+  // Question documents from before the cards existed (and any filed outside one)
+  // belong to no card. They are still evidence, so the questions section shows
+  // them rather than leaving them findable only in the attachments list.
+  const unassignedQuestionDocs = attachments.filter(
+    (a) => (a.kind === 'info_request' || a.kind === 'info_response') && a.concern_id == null)
   // Team needs-info flags are the customer questions; they get their own cards,
   // in the order the questions were asked. A flag raised by a meeting's decision
   // belongs under that meeting's record; a hand-raised one stands on its own.
@@ -320,6 +325,21 @@ export default function ScopingPanel(
           </div>
         ) : (
           !outstanding && <p className="text-xs text-slate-500">{t('concern.none')}</p>
+        )}
+
+        {unassignedQuestionDocs.length > 0 && (
+          <div data-testid="unassigned-question-docs"
+            className="rounded-lg border border-slate-700 bg-slate-800/40 p-3 space-y-1">
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">
+              {t('concern.unassignedDocs')}
+            </p>
+            <ul className="text-sm">
+              {unassignedQuestionDocs.map((a) => (
+                <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
+              ))}
+            </ul>
+            <p className="text-[11px] text-slate-500">{t('concern.unassignedHint')}</p>
+          </div>
         )}
 
         {/* Everything else the team flagged, in one strip. */}

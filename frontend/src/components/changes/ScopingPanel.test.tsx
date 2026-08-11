@@ -345,3 +345,70 @@ describe('ScopingPanel question containers', () => {
     expect(screen.getByText(/older question/)).toBeTruthy()
   })
 })
+
+describe('ScopingPanel question documents are visible where the questions are', () => {
+  const meeting = {
+    id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
+    participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
+    decision_reason: 'target price', selected_department_ids: [],
+    created_by: 1, created_at: '2026-07-04T10:00:00Z',
+    decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+  }
+  const question = {
+    id: 11, change_id: 7, kind: 'needs_info', note: 'What is the target price?',
+    raised_by: 1, raised_by_name: 'PM Jane', raised_at: '2026-07-04T11:00:00',
+    withdrawn_at: null, resolved_by_meeting_id: null, is_open: true,
+    department_id: null, resolution_note: null, answer_note: null,
+    raised_by_meeting_id: 4,
+  }
+  const att = (over: Record<string, unknown>) => ({
+    id: 1, filename: 'f.msg', content_type: 'text/plain', size_bytes: 1,
+    phase: 'baseline', created_at: '2026-07-05T00:00:00',
+    kind: 'info_request', responds_to_id: null, concern_id: null, ...over,
+  })
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting] as never)
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([question] as never)
+  })
+  afterEach(cleanup)
+
+  it('shows a scoped document inside its own card, downloadable and attributed', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [
+      att({ id: 20, filename: 'questions.msg', concern_id: 11,
+        uploaded_by_name: 'PM Jane' }),
+      att({ id: 21, filename: 'reply.msg', kind: 'info_response', concern_id: 11,
+        uploaded_by_name: 'Sam Sales' }),
+    ] })} />))
+    const card = await screen.findByTestId('needs-info-card-11')
+    expect(card.textContent).toContain('questions.msg')
+    expect(card.textContent).toContain('PM Jane')
+    expect(card.textContent).toContain('reply.msg')
+    expect(card.textContent).toContain('Sam Sales')
+    const link = screen.getByRole('link', { name: 'questions.msg' })
+    expect(link.getAttribute('href')).toContain('/v1/changes/7/attachments/20/download')
+    // No empty headings on a card with only one side filled.
+    expect(screen.queryByText(t('concern.noDocs'))).toBeNull()
+  })
+
+  it('surfaces legacy question documents that belong to no card', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [
+      att({ id: 30, filename: 'legacy-question.msg', concern_id: null }),
+      att({ id: 31, filename: 'general.pdf', kind: 'general', concern_id: null }),
+    ] })} />))
+    const strip = await screen.findByTestId('unassigned-question-docs')
+    expect(strip.textContent).toContain('legacy-question.msg')
+    // Plain documents are not question evidence and stay out of it.
+    expect(strip.textContent).not.toContain('general.pdf')
+    expect(screen.getByRole('link', { name: 'legacy-question.msg' })).toBeTruthy()
+    expect(strip.textContent).toContain(t('concern.unassignedHint'))
+  })
+
+  it('keeps the strip away when every document is filed', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [
+      att({ id: 20, filename: 'questions.msg', concern_id: 11 }),
+    ] })} />))
+    await screen.findByTestId('needs-info-card-11')
+    expect(screen.queryByTestId('unassigned-question-docs')).toBeNull()
+  })
+})

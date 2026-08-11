@@ -6,9 +6,10 @@ import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({ changesApi: { deleteAttachment: vi.fn() } }))
 vi.mock('./AttachmentDropzone', () => ({
-  default: (props: { kind?: string; respondsToId?: number }) => (
+  default: (props: { kind?: string; respondsToId?: number; concernId?: number }) => (
     <div data-testid="dropzone" data-kind={props.kind ?? ''}
-      data-responds-to={props.respondsToId ?? ''} />
+      data-responds-to={props.respondsToId ?? ''}
+      data-concern={props.concernId ?? ''} />
   ),
 }))
 
@@ -107,6 +108,17 @@ describe('ChangeAttachments needs-info loop', () => {
     expect(plain?.querySelector('[data-testid^="attach-kind"]')).toBeNull()
     // Answered requests stop asking for an answer.
     expect(screen.queryByTestId('attach-response-1')).toBeNull()
+  })
+
+  it('files a response from the list into the same container as its question', () => {
+    wrap(<ChangeAttachments change={change({
+      attachments: [att({ id: 1, filename: 'question.msg', kind: 'info_request',
+        concern_id: 11 })],
+    })} />)
+    fireEvent.click(screen.getByTestId('attach-response-1'))
+    const slot = screen.getAllByTestId('dropzone')
+      .find((s) => s.getAttribute('data-kind') === 'info_response')
+    expect(slot?.getAttribute('data-concern')).toBe('11')
   })
 
   it('offers a response slot preset to the request it answers', () => {

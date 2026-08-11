@@ -364,6 +364,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'objtype.gauge': { de: 'Lehre', en: 'Gauge' },
   'objtype.document': { de: 'Dokument', en: 'Document' },
   'objtype.part': { de: 'Teil', en: 'Part' },
+  'concern.unassignedDocs': {
+    de: 'Nicht zugeordnete Fragedokumente',
+    en: 'Unassigned question documents',
+  },
+  'concern.unassignedHint': {
+    de: 'Vor den Fragekarten hochgeladen — gehören zu keiner Frage. Für die '
+      + 'Zuordnung erneut in der jeweiligen Karte hochladen.',
+    en: 'Uploaded before the question cards existed, so they belong to no '
+      + 'question. Re-upload inside a card if the link matters.',
+  },
   'concern.openRequests': { de: 'Offene Rückfragen', en: 'Open questions' },
   'concern.solvedQuestions': { de: 'Geklärte Rückfragen', en: 'Settled questions' },
   'concern.solvedBy': { de: 'geklärt von', en: 'solved by' },
