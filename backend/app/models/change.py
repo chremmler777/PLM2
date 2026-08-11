@@ -32,6 +32,10 @@ CUSTOMER_RESPONSES = ("pending", "accepted", "declined", "negotiating")
 SIGN_OFF_ROLES = ("pm", "quality")
 TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 
+# What a change attachment is. "info_request" is the question sent out after a
+# needs_info decision; "info_response" is the answer, linked back to it.
+ATTACHMENT_KINDS = ("general", "info_request", "info_response")
+
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
 ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
@@ -392,6 +396,14 @@ class ChangeAttachment(Base):
     # "baseline" (uploaded during capture/scoping — frozen once scoping ends) or
     # "post_scoping" (documents added afterwards). See migration 033.
     phase: Mapped[str] = mapped_column(String(20), default="baseline", server_default="baseline")
+
+    # What this document IS, so the needs-info loop can be read back: the
+    # question Sales sends out (info_request), the answer that came back
+    # (info_response, pointing at its question), or an ordinary file.
+    kind: Mapped[str] = mapped_column(
+        String(20), default="general", server_default="general")
+    responds_to_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_attachments.id"), nullable=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

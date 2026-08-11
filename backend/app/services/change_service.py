@@ -17,7 +17,7 @@ from app.models.change import (
     ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting, ChangeConcern,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
-    SCOPING_STATUSES,
+    SCOPING_STATUSES, ATTACHMENT_KINDS,
 )
 from app.models.entities import User, Project, Plant
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
@@ -1734,21 +1734,39 @@ class ChangeService:
     async def add_attachment(
         session: AsyncSession, change: ChangeRequest, *, filename: str,
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
+        kind: str = "general", responds_to_id: Optional[int] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
         phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
+        if kind not in ATTACHMENT_KINDS:
+            raise ChangeError(f"Invalid attachment kind '{kind}'")
+        # Only an answer may point at a question, and only at a real question
+        # on THIS change — a dangling or cross-change link would make the
+        # needs-info loop unreadable, which is the whole point of the field.
+        if responds_to_id is not None:
+            if kind != "info_response":
+                raise ChangeError(
+                    "Only an info_response may name the attachment it answers")
+            target = await session.get(ChangeAttachment, responds_to_id)
+            if target is None or target.change_id != change.id:
+                raise ChangeError(
+                    f"Attachment {responds_to_id} not found on this change")
+            if target.kind != "info_request":
+                raise ChangeError("An info_response must answer an info_request")
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
             content_type=content_type, size_bytes=size_bytes, sha256=sha256,
-            uploaded_by=user_id, phase=phase,
+            uploaded_by=user_id, phase=phase, kind=kind,
+            responds_to_id=responds_to_id,
         )
         session.add(att)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "attachment_added",
-            f"Attached {filename} ({phase})", user_id,
-            new_value={"filename": filename, "phase": phase},
+            f"Attached {filename} ({phase}, {kind})", user_id,
+            new_value={"filename": filename, "phase": phase, "kind": kind,
+                       "responds_to_id": responds_to_id},
         )
         return att
 

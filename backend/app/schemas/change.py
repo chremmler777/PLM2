@@ -12,8 +12,6 @@ REASON_MAX_LENGTH = 100
 
 class ChangeCreate(BaseModel):
     project_id: int
-    project_number: Optional[str] = None
-    project_name: Optional[str] = None
     title: str = Field(min_length=1, max_length=255)
     change_type: str = "physical_part"
     # A one-line "what is wrong", not an essay. The long form belongs in the
@@ -161,6 +159,8 @@ class AttachmentResponse(BaseModel):
     content_type: str
     size_bytes: int
     phase: str = "baseline"
+    kind: str = "general"          # general | info_request | info_response
+    responds_to_id: Optional[int] = None
     created_at: datetime
     uploaded_by: int
     uploaded_by_name: Optional[str] = None
@@ -192,6 +192,10 @@ class ChangeResponse(BaseModel):
     id: int
     change_number: str
     project_id: int
+    # Project.code + name: no change response should force a second call to
+    # say which project it belongs to.
+    project_number: Optional[str] = None
+    project_name: Optional[str] = None
     title: str
     description: Optional[str] = None
     reason: Optional[str] = None

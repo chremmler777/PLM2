@@ -7,7 +7,9 @@ import uuid
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, status
+from fastapi import (
+    APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, status,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -783,6 +785,9 @@ async def approve_internal_costs(
 async def upload_attachment(
     change_id: int,
     file: UploadFile = File(...),
+    # Multipart, so the classification rides as form fields alongside the file.
+    kind: str = Form("general"),
+    responds_to_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -798,14 +803,19 @@ async def upload_attachment(
     stored_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}_{safe_name}")
     with open(stored_path, "wb") as fh:
         fh.write(contents)
-    att = await ChangeService.add_attachment(
-        db, change, filename=safe_name, stored_path=stored_path,
-        content_type=file.content_type or "application/octet-stream",
-        size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
-        user_id=current_user.id,
-    )
+    try:
+        att = await ChangeService.add_attachment(
+            db, change, filename=safe_name, stored_path=stored_path,
+            content_type=file.content_type or "application/octet-stream",
+            size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
+            user_id=current_user.id, kind=kind, responds_to_id=responds_to_id,
+        )
+    except ChangeError as e:
+        os.remove(stored_path)      # do not leave an orphan on a rejected upload
+        raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
-    return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes}
+    return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
+            "kind": att.kind, "responds_to_id": att.responds_to_id}
 
 
 @router.get("/{change_id}/attachments/{attachment_id}/download")
