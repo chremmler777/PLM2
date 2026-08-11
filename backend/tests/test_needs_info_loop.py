@@ -209,68 +209,161 @@ async def _open_team_flag(client, admin_auth, seed, session_factory, suffix):
     return cid, next(c["id"] for c in concerns if c["is_open"]), depts
 
 
-async def test_sales_answers_and_closes_the_flag_in_one_action(
+async def _pm_member(client, session_factory, seed):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    from sqlalchemy import select
+    async with session_factory() as s:
+        dept = (await s.execute(select(Department).where(
+            Department.name == "Project Manager"))).scalar_one_or_none()
+        if dept is None:
+            dept = Department(name="Project Manager", flow_type="action",
+                              is_active=True)
+            s.add(dept)
+            await s.flush()
+        u = User(organization_id=seed["org_id"], username="pmperson",
+                 email="pmperson@test.io", full_name="PM Person",
+                 hashed_password=get_password_hash("pm-secret-12"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=dept.id))
+        await s.commit()
+        return await login(client, "pmperson@test.io")
+
+
+async def test_sales_answers_but_does_not_settle(
         client, admin_auth, seed, session_factory):
+    """Answering is a comment on the question, not a verdict on it: the
+    concern stays open for the side that asked."""
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "7")
     sales = await _sales_member(client, session_factory, seed)
 
-    # substance is required — the note IS the answer
-    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                            json={"resolution_note": "   "}, headers=sales)
+    # substance is required
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "   "}, headers=sales)
     assert res.status_code == 400
     assert "needs content" in res.json()["detail"]
 
-    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                            json={"resolution_note": "Customer sent rev C"},
-                            headers=sales)
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Customer sent rev C"}, headers=sales)
     assert res.status_code == 200, res.text
-    assert res.json()["is_open"] is False
-    assert res.json()["resolution_note"] == "Customer sent rev C"
+    body = res.json()
+    assert body["answer_note"] == "Customer sent rev C"
+    assert body["answered_at"] is not None
+    assert body["answered_by"] is not None
+    assert body["is_open"] is True          # answering does not settle it
 
-    # the thread reads question -> answer, from the changelog alone
-    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
-    asked = [e for e in log if e["action"] == "concern_raised"]
-    answered = [e for e in log if e["action"] == "concern_withdrawn"]
-    assert asked and answered
-    assert "Send us the customer drawing" in asked[-1]["action_description"]
-    assert "Customer sent rev C" in answered[-1]["action_description"]
+    # ...and Sales cannot settle it either
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "closing my own answer"},
+                            headers=sales)
+    assert res.status_code == 400
+    assert "Project Management" in res.json()["detail"]
 
 
-async def test_a_document_in_the_container_counts_as_the_answer(
+async def test_re_answering_overwrites_and_keeps_every_round_in_the_chain(
         client, admin_auth, seed, session_factory):
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "8")
     sales = await _sales_member(client, session_factory, seed)
+    for note in ("Asked the customer", "Customer sent rev C"):
+        res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                                json={"note": note}, headers=sales)
+        assert res.status_code == 200, res.text
+    assert res.json()["answer_note"] == "Customer sent rev C"
 
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
+    answered = [e for e in log if e["action"] == "concern_answered"]
+    assert len(answered) == 2
+    assert "Asked the customer" in answered[0]["action_description"]
+    assert "Customer sent rev C" in answered[1]["action_description"]
+
+
+async def test_a_document_in_the_container_is_content_enough(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "9")
+    sales = await _sales_member(client, session_factory, seed)
     up = await client.post(
         f"/api/v1/changes/{cid}/attachments",
         files={"file": ("drawing.pdf", b"x", "application/pdf")},
         data={"kind": "info_response", "concern_id": str(concern_id)},
         headers=sales)
     assert up.status_code in (200, 201), up.text
-    assert up.json()["concern_id"] == concern_id
-
-    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                             json={}, headers=sales)
     assert res.status_code == 200, res.text
 
 
-async def test_non_sales_non_author_still_cannot_close_it(
-        client, admin_auth, eng_auth, seed, session_factory):
-    cid, concern_id, _ = await _open_team_flag(
-        client, admin_auth, seed, session_factory, "9")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                            json={"resolution_note": "not mine to close"},
-                            headers=eng_auth)
-    assert res.status_code == 400
-    assert "who raised" in res.json()["detail"]
-
-
-async def test_obtain_info_task_vanishes_when_the_flag_is_solved(
-        client, admin_auth, seed, session_factory):
+async def test_only_sales_may_answer(client, admin_auth, eng_auth, seed,
+                                     session_factory):
     cid, concern_id, _ = await _open_team_flag(
         client, admin_auth, seed, session_factory, "10")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "not mine to answer"}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "Sales" in res.json()["detail"]
+
+
+async def test_the_author_or_pm_settles_a_team_flag(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "11")
+    pm = await _pm_member(client, session_factory, seed)
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "Rev C is what we needed"},
+                            headers=pm)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is False
+
+    # the author (the decider) can settle their own too
+    cid2, concern2, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "12")
+    res = await client.post(f"/api/v1/changes/{cid2}/concerns/{concern2}/withdraw",
+                            json={}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_any_member_of_the_raising_department_may_settle_its_flag(
+        client, admin_auth, eng_auth, seed, session_factory):
+    """A department flag is the department's, not one person's — colleagues
+    cover for each other."""
+    from app.models.workflow import Department, UserDepartment
+    cid, _, depts = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "13")
+    dept_id = depts[0]
+    # admin raises for the department (acting as it), a colleague settles it
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept_id))
+        await s.commit()
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = "in_assessment"
+        await s.commit()
+
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
+                            json={"kind": "reject_proposal", "note": "Tolerance",
+                                  "department_id": dept_id})
+    assert res.status_code == 200, res.text
+    dept_concern = res.json()["id"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{dept_concern}/withdraw",
+                            json={"resolution_note": "Supplier confirmed"},
+                            headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is False
+
+
+async def test_obtain_info_task_clears_on_the_answer_not_the_settlement(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "14")
     sales = await _sales_member(client, session_factory, seed)
 
     async def rows():
@@ -279,29 +372,13 @@ async def test_obtain_info_task_vanishes_when_the_flag_is_solved(
                 if t["kind"] == "obtain_info" and t["change_id"] == cid]
 
     assert len(await rows()) == 1
-    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                      json={"resolution_note": "Answered by phone"}, headers=sales)
-    assert await rows() == []
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                      json={"note": "Answered by phone"}, headers=sales)
+    assert await rows() == []          # Sales is done; the flag is still open
 
-
-async def test_the_follow_up_meeting_is_the_review(
-        client, admin_auth, seed, session_factory):
-    """Solved unblocks 'proceed'; deciding needs_info again raises a fresh
-    flag, so a bad answer costs nothing but another round."""
-    cid, concern_id, depts = await _open_team_flag(
-        client, admin_auth, seed, session_factory, "11")
-    sales = await _sales_member(client, session_factory, seed)
-    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                      json={"resolution_note": "Rev C attached"}, headers=sales)
-
-    mid = await _meeting(client, admin_auth, cid, depts)
-    res = await _decide(client, admin_auth, cid, mid, "needs_info", "Wrong revision")
-    assert res.status_code == 200, res.text
     concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
                                  headers=admin_auth)).json()
-    open_ = [c for c in concerns if c["is_open"]]
-    assert len(open_) == 1 and open_[0]["note"] == "Wrong revision"
-    assert len(concerns) == 2      # the whole exchange is on the record
+    assert [c for c in concerns if c["is_open"]]
 
 
 # --- concern containers -----------------------------------------------------
@@ -343,9 +420,11 @@ async def test_container_validations(
     # a concern on ANOTHER change is not this change's container
     assert (await up(cid, other_concern)).status_code == 400
 
-    # settled containers are closed for filing
-    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
-                      json={"resolution_note": "done"}, headers=sales)
+    # settled containers are closed for filing (the author settles it)
+    settled = await client.post(
+        f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+        json={"resolution_note": "done"}, headers=admin_auth)
+    assert settled.status_code == 200, settled.text
     res = await up(cid, concern_id)
     assert res.status_code == 400
     assert "already settled" in res.json()["detail"]
@@ -361,8 +440,12 @@ async def test_substance_is_counted_per_container(
         f"/api/v1/changes/{cid}/attachments",
         files={"file": ("first-answer.pdf", b"x", "application/pdf")},
         data={"kind": "info_response", "concern_id": str(first)}, headers=sales)
+    # answered with the document, then settled by its author
+    assert (await client.post(
+        f"/api/v1/changes/{cid}/concerns/{first}/answer",
+        json={}, headers=sales)).status_code == 200
     await client.post(f"/api/v1/changes/{cid}/concerns/{first}/withdraw",
-                      json={}, headers=sales)
+                      json={}, headers=admin_auth)
 
     mid = await _meeting(client, admin_auth, cid, depts)
     await _decide(client, admin_auth, cid, mid, "needs_info", "And the tolerances?")
@@ -370,7 +453,8 @@ async def test_substance_is_counted_per_container(
                                  headers=admin_auth)).json()
     second = next(c["id"] for c in concerns if c["is_open"])
 
-    res = await client.post(f"/api/v1/changes/{cid}/concerns/{second}/withdraw",
+    # the earlier document belongs to the earlier question
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{second}/answer",
                             json={}, headers=sales)
     assert res.status_code == 400
     assert "needs content" in res.json()["detail"]

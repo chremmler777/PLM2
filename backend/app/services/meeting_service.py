@@ -12,6 +12,7 @@ from app.models.change import (
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services.change_service import ChangeService, ChangeError
+from app.services.workflow_service import WorkflowService
 
 
 class MeetingService:
@@ -194,40 +195,37 @@ class MeetingService:
             raise ChangeError("Concern not found on this change")
         if not concern.is_open:
             raise ChangeError("Concern is no longer open")
-        # Only its author may withdraw it — clearing someone else's objection
-        # for them is exactly what this feature exists to prevent. The lead and
-        # admins are not exempt.
+        # Settling a concern belongs to the side that raised it, plus Project
+        # Management as the standing arbiter. A department flag is the
+        # DEPARTMENT's, not one member's — colleagues cover for each other and
+        # people leave — so any member of that department may settle it. A
+        # Team or personal flag has only its author behind it.
         #
-        # One exception, and it is not a loophole: a Team needs_info flag is a
-        # QUESTION addressed to Sales, not an objection Sales might want to
-        # bury. Answering it IS resolving it, so Sales closes it by writing the
-        # answer — and the follow-up meeting is the review. Everything else
-        # stays author-only.
+        # Nobody else, however senior: an objection cleared by the person it
+        # inconveniences is the failure this feature exists to prevent, and
+        # answering a question (see answer_concern) is deliberately NOT the
+        # same act as deciding the answer was good enough.
         note = (resolution_note or "").strip()
-        is_author = concern.raised_by == user.id
-        answering_for_sales = False
-        if not is_author:
-            team_question = (concern.kind == "needs_info"
-                             and concern.department_id is None)
-            if not team_question or not await ChangeService._user_in_department(
-                    session, user, "Sales"):
+        if concern.department_id is not None:
+            allowed = (await WorkflowService.actor_in_department(
+                session, user, concern.department_id)
+                or await MeetingService.user_is_pm(session, user))
+            if not allowed:
                 raise ChangeError(
-                    "Only the person who raised a concern may withdraw it")
-            answering_for_sales = True
-        # A department-scoped concern held that department's assessment.
-        # Lifting the hold has to say how the point was addressed.
-        if concern.department_id is not None and not note:
-            raise ChangeError(
-                "Withdrawing a department concern requires a resolution note "
-                "saying how it was addressed")
-        # Sales closing a question must say what the answer is — that note is
-        # the answer, and it is what the follow-up meeting reviews. A response
-        # document on the change counts as the content instead.
-        if answering_for_sales and not note and not await ChangeService.has_info_response(
-                session, change, concern_id=concern.id):
-            raise ChangeError(
-                "An answer needs content — write it or attach the response "
-                "document")
+                    "Only a member of the department that raised this concern, "
+                    "or Project Management, may settle it")
+            # The flag held that department's assessment. Lifting the hold has
+            # to say how the point was addressed.
+            if not note:
+                raise ChangeError(
+                    "Withdrawing a department concern requires a resolution note "
+                    "saying how it was addressed")
+        else:
+            if (concern.raised_by != user.id
+                    and not await MeetingService.user_is_pm(session, user)):
+                raise ChangeError(
+                    "Only the person who raised this concern, or Project "
+                    "Management, may settle it")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
         concern.resolution_note = note or None
@@ -237,8 +235,7 @@ class MeetingService:
         await ChangeService.append_changelog(
             session, change,
             "concern_withdrawn",
-            f"Concern #{concern.id} "
-            + ("answered and closed" if answering_for_sales else "withdrawn")
+            f"Concern #{concern.id} withdrawn"
             + (f" — {concern.resolution_note}" if concern.resolution_note else ""),
             user.id,
             old_value={"concern_id": concern.id},
@@ -276,6 +273,48 @@ class MeetingService:
             new_value={"concern_id": concern.id, "kind": "needs_info",
                        "department_id": None, "meeting_id": meeting_id},
             notes=concern.note)
+        return concern
+
+    @staticmethod
+    async def answer_concern(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        note: Optional[str] = None,
+    ) -> ChangeConcern:
+        """Sales writes the answer to an open question — a COMMENT on it, not a
+        verdict on it.
+
+        Deliberately separate from withdrawal: the side that asked decides
+        whether the answer settles the point, so answering leaves the concern
+        open and the task list simply stops nagging. Re-answering overwrites
+        the stored note; every round stays in the changelog, so a thin first
+        answer is visible rather than silently replaced.
+        """
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if not concern.is_open:
+            raise ChangeError("Concern is no longer open")
+        if not await ChangeService._user_in_department(session, user, "Sales"):
+            raise ChangeError(
+                "Only a Sales department member may answer a concern")
+        note = (note or "").strip()
+        # An answer needs content — either words, or the document that carries
+        # them filed into this question's container.
+        if not note and not await ChangeService.has_info_response(
+                session, change, concern_id=concern.id):
+            raise ChangeError(
+                "An answer needs content — write it or attach the response "
+                "document")
+        concern.answer_note = note or None
+        concern.answered_at = datetime.utcnow()
+        concern.answered_by = user.id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_answered",
+            f"Concern #{concern.id} answered"
+            + (f" — {note}" if note else " (see attached document)"),
+            user.id,
+            new_value={"concern_id": concern.id}, notes=note or None)
         return concern
 
     @staticmethod

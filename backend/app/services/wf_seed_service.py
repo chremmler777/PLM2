@@ -51,6 +51,33 @@ ECM_BEWERTUNG = {
 }
 
 
+# A physical-part change is assessed by the five disciplines that own physical
+# objects: Development (the parts), Tool Engineer (tools), Manufacturing
+# Engineer (equipment), APQP (gauges) and Packaging Engineer (packaging). The
+# rest are not silent participants with an empty task — they simply have no
+# assessment to make here, and a queue full of nothing to do is how real work
+# gets lost. One stage only: the shared template's later stages (Summation &
+# Budget, Customer activities) mint assessment rows for PM and Sales, which is
+# exactly the noise being removed. Those phases are driven by the change's own
+# status machine, not by an assessment card.
+ECM_BEWERTUNG_PHYSICAL = {
+    "name": "ECM Assessment (Physical Part)",
+    "description": "Assessment routing for physical part changes (D1 matrix)",
+    "stages": [
+        ("Feasibility & Assessment", [
+            ("Department assessment", [
+                ("Development", "R"), ("Tool Engineer", "R"),
+                ("Manufacturing Engineer", "R"), ("APQP", "R"),
+                ("Packaging Engineer", "R"),
+            ], {}),
+        ]),
+    ],
+}
+
+# change_type -> its own template. Anything absent keeps the shared one.
+ASSESSMENT_STANDARD_BY_TYPE = {"physical_part": ECM_BEWERTUNG_PHYSICAL}
+
+
 def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     return {
         "name": name,
@@ -241,14 +268,18 @@ async def seed_check_standards(session: AsyncSession) -> None:
 
 
 async def seed_assessment_standard(session: AsyncSession) -> None:
-    tmpl = await _seed_template(session, ECM_BEWERTUNG)
+    shared = await _seed_template(session, ECM_BEWERTUNG)
     uid = await _seed_user_id(session)
+    per_type = {}
+    for change_type, definition in ASSESSMENT_STANDARD_BY_TYPE.items():
+        per_type[change_type] = await _seed_template(session, definition)
     for change_type in CHANGE_TYPES:
         existing = (await session.execute(
             select(ChangeRoutingStandard).where(
                 ChangeRoutingStandard.change_type == change_type)
         )).scalar_one_or_none()
         if existing is None:
+            tmpl = per_type.get(change_type, shared)
             session.add(ChangeRoutingStandard(
                 change_type=change_type, template_id=tmpl.id,
                 template_version=tmpl.version, updated_by=uid,

@@ -5,6 +5,7 @@ controlled items, per-discipline assessments, informal attachments (the PPT-only
 start), and a hash-chained changelog hang off it. On approval the change spawns
 ECN PartRevisions on each impacted part; on release those become active.
 """
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -291,6 +292,11 @@ class ChangeAssessment(Base):
     lead_time_impact_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A department's own questionnaire answers, JSON-serialized. Generic on
+    # purpose: a column (or table) per questionnaire would mean a migration
+    # every time a department changes a question. See ChangeService for the
+    # accessor that keeps callers away from the raw string.
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     producibility: Mapped[str] = mapped_column(String(10), default="na", server_default="na")  # yes|no|na
     contact_person: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -333,6 +339,20 @@ class ChangeAssessment(Base):
         foreign_keys=[owner_id], lazy="selectin")
     task: Mapped["WfInstanceTask | None"] = relationship(
         "WfInstanceTask", foreign_keys=[wf_instance_task_id], lazy="selectin")
+
+    @property
+    def details_dict(self) -> dict:
+        """The department's questionnaire answers. Stored as JSON text so a new
+        question never needs a migration; empty dict when nothing was
+        answered or the payload is unreadable — a malformed blob must not take
+        the assessment list down with it."""
+        if not self.details:
+            return {}
+        try:
+            loaded = json.loads(self.details)
+        except (TypeError, ValueError):
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
 
     @property
     def owner_name(self) -> Optional[str]:
@@ -502,6 +522,12 @@ class ChangeConcern(Base):
     # How the objection was addressed. Required to withdraw a department-scoped
     # (assessment-phase) concern — lifting a hold is itself a record.
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sales' answer to the question, as a comment on it. Answering is not
+    # settling: the raising side decides whether the answer is good enough.
+    answer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    answered_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
     # The meeting/email record that raised it, when a decision did. Manually
     # raised concerns leave it null — the flag stands on its own.
     raised_by_meeting_id: Mapped[int | None] = mapped_column(
@@ -518,6 +544,10 @@ class ChangeConcern(Base):
     @property
     def is_open(self) -> bool:
         return self.withdrawn_at is None and self.resolved_by_meeting_id is None
+
+    @property
+    def is_answered(self) -> bool:
+        return self.answered_at is not None
 
     @property
     def raised_by_name(self) -> Optional[str]:

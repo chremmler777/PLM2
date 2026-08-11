@@ -38,7 +38,7 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
-    ConcernCreate, ConcernResponse, ConcernWithdrawIn,
+    ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
     InternalApprovalIn,
 )
 
@@ -137,8 +137,9 @@ async def my_change_tasks(
       impact_confirm    scoping and unlocked, for Development
       assessment        in_assessment, the department's own pending answer
       obtain_info       scoping, a needs_info decision whose Team flag is
-                        still open, for Sales — who owns the customer
-                        relationship and closes the flag with the answer
+                        open and UNANSWERED, for Sales — who owns the customer
+                        relationship. Answering clears the row; settling the
+                        flag stays with the side that raised it
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
       customer_response quoted and unanswered, for Sales
@@ -223,8 +224,9 @@ async def my_change_tasks(
             # the flag solved the row goes, and the PM's scoping_wrapup drives
             # the follow-up meeting that reviews the answer.
             asked = ChangeService.pending_info_request(c)
+            question = ChangeService.open_team_question(c)
             if (asked is not None and in_sales
-                    and ChangeService.open_team_question(c) is not None):
+                    and question is not None and not question.is_answered):
                 tasks.append({
                     **await _base(c), "kind": "obtain_info",
                     "reason": asked.decision_reason,
@@ -677,7 +679,7 @@ async def submit_assessment(
             db, change, body.department_id, body.verdict, current_user.id,
             cost_impact=body.cost_impact, lead_time_impact_days=body.lead_time_impact_days,
             conditions=body.conditions, notes=body.notes, responsible_id=body.responsible_id,
-            effort_hours=body.effort_hours,
+            effort_hours=body.effort_hours, details=body.details,
         )
     except ValueError as e:
         # Blocking (R/A) submissions delegate to WorkflowService.complete_task,
@@ -1173,6 +1175,27 @@ async def _withdraw_concern(
     try:
         concern = await MeetingService.withdraw_concern(
             db, change, concern_id, current_user, resolution_note=resolution_note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
+
+
+@router.post("/{change_id}/concerns/{concern_id}/answer",
+             response_model=ConcernResponse)
+async def answer_concern(
+    change_id: int, concern_id: int, body: ConcernAnswerIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales answers an open question. The concern stays OPEN — the side that
+    asked decides whether the answer settles it (POST .../withdraw)."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await MeetingService.answer_concern(
+            db, change, concern_id, current_user, note=body.note)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -71,7 +71,11 @@ ALLOWED_TRANSITIONS = {
 }
 
 TYPE_DISCIPLINES = {
-    "physical_part": ["Tool Engineer", "APQP", "Quality", "Manufacturing Engineer", "Sales"],
+    # The five disciplines that own physical objects — kept in step with the
+    # "ECM Assessment (Physical Part)" template (wf_seed_service), which is the
+    # real source; this list only serves databases with no standard mapped yet.
+    "physical_part": ["Development", "Tool Engineer", "Manufacturing Engineer",
+                      "APQP", "Packaging Engineer"],
     "tooling":       ["Tool Engineer", "Process Engineer", "Manufacturing Engineer"],
     "document_spec": ["Quality", "Project Manager"],
     "process_im":    ["Process Engineer", "Manufacturing Engineer", "Quality"],
@@ -1554,6 +1558,7 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, department_id: int,
         verdict: str, user_id: int, *, cost_impact=None, lead_time_impact_days=None,
         conditions=None, notes=None, responsible_id=None, effort_hours=None,
+        details: Optional[dict] = None,
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
@@ -1605,6 +1610,10 @@ class ChangeService:
         a.notes = notes
         a.responsible_id = responsible_id
         a.effort_hours = effort_hours
+        if details is not None:
+            if not isinstance(details, dict):
+                raise ChangeError("Assessment details must be an object")
+            a.details = json.dumps(details)
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
         await session.flush()

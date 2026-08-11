@@ -83,6 +83,10 @@ class AssessmentSubmit(BaseModel):
     notes: Optional[str] = None
     responsible_id: Optional[int] = None
     effort_hours: Optional[float] = Field(None, ge=0)
+    # Free-form per-department questionnaire answers (e.g. Packaging's
+    # packaging_impacted / change kinds). Stored as JSON; omit to leave the
+    # stored answers untouched.
+    details: Optional[dict] = None
 
 
 class ImpactedItemResponse(BaseModel):
@@ -117,6 +121,7 @@ class AssessmentResponse(BaseModel):
     accepted_at: Optional[datetime] = None
     due_date: Optional[datetime] = None
     overdue: bool = False
+    details: dict = {}
 
     @model_validator(mode="before")
     @classmethod
@@ -138,6 +143,7 @@ class AssessmentResponse(BaseModel):
                 "accepted_at": data.effective_accepted_at,
                 "due_date": data.effective_due_date,
                 "overdue": data.effective_overdue,
+                "details": data.details_dict,
             }
         return data
 
@@ -444,6 +450,11 @@ class ConcernCreate(BaseModel):
     department_id: Optional[int] = None
 
 
+class ConcernAnswerIn(BaseModel):
+    # Optional: a response document filed into the concern counts as content.
+    note: Optional[str] = None
+
+
 class ConcernWithdrawIn(BaseModel):
     # Required to withdraw a department-scoped (assessment-phase) concern.
     resolution_note: Optional[str] = None
@@ -459,6 +470,9 @@ class ConcernResponse(BaseModel):
     raised_at: datetime
     department_id: Optional[int] = None
     raised_by_meeting_id: Optional[int] = None
+    answer_note: Optional[str] = None
+    answered_at: Optional[datetime] = None
+    answered_by: Optional[int] = None
     withdrawn_at: Optional[datetime] = None
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None
