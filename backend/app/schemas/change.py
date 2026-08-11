@@ -5,12 +5,18 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
 
+# The reason is a short description of the problem — one line, readable in a
+# list. Anything longer is a scoping attachment, not a reason.
+REASON_MAX_LENGTH = 100
+
 
 class ChangeCreate(BaseModel):
     project_id: int
     title: str = Field(min_length=1, max_length=255)
     change_type: str = "physical_part"
-    reason: Optional[str] = None
+    # A one-line "what is wrong", not an essay. The long form belongs in the
+    # scoping attachments and the assessments.
+    reason: Optional[str] = Field(None, max_length=REASON_MAX_LENGTH)
     description: Optional[str] = None
     priority: str = "medium"
     lead_id: Optional[int] = None
@@ -20,7 +26,7 @@ class ChangeCreate(BaseModel):
 
 class ChangeUpdate(BaseModel):
     title: Optional[str] = None
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(None, max_length=REASON_MAX_LENGTH)
     description: Optional[str] = None
     priority: Optional[str] = None
     change_type: Optional[str] = None
@@ -39,15 +45,22 @@ class ChangeUpdate(BaseModel):
     affected_plant_ids: Optional[List[int]] = None
     required_by_date: Optional[NaiveUtcDatetime] = None
     required_by_reason: Optional[str] = None
+    release_due_date: Optional[NaiveUtcDatetime] = None
+    release_due_reason: Optional[str] = None
 
 
 class TransitionRequest(BaseModel):
     to_status: str
     cancellation_reason: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    reopen_reason: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):
     response: str  # accepted | declined | negotiating
+    # Mandatory when response == 'accepted' (enforced in the service)
+    release_due_date: Optional[NaiveUtcDatetime] = None
+    release_due_reason: Optional[str] = None
 
 
 class SignOffRequest(BaseModel):
@@ -166,6 +179,9 @@ class ChangelogResponse(BaseModel):
 
 class InternalApprovalIn(BaseModel):
     note: Optional[str] = None
+    # Mandatory — internal approval sets the release deadline (service enforces)
+    release_due_date: Optional[NaiveUtcDatetime] = None
+    release_due_reason: Optional[str] = None
 
 
 class ChangeResponse(BaseModel):
@@ -197,6 +213,11 @@ class ChangeResponse(BaseModel):
     required_by_date: Optional[datetime] = None
     required_by_reason: Optional[str] = None
     deadline_state: Optional[str] = None
+    quoted_at: Optional[datetime] = None
+    quoted_on_time: Optional[bool] = None
+    active_deadline: Optional[str] = None  # quote | release | None
+    release_due_date: Optional[datetime] = None
+    release_due_reason: Optional[str] = None
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
@@ -204,6 +225,9 @@ class ChangeResponse(BaseModel):
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
     internal_approval_note: Optional[str] = None
+    rejected_at: Optional[datetime] = None
+    rejected_by: Optional[int] = None
+    rejection_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -393,13 +417,37 @@ class MeetingUpdate(BaseModel):
     selected_department_ids: Optional[List[int]] = None
 
 
+class ConcernCreate(BaseModel):
+    kind: str  # reject_proposal | needs_info
+    note: str = Field(min_length=1)
+
+
+class ConcernResponse(BaseModel):
+    id: int
+    change_id: int
+    kind: str
+    note: str
+    raised_by: int
+    raised_by_name: Optional[str] = None
+    raised_at: datetime
+    withdrawn_at: Optional[datetime] = None
+    resolved_by_meeting_id: Optional[int] = None
+    is_open: bool = True
+
+    class Config:
+        from_attributes = True
+
+
 class MeetingDecideIn(BaseModel):
     decision: str  # proceed | reject | needs_info
+    # Required for reject and needs_info; ignored for proceed.
+    reason: Optional[str] = None
 
 
 class MeetingResponse(BaseModel):
     id: int
     change_id: int
+    decision_reason: Optional[str] = None
     meeting_date: datetime
     channel: str = "meeting"
     participants: List[MeetingParticipant] = []

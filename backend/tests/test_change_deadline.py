@@ -266,3 +266,38 @@ async def test_patch_date_only_keeps_reason(client, admin_auth, seed):
     res = await client.patch(f"/api/v1/changes/{change_id}",
                              json={"required_by_date": d2}, headers=admin_auth)
     assert res.json()["required_by_reason"] == "SOP"    # was nulled before the fix
+
+
+@pytest.mark.asyncio
+async def test_active_deadline_and_quoted_on_time(session_factory, seed):
+    async with session_factory() as session:
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-P1", customer_relevant=True,
+            required_by_date=datetime.utcnow() + timedelta(days=10))
+        # quote deadline drives the pre-quoted phase
+        assert chg.active_deadline == "quote"
+        assert chg.quoted_on_time is None
+        # quoting on time freezes the fact and retires the quote deadline
+        chg.quoted_at = datetime.utcnow()
+        assert chg.active_deadline is None
+        assert chg.quoted_on_time is True
+        # a late quote reads as late
+        chg.quoted_at = chg.required_by_date + timedelta(days=3)
+        assert chg.quoted_on_time is False
+        # once a release deadline exists it takes over
+        chg.release_due_date = datetime.utcnow() + timedelta(days=40)
+        assert chg.active_deadline == "release"
+        # terminal statuses have no active deadline
+        chg.status = "released"
+        assert chg.active_deadline is None
+
+
+@pytest.mark.asyncio
+async def test_internal_change_has_no_quote_deadline(session_factory, seed):
+    async with session_factory() as session:
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-P2", customer_relevant=False,
+            required_by_date=datetime.utcnow() + timedelta(days=10))
+        assert chg.active_deadline is None
+        chg.release_due_date = datetime.utcnow() + timedelta(days=30)
+        assert chg.active_deadline == "release"

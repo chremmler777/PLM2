@@ -103,6 +103,16 @@ class ChangeRequest(Base):
     required_by_set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     required_by_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Two-phase deadlines: required_by_* is the QUOTE deadline (customer-
+    # relevant changes only); release_due_* is the RELEASE deadline, set at
+    # customer acceptance (Sales) or internal cost approval (PM). quoted_at
+    # freezes the quote-milestone moment (same pattern as released_at).
+    quoted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    release_due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    release_due_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    release_due_set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    release_due_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Internal branch of the costing path split: PM approves the summation
     # total for non-customer-relevant changes (no quote step). Amount is a
     # snapshot of the summation grand total at approval time (P&L hook).
@@ -124,6 +134,15 @@ class ChangeRequest(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Rejection is a decision someone has to answer for later, so it carries a
+    # memo like cancellation does. Unlike cancellation it is reversible: a
+    # rejected change can be reopened back into scoping, which clears these
+    # three. The full history of both events lives in the hash-chained
+    # changelog, so clearing them here loses nothing.
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -141,6 +160,28 @@ class ChangeRequest(Base):
     @property
     def impact_confirmed_by_name(self) -> Optional[str]:
         return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
+
+    @property
+    def active_deadline(self) -> str | None:
+        """Which deadline currently drives deadline_state: 'quote' until the
+        change is quoted (customer-relevant only), 'release' once a release
+        deadline exists, None otherwise (incl. terminal statuses)."""
+        if self.status in TERMINAL_STATUSES:
+            return None
+        if self.release_due_date is not None:
+            return "release"
+        if (self.customer_relevant and self.required_by_date is not None
+                and self.quoted_at is None):
+            return "quote"
+        return None
+
+    @property
+    def quoted_on_time(self) -> bool | None:
+        """Frozen once quoted: was the quote deadline met? None while not yet
+        quoted or when no quote deadline was ever set."""
+        if self.quoted_at is None or self.required_by_date is None:
+            return None
+        return self.quoted_at <= self.required_by_date
 
     impacted_items: Mapped[list["ChangeImpactedItem"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin"
@@ -167,6 +208,10 @@ class ChangeRequest(Base):
     )
     affected_plants: Mapped[list["Plant"]] = relationship(
         secondary=change_affected_plants, lazy="selectin",
+    )
+    concerns: Mapped[list["ChangeConcern"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeConcern.id",
     )
     meetings: Mapped[list["ChangeMeeting"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
@@ -346,6 +391,11 @@ class ChangeMeeting(Base):
     participants: Mapped[list] = mapped_column(JSON, default=list)   # [{"name": str, "user_id": int|None}]
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     decision: Mapped[str | None] = mapped_column(String(20), nullable=True)  # proceed|reject|needs_info
+    # Why the team decided as it did. Required for reject ("why this change
+    # cannot go ahead") and for needs_info ("what is missing before it can
+    # start") — both are answers somebody owes the originator, so neither is
+    # allowed to be a bare button press. 'proceed' needs no justification.
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_department_ids: Mapped[list] = mapped_column(JSON, default=list)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -354,6 +404,53 @@ class ChangeMeeting(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
+
+
+CONCERN_KINDS = ("reject_proposal", "needs_info")
+
+
+class ChangeConcern(Base):
+    """A team member's flag against a change, raised outside the meeting.
+
+    The scoping decision is one event, but the opinions feeding it arrive in
+    parallel and from different people. A concern records who objects and why,
+    so the meeting is not the first place an objection becomes visible and the
+    official bounceback can be written from the team's own words.
+
+    Lifecycle: raised -> withdrawn by its author (they changed their mind), or
+    resolved by the meeting decision that answers it. Only one of the two ever
+    gets set; an open concern is one where both are null.
+    """
+    __tablename__ = "change_concerns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+
+    kind: Mapped[str] = mapped_column(String(20))   # reject_proposal | needs_info
+    note: Mapped[str] = mapped_column(Text)
+
+    raised_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    raised_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Withdrawn by its author — the objection no longer stands.
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    withdrawn_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Answered by a meeting decision (reject / needs_info) that carried it.
+    resolved_by_meeting_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_meetings.id"), nullable=True)
+
+    change: Mapped["ChangeRequest"] = relationship(
+        back_populates="concerns", foreign_keys=[change_id])
+    raised_by_user: Mapped["User"] = relationship(
+        foreign_keys=[raised_by], lazy="selectin")
+
+    @property
+    def is_open(self) -> bool:
+        return self.withdrawn_at is None and self.resolved_by_meeting_id is None
+
+    @property
+    def raised_by_name(self) -> Optional[str]:
+        return self.raised_by_user.full_name if self.raised_by_user is not None else None
 
 
 class ChangeChangelog(Base):
