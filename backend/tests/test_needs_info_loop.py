@@ -192,3 +192,205 @@ async def test_obtain_info_row_appears_for_sales_and_clears_on_a_decision(
     res = await _decide(client, admin_auth, cid, mid2, "reject", "Not economical")
     assert res.status_code == 200, res.text
     assert await rows() == []
+
+
+# --- Sales answers and marks solved; the meeting is the review --------------
+
+async def _open_team_flag(client, admin_auth, seed, session_factory, suffix):
+    """A change in scoping carrying an open Team needs_info flag."""
+    cid = await _change_in_scoping(client, admin_auth, seed, suffix)
+    depts = await _departments(session_factory)
+    mid = await _meeting(client, admin_auth, cid, depts)
+    res = await _decide(client, admin_auth, cid, mid, "needs_info",
+                        "Send us the customer drawing")
+    assert res.status_code == 200, res.text
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    return cid, next(c["id"] for c in concerns if c["is_open"]), depts
+
+
+async def test_sales_answers_and_closes_the_flag_in_one_action(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "7")
+    sales = await _sales_member(client, session_factory, seed)
+
+    # substance is required — the note IS the answer
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "   "}, headers=sales)
+    assert res.status_code == 400
+    assert "needs content" in res.json()["detail"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "Customer sent rev C"},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is False
+    assert res.json()["resolution_note"] == "Customer sent rev C"
+
+    # the thread reads question -> answer, from the changelog alone
+    log = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=admin_auth)).json()
+    asked = [e for e in log if e["action"] == "concern_raised"]
+    answered = [e for e in log if e["action"] == "concern_withdrawn"]
+    assert asked and answered
+    assert "Send us the customer drawing" in asked[-1]["action_description"]
+    assert "Customer sent rev C" in answered[-1]["action_description"]
+
+
+async def test_a_document_in_the_container_counts_as_the_answer(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "8")
+    sales = await _sales_member(client, session_factory, seed)
+
+    up = await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("drawing.pdf", b"x", "application/pdf")},
+        data={"kind": "info_response", "concern_id": str(concern_id)},
+        headers=sales)
+    assert up.status_code in (200, 201), up.text
+    assert up.json()["concern_id"] == concern_id
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={}, headers=sales)
+    assert res.status_code == 200, res.text
+
+
+async def test_non_sales_non_author_still_cannot_close_it(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "9")
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "not mine to close"},
+                            headers=eng_auth)
+    assert res.status_code == 400
+    assert "who raised" in res.json()["detail"]
+
+
+async def test_obtain_info_task_vanishes_when_the_flag_is_solved(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "10")
+    sales = await _sales_member(client, session_factory, seed)
+
+    async def rows():
+        res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+        return [t for t in res.json()
+                if t["kind"] == "obtain_info" and t["change_id"] == cid]
+
+    assert len(await rows()) == 1
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                      json={"resolution_note": "Answered by phone"}, headers=sales)
+    assert await rows() == []
+
+
+async def test_the_follow_up_meeting_is_the_review(
+        client, admin_auth, seed, session_factory):
+    """Solved unblocks 'proceed'; deciding needs_info again raises a fresh
+    flag, so a bad answer costs nothing but another round."""
+    cid, concern_id, depts = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "11")
+    sales = await _sales_member(client, session_factory, seed)
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                      json={"resolution_note": "Rev C attached"}, headers=sales)
+
+    mid = await _meeting(client, admin_auth, cid, depts)
+    res = await _decide(client, admin_auth, cid, mid, "needs_info", "Wrong revision")
+    assert res.status_code == 200, res.text
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    open_ = [c for c in concerns if c["is_open"]]
+    assert len(open_) == 1 and open_[0]["note"] == "Wrong revision"
+    assert len(concerns) == 2      # the whole exchange is on the record
+
+
+# --- concern containers -----------------------------------------------------
+
+async def test_anyone_may_file_into_an_open_concern(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "12")
+    # a team member explains the question with a document
+    up = await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("what-we-mean.pdf", b"x", "application/pdf")},
+        data={"kind": "info_request", "concern_id": str(concern_id)},
+        headers=eng_auth)
+    assert up.status_code in (200, 201), up.text
+    assert up.json()["concern_id"] == concern_id
+
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    filed = [a for a in detail["attachments"] if a["concern_id"] == concern_id]
+    assert len(filed) == 1
+    assert filed[0]["kind"] == "info_request"
+
+
+async def test_container_validations(
+        client, admin_auth, seed, session_factory):
+    cid, concern_id, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "13")
+    other_cid, other_concern, _ = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "14")
+    sales = await _sales_member(client, session_factory, seed)
+
+    async def up(target_cid, concern):
+        return await client.post(
+            f"/api/v1/changes/{target_cid}/attachments",
+            files={"file": ("x.pdf", b"x", "application/pdf")},
+            data={"concern_id": str(concern)}, headers=admin_auth)
+
+    assert (await up(cid, 999_999)).status_code == 400
+    # a concern on ANOTHER change is not this change's container
+    assert (await up(cid, other_concern)).status_code == 400
+
+    # settled containers are closed for filing
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                      json={"resolution_note": "done"}, headers=sales)
+    res = await up(cid, concern_id)
+    assert res.status_code == 400
+    assert "already settled" in res.json()["detail"]
+
+
+async def test_substance_is_counted_per_container(
+        client, admin_auth, seed, session_factory):
+    """A document filed into ANOTHER question does not answer this one."""
+    cid, first, depts = await _open_team_flag(
+        client, admin_auth, seed, session_factory, "15")
+    sales = await _sales_member(client, session_factory, seed)
+    await client.post(
+        f"/api/v1/changes/{cid}/attachments",
+        files={"file": ("first-answer.pdf", b"x", "application/pdf")},
+        data={"kind": "info_response", "concern_id": str(first)}, headers=sales)
+    await client.post(f"/api/v1/changes/{cid}/concerns/{first}/withdraw",
+                      json={}, headers=sales)
+
+    mid = await _meeting(client, admin_auth, cid, depts)
+    await _decide(client, admin_auth, cid, mid, "needs_info", "And the tolerances?")
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    second = next(c["id"] for c in concerns if c["is_open"])
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{second}/withdraw",
+                            json={}, headers=sales)
+    assert res.status_code == 400
+    assert "needs content" in res.json()["detail"]
+
+
+async def test_the_auto_flag_names_the_meeting_that_raised_it(
+        client, admin_auth, seed, session_factory):
+    """The container traces back to where the question was decided."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "16")
+    depts = await _departments(session_factory)
+    mid = await _meeting(client, admin_auth, cid, depts)
+    await _decide(client, admin_auth, cid, mid, "needs_info", "Which revision?")
+
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                                 headers=admin_auth)).json()
+    auto = next(c for c in concerns if c["is_open"])
+    assert auto["raised_by_meeting_id"] == mid
+
+    # a hand-raised flag stands on its own
+    manual = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+                               json={"kind": "reject_proposal", "note": "mine"})
+    assert manual.status_code == 200, manual.text
+    assert manual.json()["raised_by_meeting_id"] is None

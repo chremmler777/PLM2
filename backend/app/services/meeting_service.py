@@ -197,22 +197,48 @@ class MeetingService:
         # Only its author may withdraw it — clearing someone else's objection
         # for them is exactly what this feature exists to prevent. The lead and
         # admins are not exempt.
-        if concern.raised_by != user.id:
-            raise ChangeError("Only the person who raised a concern may withdraw it")
+        #
+        # One exception, and it is not a loophole: a Team needs_info flag is a
+        # QUESTION addressed to Sales, not an objection Sales might want to
+        # bury. Answering it IS resolving it, so Sales closes it by writing the
+        # answer — and the follow-up meeting is the review. Everything else
+        # stays author-only.
+        note = (resolution_note or "").strip()
+        is_author = concern.raised_by == user.id
+        answering_for_sales = False
+        if not is_author:
+            team_question = (concern.kind == "needs_info"
+                             and concern.department_id is None)
+            if not team_question or not await ChangeService._user_in_department(
+                    session, user, "Sales"):
+                raise ChangeError(
+                    "Only the person who raised a concern may withdraw it")
+            answering_for_sales = True
         # A department-scoped concern held that department's assessment.
         # Lifting the hold has to say how the point was addressed.
-        note = (resolution_note or "").strip()
         if concern.department_id is not None and not note:
             raise ChangeError(
                 "Withdrawing a department concern requires a resolution note "
                 "saying how it was addressed")
+        # Sales closing a question must say what the answer is — that note is
+        # the answer, and it is what the follow-up meeting reviews. A response
+        # document on the change counts as the content instead.
+        if answering_for_sales and not note and not await ChangeService.has_info_response(
+                session, change, concern_id=concern.id):
+            raise ChangeError(
+                "An answer needs content — write it or attach the response "
+                "document")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
         concern.resolution_note = note or None
         await session.flush()
+        # The changelog row IS the thread: question (concern_raised) then
+        # answer (concern_withdrawn), each with its note and its actor.
         await ChangeService.append_changelog(
-            session, change, "concern_withdrawn",
-            f"Concern #{concern.id} withdrawn"
+            session, change,
+            "concern_withdrawn",
+            f"Concern #{concern.id} "
+            + ("answered and closed" if answering_for_sales else "withdrawn")
             + (f" — {concern.resolution_note}" if concern.resolution_note else ""),
             user.id,
             old_value={"concern_id": concern.id},
@@ -222,6 +248,7 @@ class MeetingService:
     @staticmethod
     async def _flag_missing_information(
         session: AsyncSession, change: ChangeRequest, user: User, reason: str,
+        meeting_id: Optional[int] = None,
     ) -> Optional[ChangeConcern]:
         """A needs_info decision IS an open point against the change, so it
         becomes a Team concern in its own right rather than a note in a meeting
@@ -239,14 +266,15 @@ class MeetingService:
             return None
         concern = ChangeConcern(
             change_id=change.id, kind="needs_info", note=reason.strip(),
-            raised_by=user.id, department_id=None)
+            raised_by=user.id, department_id=None,
+            raised_by_meeting_id=meeting_id)
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_raised",
             f"Concern (needs_info): {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": "needs_info",
-                       "department_id": None},
+                       "department_id": None, "meeting_id": meeting_id},
             notes=concern.note)
         return concern
 
@@ -305,7 +333,7 @@ class MeetingService:
         await session.flush()
         if decision == "needs_info":
             await MeetingService._flag_missing_information(
-                session, change, user, reason)
+                session, change, user, reason, meeting_id=meeting.id)
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_decided",
             f"Scoping meeting #{meeting.id}: {decision}"

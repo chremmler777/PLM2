@@ -136,8 +136,9 @@ async def my_change_tasks(
       scoping_wrapup    scoping, for Project Manager — drive it to a decision
       impact_confirm    scoping and unlocked, for Development
       assessment        in_assessment, the department's own pending answer
-      obtain_info       scoping, a needs_info decision still unanswered,
-                        for Sales — who owns the customer relationship
+      obtain_info       scoping, a needs_info decision whose Team flag is
+                        still open, for Sales — who owns the customer
+                        relationship and closes the flag with the answer
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
       customer_response quoted and unanswered, for Sales
@@ -218,8 +219,12 @@ async def my_change_tasks(
                 })
             if can_confirm and c.impact_confirmed_at is None:
                 tasks.append({**await _base(c), "kind": "impact_confirm"})
+            # The task lives as long as the QUESTION does: once Sales marks
+            # the flag solved the row goes, and the PM's scoping_wrapup drives
+            # the follow-up meeting that reviews the answer.
             asked = ChangeService.pending_info_request(c)
-            if asked is not None and in_sales:
+            if (asked is not None and in_sales
+                    and ChangeService.open_team_question(c) is not None):
                 tasks.append({
                     **await _base(c), "kind": "obtain_info",
                     "reason": asked.decision_reason,
@@ -863,6 +868,9 @@ async def upload_attachment(
     # Multipart, so the classification rides as form fields alongside the file.
     kind: str = Form("general"),
     responds_to_id: Optional[int] = Form(None),
+    # Files the document into one concern's container (any authenticated user
+    # may add to an open concern: the asker explains, Sales answers).
+    concern_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -884,13 +892,15 @@ async def upload_attachment(
             content_type=file.content_type or "application/octet-stream",
             size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
             user_id=current_user.id, kind=kind, responds_to_id=responds_to_id,
+            concern_id=concern_id,
         )
     except ChangeError as e:
         os.remove(stored_path)      # do not leave an orphan on a rejected upload
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
-            "kind": att.kind, "responds_to_id": att.responds_to_id}
+            "kind": att.kind, "responds_to_id": att.responds_to_id,
+            "concern_id": att.concern_id}
 
 
 @router.get("/{change_id}/attachments/{attachment_id}/download")

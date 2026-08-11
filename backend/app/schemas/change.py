@@ -161,6 +161,7 @@ class AttachmentResponse(BaseModel):
     phase: str = "baseline"
     kind: str = "general"          # general | info_request | info_response
     responds_to_id: Optional[int] = None
+    concern_id: Optional[int] = None
     created_at: datetime
     uploaded_by: int
     uploaded_by_name: Optional[str] = None
@@ -457,6 +458,7 @@ class ConcernResponse(BaseModel):
     raised_by_name: Optional[str] = None
     raised_at: datetime
     department_id: Optional[int] = None
+    raised_by_meeting_id: Optional[int] = None
     withdrawn_at: Optional[datetime] = None
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None

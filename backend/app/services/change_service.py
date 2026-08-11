@@ -1312,6 +1312,37 @@ class ChangeService:
                 ChangeAttachment.kind == "rejection_letter"))).scalar() or 0)
 
     @staticmethod
+    async def has_info_response(
+        session: AsyncSession, change: ChangeRequest,
+        concern_id: Optional[int] = None,
+    ) -> bool:
+        """Did the answer to a needs-info question arrive as a document?
+
+        Counts documents filed INTO that concern's container — the answer to
+        THIS question, not to some earlier one. Change-level info_response
+        files still count, for exchanges recorded before containers existed."""
+        q = select(func.count()).select_from(ChangeAttachment).where(
+            ChangeAttachment.change_id == change.id)
+        if concern_id is not None:
+            q = q.where(
+                (ChangeAttachment.concern_id == concern_id)
+                | ((ChangeAttachment.concern_id.is_(None))
+                   & (ChangeAttachment.kind == "info_response")))
+        else:
+            q = q.where(ChangeAttachment.kind == "info_response")
+        return bool((await session.execute(q)).scalar() or 0)
+
+    @staticmethod
+    def open_team_question(change: ChangeRequest):
+        """The open Team needs_info flag, or None — the question Sales owes an
+        answer to. Distinct from pending_info_request (which reads the meeting
+        decision): this one disappears the moment Sales marks it solved, which
+        is what the task list keys off."""
+        return next((c for c in change.concerns
+                     if c.is_open and c.kind == "needs_info"
+                     and c.department_id is None), None)
+
+    @staticmethod
     async def confirm_rejection_sent(
         session: AsyncSession, change: ChangeRequest, user_id: int,
     ) -> ChangeRequest:
@@ -1808,6 +1839,7 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, *, filename: str,
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
         kind: str = "general", responds_to_id: Optional[int] = None,
+        concern_id: Optional[int] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
@@ -1827,11 +1859,22 @@ class ChangeService:
                     f"Attachment {responds_to_id} not found on this change")
             if target.kind != "info_request":
                 raise ChangeError("An info_response must answer an info_request")
+        # A concern is a container only while it is open: filing a document
+        # into a settled question would rewrite a closed exchange. Anyone may
+        # add to an open one — the asker explains, Sales answers.
+        if concern_id is not None:
+            concern = await session.get(ChangeConcern, concern_id)
+            if concern is None or concern.change_id != change.id:
+                raise ChangeError(f"Concern {concern_id} not found on this change")
+            if not concern.is_open:
+                raise ChangeError(
+                    "That concern is already settled — attach to the change "
+                    "instead")
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
             content_type=content_type, size_bytes=size_bytes, sha256=sha256,
             uploaded_by=user_id, phase=phase, kind=kind,
-            responds_to_id=responds_to_id,
+            responds_to_id=responds_to_id, concern_id=concern_id,
         )
         session.add(att)
         await session.flush()
@@ -1839,7 +1882,8 @@ class ChangeService:
             session, change, "attachment_added",
             f"Attached {filename} ({phase}, {kind})", user_id,
             new_value={"filename": filename, "phase": phase, "kind": kind,
-                       "responds_to_id": responds_to_id},
+                       "responds_to_id": responds_to_id,
+                       "concern_id": concern_id},
         )
         return att
 

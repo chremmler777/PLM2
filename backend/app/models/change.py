@@ -413,6 +413,11 @@ class ChangeAttachment(Base):
         String(20), default="general", server_default="general")
     responds_to_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_attachments.id"), nullable=True)
+    # Which concern this document belongs to, if any. A needs-info request is a
+    # self-contained exchange — the question's own explanation and the answer's
+    # documents live in it, not loose on the change.
+    concern_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_concerns.id"), nullable=True, index=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -497,6 +502,10 @@ class ChangeConcern(Base):
     # How the objection was addressed. Required to withdraw a department-scoped
     # (assessment-phase) concern — lifting a hold is itself a record.
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The meeting/email record that raised it, when a decision did. Manually
+    # raised concerns leave it null — the flag stands on its own.
+    raised_by_meeting_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_meetings.id"), nullable=True)
     # Answered by a meeting decision (reject / needs_info) that carried it.
     resolved_by_meeting_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_meetings.id"), nullable=True)
