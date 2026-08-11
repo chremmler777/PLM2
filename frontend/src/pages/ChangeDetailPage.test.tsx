@@ -387,3 +387,81 @@ describe('ChangeDetailPage release-deadline collection', () => {
       { note: null, release_due_date: '2026-12-15T23:59:59Z', release_due_reason: null }))
   })
 })
+
+describe('ChangeDetailPage capture phase', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.description = null
+    vi.mocked(changesApi.update).mockClear()
+  })
+
+  it('saves an edited description with a PATCH', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'captured' as ChangeDetail['status']
+    wrap('/changes/1')
+    fireEvent.change(await screen.findByTestId('description-input'),
+      { target: { value: 'Clip rattles at 40 km/h' } })
+    fireEvent.click(screen.getByTestId('description-save'))
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(
+      1, { description: 'Clip rattles at 40 km/h' }))
+  })
+
+  it('locks the later-phase tabs while the change is captured', async () => {
+    change.status = 'captured' as ChangeDetail['status']
+    wrap('/changes/1')
+    const scoping = await screen.findByRole('button', { name: /Scoping/ })
+    expect((scoping as HTMLButtonElement).disabled).toBe(true)
+    expect(scoping.getAttribute('title')).toBe(t('tab.lockedUntilScoping'))
+    expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /Overview/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('sends a deep link into a locked tab back to overview', async () => {
+    change.status = 'captured' as ChangeDetail['status']
+    wrap('/changes/1?tab=scoping')
+    const overview = await screen.findByRole('button', { name: /Overview/ })
+    expect(overview.className).toContain('border-b-2')
+    // Overview content, not the scoping panel.
+    expect(screen.getByText(/Reason:/)).toBeDefined()
+  })
+
+  it('unlocks those tabs again from scoping onwards', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    wrap('/changes/1')
+    const scoping = await screen.findByRole('button', { name: /Scoping/ })
+    expect((scoping as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('ChangeDetailPage description authz', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.lead_id = null
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  it('lets a Sales department member edit the description at capture', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'captured' as ChangeDetail['status']
+    wrap('/changes/1')
+    expect(await screen.findByTestId('description-input')).toBeDefined()
+  })
+
+  it('shows the description read-only to an unrelated viewer', async () => {
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'captured' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Overview/ })
+    expect(screen.queryByTestId('description-input')).toBeNull()
+  })
+})

@@ -22,6 +22,7 @@ import ChangeAttachments from '../components/changes/ChangeAttachments';
 import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
+import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import { useDepartments } from '../hooks/queries/useWorkflows';
@@ -51,6 +52,13 @@ const STATUS_ACTIVE_TAB: Record<string, Tab> = {
 // explainer instead of a dead-end disabled control (mirrors PnlCard's hidden
 // rule, which hides the P&L card for the same statuses).
 const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
+// While the change is still being captured, only the request itself is on the
+// table: Sales writes it and attaches the evidence. Scope, affected parts,
+// assessments, costs and implementation all start at scoping, so their tabs
+// stay locked — governance tabs keep their own authz rule.
+const CAPTURE_TABS: Tab[] = ['overview'];
+const isTabLocked = (status: string, tb: Tab): boolean =>
+  status === 'captured' && !CAPTURE_TABS.includes(tb) && !GOVERNANCE_TABS.includes(tb);
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -141,6 +149,9 @@ export default function ChangeDetailPage() {
   const canSignQuality = isAdmin || isQualityMember;
   const canApproveInternalCosts = isAdmin || isPmMember;
   const canEditQuotedPrice = isAdmin || isChangeLead || isSalesMember;
+  // The description is written during capture, and capture is Sales' job — the
+  // backend PATCH gate allows lead / Sales / admin, so the editor must too.
+  const canEditDescription = isAdmin || isChangeLead || isSalesMember;
   // F8: the backend enforces "PM and Quality sign-off must be different
   // users" (4-eyes) and 400s if violated. Disable the button in place and
   // name the rule instead of letting the user hit the error after clicking.
@@ -201,9 +212,12 @@ export default function ChangeDetailPage() {
   });
   if (isLoading || !change) return <div className="p-6 text-slate-400">Loading…</div>;
 
-  // An unauthorized deep link into a governance tab (?tab=d1 / ?tab=audit)
+  // A deep link into a tab the viewer or the phase does not allow — a
+  // governance tab without authz, or any later-phase tab while capturing —
   // falls back to overview rather than rendering a blank/forbidden tab.
-  const effectiveTab: Tab = GOVERNANCE_TABS.includes(tab) && !canSeeGovernance ? 'overview' : tab;
+  const effectiveTab: Tab =
+    (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || isTabLocked(change.status, tab)
+      ? 'overview' : tab;
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
@@ -310,12 +324,18 @@ export default function ChangeDetailPage() {
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
         {EVERYDAY_TABS.map((tb) => {
-          const isActivePhase = STATUS_ACTIVE_TAB[change.status] === tb;
+          const locked = isTabLocked(change.status, tb);
+          const isActivePhase = !locked && STATUS_ACTIVE_TAB[change.status] === tb;
           return (
             <button key={tb}
-              title={isActivePhase ? t('tab.activePhase') : undefined}
-              className={`pb-2 flex items-center gap-1.5 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-              onClick={() => setTab(tb)}>
+              disabled={locked}
+              title={locked ? t('tab.lockedUntilScoping')
+                : isActivePhase ? t('tab.activePhase') : undefined}
+              className={`pb-2 flex items-center gap-1.5 ${
+                locked ? 'text-slate-600 cursor-not-allowed'
+                : effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium'
+                : 'text-slate-400 hover:text-slate-200'}`}
+              onClick={() => { if (!locked) setTab(tb); }}>
               {isActivePhase && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-label={t('tab.activePhase')} />
               )}
@@ -346,6 +366,7 @@ export default function ChangeDetailPage() {
           </p>
           <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '—'}</p>
+          <DescriptionEditor change={change} canEdit={canEditDescription} />
           <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
 
           <ChangeAttachments change={change} />

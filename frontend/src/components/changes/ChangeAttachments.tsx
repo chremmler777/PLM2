@@ -37,12 +37,13 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
   const baselineDeletable = isScopingPhase(change.status)
 
   const row = (a: Attachment, deletable: boolean) => (
+    // Delete leads the row rather than trailing it: the control sits where the
+    // eye starts, muted until the row is hovered so it never dominates the name.
     <li key={a.id} className="flex items-center gap-2 py-1 group">
-      <span className="truncate min-w-0">📎 {a.filename}</span>
       {deletable && (
         <button
           type="button"
-          className="ml-auto flex-shrink-0 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          className="flex-shrink-0 text-slate-600 hover:text-red-400 opacity-40 group-hover:opacity-100 focus:opacity-100 transition-opacity"
           aria-label={`Delete ${a.filename}`}
           title="Delete attachment"
           onClick={() => del(a)}
@@ -50,6 +51,7 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
           ✕
         </button>
       )}
+      <span className="truncate min-w-0">📎 {a.filename}</span>
     </li>
   )
 
