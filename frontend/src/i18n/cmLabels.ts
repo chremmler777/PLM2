@@ -270,9 +270,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'meeting.needsInfoWarning': {
     de: 'Die Änderung bleibt im Scoping. Vertrieb ist verantwortlich, die fehlenden '
-      + 'Informationen zu beschaffen, und erhält dies als Aufgabe.',
+      + 'Informationen beim Kunden zu beschaffen, und erhält dies als Aufgabe.',
     en: 'The change stays in scoping. Sales is accountable for obtaining the missing '
-      + 'information and gets this as an action.',
+      + 'information from the customer, and gets this as an action.',
   },
   'meeting.shareRejection': {
     de: 'Ablehnung an den Kunden kommunizieren',
@@ -290,7 +290,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
       + 'rejection letter, the list of open questions, or a counter-proposal — so it '
       + 'lives on the change rather than in a mailbox.',
   },
-  'meeting.missingInfo': { de: 'Fehlt noch (Vertrieb):', en: 'Missing (Sales):' },
+  // Reads as what it is — an open question going out to the customer — not as a
+  // validation error about the meeting form.
+  'meeting.missingInfo': {
+    de: 'Offene Rückfrage — Vertrieb holt die Info beim Kunden ein:',
+    en: 'Open info request — Sales obtains this from the customer:',
+  },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
   'attach.baseline': { de: 'Erstunterlagen (Basis)', en: 'Initial documentation (baseline)' },

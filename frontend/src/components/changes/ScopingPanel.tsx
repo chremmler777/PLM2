@@ -102,12 +102,19 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
   })
+  // A refused decision names the open concerns that blocked it — that detail is
+  // the whole answer, so it is shown in place and not only as a toast.
+  const [decideError, setDecideError] = useState<string | null>(null)
   const decide = useMutation({
     mutationFn: (vars: {
       meetingId: number; decision: 'proceed' | 'reject' | 'needs_info'; reason?: string
     }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
-    onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Decision failed'),
+    onSuccess: () => { setDecideError(null); invalidate() },
+    onError: (e: unknown) => {
+      const detail = errDetail(e) ?? 'Decision failed'
+      setDecideError(detail)
+      toast.error(detail)
+    },
   })
   // Reject and needs-info both owe the originator an answer, so both collect
   // one before the call goes out rather than letting the server 400.
@@ -165,6 +172,13 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
               proposal — belongs on the change, not in someone's mailbox. */}
           <AttachmentDropzone changeId={changeId} onUploaded={invalidate} />
         </div>
+      )}
+
+      {decideError && (
+        <p role="alert" data-testid="decide-error"
+          className="rounded border border-red-800/60 bg-red-950/40 px-2 py-1 text-xs text-red-200">
+          {decideError}
+        </p>
       )}
 
       <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">

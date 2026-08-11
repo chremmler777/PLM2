@@ -150,3 +150,40 @@ describe('ScopingPanel department picker', () => {
     expect(screen.queryByRole('button', { name: /Logistics/ })).toBeNull()
   })
 })
+
+describe('ScopingPanel refused decision', () => {
+  afterEach(cleanup)
+
+  it('names the open concerns that blocked proceed', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([{
+      id: 2, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'meeting',
+      participants: [{ name: 'PM Jane' }], notes: null, decision: null,
+      selected_department_ids: [], created_by: 1, created_at: '2026-07-04T10:00:00Z',
+      decided_by: null, decided_at: null,
+    }] as never)
+    vi.mocked(changesApi.decideMeeting).mockRejectedValueOnce({
+      response: { status: 400, data: { detail:
+        'Open concerns block proceed: Rita RD (would reject): tool cannot hold tolerance' } },
+    })
+    render(wrap(<ScopingPanel change={change()} />))
+    fireEvent.click(await screen.findByRole('button', { name: t('meeting.proceed') }))
+    const alert = await screen.findByTestId('decide-error')
+    expect(alert.textContent).toContain('Rita RD')
+    expect(alert.textContent).toContain('tool cannot hold tolerance')
+  })
+
+  it('reads the needs-info line as an open question to the customer', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([{
+      id: 3, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
+      participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
+      decision_reason: 'target price for the new gauge', selected_department_ids: [],
+      created_by: 1, created_at: '2026-07-04T10:00:00Z',
+      decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+    }] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const line = await screen.findByText(/target price for the new gauge/)
+    // It names the mechanism — Sales asking the customer — not a form complaint.
+    expect(line.textContent).toContain(t('meeting.missingInfo'))
+    expect(line.textContent).not.toMatch(/Missing \(Sales\)/)
+  })
+})
