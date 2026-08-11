@@ -1514,14 +1514,46 @@ class ChangeService:
         return change
 
     @staticmethod
+    async def _apply_release_deadline(
+        session: AsyncSession, change: ChangeRequest, new_date: datetime,
+        reason: Optional[str], user_id: int,
+    ) -> None:
+        """Audited set/move of deadline #2 (the released-by commitment).
+        Shared by acceptance, internal approval and PATCH so all three write
+        the same `release_deadline_set` changelog row."""
+        old = change.release_due_date
+        change.release_due_date = new_date
+        if reason is not None:
+            change.release_due_reason = reason
+        change.release_due_set_by = user_id
+        change.release_due_set_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "release_deadline_set",
+            f"Release due {old} -> {new_date}", user_id,
+            field_name="release_due_date",
+            old_value=str(old) if old else None,
+            new_value=str(new_date), notes=change.release_due_reason)
+
+    @staticmethod
     async def record_customer_response(
         session: AsyncSession, change: ChangeRequest, response: str, user_id: int,
+        *, release_due_date: Optional[datetime] = None,
+        release_due_reason: Optional[str] = None,
     ) -> ChangeRequest:
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
+        # Acceptance is the moment deadline #2 is born: the customer said yes,
+        # so a released-by commitment must exist from here on.
+        if (response == "accepted" and release_due_date is None
+                and change.release_due_date is None):
+            raise ChangeError(
+                "Recording acceptance requires a release deadline (release_due_date)")
         change.customer_response = response
         change.customer_response_at = datetime.utcnow()
         change.customer_response_by = user_id
+        if release_due_date is not None:
+            await ChangeService._apply_release_deadline(
+                session, change, release_due_date, release_due_reason, user_id)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "customer_response_recorded",

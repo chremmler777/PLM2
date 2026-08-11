@@ -653,7 +653,10 @@ async def customer_response(
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
-        await ChangeService.record_customer_response(db, change, body.response, current_user.id)
+        await ChangeService.record_customer_response(
+            db, change, body.response, current_user.id,
+            release_due_date=body.release_due_date,
+            release_due_reason=body.release_due_reason)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

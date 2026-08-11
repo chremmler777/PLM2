@@ -1,5 +1,6 @@
 # backend/tests/test_changes.py
 import pytest
+from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from tests.conftest import (
@@ -7,6 +8,9 @@ from tests.conftest import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+# Customer acceptance now requires a release ("released-by") deadline.
+_RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 
 async def _create_change(client, auth, project_id, **over):
@@ -228,7 +232,7 @@ async def test_approve_blocked_until_customer_and_dual_signoff(
 
     # record customer acceptance
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
-                            json={"response": "accepted"}, headers=eng_auth)
+                            json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     assert res.status_code == 200, res.text
     # PM signs (engineer), Quality signs (admin) — must be different users
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",
@@ -254,7 +258,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted"}, headers=eng_auth)
+                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
@@ -275,7 +279,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted"}, headers=eng_auth)
+                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
@@ -668,7 +672,7 @@ async def test_sign_off_department_gating(
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted"}, headers=eng_auth)
+                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
 
     # eng is a Quality department member (departments fixture) -> quality sign-off OK
     res = await client.post(f"/api/v1/changes/{cid}/sign-off",

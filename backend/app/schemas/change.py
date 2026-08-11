@@ -250,6 +250,9 @@ class ChangeResponse(BaseModel):
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
+            # Model properties (not in __dict__) must be injected explicitly.
+            row["active_deadline"] = data.active_deadline
+            row["quoted_on_time"] = data.quoted_on_time
             return row
         return data
 

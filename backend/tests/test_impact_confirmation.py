@@ -5,13 +5,16 @@ confirms the set; kickoff (approved -> in_implementation) is soft-guarded on
 that confirmation, bypassable only via an approved transition deviation."""
 import pytest
 import pytest_asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import select, update
 
 from tests.conftest import login
 from tests.test_changes import departments  # noqa: F401 (reused fixture)
 
 pytestmark = pytest.mark.asyncio
+
+# Customer acceptance now requires a release ("released-by") deadline.
+_RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 
 @pytest_asyncio.fixture
@@ -207,7 +210,7 @@ async def _approved_change_via_api(client, eng_auth, admin_auth, seed, departmen
                                       session_factory)
     cid = change["id"]
     await client.post(f"/api/v1/changes/{cid}/customer-response",
-                      json={"response": "accepted"}, headers=eng_auth)
+                      json={"response": "accepted", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     res = await _transition(client, eng_auth, cid, "approved")

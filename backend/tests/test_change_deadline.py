@@ -394,3 +394,64 @@ async def test_in_assessment_gate_skips_deadline_for_internal(session_factory, s
         blocker = await ChangeService._guard(session, cust, "in_assessment")
         # customer-relevant without a quote deadline still blocks
         assert blocker is not None and "deadline" in blocker.lower()
+
+
+@pytest.mark.asyncio
+async def test_acceptance_requires_release_deadline(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Accept needs date", "reason": "r",
+        "customer_relevant": True,
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response",
+                            json={"response": "accepted"}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "release deadline" in res.json()["detail"].lower()
+
+    due = (datetime.utcnow() + timedelta(days=45)).isoformat()
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
+        "response": "accepted", "release_due_date": due,
+        "release_due_reason": "customer PO timing",
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["customer_response"] == "accepted"
+    assert body["release_due_date"] is not None
+    assert body["release_due_reason"] == "customer PO timing"
+    assert body["active_deadline"] == "release"
+
+
+@pytest.mark.asyncio
+async def test_decline_does_not_require_release_deadline(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Decline no date", "reason": "r",
+        "customer_relevant": True,
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response",
+                            json={"response": "declined"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
+async def test_acceptance_release_deadline_audited(client, eng_auth, seed, session_factory):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Audit release DL", "reason": "r",
+        "customer_relevant": True,
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+    due = (datetime.utcnow() + timedelta(days=45)).isoformat()
+    await client.post(f"/api/v1/changes/{cid}/customer-response", json={
+        "response": "accepted", "release_due_date": due,
+    }, headers=eng_auth)
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(ChangeChangelog).where(
+                ChangeChangelog.change_id == cid,
+                ChangeChangelog.action == "release_deadline_set",
+            ))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].field_name == "release_due_date"
+        assert rows[0].old_value is None
+        assert rows[0].new_value is not None
