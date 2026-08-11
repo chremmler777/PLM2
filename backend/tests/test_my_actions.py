@@ -12,13 +12,13 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def rd_member_auth(client, session_factory, seed):
-    """A user who is a member of the 'R&D' department (not the change lead)."""
+    """A user who is a member of the 'Development' department (not the change lead)."""
     from app.auth.security import get_password_hash
     from app.models.entities import User
     from app.models.workflow import Department, UserDepartment
 
     async with session_factory() as s:
-        dept = Department(name="R&D", flow_type="action", is_active=True)
+        dept = Department(name="Development", flow_type="action", is_active=True)
         s.add(dept)
         await s.flush()
         user = User(

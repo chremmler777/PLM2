@@ -28,7 +28,7 @@ ECM_BEWERTUNG = {
             ("Department assessment", [
                 # Technical disciplines each assess their own scope (Responsible);
                 # support functions are Informed. See migration 034.
-                ("R&D", "R"), ("Tooling Engineer", "R"), ("Manufacturing Engineer", "R"),
+                ("Development", "R"), ("Tool Engineer", "R"), ("Manufacturing Engineer", "R"),
                 ("Process Engineer", "R"), ("APQP", "R"), ("Quality", "R"),
                 ("Logistics", "I"), ("Project Manager", "I"), ("Sales", "I"),
             ], {}),
@@ -36,7 +36,7 @@ ECM_BEWERTUNG = {
         ("Summation & Budget", [
             ("Review cost summary & release budget", [
                 ("Project Manager", "R"), ("Sales", "A"),
-                ("R&D", "C"), ("Tooling Engineer", "C"),
+                ("Development", "C"), ("Tool Engineer", "C"),
                 ("Manufacturing Engineer", "I"), ("Quality", "I"), ("Logistics", "I"),
                 ("Production", "I"), ("Purchasing", "I"), ("Production control", "I"),
             ], {}),
@@ -44,7 +44,7 @@ ECM_BEWERTUNG = {
         ("Customer activities", [
             ("Send customer quote / record customer response", [
                 ("Sales", "R"), ("Project Manager", "A"),
-                ("Quality", "I"), ("R&D", "I"),
+                ("Quality", "I"), ("Development", "I"),
             ], {}),
         ]),
     ],
@@ -58,20 +58,20 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
         "stages": [
             ("Design", [
                 ("Update 3D data", [
-                    (konstruktion_r, "R"), ("R&D", "A"), ("Project Manager", "I"),
+                    (konstruktion_r, "R"), ("Development", "A"), ("Project Manager", "I"),
                 ], {"requires_cad_evidence": True}),
                 ("Update drawings & documentation", [
-                    (konstruktion_r, "R"), ("R&D", "A"), ("Quality", "S"),
+                    (konstruktion_r, "R"), ("Development", "A"), ("Quality", "S"),
                 ], {}),
             ]),
             ("Design check", [
                 ("Design review", [
-                    ("R&D", "R"), ("Quality", "A"), ("Manufacturing Engineer", "C"),
+                    ("Development", "R"), ("Quality", "A"), ("Manufacturing Engineer", "C"),
                 ], {"four_eyes": True}),
             ]),
             ("Industrialization", [
                 ("Implement tool change", [
-                    ("Production", "R"), ("Tooling Engineer", "A"), ("Production control", "I"),
+                    ("Production", "R"), ("Tool Engineer", "A"), ("Production control", "I"),
                 ], {}),
                 ("Adjust process / routing sheets", [
                     ("Manufacturing Engineer", "R"), ("Project Manager", "A"), ("Production", "C"),
@@ -97,8 +97,8 @@ def _ecn_umsetzung(name: str, konstruktion_r: str) -> dict:
     }
 
 
-ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tooling Engineer")
-ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Implementation (Article)", "R&D")
+ECN_UMSETZUNG_WERKZEUG = _ecn_umsetzung("ECN Implementation (Tool)", "Tool Engineer")
+ECN_UMSETZUNG_ARTIKEL = _ecn_umsetzung("ECN Implementation (Article)", "Development")
 
 CHECK_WF_CATEGORY_TEMPLATE = {
     "article": "ECN Implementation (Article)",
@@ -268,7 +268,7 @@ async def seed_change_workflows(session: AsyncSession) -> None:
 # Create-if-absent per (user, department) pair: never removes memberships an
 # admin has since set up by hand, and safe to call on every startup.
 DEV_MEMBERSHIPS = {
-    "test@example.com": ["R&D"],
+    "test@example.com": ["Development"],
     "admin@example.com": None,  # None = every active department
 }
 

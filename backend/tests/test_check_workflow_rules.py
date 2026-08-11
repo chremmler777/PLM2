@@ -204,10 +204,10 @@ async def test_seeded_ecn_template_end_to_end(
         tmpl_id = tmpl.id
         inst = await WorkflowService.start_workflow(
             s, part["revision_id"], tmpl_id, seed["engineer_id"])
-        # Stage 1 ("Design") is all R&D-R; grant the engineer membership
+        # Stage 1 ("Design") is all Development-R; grant the engineer membership
         # so complete_task's department-membership guard doesn't block them.
         rd = (await s.execute(select(Department).where(
-            Department.name == "R&D"))).scalar_one()
+            Department.name == "Development"))).scalar_one()
         s.add(UserDepartment(user_id=seed["engineer_id"], department_id=rd.id))
         await s.commit()
         inst_id = inst.id

@@ -121,7 +121,7 @@ class ChangeRequest(Base):
     internal_approved_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     internal_approval_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Task 18: Engineering (R&D) owns the affected-items decision. Set together
+    # Task 18: Development owns the affected-items decision. Set together
     # by POST /impact/confirm; cleared together whenever the impacted-item set
     # changes afterwards (re-confirmation required). in_implementation's soft
     # guard reads impact_confirmed_at.

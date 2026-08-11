@@ -113,23 +113,26 @@ async def seed_test_data():
                 session.add(admin_user)
 
             # Create workflow departments
+            # The ECR nine in order, then Quality (co-signs approvals), then
+            # the non-ECR roles kept for history (see migration 043 — they are
+            # deactivated there, this list only creates what is missing).
             departments_data = [
-                ("Developer", "action", 1),
-                ("APQP", "action", 4),
-                ("Sales", "action", 5),
-                ("Project Manager", "action", 6),
-                ("Planner/Scheduler", "info", 7),
-                ("Operations Manager", "info", 8),
-                # Change-management cost departments (D2–D10)
-                ("R&D", "action", 9),
-                ("Tooling Engineer", "action", 10),
-                ("Manufacturing Engineer", "action", 11),
-                ("Quality", "action", 12),
-                ("Logistics", "action", 13),
-                ("Production", "action", 14),
-                ("Purchasing", "action", 15),
-                ("Production control", "action", 16),
-                ("Process Engineer", "action", 17),
+                ("Sales", "action", 1),
+                ("Project Manager", "action", 2),
+                ("APQP", "action", 3),
+                ("Tool Engineer", "action", 4),
+                ("Manufacturing Engineer", "action", 5),
+                ("Process Engineer", "action", 6),
+                ("Development", "action", 7),
+                ("Scheduling", "info", 8),
+                ("Packaging Engineer", "action", 9),
+                ("Quality", "action", 10),
+                ("Logistics", "action", 11),
+                ("Production", "action", 12),
+                ("Purchasing", "action", 13),
+                ("Production control", "action", 14),
+                ("Operations Manager", "info", 15),
+                ("Developer", "action", 16),
             ]
             for dept_name, flow_type, sort_order in departments_data:
                 result = await session.execute(
@@ -162,7 +165,7 @@ async def seed_test_data():
                         await session.flush()
                         plants[name] = p
                 rate_table = {
-                    "Sales": (50.0, None), "R&D": (65.0, 21.5), "Tooling Engineer": (65.0, 21.5),
+                    "Sales": (50.0, None), "Development": (65.0, 21.5), "Tool Engineer": (65.0, 21.5),
                     "Manufacturing Engineer": (65.0, 21.5), "Quality": (45.0, 21.5), "Logistics": (50.0, 21.5),
                     "Production": (55.0, 21.5), "Purchasing": (50.0, 21.5),
                     "Production control": (50.0, 21.5),
@@ -191,7 +194,7 @@ async def seed_test_data():
                         "Angebotserstellung/ tender preparation",
                         "Bestellabwicklung / Purchase order processing",
                     ],
-                    "R&D": [
+                    "Development": [
                         "Änderungsanfrage bewerten",
                         "Herstellbarkeitsbewertung durchführen",
                         "2D-Konstruktion Produkt / 2D construction product",
@@ -217,7 +220,7 @@ async def seed_test_data():
                         "Aktualisierung Zeichnungen / Update drawings",
                         "SC/CC- Merkmale// SC/CC- features",
                     ],
-                    "Tooling Engineer": [
+                    "Tool Engineer": [
                         "2D-Konstruktion Betriebsmittel / 2D construction equipment",
                         "3D-Konstruktion Betriebsmittel / 3D construction equipment",
                         "Stückliste / equipment object list",

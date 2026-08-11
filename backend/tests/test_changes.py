@@ -264,7 +264,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
-    # Task 18: Engineering (R&D) must confirm the impacted-item set before kickoff.
+    # Task 18: Development must confirm the impacted-item set before kickoff.
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
     res = await _transition(client, eng_auth, cid, "in_implementation")

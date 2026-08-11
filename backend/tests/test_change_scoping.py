@@ -82,7 +82,7 @@ async def test_recommended_departments_are_stage1_responsible(
         f"/api/v1/changes/{change['id']}/recommended-departments", headers=admin_auth)
     assert res.status_code == 200, res.text
     names = {d["name"] for d in res.json()}
-    assert names == {"R&D", "Tooling Engineer", "Manufacturing Engineer",
+    assert names == {"Development", "Tool Engineer", "Manufacturing Engineer",
                      "Process Engineer", "APQP", "Quality"}
     # support functions (Informed) are not recommended
     assert "Sales" not in names and "Logistics" not in names
@@ -232,7 +232,7 @@ async def test_scoping_selection_filters_stage1_fanout(
     async with session_factory() as s:
         # Two Responsible stage-1 assessors (both produce assessment rows).
         picked = [d for (d,) in await s.execute(
-            select(Department.id).where(Department.name.in_(["Quality", "R&D"])))]
+            select(Department.id).where(Department.name.in_(["Quality", "Development"])))]
     assert len(picked) == 2
     await advance_to_assessment(client, admin_auth, session_factory,
                                 change["id"], dept_ids=picked)

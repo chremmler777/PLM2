@@ -982,7 +982,7 @@ class ChangeService:
     async def _reset_impact_confirmation(
         session: AsyncSession, change: ChangeRequest, user_id: int,
     ) -> None:
-        """Task 18: the impacted-item set changed after Engineering (R&D)
+        """Task 18: the impacted-item set changed after Development
         confirmed it - invalidate the confirmation so it must be redone."""
         if change.impact_confirmed_at is None:
             return
@@ -1038,8 +1038,8 @@ class ChangeService:
     async def confirm_impact(
         session: AsyncSession, change: ChangeRequest, user_id: int,
     ) -> ChangeRequest:
-        """Task 18: Engineering (R&D) confirms the lead-proposed impacted-item
-        set. Idempotent by design - re-confirming (e.g. by a different R&D
+        """Task 18: Development confirms the lead-proposed impacted-item
+        set. Idempotent by design - re-confirming (e.g. by a different Development
         member) simply refreshes who/when; it does not error, since the set
         may legitimately be re-reviewed without having changed."""
         if not change.impacted_items:
@@ -1048,13 +1048,13 @@ class ChangeService:
         change.impact_confirmed_at = datetime.utcnow()
         await ChangeService.append_changelog(
             session, change, "impact_confirmed",
-            "Impacted-item set confirmed by Engineering (R&D)", user_id,
+            "Impacted-item set confirmed by Development", user_id,
         )
         return change
 
     @staticmethod
     async def user_can_confirm_impact(session: AsyncSession, user: User) -> bool:
-        """Task 18's confirm-impact rule (only an R&D department member or an
+        """Task 18's confirm-impact rule (only a Development department member or an
         admin), extracted so both POST /impact/confirm (changes.py) and the
         Task 19 my-actions assembly below use the identical check instead of
         duplicating it."""
@@ -1062,7 +1062,7 @@ class ChangeService:
             return True
         from app.services.workflow_service import WorkflowService
         rd_dept = (await session.execute(
-            select(Department).where(Department.name == "R&D"))).scalar_one_or_none()
+            select(Department).where(Department.name == "Development"))).scalar_one_or_none()
         if rd_dept is None:
             return False
         dept_ids = await WorkflowService.get_user_department_ids(session, user.id)

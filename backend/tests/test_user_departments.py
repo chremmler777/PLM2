@@ -91,7 +91,7 @@ async def test_seed_dev_department_memberships_is_idempotent(session_factory):
         org = Organization(name="O", code="o", is_active=True)
         s.add(org)
         await s.flush()
-        rd = Department(name="R&D", flow_type="action", is_active=True)
+        rd = Department(name="Development", flow_type="action", is_active=True)
         other = Department(name="Other Dept", flow_type="action", is_active=True)
         s.add_all([rd, other])
         await s.flush()

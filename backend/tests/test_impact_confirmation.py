@@ -1,6 +1,6 @@
 # backend/tests/test_impact_confirmation.py
-"""Task 18: Engineering (R&D) owns the affected-items decision. The lead
-proposes impacted items (existing flow, unchanged); an R&D department member
+"""Task 18: Development owns the affected-items decision. The lead
+proposes impacted items (existing flow, unchanged); a Development department member
 confirms the set; kickoff (approved -> in_implementation) is soft-guarded on
 that confirmation, bypassable only via an approved transition deviation."""
 import pytest
@@ -19,13 +19,13 @@ _RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 @pytest_asyncio.fixture
 async def rd_member_auth(client, session_factory, seed):
-    """A user who is a member of the 'R&D' department (not the change lead)."""
+    """A user who is a member of the 'Development' department (not the change lead)."""
     from app.auth.security import get_password_hash
     from app.models.entities import User
     from app.models.workflow import Department, UserDepartment
 
     async with session_factory() as s:
-        dept = Department(name="R&D", flow_type="action", is_active=True)
+        dept = Department(name="Development", flow_type="action", is_active=True)
         s.add(dept)
         await s.flush()
         user = User(
@@ -75,7 +75,7 @@ async def test_confirm_as_rd_member_sets_fields_and_changelog(
 
 
 async def test_confirm_as_non_member_403(client, eng_auth, seed, part):
-    """The lead (engineer) is not in R&D and is not admin -> 403."""
+    """The lead (engineer) is not in Development and is not admin -> 403."""
     cid = await _create_change_with_impacted_item(client, eng_auth, seed, part)
     res = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=eng_auth)
     assert res.status_code == 403, res.text
@@ -126,7 +126,7 @@ async def test_confirm_response_includes_deadline_state(
 
 
 async def test_confirm_is_idempotent(client, eng_auth, rd_member_auth, seed, part):
-    """Re-confirming (e.g. a second R&D reviewer) refreshes who/when instead
+    """Re-confirming (e.g. a second Development reviewer) refreshes who/when instead
     of erroring - the set may legitimately be re-reviewed unchanged."""
     cid = await _create_change_with_impacted_item(client, eng_auth, seed, part)
     first = await client.post(f"/api/v1/changes/{cid}/impact/confirm",
@@ -239,7 +239,7 @@ async def test_deviation_bypasses_impact_confirmation_guard(
     cid = await _approved_change_via_api(client, eng_auth, admin_auth, seed, departments,
                                          session_factory)
     dev = (await client.post(f"/api/v1/changes/{cid}/deviations", json={
-        "to_status": "in_implementation", "reason": "kickoff before R&D signs off"},
+        "to_status": "in_implementation", "reason": "kickoff before Development signs off"},
         headers=eng_auth)).json()
     ok = await client.post(
         f"/api/v1/changes/{cid}/deviations/{dev['id']}/decide",

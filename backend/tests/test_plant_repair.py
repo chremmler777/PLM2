@@ -33,7 +33,7 @@ async def test_merges_usa_dup_and_repoints_all_fks(session_factory, seed):
         s.add_all([canonical, dup])
         await s.flush()
 
-        dept = Department(name="R&D", flow_type="action", is_active=True, sort_order=1)
+        dept = Department(name="Development", flow_type="action", is_active=True, sort_order=1)
         s.add(dept)
         await s.flush()
 

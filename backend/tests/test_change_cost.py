@@ -32,7 +32,7 @@ async def test_replace_cost_lines_computes_internal_cost(session_factory, seed):
     from app.services.cost_service import CostService
     async with session_factory() as s:
         plant = (await s.execute(select(Plant))).scalars().first()
-        dep = Department(name="R&D", flow_type="action"); s.add(dep); await s.flush()
+        dep = Department(name="Development", flow_type="action"); s.add(dep); await s.flush()
         s.add(DepartmentRate(department_id=dep.id, plant_id=plant.id,
                              hourly_rate=65.0, min_factor=0.6, effective_from=date(2026, 1, 1)))
         change = ChangeRequest(change_number="CR-T-2", project_id=seed["project_id"],

@@ -1,4 +1,4 @@
-"""The impacted set must be LOCKED (R&D-confirmed) before a change may enter
+"""The impacted set must be LOCKED (Development-confirmed) before a change may enter
 assessment. Hard gate: no approved transition deviation can bypass it."""
 import pytest
 

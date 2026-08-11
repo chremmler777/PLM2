@@ -19,7 +19,7 @@ class MeetingService:
     @staticmethod
     async def user_is_pm(session: AsyncSession, user: User) -> bool:
         """Admin, or member of the 'Project Manager' department (mirrors the
-        pattern of ChangeService.user_can_confirm_impact for R&D)."""
+        pattern of ChangeService.user_can_confirm_impact for Development)."""
         if user.role == "admin":
             return True
         from app.services.workflow_service import WorkflowService

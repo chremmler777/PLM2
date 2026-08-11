@@ -513,15 +513,15 @@ async def confirm_impact(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Task 18: Engineering (R&D) confirms the lead-proposed impacted-item set.
-    Only an R&D department member or an admin may confirm."""
+    """Task 18: Development confirms the lead-proposed impacted-item set.
+    Only a Development department member or an admin may confirm."""
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     if not await ChangeService.user_can_confirm_impact(db, current_user):
         raise HTTPException(
             status_code=403,
-            detail="Only an R&D department member or an admin may confirm impact")
+            detail="Only a Development department member or an admin may confirm impact")
     if not change.impacted_items:
         raise HTTPException(status_code=409, detail="No impacted items to confirm")
     try:
