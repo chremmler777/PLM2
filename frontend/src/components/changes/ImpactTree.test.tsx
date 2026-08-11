@@ -118,7 +118,7 @@ describe('ImpactTree', () => {
   it('shows a Confirm impact (R&D) button when unconfirmed, and calls the API', async () => {
     wrap(<ImpactTree changeId={7} status="captured" />)
     await screen.findByText('Child')
-    const btn = screen.getByRole('button', { name: /Confirm impact \(R&D\)/ })
+    const btn = screen.getByRole('button', { name: /Confirm impact \(Development\)/ })
     fireEvent.click(btn)
     await waitFor(() => expect(changesApi.confirmImpact).toHaveBeenCalledWith(7))
   })
@@ -126,14 +126,14 @@ describe('ImpactTree', () => {
   it('hides the confirm button for a non-member (canConfirm=false)', async () => {
     wrap(<ImpactTree changeId={7} status="captured" canConfirm={false} />)
     await screen.findByText('Child')
-    expect(screen.queryByRole('button', { name: /Confirm impact \(R&D\)/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Confirm impact \(Development\)/ })).toBeNull()
   })
 
   it('shows a confirmed badge with who/when instead of the button once confirmed', async () => {
     wrap(<ImpactTree changeId={7} status="captured"
       impactConfirmedByName="RD Member" impactConfirmedAt="2026-07-01T12:00:00" />)
     await screen.findByText('Child')
-    expect(screen.queryByRole('button', { name: /Confirm impact \(R&D\)/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Confirm impact \(Development\)/ })).toBeNull()
     expect(screen.getByText(/RD Member/)).toBeDefined()
   })
 

@@ -9,6 +9,7 @@ vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 
 const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn() } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
+vi.mock('./ActsAsSwitch', () => ({ default: () => <div>mock-acts-as-switch</div> }))
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -59,5 +60,19 @@ describe('Sidebar nav groups', () => {
     authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     expect(await screen.findByText('3')).toBeDefined()
+  })
+})
+
+describe('Sidebar acting-as control', () => {
+  afterEach(cleanup)
+
+  it('offers the act-as switch to an admin only', async () => {
+    authMock.current = { role: 'admin', username: 'tester', logout: vi.fn() }
+    wrap(<Sidebar />)
+    expect(await screen.findByText('mock-acts-as-switch')).toBeDefined()
+    cleanup()
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
+    wrap(<Sidebar />)
+    expect(screen.queryByText('mock-acts-as-switch')).toBeNull()
   })
 })

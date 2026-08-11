@@ -9,6 +9,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
 import client from '../../api/client';
+import ActsAsSwitch from './ActsAsSwitch';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -139,6 +140,7 @@ export default function Sidebar() {
             )}
           </div>
         )}
+        {role === 'admin' && <ActsAsSwitch collapsed={isCollapsed} />}
         <NotificationBell collapsed={isCollapsed} />
         <button
           onClick={logout}

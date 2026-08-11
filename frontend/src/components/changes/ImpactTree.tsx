@@ -24,7 +24,7 @@ interface Props {
   status: ChangeStatus
   impactConfirmedByName?: string | null
   impactConfirmedAt?: string | null
-  /** Task 19: whether the current user may confirm impact (R&D member or
+  /** Task 19: whether the current user may confirm impact (Development member or
       admin — server-mirrored via GET /my-actions). Defaults to true so
       existing callers that don't pass it keep prior behaviour. */
   canConfirm?: boolean

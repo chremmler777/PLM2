@@ -19,7 +19,10 @@ vi.mock('../../api/changes', () => ({
   },
 }))
 vi.mock('../../hooks/queries/useWorkflows', () => ({
-  useDepartments: () => ({ data: [{ id: 2, name: 'Quality' }] }),
+  useDepartments: () => ({ data: [
+    { id: 2, name: 'Quality', is_active: true },
+    { id: 8, name: 'Logistics', is_active: false },
+  ] }),
 }))
 // ConcernStrip has its own suite and its own auth/query needs; this file is
 // about the meeting flow.
@@ -133,5 +136,15 @@ describe('ScopingPanel keeps the discussion out of the record', () => {
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
     expect(body).not.toHaveProperty('notes')
+  })
+})
+
+describe('ScopingPanel department picker', () => {
+  afterEach(cleanup)
+
+  it('offers only active departments', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    expect(await screen.findByRole('button', { name: /Quality/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Logistics/ })).toBeNull()
   })
 })

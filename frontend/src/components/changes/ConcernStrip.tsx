@@ -31,7 +31,7 @@ export default function ConcernStrip({
   /** Assessment phase: every flag belongs to a department, and dropping one
    *  needs a written resolution. */
   scoped?: boolean
-  departments?: { id: number; name: string }[]
+  departments?: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds?: number[]
 }) {
   const qc = useQueryClient()
@@ -44,8 +44,9 @@ export default function ConcernStrip({
   const [resolution, setResolution] = useState('')
 
   // You flag for your own department; an admin may flag for any of them.
-  const options = isAdmin ? departments
-    : departments.filter((d) => myDepartmentIds.includes(d.id))
+  const selectable = departments.filter((d) => d.is_active !== false)
+  const options = isAdmin ? selectable
+    : selectable.filter((d) => myDepartmentIds.includes(d.id))
   const [deptId, setDeptId] = useState<number | undefined>(undefined)
   const effectiveDept = deptId ?? options[0]?.id
   const deptName = (id?: number | null) =>

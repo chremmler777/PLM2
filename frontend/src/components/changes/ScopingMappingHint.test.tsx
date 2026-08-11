@@ -10,7 +10,7 @@ vi.mock('../../api/changes', () => ({
 }))
 
 const departments = [
-  { id: 1, name: 'R&D' },
+  { id: 1, name: 'Development' },
   { id: 2, name: 'Sales' },
   { id: 3, name: 'Tool Engineer' },
 ]
@@ -44,7 +44,7 @@ describe('ScopingMappingHint', () => {
       assessments={[assessment(1), assessment(2)]}
       departments={departments} />))
     expect(await screen.findByText(/From scoping:/)).toBeDefined()
-    expect(screen.getByText(/R&D ✓/)).toBeDefined()
+    expect(screen.getByText(/Development ✓/)).toBeDefined()
     expect(screen.getByText(/Sales ✓/)).toBeDefined()
     expect(screen.getByText(/Tool Engineer has no blocking role in the routing template — no assessment task/)).toBeDefined()
   })

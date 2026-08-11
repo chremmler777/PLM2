@@ -294,7 +294,9 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
               )}
             </label>
             <div className="flex flex-wrap gap-2">
-              {departments.map((d) => {
+              {/* Retired departments stay resolvable by name on old records but
+                  are never offered for new work. */}
+              {departments.filter((d) => d.is_active).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
                 return (
                   <button key={d.id} type="button" onClick={() => toggleDept(d.id)}
