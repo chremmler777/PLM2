@@ -127,6 +127,9 @@ export interface ChangeRequest {
   required_by_date: string | null;
   required_by_reason: string | null;
   deadline_state: 'on_track' | 'at_risk' | 'overdue' | null;
+  /** The project the change belongs to, denormalised for lists and headers. */
+  project_number?: string | null;
+  project_name?: string | null;
   /** Departments with an open assessment concern — their submit is blocked. */
   blocked_department_ids?: number[];
   quoted_at: string | null;
@@ -163,6 +166,8 @@ export interface ChangeTask {
   change_id: number;
   change_number: string;
   title: string;
+  project_number?: string | null;
+  project_name?: string | null;
   due_date: string | null;
   overdue: boolean;
   // assessment rows

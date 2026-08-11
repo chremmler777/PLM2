@@ -306,7 +306,7 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                     className={`px-2.5 py-1 rounded-full text-xs border ${deptIds.includes(d.id)
                       ? 'bg-sky-600 text-white border-sky-500'
                       : 'bg-slate-900 text-slate-300 border-slate-600'}`}>
-                    {isRec && <span className="mr-1">★</span>}{d.name}
+                    {d.name}
                   </button>
                 )
               })}

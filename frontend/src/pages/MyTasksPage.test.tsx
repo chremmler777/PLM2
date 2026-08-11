@@ -85,6 +85,13 @@ describe('MyTasksPage change tasks by kind', () => {
     return screen.findByText('GB-CM-0007')
   }
 
+  it('names the project on the row, number first', async () => {
+    await renderWith(changeTask({
+      kind: 'impact_confirm', project_number: '1864', project_name: 'VW426 Atlas',
+    }))
+    expect(screen.getByTestId('task-project').textContent).toBe('1864 · VW426 Atlas')
+  })
+
   it('names the missing capture pieces on a kickoff row and opens the overview', async () => {
     await renderWith(changeTask({ kind: 'kickoff', missing: ['description', 'attachment'] }))
     expect(screen.getByText(t('tasks.kind.kickoff'))).toBeDefined()

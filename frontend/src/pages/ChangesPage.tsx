@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { changesApi } from '../api/changes';
 import { STATUS_LABELS, STATUS_PILL, stepPosition } from '../lib/changeStatus';
+import { projectLabel } from '../lib/project';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 
@@ -53,6 +54,7 @@ export default function ChangesPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-700 text-left text-slate-400">
               <tr>
+                <th className="px-4 py-3">Project</th>
                 <th className="px-4 py-3">Number</th>
                 <th className="px-4 py-3">Title</th>
                 <th className="px-4 py-3">Type</th>
@@ -67,6 +69,14 @@ export default function ChangesPage() {
                 const pos = stepPosition(c.status, c.customer_relevant);
                 return (
                 <tr key={c.id} className="border-t border-slate-700 hover:bg-slate-800/60">
+                  <td className="px-4 py-3 max-w-[14rem]">
+                    {projectLabel(c.project_number, c.project_name) ? (
+                      <span className="block truncate text-slate-300"
+                        title={projectLabel(c.project_number, c.project_name) ?? undefined}>
+                        {projectLabel(c.project_number, c.project_name)}
+                      </span>
+                    ) : <span className="text-slate-600">—</span>}
+                  </td>
                   <td className="px-4 py-3 font-mono">
                     <Link className="text-blue-600 hover:underline" to={`/changes/${c.id}`}>
                       {c.change_number}
@@ -97,7 +107,7 @@ export default function ChangesPage() {
                 </tr>
               );})}
               {changes.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No changes yet.</td></tr>
               )}
             </tbody>
           </table>

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ConcernStrip from './ConcernStrip'
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -105,26 +106,48 @@ describe('ConcernStrip in the assessment phase', () => {
   })
   afterEach(cleanup)
 
-  it('raises the flag for the raiser own department', async () => {
+  it('makes a non-Development member choose their department before flagging', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={depts} myDepartmentIds={[4]} />)
     fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
-    // Only the member's own department is offered, and it is preselected.
+    // Nothing is guessed: the placeholder stands until the user picks.
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
-    expect(picker.value).toBe('4')
-    expect(picker.querySelectorAll('option')).toHaveLength(1)
+    expect(picker.value).toBe('')
+    expect(screen.getByText(t('concern.pickDepartment'))).toBeTruthy()
     fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'gauge missing' } })
+    expect((screen.getByRole('button', { name: /^Flag$/ }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(picker, { target: { value: '4' } })
     fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }))
     await waitFor(() => expect(changesApi.raiseConcern)
       .toHaveBeenCalledWith(7, 'needs_info', 'gauge missing', 4))
   })
 
-  it('offers an admin every department', async () => {
+  it('preselects Development for a member of several departments', async () => {
+    const many = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 5, name: 'Manufacturing Engineer', is_active: true },
+      { id: 6, name: 'Development', is_active: true },
+    ]
+    wrap(<ConcernStrip changeId={7} editable scoped
+      departments={many} myDepartmentIds={[5, 6]} />)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    // Development is the master role, whichever membership comes first — and
+    // being preselected, no placeholder is offered.
+    expect((screen.getByLabelText(/Department/) as HTMLSelectElement).value).toBe('6')
+    expect(screen.queryByText(t('concern.pickDepartment'))).toBeNull()
+  })
+
+  it('offers an admin every department, still unpicked', async () => {
     authState.current = { userId: 5, isAdmin: true }
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[]} />)
     fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
-    expect((screen.getByLabelText(/Department/) as HTMLSelectElement)
-      .querySelectorAll('option')).toHaveLength(2)
+    const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
+    // Placeholder + the two active departments; nothing preselected for an
+    // admin who is in none of them.
+    expect(picker.value).toBe('')
+    expect(picker.querySelectorAll('option')).toHaveLength(3)
+    fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'no capacity' } })
+    expect((screen.getByRole('button', { name: /^Flag$/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('will not drop a department flag without saying how it was addressed', async () => {
@@ -201,5 +224,29 @@ describe('ConcernStrip attribution in scoping', () => {
     const withdrawLinks = screen.getAllByRole('button', { name: /withdraw/ })
     fireEvent.click(withdrawLinks[1])
     expect((screen.getByTestId('concern-withdraw-confirm') as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('ConcernStrip refused flag', () => {
+  beforeEach(() => {
+    authState.current = { userId: 5, isAdmin: false }
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    vi.mocked(changesApi.raiseConcern).mockReset()
+  })
+  afterEach(cleanup)
+
+  it('shows the API refusal next to the form and keeps what was typed', async () => {
+    vi.mocked(changesApi.raiseConcern).mockRejectedValue({
+      response: { status: 400, data: { detail:
+        'Only Project Management, the change lead, or an admin may manage scoping meetings' } },
+    })
+    wrap(<ConcernStrip changeId={7} editable />)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'tool risk' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }))
+    const alert = await screen.findByTestId('concern-error')
+    expect(alert.textContent).toContain('Only Project Management')
+    // The form stays open with the note — the failure must not eat the typing.
+    expect((screen.getByLabelText(/^Concern$/) as HTMLInputElement).value).toBe('tool risk')
   })
 })

@@ -63,11 +63,13 @@ describe('ScopingPanel', () => {
     expect(screen.queryByTestId('deadline-chip')).toBeNull()
     expect(screen.queryByText(/required before assessment/i)).toBeNull()
   })
-  it('pre-marks the recommended assessor departments with a star', async () => {
+  it('pre-selects the recommended assessor departments', async () => {
     render(wrap(<ScopingPanel change={change()} />))
-    // "Quality" is recommended → button pre-selected (sky bg) and starred.
-    const qualityBtn = await screen.findByRole('button', { name: /★\s*Quality/ })
-    expect(qualityBtn.className).toContain('bg-sky-600')
+    // "Quality" is recommended → button pre-selected (sky bg), no star marker.
+    const qualityBtn = await screen.findByRole('button', { name: /Quality/ })
+    // The recommendation arrives with its query, then seeds the selection.
+    await waitFor(() => expect(qualityBtn.className).toContain('bg-sky-600'))
+    expect(qualityBtn.textContent).toBe('Quality')
   })
   it('adds a picked contact as a removable chip', async () => {
     const { container } = render(wrap(<ScopingPanel change={change()} />))

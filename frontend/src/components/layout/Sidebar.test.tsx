@@ -3,9 +3,11 @@ import { render, screen, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Sidebar from './Sidebar'
+import { changesApi } from '../../api/changes'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
+vi.mock('../../api/changes', () => ({ changesApi: { myTasks: vi.fn().mockResolvedValue([]) } }))
 
 const authMock = vi.hoisted(() => ({ current: { role: 'admin' as string | null, username: 'tester', logout: vi.fn() } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
@@ -74,5 +76,36 @@ describe('Sidebar acting-as control', () => {
     authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
     wrap(<Sidebar />)
     expect(screen.queryByText('mock-acts-as-switch')).toBeNull()
+  })
+})
+
+describe('Sidebar My Tasks counter', () => {
+  beforeEach(() => {
+    authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/open-task-count') return Promise.resolve({ data: { count: 3 } })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  it('sums workflow tasks and change tasks into one badge', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      { kind: 'kickoff' }, { kind: 'assessment' },
+    ] as never)
+    wrap(<Sidebar />)
+    const badge = await screen.findByText('5')
+    expect(badge.closest('button')?.textContent).toContain('My Tasks')
+  })
+
+  it('shows no badge when nothing is waiting', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/open-task-count') return Promise.resolve({ data: { count: 0 } })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<Sidebar />)
+    const myTasks = await screen.findByRole('button', { name: /My Tasks/ })
+    expect(myTasks.textContent?.replace(/[^0-9]/g, '')).toBe('')
   })
 })

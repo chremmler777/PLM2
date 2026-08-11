@@ -1,4 +1,4 @@
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -30,6 +30,7 @@ import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import { STATUS_LABELS, OFF_PATH_STATUSES } from '../lib/changeStatus';
+import { projectLabel } from '../lib/project';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -255,6 +256,14 @@ export default function ChangeDetailPage() {
         <h1 className="text-2xl font-semibold flex items-center gap-3">
           <span>
             <span className="font-mono text-slate-400">{change.change_number}</span> — {change.title}
+            {/* Which project this belongs to, one line under the name. */}
+            {projectLabel(change.project_number, change.project_name) && (
+              <Link data-testid="change-project"
+                to={`/projects/${change.project_id}`}
+                className="block text-sm font-normal text-slate-400 hover:text-sky-300">
+                {projectLabel(change.project_number, change.project_name)}
+              </Link>
+            )}
           </span>
           {impl?.ready_to_go && (
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100">

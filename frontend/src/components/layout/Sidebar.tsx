@@ -4,11 +4,10 @@
 
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
-import client from '../../api/client';
+import { useOpenTaskCount } from '../../hooks/queries/useOpenTaskCount';
 import ActsAsSwitch from './ActsAsSwitch';
 
 export default function Sidebar() {
@@ -17,12 +16,8 @@ export default function Sidebar() {
   const { logout, username, role } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const { data: taskCount } = useQuery<{ count: number }>({
-    queryKey: ['open-task-count'],
-    queryFn: async () => (await client.get('/v1/workflow-instances/open-task-count')).data,
-    refetchInterval: 60_000,
-  });
-  const openTasks = taskCount?.count ?? 0;
+  // Workflow tasks + change tasks — whatever My Tasks would show.
+  const openTasks = useOpenTaskCount();
 
   const dailyItems = [
     { path: '/dashboard', label: 'Dashboard', icon: '🏠' },

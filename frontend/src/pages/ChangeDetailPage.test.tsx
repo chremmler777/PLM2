@@ -39,6 +39,8 @@ const { change } = vi.hoisted(() => ({
     deadline_state: null,
     impact_confirmed_at: null as string | null,
     blocked_department_ids: [] as number[],
+    project_number: '1864' as string | null,
+    project_name: 'VW426 Atlas' as string | null,
     quoted_at: null,
     quoted_on_time: null as boolean | null,
     active_deadline: null as 'quote' | 'release' | null,
@@ -567,5 +569,28 @@ describe('ChangeDetailPage department on-hold badge', () => {
     const badges = await screen.findAllByTestId('dept-on-hold')
     expect(badges).toHaveLength(1)
     expect(badges[0].closest('span')?.parentElement?.textContent).toContain('Tooling')
+  })
+})
+
+describe('ChangeDetailPage project in the header', () => {
+  afterEach(() => {
+    cleanup()
+    change.project_number = '1864'
+    change.project_name = 'VW426 Atlas'
+  })
+
+  it('names the project under the change, number first, linking to it', async () => {
+    wrap('/changes/1')
+    const link = await screen.findByTestId('change-project')
+    expect(link.textContent).toBe('1864 · VW426 Atlas')
+    expect(link.getAttribute('href')).toBe('/projects/1')
+  })
+
+  it('says nothing when the change carries no project', async () => {
+    change.project_number = null
+    change.project_name = null
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Overview/ })
+    expect(screen.queryByTestId('change-project')).toBeNull()
   })
 })

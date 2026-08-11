@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
+import { preferredDepartmentId } from '../../lib/departments'
 import type { ChangeConcern, ConcernKind } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -42,6 +43,9 @@ export default function ConcernStrip({
   // Which concern is being withdrawn, and the note explaining how it was met.
   const [withdrawing, setWithdrawing] = useState<number | null>(null)
   const [resolution, setResolution] = useState('')
+  // A refused flag must say why in place: a toast is missed, and the typed note
+  // has to survive so the user can fix the problem and send it again.
+  const [failure, setFailure] = useState<string | null>(null)
 
   // In assessment you flag for your own department (admins for any). In scoping
   // the department is mere attribution — anyone may say "this concerns Packaging"
@@ -51,8 +55,11 @@ export default function ConcernStrip({
     : isAdmin ? selectable
     : selectable.filter((d) => myDepartmentIds.includes(d.id))
   const [deptId, setDeptId] = useState<number | undefined>(undefined)
-  // Scoping starts on "Team"; assessment starts on the first department offered.
-  const effectiveDept = deptId ?? (scoped ? options[0]?.id : undefined)
+  // Scoping starts on "Team". Assessment starts on the master department when
+  // the user holds it, and otherwise on nothing at all — they pick.
+  const effectiveDept = deptId ?? (scoped
+    ? preferredDepartmentId(myDepartmentIds, options)
+    : undefined)
   const deptName = (id?: number | null) =>
     id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
 
@@ -67,14 +74,22 @@ export default function ConcernStrip({
 
   const raise = useMutation({
     mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim(), effectiveDept),
-    onSuccess: () => { setNote(''); setAdding(false); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not raise the flag'),
+    onSuccess: () => { setNote(''); setAdding(false); setFailure(null); invalidate() },
+    onError: (e: unknown) => {
+      const detail = errDetail(e) ?? 'Could not raise the flag'
+      setFailure(detail)
+      toast.error(detail)
+    },
   })
   const withdraw = useMutation({
     mutationFn: (vars: { concernId: number; note: string }) =>
       changesApi.withdrawConcern(changeId, vars.concernId, vars.note.trim() || undefined),
-    onSuccess: () => { setWithdrawing(null); setResolution(''); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not withdraw'),
+    onSuccess: () => { setWithdrawing(null); setResolution(''); setFailure(null); invalidate() },
+    onError: (e: unknown) => {
+      const detail = errDetail(e) ?? 'Could not withdraw'
+      setFailure(detail)
+      toast.error(detail)
+    },
   })
 
   const open = concerns.filter((c: ChangeConcern) => c.is_open)
@@ -92,7 +107,7 @@ export default function ConcernStrip({
         )}
         {editable && !adding && (
           <button className="ml-auto text-xs text-sky-300 hover:text-sky-200"
-            onClick={() => setAdding(true)}>+ {t('concern.raise')}</button>
+            onClick={() => { setFailure(null); setAdding(true) }}>+ {t('concern.raise')}</button>
         )}
       </div>
 
@@ -161,6 +176,13 @@ export default function ConcernStrip({
         ))}
       </ul>
 
+      {failure && (
+        <p role="alert" data-testid="concern-error"
+          className="rounded border border-red-800/60 bg-red-950/40 px-2 py-1 text-xs text-red-200">
+          {failure}
+        </p>
+      )}
+
       {adding && (
         <div className="flex gap-2 items-start flex-wrap">
           <select value={kind} onChange={(e) => setKind(e.target.value as ConcernKind)}
@@ -173,7 +195,10 @@ export default function ConcernStrip({
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
               onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-              {!scoped && <option value="">{t('concern.team')}</option>}
+              {scoped
+                ? effectiveDept === undefined
+                  && <option value="">{t('concern.pickDepartment')}</option>
+                : <option value="">{t('concern.team')}</option>}
               {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           )}
@@ -184,7 +209,9 @@ export default function ConcernStrip({
             disabled={!note.trim() || raise.isPending || (scoped && effectiveDept === undefined)}
             onClick={() => raise.mutate()}>{t('concern.raise')}</button>
           <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
-            onClick={() => { setAdding(false); setNote('') }}>{t('common.cancel')}</button>
+            onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
+            {t('common.cancel')}
+          </button>
         </div>
       )}
     </div>

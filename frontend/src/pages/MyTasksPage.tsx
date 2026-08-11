@@ -13,6 +13,7 @@ import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
 import type { ChangeTask } from '../types/change';
+import { projectLabel } from '../lib/project';
 import { toast } from 'sonner';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -284,7 +285,14 @@ function ChangeTasksSection() {
                 <td className="px-4 py-3">
                   <span className="font-mono text-slate-100">{task.change_number}</span>
                 </td>
-                <td className="px-4 py-3 text-slate-100">{task.title}</td>
+                <td className="px-4 py-3 text-slate-100">
+                  {task.title}
+                  {projectLabel(task.project_number, task.project_name) && (
+                    <span data-testid="task-project" className="block text-xs text-slate-400">
+                      {projectLabel(task.project_number, task.project_name)}
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   {task.kind === 'assessment' ? (
                     task.owner_id != null ? (
