@@ -430,6 +430,24 @@ async def recommended_departments(
     return [{"id": i, "name": n} for i, n in rows]
 
 
+@router.get("/{change_id}/assessment-objects")
+async def assessment_objects(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """What each routed department is actually being asked to assess.
+
+    Derived from the impacted set through the existing part relations — the
+    tools that produce the impacted articles, the equipment that assembles
+    them, the gauges that check them — so nobody re-lists what the data
+    already knows. No cost fields: cost belongs to the costing phase.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return {"departments": await ChangeService.assessment_objects(db, change)}
+
+
 @router.get("/{change_id}/routing", response_model=RoutingResponse)
 async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):

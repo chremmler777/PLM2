@@ -1371,6 +1371,137 @@ class ChangeService:
         await ChangeService.transition(session, change, "closed", user_id)
         return change
 
+    # Each routed department assesses the objects in ITS domain. The impacted
+    # set names articles; the tools that produce them, the equipment that
+    # assembles them and the gauges that check them are already recorded as
+    # part relations, so the buckets derive themselves instead of asking
+    # someone to re-list what the data already knows.
+    #
+    # Category -> the object "type" a caller sees. Deliberately renamed:
+    # assembly_equipment is "equipment" in every conversation about it.
+    _OBJECT_TYPE_BY_CATEGORY = {
+        "tool": "tool",
+        "assembly_equipment": "equipment",
+        "eoat": "equipment",
+        "gauge": "gauge",
+        "article": "part",
+    }
+    # Department -> the categories it owns. A department outside this map still
+    # assesses (it just has no objects of its own), and there is no controlled-
+    # document entity in the model yet, so APQP gets gauges only.
+    _DOMAIN_BY_DEPARTMENT = {
+        "Tool Engineer": ("tool",),
+        "Manufacturing Engineer": ("assembly_equipment", "eoat"),
+        "APQP": ("gauge",),
+        "Development": ("article",),
+    }
+
+    @staticmethod
+    async def assessment_objects(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[dict]:
+        """Per-routed-department buckets of the objects that department
+        assesses, derived from the impacted set. Four queries regardless of how
+        many parts or departments are involved."""
+        from app.models.workflow import Department
+
+        # Routed departments = the ones carrying an assessment row on this
+        # change. Ordered by stage then name so the buckets read like the
+        # routing does.
+        routed = {}
+        for a in change.assessments:
+            routed.setdefault(a.department_id, a.stage_order or 0)
+        if not routed:
+            return []
+        names = {d.id: d.name for d in (await session.execute(
+            select(Department).where(Department.id.in_(routed)))).scalars().all()}
+
+        impacted_ids = [i.part_id for i in change.impacted_items]
+
+        async def _step(part_ids: list[int]) -> dict[int, set[int]]:
+            """part_id -> everything related to it, in either direction. A tool
+            *produces* an article, a gauge *checks* it, equipment *assembles*
+            it, and serves/feeds run either way — the direction is a label, not
+            a filter."""
+            if not part_ids:
+                return {}
+            rows = (await session.execute(
+                select(PartRelation).where(
+                    PartRelation.from_part_id.in_(part_ids)
+                    | PartRelation.to_part_id.in_(part_ids)))).scalars().all()
+            out: dict[int, set[int]] = {}
+            wanted = set(part_ids)
+            for r in rows:
+                if r.from_part_id in wanted:
+                    out.setdefault(r.from_part_id, set()).add(r.to_part_id)
+                if r.to_part_id in wanted:
+                    out.setdefault(r.to_part_id, set()).add(r.from_part_id)
+            return out
+
+        # found[part_id] = the impacted part it was reached through.
+        found: dict[int, int] = {}
+        hop1 = await _step(impacted_ids)
+        for pid in impacted_ids:
+            for other in hop1.get(pid, ()):
+                found.setdefault(other, pid)
+
+        wanted = set(found) | set(impacted_ids)
+        parts = {p.id: p for p in (await session.execute(
+            select(Part).where(Part.id.in_(wanted)))).scalars().all()} if wanted else {}
+
+        # Second hop, through the tools. Stations, EOAT and gauges are numbered
+        # against the TOOL they serve, not the article it produces — so a
+        # one-hop walk from the impacted articles finds the tools and stops
+        # just short of everything Manufacturing Engineering and APQP own.
+        tool_ids = [pid for pid, part in parts.items()
+                    if part.item_category == "tool" and pid in found]
+        for tid, others in (await _step(tool_ids)).items():
+            for other in others:
+                found.setdefault(other, found[tid])
+        missing = set(found) - set(parts)
+        if missing:
+            parts.update({p.id: p for p in (await session.execute(
+                select(Part).where(Part.id.in_(missing)))).scalars().all()})
+
+        # An impacted article is its own via, so Development sees the parts
+        # themselves rather than a derived list.
+        by_category: dict[str, list[tuple]] = {}
+        for pid in impacted_ids:
+            part = parts.get(pid)
+            if part is not None:
+                by_category.setdefault(part.item_category, []).append((part, pid))
+        for other_id in sorted(found):
+            if other_id in impacted_ids:
+                continue
+            other = parts.get(other_id)
+            if other is not None:
+                by_category.setdefault(other.item_category, []).append(
+                    (other, found[other_id]))
+
+        out = []
+        for dept_id in sorted(routed, key=lambda d: (routed[d], names.get(d, ""))):
+            name = names.get(dept_id)
+            objects = []
+            seen = set()
+            for category in ChangeService._DOMAIN_BY_DEPARTMENT.get(name, ()):
+                for part, via in by_category.get(category, []):
+                    if part.id in seen:
+                        continue
+                    seen.add(part.id)
+                    objects.append({
+                        "type": ChangeService._OBJECT_TYPE_BY_CATEGORY[category],
+                        "id": part.id,
+                        "number": part.part_number,
+                        "name": part.name,
+                        "via_part_id": via,
+                    })
+            out.append({
+                "department_id": dept_id,
+                "department_name": name,
+                "objects": objects,
+            })
+        return out
+
     @staticmethod
     def pending_info_request(change: ChangeRequest):
         """The needs_info decision still waiting on an answer, or None.
