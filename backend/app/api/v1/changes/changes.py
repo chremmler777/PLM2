@@ -1003,9 +1003,24 @@ async def get_cost_lines(
     change_id: int, aid: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    """The department's cost grid, seeded from its own assessment checklist on
+    first view.
+
+    Seeding lazily here rather than on the -> costing transition means it also
+    reaches changes that were already in costing, and a department that
+    answered its checklist late still gets its grid. It happens once per
+    assessment (recorded in details.cost_seeded_at), so nothing duplicates and
+    a deleted line stays deleted.
+    """
+    from app.services.cost_service import CostService
     a = await db.get(ChangeAssessment, aid)
     if not a or a.change_id != change_id:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if change is not None and await CostService.seed_from_checklist(
+            db, change, a, current_user.id):
+        await db.commit()
+        await db.refresh(a, ["cost_lines"])
     return a.cost_lines
 
 

@@ -1,4 +1,6 @@
 """Cost-line math + Summierung roll-up for the digitized Änderungsmitteilung."""
+import json
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select, func
@@ -32,6 +34,73 @@ class CostService:
                         for l in assessment.cost_lines if l.cost_kind == "lifecycle")
         assessment.cost_impact = one_time
         assessment.lifecycle_cost = lifecycle
+
+    @staticmethod
+    async def seed_from_checklist(
+        session: AsyncSession, change: ChangeRequest,
+        assessment: ChangeAssessment, user_id: int,
+    ) -> list:
+        """Turn the department's assessment checklist into its starting cost
+        grid: one zero-hour line per item it marked impacted, at the current
+        rate.
+
+        A department that has already said WHICH items the change touches
+        should not then face an empty grid and retype them. Seeded once —
+        recorded in the assessment's own details — so re-entering costing
+        never duplicates, and a line the department deliberately deleted stays
+        deleted.
+        """
+        details = assessment.details_dict
+        if details.get("cost_seeded_at"):
+            return []
+        impacts = [i for i in (details.get("impacts") or [])
+                   if isinstance(i, dict) and i.get("impacted")]
+        if not impacts:
+            return []
+
+        plant_id = await CostService._costing_plant(session, change)
+        if plant_id is None:
+            return []      # nothing to price against yet; try again later
+        rate = await CostService.rate_for(
+            session, assessment.department_id, plant_id) or 0.0
+
+        await session.refresh(assessment, ["cost_lines"])
+        seeded = []
+        for item in impacts:
+            line = AssessmentCostLine(
+                assessment_id=assessment.id, plant_id=plant_id,
+                activity_id=item.get("activity_id"),
+                activity_label=item.get("label"),
+                cost_kind="one_time", demand_hours=0.0, rate_snapshot=rate,
+                internal_cost=0.0, external_cost=0.0,
+                # The remark from the checklist travels with the line: it is
+                # the reason this row exists.
+                note=item.get("remark") or None,
+            )
+            session.add(line)
+            seeded.append(line)
+        details["cost_seeded_at"] = datetime.utcnow().isoformat()
+        assessment.details = json.dumps(details)
+        await session.flush()
+        await session.refresh(assessment, ["cost_lines"])
+        from app.services.change_service import ChangeService  # local: cycle
+        await ChangeService.append_changelog(
+            session, change, "cost_lines_seeded",
+            f"Cost grid seeded from the checklist for dept "
+            f"{assessment.department_id} ({len(seeded)} lines)", user_id,
+            new_value={"assessment_id": assessment.id, "lines": len(seeded)})
+        return seeded
+
+    @staticmethod
+    async def _costing_plant(session: AsyncSession, change: ChangeRequest):
+        """Which plant the seeded lines are priced at: the change's own
+        affected plant when it names exactly one, otherwise its project's."""
+        plants = list(change.affected_plants or [])
+        if len(plants) == 1:
+            return plants[0].id
+        from app.models.entities import Project
+        project = await session.get(Project, change.project_id)
+        return project.plant_id if project is not None else None
 
     @staticmethod
     async def replace_cost_lines(session: AsyncSession, change: ChangeRequest,
@@ -92,14 +161,21 @@ class CostService:
 
         by_plant: dict[int, dict] = {}
         by_dep: dict[int, dict] = {}
+        # The workbook's actual shape: a department row with a column group per
+        # plant. by_plant and by_department are its margins; neither can be
+        # derived from the other, so the matrix is its own rollup.
+        by_cell: dict[tuple, dict] = {}
         totals = _blank()
         for line, department_id in rows:
             pk = "one_time" if line.cost_kind == "one_time" else "lifecycle"
+            cell = by_cell.setdefault((department_id, line.plant_id),
+                                      {**_blank(), "demand_hours": 0.0})
             for bucket in (by_plant.setdefault(line.plant_id, _blank()),
                            by_dep.setdefault(department_id, _blank()),
-                           totals):
+                           cell, totals):
                 bucket[f"{pk}_internal"] += line.internal_cost
                 bucket[f"{pk}_external"] += line.external_cost
+            cell["demand_hours"] += line.demand_hours
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])
 
@@ -113,6 +189,9 @@ class CostService:
         return {
             "by_plant": [{"plant_id": pid, **vals} for pid, vals in sorted(by_plant.items())],
             "by_department": [{"department_id": did, **vals} for did, vals in sorted(by_dep.items())],
+            "by_department_plant": [
+                {"department_id": did, "plant_id": pid, **vals}
+                for (did, pid), vals in sorted(by_cell.items())],
             "totals": totals,
             "effort_by_department": [
                 {"department_id": d, "effort_hours": h} for d, h in sorted(efforts)],

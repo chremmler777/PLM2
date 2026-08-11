@@ -258,3 +258,86 @@ async def test_assessments_without_details_stay_empty(
                                   "verdict": "feasible"}, headers=admin_auth)
     assert res.status_code == 200, res.text
     assert res.json()["details"] == {}
+
+
+# --- the meeting decides who assesses --------------------------------------
+
+async def _change_through_scoping(client, auth, seed, session_factory, part,
+                                  picked, title):
+    """Drive a physical-part change to in_assessment with `picked` selected in
+    the proceed meeting."""
+    from tests.conftest import satisfy_capture_gate, lock_impact
+    from app.models.change import ChangeMeeting
+    from datetime import datetime
+
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": title, "reason": "r",
+        "change_type": "physical_part", "customer_relevant": True,
+        "lead_id": seed["admin_id"]}, headers=auth)
+    cid = res.json()["id"]
+    await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                      json={"part_id": part["part_id"], "is_lead": True}, headers=auth)
+    await satisfy_capture_gate(client, auth, cid)
+    await client.post(f"/api/v1/changes/{cid}/transition",
+                      json={"to_status": "scoping"}, headers=auth)
+    async with session_factory() as s:
+        s.add(ChangeMeeting(
+            change_id=cid, meeting_date=datetime.utcnow(),
+            participants=[{"name": "PM"}], notes="scoped",
+            decision="proceed", selected_department_ids=picked,
+            created_by=seed["admin_id"], decided_by=seed["admin_id"],
+            decided_at=datetime.utcnow()))
+        await s.commit()
+    await lock_impact(session_factory, cid)
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "in_assessment"}, headers=auth)
+    assert res.status_code == 200, res.text
+    return cid
+
+
+async def _seed_standard(session_factory):
+    from app.services.wf_seed_service import seed_change_workflows
+    from app.models.workflow import Department
+    from sqlalchemy import select
+    async with session_factory() as s:
+        await seed_change_workflows(s)
+        await s.commit()
+    async with session_factory() as s:
+        return {d.name: d.id for d in
+                (await s.execute(select(Department))).scalars().all()}
+
+
+async def test_the_meeting_narrows_the_template(
+        client, admin_auth, seed, session_factory, part):
+    """Three of the five selected -> exactly three buckets. The template is the
+    default the room starts from, not the answer."""
+    depts = await _seed_standard(session_factory)
+    picked = [depts["Development"], depts["Tool Engineer"], depts["APQP"]]
+    cid = await _change_through_scoping(client, admin_auth, seed, session_factory,
+                                        part, picked, "narrowed")
+
+    got = await _objects(client, admin_auth, cid)
+    assert set(got) == {"Development", "Tool Engineer", "APQP"}
+    assert "Manufacturing Engineer" not in got
+    assert "Packaging Engineer" not in got
+
+
+async def test_the_meeting_may_pull_in_a_department_outside_the_template(
+        client, admin_auth, seed, session_factory, part):
+    """A department the room deliberately added is routed, template or not."""
+    depts = await _seed_standard(session_factory)
+    picked = [depts["Development"], depts["Quality"]]
+    cid = await _change_through_scoping(client, admin_auth, seed, session_factory,
+                                        part, picked, "widened")
+
+    got = await _objects(client, admin_auth, cid)
+    assert set(got) == {"Development", "Quality"}
+    # added as Responsible, so it actually gates the stage
+    from app.models.change import ChangeAssessment
+    from sqlalchemy import select
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars().all()
+    quality = next(r for r in rows if r.department_id == depts["Quality"])
+    assert quality.rasic_letter == "R"
+    assert quality.stage_order == 1

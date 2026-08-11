@@ -385,6 +385,17 @@ class DeptRollup(BaseModel):
     lifecycle_external: float
 
 
+class DeptPlantRollup(BaseModel):
+    """One cell of the workbook matrix: a department's costs at one plant."""
+    department_id: int
+    plant_id: int
+    one_time_internal: float
+    one_time_external: float
+    lifecycle_internal: float
+    lifecycle_external: float
+    demand_hours: float = 0.0
+
+
 class SummationTotals(BaseModel):
     one_time_internal: float
     one_time_external: float
@@ -401,6 +412,7 @@ class EffortRollup(BaseModel):
 class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
+    by_department_plant: List[DeptPlantRollup] = []
     totals: SummationTotals
     effort_by_department: List[EffortRollup] = []
     total_effort_hours: float = 0.0

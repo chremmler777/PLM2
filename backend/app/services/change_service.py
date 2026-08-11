@@ -11,7 +11,9 @@ from typing import Optional, List
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
+from app.models.change_cost import (
+    ChangeGate, AssessmentActivity, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS,
+)
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
     ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting, ChangeConcern,
@@ -1435,6 +1437,37 @@ class ChangeService:
     }
 
     @staticmethod
+    async def _validate_impacts(
+        session: AsyncSession, department_id: int, details: dict,
+    ) -> None:
+        """The D-tab checklist: "does the change impact X?" per catalog item.
+
+        Validated where it is written, because costing prices these rows later
+        and a stray activity_id would price another department's work. Free
+        text is allowed with a label only — the catalog is a starting list,
+        not a cage."""
+        impacts = details.get("impacts")
+        if impacts is None:
+            return
+        if not isinstance(impacts, list):
+            raise ChangeError("details.impacts must be a list")
+        catalog = {a for (a,) in await session.execute(
+            select(AssessmentActivity.id).where(
+                AssessmentActivity.department_id == department_id))}
+        for entry in impacts:
+            if not isinstance(entry, dict):
+                raise ChangeError("Each impacts entry must be an object")
+            activity_id = entry.get("activity_id")
+            if activity_id is None:
+                if not (entry.get("label") or "").strip():
+                    raise ChangeError(
+                        "A free-text checklist item needs a label")
+                continue
+            if activity_id not in catalog:
+                raise ChangeError(
+                    f"Activity {activity_id} is not in this department's catalog")
+
+    @staticmethod
     async def assessment_objects(
         session: AsyncSession, change: ChangeRequest,
     ) -> list[dict]:
@@ -1647,6 +1680,7 @@ class ChangeService:
         if details is not None:
             if not isinstance(details, dict):
                 raise ChangeError("Assessment details must be an object")
+            await ChangeService._validate_impacts(session, department_id, details)
             a.details = json.dumps(details)
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id

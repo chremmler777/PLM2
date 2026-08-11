@@ -139,15 +139,25 @@ class ChangeRoutingService:
             .order_by(ChangeMeeting.decided_at.desc(), ChangeMeeting.id.desc())
             .limit(1))).scalar_one_or_none()
         if proceed is not None and proceed.selected_department_ids:
+            # The meeting's selection is AUTHORITATIVE for stage 1, not a filter
+            # applied to the template's opinion. The template is the default the
+            # meeting starts from; the people in the room decide who actually
+            # assesses. So:
+            #   in template, selected      -> kept, with its template letter
+            #   in template, NOT selected  -> dropped, however standard it is
+            #   selected, NOT in template  -> added as Responsible at stage 1
+            # The last case is the one that used to be silently swallowed: a
+            # department the room deliberately pulled in got no task at all.
+            # Later stages are process roles (summation, quote) and stay as the
+            # template defines them.
             allowed = set(proceed.selected_department_ids)
             for stage in stages:
                 if stage["stage_order"] == 1:
                     kept = [d for d in stage["departments"]
                             if d["department_id"] in allowed]
-                    if not kept:
-                        raise ValueError(
-                            "Scoping selection matches no stage-1 department "
-                            "of the routing standard")
+                    known = {d["department_id"] for d in stage["departments"]}
+                    for dept_id in sorted(allowed - known):
+                        kept.append({"department_id": dept_id, "rasic_letter": "R"})
                     # An all-informational selection (only S/C/I letters) leaves
                     # stage 1 with no gate — the engine would stall forever. Require
                     # at least one responsible/accountable (R/A) department so the
