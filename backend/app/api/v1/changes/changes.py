@@ -20,7 +20,7 @@ from app.models.change import (
     ChangeImpactedItem, SIGN_OFF_ROLES,
 )
 from app.models.workflow import UserDepartment, Department
-from app.services.change_service import ChangeService, ChangeError
+from app.services.change_service import ChangeService, ChangeError, _org_scope
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingService
 from app.schemas.change import (
@@ -100,8 +100,19 @@ async def list_changes(
 async def my_change_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    # departments the user belongs to. Acts-as swaps these for the single
-    # department a real admin is currently acting as (spec D2).
+    """Every open piece of ECR work this caller's role owns — not just pending
+    assessments. A change parked in a stage IS the open task of that stage's
+    responsible role, so each stage contributes its own row kind:
+
+      kickoff           captured, for a can_start_change department (Sales)
+      scoping_wrapup    scoping, for Project Manager — drive it to a decision
+      impact_confirm    scoping and unlocked, for Development
+      assessment        in_assessment, the department's own pending answer
+      customer_response quoted and unanswered, for Sales
+
+    Departments come from the EFFECTIVE actor, so an admin acting as Sales
+    sees Sales' queue rather than everything.
+    """
     dep_ids = set(await WorkflowService.effective_department_ids(db, current_user))
     tasks = []
     if dep_ids:
@@ -131,9 +142,54 @@ async def my_change_tasks(
                 "mine": a.effective_owner_id == current_user.id,
             })
 
-        tasks.sort(key=lambda d: (
-            not d["mine"], not d["overdue"],
-            d["due_date"] is None, d["due_date"] or datetime.max, d["assessment_id"]))
+    # --- stage-responsibility rows --------------------------------------
+    async def _base(c) -> dict:
+        """Shared shape: identity plus the ACTIVE deadline's context, computed
+        by the service so the badge here and the badge on the change agree."""
+        kind = c.active_deadline
+        due = (c.release_due_date if kind == "release"
+               else c.required_by_date if kind == "quote" else None)
+        state = await ChangeService.deadline_state(db, c)
+        return {
+            "change_id": c.id, "change_number": c.change_number, "title": c.title,
+            "due_date": due, "overdue": state == "overdue",
+        }
+
+    open_changes = (await db.execute(_org_scope(
+        select(ChangeRequest).where(
+            ChangeRequest.status.in_(("captured", "scoping", "quoted"))),
+        current_user,
+    ))).scalars().all()
+
+    can_capture = await ChangeService.user_can_start_change(db, current_user)
+    is_pm = await MeetingService.user_is_pm(db, current_user)
+    can_confirm = await ChangeService.user_can_confirm_impact(db, current_user)
+    in_sales = await ChangeService._user_in_department(db, current_user, "Sales")
+
+    for c in open_changes:
+        if c.status == "captured" and can_capture:
+            tasks.append({**await _base(c), "kind": "kickoff",
+                          "missing": await ChangeService.kickoff_missing(db, c)})
+        elif c.status == "scoping":
+            if is_pm:
+                tasks.append({
+                    **await _base(c), "kind": "scoping_wrapup",
+                    "impact_confirmed": c.impact_confirmed_at is not None,
+                    "has_decision": any(m.decision in ("proceed", "reject")
+                                        for m in c.meetings),
+                })
+            if can_confirm and c.impact_confirmed_at is None:
+                tasks.append({**await _base(c), "kind": "impact_confirm"})
+        elif (c.status == "quoted" and in_sales and c.customer_relevant
+                and c.customer_response in (None, "pending")):
+            tasks.append({**await _base(c), "kind": "customer_response"})
+
+    # One order across every kind: overdue first, then soonest due (undated
+    # last), then change number. Assessment rows keep "mine" as the top tie
+    # break — an answer you already accepted outranks one you have not.
+    tasks.sort(key=lambda d: (
+        not d.get("mine", False), not d["overdue"],
+        d["due_date"] is None, d["due_date"] or datetime.max, d["change_number"]))
     return tasks
 
 

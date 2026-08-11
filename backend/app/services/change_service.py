@@ -501,6 +501,27 @@ class ChangeService:
         }
 
     @staticmethod
+    async def kickoff_missing(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[str]:
+        """The unmet parts of a complete capture, in the order the message
+        lists them. Single source of truth for the kickoff gate — the ->
+        scoping guard and the my-tasks 'kickoff' row both read it, so the
+        checklist the user sees is the checklist that blocks them."""
+        missing = []
+        if not (change.description or "").strip():
+            missing.append("description")
+        att_count = (await session.execute(
+            select(func.count()).select_from(ChangeAttachment).where(
+                ChangeAttachment.change_id == change.id))).scalar() or 0
+        if att_count == 0:
+            missing.append("at least one attachment")
+        # Internal changes have no quote deadline in the two-phase model.
+        if change.customer_relevant and change.required_by_date is None:
+            missing.append("required-by date")
+        return missing
+
+    @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
         """Return None if soft-OK, else a human reason string (overridable)."""
         # Capture is Sales' job, scoping is the project team's: kickoff means
@@ -511,17 +532,7 @@ class ChangeService:
         # assessment. Deliberately soft, so an urgent request can proceed on an
         # approved deviation with the override on the record.
         if to_status == "scoping":
-            missing = []
-            if not (change.description or "").strip():
-                missing.append("description")
-            att_count = (await session.execute(
-                select(func.count()).select_from(ChangeAttachment).where(
-                    ChangeAttachment.change_id == change.id))).scalar() or 0
-            if att_count == 0:
-                missing.append("at least one attachment")
-            # Internal changes have no quote deadline in the two-phase model.
-            if change.customer_relevant and change.required_by_date is None:
-                missing.append("required-by date")
+            missing = await ChangeService.kickoff_missing(session, change)
             if missing:
                 return ("Incomplete capture — missing " + ", ".join(missing)
                         + " before scoping")
