@@ -98,6 +98,22 @@ async def list_changes(
     return changes
 
 
+@router.get("/permissions")
+async def change_permissions(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """What the caller may do in the change module, for gating buttons.
+
+    Answers for the EFFECTIVE actor, so an admin acting as a department sees
+    what that department can do — the same answer the endpoints themselves
+    will give. Declared before /{change_id} so "permissions" is not eaten as
+    a change id (same trap as my-tasks).
+    """
+    return {
+        "can_start_change": await ChangeService.user_can_start_change(db, current_user),
+    }
+
+
 @router.get("/my-tasks")
 async def my_change_tasks(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
