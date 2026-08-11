@@ -8,10 +8,10 @@ import type { ChangeRequest } from '../../types/change'
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-// The description is written while the request is being captured and may still
-// be sharpened during scoping. Once departments assess against it, it is
-// history — shown, not edited.
-const EDITABLE_STATUSES = ['captured', 'scoping']
+// The description is Sales' capture text. It freezes at kickoff: from scoping on
+// the project team records its thinking in meeting notes and minutes instead, so
+// the text a decision was made on cannot move underneath it.
+const EDITABLE_STATUSES = ['captured']
 
 export function DescriptionEditor({ change, canEdit = true }:
     { change: ChangeRequest; canEdit?: boolean }) {

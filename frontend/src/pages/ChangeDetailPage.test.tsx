@@ -430,12 +430,34 @@ describe('ChangeDetailPage capture phase', () => {
     expect(screen.getByText(/Reason:/)).toBeDefined()
   })
 
-  it('unlocks those tabs again from scoping onwards', async () => {
+  it('unlocks scoping and impacted at scoping, but not the later phases', async () => {
     change.status = 'scoping' as ChangeDetail['status']
     wrap('/changes/1')
     const scoping = await screen.findByRole('button', { name: /Scoping/ })
     expect((scoping as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(false)
+    const commercial = screen.getByRole('button', { name: /Commercial/ })
+    expect((commercial as HTMLButtonElement).disabled).toBe(true)
+    expect(commercial.getAttribute('title')).toBe(t('tab.lockedUntilPhase'))
+    expect((screen.getByRole('button', { name: /Implementation|Umsetzung/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('unlocks the commercial tab once the change reaches costing', async () => {
+    change.status = 'costing' as ChangeDetail['status']
+    wrap('/changes/1')
+    const commercial = await screen.findByRole('button', { name: /Commercial/ })
+    expect((commercial as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(false)
+    // Implementation is still a phase away.
+    expect((screen.getByRole('button', { name: /Implementation|Umsetzung/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('withholds nothing from an off-path change', async () => {
+    change.status = 'rejected' as ChangeDetail['status']
+    wrap('/changes/1')
+    const commercial = await screen.findByRole('button', { name: /Commercial/ })
+    expect((commercial as HTMLButtonElement).disabled).toBe(false)
   })
 })
 
@@ -458,6 +480,18 @@ describe('ChangeDetailPage description authz', () => {
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
     expect(await screen.findByTestId('description-input')).toBeDefined()
+  })
+
+  it('freezes the description at kickoff — read-only from scoping on', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'scoping' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Overview/ })
+    expect(screen.queryByTestId('description-input')).toBeNull()
   })
 
   it('shows the description read-only to an unrelated viewer', async () => {

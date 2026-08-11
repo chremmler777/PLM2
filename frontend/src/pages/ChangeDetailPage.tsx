@@ -28,7 +28,8 @@ import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
-import { STATUS_LABELS } from '../lib/changeStatus';
+import { STATUS_LABELS, OFF_PATH_STATUSES } from '../lib/changeStatus';
+import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -52,13 +53,33 @@ const STATUS_ACTIVE_TAB: Record<string, Tab> = {
 // explainer instead of a dead-end disabled control (mirrors PnlCard's hidden
 // rule, which hides the P&L card for the same statuses).
 const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
-// While the change is still being captured, only the request itself is on the
-// table: Sales writes it and attaches the evidence. Scope, affected parts,
-// assessments, costs and implementation all start at scoping, so their tabs
-// stay locked — governance tabs keep their own authz rule.
-const CAPTURE_TABS: Tab[] = ['overview'];
-const isTabLocked = (status: string, tb: Tab): boolean =>
-  status === 'captured' && !CAPTURE_TABS.includes(tb) && !GOVERNANCE_TABS.includes(tb);
+// Each phase-bound tab unlocks when the change reaches its phase: at capture only
+// the request itself is on the table (Sales writes it and attaches the evidence),
+// scope and affected parts arrive with scoping, costs with costing, and so on. A
+// tab with no entry here (overview) is always open; governance tabs keep their
+// own authz rule instead.
+const TAB_UNLOCK_STATUS: Partial<Record<Tab, ChangeStatus>> = {
+  scoping: 'scoping',
+  impacted: 'scoping',
+  assessments: 'in_assessment',
+  commercial: 'costing',
+  implementation: 'in_implementation',
+};
+const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
+const isTabLocked = (status: string, tb: Tab): boolean => {
+  const from = TAB_UNLOCK_STATUS[tb];
+  if (from === undefined || GOVERNANCE_TABS.includes(tb)) return false;
+  // Off-path changes (on_hold/rejected/cancelled) have no place in the order;
+  // they have been through the flow, so nothing is withheld from them.
+  if (OFF_PATH_STATUSES.includes(status as ChangeStatus)) return false;
+  return phaseIndex(status) < phaseIndex(from);
+};
+// Pre-scoping locks name the phase people are waiting for; later ones are
+// generic, since which phase unlocks them is obvious from the tab itself.
+const lockedTitleKey = (tb: Tab): string =>
+  tb === 'scoping' ? 'tab.scopingHandoff'
+  : TAB_UNLOCK_STATUS[tb] === 'scoping' ? 'tab.lockedUntilScoping'
+  : 'tab.lockedUntilPhase';
 
 export default function ChangeDetailPage() {
   const { id } = useParams();
@@ -329,7 +350,7 @@ export default function ChangeDetailPage() {
           return (
             <button key={tb}
               disabled={locked}
-              title={locked ? (tb === 'scoping' ? t('tab.scopingHandoff') : t('tab.lockedUntilScoping'))
+              title={locked ? t(lockedTitleKey(tb))
                 : isActivePhase ? t('tab.activePhase') : undefined}
               className={`pb-2 flex items-center gap-1.5 ${
                 locked ? 'text-slate-600 cursor-not-allowed'

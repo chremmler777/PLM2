@@ -323,6 +323,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'tab.activePhase': { de: 'Aktuelle Phase', en: 'Current phase' },
   'tab.lockedUntilScoping': { de: 'Ab dem Scoping verfügbar', en: 'Available from scoping' },
+  'tab.lockedUntilPhase': {
+    de: 'Wird in einer späteren Phase freigeschaltet',
+    en: 'Unlocks in a later phase',
+  },
   'tab.scopingHandoff': {
     de: 'Nach dem Kickoff übernimmt das Projektteam',
     en: 'After kickoff this is handled by the project team',
