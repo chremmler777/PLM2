@@ -147,6 +147,15 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(screen.getByText(t('tasks.hint.obtain_info'))).toBeDefined()
   })
 
+  it('asks for the rejection letter first, then for the send', async () => {
+    await renderWith(changeTask({ kind: 'send_rejection', has_letter: false }))
+    expect(screen.getByText(t('tasks.kind.send_rejection'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.send_rejection_letter'))).toBeDefined()
+    cleanup()
+    await renderWith(changeTask({ kind: 'send_rejection', has_letter: true }))
+    expect(screen.getByText(t('tasks.hint.send_rejection_send'))).toBeDefined()
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

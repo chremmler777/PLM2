@@ -5,6 +5,7 @@ import { changesApi } from '../api/changes';
 import { STATUS_LABELS, STATUS_PILL, stepPosition } from '../lib/changeStatus';
 import { projectLabel } from '../lib/project';
 import StartChangeModal from '../components/changes/StartChangeModal';
+import StartChangeButton from '../components/changes/StartChangeButton';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
 
 export default function ChangesPage() {
@@ -26,12 +27,7 @@ export default function ChangesPage() {
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Change Management</h1>
-        <button
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
-          onClick={() => setShowCreate(true)}
-        >
-          New Change Request
-        </button>
+        <StartChangeButton label="New Change Request" onClick={() => setShowCreate(true)} />
       </div>
 
       <div className="mb-4">

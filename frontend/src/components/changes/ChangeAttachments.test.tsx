@@ -34,8 +34,9 @@ describe('ChangeAttachments', () => {
     })} />)
     expect(screen.getByText(/Initial documentation/i)).toBeTruthy()
     expect(screen.getByText(/Changes after scoping/i)).toBeTruthy()
-    expect(screen.getByText('📎 base.pdf')).toBeTruthy()
-    expect(screen.getByText('📎 later.pdf')).toBeTruthy()
+    // Filenames are download links now.
+    expect(screen.getByRole('link', { name: 'base.pdf' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'later.pdf' })).toBeTruthy()
   })
 
   it('lets baseline docs be deleted while still in scoping', () => {
@@ -98,10 +99,11 @@ describe('ChangeAttachments needs-info loop', () => {
     expect(screen.getByTestId('attach-kind-info_request').textContent).toBe(t('attach.infoRequest'))
     expect(screen.getByTestId('attach-kind-info_response').textContent).toBe(t('attach.infoResponse'))
     // The answer sits inside the request's block, not loose in the list.
-    const request = screen.getByText(/question.msg/).closest('li')?.parentElement?.closest('li')
+    const request = screen.getByRole('link', { name: 'question.msg' })
+      .closest('li')?.parentElement?.closest('li')
     expect(request?.textContent).toContain('answer.msg')
     // A plain document gets no chip at all.
-    const plain = screen.getByText(/spec.pdf/).closest('li')
+    const plain = screen.getByRole('link', { name: 'spec.pdf' }).closest('li')
     expect(plain?.querySelector('[data-testid^="attach-kind"]')).toBeNull()
     // Answered requests stop asking for an answer.
     expect(screen.queryByTestId('attach-response-1')).toBeNull()

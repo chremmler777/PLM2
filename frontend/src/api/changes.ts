@@ -88,6 +88,10 @@ export const changesApi = {
       .then((r) => r.data);
   },
 
+  // Sales confirms the rejection letter went out; the backend closes the change.
+  markRejectionSent: (id: number) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/rejection-sent`).then((r) => r.data),
+
   deleteAttachment: (id: number, attachmentId: number) =>
     client.delete(`/v1/changes/${id}/attachments/${attachmentId}`).then((r) => r.data),
 

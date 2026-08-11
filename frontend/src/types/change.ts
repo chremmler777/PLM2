@@ -72,7 +72,8 @@ export interface DeviationRequest {
   stage_order?: number;
 }
 
-export type AttachmentKind = 'general' | 'info_request' | 'info_response';
+export type AttachmentKind =
+  | 'general' | 'info_request' | 'info_response' | 'rejection_letter';
 
 export interface Attachment {
   id: number;
@@ -127,6 +128,9 @@ export interface ChangeRequest {
   rejected_at?: string | null;
   rejected_by?: number | null;
   rejection_reason?: string | null;
+  /** Set once Sales confirms the rejection letter went out; closes the change. */
+  rejection_sent_at?: string | null;
+  rejection_sent_by?: number | null;
   car_line?: string | null;
   affected_plant_ids?: number[];
   required_by_date: string | null;
@@ -160,7 +164,7 @@ export interface ChangeDetail extends ChangeRequest {
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
-  | 'obtain_info';
+  | 'obtain_info' | 'send_rejection';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -190,6 +194,8 @@ export interface ChangeTask {
   has_decision?: boolean;
   // obtain_info rows: what the customer was asked for
   reason?: string | null;
+  // send_rejection rows: whether the letter is already attached
+  has_letter?: boolean;
 }
 
 // --- Cost & summation types (sub-project A) ---

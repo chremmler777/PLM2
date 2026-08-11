@@ -8,6 +8,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
 import StartChangeModal from '../components/changes/StartChangeModal';
+import StartChangeButton from '../components/changes/StartChangeButton';
 
 interface Revision {
   id: number;
@@ -466,12 +467,9 @@ export default function PartDetail() {
                 {getActiveRevisionLevel(part.revisions)}
               </p>
             </div>
-            <button
+            <StartChangeButton label="Start change request"
               onClick={() => setShowStartChange(true)}
-              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
-            >
-              Start change request
-            </button>
+              className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium" />
           </div>
         </div>
 

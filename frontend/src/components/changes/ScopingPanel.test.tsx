@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ScopingPanel from './ScopingPanel'
@@ -15,6 +15,7 @@ vi.mock('../../api/changes', () => ({
       decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
     }]),
     createMeeting: vi.fn(), decideMeeting: vi.fn(), update: vi.fn(),
+    markRejectionSent: vi.fn().mockResolvedValue({}),
     recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality' }]),
   },
 }))
@@ -206,5 +207,119 @@ describe('ScopingPanel needs-info upload slot', () => {
     render(wrap(<ScopingPanel change={change()} />))
     const slot = await screen.findByTestId('dropzone')
     expect(slot.getAttribute('data-kind')).toBe('info_request')
+  })
+})
+
+describe('ScopingPanel needs-info loop is reachable where Sales lands', () => {
+  const pendingNeedsInfo = [{
+    id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
+    participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
+    decision_reason: 'target price for the new gauge', selected_department_ids: [],
+    created_by: 1, created_at: '2026-07-04T10:00:00Z',
+    decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+  }]
+  const att = (over: Record<string, unknown>) => ({
+    id: 1, filename: 'questions.msg', content_type: 'application/vnd.ms-outlook',
+    size_bytes: 10, phase: 'baseline', created_at: '2026-07-05T00:00:00',
+    kind: 'info_request', responds_to_id: null, ...over,
+  })
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue(pendingNeedsInfo as never)
+  })
+  afterEach(cleanup)
+
+  it('shows the question document, downloadable, with a slot for the answer', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [att({})] })} />))
+    // The reason is already there; now the document is too — no hunt on another tab.
+    expect(await screen.findByText(/target price for the new gauge/)).toBeTruthy()
+    const link = screen.getByRole('link', { name: 'questions.msg' })
+    expect(link.getAttribute('href')).toContain('/v1/changes/7/attachments/1/download')
+    expect(screen.getByTestId('attach-response-1')).toBeTruthy()
+  })
+
+  it('reads the answer beneath its question once it lands', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [
+      att({}),
+      att({ id: 2, filename: 'customer-reply.msg', kind: 'info_response', responds_to_id: 1 }),
+    ] })} />))
+    const loop = await screen.findByTestId('scoping-info-loop')
+    expect(loop.textContent).toContain('customer-reply.msg')
+    // Answered: it stops asking for one.
+    expect(screen.queryByTestId('attach-response-1')).toBeNull()
+  })
+
+  it('offers the request slot while no question has been sent yet', async () => {
+    render(wrap(<ScopingPanel change={change({ attachments: [] })} />))
+    const slot = await screen.findByTestId('dropzone')
+    expect(slot.getAttribute('data-kind')).toBe('info_request')
+    expect(screen.queryByTestId('scoping-info-loop')).toBeNull()
+  })
+})
+
+describe('ScopingPanel rejection closure', () => {
+  const rejected = [{
+    id: 5, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'meeting',
+    participants: [{ name: 'PM Jane' }], notes: null, decision: 'reject',
+    decision_reason: 'customer withdrew', selected_department_ids: [],
+    created_by: 1, created_at: '2026-07-04T10:00:00Z',
+    decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+  }]
+  const letter = {
+    id: 9, filename: 'rejection.pdf', content_type: 'application/pdf', size_bytes: 10,
+    phase: 'post_scoping', created_at: '2026-07-06T00:00:00',
+    kind: 'rejection_letter', responds_to_id: null,
+  }
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue(rejected as never)
+    vi.mocked(changesApi.markRejectionSent).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('offers the letter slot and refuses to close before one exists', async () => {
+    render(wrap(<ScopingPanel change={change({
+      status: 'rejected', customer_relevant: true, attachments: [] })} />))
+    const slot = await screen.findByTestId('dropzone')
+    expect(slot.getAttribute('data-kind')).toBe('rejection_letter')
+    const close = screen.getByTestId('rejection-sent') as HTMLButtonElement
+    expect(close.disabled).toBe(true)
+    expect(close.getAttribute('title')).toBe(t('reject.needLetter'))
+  })
+
+  it('closes the ECR once the letter is attached and the send is confirmed', async () => {
+    render(wrap(<ScopingPanel change={change({
+      status: 'rejected', customer_relevant: true, attachments: [letter] })} />))
+    expect(await screen.findByRole('link', { name: 'rejection.pdf' })).toBeTruthy()
+    const close = screen.getByTestId('rejection-sent') as HTMLButtonElement
+    expect(close.disabled).toBe(false)
+    fireEvent.click(close)
+    await waitFor(() => expect(changesApi.markRejectionSent).toHaveBeenCalledWith(7))
+  })
+
+  it('greys the confirmation for anyone outside Sales and says why', async () => {
+    render(wrap(<ScopingPanel canSendRejection={false} change={change({
+      status: 'rejected', customer_relevant: true, attachments: [letter] })} />))
+    const close = await screen.findByTestId('rejection-sent') as HTMLButtonElement
+    expect(close.disabled).toBe(true)
+    expect(close.getAttribute('title')).toBe(t('reject.salesOnly'))
+    fireEvent.click(close)
+    expect(changesApi.markRejectionSent).not.toHaveBeenCalled()
+  })
+
+  it('states the send instead of the button once it has gone out', async () => {
+    render(wrap(<ScopingPanel change={change({
+      status: 'rejected', customer_relevant: true, attachments: [letter],
+      rejection_sent_at: '2026-07-07T00:00:00' })} />))
+    expect(await screen.findByText(new RegExp(t('reject.sent')))).toBeTruthy()
+    expect(screen.queryByTestId('rejection-sent')).toBeNull()
+  })
+
+  it('leaves an internal rejected change its plain slot, no closure block', async () => {
+    render(wrap(<ScopingPanel change={change({
+      status: 'rejected', customer_relevant: false, attachments: [] })} />))
+    await screen.findByText(/customer withdrew/)
+    expect(screen.queryByTestId('rejection-closure')).toBeNull()
+    expect(screen.queryByTestId('rejection-sent')).toBeNull()
   })
 })

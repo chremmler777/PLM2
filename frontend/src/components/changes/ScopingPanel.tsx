@@ -6,9 +6,10 @@ import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
+import { AttachmentRow, InfoRequestBlock } from './AttachmentRow'
 import ConcernStrip from './ConcernStrip'
 import { t } from '../../i18n/cmLabels'
-import type { ChangeMeeting, ChangeRequest } from '../../types/change'
+import type { Attachment, ChangeMeeting, ChangeRequest } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -18,7 +19,14 @@ const DECISION_LABEL: Record<string, string> = {
   needs_info: t('meeting.needsInfo'),
 }
 
-export default function ScopingPanel({ change }: { change: ChangeRequest }) {
+export default function ScopingPanel(
+  { change, canSendRejection = true }: {
+    change: ChangeRequest & { attachments?: Attachment[] }
+    /** Sales membership — only Sales confirms the rejection letter went out.
+     *  Defaults true until memberships load so the control doesn't flash-grey. */
+    canSendRejection?: boolean
+  },
+) {
   const changeId = change.id
   const status = change.status
   const qc = useQueryClient()
@@ -105,6 +113,16 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   // A refused decision names the open concerns that blocked it — that detail is
   // the whole answer, so it is shown in place and not only as a toast.
   const [decideError, setDecideError] = useState<string | null>(null)
+  // Closing a rejected customer change is an act with a record: the letter is
+  // attached, then Sales confirms it went out and the backend closes the ECR.
+  const markSent = useMutation({
+    mutationFn: () => changesApi.markRejectionSent(changeId),
+    onSuccess: () => {
+      toast.success(t('reject.sent'))
+      invalidate()
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the change'),
+  })
   const decide = useMutation({
     mutationFn: (vars: {
       meetingId: number; decision: 'proceed' | 'reject' | 'needs_info'; reason?: string
@@ -128,6 +146,11 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   // The most recent decision that leaves a ball in our court: a rejection the
   // customer has to be told about, or missing information somebody has to go
   // and get. Cleared once a later meeting reaches 'proceed'.
+  // The change already carries its attachments; the loop reads them in place
+  // rather than fetching again.
+  const attachments = change.attachments ?? []
+  const infoRequests = attachments.filter((a) => a.kind === 'info_request')
+  const rejectionLetters = attachments.filter((a) => a.kind === 'rejection_letter')
   const outstanding = [...meetings].reverse().find(
     (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
     ?? null
@@ -169,10 +192,55 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
           <p className="text-xs text-slate-400">{t('meeting.shareHint')}</p>
           {/* Sales and PM answer the customer; the document they send — the
               rejection letter, the list of open questions, or a counter-
-              proposal — belongs on the change, not in someone's mailbox. */}
-          {/* What goes out to the customer is the info request itself. */}
-          <AttachmentDropzone changeId={changeId} kind="info_request"
-            label={t('attach.requestSlot')} onUploaded={invalidate} />
+              proposal — belongs on the change, not in someone's mailbox.
+              Whoever follows the "obtain info" task lands here, so the whole
+              loop is in reach: the question that went out, its answer, and the
+              slot for whichever half is still missing. */}
+          {outstanding.decision === 'reject' && change.customer_relevant ? (
+            // Rejection closure: the letter, then the confirmed send that closes it.
+            <div className="space-y-2" data-testid="rejection-closure">
+              {rejectionLetters.length > 0 && (
+                <ul className="text-sm divide-y divide-slate-700/60">
+                  {rejectionLetters.map((l) => (
+                    <AttachmentRow key={l.id} changeId={changeId} attachment={l} />
+                  ))}
+                </ul>
+              )}
+              <AttachmentDropzone changeId={changeId} kind="rejection_letter"
+                label={t('attach.rejectionSlot')} onUploaded={invalidate} />
+              {change.rejection_sent_at ? (
+                <p className="text-xs text-emerald-300">
+                  ✓ {t('reject.sent')} · {new Date(change.rejection_sent_at).toLocaleDateString()}
+                </p>
+              ) : (
+                <button type="button" data-testid="rejection-sent"
+                  disabled={rejectionLetters.length === 0 || !canSendRejection || markSent.isPending}
+                  title={!canSendRejection ? t('reject.salesOnly')
+                    : rejectionLetters.length === 0 ? t('reject.needLetter') : undefined}
+                  onClick={() => markSent.mutate()}
+                  className="bg-red-800 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                  {t('reject.markSent')}
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {infoRequests.length > 0 && (
+                <ul className="text-sm divide-y divide-slate-700/60"
+                  data-testid="scoping-info-loop">
+                  {infoRequests.map((q) => (
+                    <InfoRequestBlock key={q.id} changeId={changeId} request={q}
+                      responses={attachments.filter((a) => a.responds_to_id === q.id)}
+                      onChanged={invalidate} />
+                  ))}
+                </ul>
+              )}
+              {infoRequests.length === 0 && (
+                <AttachmentDropzone changeId={changeId} kind="info_request"
+                  label={t('attach.requestSlot')} onUploaded={invalidate} />
+              )}
+            </>
+          )}
         </div>
       )}
 

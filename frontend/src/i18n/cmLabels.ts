@@ -88,6 +88,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Betroffene Teile festlegen und bestätigen',
     en: 'Define and confirm the impacted set',
   },
+  'tasks.kind.send_rejection': { de: 'Absage an Kunden senden', en: 'Send rejection to customer' },
+  'tasks.hint.send_rejection_letter': {
+    de: 'Begründungsdokument hochladen',
+    en: 'Upload the rejection document',
+  },
+  'tasks.hint.send_rejection_send': {
+    de: 'Versand bestätigen und schließen',
+    en: 'Confirm the send and close',
+  },
   'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
   'tasks.hint.obtain_info': {
     de: 'Offene Rückfrage beim Kunden klären',
@@ -305,11 +314,33 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Offene Rückfrage — Vertrieb holt die Info beim Kunden ein:',
     en: 'Open info request — Sales obtains this from the customer:',
   },
+  'start.salesOnly': {
+    de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an',
+    en: 'Only Sales or Project Management raises change requests',
+  },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
   'attach.baseline': { de: 'Erstunterlagen (Basis)', en: 'Initial documentation (baseline)' },
   'attach.infoRequest': { de: 'Rückfrage', en: 'Info request' },
   'attach.infoResponse': { de: 'Antwort', en: 'Response' },
+  'attach.rejectionLetter': { de: 'Absageschreiben', en: 'Rejection letter' },
+  'attach.rejectionSlot': {
+    de: 'Absageschreiben hier ablegen',
+    en: 'Drop the rejection letter here',
+  },
+  'reject.markSent': {
+    de: 'An Kunden gesendet — ECR schließen',
+    en: 'Sent to customer — close ECR',
+  },
+  'reject.needLetter': {
+    de: 'Erst das Absageschreiben anhängen',
+    en: 'Attach the rejection letter first',
+  },
+  'reject.salesOnly': {
+    de: 'Nur der Vertrieb bestätigt den Versand',
+    en: 'Only Sales confirms the send',
+  },
+  'reject.sent': { de: 'Absage versendet', en: 'Rejection sent' },
   'attach.attachResponse': { de: '+ Antwort anhängen', en: '+ Attach response' },
   'attach.responseSlot': {
     de: 'Antwort des Kunden hier ablegen',

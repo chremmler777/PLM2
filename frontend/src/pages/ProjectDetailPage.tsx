@@ -17,6 +17,7 @@ import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
+import StartChangeButton from '../components/changes/StartChangeButton';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
 
@@ -1051,12 +1052,9 @@ export default function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <StartChangeButton label="Start change request"
             onClick={() => setShowStartChange(true)}
-            className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
-          >
-            Start change request
-          </button>
+            className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium" />
           <button
             onClick={() => setShowAddModal(true)}
             className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"

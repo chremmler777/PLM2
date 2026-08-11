@@ -415,7 +415,8 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'scoping' && change && (
-        <ScopingPanel change={change} />
+        <ScopingPanel change={change}
+          canSendRejection={!myActions ? true : isSalesMember} />
       )}
 
       {effectiveTab === 'impacted' && change && (
