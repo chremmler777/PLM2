@@ -158,6 +158,20 @@ async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def make_internal(client, auth, change_id: int):
+    """Turn a freshly captured change internal.
+
+    Creating one outright is refused while the system runs the external flow
+    only (POST /changes), but the internal path itself is real, tested
+    functionality — and PATCH still allows the flip during capture/scoping.
+    Tests that exercise the internal flow go through here."""
+    res = await client.patch(f"/api/v1/changes/{change_id}",
+                             json={"customer_relevant": False}, headers=auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is False
+    return res.json()
+
+
 async def satisfy_capture_gate(client, auth, change_id: int):
     """Kickoff (captured -> scoping) is soft-gated on a complete capture:
     a description, at least one attachment, and — for customer-relevant

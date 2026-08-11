@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from tests.conftest import satisfy_capture_gate
+from tests.conftest import satisfy_capture_gate, make_internal
 
 pytestmark = pytest.mark.asyncio
 
@@ -57,8 +57,8 @@ async def test_kickoff_blocked_without_date_when_customer_relevant(
 
 
 async def test_internal_change_needs_no_date(client, eng_auth, seed):
-    change = await _create(client, eng_auth, seed, description="what changes",
-                           customer_relevant=False)
+    change = await _create(client, eng_auth, seed, description="what changes")
+    await make_internal(client, eng_auth, change["id"])
     await _attach(client, eng_auth, change["id"])
     res = await _kickoff(client, eng_auth, change["id"])
     assert res.status_code == 200, res.text
@@ -128,3 +128,22 @@ async def test_capture_open_while_no_department_is_flagged(client, eng_auth, see
         "project_id": seed["project_id"], "title": "Unconfigured", "reason": "r",
         "change_type": "physical_part"}, headers=eng_auth)
     assert res.status_code == 200, res.text
+
+
+async def test_internal_change_creation_is_refused(client, eng_auth, seed):
+    """External flow only for now: the endpoint refuses to create an internal
+    change, while the service keeps the capability."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "internal", "reason": "r",
+        "change_type": "physical_part", "customer_relevant": False}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "not enabled yet" in res.json()["detail"]
+    assert "external" in res.json()["detail"]
+
+
+async def test_customer_relevant_change_is_still_accepted(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "external", "reason": "r",
+        "change_type": "physical_part", "customer_relevant": True}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["customer_relevant"] is True

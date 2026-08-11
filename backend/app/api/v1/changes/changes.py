@@ -65,6 +65,16 @@ async def create_change(
             status_code=403,
             detail="Only an admin or a member of a department allowed to start "
                    "changes (e.g. Sales) may raise a change")
+    # The system currently runs the customer (external) change flow only, so
+    # the entry point refuses to create internal ones — half-built internal
+    # changes stuck mid-flow are worse than not offering them. The SERVICE
+    # stays capable: the internal costing/approval path is real, tested
+    # functionality waiting on the decision to switch it on.
+    if body.customer_relevant is False:
+        raise HTTPException(
+            status_code=400,
+            detail="Internal changes are not enabled yet — this system "
+                   "currently runs the customer (external) change flow")
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,

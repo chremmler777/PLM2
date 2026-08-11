@@ -3,7 +3,7 @@ told: letter on file, send confirmed, then closed. Internal rejections carry
 no such debt."""
 import pytest
 
-from tests.conftest import login, satisfy_capture_gate
+from tests.conftest import login, satisfy_capture_gate, make_internal
 
 pytestmark = pytest.mark.asyncio
 
@@ -30,10 +30,14 @@ async def _sales_auth(client, session_factory, seed, user_id=None):
 async def _rejected_change(client, auth, seed, title, *, customer_relevant=True):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": title, "reason": "r",
-        "change_type": "physical_part", "customer_relevant": customer_relevant,
+        "change_type": "physical_part", "customer_relevant": True,
     }, headers=auth)
     assert res.status_code == 200, res.text
     cid = res.json()["id"]
+    if not customer_relevant:
+        # Creation is external-only for now; the internal flow is reached by
+        # flipping during capture.
+        await make_internal(client, auth, cid)
     # A real capture, so reopening lands back in scoping without tripping the
     # kickoff gate on the way.
     await satisfy_capture_gate(client, auth, cid)

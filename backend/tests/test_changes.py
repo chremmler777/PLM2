@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
-    satisfy_capture_gate, make_development_member,
+    satisfy_capture_gate, make_development_member, make_internal,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -34,7 +34,10 @@ async def test_create_change_accepts_customer_relevant(client, eng_auth, seed):
     data = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=True)
     assert data["customer_relevant"] is True
 
-    data2 = await _create_change(client, eng_auth, seed["project_id"], customer_relevant=False)
+    # Internal changes cannot be created while the external flow is the focus;
+    # the flip is still available during capture (see test below).
+    data2 = await _create_change(client, eng_auth, seed["project_id"])
+    data2 = await make_internal(client, eng_auth, data2["id"])
     assert data2["customer_relevant"] is False
 
 
@@ -635,9 +638,9 @@ async def test_customer_relevant_locked_after_scoping(
 
     # A change still in scoping can freely change customer_relevant.
     change2 = await _create_change(client, eng_auth, seed["project_id"],
-                                   customer_relevant=False,
                                    lead_id=seed["engineer_id"])
     cid2 = change2["id"]
+    await make_internal(client, eng_auth, cid2)
     await approve_gates(client, eng_auth, cid2)
     part_id2 = await _make_part(client, eng_auth, seed["project_id"], f"ART-CR{cid2}")
     await client.post(f"/api/v1/changes/{cid2}/impacted-items",
