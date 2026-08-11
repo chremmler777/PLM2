@@ -144,7 +144,15 @@ One quote-by, one release-by; at any moment at most one is *active*
   `deadline_state` from then on; escalations and the workload report follow
   whichever deadline is active.
 
-### Inside `in_assessment` — department holds (2026-08-11)
+### Inside `in_assessment` — department holds are the risk assessment (2026-08-11)
+
+The department-concern loop at assessment **is the change's risk register**:
+a department flags a risk, anyone proposes a mitigation with mandatory
+documentation (PPT in the risk's container), and the flagging department (or
+PM) accepts or loops — raised → mitigated → accepted, each step stamped.
+Risks are not vetoes: they hold only the flagging department's own submit;
+the pass decision is the feasible/not-feasible verdict. UI presents these as
+"Risks" in the assessment context.
 
 - A department member may raise a **department-scoped concern**: kind
   `reject_proposal` (grounds that would cancel) or `needs_info` (missing
