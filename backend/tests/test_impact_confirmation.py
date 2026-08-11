@@ -103,6 +103,7 @@ async def test_confirm_response_includes_deadline_state(
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "impact confirm deadline",
         "change_type": "physical_part", "lead_id": seed["engineer_id"],
+        "customer_relevant": True,
     }, headers=eng_auth)
     assert res.status_code in (200, 201), res.text
     cid = res.json()["id"]

@@ -298,6 +298,7 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
         # required_by_date is only 3 days out -> at_risk.
         chg_risk = await _mk_change(
             session, seed, "C-N-006", lead_id=seed["engineer_id"],
+            customer_relevant=True,
             required_by_date=datetime.utcnow() + timedelta(days=3))
         inst_risk = WfInstance(template_id=tmpl.id, change_id=chg_risk.id,
                                status="active", current_stage_order=1,

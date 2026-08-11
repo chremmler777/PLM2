@@ -109,7 +109,7 @@ async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
                                               session_factory):
     """A required-by deadline must be set in scoping before assessment starts."""
     change = await create_change(client, admin_auth, seed["project_id"],
-                                 lead_id=seed["admin_id"])
+                                 lead_id=seed["admin_id"], customer_relevant=True)
     # add_item_and_lead sets a deadline; add the item WITHOUT it here.
     res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                             json={"part_id": part["part_id"], "is_lead": True},

@@ -131,7 +131,8 @@ async def test_deadline_state_none_without_date(session_factory, seed):
 @pytest.mark.asyncio
 async def test_deadline_state_overdue(session_factory, seed):
     async with session_factory() as session:
-        chg = await _mk_change(session, seed, change_number="C-DL-003")
+        chg = await _mk_change(session, seed, change_number="C-DL-003",
+                               customer_relevant=True)
         chg.required_by_date = datetime.utcnow() - timedelta(days=1)
         await session.flush()
         state = await ChangeService.deadline_state(session, chg)
@@ -141,7 +142,8 @@ async def test_deadline_state_overdue(session_factory, seed):
 @pytest.mark.asyncio
 async def test_deadline_state_at_risk(session_factory, seed):
     async with session_factory() as session:
-        chg = await _mk_change(session, seed, change_number="C-DL-004")
+        chg = await _mk_change(session, seed, change_number="C-DL-004",
+                               customer_relevant=True)
         chg.required_by_date = datetime.utcnow() + timedelta(days=2)
         await session.flush()
         template = await _mk_template_with_stages(session, 5)
@@ -157,7 +159,8 @@ async def test_deadline_state_at_risk(session_factory, seed):
 @pytest.mark.asyncio
 async def test_deadline_state_on_track(session_factory, seed):
     async with session_factory() as session:
-        chg = await _mk_change(session, seed, change_number="C-DL-005")
+        chg = await _mk_change(session, seed, change_number="C-DL-005",
+                               customer_relevant=True)
         chg.required_by_date = datetime.utcnow() + timedelta(days=60)
         await session.flush()
         template = await _mk_template_with_stages(session, 5)
@@ -182,7 +185,7 @@ async def test_deadline_state_none_for_terminal_change(session_factory, seed):
 async def test_lead_escalations_contains_deadline_row(session_factory, seed):
     async with session_factory() as session:
         chg = await _mk_change(session, seed, change_number="C-DL-007",
-                               lead_id=seed["admin_id"],
+                               lead_id=seed["admin_id"], customer_relevant=True,
                                required_by_date=datetime.utcnow() - timedelta(days=3))
         await session.flush()
         rows = await ChangeService.lead_escalations(session, seed["admin_id"])
@@ -198,6 +201,7 @@ async def test_lead_escalations_contains_deadline_row(session_factory, seed):
 async def test_get_and_list_expose_deadline_fields(client, eng_auth, seed):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "Deadline Expose", "reason": "r",
+        "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
@@ -241,6 +245,7 @@ async def test_patch_response_recomputes_deadline_state(client, admin_auth, seed
     # create a change (mirror this file's existing creation helper)
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "deadline", "change_type": "physical_part",
+        "customer_relevant": True,
     }, headers=admin_auth)
     change_id = res.json()["id"]
     future = (datetime.utcnow() + timedelta(days=30)).isoformat()
@@ -301,3 +306,91 @@ async def test_internal_change_has_no_quote_deadline(session_factory, seed):
         assert chg.active_deadline is None
         chg.release_due_date = datetime.utcnow() + timedelta(days=30)
         assert chg.active_deadline == "release"
+
+
+@pytest.mark.asyncio
+async def test_transition_to_quoted_stamps_quoted_at(session_factory, seed):
+    async with session_factory() as session:
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-Q1", status="costing",
+            customer_relevant=True, quoted_price=100.0,
+            required_by_date=datetime.utcnow() + timedelta(days=10))
+        # _guard's gate-wiring check iterates change.gates; the raw insert
+        # above never touched it, so force a load before transitioning
+        # (same async lazy-load pitfall as impacted_items above).
+        await session.refresh(chg, ["gates"])
+        await ChangeService.transition(session, chg, "quoted", seed["admin_id"])
+        assert chg.status == "quoted"
+        assert chg.quoted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_deadline_state_follows_active_deadline(session_factory, seed):
+    async with session_factory() as session:
+        # overdue quote deadline while pre-quoted
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-S1", status="costing",
+            customer_relevant=True,
+            required_by_date=datetime.utcnow() - timedelta(days=1))
+        assert await ChangeService.deadline_state(session, chg) == "overdue"
+        # quoted: quote deadline retired, nothing active -> None
+        chg.quoted_at = datetime.utcnow()
+        chg.status = "quoted"
+        assert await ChangeService.deadline_state(session, chg) is None
+        # release deadline takes over after acceptance/approval
+        chg.status = "approved"
+        chg.release_due_date = datetime.utcnow() - timedelta(days=2)
+        assert await ChangeService.deadline_state(session, chg) == "overdue"
+        chg.release_due_date = datetime.utcnow() + timedelta(days=60)
+        assert await ChangeService.deadline_state(session, chg) == "on_track"
+
+
+@pytest.mark.asyncio
+async def test_internal_change_deadline_state_none_before_release_due(
+        session_factory, seed):
+    async with session_factory() as session:
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-S2", status="costing",
+            customer_relevant=False,
+            required_by_date=datetime.utcnow() - timedelta(days=5))
+        assert await ChangeService.deadline_state(session, chg) is None
+
+
+@pytest.mark.asyncio
+async def test_in_assessment_gate_skips_deadline_for_internal(session_factory, seed):
+    # The gate helper is ChangeService._guard(session, change, to_status) ->
+    # str | None (reason string when blocked). The deadline gate sits behind
+    # the item/lead gates, so give both changes an impacted item; _mk_change
+    # already sets a lead. seed has no part, so create one (pattern from
+    # tests/test_notifications.py:122).
+    from app.models.change import ChangeImpactedItem
+    from app.models.part import Part
+    async with session_factory() as session:
+        part = Part(project_id=seed["project_id"], part_number="P-DL-1",
+                    name="P-DL-1", part_type="internal_mfg",
+                    item_category="article", created_by=seed["admin_id"])
+        session.add(part)
+        await session.flush()
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-G1", status="scoping",
+            customer_relevant=False)
+        session.add(ChangeImpactedItem(
+            change_id=chg.id, part_id=part.id, is_lead=True,
+            created_by=seed["admin_id"]))
+        await session.flush()
+        await session.refresh(chg, ["impacted_items"])
+        blocker = await ChangeService._guard(session, chg, "in_assessment")
+        # internal change without a deadline: the deadline gate must not fire
+        assert blocker is None or "deadline" not in blocker.lower()
+
+        cust = await _mk_change(
+            session, seed, change_number="C-DL-G2", status="scoping",
+            customer_relevant=True)
+        session.add(ChangeImpactedItem(
+            change_id=cust.id, part_id=part.id, is_lead=True,
+            created_by=seed["admin_id"]))
+        await session.flush()
+        await session.refresh(cust, ["impacted_items"])
+        blocker = await ChangeService._guard(session, cust, "in_assessment")
+        # customer-relevant without a quote deadline still blocks
+        assert blocker is not None and "deadline" in blocker.lower()

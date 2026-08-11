@@ -17,6 +17,7 @@ from app.models.change import (
     ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
+    SCOPING_STATUSES,
 )
 from app.models.entities import User, Project, Plant
 from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
@@ -44,7 +45,10 @@ def _org_scope(stmt, viewer: Optional[User]):
         ChangeRequest.project_id.is_(None) | ChangeRequest.project_id.in_(org_projects))
 
 ALLOWED_TRANSITIONS = {
-    "captured":          {"scoping", "cancelled", "on_hold"},
+    # 'rejected' is reachable straight from captured: a request can be turned
+    # down outright without first being scoped, and forcing it through scoping
+    # would demand an impacted set for a change that is dying anyway.
+    "captured":          {"scoping", "rejected", "cancelled", "on_hold"},
     "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
     "in_assessment":     {"scoping", "costing", "rejected", "cancelled", "on_hold"},
     "costing":           {"quoted", "approved", "on_hold", "cancelled"},
@@ -55,7 +59,10 @@ ALLOWED_TRANSITIONS = {
     "released":          {"closed"},
     "on_hold":           {"scoping", "in_assessment", "costing", "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
-    "rejected":          set(),
+    # Rejection is reversible: a change rejected in error goes back to scoping
+    # with a memo rather than forcing a whole new change request. Cancellation
+    # stays terminal — that is the irreversible one.
+    "rejected":          {"scoping"},
     "closed":            set(),
     "cancelled":         set(),
 }
@@ -290,17 +297,22 @@ class ChangeService:
 
     @staticmethod
     async def deadline_state(session: AsyncSession, change: ChangeRequest) -> str | None:
-        """Computed on_track/at_risk/overdue state for a Sales-set required-by
-        date. None when no deadline is set or the change is already terminal
-        (done changes don't need a deadline banner)."""
-        if change.required_by_date is None or change.status in TERMINAL_STATUSES:
+        """Computed on_track/at_risk/overdue for the phase's ACTIVE deadline:
+        the Sales-set quote deadline (required_by_date) until the change is
+        quoted, the release deadline (release_due_date) once one is set at
+        acceptance / internal approval. None when nothing is active (terminal
+        statuses, internal changes before approval, quoted changes waiting on
+        the customer)."""
+        kind = change.active_deadline
+        if kind is None:
             return None
+        due = change.release_due_date if kind == "release" else change.required_by_date
         from sqlalchemy.orm import selectinload
         from app.models.workflow import WfInstance, WfTemplate
         from app.services.workflow_service import DEFAULT_TASK_DUE_DAYS
 
         now = datetime.utcnow()
-        if change.required_by_date < now:
+        if due < now:
             return "overdue"
         insts = (await session.execute(
             select(WfInstance).where(WfInstance.status == "active").where(
@@ -314,7 +326,7 @@ class ChangeService:
         for inst in insts:
             max_stage = max((s.stage_order for s in inst.template.stages), default=inst.current_stage_order)
             needed = max(needed, (max_stage - inst.current_stage_order + 1) * DEFAULT_TASK_DUE_DAYS)
-        days_left = (change.required_by_date - now).days
+        days_left = (due - now).days
         return "at_risk" if needed > days_left else "on_track"
 
     @staticmethod
@@ -485,13 +497,25 @@ class ChangeService:
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
         """Return None if soft-OK, else a human reason string (overridable)."""
+        # Impact is an input to scoping, not an output of it: the meeting that
+        # decides to scope a change already knows which items are on the table,
+        # so entering scoping with an empty set means the decision was never
+        # recorded. Deliberately soft — an exploratory change that genuinely
+        # does not know its scope yet can proceed on an approved deviation, and
+        # the override is then on the record. The *hard*, unbypassable bar stays
+        # where it was: a locked set before assessment.
+        if to_status == "scoping" and not change.impacted_items:
+            return ("No impacted items defined — list what this change touches "
+                    "before scoping")
         if to_status == "in_assessment":
             count = len(change.impacted_items)
             if count == 0:
                 return "No impacted items added yet"
             if change.lead_id is None:
                 return "No lead (project manager) assigned"
-            if change.required_by_date is None:
+            # Internal changes have no quote deadline; only customer-relevant
+            # changes must set the required-by date before assessment.
+            if change.customer_relevant and change.required_by_date is None:
                 return "No deadline set — define the required-by date in scoping"
             # A change that already has routing has fanned out once — the proceed
             # meeting was consumed then. Resuming from on_hold back into
@@ -560,6 +584,8 @@ class ChangeService:
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
         user_id: int, *, cancellation_reason: Optional[str] = None,
+        rejection_reason: Optional[str] = None,
+        reopen_reason: Optional[str] = None,
     ) -> ChangeRequest:
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
@@ -601,6 +627,20 @@ class ChangeService:
             change.cancellation_reason = cancellation_reason
             change.cancelled_at = datetime.utcnow()
 
+        # Rejecting stops the flow dead: routing and assessments stay as they
+        # are, and nothing downstream will run again unless someone reopens it.
+        # That is a decision to answer for, so it carries a memo.
+        reopening = change.status == "rejected" and to_status == "scoping"
+        if to_status == "rejected":
+            if not rejection_reason:
+                raise ChangeError("rejection_reason is required to reject")
+            change.rejection_reason = rejection_reason
+            change.rejected_at = datetime.utcnow()
+            change.rejected_by = user_id
+        if reopening:
+            if not reopen_reason:
+                raise ChangeError("reopen_reason is required to reopen a rejected change")
+
         deviation = None
         reason = await ChangeService._guard(session, change, to_status)
         if reason is not None:
@@ -636,6 +676,8 @@ class ChangeService:
             await ChangeService.release(session, change, user_id)
         if to_status == "closed":
             change.closed_at = datetime.utcnow()
+        if to_status == "quoted" and change.quoted_at is None:
+            change.quoted_at = datetime.utcnow()
 
         old = change.status
         change.status = to_status
@@ -648,6 +690,24 @@ class ChangeService:
             field_name="status", old_value=old, new_value=to_status,
             notes=deviation.reason if deviation else None,
         )
+
+        # Both memos get their own audit row, distinct from the status hop, so
+        # the trail reads as "who rejected this and why" rather than as a bare
+        # state change with a reason buried in a field.
+        if to_status == "rejected":
+            await ChangeService.append_changelog(
+                session, change, "rejected", f"Rejected: {rejection_reason}",
+                user_id, notes=rejection_reason)
+        if reopening:
+            prior = change.rejection_reason
+            change.rejected_at = None
+            change.rejected_by = None
+            change.rejection_reason = None
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "reopened", f"Reopened: {reopen_reason}",
+                user_id, notes=reopen_reason,
+                old_value={"rejection_reason": prior}, new_value=None)
         return change
 
     @staticmethod
@@ -768,6 +828,7 @@ class ChangeService:
                 "part_number": p.part_number,
                 "name": p.name,
                 "part_type": p.part_type,
+                "customer_part_number": p.customer_part_number,
                 "item_category": p.item_category,
                 "is_impacted": item is not None,
                 "is_lead": bool(item and item.is_lead),
@@ -842,11 +903,17 @@ class ChangeService:
             raise ChangeError(f"Parts not in this project: {unknown}")
         current = {i.part_id: i for i in change.impacted_items}
         changed = False
+        # The lead names the change, so it is pinned once the change is out of
+        # the door — but while it is still being captured or scoped, picking
+        # the wrong lead is an ordinary mistake and must stay correctable. From
+        # assessment on it is frozen: departments have been routed against it.
+        lead_editable = change.status in SCOPING_STATUSES
         for pid, item in list(current.items()):
             if pid in wanted:
                 continue
-            if item.is_lead:
-                raise ChangeError("The lead item cannot be removed")
+            if item.is_lead and not lead_editable:
+                raise ChangeError(
+                    "The lead item cannot be removed once assessment has started")
             if item.resulting_revision_id is not None:
                 raise ChangeError(
                     f"Part {pid} already has a spawned revision and cannot be removed")
@@ -866,7 +933,32 @@ class ChangeService:
             changed = True
         await session.flush()
         if changed:
+            await ChangeService._ensure_lead(session, change, user_id)
             await ChangeService._reset_impact_confirmation(session, change, user_id)
+
+    @staticmethod
+    async def _ensure_lead(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> None:
+        """Guarantee a surviving impacted set still has exactly one lead.
+
+        Dropping the lead during scoping is allowed, so something has to take
+        over — the change is named after its lead, and a set with no lead has
+        no name. Promotes the lowest part id, which is stable and predictable
+        rather than whatever the ORM happens to return first.
+        """
+        await session.refresh(change, ["impacted_items"])
+        items = change.impacted_items
+        if not items or any(i.is_lead for i in items):
+            return
+        new_lead = min(items, key=lambda i: i.part_id)
+        new_lead.is_lead = True
+        await session.flush()
+        part = await session.get(Part, new_lead.part_id)
+        await ChangeService.append_changelog(
+            session, change, "impacted_lead_changed",
+            f"Lead item is now {part.part_number if part else new_lead.part_id}",
+            user_id, new_value={"part_id": new_lead.part_id})
 
     @staticmethod
     async def _reset_impact_confirmation(
@@ -1079,18 +1171,39 @@ class ChangeService:
                 "deviation_id": dev.id,
             })
 
-        # kind "impact_confirm": scoping & impacted items exist & not yet locked,
-        # and this user may confirm it. Locking is the step that unblocks
-        # assessment (see the -> in_assessment hard gate in transition()).
+        # kind "impact_confirm": captured or scoping, impacted items exist and
+        # are not yet locked, and this user may confirm it. Offered from
+        # captured on, because the set is meant to be defined before scoping
+        # starts — see the -> scoping soft guard. Locking is the step that
+        # unblocks assessment (the -> in_assessment hard gate in transition()).
         # Mirrors ChangeService.user_can_confirm_impact /
         # POST /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
-        if (change.status == "scoping" and change.impact_confirmed_at is None
+        if (change.status in SCOPING_STATUSES and change.impact_confirmed_at is None
                 and change.impacted_items
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",
                 "label": "Confirm impacted items",
                 "target_tab": "impacted",
+            })
+
+        # kind "needs_info": the scoping meeting could not decide because
+        # something is missing. Sales owns the customer relationship, so Sales
+        # is accountable for going and getting it — the action is addressed to
+        # them by name rather than left as a note nobody owns. Cleared by
+        # recording a follow-up meeting that reaches a real decision.
+        undecided_needs_info = [
+            m for m in change.meetings if m.decision == "needs_info"]
+        if (undecided_needs_info
+                and change.status in SCOPING_STATUSES
+                and not any(m.decision in ("proceed", "reject") for m in change.meetings)
+                and await ChangeService._user_in_department(session, user, "Sales")):
+            latest = undecided_needs_info[-1]
+            actions.append({
+                "kind": "needs_info",
+                "label": "Sales: obtain missing information — "
+                         + (latest.decision_reason or "see meeting note"),
+                "target_tab": "scoping",
             })
 
         # kind "gate": a gate that guards the currently-reachable transition,
@@ -1479,7 +1592,6 @@ class ChangeService:
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
-        from app.models.change import SCOPING_STATUSES
         phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
