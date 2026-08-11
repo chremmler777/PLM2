@@ -236,6 +236,8 @@ class ChangeResponse(BaseModel):
     internal_approved_amount: Optional[float] = None
     internal_approval_note: Optional[str] = None
     rejected_at: Optional[datetime] = None
+    rejection_sent_at: Optional[datetime] = None
+    rejection_sent_by: Optional[int] = None
     rejected_by: Optional[int] = None
     rejection_reason: Optional[str] = None
     created_at: datetime

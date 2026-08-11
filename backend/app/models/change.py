@@ -34,7 +34,11 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 
 # What a change attachment is. "info_request" is the question sent out after a
 # needs_info decision; "info_response" is the answer, linked back to it.
-ATTACHMENT_KINDS = ("general", "info_request", "info_response")
+# "rejection_letter" is the explanation sent to the customer when a change is
+# turned down — the document a rejected customer-relevant change cannot close
+# without.
+ATTACHMENT_KINDS = ("general", "info_request", "info_response",
+                    "rejection_letter")
 
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
@@ -146,6 +150,11 @@ class ChangeRequest(Base):
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Telling the customer is the last step of a rejection, not an afterthought:
+    # stamped by POST /rejection-sent, which then closes the change.
+    rejection_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_sent_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

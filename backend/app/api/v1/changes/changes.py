@@ -112,6 +112,8 @@ async def my_change_tasks(
       assessment        in_assessment, the department's own pending answer
       obtain_info       scoping, a needs_info decision still unanswered,
                         for Sales — who owns the customer relationship
+      send_rejection    rejected and customer-relevant, not yet sent, for
+                        Sales — with has_letter saying what is still missing
       customer_response quoted and unanswered, for Sales
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
@@ -166,7 +168,8 @@ async def my_change_tasks(
 
     open_changes = (await db.execute(_org_scope(
         select(ChangeRequest).where(
-            ChangeRequest.status.in_(("captured", "scoping", "quoted"))),
+            ChangeRequest.status.in_(
+                ("captured", "scoping", "quoted", "rejected"))),
         current_user,
     ))).scalars().all()
 
@@ -195,6 +198,14 @@ async def my_change_tasks(
                     **await _base(c), "kind": "obtain_info",
                     "reason": asked.decision_reason,
                 })
+        elif (c.status == "rejected" and in_sales and c.customer_relevant
+                and c.rejection_sent_at is None):
+            tasks.append({
+                **await _base(c), "kind": "send_rejection",
+                # Tells the UI which half of the job is left: write the
+                # explanation, or confirm it went out.
+                "has_letter": await ChangeService.has_rejection_letter(db, c),
+            })
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})
@@ -736,6 +747,36 @@ async def customer_response(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
+    return change
+
+
+@router.post("/{change_id}/rejection-sent", response_model=ChangeResponse)
+async def confirm_rejection_sent(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales confirms the rejection reached the customer — the last open step
+    of a rejection — which also closes the change.
+
+    Sales membership only, no plain-admin shortcut: whoever owns the customer
+    relationship is the only one who can honestly say it was sent. An admin
+    does it through acts-as.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService._user_in_department(db, current_user, "Sales"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Sales department member may confirm the rejection "
+                   "was sent (admins: act as Sales)")
+    try:
+        await ChangeService.confirm_rejection_sent(db, change, current_user.id)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
     return change
 
 

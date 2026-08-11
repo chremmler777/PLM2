@@ -62,7 +62,10 @@ ALLOWED_TRANSITIONS = {
     # Rejection is reversible: a change rejected in error goes back to scoping
     # with a memo rather than forcing a whole new change request. Cancellation
     # stays terminal — that is the irreversible one.
-    "rejected":          {"scoping"},
+    # Reopening stays available right up until the change is closed; closing is
+    # the step that makes a rejection final (and, for a customer-relevant one,
+    # requires the customer to have been told — see transition()).
+    "rejected":          {"scoping", "closed"},
     "closed":            set(),
     "cancelled":         set(),
 }
@@ -685,6 +688,25 @@ class ChangeService:
         # locking the impacted set is always doable and cheap. Evaluated after the
         # soft guards so their more specific reasons surface first, and before the
         # deviation is consumed so a refused attempt does not burn it.
+        # HARD gate: a rejected customer-relevant change is not finished until
+        # the customer has been told. Not in _guard — no deviation should let a
+        # customer be left waiting on an answer that was decided weeks ago.
+        # Internal rejections carry no such debt and close freely.
+        if (change.status == "rejected" and to_status == "closed"
+                and change.customer_relevant):
+            letters = (await session.execute(
+                select(func.count()).select_from(ChangeAttachment).where(
+                    ChangeAttachment.change_id == change.id,
+                    ChangeAttachment.kind == "rejection_letter"))).scalar() or 0
+            if letters == 0:
+                raise ChangeError(
+                    "No rejection letter on file — attach the explanation sent "
+                    "to the customer before closing")
+            if change.rejection_sent_at is None:
+                raise ChangeError(
+                    "Rejection has not been confirmed as sent — record the send "
+                    "(POST /rejection-sent) before closing")
+
         if to_status == "in_assessment" and change.impact_confirmed_at is None:
             raise ChangeError(
                 "Impacted set is not locked — confirm impacted items before "
@@ -1277,6 +1299,46 @@ class ChangeService:
                     })
 
         return actions
+
+    @staticmethod
+    async def has_rejection_letter(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> bool:
+        """Is the explanation sent to the customer on file? Shared by the close
+        gate and the my-tasks hint, so the badge and the block agree."""
+        return bool((await session.execute(
+            select(func.count()).select_from(ChangeAttachment).where(
+                ChangeAttachment.change_id == change.id,
+                ChangeAttachment.kind == "rejection_letter"))).scalar() or 0)
+
+    @staticmethod
+    async def confirm_rejection_sent(
+        session: AsyncSession, change: ChangeRequest, user_id: int,
+    ) -> ChangeRequest:
+        """Record that the rejection reached the customer, then close the
+        change in the same breath — the send IS the last open step, so leaving
+        the change sitting in 'rejected' afterwards would just be a second
+        button for the same fact. Closing runs through transition() so the
+        changelog chain and the gates stay exactly as they are everywhere else.
+        """
+        if change.status != "rejected":
+            raise ChangeError("Only a rejected change has a rejection to send")
+        if change.rejection_sent_at is not None:
+            raise ChangeError("Rejection was already confirmed as sent")
+        if not await ChangeService.has_rejection_letter(session, change):
+            raise ChangeError(
+                "No rejection letter on file — attach the explanation sent to "
+                "the customer first")
+        change.rejection_sent_at = datetime.utcnow()
+        change.rejection_sent_by = user_id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "rejection_sent",
+            "Rejection sent to the customer", user_id,
+            field_name="rejection_sent_at",
+            new_value=str(change.rejection_sent_at))
+        await ChangeService.transition(session, change, "closed", user_id)
+        return change
 
     @staticmethod
     def pending_info_request(change: ChangeRequest):
