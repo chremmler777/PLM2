@@ -241,6 +241,12 @@ view.
   `scoping` is the single CCB-style review. A `needs_info` outcome produces a
   *follow-up meeting row*, not a second meeting type.
 - ⚠ **Workbook field mapping** — see §1.
+- ⚠ **External flow only, for now (2026-08-11).** The current shape — Sales/PM
+  as the only capturers, quote deadline, customer letters, Sales-owned
+  loops — deliberately serves the *external* (customer-driven) change flow
+  with safeguarding. When internal changes become a real volume, expect the
+  starter set to widen (more `can_start_change` departments) and the internal
+  branch to grow its own conventions. Revisit then; don't generalize early.
 - ⚠ **Process responsibles per project (planned, not built — 2026-08-11).**
   Today department pickers preselect nothing (except Development, the master
   engineering role, when the user holds it). The intended end state: each
