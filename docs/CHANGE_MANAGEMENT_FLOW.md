@@ -102,6 +102,26 @@ Run these when discussing any stage's implementation:
   what they send the customer — rejection letter, open questions, or a
   counter-proposal.
 
+### The needs-info loop (2026-08-11)
+
+A `needs_info` decision opens a tracked request/response cycle instead of a
+note nobody owns:
+
+1. The decision **auto-raises a Team flag** (`needs_info` concern, author =
+   the decider) carrying the decision reason. Net effect per follow-up round:
+   the prior flag is resolved by the decision, a fresh one is raised — the
+   change always visibly owes exactly one answer
+   (`meeting_service.py::decide_meeting`).
+2. **Sales gets the task** — my-tasks kind `obtain_info` with the reason, for
+   Sales members, while `ChangeService.pending_info_request` holds.
+3. **Documents are classified**: attachments carry `kind`
+   (`general | info_request | info_response`) and a response links to its
+   request (`responds_to_id`, migration 046). The needs-info slot uploads as
+   `info_request`; the UI pairs responses under their requests.
+4. **Closure**: the decider withdraws their flag once the answers suffice
+   (author-only — whoever asked the question judges the answer), then a
+   follow-up meeting decides `proceed`. All steps audited.
+
 ### The two deadlines (2026-08-11)
 
 One quote-by, one release-by; at any moment at most one is *active*
