@@ -10,7 +10,13 @@ vi.mock('../../api/changes', () => ({
     listConcerns: vi.fn(),
     raiseConcern: vi.fn().mockResolvedValue({}),
     withdrawConcern: vi.fn().mockResolvedValue({}),
+    answerConcern: vi.fn().mockResolvedValue({}),
   },
+}))
+vi.mock('./AttachmentDropzone', () => ({
+  default: (p: { concernId?: number }) => (
+    <div data-testid="dropzone" data-concern={p.concernId ?? ''} />
+  ),
 }))
 const authState = vi.hoisted(() => ({ current: { userId: 5, isAdmin: false } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => authState.current }))
@@ -155,18 +161,34 @@ describe('ConcernStrip in the assessment phase', () => {
   })
   afterEach(cleanup)
 
+  it('talks risks, not concerns, in the assessment context', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'reject_proposal', department_id: 4, raised_by: 5 })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
+    const note = await screen.findByText('Tool cannot hold tolerance')
+    expect(screen.getByText(t('risk.title'))).toBeTruthy()
+    expect(screen.getByText(t('risk.hint'))).toBeTruthy()
+    // The kind reads as a risk, not as "would reject".
+    expect(note.closest('li')?.textContent).toContain(t('risk.kind'))
+    expect(screen.getByTestId('concern-close-1').textContent).toBe(t('risk.resolved'))
+    expect(screen.getByRole('button', { name: new RegExp(t('risk.raise')) })).toBeTruthy()
+    // The scoping vocabulary stays out of this context.
+    expect(screen.queryByText(t('concern.title'))).toBeNull()
+    expect(screen.queryByText(t('concern.wouldReject'))).toBeNull()
+  })
+
   it('makes a non-Development member choose their department before flagging', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={depts} myDepartmentIds={[4]} />)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
     // Nothing is guessed: the placeholder stands until the user picks.
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
     expect(picker.value).toBe('')
     expect(screen.getByText(t('concern.pickDepartment'))).toBeTruthy()
     fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'gauge missing' } })
-    expect((screen.getByRole('button', { name: /^Flag$/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: t('risk.raise') }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(picker, { target: { value: '4' } })
-    fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }))
+    fireEvent.click(screen.getByRole('button', { name: t('risk.raise') }))
     await waitFor(() => expect(changesApi.raiseConcern)
       .toHaveBeenCalledWith(7, 'needs_info', 'gauge missing', 4))
   })
@@ -179,7 +201,7 @@ describe('ConcernStrip in the assessment phase', () => {
     ]
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={many} myDepartmentIds={[5, 6]} />)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
     // Development is the master role, whichever membership comes first — and
     // being preselected, no placeholder is offered.
     expect((screen.getByLabelText(/Department/) as HTMLSelectElement).value).toBe('6')
@@ -189,21 +211,21 @@ describe('ConcernStrip in the assessment phase', () => {
   it('offers an admin every department, still unpicked', async () => {
     authState.current = { userId: 5, isAdmin: true }
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[]} />)
-    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
     // Placeholder + the two active departments; nothing preselected for an
     // admin who is in none of them.
     expect(picker.value).toBe('')
     expect(picker.querySelectorAll('option')).toHaveLength(3)
     fireEvent.change(screen.getByLabelText(/^Concern$/), { target: { value: 'no capacity' } })
-    expect((screen.getByRole('button', { name: /^Flag$/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: t('risk.raise') }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('will not drop a department flag without saying how it was addressed', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
       concern({ id: 3, raised_by: 5, department_id: 4, note: 'gauge missing' })] as never)
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
-    fireEvent.click(await screen.findByRole('button', { name: /withdraw/ }))
+    fireEvent.click(await screen.findByTestId('concern-close-3'))
     const confirm = screen.getByTestId('concern-withdraw-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.change(screen.getByTestId('concern-withdraw-note'),
@@ -297,5 +319,92 @@ describe('ConcernStrip refused flag', () => {
     expect(alert.textContent).toContain('Only Project Management')
     // The form stays open with the note — the failure must not eat the typing.
     expect((screen.getByLabelText(/^Concern$/) as HTMLInputElement).value).toBe('tool risk')
+  })
+})
+
+describe('ConcernStrip risk proposals', () => {
+  const depts = [{ id: 4, name: 'Tool Engineer' }]
+  const doc = (over: Record<string, unknown> = {}) => ({
+    id: 70, filename: 'mitigation.pptx', content_type: 'application/vnd.ms-powerpoint',
+    size_bytes: 10, phase: 'baseline', created_at: '2026-08-08T00:00:00',
+    kind: 'general', responds_to_id: null, concern_id: 3, assessment_id: null, ...over,
+  })
+  const risk = (over: Record<string, unknown> = {}) => concern({
+    id: 3, kind: 'reject_proposal', department_id: 4, raised_by: 9,
+    note: 'tool cannot hold tolerance', answer_note: null, answered_by_name: null, ...over,
+  })
+
+  beforeEach(() => {
+    authState.current = { userId: 5, isAdmin: false }
+    vi.mocked(changesApi.answerConcern).mockClear()
+    vi.mocked(changesApi.withdrawConcern).mockClear()
+  })
+  afterEach(cleanup)
+
+  const openProposal = async (attachments: unknown[] = []) => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk()] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[2]} attachments={attachments as never} />)
+    // Any member may propose — this viewer is in another department entirely.
+    fireEvent.click(await screen.findByTestId('concern-propose-3'))
+  }
+
+  it('takes a proposal from any member, but not without its documentation', async () => {
+    await openProposal()
+    fireEvent.change(screen.getByTestId('concern-proposal-note-3'),
+      { target: { value: 'insert can be reworked' } })
+    const submit = () => screen.getByTestId('concern-proposal-submit-3') as HTMLButtonElement
+    // Text alone is not a proposal.
+    expect(submit().disabled).toBe(true)
+    expect(screen.getByTestId('concern-proposal-needsdoc-3')).toBeTruthy()
+    // The upload lands in this risk's container.
+    expect(screen.getByTestId('dropzone').getAttribute('data-concern')).toBe('3')
+    // Even ticking the confirmation does not fake a missing document.
+    fireEvent.click(screen.getByTestId('concern-proposal-confirm-3'))
+    expect(submit().disabled).toBe(true)
+  })
+
+  it('needs the explicit confirmation even once the document is there', async () => {
+    await openProposal([doc()])
+    fireEvent.change(screen.getByTestId('concern-proposal-note-3'),
+      { target: { value: 'insert can be reworked' } })
+    const submit = () => screen.getByTestId('concern-proposal-submit-3') as HTMLButtonElement
+    expect(submit().disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('concern-proposal-confirm-3'))
+    expect(submit().disabled).toBe(false)
+    fireEvent.click(submit())
+    await waitFor(() => expect(changesApi.answerConcern)
+      .toHaveBeenCalledWith(7, 3, 'insert can be reworked'))
+  })
+
+  it('says who the proposal is waiting on', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      risk({ answer_note: 'insert can be reworked', answered_by_name: 'Eva Eng' })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[2]} attachments={[doc()] as never} />)
+    const state = await screen.findByTestId('concern-proposal-state-3')
+    expect(state.textContent).toContain('Tool Engineer')
+    expect(screen.getByTestId('concern-proposal-3').textContent).toContain('insert can be reworked')
+    expect(screen.getByTestId('concern-proposal-3').textContent).toContain('Eva Eng')
+    // The proposal's documentation reads on the card.
+    expect(screen.getByRole('link', { name: 'mitigation.pptx' })).toBeTruthy()
+    // A proposer from another department cannot close it.
+    expect((screen.getByTestId('concern-close-3') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('leaves the resolution to the raising department', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      risk({ answer_note: 'insert can be reworked' })] as never)
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[4]} attachments={[doc()] as never} />)
+    const close = await screen.findByTestId('concern-close-3') as HTMLButtonElement
+    expect(close.disabled).toBe(false)
+    expect(close.textContent).toBe(t('risk.resolved'))
+    fireEvent.click(close)
+    fireEvent.change(screen.getByTestId('concern-withdraw-note'),
+      { target: { value: 'rework accepted' } })
+    fireEvent.click(screen.getByTestId('concern-withdraw-confirm'))
+    await waitFor(() => expect(changesApi.withdrawConcern)
+      .toHaveBeenCalledWith(7, 3, 'rework accepted'))
   })
 })

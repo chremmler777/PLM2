@@ -262,7 +262,8 @@ export default function AssessmentBuckets({
                 {/* This department's own holds, in the room where the work happens. */}
                 <ConcernStrip changeId={changeId} editable={isMine && editable}
                   scoped departments={departments} myDepartmentIds={myDepartmentIds}
-                  onlyDepartmentId={row.id} isPm={isPm} />
+                  onlyDepartmentId={row.id} isPm={isPm}
+                  attachments={change.attachments ?? []} />
 
                 {a?.submitted_at || (a?.verdict && a.verdict !== 'pending') ? (
                   <div className="text-sm space-y-0.5" data-testid={`bucket-answer-${row.id}`}>

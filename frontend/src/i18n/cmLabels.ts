@@ -250,6 +250,44 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Goes through internal cost approval — no customer involved.',
   },
   'concern.title': { de: 'Einwände des Teams', en: 'Team concerns' },
+  // Assessment is a risk assessment, so the same mechanics are worded as risks
+  // there. Scoping keeps its questions-and-concerns language.
+  'risk.title': { de: 'Risiken', en: 'Risks' },
+  'risk.hint': {
+    de: 'Ein offenes Risiko hält nur die Bewertung dieses Fachbereichs auf — '
+      + 'entschieden wird mit dem Urteil.',
+    en: 'An open risk holds only this department’s assessment — the verdict is '
+      + 'the decision.',
+  },
+  'risk.raise': { de: 'Risiko melden', en: 'Flag risk' },
+  'risk.kind': { de: 'Risiko', en: 'Risk' },
+  'risk.question': { de: 'Offene Frage', en: 'Open question' },
+  'risk.proposal': { de: 'Lösungsvorschlag', en: 'Mitigation proposal' },
+  'risk.resolved': { de: 'Risiko geklärt', en: 'Risk resolved' },
+  'risk.open': { de: 'Offene Risiken', en: 'Open risks' },
+  'concern.proposal': { de: 'Lösungsvorschlag', en: 'Proposal' },
+  'concern.proposalPlaceholder': {
+    de: 'Wie lässt sich der Punkt lösen?',
+    en: 'How can this point be solved?',
+  },
+  'concern.proposalSubmit': { de: 'Vorschlag einreichen', en: 'Submit proposal' },
+  'concern.proposalDocSlot': {
+    de: 'Dokumentation ablegen (PPT …)',
+    en: 'Drop the documentation (PPT …)',
+  },
+  'concern.proposalConfirm': {
+    de: 'Dokumentation angehängt (PPT)',
+    en: 'Documentation attached (PPT)',
+  },
+  'concern.proposalNeedsDoc': {
+    de: 'Ein Vorschlag braucht die Dokumentation — Text allein reicht nicht.',
+    en: 'A proposal needs its documentation — text alone is not enough.',
+  },
+  'concern.proposalReceived': {
+    de: 'Vorschlag eingegangen — wartet auf Prüfung durch {x}',
+    en: 'Proposal received — awaiting {x} review',
+  },
+  'concern.proposalBy': { de: 'vorgeschlagen von', en: 'proposed by' },
   'concern.none': {
     de: 'Keine Einwände. Wer etwas blockiert sieht, kann es hier markieren — auch vor dem Termin.',
     en: 'No concerns. Anyone who sees a blocker can flag it here — before the meeting, too.',

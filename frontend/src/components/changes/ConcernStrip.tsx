@@ -5,7 +5,9 @@ import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
 import { preferredDepartmentId } from '../../lib/departments'
-import type { ChangeConcern, ConcernKind } from '../../types/change'
+import AttachmentDropzone from './AttachmentDropzone'
+import { AttachmentRow } from './AttachmentRow'
+import type { Attachment, ChangeConcern, ConcernKind } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -26,7 +28,7 @@ const KIND_STYLE: Record<ConcernKind, string> = {
  */
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
-  hideConcernIds = [], onlyDepartmentId, isPm = false,
+  hideConcernIds = [], onlyDepartmentId, isPm = false, attachments = [],
 }: {
   changeId: number
   editable: boolean
@@ -36,6 +38,8 @@ export default function ConcernStrip({
   onlyDepartmentId?: number
   /** Project Management may settle any objection. */
   isPm?: boolean
+  /** The change's documents, so a proposal can show and require its own. */
+  attachments?: Attachment[]
   /** Assessment phase: every flag belongs to a department, and dropping one
    *  needs a written resolution. */
   scoped?: boolean
@@ -53,6 +57,11 @@ export default function ConcernStrip({
   // A refused flag must say why in place: a toast is missed, and the typed note
   // has to survive so the user can fix the problem and send it again.
   const [failure, setFailure] = useState<string | null>(null)
+  // A proposal is text plus its documentation, and the author confirming that
+  // the documentation is really there — the explicit tick the business asked for.
+  const [proposing, setProposing] = useState<number | null>(null)
+  const [proposal, setProposal] = useState('')
+  const [docConfirmed, setDocConfirmed] = useState(false)
 
   // In assessment you flag for your own department (admins for any). In scoping
   // the department is mere attribution — anyone may say "this concerns Packaging"
@@ -114,6 +123,35 @@ export default function ConcernStrip({
   const closerRule = (c: ChangeConcern) =>
     c.department_id != null ? t('concern.authorDeptOrPm') : t('concern.authorOrPm')
 
+  // One vocabulary switch: assessment talks risks, scoping talks concerns.
+  const w = {
+    title: scoped ? t('risk.title') : t('concern.title'),
+    hint: t('risk.hint'),
+    raise: scoped ? t('risk.raise') : t('concern.raise'),
+    proposal: scoped ? t('risk.proposal') : t('concern.proposal'),
+    settle: scoped ? t('risk.resolved') : t('concern.markSolved'),
+    kindOf: (k: ConcernKind) => scoped
+      ? (k === 'needs_info' ? t('risk.question') : t('risk.kind'))
+      : (k === 'reject_proposal' ? t('concern.wouldReject') : t('concern.wantsInfo')),
+  }
+
+  const docsOf = (concernId: number) =>
+    attachments.filter((a) => a.concern_id === concernId)
+
+  const propose = useMutation({
+    mutationFn: (vars: { concernId: number; note: string }) =>
+      changesApi.answerConcern(changeId, vars.concernId, vars.note.trim()),
+    onSuccess: () => {
+      setProposing(null); setProposal(''); setDocConfirmed(false)
+      setFailure(null); invalidate()
+    },
+    onError: (e: unknown) => {
+      const detail = errDetail(e) ?? 'Could not submit the proposal'
+      setFailure(detail)
+      toast.error(detail)
+    },
+  })
+
   const listed = concerns
     .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
     .filter((c: ChangeConcern) =>
@@ -125,7 +163,7 @@ export default function ConcernStrip({
     <div className={`rounded-lg border p-3 space-y-2 ${
       open.length > 0 ? 'border-amber-700/60 bg-amber-950/20' : 'border-slate-700 bg-slate-800'}`}>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-medium text-slate-100">{t('concern.title')}</span>
+        <span className="font-medium text-slate-100">{w.title}</span>
         {open.length > 0 && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-100">
             {t('concern.blocking').replace('{n}', String(open.length))}
@@ -133,9 +171,11 @@ export default function ConcernStrip({
         )}
         {editable && !adding && (
           <button className="ml-auto text-xs text-sky-300 hover:text-sky-200"
-            onClick={() => { setFailure(null); setAdding(true) }}>+ {t('concern.raise')}</button>
+            onClick={() => { setFailure(null); setAdding(true) }}>+ {w.raise}</button>
         )}
       </div>
+
+      {scoped && <p className="text-[11px] text-slate-500">{w.hint}</p>}
 
       {open.length === 0 && settled.length === 0 && (
         <p className="text-xs text-slate-500">{t('concern.none')}</p>
@@ -147,7 +187,7 @@ export default function ConcernStrip({
             className={`flex items-start gap-2 text-sm rounded border px-2 py-1.5 ${
               c.is_open ? KIND_STYLE[c.kind] : 'border-slate-700 bg-slate-900/40 text-slate-500'}`}>
             <span className="text-xs font-semibold flex-shrink-0 mt-0.5">
-              {c.kind === 'reject_proposal' ? t('concern.wouldReject') : t('concern.wantsInfo')}
+              {w.kindOf(c.kind)}
             </span>
             <span className="min-w-0 flex-1">
               {c.department_id != null && (
@@ -163,6 +203,83 @@ export default function ConcernStrip({
               {!c.is_open && c.resolution_note && (
                 <span className="block text-xs opacity-70">
                   {t('concern.resolved')}: {c.resolution_note}
+                </span>
+              )}
+              {/* A department point is solved by whoever can solve it: anyone may
+                  put a proposal on it, and the raising side then settles it. */}
+              {scoped && c.is_open && (
+                <span className="block mt-1 space-y-1">
+                  {c.answer_note && (
+                    <>
+                      <span data-testid={`concern-proposal-state-${c.id}`}
+                        className="inline-flex items-center rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[10px] leading-tight font-medium">
+                        {t('concern.proposalReceived').replace('{x}',
+                          deptName(c.department_id) ?? t('concern.deptTitle'))}
+                      </span>
+                      <span className="block text-xs" data-testid={`concern-proposal-${c.id}`}>
+                        {w.proposal}: {c.answer_note}
+                        <span className="block opacity-70">
+                          {t('concern.proposalBy')}{' '}
+                          {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '—')}
+                        </span>
+                      </span>
+                    </>
+                  )}
+                  {docsOf(c.id).length > 0 && (
+                    <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-0.5">
+                      {docsOf(c.id).map((a) => (
+                        <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
+                      ))}
+                    </ul>
+                  )}
+                  {editable && (proposing === c.id ? (
+                    <span className="block space-y-1">
+                      <textarea value={proposal} rows={2}
+                        data-testid={`concern-proposal-note-${c.id}`}
+                        onChange={(e) => setProposal(e.target.value)}
+                        placeholder={t('concern.proposalPlaceholder')}
+                        aria-label={w.proposal}
+                        className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                      <AttachmentDropzone changeId={changeId} concernId={c.id} compact
+                        label={t('concern.proposalDocSlot')} onUploaded={invalidate} />
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" data-testid={`concern-proposal-confirm-${c.id}`}
+                          checked={docConfirmed}
+                          onChange={(e) => setDocConfirmed(e.target.checked)} />
+                        <span className="text-slate-300">{t('concern.proposalConfirm')}</span>
+                      </label>
+                      {docsOf(c.id).length === 0 && (
+                        <span className="block text-[11px] text-amber-300/80"
+                          data-testid={`concern-proposal-needsdoc-${c.id}`}>
+                          {t('concern.proposalNeedsDoc')}
+                        </span>
+                      )}
+                      <span className="flex flex-wrap gap-2">
+                        <button data-testid={`concern-proposal-submit-${c.id}`}
+                          className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={!proposal.trim() || !docConfirmed
+                            || docsOf(c.id).length === 0 || propose.isPending}
+                          onClick={() => propose.mutate({ concernId: c.id, note: proposal })}>
+                          {t('concern.proposalSubmit')}
+                        </button>
+                        <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
+                          onClick={() => {
+                            setProposing(null); setProposal(''); setDocConfirmed(false)
+                          }}>
+                          {t('common.cancel')}
+                        </button>
+                      </span>
+                    </span>
+                  ) : (
+                    <button data-testid={`concern-propose-${c.id}`}
+                      className="text-xs text-sky-300 hover:text-sky-200"
+                      onClick={() => {
+                        setProposing(c.id); setProposal(c.answer_note ?? '')
+                        setDocConfirmed(false)
+                      }}>
+                      + {w.proposal}
+                    </button>
+                  ))}
                 </span>
               )}
               {withdrawing === c.id && (() => {
@@ -182,7 +299,7 @@ export default function ConcernStrip({
                       className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
                       disabled={withdraw.isPending || (noteRequired && !resolution.trim())}
                       onClick={() => withdraw.mutate({ concernId: c.id, note: resolution })}>
-                      {answering ? t('concern.markSolved') : t('concern.withdraw')}
+                      {scoped ? w.settle : (answering ? t('concern.markSolved') : t('concern.withdraw'))}
                     </button>
                     <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
                       onClick={() => { setWithdrawing(null); setResolution('') }}>
@@ -206,7 +323,7 @@ export default function ConcernStrip({
                 disabled={!mayClose(c) || withdraw.isPending}
                 title={mayClose(c) ? undefined : closerRule(c)}
                 onClick={() => { setWithdrawing(c.id); setResolution('') }}>
-                {isAuthor(c) ? t('concern.withdraw') : t('concern.markSolved')}
+                {scoped ? w.settle : (isAuthor(c) ? t('concern.withdraw') : t('concern.markSolved'))}
               </button>
             )}
           </li>
@@ -244,7 +361,7 @@ export default function ConcernStrip({
             className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
           <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
             disabled={!note.trim() || raise.isPending || (scoped && effectiveDept === undefined)}
-            onClick={() => raise.mutate()}>{t('concern.raise')}</button>
+            onClick={() => raise.mutate()}>{w.raise}</button>
           <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
             onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
             {t('common.cancel')}
