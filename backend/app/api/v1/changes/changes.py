@@ -136,10 +136,11 @@ async def my_change_tasks(
       scoping_wrapup    scoping, for Project Manager — drive it to a decision
       impact_confirm    scoping and unlocked, for Development
       assessment        in_assessment, the department's own pending answer
-      obtain_info       scoping, a needs_info decision whose Team flag is
-                        open and UNANSWERED, for Sales — who owns the customer
-                        relationship. Answering clears the row; settling the
-                        flag stays with the side that raised it
+      obtain_info       ANY open, unanswered needs_info question on a live
+                        change — raised by the scoping meeting or by a single
+                        department alike — for Sales, who owns the customer
+                        relationship. One row per change; answering the
+                        question clears it, settling stays with the asker
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
       customer_response quoted and unanswered, for Sales
@@ -194,10 +195,13 @@ async def my_change_tasks(
             "due_date": due, "overdue": state == "overdue",
         }
 
+    # Every change that can still need something done to it. Not simply
+    # "not terminal": 'rejected' counts as terminal for the flow, but a
+    # rejected customer change still owes the customer a letter (send_rejection
+    # below). Closed, released and cancelled owe nobody anything.
     open_changes = (await db.execute(_org_scope(
         select(ChangeRequest).where(
-            ChangeRequest.status.in_(
-                ("captured", "scoping", "quoted", "rejected"))),
+            ChangeRequest.status.not_in(("released", "closed", "cancelled"))),
         current_user,
     ))).scalars().all()
 
@@ -220,17 +224,7 @@ async def my_change_tasks(
                 })
             if can_confirm and c.impact_confirmed_at is None:
                 tasks.append({**await _base(c), "kind": "impact_confirm"})
-            # The task lives as long as the QUESTION does: once Sales marks
-            # the flag solved the row goes, and the PM's scoping_wrapup drives
-            # the follow-up meeting that reviews the answer.
-            asked = ChangeService.pending_info_request(c)
-            question = ChangeService.open_team_question(c)
-            if (asked is not None and in_sales
-                    and question is not None and not question.is_answered):
-                tasks.append({
-                    **await _base(c), "kind": "obtain_info",
-                    "reason": asked.decision_reason,
-                })
+
         elif (c.status == "rejected" and in_sales and c.customer_relevant
                 and c.rejection_sent_at is None):
             tasks.append({
@@ -242,6 +236,21 @@ async def my_change_tasks(
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})
+
+        # Independent of the stage chain: a question can be waiting on Sales at
+        # any live status, and it is one errand per change however many people
+        # asked. Cleared per question by answering it.
+        if in_sales:
+            questions = ChangeService.unanswered_questions(c)
+            if questions:
+                newest = questions[-1]
+                tasks.append({
+                    **await _base(c), "kind": "obtain_info",
+                    "reason": newest.note,
+                    "question_count": len(questions),
+                    "concern_id": newest.id,
+                    "department_id": newest.department_id,
+                })
 
     # One order across every kind: overdue first, then soonest due (undated
     # last), then change number. Assessment rows keep "mine" as the top tie

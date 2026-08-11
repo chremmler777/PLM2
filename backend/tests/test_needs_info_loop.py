@@ -478,3 +478,104 @@ async def test_the_auto_flag_names_the_meeting_that_raised_it(
                                json={"kind": "reject_proposal", "note": "mine"})
     assert manual.status_code == 200, manual.text
     assert manual.json()["raised_by_meeting_id"] is None
+
+
+# --- Sales answers ANY open question, whoever asked -------------------------
+
+async def test_department_raised_question_reaches_sales(
+        client, admin_auth, seed, session_factory):
+    """The live bug: an APQP question produced no Sales task because only Team
+    flags counted. Attribution says who wants to know, not who has to ask."""
+    from app.models.workflow import Department, UserDepartment
+    cid = await _change_in_scoping(client, admin_auth, seed, "17")
+    sales = await _sales_member(client, session_factory, seed)
+    async with session_factory() as s:
+        apqp = Department(name="APQP", flow_type="action", is_active=True)
+        s.add(apqp)
+        await s.flush()
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=apqp.id))
+        await s.commit()
+        apqp_id = apqp.id
+
+    async def rows():
+        res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+        assert res.status_code == 200, res.text
+        return [t for t in res.json()
+                if t["kind"] == "obtain_info" and t["change_id"] == cid]
+
+    assert await rows() == []
+
+    # APQP asks — at scoping the department is attribution, no meeting involved
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+                            json={"kind": "needs_info", "note": "Which tolerance class?",
+                                  "department_id": apqp_id})
+    assert res.status_code == 200, res.text
+    concern_id = res.json()["id"]
+
+    got = await rows()
+    assert len(got) == 1
+    assert got[0]["reason"] == "Which tolerance class?"
+    assert got[0]["question_count"] == 1
+    assert got[0]["concern_id"] == concern_id
+    assert got[0]["department_id"] == apqp_id
+
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                      json={"note": "Class 2"}, headers=sales)
+    assert await rows() == []
+
+
+async def test_one_row_per_change_counts_the_questions(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "18")
+    sales = await _sales_member(client, session_factory, seed)
+    for auth, note in ((admin_auth, "First question"), (eng_auth, "Second question")):
+        res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=auth,
+                                json={"kind": "needs_info", "note": note})
+        assert res.status_code == 200, res.text
+
+    res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+    rows = [t for t in res.json()
+            if t["kind"] == "obtain_info" and t["change_id"] == cid]
+    assert len(rows) == 1                       # one errand, not two
+    assert rows[0]["question_count"] == 2
+    assert rows[0]["reason"] == "Second question"   # the newest one
+
+
+async def test_objections_are_not_questions(client, admin_auth, seed,
+                                            session_factory):
+    """reject_proposal is an objection — nobody can answer it for its author."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "19")
+    sales = await _sales_member(client, session_factory, seed)
+    await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+                      json={"kind": "reject_proposal", "note": "Too expensive"})
+    res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+    assert [t for t in res.json()
+            if t["kind"] == "obtain_info" and t["change_id"] == cid] == []
+
+
+async def test_a_question_in_assessment_still_reaches_sales(
+        client, admin_auth, seed, session_factory):
+    """Questions do not stop at scoping — the row follows the change."""
+    from app.models.change import ChangeRequest
+    from app.models.workflow import Department, UserDepartment
+    cid = await _change_in_scoping(client, admin_auth, seed, "20")
+    sales = await _sales_member(client, session_factory, seed)
+    async with session_factory() as s:
+        dept = Department(name="Tool Engineer", flow_type="action", is_active=True)
+        s.add(dept)
+        await s.flush()
+        dept_id = dept.id
+        c = await s.get(ChangeRequest, cid)
+        c.status = "in_assessment"
+        await s.commit()
+
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
+    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
+                            json={"kind": "needs_info", "note": "Steel grade?",
+                                  "department_id": dept_id})
+    assert res.status_code == 200, res.text
+
+    res = await client.get("/api/v1/changes/my-tasks", headers=sales)
+    rows = [t for t in res.json()
+            if t["kind"] == "obtain_info" and t["change_id"] == cid]
+    assert len(rows) == 1 and rows[0]["reason"] == "Steel grade?"

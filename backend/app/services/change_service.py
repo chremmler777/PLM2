@@ -1337,6 +1337,24 @@ class ChangeService:
         return bool((await session.execute(q)).scalar() or 0)
 
     @staticmethod
+    def unanswered_questions(change: ChangeRequest) -> list:
+        """Every open, unanswered QUESTION on the change, newest last.
+
+        Sales owns the customer relationship, so Sales answers whatever the
+        team needs asked — a tolerance question from APQP is as much a customer
+        question as one the scoping meeting raised. Attribution says who wants
+        to know, not who has to go and ask, so department-raised and Team flags
+        count alike. reject_proposal is excluded: an objection is not a
+        question, and nobody can answer it on the objector's behalf.
+        """
+        if change.status in TERMINAL_STATUSES:
+            return []
+        return sorted(
+            (c for c in change.concerns
+             if c.is_open and c.kind == "needs_info" and c.answered_at is None),
+            key=lambda c: c.id)
+
+    @staticmethod
     def open_team_question(change: ChangeRequest):
         """The open Team needs_info flag, or None — the question Sales owes an
         answer to. Distinct from pending_info_request (which reads the meeting
