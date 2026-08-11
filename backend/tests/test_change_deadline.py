@@ -9,6 +9,7 @@ from app.models.change import ChangeRequest, ChangeChangelog
 from app.models.entities import AuditLog
 from app.models.workflow import WfInstance, WfTemplate, WfStage
 from app.services.change_service import ChangeService
+from tests.conftest import satisfy_capture_gate
 
 
 async def _mk_change(session, seed, **over):
@@ -543,3 +544,55 @@ async def test_workload_report_uses_active_deadline_and_state_key(
         assert rows[0]["state"] == "overdue"
         assert rows[0]["required_by_date"].startswith(
             (datetime.utcnow() - timedelta(days=2)).date().isoformat())
+
+
+@pytest.mark.asyncio
+async def test_quote_deadline_locked_after_capture_without_reason(
+        client, eng_auth, seed, session_factory):
+    """Past capture the whole team plans against the quote deadline, so moving
+    it is a pushback that must say why — and lands under its own action."""
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "Pushback", "reason": "r",
+    }, headers=eng_auth)
+    cid = res.json()["id"]
+    d1 = (datetime.utcnow() + timedelta(days=30)).isoformat()
+    # at captured: free edit, no reason needed
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"required_by_date": d1}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    await satisfy_capture_gate(client, eng_auth, cid)
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "scoping"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    d2 = (datetime.utcnow() + timedelta(days=60)).isoformat()
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"required_by_date": d2}, headers=eng_auth)
+    assert res.status_code == 400
+    assert "pushback reason" in res.json()["detail"].lower()
+
+    res = await client.patch(f"/api/v1/changes/{cid}", json={
+        "required_by_date": d2, "required_by_reason": "customer moved the SOP",
+    }, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["required_by_reason"] == "customer moved the SOP"
+
+    async with session_factory() as session:
+        rows = (await session.execute(
+            select(ChangeChangelog).where(
+                ChangeChangelog.change_id == cid,
+                ChangeChangelog.action == "quote_deadline_pushback",
+            ))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].field_name == "required_by_date"
+        assert rows[0].old_value is not None
+        assert rows[0].new_value is not None
+        assert rows[0].notes == "customer moved the SOP"
+        # capture-time entry keeps the plain action
+        plain = (await session.execute(
+            select(ChangeChangelog).where(
+                ChangeChangelog.change_id == cid,
+                ChangeChangelog.action == "deadline_set",
+            ))).scalars().all()
+        assert len(plain) >= 1

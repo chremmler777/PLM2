@@ -120,8 +120,11 @@ async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
                             headers=admin_auth)
     assert res.status_code == 200, res.text
     await to_scoping(client, admin_auth, change["id"])
-    res = await client.patch(f"/api/v1/changes/{change['id']}",
-                             json={"required_by_date": None}, headers=admin_auth)
+    res = await client.patch(
+        f"/api/v1/changes/{change['id']}",
+        json={"required_by_date": None,
+              "required_by_reason": "customer pulled the date"},
+        headers=admin_auth)
     assert res.status_code == 200, res.text
     await record_proceed_meeting(session_factory, change["id"], actor_id=seed["admin_id"])
     blocked = await client.post(f"/api/v1/changes/{change['id']}/transition",
@@ -129,8 +132,11 @@ async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
     assert blocked.status_code == 400
     assert "deadline" in blocked.json()["detail"].lower()
     # set the deadline -> now allowed
-    await client.patch(f"/api/v1/changes/{change['id']}",
-                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=admin_auth)
+    await client.patch(
+        f"/api/v1/changes/{change['id']}",
+        json={"required_by_date": "2026-12-31T12:00:00Z",
+              "required_by_reason": "customer confirmed a new SOP"},
+        headers=admin_auth)
     await lock_impact(session_factory, change["id"])  # -> in_assessment hard gate
     ok = await client.post(f"/api/v1/changes/{change['id']}/transition",
                            json={"to_status": "in_assessment"}, headers=admin_auth)

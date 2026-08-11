@@ -1512,6 +1512,16 @@ class ChangeService:
         if "required_by_date" in fields:
             new_date = fields.pop("required_by_date")
             old = change.required_by_date
+            # The quote deadline is a capture-time commitment. Once the change
+            # has left capture the whole team is planning against it, so moving
+            # it is a pushback that must say why — in the same PATCH, and on
+            # its own changelog action so the audit trail tells a post-capture
+            # push apart from capture-time entry.
+            pushback = change.status != "captured" and new_date != old
+            if pushback and not (fields.get("required_by_reason") or "").strip():
+                raise ChangeError(
+                    "Changing the quote deadline after capture requires a "
+                    "pushback reason (required_by_reason)")
             change.required_by_date = new_date
             # Reason only changes when the request explicitly carries it —
             # a date-only PATCH must not wipe the stored justification.
@@ -1521,7 +1531,8 @@ class ChangeService:
             change.required_by_set_by = user_id
             change.required_by_set_at = datetime.utcnow()
             await ChangeService.append_changelog(
-                session, change, "deadline_set",
+                session, change,
+                "quote_deadline_pushback" if pushback else "deadline_set",
                 f"Required-by {old} -> {new_date}", user_id,
                 field_name="required_by_date",
                 old_value=str(old) if old else None,
