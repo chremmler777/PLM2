@@ -132,6 +132,21 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=impacted')
   })
 
+  it('quotes the open question on an obtain-info row and opens scoping', async () => {
+    await renderWith(changeTask({
+      kind: 'obtain_info', reason: 'target price for the new gauge',
+    }))
+    expect(screen.getByText(t('tasks.kind.obtain_info'))).toBeDefined()
+    expect(screen.getByText('target price for the new gauge')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=scoping')
+  })
+
+  it('falls back to a generic hint when the obtain-info row carries no reason', async () => {
+    await renderWith(changeTask({ kind: 'obtain_info', reason: null }))
+    expect(screen.getByText(t('tasks.hint.obtain_info'))).toBeDefined()
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

@@ -49,6 +49,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
   'impact.confirm': { de: 'Umfang bestätigen (Entwicklung)', en: 'Confirm impact (Development)' },
   'impact.confirmed': { de: 'Bestätigt von', en: 'Confirmed by' },
+  'impact.developmentOnly': {
+    de: 'Nur Entwicklung bestätigt den Umfang',
+    en: 'Only Development confirms the impacted set',
+  },
   'impact.pending': { de: 'Bestätigung durch die Entwicklung ausstehend', en: 'Impact confirmation pending (Development)' },
   'impl.title': { de: 'Umsetzung', en: 'Implementation' },
   'impl.readyToGo': { de: 'Ready to go — alle Prüf-Workflows abgeschlossen', en: 'Ready to go — all check workflows completed' },
@@ -83,6 +87,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.hint.impact_confirm': {
     de: 'Betroffene Teile festlegen und bestätigen',
     en: 'Define and confirm the impacted set',
+  },
+  'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
+  'tasks.hint.obtain_info': {
+    de: 'Offene Rückfrage beim Kunden klären',
+    en: 'Clear the open question with the customer',
   },
   'tasks.hint.customer_response': {
     de: 'Kundenantwort einholen',
@@ -299,6 +308,17 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
   'attach.baseline': { de: 'Erstunterlagen (Basis)', en: 'Initial documentation (baseline)' },
+  'attach.infoRequest': { de: 'Rückfrage', en: 'Info request' },
+  'attach.infoResponse': { de: 'Antwort', en: 'Response' },
+  'attach.attachResponse': { de: '+ Antwort anhängen', en: '+ Attach response' },
+  'attach.responseSlot': {
+    de: 'Antwort des Kunden hier ablegen',
+    en: 'Drop the customer’s answer here',
+  },
+  'attach.requestSlot': {
+    de: 'Rückfrage an den Kunden hier ablegen',
+    en: 'Drop the question sent to the customer here',
+  },
   'attach.postScoping': { de: 'Änderungen nach Scoping', en: 'Changes after scoping' },
   'attach.frozen': { de: 'eingefroren', en: 'frozen' },
   'attach.frozenHint': {

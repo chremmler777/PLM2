@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ChangeAttachments from './ChangeAttachments'
+import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({ changesApi: { deleteAttachment: vi.fn() } }))
-vi.mock('./AttachmentDropzone', () => ({ default: () => <div data-testid="dropzone" /> }))
+vi.mock('./AttachmentDropzone', () => ({
+  default: (props: { kind?: string; respondsToId?: number }) => (
+    <div data-testid="dropzone" data-kind={props.kind ?? ''}
+      data-responds-to={props.respondsToId ?? ''} />
+  ),
+}))
 
 const att = (over: Record<string, unknown>) => ({
   id: 1, filename: 'f.pdf', content_type: 'application/pdf', size_bytes: 10,
@@ -75,5 +81,39 @@ describe('ChangeAttachments provenance', () => {
     })} />)
     const line = screen.getByText(new Date('2026-07-01T00:00:00').toLocaleDateString())
     expect(line.textContent).not.toContain('·')
+  })
+})
+
+describe('ChangeAttachments needs-info loop', () => {
+  afterEach(cleanup)
+
+  it('chips the request and reads its answer underneath', () => {
+    wrap(<ChangeAttachments change={change({
+      attachments: [
+        att({ id: 1, filename: 'question.msg', kind: 'info_request' }),
+        att({ id: 2, filename: 'answer.msg', kind: 'info_response', responds_to_id: 1 }),
+        att({ id: 3, filename: 'spec.pdf' }),
+      ],
+    })} />)
+    expect(screen.getByTestId('attach-kind-info_request').textContent).toBe(t('attach.infoRequest'))
+    expect(screen.getByTestId('attach-kind-info_response').textContent).toBe(t('attach.infoResponse'))
+    // The answer sits inside the request's block, not loose in the list.
+    const request = screen.getByText(/question.msg/).closest('li')?.parentElement?.closest('li')
+    expect(request?.textContent).toContain('answer.msg')
+    // A plain document gets no chip at all.
+    const plain = screen.getByText(/spec.pdf/).closest('li')
+    expect(plain?.querySelector('[data-testid^="attach-kind"]')).toBeNull()
+    // Answered requests stop asking for an answer.
+    expect(screen.queryByTestId('attach-response-1')).toBeNull()
+  })
+
+  it('offers a response slot preset to the request it answers', () => {
+    wrap(<ChangeAttachments change={change({
+      attachments: [att({ id: 1, filename: 'question.msg', kind: 'info_request' })],
+    })} />)
+    fireEvent.click(screen.getByTestId('attach-response-1'))
+    const slots = screen.getAllByTestId('dropzone')
+    const responseSlot = slots.find((s) => s.getAttribute('data-kind') === 'info_response')
+    expect(responseSlot?.getAttribute('data-responds-to')).toBe('1')
   })
 })

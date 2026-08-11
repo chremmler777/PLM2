@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { apiErrorMessage } from '../../lib/apiError';
 import { t } from '../../i18n/cmLabels';
+import type { AttachmentKind } from '../../types/change';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 // Hint for the browse dialog; drops themselves are not restricted by extension.
@@ -19,9 +20,17 @@ const ACCEPT = '.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.msg,.eml,.png,.jpg,.jpeg,
 interface Props {
   changeId: number;
   onUploaded: () => void;
+  /** Where these uploads sit in the needs-info loop. Plain document slots pass
+   *  nothing and the file stays 'general'. */
+  kind?: AttachmentKind;
+  respondsToId?: number;
+  /** Slot label — the needs-info and response slots say what they are for. */
+  label?: string;
 }
 
-export default function AttachmentDropzone({ changeId, onUploaded }: Props) {
+export default function AttachmentDropzone({
+  changeId, onUploaded, kind, respondsToId, label,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,7 +48,7 @@ export default function AttachmentDropzone({ changeId, onUploaded }: Props) {
     let uploaded = 0;
     for (const f of ok) {
       try {
-        await changesApi.uploadAttachment(changeId, f);
+        await changesApi.uploadAttachment(changeId, f, { kind, respondsToId });
         uploaded += 1;
       } catch (e) {
         toast.error(apiErrorMessage(e, t('attach.failed').replace('{name}', f.name)));
@@ -69,7 +78,7 @@ export default function AttachmentDropzone({ changeId, onUploaded }: Props) {
       <div
         role="button"
         tabIndex={0}
-        aria-label={t('attach.dropHere')}
+        aria-label={label ?? t('attach.dropHere')}
         onClick={() => inputRef.current?.click()}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -95,7 +104,7 @@ export default function AttachmentDropzone({ changeId, onUploaded }: Props) {
           {busy ? '⏳' : '📎'}
         </span>
         <span className="text-sm">
-          {busy ? t('attach.uploading') : t('attach.dropHere')}
+          {busy ? t('attach.uploading') : label ?? t('attach.dropHere')}
         </span>
         <span className="text-xs text-slate-500">{t('attach.hint')}</span>
       </div>

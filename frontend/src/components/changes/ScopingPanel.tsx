@@ -170,7 +170,9 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
           {/* Sales and PM answer the customer; the document they send — the
               rejection letter, the list of open questions, or a counter-
               proposal — belongs on the change, not in someone's mailbox. */}
-          <AttachmentDropzone changeId={changeId} onUploaded={invalidate} />
+          {/* What goes out to the customer is the info request itself. */}
+          <AttachmentDropzone changeId={changeId} kind="info_request"
+            label={t('attach.requestSlot')} onUploaded={invalidate} />
         </div>
       )}
 

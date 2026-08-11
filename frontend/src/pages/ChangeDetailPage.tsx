@@ -142,13 +142,13 @@ export default function ChangeDetailPage() {
   const { isAdmin, userId } = useAuth();
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
-  // Task 19: client-side mirror of the confirm-impact authz (Development member or
-  // admin) — server enforcement already exists (Task 18); this only decides
-  // whether to show the button. Defaults to true until departments/memberships
-  // have loaded, so the button doesn't flash-hide.
+  // Client-side mirror of the confirm-impact authz: Development members only —
+  // no admin shortcut, because the backend dropped it too (an admin who needs to
+  // confirm acts as Development). Defaults to true until departments/memberships
+  // have loaded, so the button doesn't flash-disabled.
   const rdDeptId = departments.find((d) => d.name === 'Development')?.id;
   const canConfirmImpact = !myActions ? true
-    : isAdmin || (rdDeptId !== undefined && myActions.memberships.includes(rdDeptId));
+    : rdDeptId !== undefined && myActions.memberships.includes(rdDeptId);
   // Task 6: governance tabs (D1, Audit) are only visible/reachable for admin,
   // the change lead, or Quality/Project Manager department members — reusing
   // the myActions/departments data already fetched for this page (no new

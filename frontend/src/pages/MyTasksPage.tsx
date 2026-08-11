@@ -198,6 +198,7 @@ function SepItemsSection() {
 const TASK_TAB: Record<string, string> = {
   kickoff: '', scoping_wrapup: '?tab=scoping',
   impact_confirm: '?tab=impacted', customer_response: '',
+  obtain_info: '?tab=scoping',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -223,6 +224,9 @@ const taskHint = (task: ChangeTask): string | null => {
     }
     case 'impact_confirm':
       return t('tasks.hint.impact_confirm');
+    case 'obtain_info':
+      // The reason is the question that was asked — nothing beats quoting it.
+      return task.reason?.trim() || t('tasks.hint.obtain_info');
     case 'customer_response':
       return t('tasks.hint.customer_response');
     default:

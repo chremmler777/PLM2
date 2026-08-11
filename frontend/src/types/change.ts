@@ -72,12 +72,17 @@ export interface DeviationRequest {
   stage_order?: number;
 }
 
+export type AttachmentKind = 'general' | 'info_request' | 'info_response';
+
 export interface Attachment {
   id: number;
   filename: string;
   content_type: string;
   size_bytes: number;
   phase: 'baseline' | 'post_scoping';
+  /** Needs-info loop: the question sent out, and the answer that came back. */
+  kind?: AttachmentKind | null;
+  responds_to_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;
@@ -154,7 +159,8 @@ export interface ChangeDetail extends ChangeRequest {
 
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
-  | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response';
+  | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
+  | 'obtain_info';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -182,6 +188,8 @@ export interface ChangeTask {
   // scoping wrap-up rows
   impact_confirmed?: boolean;
   has_decision?: boolean;
+  // obtain_info rows: what the customer was asked for
+  reason?: string | null;
 }
 
 // --- Cost & summation types (sub-project A) ---

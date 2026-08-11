@@ -4,7 +4,7 @@ import type {
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
-  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind,
+  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -68,9 +68,16 @@ export const changesApi = {
   acceptAssessment: (changeId: number, assessmentId: number) =>
     client.post(`/v1/changes/${changeId}/assessments/${assessmentId}/accept`).then((r) => r.data),
 
-  uploadAttachment: (id: number, file: File) => {
+  uploadAttachment: (
+    id: number, file: File,
+    opts?: { kind?: AttachmentKind; respondsToId?: number },
+  ) => {
     const fd = new FormData();
     fd.append('file', file);
+    // Classified uploads carry their place in the needs-info loop; a plain
+    // document sends neither field and stays 'general' server-side.
+    if (opts?.kind) fd.append('kind', opts.kind);
+    if (opts?.respondsToId !== undefined) fd.append('responds_to_id', String(opts.respondsToId));
     // The client sets a global Content-Type: application/json default; it must
     // be cleared here so the browser sets multipart/form-data WITH its boundary.
     // Otherwise FastAPI can't find the `file` field and returns 422.

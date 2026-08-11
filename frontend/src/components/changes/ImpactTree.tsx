@@ -170,18 +170,17 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
               ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '—'} · {new Date(impactConfirmedAt).toLocaleString()}
             </span>
-          ) : canConfirm ? (
+          ) : (
+            // Shown to everyone, actionable only by Development: a greyed button
+            // that names the rule beats a control that vanishes or 403s.
             <button
               onClick={() => confirmImpact.mutate()}
-              disabled={confirmImpact.isPending}
-              className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50"
+              disabled={!canConfirm || confirmImpact.isPending}
+              title={canConfirm ? undefined : t('impact.developmentOnly')}
+              className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t('impact.confirm')}
             </button>
-          ) : (
-            <span className="text-amber-300 text-xs" title={t('actions.notYourDepartment')}>
-              {t('impact.pending')}
-            </span>
           )}
           {editable ? (
             <button

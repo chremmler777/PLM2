@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ImpactTree from './ImpactTree'
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -115,18 +116,25 @@ describe('ImpactTree', () => {
     expect(sibling.checked).toBe(true)
   })
 
-  it('shows a Confirm impact (R&D) button when unconfirmed, and calls the API', async () => {
+  it('shows an enabled Confirm impact button to Development, and calls the API', async () => {
     wrap(<ImpactTree changeId={7} status="captured" />)
     await screen.findByText('Child')
     const btn = screen.getByRole('button', { name: /Confirm impact \(Development\)/ })
+    expect((btn as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(btn)
     await waitFor(() => expect(changesApi.confirmImpact).toHaveBeenCalledWith(7))
   })
 
-  it('hides the confirm button for a non-member (canConfirm=false)', async () => {
+  it('greys the confirm button for a non-Development viewer and says why', async () => {
+    vi.mocked(changesApi.confirmImpact).mockClear()
     wrap(<ImpactTree changeId={7} status="captured" canConfirm={false} />)
     await screen.findByText('Child')
-    expect(screen.queryByRole('button', { name: /Confirm impact \(Development\)/ })).toBeNull()
+    const btn = screen.getByRole('button', { name: /Confirm impact \(Development\)/ })
+    // Visible but inert — the rule is stated, not hidden behind a 403.
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    expect(btn.getAttribute('title')).toBe(t('impact.developmentOnly'))
+    fireEvent.click(btn)
+    expect(changesApi.confirmImpact).not.toHaveBeenCalled()
   })
 
   it('shows a confirmed badge with who/when instead of the button once confirmed', async () => {

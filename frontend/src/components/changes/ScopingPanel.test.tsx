@@ -27,7 +27,11 @@ vi.mock('../../hooks/queries/useWorkflows', () => ({
 // ConcernStrip has its own suite and its own auth/query needs; this file is
 // about the meeting flow.
 vi.mock('./ConcernStrip', () => ({ default: () => <div>mock-concern-strip</div> }))
-vi.mock('./AttachmentDropzone', () => ({ default: () => <div>mock-attachment-dropzone</div> }))
+vi.mock('./AttachmentDropzone', () => ({
+  default: (props: { kind?: string }) => (
+    <div data-testid="dropzone" data-kind={props.kind ?? ''}>mock-attachment-dropzone</div>
+  ),
+}))
 vi.mock('../../api/contacts', () => ({
   contactsApi: { list: vi.fn().mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }]) },
 }))
@@ -185,5 +189,22 @@ describe('ScopingPanel refused decision', () => {
     // It names the mechanism — Sales asking the customer — not a form complaint.
     expect(line.textContent).toContain(t('meeting.missingInfo'))
     expect(line.textContent).not.toMatch(/Missing \(Sales\)/)
+  })
+})
+
+describe('ScopingPanel needs-info upload slot', () => {
+  afterEach(cleanup)
+
+  it('files what goes out to the customer as the info request', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([{
+      id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
+      participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
+      decision_reason: 'target price', selected_department_ids: [],
+      created_by: 1, created_at: '2026-07-04T10:00:00Z',
+      decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+    }] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const slot = await screen.findByTestId('dropzone')
+    expect(slot.getAttribute('data-kind')).toBe('info_request')
   })
 })
