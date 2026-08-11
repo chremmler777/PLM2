@@ -10,7 +10,7 @@ const change = (over: Record<string, unknown> = {}) => ({
 const concern = (over: Record<string, unknown> = {}) => ({
   id: 1, change_id: 7, kind: 'needs_info', note: 'What is the target price?',
   raised_by: 9, raised_at: '2026-08-01T09:00:00', is_open: true,
-  department_id: null, answer_note: null, ...over,
+  department_id: null, answer_note: null, answered_at: null, ...over,
 }) as never
 
 const deptName = (id: number) => ({ 2: 'Development', 4: 'Tool Engineer' }[id] ?? `#${id}`)
@@ -28,13 +28,32 @@ describe('resolveWaitStates', () => {
   })
 
   it('waits on review once the answer is in', () => {
-    const [w] = resolveWaitStates(change(), [concern({ answer_note: '12.50' })], deptName)
+    const [w] = resolveWaitStates(change(),
+      [concern({ answer_note: '12.50', answered_at: '2026-08-02T00:00:00' })], deptName)
     expect(w.key).toBe('review-1')
     expect(w.text).toContain(t('wait.onReview').split('{x}')[0].trim())
   })
 
   it('forgets a question that has been settled', () => {
     expect(resolveWaitStates(change(), [concern({ is_open: false })], deptName)).toEqual([])
+  })
+
+  it('counts a department-attributed question exactly like a team one', () => {
+    // The backend gives Sales the task for any open needs-info flag; the banner
+    // must agree, or a task exists that the change page denies.
+    const waits = resolveWaitStates(change(), [
+      concern({ id: 1, department_id: 6, note: 'packaging dimensions?' }),
+      concern({ id: 2, department_id: null, note: 'target price?' }),
+    ], deptName)
+    expect(waits.map((w) => w.key)).toEqual(['sales-info-1', 'sales-info-2'])
+    expect(waits[0].text).toContain('packaging dimensions?')
+  })
+
+  it('watches questions at any live status, not only scoping', () => {
+    for (const status of ['captured', 'in_assessment', 'costing', 'quoted', 'approved']) {
+      const waits = resolveWaitStates(change({ status }), [concern()], deptName)
+      expect(waits[0].key).toBe('sales-info-1')
+    }
   })
 
   it('names the departments an open concern is holding, in assessment', () => {
@@ -72,7 +91,8 @@ describe('resolveWaitStates', () => {
   it('lists every wait at once', () => {
     const waits = resolveWaitStates(
       change({ status: 'in_assessment', blocked_department_ids: [2] }),
-      [concern(), concern({ id: 2, note: 'timing?', answer_note: 'Q4' })], deptName)
+      [concern(), concern({ id: 2, note: 'timing?', answer_note: 'Q4',
+        answered_at: '2026-08-02T00:00:00' })], deptName)
     expect(waits.map((w) => w.key)).toEqual(['sales-info-1', 'review-2', 'blocked-departments'])
   })
 })

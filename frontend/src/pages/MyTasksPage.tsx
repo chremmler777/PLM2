@@ -231,9 +231,14 @@ const taskHint = (task: ChangeTask): string | null => {
         ? t('tasks.hint.send_rejection_send') : t('tasks.hint.send_rejection_letter');
     case 'costing_input':
       return t('tasks.hint.costing_input');
-    case 'obtain_info':
-      // The reason is the question that was asked — nothing beats quoting it.
-      return task.reason?.trim() || t('tasks.hint.obtain_info');
+    case 'obtain_info': {
+      // The question itself is the brief; when several are open, say how many so
+      // the row does not read as a single job.
+      const newest = task.reason?.trim() || t('tasks.hint.obtain_info');
+      return (task.question_count ?? 0) > 1
+        ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} — ${newest}`
+        : newest;
+    }
     case 'customer_response':
       return t('tasks.hint.customer_response');
     default:

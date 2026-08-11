@@ -591,7 +591,8 @@ describe('ChangeDetailPage wait banner', () => {
   it('switches to awaiting review once the answer is in', async () => {
     change.status = 'scoping' as ChangeDetail['status']
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ answer_note: 'customer confirmed 12.50' })] as never)
+      concern({ answer_note: 'customer confirmed 12.50',
+        answered_at: '2026-08-02T00:00:00' })] as never)
     wrap('/changes/1')
     expect(await screen.findByTestId('wait-review-1')).toBeTruthy()
   })

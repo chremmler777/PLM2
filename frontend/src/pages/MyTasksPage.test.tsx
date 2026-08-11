@@ -142,6 +142,16 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=scoping')
   })
 
+  it('says how many questions are open when the row stands for several', async () => {
+    await renderWith(changeTask({
+      kind: 'obtain_info', reason: 'target price for the new gauge',
+      question_count: 2, concern_id: 11,
+    }))
+    const hint = screen.getByText(/questions open/)
+    expect(hint.textContent).toContain('2')
+    expect(hint.textContent).toContain('target price for the new gauge')
+  })
+
   it('falls back to a generic hint when the obtain-info row carries no reason', async () => {
     await renderWith(changeTask({ kind: 'obtain_info', reason: null }))
     expect(screen.getByText(t('tasks.hint.obtain_info'))).toBeDefined()

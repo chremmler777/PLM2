@@ -98,6 +98,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Confirm the send and close',
   },
   'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
+  'tasks.hint.questionsOpen': {
+    de: '{n} offene Fragen — neueste',
+    en: '{n} questions open — newest',
+  },
   'tasks.hint.obtain_info': {
     de: 'Offene Rückfrage beim Kunden klären',
     en: 'Clear the open question with the customer',

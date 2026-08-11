@@ -31,10 +31,13 @@ export function resolveWaitStates(
   const waits: WaitState[] = []
 
   // Customer questions: first nobody has answered, then nobody has closed it.
-  const teamQuestions = concerns.filter(
-    (c) => c.is_open && c.kind === 'needs_info' && c.department_id == null)
-  for (const c of teamQuestions) {
-    waits.push(c.answer_note
+  // Same predicate the backend uses for the Sales task — open and needs-info,
+  // whatever it is attributed to and whichever meeting (if any) raised it. A
+  // narrower rule here would put a task in someone's list that the change page
+  // then denies is outstanding.
+  const questions = concerns.filter((c) => c.is_open && c.kind === 'needs_info')
+  for (const c of questions) {
+    waits.push(c.answered_at
       ? {
         key: `review-${c.id}`,
         text: t('wait.onReview').replace('{x}', excerpt(c.note)),

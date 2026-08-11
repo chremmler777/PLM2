@@ -50,7 +50,9 @@ export default function NeedsInfoCard({
   const answerDocs = mine.filter((a) => a.kind === 'info_response')
   const questionDocs = mine.filter((a) => a.kind !== 'info_response')
   const solved = !c.is_open
-  const answered = !!c.answer_note
+  // Answered is a fact with a timestamp — the same signal the backend and the
+  // wait banner key off, so all three agree on what "answered" means.
+  const answered = c.answered_at != null || !!c.answer_note
 
   const postAnswer = useMutation({
     mutationFn: (note: string) => changesApi.answerConcern(changeId, c.id, note.trim()),

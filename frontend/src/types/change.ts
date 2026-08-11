@@ -219,8 +219,10 @@ export interface ChangeTask {
   // scoping wrap-up rows
   impact_confirmed?: boolean;
   has_decision?: boolean;
-  // obtain_info rows: what the customer was asked for
+  // obtain_info rows: what the customer was asked for, and how much of it
   reason?: string | null;
+  question_count?: number;
+  concern_id?: number;
   // send_rejection rows: whether the letter is already attached
   has_letter?: boolean;
 }
