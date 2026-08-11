@@ -4,10 +4,17 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeStatus, ImpactTreeNode } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
+import { groupItems } from '../../lib/itemCategory'
 
 const LOCKED: ChangeStatus[] = [
   'in_implementation', 'in_validation', 'released', 'closed', 'rejected', 'cancelled',
 ]
+
+// The lead names the change, so it is pinned from assessment on — by then
+// departments have been routed against it. While the change is still being
+// captured or scoped, picking the wrong lead is an ordinary mistake and stays
+// correctable. Mirrors the lead_editable check in ChangeService.apply_impact_selection.
+const LEAD_EDITABLE: ChangeStatus[] = ['captured', 'scoping']
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -26,6 +33,7 @@ interface Props {
 export default function ImpactTree({ changeId, status, impactConfirmedByName, impactConfirmedAt, canConfirm = true }: Props) {
   const qc = useQueryClient()
   const editable = !LOCKED.includes(status)
+  const leadPinned = !LEAD_EDITABLE.includes(status)
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
   const confirmImpact = useMutation({
@@ -106,13 +114,23 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
           className="accent-sky-500"
           aria-label={`${node.name} (${node.part_number})`}
           checked={selected.has(node.part_id)}
-          disabled={!editable || node.is_lead || node.resulting_revision_id !== null}
+          disabled={!editable || (node.is_lead && leadPinned)
+                    || node.resulting_revision_id !== null}
           onChange={() => toggle(node.part_id)}
         />
-        <span className="text-slate-100 text-sm">{node.name}</span>
-        <span className="text-slate-500 text-xs">{node.part_number}</span>
+        {/* Our number leads, the customer's follows, the name last — the same
+            reading order as the change title and the start dialog. */}
+        <span className="font-mono text-slate-100 text-sm flex-shrink-0">{node.part_number}</span>
+        <span className="font-mono text-sky-300/80 text-xs flex-shrink-0 w-32">
+          {node.customer_part_number ?? <span className="text-slate-600">—</span>}
+        </span>
+        <span className="text-slate-400 text-sm truncate min-w-0">{node.name}</span>
         {node.is_lead && (
-          <span className="px-2 py-0.5 rounded-full text-xs bg-sky-900 text-sky-100">
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs ${
+              leadPinned ? 'bg-slate-700 text-slate-400' : 'bg-sky-900 text-sky-100'}`}
+            title={leadPinned ? t('impact.leadPinned') : undefined}
+          >
             {t('impact.lead')}
           </span>
         )}
@@ -122,7 +140,8 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
           </span>
         )}
         {!selected.has(node.part_id) && suggested.has(node.part_id) && (() => {
-          const chipDisabled = !editable || node.is_lead || node.resulting_revision_id !== null
+          const chipDisabled = !editable || (node.is_lead && leadPinned)
+            || node.resulting_revision_id !== null
           return (
             <button
               onClick={() => !chipDisabled && toggle(node.part_id)}
@@ -177,7 +196,18 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
           )}
         </div>
       </div>
-      {data.tree.map(n => renderNode(n, 0))}
+      {/* Roots grouped by controlled-item class, each behind a rule: Articles,
+          Dunnage, Material, Tools, EOAT, … The BOM nesting under each root is
+          untouched — grouping only orders the top level. */}
+      {groupItems(data.tree).map(group => (
+        <div key={group.key} className="border-t border-slate-700 first:border-t-0 first:pt-0 pt-2 mt-2">
+          <div className="flex items-center gap-2 px-1 py-1 text-xs uppercase tracking-wide text-slate-500">
+            <span>{group.label}</span>
+            <span className="ml-auto normal-case">{group.items.length}</span>
+          </div>
+          {group.items.map(n => renderNode(n, 0))}
+        </div>
+      ))}
     </div>
   )
 }

@@ -5,6 +5,9 @@ import { changesApi } from '../../api/changes'
 import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import { DeadlineEditor } from './DeadlineEditor'
+import ReasonDialog from './ReasonDialog'
+import AttachmentDropzone from './AttachmentDropzone'
+import ConcernStrip from './ConcernStrip'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeMeeting, ChangeRequest } from '../../types/change'
 
@@ -103,13 +106,24 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
   })
   const decide = useMutation({
-    mutationFn: (vars: { meetingId: number; decision: 'proceed' | 'reject' | 'needs_info' }) =>
-      changesApi.decideMeeting(changeId, vars.meetingId, vars.decision),
+    mutationFn: (vars: {
+      meetingId: number; decision: 'proceed' | 'reject' | 'needs_info'; reason?: string
+    }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
     onSuccess: invalidate,
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Decision failed'),
   })
+  // Reject and needs-info both owe the originator an answer, so both collect
+  // one before the call goes out rather than letting the server 400.
+  const [pending, setPending] = useState<
+    { meetingId: number; decision: 'reject' | 'needs_info' } | null>(null)
 
   const open = status === 'captured' || status === 'scoping'
+  // The most recent decision that leaves a ball in our court: a rejection the
+  // customer has to be told about, or missing information somebody has to go
+  // and get. Cleared once a later meeting reaches 'proceed'.
+  const outstanding = [...meetings].reverse().find(
+    (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
+    ?? null
   const toggleDept = (id: number) => {
     setDeptTouched(true)
     setDeptIds((prev) =>
@@ -120,6 +134,19 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
 
   return (
     <div className="space-y-4 text-sm">
+      <ReasonDialog
+        open={pending !== null}
+        title={pending?.decision === 'reject' ? t('meeting.rejectTitle') : t('meeting.needsInfoTitle')}
+        warning={pending?.decision === 'reject' ? t('meeting.rejectWarning') : t('meeting.needsInfoWarning')}
+        label={pending?.decision === 'reject' ? t('meeting.rejectLabel') : t('meeting.needsInfoLabel')}
+        submitLabel={pending?.decision === 'reject' ? t('meeting.reject') : t('meeting.needsInfo')}
+        danger={pending?.decision === 'reject'}
+        onSubmit={(reason) => {
+          if (pending) decide.mutate({ ...pending, reason })
+          setPending(null)
+        }}
+        onClose={() => setPending(null)}
+      />
       {/* Deadline is required to leave scoping — surface it here so the user
           can set it in place rather than hunting for it after being blocked. */}
       <div className={`rounded-lg border p-3 flex items-center gap-3 flex-wrap ${
@@ -130,6 +157,25 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
           <span className="text-xs text-amber-300">{t('scoping.deadlineRequired')}</span>
         )}
       </div>
+
+      {/* Raised before or during the meeting, by anyone, in parallel. */}
+      <ConcernStrip changeId={changeId} editable={open} />
+
+      {outstanding && (
+        <div className={`rounded-lg border p-3 space-y-2 ${
+          outstanding.decision === 'reject'
+            ? 'border-red-800/60 bg-red-950/30' : 'border-amber-700/60 bg-amber-950/30'}`}>
+          <p className="font-medium text-slate-100">
+            {outstanding.decision === 'reject'
+              ? t('meeting.shareRejection') : t('meeting.shareNeedsInfo')}
+          </p>
+          <p className="text-xs text-slate-400">{t('meeting.shareHint')}</p>
+          {/* Sales and PM answer the customer; the document they send — the
+              rejection letter, the list of open questions, or a counter-
+              proposal — belongs on the change, not in someone's mailbox. */}
+          <AttachmentDropzone changeId={changeId} onUploaded={invalidate} />
+        </div>
+      )}
 
       <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">
         {meetings.map((m: ChangeMeeting) => (
@@ -155,17 +201,24 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                   </button>
                   <button className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs"
                     disabled={decide.isPending}
-                    onClick={() => decide.mutate({ meetingId: m.id, decision: 'needs_info' })}>
+                    onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
                     {t('meeting.needsInfo')}
                   </button>
                   <button className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs"
                     disabled={decide.isPending}
-                    onClick={() => decide.mutate({ meetingId: m.id, decision: 'reject' })}>
+                    onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
                     {t('meeting.reject')}
                   </button>
                 </span>
               )}
             </div>
+            {m.decision_reason && (
+              <p className={`whitespace-pre-wrap ${
+                m.decision === 'reject' ? 'text-red-300' : 'text-amber-300'}`}>
+                {m.decision === 'needs_info' ? t('meeting.missingInfo') : t('meeting.rejectedBecause')}
+                {' '}{m.decision_reason}
+              </p>
+            )}
             {m.notes && <p className="text-slate-400 whitespace-pre-wrap">{m.notes}</p>}
             {m.selected_department_ids.length > 0 && (
               <p className="text-xs text-slate-500">

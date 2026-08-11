@@ -90,13 +90,53 @@ async def test_apply_selection_adds_and_removes(client, eng_auth, seed):
     assert res.status_code == 200, res.text
     assert set(res.json()["impacted_part_ids"]) == {lead["part_id"], extra["part_id"]}
 
-    # dropping the lead is refused
+    # Dropping the lead is allowed while the change is still captured/scoped —
+    # naming the wrong lead is an ordinary mistake at that point. The surviving
+    # item takes over, so the set is never left without a lead to name it after.
+    res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
+                           json={"part_ids": [extra["part_id"]]}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["impacted_part_ids"] == [extra["part_id"]]
+    tree = await client.get(f"/api/v1/changes/{change['id']}/impact-tree",
+                            headers=eng_auth)
+    assert tree.json()["lead_part_id"] == extra["part_id"]
+
+    # removing a non-lead is fine
+    res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
+                           json={"part_ids": [extra["part_id"], lead["part_id"]]},
+                           headers=eng_auth)
+    assert res.status_code == 200, res.text
+    res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
+                           json={"part_ids": [extra["part_id"]]}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["impacted_part_ids"] == [extra["part_id"]]
+
+
+async def test_lead_pinned_once_assessment_started(client, eng_auth, seed,
+                                                   session_factory):
+    """From assessment on the lead is frozen — departments have been routed
+    against it — even though the rest of the set stays editable."""
+    lead = await _make_part(client, eng_auth, seed, "L-3", "Lead3")
+    extra = await _make_part(client, eng_auth, seed, "X-3", "Extra3")
+    change = await _make_change_with_lead(client, eng_auth, seed, lead["part_id"])
+    res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
+                           json={"part_ids": [lead["part_id"], extra["part_id"]]},
+                           headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, change["id"])
+        c.status = "in_assessment"
+        await s.commit()
+
+    # The lead may not be dropped...
     res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
                            json={"part_ids": [extra["part_id"]]}, headers=eng_auth)
     assert res.status_code == 400
     assert "lead" in res.json()["detail"].lower()
 
-    # removing the extra is fine
+    # ...but the rest of the set still moves.
     res = await client.put(f"/api/v1/changes/{change['id']}/impacted-items",
                            json={"part_ids": [lead["part_id"]]}, headers=eng_auth)
     assert res.status_code == 200, res.text

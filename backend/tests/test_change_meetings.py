@@ -24,9 +24,16 @@ async def test_meeting_crud_and_needs_info(client, admin_auth, seed):
     res = await client.patch(f"/api/v1/changes/{change['id']}/meetings/{mid}",
                              json={"notes": "updated"}, headers=admin_auth)
     assert res.status_code == 200 and res.json()["notes"] == "updated"
+    # needs_info must say what is missing — that is what Sales then goes to get.
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
                             json={"decision": "needs_info"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
+                            json={"decision": "needs_info",
+                                  "reason": "Customer drawing missing"},
+                            headers=admin_auth)
     assert res.status_code == 200 and res.json()["decision"] == "needs_info"
+    assert res.json()["decision_reason"] == "Customer drawing missing"
     # decided meetings are immutable
     res = await client.patch(f"/api/v1/changes/{change['id']}/meetings/{mid}",
                              json={"notes": "nope"}, headers=admin_auth)
@@ -80,10 +87,13 @@ async def test_reject_decision_rejects_change(client, admin_auth, seed):
     res = await post_meeting(client, admin_auth, change["id"])
     mid = res.json()["id"]
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
-                            json={"decision": "reject"}, headers=admin_auth)
-    assert res.status_code == 200
+                            json={"decision": "reject", "reason": "Not economical"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=admin_auth)
     assert res.json()["status"] == "rejected"
+    # The meeting's reason is the change's rejection reason.
+    assert res.json()["rejection_reason"] == "Not economical"
 
 
 @pytest.mark.asyncio

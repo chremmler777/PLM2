@@ -30,7 +30,7 @@ describe('CustomerRelevantEditor', () => {
 
   it('shows the current value and no edit control when not editable', () => {
     render(wrap(<CustomerRelevantEditor change={change({ status: 'approved' })} canEdit={false} />))
-    expect(screen.getByText('No')).toBeDefined()
+    expect(screen.getByText('Internal change')).toBeDefined()
     expect(screen.queryByTestId('customer-relevant-edit')).toBeNull()
   })
 

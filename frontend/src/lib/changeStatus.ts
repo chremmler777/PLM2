@@ -7,6 +7,12 @@ export const STATUS_LABELS: Record<ChangeStatus, string> = {
   on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
 }
 
+/**
+ * Statuses reachable from each status. Used both for the advance buttons and to
+ * decide which gates are currently blocking, so it must stay a statement about
+ * reachability — not about which buttons happen to be shown. See
+ * DECIDED_BY_MEETING for the statuses whose buttons are deliberately withheld.
+ */
 export const NEXT_STATUS: Partial<Record<ChangeStatus, ChangeStatus[]>> = {
   captured: ['scoping'], scoping: ['in_assessment', 'rejected'],
   in_assessment: ['costing', 'rejected'],
@@ -33,6 +39,16 @@ export const STATUS_PILL: Record<ChangeStatus, string> = {
 }
 
 export const OFF_PATH_STATUSES: ChangeStatus[] = ['on_hold', 'rejected', 'cancelled']
+
+/**
+ * Statuses whose onward move is the scoping meeting's call, not a button's.
+ * Proceeding and rejecting both require a recorded decision (meeting, chat or
+ * email) — and since migrations 037/038 a reason as well. A plain advance
+ * button would bypass both, so it is withheld and the cockpit points at the
+ * scoping tab instead. These transitions remain reachable, which is why
+ * NEXT_STATUS still lists them: gate relevance is computed from it.
+ */
+export const DECIDED_BY_MEETING: ChangeStatus[] = ['scoping']
 
 /** Plain-language sublabels for on-path statuses, shown as tooltip + current-step hint. */
 export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {

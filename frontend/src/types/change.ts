@@ -116,6 +116,9 @@ export interface ChangeRequest {
   cm_external?: boolean;
   implementation_mode?: 'integrated' | 'separational' | null;
   customer_relevant?: boolean;
+  rejected_at?: string | null;
+  rejected_by?: number | null;
+  rejection_reason?: string | null;
   car_line?: string | null;
   affected_plant_ids?: number[];
   required_by_date: string | null;
@@ -228,6 +231,7 @@ export interface MyActionsResponse {
 export interface ImpactTreeNode {
   part_id: number;
   part_number: string;
+  customer_part_number?: string | null;
   name: string;
   part_type: string;
   item_category: string;
@@ -270,6 +274,22 @@ export interface MeetingParticipant { name: string; user_id?: number | null }
 
 export type MeetingChannel = 'meeting' | 'chat' | 'email';
 
+export type ConcernKind = 'reject_proposal' | 'needs_info';
+
+/** A team member's flag against a change, raised in parallel with the meeting. */
+export interface ChangeConcern {
+  id: number;
+  change_id: number;
+  kind: ConcernKind;
+  note: string;
+  raised_by: number;
+  raised_by_name?: string | null;
+  raised_at: string;
+  withdrawn_at?: string | null;
+  resolved_by_meeting_id?: number | null;
+  is_open: boolean;
+}
+
 export interface ChangeMeeting {
   id: number;
   change_id: number;
@@ -278,6 +298,7 @@ export interface ChangeMeeting {
   participants: MeetingParticipant[];
   notes: string | null;
   decision: 'proceed' | 'reject' | 'needs_info' | null;
+  decision_reason?: string | null;
   selected_department_ids: number[];
   created_by: number;
   created_at: string;

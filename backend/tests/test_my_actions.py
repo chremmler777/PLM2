@@ -133,7 +133,14 @@ async def test_admin_sees_gate_action_on_soft_blocked_change(
     await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
                      json={"decision": "na"}, headers=eng_auth)
     # feasibility gates the in_assessment transition, now reachable only from
-    # scoping — move there so the gate action becomes surfaceable.
+    # scoping — move there so the gate action becomes surfaceable. Scoping
+    # needs something to scope, so list an item first.
+    part = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": f"ART-GATE{cid}",
+        "name": "Gate part", "part_type": "internal_mfg"}, headers=eng_auth)
+    assert part.status_code in (200, 201), part.text
+    await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                      json={"part_id": part.json()["id"]}, headers=eng_auth)
     scop = await client.post(f"/api/v1/changes/{cid}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text

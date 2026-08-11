@@ -54,7 +54,8 @@ def upgrade() -> None:
             "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM wf_departments")).scalar()
         bind.execute(sa.text(
             "INSERT INTO wf_departments (name, flow_type, is_active, sort_order, created_at) "
-            "VALUES ('Process Engineer', 'action', true, :so, now())"), {"so": nxt})
+            # CURRENT_TIMESTAMP, not now(): SQLite has no now().
+            "VALUES ('Process Engineer', 'action', true, :so, CURRENT_TIMESTAMP)"), {"so": nxt})
 
     # 3. Rewrite the live stage-1 RASIC (create-if-absent seeding never updates
     #    an existing template). There may be more than one template named

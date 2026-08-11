@@ -33,6 +33,24 @@ const tree = {
   lead_part_id: 2,
 }
 
+// A mixed set: an article root, a tool and a gauge, so the top level has to be
+// grouped rather than listed flat.
+const mixedTree = {
+  tree: [
+    { part_id: 1, part_number: '20-3454-001-0', customer_part_number: '3CR.807.425',
+      name: 'RR Cladding', part_type: 'internal_mfg', item_category: 'article',
+      is_impacted: true, is_lead: true, resulting_revision_id: null, children: [] },
+    { part_id: 2, part_number: '3454', customer_part_number: null,
+      name: 'Rear Cladding', part_type: 'purchased', item_category: 'tool',
+      is_impacted: false, is_lead: false, resulting_revision_id: null, children: [] },
+    { part_id: 3, part_number: '3454-40', customer_part_number: null,
+      name: 'Rear Cladding Gauge', part_type: 'purchased', item_category: 'gauge',
+      is_impacted: false, is_lead: false, resulting_revision_id: null, children: [] },
+  ],
+  impacted_part_ids: [1],
+  lead_part_id: 1,
+}
+
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const result = render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
@@ -57,11 +75,9 @@ describe('ImpactTree', () => {
     expect(await screen.findByText(/Suggested/)).toBeDefined()
   })
 
-  it('lead checkbox is disabled and apply sends the selection', async () => {
+  it('apply sends the selection', async () => {
     wrap(<ImpactTree changeId={7} status="captured" />)
     await screen.findByText('Child')
-    const lead = screen.getByRole('checkbox', { name: /Child/ }) as HTMLInputElement
-    expect(lead.disabled).toBe(true)
     fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
     fireEvent.click(screen.getByRole('button', { name: /Apply selection/ }))
     await waitFor(() =>
@@ -119,5 +135,44 @@ describe('ImpactTree', () => {
     await screen.findByText('Child')
     expect(screen.queryByRole('button', { name: /Confirm impact \(R&D\)/ })).toBeNull()
     expect(screen.getByText(/RD Member/)).toBeDefined()
+  })
+
+  it('shows our number, the customer number and the name, in that order', async () => {
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue(mixedTree)
+    wrap(<ImpactTree changeId={7} status="captured" />)
+    await screen.findByText('20-3454-001-0')
+    expect(screen.getByText('3CR.807.425')).toBeDefined()
+    expect(screen.getByText('RR Cladding')).toBeDefined()
+    // The tool has no customer number; the column holds its place rather than
+    // collapsing and knocking the names out of alignment.
+    expect(screen.getAllByText('\u2014').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('groups the top level by controlled-item class, articles first', async () => {
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue(mixedTree)
+    wrap(<ImpactTree changeId={7} status="captured" />)
+    await screen.findByText('20-3454-001-0')
+    const headings = ['Articles', 'Tools & molds', 'Gauges'].map((h) => screen.getByText(h))
+    expect(headings).toHaveLength(3)
+    // Articles lead, gauges trail — order comes from ITEM_GROUP_ORDER.
+    const order = headings.map((el) => el.compareDocumentPosition(headings[0]))
+    expect(order[1] & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  })
+
+  it('lets the lead be unpicked while scoping, and pins it from assessment on', async () => {
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue(tree)
+    const { unmount } = wrap(<ImpactTree changeId={7} status="scoping" />)
+    await screen.findByText('Child')
+    // 'Child' is the lead. Naming it wrong is an ordinary scoping mistake.
+    expect((screen.getByRole('checkbox', { name: /Child/ }) as HTMLInputElement).disabled)
+      .toBe(false)
+    unmount()
+
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue(tree)
+    wrap(<ImpactTree changeId={7} status="in_assessment" />)
+    await screen.findByText('Child')
+    // Departments are routed against it by now — frozen.
+    expect((screen.getByRole('checkbox', { name: /Child/ }) as HTMLInputElement).disabled)
+      .toBe(true)
   })
 })

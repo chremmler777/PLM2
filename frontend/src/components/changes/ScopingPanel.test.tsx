@@ -19,6 +19,10 @@ vi.mock('../../api/changes', () => ({
 vi.mock('../../hooks/queries/useWorkflows', () => ({
   useDepartments: () => ({ data: [{ id: 2, name: 'Quality' }] }),
 }))
+// ConcernStrip has its own suite and its own auth/query needs; this file is
+// about the meeting flow.
+vi.mock('./ConcernStrip', () => ({ default: () => <div>mock-concern-strip</div> }))
+vi.mock('./AttachmentDropzone', () => ({ default: () => <div>mock-attachment-dropzone</div> }))
 vi.mock('../../api/contacts', () => ({
   contactsApi: { list: vi.fn().mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }]) },
 }))

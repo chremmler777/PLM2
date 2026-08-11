@@ -25,7 +25,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   implementation_mode: { de: 'Umsetzungsart', en: 'Implementation mode' },
   integrated: { de: 'Integriert', en: 'Integrated' },
   separational: { de: 'Separativ', en: 'Separational' },
-  customer_relevant: { de: 'Kundenrelevant', en: 'Customer relevant' },
+  customer_relevant: { de: 'Kostenträger', en: 'Cost carrier' },
   affected_plants: { de: 'Betroffene Werke', en: 'Affected plants' },
   lead_part: { de: 'Leit-Teil', en: 'Lead part' },
   decided_by: { de: 'Entschieden von', en: 'Decided by' },
@@ -40,6 +40,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.hint': { de: 'Betroffene Knoten wählen — Vorschläge zeigen strukturell betroffene Baugruppen.', en: 'Pick impacted nodes — suggestions mark structurally affected parent assemblies.' },
   'impact.suggested': { de: 'Vorschlag', en: 'Suggested' },
   'impact.lead': { de: 'Leit-Teil', en: 'Lead item' },
+  'impact.leadPinned': {
+    de: 'Ab der Bewertung fest — die Fachbereiche sind darauf geroutet.',
+    en: 'Pinned from assessment on — departments are routed against it.',
+  },
   'impact.apply': { de: 'Auswahl übernehmen', en: 'Apply selection' },
   'impact.locked': { de: 'Auswahl gesperrt — Umsetzung gestartet', en: 'Selection locked — implementation started' },
   'impact.empty': { de: 'Keine Teile im Projekt. Teile zuerst im Projekt anlegen.', en: 'No parts in this project. Create parts on the project page first.' },
@@ -72,6 +76,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.pendingDeviations': { de: 'Offene Abweichungen', en: 'Pending deviations' },
   'cockpit.overdueAssessments': { de: 'Überfällige Bewertungen', en: 'Overdue assessments' },
   'cockpit.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
+  'cockpit.decideInMeeting': {
+    de: 'Entscheidung im Scoping-Termin festhalten — Freigabe, Rückfrage oder Ablehnung →',
+    en: 'Record the decision in the scoping meeting — proceed, needs info or reject →',
+  },
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
   'actions.title': { de: 'Deine Aufgaben', en: 'Your actions' },
@@ -94,10 +102,23 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
   'audit.all': { de: 'Alle', en: 'All' },
   'audit.system': { de: 'System', en: 'System' },
-  'start.title': { de: 'Änderung starten', en: 'Start change' },
+  'start.title': { de: 'Änderungsantrag anlegen', en: 'New change request' },
   'start.project': { de: 'Projekt', en: 'Project' },
-  'start.item': { de: 'Betroffenes Teil', en: 'Affected item' },
-  'start.searchItem': { de: 'Teil suchen…', en: 'Search item…' },
+  'start.item': { de: 'Betroffene Teile', en: 'Affected items' },
+  'start.itemHint': {
+    de: 'Mehrere Teile wählbar — z. B. alle Teile eines Werkzeugs in einem Antrag. Das erste ist das führende Teil.',
+    en: 'Pick several — e.g. all parts of one tool in a single request. The first one is the lead item.',
+  },
+  'start.lead': { de: 'Führend', en: 'Lead' },
+  'start.makeLead': { de: 'Als führendes Teil setzen', en: 'Make lead item' },
+  'start.selectedCount': { de: '{n} ausgewählt', en: '{n} selected' },
+  'start.colInternal': { de: 'Teilenummer', en: 'Part number' },
+  'start.colCustomer': { de: 'Kundennummer', en: 'Customer no.' },
+  'start.colName': { de: 'Benennung', en: 'Name' },
+  'start.searchItem': {
+    de: 'Teil suchen — eigene Nummer, Kundennummer oder Benennung…',
+    en: 'Search item — part number, customer number or name…',
+  },
   'start.articles': { de: 'Artikel', en: 'Articles' },
   'start.tools': { de: 'Werkzeuge & Betriebsmittel', en: 'Tools & equipment' },
   'start.toolsRarely': {
@@ -116,13 +137,35 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: '{n} Nicht-Physische-Teile ausgeblendet (Verpackung, Material … folgen später).',
     en: '{n} non-physical items hidden (packaging, material … coming later).',
   },
-  'start.changeTitle': { de: 'Titel', en: 'Title' },
-  'start.reason': { de: 'Begründung', en: 'Reason' },
+  'start.changeTitle': { de: 'Titel (automatisch)', en: 'Title (automatic)' },
+  'start.titleAuto': {
+    de: 'Wird aus Projekt, Kundennummer und führendem Teil gebildet — wie die Dateinamen im Datenmanagement.',
+    en: 'Built from project, customer number and lead item — the same way the data-management system names its files.',
+  },
+  'start.titlePlaceholder': {
+    de: 'Teil wählen — der Titel entsteht daraus',
+    en: 'Pick an item — the title follows from it',
+  },
+  'start.reason': { de: 'Kurzbeschreibung', en: 'Short description' },
+  'start.reasonPlaceholder': {
+    de: 'Was ist das Problem?',
+    en: 'What is the problem?',
+  },
+  'start.reasonHint': {
+    de: 'Eine Zeile. Details gehören in die Anhänge und Bewertungen.',
+    en: 'One line. Detail belongs in the attachments and assessments.',
+  },
   'start.type': { de: 'Änderungsart', en: 'Change type' },
   'start.create': { de: 'Änderung anlegen', en: 'Create change' },
-  'start.clearItem': { de: 'Auswahl entfernen', en: 'Clear selected item' },
+  'start.clearItem': { de: 'Auswahl entfernen', en: 'Remove selected item' },
   'start.noMatches': { de: 'Keine Treffer — Nummer oder Namen anders schreiben?', en: 'No matches — try a different number or name?' },
-  'start.customerRelevant': { de: 'Kundenrelevante Änderung?', en: 'Customer-relevant change?' },
+  // Who carries the cost, and therefore which costing branch the change takes.
+  // Deliberately NOT worded "internal / external": the D1 master already has
+  // independent "CM internal" and "CM external" flags meaning something else,
+  // and two senses of those words on one change would be unreadable.
+  'start.customerRelevant': { de: 'Wer trägt die Kosten?', en: 'Who carries the cost?' },
+  'start.customerChange': { de: 'Kundenänderung', en: 'Customer change' },
+  'start.internalChange': { de: 'Interne Änderung', en: 'Internal change' },
   'start.customerRelevantYesHint': {
     de: 'Läuft über den Angebotsprozess — Kunde muss den Preis akzeptieren, bevor freigegeben wird.',
     en: 'Goes through the quote workflow — the customer must accept a price before approval.',
@@ -131,6 +174,72 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Läuft über die interne Kostenfreigabe — kein Kunde beteiligt.',
     en: 'Goes through internal cost approval — no customer involved.',
   },
+  'concern.title': { de: 'Einwände des Teams', en: 'Team concerns' },
+  'concern.none': {
+    de: 'Keine Einwände. Wer etwas blockiert sieht, kann es hier markieren — auch vor dem Termin.',
+    en: 'No concerns. Anyone who sees a blocker can flag it here — before the meeting, too.',
+  },
+  'concern.raise': { de: 'Einwand', en: 'Flag' },
+  'concern.blocking': {
+    de: '{n} offen — blockiert die Freigabe',
+    en: '{n} open — blocks proceed',
+  },
+  'concern.wouldReject': { de: 'Würde ablehnen', en: 'Would reject' },
+  'concern.wantsInfo': { de: 'Info fehlt', en: 'Needs info' },
+  'concern.withdraw': { de: 'zurückziehen', en: 'withdraw' },
+  'concern.withdrawn': { de: 'zurückgezogen', en: 'withdrawn' },
+  'concern.answered': { de: 'im Termin beantwortet', en: 'answered by the decision' },
+  'concern.authorOnly': {
+    de: 'Nur wer den Einwand erhoben hat, kann ihn zurückziehen.',
+    en: 'Only the person who raised a concern may withdraw it.',
+  },
+  'concern.theirs': { de: 'fremd', en: "theirs" },
+  'concern.kind': { de: 'Art des Einwands', en: 'Concern kind' },
+  'concern.note': { de: 'Einwand', en: 'Concern' },
+  'concern.notePlaceholder': {
+    de: 'Was spricht dagegen bzw. was fehlt?',
+    en: 'What speaks against it, or what is missing?',
+  },
+  'meeting.rejectTitle': { de: 'Änderung ablehnen', en: 'Reject change' },
+  'meeting.rejectLabel': {
+    de: 'Warum kann diese Änderung nicht starten? (Pflicht, auditiert)',
+    en: 'Why can this change not go ahead? (required, audited)',
+  },
+  'meeting.rejectWarning': {
+    de: 'Die Änderung wird gestoppt. Der Grund geht an den Antragsteller und in den Audit-Trail. '
+      + 'Ein Wiedereröffnen ist möglich — die Ablehnung bleibt aber im Protokoll.',
+    en: 'This stops the change. The reason goes to the originator and into the audit trail. '
+      + 'It can be reopened later — the rejection stays on the record either way.',
+  },
+  'meeting.rejectedBecause': { de: 'Abgelehnt:', en: 'Rejected:' },
+  'meeting.needsInfoTitle': { de: 'Weitere Informationen nötig', en: 'More information needed' },
+  'meeting.needsInfoLabel': {
+    de: 'Was fehlt, bevor die Änderung starten kann? (Pflicht, auditiert)',
+    en: 'What is missing before the change can start? (required, audited)',
+  },
+  'meeting.needsInfoWarning': {
+    de: 'Die Änderung bleibt im Scoping. Vertrieb ist verantwortlich, die fehlenden '
+      + 'Informationen zu beschaffen, und erhält dies als Aufgabe.',
+    en: 'The change stays in scoping. Sales is accountable for obtaining the missing '
+      + 'information and gets this as an action.',
+  },
+  'meeting.shareRejection': {
+    de: 'Ablehnung an den Kunden kommunizieren',
+    en: 'Communicate the rejection to the customer',
+  },
+  'meeting.shareNeedsInfo': {
+    de: 'Fehlende Informationen beim Kunden anfragen',
+    en: 'Request the missing information from the customer',
+  },
+  'meeting.shareHint': {
+    de: 'Vertrieb und Projektleitung antworten dem Kunden. Das versendete Dokument — '
+      + 'Absage, Fragenliste oder Gegenvorschlag — hier anhängen, damit es an der '
+      + 'Änderung hängt und nicht im Postfach.',
+    en: 'Sales and project management answer the customer. Attach what you send — the '
+      + 'rejection letter, the list of open questions, or a counter-proposal — so it '
+      + 'lives on the change rather than in a mailbox.',
+  },
+  'meeting.missingInfo': { de: 'Fehlt noch (Vertrieb):', en: 'Missing (Sales):' },
   'start.missing': { de: 'Fehlt noch', en: 'Missing' },
   'attach.uploadLabel': { de: 'Dokument anhängen (PPT, PDF, E-Mail …)', en: 'Attach document (PPT, PDF, email …)' },
   'attach.baseline': { de: 'Erstunterlagen (Basis)', en: 'Initial documentation (baseline)' },

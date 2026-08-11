@@ -470,7 +470,7 @@ export default function PartDetail() {
               onClick={() => setShowStartChange(true)}
               className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium"
             >
-              Start change
+              Start change request
             </button>
           </div>
         </div>

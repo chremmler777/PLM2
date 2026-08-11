@@ -36,6 +36,7 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
+    ConcernCreate, ConcernResponse,
     InternalApprovalIn,
 )
 
@@ -393,6 +394,8 @@ async def transition_change(
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
             cancellation_reason=body.cancellation_reason,
+            rejection_reason=body.rejection_reason,
+            reopen_reason=body.reopen_reason,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -947,6 +950,53 @@ async def update_meeting(
     return meeting
 
 
+@router.get("/{change_id}/concerns", response_model=List[ConcernResponse])
+async def list_concerns(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change.concerns
+
+
+@router.post("/{change_id}/concerns", response_model=ConcernResponse)
+async def raise_concern(
+    change_id: int, body: ConcernCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await MeetingService.raise_concern(
+            db, change, current_user, body.kind, body.note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
+
+
+@router.delete("/{change_id}/concerns/{concern_id}", response_model=ConcernResponse)
+async def withdraw_concern(
+    change_id: int, concern_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await MeetingService.withdraw_concern(
+            db, change, concern_id, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
+
+
 @router.post("/{change_id}/meetings/{meeting_id}/decide", response_model=MeetingResponse)
 async def decide_meeting(
     change_id: int, meeting_id: int, body: MeetingDecideIn,
@@ -957,7 +1007,8 @@ async def decide_meeting(
         raise HTTPException(status_code=404, detail="Change not found")
     try:
         meeting = await MeetingService.decide_meeting(
-            db, change, meeting_id, body.decision, current_user)
+            db, change, meeting_id, body.decision, current_user,
+            reason=body.reason)
     except ValueError as e:
         # transition side effects raise ChangeError (a ValueError subclass);
         # WorkflowService kick-off gates raise plain ValueError.

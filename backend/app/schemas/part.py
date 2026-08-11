@@ -10,6 +10,8 @@ from app.schemas.common import NaiveUtcDatetime
 class PartBase(BaseModel):
     """Base part information."""
     part_number: str = Field(..., min_length=1, max_length=100)
+    customer_part_number: Optional[str] = Field(
+        None, max_length=100, description="Customer's own number, e.g. 3CR.919.491.A")
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     part_type: str = Field(..., description="purchased, internal_mfg, sub_assembly")
@@ -37,6 +39,7 @@ class PartUpdate(BaseModel):
     """Update part information. parent_part_id only applies when explicitly
     provided (send null to move the part to top level)."""
     name: Optional[str] = None
+    customer_part_number: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
     part_type: Optional[str] = None
     supplier: Optional[str] = None

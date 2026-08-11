@@ -294,3 +294,31 @@ describe('ChangeDetailPage commercial tab quoted-price and internal-approval aut
     expect(await screen.findByText('Approve internal costs')).toBeDefined()
   })
 })
+
+describe('ChangeDetailPage rejection', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    vi.mocked(changesApi.get).mockResolvedValue(change)
+  })
+
+  it('states that the flow is stopped, why, and offers the way back', async () => {
+    vi.mocked(changesApi.get).mockResolvedValue({
+      ...change,
+      status: 'rejected' as ChangeDetail['status'],
+      rejection_reason: 'Customer withdrew the request',
+    })
+    wrap('/changes/1')
+    expect(await screen.findByRole('alert')).toBeDefined()
+    expect(screen.getByText(/the flow is stopped/i)).toBeDefined()
+    expect(screen.getByText('Customer withdrew the request')).toBeDefined()
+    expect(screen.getByRole('button', { name: /Reopen/ })).toBeDefined()
+  })
+
+  it('shows no rejection banner or Reopen button on a live change', async () => {
+    wrap('/changes/1')
+    await screen.findByText('mock-lifecycle-stepper')
+    expect(screen.queryByText(/the flow is stopped/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Reopen/ })).toBeNull()
+  })
+})

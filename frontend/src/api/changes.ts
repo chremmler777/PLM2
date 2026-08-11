@@ -4,7 +4,7 @@ import type {
   ChangeRouting, DeviationRequest,
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
-  ChangeMeeting, MeetingParticipant,
+  ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -131,8 +131,14 @@ export const changesApi = {
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
-  decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info') =>
-    client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision }).then((r) => r.data),
+  listConcerns: (id: number) =>
+    client.get<ChangeConcern[]>(`/v1/changes/${id}/concerns`).then((r) => r.data),
+  raiseConcern: (id: number, kind: ConcernKind, note: string) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, { kind, note }).then((r) => r.data),
+  withdrawConcern: (id: number, concernId: number) =>
+    client.delete<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}`).then((r) => r.data),
+  decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info', reason?: string) =>
+    client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision, reason }).then((r) => r.data),
   approveInternalCosts: (id: number, note?: string) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/internal-approval`, { note: note ?? null }).then((r) => r.data),
 };

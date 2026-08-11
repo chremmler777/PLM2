@@ -62,6 +62,10 @@ export default function ChangeDetailPage() {
   const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  // Rejecting and reopening both stop or restart the flow, so both go through
+  // a memo dialog rather than a bare button.
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [openAssessment, setOpenAssessment] = useState<number | null>(null);
 
   const { data: change, isLoading } = useQuery({
@@ -139,7 +143,10 @@ export default function ChangeDetailPage() {
     && !!change?.pm_signed_by && userId != null && userId === change.pm_signed_by;
 
   const transition = useMutation({
-    mutationFn: (vars: { to: string; cancellation_reason?: string }) =>
+    mutationFn: (vars: {
+      to: string; cancellation_reason?: string;
+      rejection_reason?: string; reopen_reason?: string;
+    }) =>
       changesApi.transition(changeId, vars.to, vars),
     onSuccess: () => {
       setBlocked(null);
@@ -147,7 +154,10 @@ export default function ChangeDetailPage() {
     },
     onError: (e: unknown, vars) => {
       const detail = errDetail(e) ?? 'Transition failed';
-      if (vars.to !== 'cancelled') setBlocked({ to: vars.to, reason: detail });
+      // The memo-dialog transitions report inline; only the ordinary forward
+      // moves offer the deviation banner.
+      const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason;
+      if (!viaDialog) setBlocked({ to: vars.to, reason: detail });
       else toast.error(detail);
     },
   });
@@ -176,6 +186,9 @@ export default function ChangeDetailPage() {
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
+    if (to === 'rejected') { setRejectOpen(true); return; }
+    // Leaving a rejected change is a reopen, wherever the button lives.
+    if (change.status === 'rejected') { setReopenOpen(true); return; }
     transition.mutate({ to });
   };
 
@@ -193,6 +206,10 @@ export default function ChangeDetailPage() {
           )}
         </h1>
         <div className="flex gap-2">
+          {change.status === 'rejected' && (
+            <button className="px-3 py-1.5 text-sm rounded-lg bg-amber-700 hover:bg-amber-600 text-white"
+                    onClick={() => setReopenOpen(true)}>Reopen</button>
+          )}
           {change.status === 'on_hold' && (
             <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
                     onClick={() => advance('in_assessment')}>Resume</button>
@@ -204,6 +221,18 @@ export default function ChangeDetailPage() {
 
       <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant} />
 
+      {change.status === 'rejected' && (
+        <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
+          <p className="font-semibold text-red-200">This change was rejected — the flow is stopped.</p>
+          {change.rejection_reason && (
+            <p className="mt-1 text-red-100/80">{change.rejection_reason}</p>
+          )}
+          <p className="mt-1 text-xs text-red-200/60">
+            Reopen it to put it back into scoping. Both the rejection and the reopen are audited.
+          </p>
+        </div>
+      )}
+
       {blocked && (
         <DeviationBanner
           changeId={changeId}
@@ -213,6 +242,28 @@ export default function ChangeDetailPage() {
           onClose={() => setBlocked(null)}
         />
       )}
+      <ReasonDialog
+        open={rejectOpen}
+        title="Reject change"
+        warning={'Rejecting stops this change here. Assessments and routing stay as they are '
+          + 'and nothing downstream runs again. It can be reopened later, with a reason — '
+          + 'but the rejection stays on the record either way.'}
+        label="Why is this rejected? (required, audited)"
+        submitLabel="Reject change"
+        danger
+        onSubmit={(reason) => { setRejectOpen(false); transition.mutate({ to: 'rejected', rejection_reason: reason }); }}
+        onClose={() => setRejectOpen(false)}
+      />
+      <ReasonDialog
+        open={reopenOpen}
+        title="Reopen change"
+        warning={'Reopening puts the change back into scoping. The earlier rejection stays '
+          + 'in the audit trail.'}
+        label="Why is this being reopened? (required, audited)"
+        submitLabel="Reopen change"
+        onSubmit={(reason) => { setReopenOpen(false); transition.mutate({ to: 'scoping', reopen_reason: reason }); }}
+        onClose={() => setReopenOpen(false)}
+      />
       <ReasonDialog
         open={cancelOpen}
         title="Cancel change"

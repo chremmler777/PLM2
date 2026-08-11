@@ -42,6 +42,11 @@ class Part(Base):
 
     # Identity
     part_number: Mapped[str] = mapped_column(String(100), index=True)  # org-scoped unique
+    # The number the customer knows the part by, in their own scheme — VW writes
+    # theirs dotted (3CR.919.491.A). Everything customer-facing (change requests,
+    # PPAP, deviations) is discussed in this number, not ours, so it is indexed
+    # and searchable. Tools and gauges normally have none.
+    customer_part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

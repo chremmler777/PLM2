@@ -12,6 +12,11 @@ const errDetail = (e: unknown): string | undefined =>
  * decides whether a change routes through the customer quote path or the
  * internal cost-approval path. Editable only while the routing decision is
  * still open (captured/scoping) and only for the change lead or an admin.
+ *
+ * Reads as "Cost carrier: Customer change / Internal change" rather than a
+ * yes/no on "customer-relevant" — the question is really who pays, and the
+ * answer names the branch. Not worded "internal/external": the D1 master has
+ * its own independent "CM internal"/"CM external" flags meaning something else.
  */
 export function CustomerRelevantEditor({ change, canEdit }: {
   change: ChangeRequest; canEdit: boolean
@@ -34,8 +39,8 @@ export function CustomerRelevantEditor({ change, canEdit }: {
 
   return (
     <p className="flex items-center gap-2">
-      <span className="text-slate-400">Customer-relevant:</span>
-      <span>{change.customer_relevant ? 'Yes' : 'No'}</span>
+      <span className="text-slate-400">Cost carrier:</span>
+      <span>{change.customer_relevant ? 'Customer change' : 'Internal change'}</span>
       {editable && !open && (
         <button type="button" data-testid="customer-relevant-edit"
           onClick={() => { setValue(!!change.customer_relevant); setOpen(true) }}
@@ -48,8 +53,8 @@ export function CustomerRelevantEditor({ change, canEdit }: {
           <select value={value ? 'yes' : 'no'}
             onChange={(e) => setValue(e.target.value === 'yes')}
             className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
+            <option value="yes">Customer change</option>
+            <option value="no">Internal change</option>
           </select>
           <button type="button"
             className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"

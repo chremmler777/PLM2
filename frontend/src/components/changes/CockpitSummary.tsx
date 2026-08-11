@@ -1,5 +1,5 @@
 import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 
@@ -154,7 +154,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ✓ {t('impl.readyToGo')}
           </span>
         )}
-        {offPath || next.length === 0 ? (
+        {DECIDED_BY_MEETING.includes(change.status) ? (
+          // The decision lives in the meeting record, not on a button here.
+          <button
+            className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"
+            onClick={() => onAction?.('scoping')}>
+            {t('cockpit.decideInMeeting')}
+          </button>
+        ) : offPath || next.length === 0 ? (
           <p className="text-sm text-slate-400">{STATUS_LABELS[change.status]}</p>
         ) : (
           <div className="flex flex-col gap-2">

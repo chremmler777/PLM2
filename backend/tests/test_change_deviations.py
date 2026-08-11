@@ -103,8 +103,16 @@ async def test_viewer_cannot_be_second_signature(client, eng_auth, seed, session
 
 async def test_blocked_transition_requires_approved_deviation(
         client, eng_auth, admin_auth, seed, session_factory):
-    c = await _change(client, eng_auth, seed)  # no impacted items -> guard blocks
-    # captured -> scoping is the legal edge; the guard then blocks scoping -> in_assessment
+    c = await _change(client, eng_auth, seed)
+    # Scoping needs something to scope, so list one item; the change still has
+    # no deadline, which is what soft-blocks scoping -> in_assessment below.
+    part = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": f"ART-DEV{c['id']}",
+        "name": "Dev part", "part_type": "internal_mfg"}, headers=eng_auth)
+    assert part.status_code in (200, 201), part.text
+    await client.post(f"/api/v1/changes/{c['id']}/impacted-items",
+                      json={"part_id": part.json()["id"], "is_lead": True},
+                      headers=eng_auth)
     scop = await client.post(f"/api/v1/changes/{c['id']}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text

@@ -6,7 +6,9 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change import ChangeRequest, ChangeMeeting, MEETING_DECISIONS, MEETING_CHANNELS
+from app.models.change import (
+    ChangeRequest, ChangeMeeting, ChangeConcern, CONCERN_KINDS,
+    MEETING_DECISIONS, MEETING_CHANNELS, SCOPING_STATUSES)
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services.change_service import ChangeService, ChangeError
@@ -103,10 +105,70 @@ class MeetingService:
         await session.flush()
         return meeting
 
+    # ---- Concerns -----------------------------------------------------------
+    # Flags raised by team members in parallel with (and before) the meeting.
+    # They answer "who wants this rejected, and why" — which the meeting record
+    # alone cannot, since it only knows who pressed the button.
+
+    @staticmethod
+    async def raise_concern(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        kind: str, note: str,
+    ) -> ChangeConcern:
+        await MeetingService._authz(session, change, user)
+        if change.status not in SCOPING_STATUSES:
+            raise ChangeError(
+                "Concerns can only be raised before assessment starts")
+        if kind not in CONCERN_KINDS:
+            raise ChangeError(f"Invalid concern kind '{kind}'")
+        if not (note or "").strip():
+            raise ChangeError("A concern needs a note saying what the problem is")
+        # One open concern per person per kind — a second is an edit, not a vote.
+        if any(c.is_open and c.raised_by == user.id and c.kind == kind
+               for c in change.concerns):
+            raise ChangeError(
+                "You already have an open concern of this kind — withdraw it first")
+        concern = ChangeConcern(
+            change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id)
+        session.add(concern)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_raised",
+            f"Concern ({kind}): {concern.note}", user.id,
+            new_value={"concern_id": concern.id, "kind": kind}, notes=concern.note)
+        return concern
+
+    @staticmethod
+    async def withdraw_concern(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+    ) -> ChangeConcern:
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if not concern.is_open:
+            raise ChangeError("Concern is no longer open")
+        # Only its author may withdraw it — clearing someone else's objection
+        # for them is exactly what this feature exists to prevent. The lead and
+        # admins are not exempt.
+        if concern.raised_by != user.id:
+            raise ChangeError("Only the person who raised a concern may withdraw it")
+        concern.withdrawn_at = datetime.utcnow()
+        concern.withdrawn_by = user.id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_withdrawn",
+            f"Concern #{concern.id} withdrawn", user.id,
+            old_value={"concern_id": concern.id})
+        return concern
+
+    @staticmethod
+    def open_concerns(change: ChangeRequest) -> list[ChangeConcern]:
+        return [c for c in change.concerns if c.is_open]
+
     @staticmethod
     async def decide_meeting(
         session: AsyncSession, change: ChangeRequest, meeting_id: int,
-        decision: str, user: User,
+        decision: str, user: User, reason: Optional[str] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         if decision not in MEETING_DECISIONS:
@@ -117,17 +179,48 @@ class MeetingService:
         if decision == "proceed" and not meeting.selected_department_ids:
             raise ChangeError(
                 "Select at least one impacted department before proceeding")
+        # Proceeding over an unanswered objection is the failure this exists to
+        # stop. Either its author withdraws it, or the decision answers it.
+        open_concerns = MeetingService.open_concerns(change)
+        if decision == "proceed" and open_concerns:
+            who = ", ".join(sorted({c.raised_by_name or f"user #{c.raised_by}"
+                                    for c in open_concerns}))
+            raise ChangeError(
+                f"{len(open_concerns)} open concern(s) from {who} — they must be "
+                "withdrawn by their author, or answered by rejecting / asking "
+                "for more information")
+        # Both of the negative outcomes owe the originator an answer: reject
+        # says why the change cannot go ahead, needs_info says what is missing
+        # before it can start. Only 'proceed' needs no justification.
+        if decision == "reject" and not reason:
+            raise ChangeError("A reason is required to reject a change")
+        if decision == "needs_info" and not reason:
+            raise ChangeError(
+                "State what information is missing before the change can start")
         meeting.decision = decision
+        meeting.decision_reason = reason
+        # A negative decision answers the open concerns; they close with it.
+        if decision in ("reject", "needs_info"):
+            for c in open_concerns:
+                c.resolved_by_meeting_id = meeting.id
         meeting.decided_by = user.id
         meeting.decided_at = datetime.utcnow()
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_decided",
-            f"Scoping meeting #{meeting.id}: {decision}", user.id,
-            field_name="decision", new_value=decision, notes=meeting.notes)
+            f"Scoping meeting #{meeting.id}: {decision}"
+            + (f" — {reason}" if reason else ""), user.id,
+            field_name="decision", new_value=decision,
+            notes=reason or meeting.notes)
         if decision in ("proceed", "reject"):
-            if change.status == "captured":
+            # Proceeding runs through scoping (that is where the work was done);
+            # rejecting goes straight there from wherever it is, so a change
+            # turned down at capture is not forced to be scoped on its way out.
+            if change.status == "captured" and decision == "proceed":
                 await ChangeService.transition(session, change, "scoping", user.id)
             target = "in_assessment" if decision == "proceed" else "rejected"
-            await ChangeService.transition(session, change, target, user.id)
+            # The meeting's reason is the change's rejection reason — one
+            # decision, one justification, not two places to keep in step.
+            await ChangeService.transition(
+                session, change, target, user.id, rejection_reason=reason)
         return meeting

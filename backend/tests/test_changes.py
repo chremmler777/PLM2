@@ -53,11 +53,27 @@ async def _transition(client, auth, change_id, to_status, **over):
 
 
 async def test_transition_blocked_without_impacted_items(client, eng_auth, seed):
+    """Impact is an input to scoping, not an output of it: a change with
+    nothing listed cannot be scoped, and even once listed it cannot reach
+    assessment until the set is locked."""
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
+
+    # Nothing listed -> scoping is soft-blocked (overridable by deviation).
+    res = await _transition(client, eng_auth, change["id"], "scoping")
+    assert res.status_code == 400, res.text
+    assert "no impacted items defined" in res.json()["detail"].lower()
+
+    # List one, and scoping opens.
+    part_id = await _make_part(client, eng_auth, seed["project_id"],
+                               f"ART-IMP{change['id']}")
+    await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
+                      json={"part_id": part_id}, headers=eng_auth)
     res = await _transition(client, eng_auth, change["id"], "scoping")
     assert res.status_code == 200, res.text
+
+    # Listed but not locked -> assessment still refuses.
     res = await _transition(client, eng_auth, change["id"], "in_assessment")
     assert res.status_code == 400, res.text
     assert "deviation" in res.json()["detail"].lower()
@@ -614,6 +630,9 @@ async def test_customer_relevant_locked_after_scoping(
                                    lead_id=seed["engineer_id"])
     cid2 = change2["id"]
     await approve_gates(client, eng_auth, cid2)
+    part_id2 = await _make_part(client, eng_auth, seed["project_id"], f"ART-CR{cid2}")
+    await client.post(f"/api/v1/changes/{cid2}/impacted-items",
+                      json={"part_id": part_id2}, headers=eng_auth)
     res = await _transition(client, eng_auth, cid2, "scoping")
     assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{cid2}", headers=eng_auth)
@@ -700,3 +719,65 @@ async def test_quoted_price_role_gating(
                              json={"quoted_price": 750.0}, headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["quoted_price"] == 750.0
+
+
+async def test_reject_requires_a_memo_and_can_be_reopened(client, eng_auth, seed):
+    """Rejecting stops the flow, so it carries a memo; and it is reversible —
+    a change rejected in error goes back to scoping with its own memo. Both
+    land in the audit trail as their own entries."""
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
+    cid = change["id"]
+    await approve_gates(client, eng_auth, cid)
+    part_id = await _make_part(client, eng_auth, seed["project_id"], f"ART-RJ{cid}")
+    await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                      json={"part_id": part_id}, headers=eng_auth)
+    assert (await _transition(client, eng_auth, cid, "scoping")).status_code == 200
+
+    # No memo -> refused.
+    res = await _transition(client, eng_auth, cid, "rejected")
+    assert res.status_code == 400, res.text
+    assert "rejection_reason" in res.json()["detail"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/transition", headers=eng_auth,
+                            json={"to_status": "rejected",
+                                  "rejection_reason": "Customer withdrew the request"})
+    assert res.status_code == 200, res.text
+    got = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
+    assert got.json()["status"] == "rejected"
+    assert got.json()["rejection_reason"] == "Customer withdrew the request"
+    assert got.json()["rejected_at"] is not None
+
+    # Reopen without a memo -> refused.
+    res = await _transition(client, eng_auth, cid, "scoping")
+    assert res.status_code == 400, res.text
+    assert "reopen_reason" in res.json()["detail"]
+
+    res = await client.post(f"/api/v1/changes/{cid}/transition", headers=eng_auth,
+                            json={"to_status": "scoping",
+                                  "reopen_reason": "Customer came back, still needed"})
+    assert res.status_code == 200, res.text
+    got = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
+    assert got.json()["status"] == "scoping"
+    # The live rejection state is cleared; the history is not.
+    assert got.json()["rejection_reason"] is None
+    assert got.json()["rejected_at"] is None
+
+    log = await client.get(f"/api/v1/changes/{cid}/changelog", headers=eng_auth)
+    assert log.status_code == 200, log.text
+    entries = {e["action"]: e for e in log.json()}
+    assert "rejected" in entries and "reopened" in entries
+    assert "Customer withdrew the request" in entries["rejected"]["action_description"]
+    assert "Customer came back" in entries["reopened"]["action_description"]
+
+
+async def test_cancelled_stays_terminal(client, eng_auth, seed):
+    """Cancellation is the irreversible one — no reopen path out of it."""
+    change = await _create_change(client, eng_auth, seed["project_id"])
+    cid = change["id"]
+    res = await _transition(client, eng_auth, cid, "cancelled",
+                            cancellation_reason="Duplicate of CR-2026-0001")
+    assert res.status_code == 200, res.text
+    res = await _transition(client, eng_auth, cid, "scoping")
+    assert res.status_code == 400, res.text
+    assert "cannot move from 'cancelled'" in res.json()["detail"].lower()

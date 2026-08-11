@@ -187,3 +187,27 @@ describe('CockpitSummary', () => {
     expect(screen.queryByText(/Your actions/)).toBeNull()
   })
 })
+
+describe('CockpitSummary scoping decisions belong to the meeting', () => {
+  afterEach(cleanup)
+
+  it('offers no advance buttons in scoping, only a pointer to the meeting', () => {
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onAction={onAction} />))
+    // Proceeding and rejecting are the meeting's call — no button bypasses it.
+    expect(screen.queryByRole('button', { name: /In Assessment/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Rejected/ })).toBeNull()
+    const pointer = screen.getByText(/Record the decision in the scoping meeting/)
+    fireEvent.click(pointer)
+    expect(onAction).toHaveBeenCalledWith('scoping')
+  })
+
+  it('still offers the ordinary advance button on statuses the meeting does not own', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByRole('button', { name: /Scoping/ })).toBeDefined()
+    expect(screen.queryByText(/Record the decision in the scoping meeting/)).toBeNull()
+  })
+})
