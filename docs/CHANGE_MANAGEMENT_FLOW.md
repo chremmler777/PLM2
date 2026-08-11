@@ -185,6 +185,20 @@ the pass decision is the feasible/not-feasible verdict. UI presents these as
 - **No cost fields at assessment.** Cost (the workbook's per-department
   activity grids — hours × rates per plant, one-time vs lifecycle) belongs to
   `costing`.
+- **The impact checklist (2026-08-11, replaces the workbook activity lists as
+  assessment questions).** Config, not data
+  (`GET /changes/reference/assessment-checklist`). **13 common items**: cycle
+  time change, increased scrap, increased maintenance, 3D change necessary,
+  dimensional risk, visual risk, work instruction update, new process, spare
+  part required, internal modification, external modification, prototyping,
+  matching/sampling. **Extras**: APQP → PFMEA update, control plan update;
+  Development → article design update (internal vs customer-given). External
+  modification expects an **RFQ document** (costs & timing request to the
+  supplier; reported, not gated). **`not_feasible` hard-requires the
+  explanation document (PPT) for the customer** as assessment evidence.
+  Checked items seed the department's costing grid (cycle time → lifecycle
+  line, rest one-time; remark travels as the line note; deliberate deletions
+  are remembered).
 
 ### Costing & timing shape (2026-08-11, in build)
 
