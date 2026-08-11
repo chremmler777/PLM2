@@ -314,6 +314,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Offene Rückfrage — Vertrieb holt die Info beim Kunden ein:',
     en: 'Open info request — Sales obtains this from the customer:',
   },
+  'start.internalLater': {
+    de: 'Interne Änderungen folgen später',
+    en: 'Internal changes come later',
+  },
   'start.salesOnly': {
     de: 'Nur Vertrieb oder Projektmanagement legt Änderungsanträge an',
     en: 'Only Sales or Project Management raises change requests',

@@ -20,6 +20,7 @@ vi.mock('react-router-dom', async (orig) => ({
   ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => navigate,
 }))
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -54,10 +55,9 @@ describe('StartChangeModal', () => {
     // Only physical-part changes are enabled today; the type picker sits below project.
     expect((screen.getByLabelText(/Change type/) as HTMLSelectElement).value).toBe('physical_part')
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle at clip' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 1, change_type: 'physical_part', lead_id: 5, customer_relevant: false })))
+      expect.objectContaining({ project_id: 1, change_type: 'physical_part', lead_id: 5, customer_relevant: true })))
     await waitFor(() => expect(changesApi.addImpactedItem).toHaveBeenCalledWith(
       42, { part_id: 4, is_lead: true }))
     expect(navigate).toHaveBeenCalledWith('/changes/42')
@@ -81,7 +81,8 @@ describe('StartChangeModal', () => {
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', true)
     expect(screen.getByText(/affected item/)).toBeDefined()
     expect(screen.getByText(/reason/)).toBeDefined()
-    expect(screen.getByText(/cost carrier/)).toBeDefined()
+    // The cost carrier is no longer a choice to make — it defaults to customer.
+    expect(screen.queryByText(/cost carrier/)).toBeNull()
   })
 
   it('shows the locked project number-first instead of a raw id when prefilled', async () => {
@@ -109,7 +110,6 @@ describe('StartChangeModal', () => {
     fireEvent.click(await screen.findByText('20-3457-003-0'))
     expect(screen.getByText(/3 selected/)).toBeTruthy()
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Warpage' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     // One change, three impacted items, exactly one of them flagged lead.
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledTimes(1))
@@ -143,7 +143,6 @@ describe('StartChangeModal', () => {
     fireEvent.click(await screen.findByText('20-3455-001-0'))
     expect(screen.getByText('20-3454-001-0 +1 - 3CR.807.425 - RR Cladding (Basis)')).toBeTruthy()
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Warpage' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(expect.objectContaining({
       title: '20-3454-001-0 +1 - 3CR.807.425 - RR Cladding (Basis)',
@@ -170,7 +169,6 @@ describe('StartChangeModal', () => {
     fireEvent.change(reason, { target: { value: 'x'.repeat(140) } })
     expect(reason.value).toHaveLength(100)
     expect(screen.getByText('100/100')).toBeTruthy()
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
       expect.objectContaining({ reason: 'x'.repeat(100) })))
@@ -194,7 +192,6 @@ describe('StartChangeModal', () => {
     fireEvent.click(await screen.findByText('20-3451-001-0'))
     fireEvent.click(screen.getByRole('button', { name: /Make lead item: 20-3451-001-0/ }))
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Because' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.addImpactedItem).toHaveBeenCalledTimes(2))
     expect(vi.mocked(changesApi.addImpactedItem).mock.calls.map((c) => c[1])).toEqual([
@@ -210,7 +207,6 @@ describe('StartChangeModal', () => {
     }} />)
     await screen.findByText('20-3450-001-0 - Clip')
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Because' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', false)
     fireEvent.click(screen.getByRole('button', { name: /Remove selected item: 20-3450-001-0/ }))
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', true)
@@ -254,7 +250,6 @@ describe('StartChangeModal', () => {
   it('requires picking an item when not prefilled', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Because' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     expect(screen.getByRole('button', { name: /Create change/ })).toHaveProperty('disabled', true)
     fireEvent.change(screen.getByPlaceholderText(/Search item/), { target: { value: 'clip' } })
     fireEvent.click(await screen.findByText(/20-3450-001-0/))
@@ -292,10 +287,32 @@ describe('StartChangeModal', () => {
     }} />)
     await screen.findByText('20-3450-001-0 - Clip')
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
-    fireEvent.click(screen.getByRole('radio', { name: /^Internal change/ }))
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     const alert = await screen.findByTestId('start-error')
     expect(alert.textContent).toContain('Only Sales may start a change')
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('locks the cost carrier to the customer branch while internal changes wait', async () => {
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{
+      projectId: 1,
+      part: { id: 4, part_number: '20-3450-001-0', name: 'Clip', item_category: 'article' },
+    }} />)
+    await screen.findByText('20-3450-001-0 - Clip')
+    const customer = screen.getByRole('radio', { name: /^Customer change/ }) as HTMLInputElement
+    const internal = screen.getByRole('radio', { name: /^Internal change/ }) as HTMLInputElement
+    // Customer is preselected; internal is visible but unavailable, and says why.
+    expect(customer.checked).toBe(true)
+    expect(internal.disabled).toBe(true)
+    expect(internal.checked).toBe(false)
+    expect(internal.closest('label')?.getAttribute('title')).toBe(t('start.internalLater'))
+
+    fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle' } })
+    fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
+    await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ customer_relevant: true })))
+    // Nothing the modal can do sends the internal branch.
+    expect(changesApi.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ customer_relevant: false }))
   })
 })

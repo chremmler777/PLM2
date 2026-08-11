@@ -104,7 +104,10 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // Change type is chosen up front and scopes the item picker. Only physical-part
   // changes are enabled today (see ENABLED_CHANGE_TYPES).
   const [changeType, setChangeType] = useState<ChangeType>('physical_part');
-  const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(undefined);
+  // Only the external flow is open for business: the internal branch is shown
+  // (so the distinction stays visible) but cannot be chosen, and the customer
+  // branch is preselected rather than forcing a choice with one legal answer.
+  const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
   const [submitting, setSubmitting] = useState(false);
   // Server-side refusals (e.g. 403 for a user outside a change-starting
   // department) are shown in place, not only as a toast that scrolls away.
@@ -166,12 +169,13 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   if (!projectId) missing.push('project');
   if (picked.length === 0) missing.push('affected item');
   if (!reason.trim()) missing.push('reason');
-  if (customerRelevant === undefined) missing.push('cost carrier');
+  if (customerRelevant !== true) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
 
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
+    if (customerRelevant !== true) return;
     setSubmitting(true);
     setCreateError(null);
     try {
@@ -181,7 +185,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         change_type: changeType,
         reason: reason.trim() || undefined,
         lead_id: userId ?? undefined,
-        customer_relevant: customerRelevant,
+        // Never leaves as false — the backend refuses internal changes for now.
+        customer_relevant: true,
       });
       // Sequential on purpose: the lead item must land first, and a partial
       // failure has to name the parts that did not attach so they can be added
@@ -454,17 +459,20 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span className="block text-xs text-slate-500">{t('start.customerRelevantYesHint')}</span>
               </span>
             </label>
-            <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <label className="flex items-start gap-2 text-sm cursor-not-allowed opacity-50"
+              title={t('start.internalLater')}>
               <input
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
+                disabled
                 checked={customerRelevant === false}
                 onChange={() => setCustomerRelevant(false)}
               />
               <span>
                 <span className="text-slate-100">{t('start.internalChange')}</span>
                 <span className="block text-xs text-slate-500">{t('start.customerRelevantNoHint')}</span>
+                <span className="block text-xs text-amber-300/80">{t('start.internalLater')}</span>
               </span>
             </label>
           </div>
