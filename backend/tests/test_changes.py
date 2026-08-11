@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
-    satisfy_capture_gate,
+    satisfy_capture_gate, make_development_member,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -264,7 +264,9 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
-    # Task 18: Development must confirm the impacted-item set before kickoff.
+    # Task 18: Development must confirm the impacted-item set before kickoff —
+    # Development membership only, so put the confirming admin in it.
+    await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
     res = await _transition(client, eng_auth, cid, "in_implementation")
@@ -285,6 +287,7 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "pm"}, headers=eng_auth)
     await client.post(f"/api/v1/changes/{cid}/sign-off", json={"role": "quality"}, headers=admin_auth)
     await _transition(client, eng_auth, cid, "approved")
+    await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
     await _transition(client, eng_auth, cid, "in_implementation")

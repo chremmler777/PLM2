@@ -126,6 +126,26 @@ async def record_proceed_meeting(session_factory, change_id: int,
         await s.commit()
 
 
+async def make_development_member(session_factory, user_id: int) -> int:
+    """Impact confirmation is Development-only (no admin shortcut), so any
+    test confirming through the API needs the confirming user in Development.
+    Get-or-create: several modules build the department themselves and the
+    name-based authz lookup must stay unambiguous."""
+    from sqlalchemy import select as _select
+    from app.models.workflow import Department, UserDepartment
+    async with session_factory() as s:
+        dept = (await s.execute(_select(Department).where(
+            Department.name == "Development"))).scalar_one_or_none()
+        if dept is None:
+            dept = Department(name="Development", flow_type="action", is_active=True)
+            s.add(dept)
+            await s.flush()
+        if await s.get(UserDepartment, (user_id, dept.id)) is None:
+            s.add(UserDepartment(user_id=user_id, department_id=dept.id))
+        await s.commit()
+        return dept.id
+
+
 async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
     """Stamp the impacted-set lock directly (bypasses confirm authz) so
     state-machine tests can cross the -> in_assessment hard gate."""

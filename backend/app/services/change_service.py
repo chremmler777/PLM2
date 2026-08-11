@@ -1065,12 +1065,14 @@ class ChangeService:
 
     @staticmethod
     async def user_can_confirm_impact(session: AsyncSession, user: User) -> bool:
-        """Task 18's confirm-impact rule (only a Development department member or an
-        admin), extracted so both POST /impact/confirm (changes.py) and the
-        Task 19 my-actions assembly below use the identical check instead of
-        duplicating it."""
-        if user.effective_role == "admin":
-            return True
+        """Task 18's confirm-impact rule: Development membership, full stop.
+        There is deliberately NO admin shortcut — locking the impacted set is
+        an engineering judgement, not an administrative one, so an admin who
+        needs to make it does so through acts-as (X-Acts-As-Department:
+        Development), which puts their name on it as that department.
+
+        Extracted so POST /impact/confirm (changes.py), my-tasks and the
+        my-actions assembly all use the identical check."""
         from app.services.workflow_service import WorkflowService
         rd_dept = (await session.execute(
             select(Department).where(Department.name == "Development"))).scalar_one_or_none()

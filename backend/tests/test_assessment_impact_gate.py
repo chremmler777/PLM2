@@ -20,8 +20,10 @@ async def _scoping_ready(client, auth, seed, session_factory, part):
     cid = res.json()["id"]
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part["part_id"], "is_lead": True}, headers=auth)
-    from tests.conftest import to_scoping
+    from tests.conftest import to_scoping, make_development_member
     await to_scoping(client, auth, cid)
+    # Confirming the impacted set is Development-only now (no admin shortcut).
+    await make_development_member(session_factory, seed["admin_id"])
     await record_proceed_meeting(session_factory, cid)
     return cid
 

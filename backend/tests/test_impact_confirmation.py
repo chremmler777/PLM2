@@ -81,9 +81,19 @@ async def test_confirm_as_non_member_403(client, eng_auth, seed, part):
     assert res.status_code == 403, res.text
 
 
-async def test_confirm_as_admin_allowed(client, eng_auth, admin_auth, seed, part):
+async def test_admin_confirms_only_through_acts_as(
+        client, eng_auth, admin_auth, seed, part, rd_member_auth):
+    """Locking the impacted set is an engineering judgement, so there is no
+    admin shortcut: a bare admin is refused, and the same admin acting as
+    Development succeeds — with the department on the record."""
     cid = await _create_change_with_impacted_item(client, eng_auth, seed, part)
     res = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
+    assert res.status_code == 403, res.text
+    assert "act as Development" in res.json()["detail"]
+
+    acting = {**admin_auth,
+              "X-Acts-As-Department": str(rd_member_auth["dept_id"])}
+    res = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=acting)
     assert res.status_code == 200, res.text
 
 

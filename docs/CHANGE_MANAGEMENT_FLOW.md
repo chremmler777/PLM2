@@ -141,7 +141,7 @@ One quote-by, one release-by; at any moment at most one is *active*
   the note.
 
 ### Entering `in_assessment`
-- **Hard, unbypassable:** impacted set must be R&D-locked.
+- **Hard, unbypassable:** impacted set must be Development-locked.
   *"Impacted set is not locked — confirm impacted items before starting
   assessment"*. Not even an approved deviation clears it.
 - **Soft:** ≥1 impacted item, lead assigned, deadline set, meeting with decision
@@ -188,7 +188,10 @@ approval sign-off. All other departments are deactivated for ECR
 Planner/Scheduler → Scheduling).
 
 Stage responsibilities so far: `captured` = Sales (`can_start_change`, Sales
-only), `scoping` = Project Manager, impact lock = Development,
+only), `scoping` = Project Manager, impact lock = **Development only — no
+admin shortcut**; an admin who needs to lock a set does it through acts-as
+(`X-Acts-As-Department: <Development>`), so the department is on the record
+rather than the admin bypass (`ChangeService.user_can_confirm_impact`),
 `in_assessment` = routed departments per D1. UI shows the responsible role as
 a badge on the stage (`StageResponsibleBadge.tsx`).
 
@@ -207,7 +210,7 @@ view.
   selects the whole commercial branch; the scoping meeting should confirm or
   flip it before assessment, same pattern as the impact lock. A
   misclassification currently surfaces at `quoted`.
-- ⚠ **Post-quote impact edits.** Editing the impacted set clears the R&D lock —
+- ⚠ **Post-quote impact edits.** Editing the impacted set clears the Development lock —
   correct pre-quote, but after `quoted` it means the quote no longer covers the
   scope, and nothing forces reconciliation.
 - ⚠ **Title staleness.** Composed once at creation; swapping the lead item later
@@ -218,6 +221,13 @@ view.
   `scoping` is the single CCB-style review. A `needs_info` outcome produces a
   *follow-up meeting row*, not a second meeting type.
 - ⚠ **Workbook field mapping** — see §1.
+- ⚠ **Process responsibles per project (planned, not built — 2026-08-11).**
+  Today department pickers preselect nothing (except Development, the master
+  engineering role, when the user holds it). The intended end state: each
+  project carries named *process responsibles* per role, auto-pulled into
+  changes on that project — pickers then default to the project's responsible
+  person/department instead of asking. Decided to note, deliberately not
+  implemented yet.
 
 ---
 
