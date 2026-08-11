@@ -322,6 +322,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.error': { de: 'Daten konnten nicht geladen werden.', en: 'Failed to load data.' },
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'tab.activePhase': { de: 'Aktuelle Phase', en: 'Current phase' },
+  'tab.openWork': { de: 'Offene Aufgaben', en: 'Open work' },
   'tab.lockedUntilScoping': { de: 'Ab dem Scoping verfügbar', en: 'Available from scoping' },
   'tab.lockedUntilPhase': {
     de: 'Wird in einer späteren Phase freigeschaltet',

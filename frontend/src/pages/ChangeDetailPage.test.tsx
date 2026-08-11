@@ -37,6 +37,7 @@ const { change } = vi.hoisted(() => ({
     required_by_date: null,
     required_by_reason: null,
     deadline_state: null,
+    impact_confirmed_at: null as string | null,
     quoted_at: null,
     quoted_on_time: null as boolean | null,
     active_deadline: null as 'quote' | 'release' | null,
@@ -500,5 +501,37 @@ describe('ChangeDetailPage description authz', () => {
     wrap('/changes/1')
     await screen.findByRole('button', { name: /Overview/ })
     expect(screen.queryByTestId('description-input')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage impacted-tab attention dot', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment'
+    change.impact_confirmed_at = null
+  })
+
+  it('marks the impacted tab while scoping still owes an impact confirmation', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    change.impact_confirmed_at = null
+    wrap('/changes/1')
+    const dot = await screen.findByTestId('tab-open-work')
+    expect(dot.closest('button')?.textContent).toContain('Impacted')
+  })
+
+  it('drops the mark once the impact is confirmed', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    change.impact_confirmed_at = '2026-07-05T10:00:00'
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Impacted/ })
+    expect(screen.queryByTestId('tab-open-work')).toBeNull()
+  })
+
+  it('drops the mark once the phase moves on', async () => {
+    change.status = 'in_assessment' as ChangeDetail['status']
+    change.impact_confirmed_at = null
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Impacted/ })
+    expect(screen.queryByTestId('tab-open-work')).toBeNull()
   })
 })

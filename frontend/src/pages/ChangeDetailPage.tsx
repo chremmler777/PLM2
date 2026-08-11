@@ -347,10 +347,15 @@ export default function ChangeDetailPage() {
         {EVERYDAY_TABS.map((tb) => {
           const locked = isTabLocked(change.status, tb);
           const isActivePhase = !locked && STATUS_ACTIVE_TAB[change.status] === tb;
+          // Scoping leaves two jobs on the impact tab — pick the impacted items,
+          // then confirm the set. Both are done when the confirmation lands.
+          const openWork = tb === 'impacted'
+            && change.status === 'scoping' && !change.impact_confirmed_at;
           return (
             <button key={tb}
               disabled={locked}
               title={locked ? t(lockedTitleKey(tb))
+                : openWork ? t('tab.openWork')
                 : isActivePhase ? t('tab.activePhase') : undefined}
               className={`pb-2 flex items-center gap-1.5 ${
                 locked ? 'text-slate-600 cursor-not-allowed'
@@ -359,6 +364,11 @@ export default function ChangeDetailPage() {
               onClick={() => { if (!locked) setTab(tb); }}>
               {isActivePhase && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-label={t('tab.activePhase')} />
+              )}
+              {openWork && (
+                <span data-testid="tab-open-work"
+                  className="w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-300/50"
+                  aria-label={t('tab.openWork')} />
               )}
               {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
             </button>
