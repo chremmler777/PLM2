@@ -145,9 +145,17 @@ async def test_negative_decision_resolves_the_open_concerns(
     assert res.json()["decision_reason"] == "Customer drawing missing"
 
     concerns = (await client.get(f"/api/v1/changes/{cid}/concerns", headers=eng_auth)).json()
-    assert len(concerns) == 1
-    assert concerns[0]["is_open"] is False
-    assert concerns[0]["resolved_by_meeting_id"] == mid
+    # The pre-existing flag is answered by the decision...
+    answered = [c for c in concerns if c["note"] == "Need the customer drawing"]
+    assert len(answered) == 1
+    assert answered[0]["is_open"] is False
+    assert answered[0]["resolved_by_meeting_id"] == mid
+    # ...and the decision itself becomes the open Team question that replaces
+    # it, so the change still visibly owes an answer.
+    still_open = [c for c in concerns if c["is_open"]]
+    assert len(still_open) == 1
+    assert still_open[0]["note"] == "Customer drawing missing"
+    assert still_open[0]["department_id"] is None
     # The change stays in scoping — needs_info is not a rejection.
     got = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
     assert got.json()["status"] == "scoping"
