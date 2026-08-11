@@ -78,7 +78,9 @@ describe('CostingBuckets', () => {
     fireEvent.click(screen.getByTestId('costing-toggle-2'))
     await waitFor(() => expect(changesApi.getCostLines).toHaveBeenCalledWith(7, 1))
     expect(screen.getByTestId('lead-time-2')).toBeTruthy()
-    expect(screen.getByText(/\+ row/)).toBeTruthy()
+    // The workbook matrix, not a line editor.
+    expect(screen.getByTestId('cost-add-row')).toBeTruthy()
+    expect(screen.getByTestId('plant-col-1').textContent).toBe('Plant A')
   })
 
   it('saves the lead time for that department', async () => {

@@ -331,6 +331,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Zahlen anderer Fachbereiche sind nicht sichtbar',
     en: 'Other departments’ figures are not shared',
   },
+  'costing.oneTimeSection': { de: 'Einmalige Aufwände', en: 'One-time effort' },
+  'costing.lifecycleSection': { de: 'Laufende Fertigungszeit', en: 'Ongoing production time' },
+  'costing.activity': { de: 'Tätigkeit', en: 'Activity' },
+  'costing.addActivity': { de: '+ Tätigkeit', en: '+ Activity' },
+  'costing.activityPlaceholder': { de: 'Tätigkeit benennen …', en: 'Name the activity …' },
+  'costing.sum': { de: 'Summe', en: 'Sum' },
+  'costing.noActivities': {
+    de: 'Noch keine Tätigkeiten — aus der Bewertung übernommen oder hier ergänzen.',
+    en: 'No activities yet — they arrive from the assessment, or add them here.',
+  },
   'costing.minutes': { de: 'Fertigungszeit ± min/Teil', en: 'production time ± min/part' },
   'costing.minutesShort': { de: '± min/Teil', en: '± min/part' },
   'costing.minutesHint': {
