@@ -166,6 +166,30 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(screen.getByText(t('tasks.hint.send_rejection_send'))).toBeDefined()
   })
 
+  it('sends a close-question row to scoping, quoting the answer', async () => {
+    await renderWith(changeTask({
+      kind: 'close_question', reason: 'customer confirmed 12.50', concern_id: 11,
+    }))
+    expect(screen.getByText(t('tasks.kind.close_question'))).toBeDefined()
+    expect(screen.getByText('customer confirmed 12.50')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=scoping')
+  })
+
+  it('counts several answers awaiting closure in one row', async () => {
+    await renderWith(changeTask({
+      kind: 'close_question', reason: 'customer confirmed 12.50', question_count: 3,
+    }))
+    const hint = screen.getByText(/questions open/)
+    expect(hint.textContent).toContain('3')
+    expect(hint.textContent).toContain('customer confirmed 12.50')
+  })
+
+  it('falls back to a generic hint on a close-question row with no answer text', async () => {
+    await renderWith(changeTask({ kind: 'close_question', reason: null }))
+    expect(screen.getByText(t('tasks.hint.close_question'))).toBeDefined()
+  })
+
   it('sends a costing-input row to the commercial tab', async () => {
     await renderWith(changeTask({ kind: 'costing_input' }))
     expect(screen.getByText(t('tasks.kind.costing_input'))).toBeDefined()

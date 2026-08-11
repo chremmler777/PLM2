@@ -198,7 +198,8 @@ function SepItemsSection() {
 const TASK_TAB: Record<string, string> = {
   kickoff: '', scoping_wrapup: '?tab=scoping',
   impact_confirm: '?tab=impacted', customer_response: '',
-  obtain_info: '?tab=scoping', send_rejection: '?tab=scoping',
+  obtain_info: '?tab=scoping', close_question: '?tab=scoping',
+  send_rejection: '?tab=scoping',
   costing_input: '?tab=commercial',
 };
 
@@ -231,10 +232,11 @@ const taskHint = (task: ChangeTask): string | null => {
         ? t('tasks.hint.send_rejection_send') : t('tasks.hint.send_rejection_letter');
     case 'costing_input':
       return t('tasks.hint.costing_input');
-    case 'obtain_info': {
-      // The question itself is the brief; when several are open, say how many so
-      // the row does not read as a single job.
-      const newest = task.reason?.trim() || t('tasks.hint.obtain_info');
+    case 'obtain_info':
+    case 'close_question': {
+      // The question (or the answer to it) is the brief; when several are open,
+      // say how many so the row does not read as a single job.
+      const newest = task.reason?.trim() || t(`tasks.hint.${task.kind}`);
       return (task.question_count ?? 0) > 1
         ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} — ${newest}`
         : newest;

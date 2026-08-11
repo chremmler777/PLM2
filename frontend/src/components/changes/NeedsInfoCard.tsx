@@ -43,8 +43,9 @@ export default function NeedsInfoCard({
   const [settling, setSettling] = useState(false)
   const [settleNote, setSettleNote] = useState('')
   const [addingDoc, setAddingDoc] = useState(false)
-  // A settled question is history: one line until asked to open.
-  const [expanded, setExpanded] = useState(false)
+  // One collapse behaviour everywhere: settled questions start as a line, live
+  // ones start open — and either can be toggled to the other.
+  const [expanded, setExpanded] = useState(c.is_open)
 
   const mine = attachments.filter((a) => a.concern_id === c.id)
   const answerDocs = mine.filter((a) => a.kind === 'info_response')
@@ -65,31 +66,25 @@ export default function NeedsInfoCard({
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the question'),
   })
 
-  // A heading with nothing under it is noise; the card shows a section only
-  // once it has something to show.
-  const docList = (docs: Attachment[], label: string) => (
-    docs.length === 0 ? null : (
-      <div>
-        <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-0.5">{label}</p>
-        <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
-          {docs.map((a) => (
-            <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
-          ))}
-        </ul>
-      </div>
-    )
-  )
 
-  if (solved && !expanded) {
+  const state = !c.is_open ? 'solved' : c.answered_at != null || !!c.answer_note ? 'answered' : 'open'
+  const SUMMARY_DOT: Record<string, string> = {
+    open: 'text-amber-400', answered: 'text-sky-400', solved: 'text-slate-600',
+  }
+
+  if (!expanded) {
+    // The same one-liner for every state: the dot carries where it stands, the
+    // text carries what it is about.
+    const trailing = solved ? c.resolution_note : c.answer_note
     return (
       <button type="button" data-testid={`needs-info-summary-${c.id}`}
         onClick={() => setExpanded(true)}
         className="w-full flex items-baseline gap-2 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-1.5 text-left hover:bg-slate-800">
-        <span aria-hidden className="text-slate-600 flex-shrink-0">●</span>
+        <span aria-hidden className={`flex-shrink-0 ${SUMMARY_DOT[state]}`}>●</span>
         <span className="text-sm text-slate-400 truncate">{c.note}</span>
-        {c.resolution_note && (
+        {trailing && (
           <span className="text-xs text-slate-500 truncate flex-shrink-0">
-            — {t('concern.solvedBy')} {c.resolution_note}
+            — {solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
           </span>
         )}
         <span className="ml-auto text-xs text-slate-600 flex-shrink-0">
@@ -99,7 +94,6 @@ export default function NeedsInfoCard({
     )
   }
 
-  const state = solved ? 'solved' : answered ? 'answered' : 'open'
   const STATE_STYLE: Record<string, string> = {
     open: 'bg-amber-900/70 text-amber-200',
     answered: 'bg-sky-900/70 text-sky-200',
@@ -129,18 +123,25 @@ export default function NeedsInfoCard({
           {' · '}{new Date(c.raised_at).toLocaleDateString()}
           {origin && ` · ${origin}`}
         </span>
-        {solved && (
-          <button type="button" onClick={() => setExpanded(false)}
-            className="ml-auto text-xs text-slate-500 hover:text-slate-300">
-            {t('bucket.collapse')}
-          </button>
-        )}
+        <button type="button" data-testid={`needs-info-collapse-${c.id}`}
+          onClick={() => setExpanded(false)}
+          className="ml-auto text-xs text-slate-500 hover:text-slate-300">
+          {t('bucket.collapse')}
+        </button>
       </header>
 
-      <p className={`text-sm ${solved ? '' : 'text-slate-100'}`}>{c.note}</p>
-
-      <div className="space-y-1">
-        {docList(questionDocs, t('concern.questionDocs'))}
+      {/* The question: its text, then the files that ARE the question — the
+          slide deck that was sent, the drawing it refers to. No heading between
+          them, because they are one thing. */}
+      <div className="space-y-1" data-testid={`needs-info-question-${c.id}`}>
+        <p className={`text-sm ${solved ? '' : 'text-slate-100'}`}>{c.note}</p>
+        {questionDocs.length > 0 && (
+          <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
+            {questionDocs.map((a) => (
+              <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
+            ))}
+          </ul>
+        )}
         {/* Anyone on the team may add what explains the question. */}
         {!solved && editable && (
           addingDoc ? (
@@ -157,11 +158,15 @@ export default function NeedsInfoCard({
         )}
       </div>
 
-      {/* The answer of record, and — for Sales — the means to write or revise it. */}
-      <div className="border-t border-slate-700/60 pt-2 space-y-2">
+      {/* The answer, as one block: what was said and what came with it, under a
+          single label — never the text here and its files somewhere else. */}
+      <div className="border-t border-slate-700/60 pt-2 space-y-2"
+        data-testid={`needs-info-answer-block-${c.id}`}>
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {t('concern.answer')}
+        </p>
         {answered && (
           <p className="text-sm" data-testid={`needs-info-answer-${c.id}`}>
-            <span className="text-slate-500">{t('concern.answer')}: </span>
             {c.answer_note}
             <span className="block text-xs text-slate-500">
               {t('concern.answeredBy')} {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '—')}
@@ -169,7 +174,16 @@ export default function NeedsInfoCard({
             </span>
           </p>
         )}
-        {answerDocs.length > 0 && docList(answerDocs, t('concern.answerDocs'))}
+        {answerDocs.length > 0 && (
+          <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
+            {answerDocs.map((a) => (
+              <AttachmentRow key={a.id} changeId={changeId} attachment={a} />
+            ))}
+          </ul>
+        )}
+        {!answered && answerDocs.length === 0 && !editable && (
+          <p className="text-xs text-slate-600">{t('concern.noAnswerYet')}</p>
+        )}
 
         {!solved && editable && (
           <>

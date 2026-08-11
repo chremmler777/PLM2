@@ -68,7 +68,7 @@ describe('ConcernStrip', () => {
     await screen.findByText('Tool cannot hold tolerance')
     const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(btn.getAttribute('title')).toBe(t('concern.authorOnlyWithdraw'))
+    expect(btn.getAttribute('title')).toBe(t('concern.authorOrPm'))
   })
 
   it('leaves the author their own withdraw', async () => {
@@ -79,29 +79,42 @@ describe('ConcernStrip', () => {
     expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('lets Sales settle a team needs-info flag, but nothing else', async () => {
+  it('greys the settle control for a viewer who is neither author, PM, nor the raising department', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ id: 1, kind: 'needs_info', department_id: null, raised_by: 9, note: 'ask the customer' }),
-      concern({ id: 2, kind: 'reject_proposal', department_id: null, raised_by: 9, note: 'would reject' }),
-    ] as never)
-    wrap(<ConcernStrip changeId={7} editable canAnswer />)
-    await screen.findByText('ask the customer')
-    const solvable = screen.getByTestId('concern-close-1') as HTMLButtonElement
-    expect(solvable.disabled).toBe(false)
-    expect(solvable.textContent).toContain(t('concern.markSolved'))
-    const other = screen.getByTestId('concern-close-2') as HTMLButtonElement
-    expect(other.disabled).toBe(true)
-    expect(other.getAttribute('title')).toBe(t('concern.authorOnlyWithdraw'))
-  })
-
-  it('tells a non-Sales viewer who may settle a team question', async () => {
-    vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ id: 1, kind: 'needs_info', department_id: null, raised_by: 9 })] as never)
-    wrap(<ConcernStrip changeId={7} editable />)
+      concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
+    wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Packaging Engineer' }]}
+      myDepartmentIds={[2]} />)
     await screen.findByText('Tool cannot hold tolerance')
     const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(btn.getAttribute('title')).toBe(t('concern.authorOrSales'))
+    expect(btn.getAttribute('title')).toBe(t('concern.authorDeptOrPm'))
+  })
+
+  it('lets the raising department and PM settle it', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
+    wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Packaging Engineer' }]}
+      myDepartmentIds={[6]} />)
+    await screen.findByText('Tool cannot hold tolerance')
+    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
+    cleanup()
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
+    wrap(<ConcernStrip changeId={7} editable isPm
+      departments={[{ id: 6, name: 'Packaging Engineer' }]} myDepartmentIds={[]} />)
+    await screen.findByText('Tool cannot hold tolerance')
+    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('stays locked while the session has no identity yet', async () => {
+    // The field bug: an unloaded userId and a null raiser compared equal, and
+    // the control unlocked for everyone who opened the page.
+    authState.current = { userId: null as unknown as number, isAdmin: false }
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'reject_proposal', raised_by: null as unknown as number })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    await screen.findByText('Tool cannot hold tolerance')
+    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('raises a flag with its kind and note', async () => {

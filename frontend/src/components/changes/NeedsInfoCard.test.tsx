@@ -67,6 +67,9 @@ describe('NeedsInfoCard states', () => {
   it('reads as one settled line, expandable to its record', () => {
     card({ concern: concern({ is_open: false, withdrawn_at: '2026-08-03T00:00:00',
       answer_note: 'customer confirmed 12.50', resolution_note: 'price agreed' }) })
+    // Settled starts collapsed — a stack of them reads as history, not work.
+    expect(screen.queryByTestId('needs-info-card-1')).toBeNull()
+    expect(screen.getByTestId('needs-info-summary-1').textContent).toContain('price agreed')
     fireEvent.click(screen.getByTestId('needs-info-summary-1'))
     expect(screen.getByTestId('needs-info-state-1').textContent).toBe(t('concern.solved'))
     expect(screen.getByTestId('needs-info-resolution-1').textContent).toContain('price agreed')
@@ -130,26 +133,38 @@ describe('NeedsInfoCard roles', () => {
 describe('NeedsInfoCard containment', () => {
   afterEach(cleanup)
 
-  it('renders its documents as rows with a download link and their uploader', () => {
-    card({ canAnswer: true, attachments: [
-      doc({ id: 100, filename: 'questions.msg', uploaded_by_name: 'PM Jane' }),
-      doc({ id: 101, filename: 'reply.msg', kind: 'info_response',
-        uploaded_by_name: 'Sam Sales', created_at: '2026-08-02T00:00:00' }),
-    ] })
-    // Both sides of the exchange are readable on the card itself.
-    expect(screen.getByText(t('concern.questionDocs'))).toBeTruthy()
-    expect(screen.getByText(t('concern.answerDocs'))).toBeTruthy()
-    const link = screen.getByRole('link', { name: 'questions.msg' })
-    expect(link.getAttribute('href')).toContain('/v1/changes/7/attachments/100/download')
-    expect(screen.getByTestId('needs-info-card-1').textContent).toContain('PM Jane')
-    expect(screen.getByTestId('needs-info-card-1').textContent).toContain('Sam Sales')
-    expect(screen.getByTestId('attach-kind-info_response')).toBeTruthy()
+  it('reads question → question files → answer text with its files', () => {
+    card({ canAnswer: true, concern: concern({
+      answer_note: 'customer confirmed 12.50', answered_at: '2026-08-02T00:00:00' }),
+      attachments: [
+        doc({ id: 100, filename: 'questions.pptx', uploaded_by_name: 'PM Jane' }),
+        doc({ id: 101, filename: 'reply.msg', kind: 'info_response',
+          uploaded_by_name: 'Sam Sales', created_at: '2026-08-02T00:00:00' }),
+      ] })
+    // The question deck belongs to the question, right under its text.
+    const question = screen.getByTestId('needs-info-question-1')
+    expect(question.textContent).toContain('What is the target price?')
+    expect(question.textContent).toContain('questions.pptx')
+    expect(question.textContent).not.toContain('reply.msg')
+    // The answer is one block: what was said and what came with it.
+    const answer = screen.getByTestId('needs-info-answer-block-1')
+    expect(answer.textContent).toContain('customer confirmed 12.50')
+    expect(answer.textContent).toContain('reply.msg')
+    expect(answer.textContent).toContain('Sam Sales')
+    // And in that order down the card.
+    const card1 = screen.getByTestId('needs-info-card-1')
+    expect(card1.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_CONTAINED_BY)
+      .toBeTruthy()
+    expect(question.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
+    expect(screen.getByRole('link', { name: 'questions.pptx' }).getAttribute('href'))
+      .toContain('/v1/changes/7/attachments/100/download')
   })
 
-  it('leaves out a document heading with nothing under it', () => {
-    card({ canAnswer: true, attachments: [doc({ id: 100, filename: 'questions.msg' })] })
-    expect(screen.getByText(t('concern.questionDocs'))).toBeTruthy()
-    expect(screen.queryByText(t('concern.answerDocs'))).toBeNull()
+  it('keeps the question free of an empty documents heading', () => {
+    card({ canAnswer: true, attachments: [doc({ id: 100, filename: 'questions.pptx' })] })
+    expect(screen.queryByText(t('concern.questionDocs'))).toBeNull()
+    expect(screen.getByTestId('needs-info-question-1').textContent).toContain('questions.pptx')
   })
 
   it('holds only its own documents, never a sibling question’s', () => {
@@ -177,5 +192,28 @@ describe('NeedsInfoCard containment', () => {
     card({ origin: 'from meeting of 04/07/2026' })
     expect(screen.getByTestId('needs-info-card-1').textContent)
       .toContain('from meeting of 04/07/2026')
+  })
+})
+
+describe('NeedsInfoCard collapsing', () => {
+  afterEach(cleanup)
+
+  it('starts open questions expanded and lets them be folded away', () => {
+    card()
+    expect(screen.getByTestId('needs-info-card-1')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('needs-info-collapse-1'))
+    const summary = screen.getByTestId('needs-info-summary-1')
+    expect(summary.textContent).toContain('What is the target price?')
+    expect(screen.queryByTestId('needs-info-card-1')).toBeNull()
+    fireEvent.click(summary)
+    expect(screen.getByTestId('needs-info-card-1')).toBeTruthy()
+  })
+
+  it('summarises an answered question with its answer', () => {
+    card({ concern: concern({ answer_note: 'customer confirmed 12.50',
+      answered_at: '2026-08-02T00:00:00' }) })
+    fireEvent.click(screen.getByTestId('needs-info-collapse-1'))
+    expect(screen.getByTestId('needs-info-summary-1').textContent)
+      .toContain('customer confirmed 12.50')
   })
 })

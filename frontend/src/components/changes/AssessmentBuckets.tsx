@@ -90,13 +90,15 @@ function ObjectList({ objects }: { objects: AssessmentObject[] }) {
 }
 
 export default function AssessmentBuckets({
-  change, departments, myDepartmentIds, editable,
+  change, departments, myDepartmentIds, editable, isPm = false,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds: number[]
   /** Assessment phase: only then is there anything to submit. */
   editable: boolean
+  /** Project Management may settle any department's flag. */
+  isPm?: boolean
 }) {
   const changeId = change.id
   const [openDept, setOpenDept] = useState<number | null>(null)
@@ -202,7 +204,7 @@ export default function AssessmentBuckets({
                 {/* This department's own holds, in the room where the work happens. */}
                 <ConcernStrip changeId={changeId} editable={isMine && editable}
                   scoped departments={departments} myDepartmentIds={myDepartmentIds}
-                  onlyDepartmentId={row.id} />
+                  onlyDepartmentId={row.id} isPm={isPm} />
 
                 {a?.submitted_at || (a?.verdict && a.verdict !== 'pending') ? (
                   <div className="text-sm space-y-0.5" data-testid={`bucket-answer-${row.id}`}>

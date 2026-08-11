@@ -26,16 +26,16 @@ const KIND_STYLE: Record<ConcernKind, string> = {
  */
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
-  canAnswer = false, hideConcernIds = [], onlyDepartmentId,
+  hideConcernIds = [], onlyDepartmentId, isPm = false,
 }: {
   changeId: number
   editable: boolean
-  /** Sales membership: Sales may solve a team needs-info flag by answering it. */
-  canAnswer?: boolean
   /** Concerns shown as their own containers elsewhere on the page. */
   hideConcernIds?: number[]
   /** Inside a department bucket: only that department's flags, raised for it. */
   onlyDepartmentId?: number
+  /** Project Management may settle any objection. */
+  isPm?: boolean
   /** Assessment phase: every flag belongs to a department, and dropping one
    *  needs a written resolution. */
   scoped?: boolean
@@ -101,10 +101,18 @@ export default function ConcernStrip({
 
   // A team needs-info flag is the customer question in flag form: Sales closes it
   // by writing the answer. Everything else is the author's own to withdraw.
-  const isTeamNeedsInfo = (c: ChangeConcern) =>
-    c.kind === 'needs_info' && c.department_id == null
-  const salesSolvable = (c: ChangeConcern) => canAnswer && isTeamNeedsInfo(c)
-  const mayClose = (c: ChangeConcern) => c.raised_by === userId || salesSolvable(c)
+  // Who may settle a row, mirroring the backend: the author always, PM always,
+  // and for a department-attributed flag its own members.
+  //
+  // `userId != null` matters: without it an unloaded session (userId null) and a
+  // payload with a null raiser compare equal, and the control unlocks for
+  // everyone. That is exactly how it went wrong in the field.
+  const isAuthor = (c: ChangeConcern) => userId != null && c.raised_by === userId
+  const isRaisingDept = (c: ChangeConcern) =>
+    c.department_id != null && myDepartmentIds.includes(c.department_id)
+  const mayClose = (c: ChangeConcern) => isAuthor(c) || isPm || isRaisingDept(c)
+  const closerRule = (c: ChangeConcern) =>
+    c.department_id != null ? t('concern.authorDeptOrPm') : t('concern.authorOrPm')
 
   const listed = concerns
     .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
@@ -160,7 +168,7 @@ export default function ConcernStrip({
               {withdrawing === c.id && (() => {
                 // Sales answering owes the answer itself; a department flag owes
                 // its resolution; a plain team withdrawal may go unexplained.
-                const answering = c.raised_by !== userId
+                const answering = !isAuthor(c)
                 const noteRequired = answering || c.department_id != null
                 return (
                   <span className="mt-1 flex flex-wrap items-center gap-2">
@@ -196,10 +204,9 @@ export default function ConcernStrip({
               <button data-testid={`concern-close-${c.id}`}
                 className="text-xs underline decoration-dotted flex-shrink-0 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
                 disabled={!mayClose(c) || withdraw.isPending}
-                title={mayClose(c) ? undefined
-                  : isTeamNeedsInfo(c) ? t('concern.authorOrSales') : t('concern.authorOnlyWithdraw')}
+                title={mayClose(c) ? undefined : closerRule(c)}
                 onClick={() => { setWithdrawing(c.id); setResolution('') }}>
-                {c.raised_by === userId ? t('concern.withdraw') : t('concern.markSolved')}
+                {isAuthor(c) ? t('concern.withdraw') : t('concern.markSolved')}
               </button>
             )}
           </li>

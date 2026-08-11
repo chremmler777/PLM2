@@ -191,7 +191,7 @@ export interface ChangeDetail extends ChangeRequest {
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
-  | 'obtain_info' | 'send_rejection' | 'costing_input';
+  | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the

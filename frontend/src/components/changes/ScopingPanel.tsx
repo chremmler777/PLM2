@@ -172,8 +172,11 @@ export default function ScopingPanel(
   // Team needs-info flags are the customer questions; they get their own cards,
   // in the order the questions were asked. A flag raised by a meeting's decision
   // belongs under that meeting's record; a hand-raised one stands on its own.
+  // Every needs-info flag is a question, whoever raised it and however it is
+  // attributed: auto-raised by a decision, hand-raised in the strip, or filed
+  // against a department. One flow, one card — the strip keeps the objections.
   const needsInfo = [...concerns]
-    .filter((c) => c.kind === 'needs_info' && c.department_id == null)
+    .filter((c) => c.kind === 'needs_info')
     .sort((a, b) => a.raised_at.localeCompare(b.raised_at))
   const openQuestions = needsInfo.filter((c) => c.is_open)
   const solvedQuestions = needsInfo.filter((c) => !c.is_open)
@@ -344,7 +347,7 @@ export default function ScopingPanel(
 
         {/* Everything else the team flagged, in one strip. */}
         <ConcernStrip changeId={changeId} editable={open} departments={departments}
-          canAnswer={canAnswerConcerns} hideConcernIds={needsInfo.map((c) => c.id)} />
+          isPm={isPm} hideConcernIds={needsInfo.map((c) => c.id)} />
       </section>
 
       {decideError && (

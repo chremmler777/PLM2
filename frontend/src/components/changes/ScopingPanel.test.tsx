@@ -28,7 +28,15 @@ vi.mock('../../hooks/queries/useWorkflows', () => ({
 }))
 // ConcernStrip has its own suite and its own auth/query needs; this file is
 // about the meeting flow.
-vi.mock('./ConcernStrip', () => ({ default: () => <div>mock-concern-strip</div> }))
+// ConcernStrip has its own suite; here it only has to report which concerns the
+// panel handed it and which it hoisted into cards.
+vi.mock('./ConcernStrip', () => ({
+  default: (p: { hideConcernIds?: number[] }) => (
+    <div data-testid="concern-strip" data-hidden={(p.hideConcernIds ?? []).join(',')}>
+      mock-concern-strip
+    </div>
+  ),
+}))
 vi.mock('./AttachmentDropzone', () => ({
   default: (props: { kind?: string }) => (
     <div data-testid="dropzone" data-kind={props.kind ?? ''}>mock-attachment-dropzone</div>
@@ -410,5 +418,51 @@ describe('ScopingPanel question documents are visible where the questions are', 
     ] })} />))
     await screen.findByTestId('needs-info-card-11')
     expect(screen.queryByTestId('unassigned-question-docs')).toBeNull()
+  })
+})
+
+describe('ScopingPanel recycles one question flow', () => {
+  const question = (over: Record<string, unknown> = {}) => ({
+    id: 11, change_id: 7, kind: 'needs_info', note: 'What is the target price?',
+    raised_by: 9, raised_by_name: 'Rita RD', raised_at: '2026-07-04T11:00:00',
+    withdrawn_at: null, resolved_by_meeting_id: null, is_open: true,
+    department_id: null, resolution_note: null, answer_note: null,
+    answered_at: null, raised_by_meeting_id: null, ...over,
+  })
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
+  })
+  afterEach(cleanup)
+
+  it('gives a hand-raised Team question the full card, not a strip row', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([question()] as never)
+    render(wrap(<ScopingPanel change={change()} canAnswerConcerns />))
+    // The user's case: raised by hand in the strip, answered like any other.
+    const card = await screen.findByTestId('needs-info-card-11')
+    expect(card.textContent).toContain('What is the target price?')
+    expect(screen.getByTestId('needs-info-answer-note-11')).toBeTruthy()
+    expect(screen.getByTestId('needs-info-settle-11')).toBeTruthy()
+    // And exactly once on the page — the panel tells the strip to skip it.
+    expect(screen.getByTestId('concern-strip').getAttribute('data-hidden')).toBe('11')
+    expect(screen.getAllByText('What is the target price?')).toHaveLength(1)
+  })
+
+  it('cards a department-attributed question too', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      question({ id: 12, department_id: 2, note: 'gauge tolerance?' })] as never)
+    render(wrap(<ScopingPanel change={change()} canAnswerConcerns />))
+    expect(await screen.findByTestId('needs-info-card-12')).toBeTruthy()
+    expect(screen.getByTestId('concern-strip').getAttribute('data-hidden')).toBe('12')
+  })
+
+  it('leaves objections to the strip, where they belong', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      question({ id: 13, kind: 'reject_proposal', note: 'tool cannot hold it' })] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    await screen.findByTestId('concern-strip')
+    // An objection has no answer flow: it is left with the strip, not carded.
+    expect(screen.getByTestId('concern-strip').getAttribute('data-hidden')).toBe('')
+    expect(screen.queryByTestId('needs-info-card-13')).toBeNull()
   })
 })

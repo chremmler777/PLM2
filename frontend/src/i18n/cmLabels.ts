@@ -97,6 +97,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Versand bestätigen und schließen',
     en: 'Confirm the send and close',
   },
+  'tasks.kind.close_question': {
+    de: 'Antwort prüfen & Frage schließen',
+    en: 'Review answer & close question',
+  },
+  'tasks.hint.close_question': {
+    de: 'Antwort prüfen und die Frage schließen',
+    en: 'Judge the answer and close the question',
+  },
   'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
   'tasks.hint.questionsOpen': {
     de: '{n} offene Fragen — neueste',
@@ -288,6 +296,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.asked': { de: 'Gefragt von', en: 'Asked by' },
   'concern.questionDocs': { de: 'Unterlagen zur Frage', en: 'Documents on the question' },
   'concern.answerDocs': { de: 'Unterlagen zur Antwort', en: 'Documents on the answer' },
+  'concern.noAnswerYet': { de: 'Noch keine Antwort', en: 'No answer yet' },
   'concern.addDoc': { de: '+ Dokument', en: '+ Document' },
   'concern.noDocs': { de: 'Keine Unterlagen', en: 'No documents' },
   'pkg.impacted': { de: 'Verpackung betroffen?', en: 'Packaging impacted?' },
@@ -405,6 +414,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.authorOnlyWithdraw': {
     de: 'Nur der Ersteller kann zurückziehen',
     en: 'Only the author can withdraw',
+  },
+  'concern.authorDeptOrPm': {
+    de: 'Nur der erhebende Fachbereich, der Ersteller oder PM kann diesen Punkt schließen',
+    en: 'Only the raising department, the author or PM can close this point',
+  },
+  'concern.authorOrPm': {
+    de: 'Nur der Ersteller oder PM kann diesen Einwand zurückziehen',
+    en: 'Only the author or PM can withdraw this objection',
   },
   'concern.authorOrSales': {
     de: 'Nur der Ersteller oder der Vertrieb kann diesen Punkt klären',
