@@ -43,12 +43,66 @@ describe('DeadlineEditor', () => {
   })
 
   it('defaults to editing required_by_date (quote kind)', async () => {
-    const { container } = render(wrap(<DeadlineEditor change={change({ required_by_date: null })} />))
+    const { container } = render(wrap(<DeadlineEditor change={change({ status: 'captured', required_by_date: null })} />))
     fireEvent.click(screen.getByTestId('deadline-edit'))
     fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-09-01' } })
     fireEvent.click(screen.getByText(t('deadline.set')))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
       required_by_date: '2026-09-01T23:59:59Z', required_by_reason: null,
+    }))
+  })
+
+  it('keeps the quote date open for plain editing while the change is captured', async () => {
+    const { container } = render(wrap(<DeadlineEditor change={change({
+      status: 'captured', required_by_date: '2026-09-01T23:59:59', required_by_reason: 'customer ask',
+    })} />))
+    fireEvent.click(screen.getByTestId('deadline-edit'))
+    // No pushback rules at capture: the reason stays optional and prefilled.
+    expect((screen.getByTestId('deadline-reason') as HTMLInputElement).value).toBe('customer ask')
+    expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-09-15' } })
+    fireEvent.click(screen.getByTestId('deadline-save'))
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
+      required_by_date: '2026-09-15T23:59:59Z', required_by_reason: 'customer ask',
+    }))
+  })
+
+  it('locks the quote date after capture behind a reasoned pushback', async () => {
+    const { container } = render(wrap(<DeadlineEditor change={change({
+      status: 'scoping', required_by_date: '2026-09-01T23:59:59', required_by_reason: 'customer ask',
+    })} />))
+    // Read-only until the pushback is opened: no date input, latest reason shown.
+    expect(container.querySelector('input[type="date"]')).toBeNull()
+    expect(screen.getByText('customer ask')).toBeTruthy()
+
+    fireEvent.click(screen.getByText(t('deadline.pushback')))
+    const save = screen.getByTestId('deadline-save') as HTMLButtonElement
+    // A date alone is not enough — the reason starts empty and is mandatory.
+    expect((screen.getByTestId('deadline-reason') as HTMLTextAreaElement).value).toBe('')
+    expect(save.disabled).toBe(true)
+    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-10-05' } })
+    expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(screen.getByTestId('deadline-reason'),
+      { target: { value: 'tool trial slipped, need 5 Oct' } })
+    expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('deadline-save'))
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
+      required_by_date: '2026-10-05T23:59:59Z',
+      required_by_reason: 'tool trial slipped, need 5 Oct',
+    }))
+  })
+
+  it('leaves the release deadline editable without a pushback reason', async () => {
+    const { container } = render(wrap(<DeadlineEditor change={change({
+      status: 'approved', release_due_date: '2026-10-01T23:59:59',
+    })} kind="release" />))
+    fireEvent.click(screen.getByTestId('deadline-edit'))
+    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-11-15' } })
+    expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('deadline-save'))
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
+      release_due_date: '2026-11-15T23:59:59Z', release_due_reason: null,
     }))
   })
 })

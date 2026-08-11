@@ -292,6 +292,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'deadline.set': { de: 'Termin setzen', en: 'Set deadline' },
   'deadline.overdue': { de: 'überfällig', en: 'overdue' },
   'deadline.quote': { de: 'Angebotstermin', en: 'Quote deadline' },
+  'deadline.pushback': { de: 'Termin verschieben', en: 'Push back' },
+  'deadline.pushbackHint': {
+    de: 'Nicht haltbar — warum, und bis wann nötig?',
+    en: 'Not feasible — why, and needed until when',
+  },
   'deadline.release': { de: 'Freigabetermin', en: 'Release deadline' },
   'deadline.quotedOnTime': { de: 'Fristgerecht angeboten', en: 'Quoted on time' },
   'deadline.quotedLate': { de: 'Verspätet angeboten', en: 'Quoted late' },
