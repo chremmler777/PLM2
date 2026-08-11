@@ -33,6 +33,23 @@ class MeetingService:
             session, user)
 
     @staticmethod
+    async def user_is_pm_member(session: AsyncSession, user: User) -> bool:
+        """Project Manager MEMBERSHIP — no admin shortcut, unlike user_is_pm.
+
+        Settling someone else's objection is exactly the act that must not be
+        available to whoever happens to hold an admin flag; a real admin does
+        it by acting as Project Manager, which puts the department on the
+        record."""
+        from app.services.workflow_service import WorkflowService
+        pm_dept = (await session.execute(
+            select(Department).where(Department.name == "Project Manager"))
+        ).scalar_one_or_none()
+        if pm_dept is None:
+            return False
+        return pm_dept.id in await WorkflowService.effective_department_ids(
+            session, user)
+
+    @staticmethod
     async def _authz(session: AsyncSession, change: ChangeRequest, user: User):
         if user.id == change.lead_id:
             return
@@ -207,9 +224,10 @@ class MeetingService:
         # same act as deciding the answer was good enough.
         note = (resolution_note or "").strip()
         if concern.department_id is not None:
-            allowed = (await WorkflowService.actor_in_department(
-                session, user, concern.department_id)
-                or await MeetingService.user_is_pm(session, user))
+            allowed = (concern.raised_by == user.id
+                       or await WorkflowService.actor_in_department(
+                           session, user, concern.department_id)
+                       or await MeetingService.user_is_pm_member(session, user))
             if not allowed:
                 raise ChangeError(
                     "Only a member of the department that raised this concern, "
@@ -222,7 +240,7 @@ class MeetingService:
                     "saying how it was addressed")
         else:
             if (concern.raised_by != user.id
-                    and not await MeetingService.user_is_pm(session, user)):
+                    and not await MeetingService.user_is_pm_member(session, user)):
                 raise ChangeError(
                     "Only the person who raised this concern, or Project "
                     "Management, may settle it")

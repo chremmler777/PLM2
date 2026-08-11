@@ -82,9 +82,10 @@ async def test_recommended_departments_are_stage1_responsible(
         f"/api/v1/changes/{change['id']}/recommended-departments", headers=admin_auth)
     assert res.status_code == 200, res.text
     names = {d["name"] for d in res.json()}
+    # A physical-part change is assessed by the five disciplines that own
+    # physical objects (ECM Assessment (Physical Part), migration 052).
     assert names == {"Development", "Tool Engineer", "Manufacturing Engineer",
-                     "Process Engineer", "APQP", "Quality"}
-    # support functions (Informed) are not recommended
+                     "APQP", "Packaging Engineer"}
     assert "Sales" not in names and "Logistics" not in names
 
 
@@ -226,8 +227,11 @@ async def test_scoping_selection_filters_stage1_fanout(
     async with session_factory() as s:
         await seed_assessment_standard(s)
         await s.commit()
+    # "tooling" still routes through the shared multi-stage ECM Assessment
+    # template — physical_part has its own single-stage one (migration 052),
+    # which would leave nothing to say about stages >= 2.
     change = await create_change(client, admin_auth, seed["project_id"],
-                                 lead_id=seed["admin_id"])
+                                 lead_id=seed["admin_id"], change_type="tooling")
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
         # Two Responsible stage-1 assessors (both produce assessment rows).
@@ -283,8 +287,11 @@ async def test_scoped_change_does_not_promote_standard(
     async with session_factory() as s:
         await seed_assessment_standard(s)
         await s.commit()
+    # "tooling" keeps the shared template, whose stage 1 includes Quality —
+    # this test is about the standard not being rebuilt, not about which
+    # departments physical parts route to.
     change = await create_change(client, admin_auth, seed["project_id"],
-                                 lead_id=seed["admin_id"])
+                                 lead_id=seed["admin_id"], change_type="tooling")
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
         picked = [d for (d,) in await s.execute(
@@ -319,8 +326,10 @@ async def test_informational_only_scoping_is_rejected(
     async with session_factory() as s:
         await seed_assessment_standard(s)
         await s.commit()
+    # Logistics is I-only on the shared template; physical_part's own template
+    # carries no informational rows at all.
     change = await create_change(client, admin_auth, seed["project_id"],
-                                 lead_id=seed["admin_id"])
+                                 lead_id=seed["admin_id"], change_type="tooling")
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
     async with session_factory() as s:
         picked = [d for (d,) in await s.execute(
