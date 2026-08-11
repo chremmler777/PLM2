@@ -216,6 +216,8 @@ class ChangeResponse(BaseModel):
     quoted_at: Optional[datetime] = None
     quoted_on_time: Optional[bool] = None
     active_deadline: Optional[str] = None  # quote | release | None
+    # Departments soft-held by an open assessment concern (badge source).
+    blocked_department_ids: List[int] = []
     release_due_date: Optional[datetime] = None
     release_due_reason: Optional[str] = None
     impact_confirmed_by: Optional[int] = None
@@ -253,6 +255,7 @@ class ChangeResponse(BaseModel):
             # Model properties (not in __dict__) must be injected explicitly.
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
+            row["blocked_department_ids"] = data.blocked_department_ids
             return row
         return data
 
@@ -423,6 +426,14 @@ class MeetingUpdate(BaseModel):
 class ConcernCreate(BaseModel):
     kind: str  # reject_proposal | needs_info
     note: str = Field(min_length=1)
+    # Required while the change is in assessment (the raiser's own
+    # department); must stay unset during scoping.
+    department_id: Optional[int] = None
+
+
+class ConcernWithdrawIn(BaseModel):
+    # Required to withdraw a department-scoped (assessment-phase) concern.
+    resolution_note: Optional[str] = None
 
 
 class ConcernResponse(BaseModel):
@@ -433,7 +444,9 @@ class ConcernResponse(BaseModel):
     raised_by: int
     raised_by_name: Optional[str] = None
     raised_at: datetime
+    department_id: Optional[int] = None
     withdrawn_at: Optional[datetime] = None
+    resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None
     is_open: bool = True
 

@@ -117,34 +117,64 @@ class MeetingService:
     @staticmethod
     async def raise_concern(
         session: AsyncSession, change: ChangeRequest, user: User,
-        kind: str, note: str,
+        kind: str, note: str, department_id: Optional[int] = None,
     ) -> ChangeConcern:
+        """Two phases, two shapes. In scoping a concern is change-level: it
+        feeds the scoping decision and blocks 'proceed'. In assessment it is
+        one department's soft hold on its OWN assessment — so it must name the
+        department, and the raiser must belong to it (admins may raise for
+        any)."""
         await MeetingService._authz(session, change, user)
-        if change.status not in SCOPING_STATUSES:
+        in_assessment = change.status == "in_assessment"
+        if change.status not in SCOPING_STATUSES and not in_assessment:
             raise ChangeError(
-                "Concerns can only be raised before assessment starts")
+                "Concerns can only be raised during scoping or assessment")
         if kind not in CONCERN_KINDS:
             raise ChangeError(f"Invalid concern kind '{kind}'")
         if not (note or "").strip():
             raise ChangeError("A concern needs a note saying what the problem is")
-        # One open concern per person per kind — a second is an edit, not a vote.
+        if in_assessment:
+            if department_id is None:
+                raise ChangeError(
+                    "A concern raised during assessment must name the "
+                    "department it holds (department_id)")
+            dept = await session.get(Department, department_id)
+            if dept is None:
+                raise ChangeError(f"Department {department_id} not found")
+            if user.role != "admin":
+                from app.services.workflow_service import WorkflowService
+                mine = await WorkflowService.get_user_department_ids(session, user.id)
+                if department_id not in mine:
+                    raise ChangeError(
+                        "You can only raise a concern for your own department")
+        elif department_id is not None:
+            raise ChangeError(
+                "Department-scoped concerns belong to the assessment phase")
+        # One open concern per person per kind — a second is an edit, not a
+        # vote. Scoped per department during assessment, so a person sitting in
+        # two departments can still hold each of them.
         if any(c.is_open and c.raised_by == user.id and c.kind == kind
+               and c.department_id == department_id
                for c in change.concerns):
             raise ChangeError(
                 "You already have an open concern of this kind — withdraw it first")
         concern = ChangeConcern(
-            change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id)
+            change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id,
+            department_id=department_id)
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_raised",
             f"Concern ({kind}): {concern.note}", user.id,
-            new_value={"concern_id": concern.id, "kind": kind}, notes=concern.note)
+            new_value={"concern_id": concern.id, "kind": kind,
+                       "department_id": department_id},
+            notes=concern.note)
         return concern
 
     @staticmethod
     async def withdraw_concern(
         session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+        resolution_note: Optional[str] = None,
     ) -> ChangeConcern:
         concern = await session.get(ChangeConcern, concern_id)
         if concern is None or concern.change_id != change.id:
@@ -156,14 +186,33 @@ class MeetingService:
         # admins are not exempt.
         if concern.raised_by != user.id:
             raise ChangeError("Only the person who raised a concern may withdraw it")
+        # A department-scoped concern held that department's assessment.
+        # Lifting the hold has to say how the point was addressed.
+        note = (resolution_note or "").strip()
+        if concern.department_id is not None and not note:
+            raise ChangeError(
+                "Withdrawing a department concern requires a resolution note "
+                "saying how it was addressed")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
+        concern.resolution_note = note or None
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_withdrawn",
-            f"Concern #{concern.id} withdrawn", user.id,
-            old_value={"concern_id": concern.id})
+            f"Concern #{concern.id} withdrawn"
+            + (f" — {concern.resolution_note}" if concern.resolution_note else ""),
+            user.id,
+            old_value={"concern_id": concern.id},
+            notes=concern.resolution_note)
         return concern
+
+    @staticmethod
+    def open_department_concerns(
+        change: ChangeRequest, department_id: int,
+    ) -> list[ChangeConcern]:
+        """Open concerns holding one department's assessment."""
+        return [c for c in change.concerns
+                if c.is_open and c.department_id == department_id]
 
     @staticmethod
     def open_concerns(change: ChangeRequest) -> list[ChangeConcern]:

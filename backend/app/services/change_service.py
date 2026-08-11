@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change_cost import ChangeGate, GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeChangelog,
-    ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting,
+    ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting, ChangeConcern,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
     SCOPING_STATUSES,
@@ -1309,6 +1309,22 @@ class ChangeService:
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
+        # Soft hold: a department that flagged an open concern on this change
+        # cannot sign its own answer off until that point is withdrawn with a
+        # resolution note. Scoped to this one department — nobody else's
+        # assessment, the change status and the deadlines are untouched.
+        held = (await session.execute(
+            select(ChangeConcern).where(
+                ChangeConcern.change_id == change.id,
+                ChangeConcern.department_id == department_id,
+                ChangeConcern.withdrawn_at.is_(None),
+                ChangeConcern.resolved_by_meeting_id.is_(None),
+            ))).scalars().all()
+        if held:
+            points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
+            raise ChangeError(
+                "This department has open concerns on the change — resolve "
+                f"them before submitting its assessment: {points}")
         result = await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)

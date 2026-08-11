@@ -36,7 +36,7 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
-    ConcernCreate, ConcernResponse,
+    ConcernCreate, ConcernResponse, ConcernWithdrawIn,
     InternalApprovalIn,
 )
 
@@ -981,12 +981,42 @@ async def raise_concern(
         raise HTTPException(status_code=404, detail="Change not found")
     try:
         concern = await MeetingService.raise_concern(
-            db, change, current_user, body.kind, body.note)
+            db, change, current_user, body.kind, body.note,
+            department_id=body.department_id)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(concern)
     return concern
+
+
+async def _withdraw_concern(
+    change_id: int, concern_id: int, resolution_note: Optional[str],
+    current_user: User, db: AsyncSession,
+):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await MeetingService.withdraw_concern(
+            db, change, concern_id, current_user, resolution_note=resolution_note)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
+
+
+@router.post("/{change_id}/concerns/{concern_id}/withdraw",
+             response_model=ConcernResponse)
+async def withdraw_concern_with_note(
+    change_id: int, concern_id: int, body: ConcernWithdrawIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Withdraw a concern. Department-scoped (assessment-phase) concerns must
+    carry a resolution_note; DELETE below stays for note-less scoping ones."""
+    return await _withdraw_concern(
+        change_id, concern_id, body.resolution_note, current_user, db)
 
 
 @router.delete("/{change_id}/concerns/{concern_id}", response_model=ConcernResponse)
@@ -994,17 +1024,10 @@ async def withdraw_concern(
     change_id: int, concern_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id, viewer=current_user)
-    if not change:
-        raise HTTPException(status_code=404, detail="Change not found")
-    try:
-        concern = await MeetingService.withdraw_concern(
-            db, change, concern_id, current_user)
-    except ChangeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    await db.commit()
-    await db.refresh(concern)
-    return concern
+    """Back-compat: note-less withdrawal. Rejected (400) for department-scoped
+    concerns — use POST .../withdraw with a resolution_note."""
+    return await _withdraw_concern(
+        change_id, concern_id, None, current_user, db)
 
 
 @router.post("/{change_id}/meetings/{meeting_id}/decide", response_model=MeetingResponse)

@@ -176,6 +176,13 @@ class ChangeRequest(Base):
         return None
 
     @property
+    def blocked_department_ids(self) -> list[int]:
+        """Departments currently soft-held by an open assessment concern —
+        the badge source. `concerns` is selectin-loaded, so this is free."""
+        return sorted({c.department_id for c in self.concerns
+                       if c.department_id is not None and c.is_open})
+
+    @property
     def quoted_on_time(self) -> bool | None:
         """Frozen once quoted: was the quote deadline met? None while not yet
         quoted or when no quote deadline was ever set."""
@@ -429,12 +436,20 @@ class ChangeConcern(Base):
     kind: Mapped[str] = mapped_column(String(20))   # reject_proposal | needs_info
     note: Mapped[str] = mapped_column(Text)
 
+    # Assessment-phase concerns belong to ONE department and hold only that
+    # department's own assessment. NULL for scoping-phase, change-level ones.
+    department_id: Mapped[int | None] = mapped_column(
+        ForeignKey("wf_departments.id"), nullable=True, index=True)
+
     raised_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     raised_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Withdrawn by its author — the objection no longer stands.
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     withdrawn_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # How the objection was addressed. Required to withdraw a department-scoped
+    # (assessment-phase) concern — lifting a hold is itself a record.
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Answered by a meeting decision (reject / needs_info) that carried it.
     resolved_by_meeting_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_meetings.id"), nullable=True)
