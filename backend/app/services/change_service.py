@@ -1355,6 +1355,22 @@ class ChangeService:
             key=lambda c: c.id)
 
     @staticmethod
+    def answered_questions(change: ChangeRequest) -> list:
+        """Open questions that HAVE an answer waiting on a verdict, newest last.
+
+        The mirror of unanswered_questions: Sales has done its part, and the
+        errand now belongs to whoever asked — is this answer good enough to
+        settle the point? An answered question left open forever is the same
+        stall as an unanswered one, so it gets its own task rather than
+        quietly leaving the list."""
+        if change.status in TERMINAL_STATUSES:
+            return []
+        return sorted(
+            (c for c in change.concerns
+             if c.is_open and c.kind == "needs_info" and c.answered_at is not None),
+            key=lambda c: c.answered_at)
+
+    @staticmethod
     def open_team_question(change: ChangeRequest):
         """The open Team needs_info flag, or None — the question Sales owes an
         answer to. Distinct from pending_info_request (which reads the meeting

@@ -143,6 +143,9 @@ async def my_change_tasks(
                         question clears it, settling stays with the asker
       send_rejection    rejected and customer-relevant, not yet sent, for
                         Sales — with has_letter saying what is still missing
+      close_question    an ANSWERED question still open, for the department
+                        that raised it and always for Project Management —
+                        somebody has to say whether the answer settles it
       customer_response quoted and unanswered, for Sales
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
@@ -207,6 +210,9 @@ async def my_change_tasks(
 
     can_capture = await ChangeService.user_can_start_change(db, current_user)
     is_pm = await MeetingService.user_is_pm(db, current_user)
+    # Settling a concern has no admin shortcut, so the task that asks for it
+    # follows membership too (MeetingService.user_is_pm_member).
+    is_pm_member = await MeetingService.user_is_pm_member(db, current_user)
     can_confirm = await ChangeService.user_can_confirm_impact(db, current_user)
     in_sales = await ChangeService._user_in_department(db, current_user, "Sales")
 
@@ -250,6 +256,27 @@ async def my_change_tasks(
                     "question_count": len(questions),
                     "concern_id": newest.id,
                     "department_id": newest.department_id,
+                })
+
+        # The other half of the same loop: an answer is waiting on the side
+        # that asked. Addressed to the department that raised it (any member —
+        # the flag is the department's), and always to Project Management, the
+        # standing arbiter who can settle either kind. An answered question
+        # nobody is told to review stalls exactly like an unanswered one.
+        answered = ChangeService.answered_questions(c)
+        if answered:
+            mine = [q for q in answered
+                    if is_pm_member
+                    or (q.department_id is not None and q.department_id in dep_ids)]
+            if mine:
+                newest = mine[-1]
+                tasks.append({
+                    **await _base(c), "kind": "close_question",
+                    "reason": newest.answer_note,
+                    "question_count": len(mine),
+                    "concern_id": newest.id,
+                    "department_id": newest.department_id,
+                    "question_note": newest.note,
                 })
 
     # One order across every kind: overdue first, then soonest due (undated

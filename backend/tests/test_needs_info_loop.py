@@ -579,3 +579,137 @@ async def test_a_question_in_assessment_still_reaches_sales(
     rows = [t for t in res.json()
             if t["kind"] == "obtain_info" and t["change_id"] == cid]
     assert len(rows) == 1 and rows[0]["reason"] == "Steel grade?"
+
+
+# --- the other half: somebody has to review the answer ----------------------
+
+async def _dept_member(client, session_factory, seed, name, email):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    from app.models.workflow import Department, UserDepartment
+    from sqlalchemy import select
+    async with session_factory() as s:
+        dept = (await s.execute(select(Department).where(
+            Department.name == name))).scalar_one_or_none()
+        if dept is None:
+            dept = Department(name=name, flow_type="action", is_active=True)
+            s.add(dept)
+            await s.flush()
+        u = User(organization_id=seed["org_id"], username=email.split("@")[0],
+                 email=email, full_name=name,
+                 hashed_password=get_password_hash("member-secret-1"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=dept.id))
+        await s.commit()
+        return {"auth": await login(client, email), "dept_id": dept.id,
+                "user_id": u.id}
+
+
+async def _close_rows(client, auth, cid):
+    res = await client.get("/api/v1/changes/my-tasks", headers=auth)
+    assert res.status_code == 200, res.text
+    return [t for t in res.json()
+            if t["kind"] == "close_question" and t["change_id"] == cid]
+
+
+async def test_answered_department_question_reaches_that_department_and_pm(
+        client, admin_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "21")
+    sales = await _sales_member(client, session_factory, seed)
+    apqp = await _dept_member(client, session_factory, seed, "APQP", "apqp@test.io")
+    pm = await _dept_member(client, session_factory, seed,
+                            "Project Manager", "pm2@test.io")
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns",
+                            headers=apqp["auth"],
+                            json={"kind": "needs_info", "note": "Which tolerance?",
+                                  "department_id": apqp["dept_id"]})
+    assert res.status_code == 200, res.text
+    concern_id = res.json()["id"]
+
+    # unanswered: nobody is asked to close it yet
+    assert await _close_rows(client, apqp["auth"], cid) == []
+    assert await _close_rows(client, pm["auth"], cid) == []
+
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Class 2 per the drawing"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+    for who in (apqp, pm):
+        rows = await _close_rows(client, who["auth"], cid)
+        assert len(rows) == 1, who["dept_id"]
+        assert rows[0]["reason"] == "Class 2 per the drawing"
+        assert rows[0]["question_note"] == "Which tolerance?"
+        assert rows[0]["concern_id"] == concern_id
+        assert rows[0]["question_count"] == 1
+        assert rows[0]["department_id"] == apqp["dept_id"]
+
+    # Sales, having answered, is not the one who decides it is settled
+    assert await _close_rows(client, sales, cid) == []
+
+    # settling it clears the row
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "Good enough"},
+                            headers=apqp["auth"])
+    assert res.status_code == 200, res.text
+    assert await _close_rows(client, apqp["auth"], cid) == []
+    assert await _close_rows(client, pm["auth"], cid) == []
+
+
+async def test_answered_team_flag_goes_to_project_management(
+        client, admin_auth, eng_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "22")
+    sales = await _sales_member(client, session_factory, seed)
+    pm = await _dept_member(client, session_factory, seed,
+                            "Project Manager", "pm3@test.io")
+
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+        json={"kind": "needs_info", "note": "Customer drawing?"})).json()["id"]
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                      json={"note": "Rev C received"}, headers=sales)
+
+    rows = await _close_rows(client, pm["auth"], cid)
+    assert len(rows) == 1
+    assert rows[0]["department_id"] is None
+    assert rows[0]["reason"] == "Rev C received"
+
+    # a bystander in no relevant department is not asked
+    assert await _close_rows(client, eng_auth, cid) == []
+
+    await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                      json={"resolution_note": "That answers it"}, headers=pm["auth"])
+    assert await _close_rows(client, pm["auth"], cid) == []
+
+
+async def test_pm_sees_both_kinds_and_counts_them_once_per_change(
+        client, admin_auth, seed, session_factory):
+    cid = await _change_in_scoping(client, admin_auth, seed, "23")
+    sales = await _sales_member(client, session_factory, seed)
+    pm = await _dept_member(client, session_factory, seed,
+                            "Project Manager", "pm4@test.io")
+    tool = await _dept_member(client, session_factory, seed,
+                              "Tool Engineer", "tool2@test.io")
+
+    team = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+        json={"kind": "needs_info", "note": "Team question"})).json()["id"]
+    dept = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=tool["auth"],
+        json={"kind": "needs_info", "note": "Tool question",
+              "department_id": tool["dept_id"]})).json()["id"]
+    for concern_id, note in ((team, "Team answer"), (dept, "Tool answer")):
+        await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                          json={"note": note}, headers=sales)
+
+    rows = await _close_rows(client, pm["auth"], cid)
+    assert len(rows) == 1                      # one errand per change
+    assert rows[0]["question_count"] == 2
+    assert rows[0]["reason"] == "Tool answer"  # the most recently answered
+
+    # Tool Engineering is asked about its own only
+    rows = await _close_rows(client, tool["auth"], cid)
+    assert len(rows) == 1 and rows[0]["question_count"] == 1
+    assert rows[0]["concern_id"] == dept
