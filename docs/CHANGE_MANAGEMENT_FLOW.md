@@ -176,8 +176,29 @@ One quote-by, one release-by; at any moment at most one is *active*
   Scheduling and Quality carry no assessment tasks for physical part changes.
 - **No cost fields at assessment.** Cost (the workbook's per-department
   activity grids — hours × rates per plant, one-time vs lifecycle) belongs to
-  `costing`; the workbook D-tab → role mapping for those catalogs is still
-  open (Production's studies, Logistics' activities, Purchasing).
+  `costing`.
+
+### Costing & timing shape (2026-08-11, in build)
+
+- **Per-department cost buckets at `costing`** — same accordion philosophy as
+  assessment: each participating department files one-time lines (activity
+  from its catalog or free label, per plant, hours × rate snapshot + external
+  cost) and lifecycle lines as **production-time deltas** (± min/part, per
+  plant). Departments see only their own figures; **PM and Sales see all**
+  (summation: per-department, one-time vs lifecycle, grand total).
+- **Timing**: each department's costing entry carries an implementation
+  lead-time estimate; the change-level roll-up is the max.
+- **Quote**: Sales sets the quoted price manually with the summation (incl.
+  the lifecycle time roll-up) as the internal basis — departments give time,
+  Sales prices (the D2 "recalculation" job).
+- **Activity catalogs remapped to our roles**: Production → Process Engineer,
+  Logistics → Packaging Engineer (packaging) + Scheduling (stock/flow),
+  Production control → Scheduling, Purchasing → deactivated (out of ECR
+  scope for now).
+- **Bank build is explicitly post-acceptance**: sizing needs a tooling
+  downtime start date and confirmed lead times, which exist only once the
+  customer accepts (release deadline born there). Costing may carry an
+  estimate line; the plan itself belongs to implementation planning.
 
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be Development-locked.
