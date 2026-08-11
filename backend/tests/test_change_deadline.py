@@ -503,3 +503,43 @@ async def test_release_deadline_cannot_be_cleared(client, eng_auth, seed):
         "release_due_date": None,
     }, headers=eng_auth)
     assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_lead_escalations_use_active_deadline(session_factory, seed):
+    async with session_factory() as session:
+        # released-phase change overdue on its release deadline
+        chg = await _mk_change(
+            session, seed, change_number="C-DL-E1", status="approved",
+            customer_relevant=True, lead_id=seed["admin_id"],
+            required_by_date=datetime.utcnow() - timedelta(days=30),
+            quoted_at=datetime.utcnow() - timedelta(days=20),
+            release_due_date=datetime.utcnow() - timedelta(days=2))
+        out = await ChangeService.lead_escalations(session, seed["admin_id"])
+        rows = [e for e in out if e.get("kind") == "deadline"
+                and e["change_id"] == chg.id]
+        assert len(rows) == 1
+        assert rows[0]["label"].startswith("Release due")
+        assert rows[0]["state"] == "overdue"
+        # the date shown is the release date, not the stale quote date
+        assert rows[0]["required_by_date"] == chg.release_due_date.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_workload_report_uses_active_deadline_and_state_key(
+        session_factory, seed):
+    from app.services.report_service import ReportService
+    async with session_factory() as session:
+        await _mk_change(
+            session, seed, change_number="C-DL-R1", status="approved",
+            customer_relevant=True,
+            required_by_date=datetime.utcnow() - timedelta(days=30),
+            quoted_at=datetime.utcnow() - timedelta(days=20),
+            release_due_date=datetime.utcnow() - timedelta(days=2))
+        report = await ReportService.workload(session, None)
+        rows = [r for r in report["at_risk_changes"]
+                if r["change_number"] == "C-DL-R1"]
+        assert len(rows) == 1
+        assert rows[0]["state"] == "overdue"
+        assert rows[0]["required_by_date"].startswith(
+            (datetime.utcnow() - timedelta(days=2)).date().isoformat())

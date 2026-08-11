@@ -412,22 +412,28 @@ class ChangeService:
                 "days_overdue": (now - t.due_date).days,
             })
 
-        # Sales-set deadlines at risk or already overdue.
+        # Active-phase deadlines at risk or already overdue (quote deadline
+        # pre-quote, release deadline once acceptance/approval set one).
         for c in changes:
-            if c.required_by_date is None:
+            kind = c.active_deadline
+            if kind is None:
                 continue
+            due = c.release_due_date if kind == "release" else c.required_by_date
             state = await ChangeService.deadline_state(session, c)
             if state not in ("at_risk", "overdue"):
                 continue
-            days_overdue = (now - c.required_by_date).days if state == "overdue" \
-                else -(c.required_by_date - now).days
+            days_overdue = (now - due).days if state == "overdue" \
+                else -(due - now).days
             out.append({
                 "kind": "deadline", "change_id": c.id,
                 "change_number": c.change_number, "change_title": c.title,
                 # label mirrors the other escalation kinds so existing
                 # renderers (EscalationsCard) show something meaningful.
-                "label": f"Required by {c.required_by_date.date().isoformat()}",
-                "required_by_date": c.required_by_date.isoformat(),
+                "label": f"{'Release' if kind == 'release' else 'Quote'} due "
+                         f"{due.date().isoformat()}",
+                # key kept for EscalationsCard compatibility; value is the
+                # active deadline's date, whichever kind that is.
+                "required_by_date": due.isoformat(),
                 "state": state,
                 # negative for at_risk (days until deadline) so the shared
                 # days_overdue sort ranks true overdues above at-risk rows.

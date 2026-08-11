@@ -179,21 +179,27 @@ class ReportService:
                     if overdue:
                         o["overdue"] += 1
 
-        # --- at-risk changes: Sales-set required_by_date at risk/overdue ---
+        # --- at-risk changes: the phase's ACTIVE deadline at risk/overdue
+        # (quote deadline pre-quote, release deadline post-acceptance). No
+        # required_by_date filter: deadline_state returns None on its own when
+        # no deadline is active.
         candidates = (await session.execute(_org_scope(
             select(ChangeRequest).where(
                 ChangeRequest.status.not_in(TERMINAL_STATUSES),
-                ChangeRequest.required_by_date.is_not(None),
             ), viewer,
         ))).scalars().all()
         at_risk_changes = []
         for c in candidates:
             state = await ChangeService.deadline_state(session, c)
             if state in ("at_risk", "overdue"):
+                due = (c.release_due_date if c.active_deadline == "release"
+                       else c.required_by_date)
                 at_risk_changes.append({
                     "id": c.id, "change_number": c.change_number, "title": c.title,
-                    "required_by_date": c.required_by_date.isoformat(),
-                    "deadline_state": state,
+                    # key kept for the existing card; value is the active
+                    # deadline's date, whichever kind that is.
+                    "required_by_date": due.isoformat(),
+                    "state": state,
                 })
 
         return {
