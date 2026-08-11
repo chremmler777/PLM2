@@ -43,7 +43,7 @@ checked field-by-field. Do this before writing the formal description.
 | Stage | What happens | Who |
 |---|---|---|
 | `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales (only members of a `can_start_change` department, or an admin, may raise a change) |
-| `scoping` | Cross-functional meeting decides: proceed / needs info / reject. Impacted set worked out and locked, deadline set, documents gathered | Team, decision recorded by any member |
+| `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached | PM convenes; decision recorded by any member |
 | `in_assessment` | Routed departments answer feasibility + cost per the D1 matrix | Departments (RASIC) |
 | `costing` | Costs summed | — |
 | `quoted` | Offer to customer (customer-carried changes only) | Sales |
@@ -102,6 +102,44 @@ Run these when discussing any stage's implementation:
   what they send the customer — rejection letter, open questions, or a
   counter-proposal.
 
+### The two deadlines (2026-08-11)
+
+One quote-by, one release-by; at any moment at most one is *active*
+(`ChangeRequest.active_deadline`, `ChangeService.deadline_state`).
+
+- **Quote deadline** (`required_by_*`) — customer-relevant changes only. Set by
+  Sales at capture (part of the kickoff gate). Active until the change is
+  quoted; `quoted_at` freezes a permanent quoted-on-time/late fact
+  (`quoted_on_time`). Internal changes never have one.
+- **Locked after capture, moved only by pushback.** From `scoping` on, changing
+  the quote date requires a reason in the same PATCH; audited as
+  `quote_deadline_pushback` (`change_service.py::update`, UI: cockpit "Push
+  back"). The date has **one owner** (lead/Sales/PM); discovery has many
+  mouths — a meeting outcome, or a department flagging timing in its
+  assessment answer, feeds the owner, who records the pushback.
+- **Release deadline** (`release_due_*`) — born mandatorily at the moment of
+  commitment: customer acceptance (Sales) or internal cost approval (PM); the
+  API refuses the acceptance/approval without it. Editable afterwards via
+  audited PATCH (`release_deadline_set`), never clearable. Drives
+  `deadline_state` from then on; escalations and the workload report follow
+  whichever deadline is active.
+
+### Inside `in_assessment` — department holds (2026-08-11)
+
+- A department member may raise a **department-scoped concern**: kind
+  `reject_proposal` (grounds that would cancel) or `needs_info` (missing
+  information), with a note, attributed to their own department
+  (`meeting_service.py::raise_concern`, `department_id` required in this phase).
+- An open concern is a **soft hold on that department only**: its assessment
+  cannot be submitted while points are open
+  (`change_service.py::submit_assessment`); the change's status and deadlines
+  are untouched, other departments keep working. UI: "On hold" chip per
+  department, cockpit counts blocked departments
+  (`ChangeResponse.blocked_department_ids`).
+- Closing a department concern **requires a resolution note** ("how was it
+  addressed") — `POST .../concerns/{id}/withdraw`; author-only, audited with
+  the note.
+
 ### Entering `in_assessment`
 - **Hard, unbypassable:** impacted set must be R&D-locked.
   *"Impacted set is not locked — confirm impacted items before starting
@@ -140,7 +178,30 @@ is the project team's, so `meeting_service.py::create_meeting` requires status
 
 ---
 
-## 5. Open questions
+## 5. Roles (ECR set, 2026-08-11)
+
+The nine ECR roles, in picker order: **Sales, Project Manager, APQP, Tool
+Engineer, Manufacturing Engineer, Process Engineer, Development, Scheduling,
+Packaging Engineer** — plus **Quality**, kept active for the PM+Quality
+approval sign-off. All other departments are deactivated for ECR
+(migration 043; renames: R&D → Development, Tooling Engineer → Tool Engineer,
+Planner/Scheduler → Scheduling).
+
+Stage responsibilities so far: `captured` = Sales (`can_start_change`, Sales
+only), `scoping` = Project Manager, impact lock = Development,
+`in_assessment` = routed departments per D1. UI shows the responsible role as
+a badge on the stage (`StageResponsibleBadge.tsx`).
+
+**Acts-as (admin testing):** an admin can pick any role from a header dropdown
+and the *backend* treats them as an engineer in exactly that department —
+admin bypass dropped while acting, every gate observable, mutations audited
+with both identities (`X-Acts-As-Department`, spec
+`2026-07-22-acts-as-role-switch-design.md`). Default "Myself" = full admin
+view.
+
+---
+
+## 6. Open questions
 
 - ⚠ **Cost carrier is never re-confirmed.** Sales picks it at capture and it
   selects the whole commercial branch; the scoping meeting should confirm or
@@ -160,12 +221,14 @@ is the project team's, so `meeting_service.py::create_meeting` requires status
 
 ---
 
-## 6. Audit trail
+## 7. Audit trail
 
 Every rule above writes to the hash-chained `change_changelog`. Actions that
 carry a human decision get their own entry rather than being folded into the
-status change: `rejected`, `reopened`, `concern_raised`, `concern_withdrawn`,
-`scoping_meeting_decided`, `impacted_lead_changed`, `title_backfilled`.
+status change: `rejected`, `reopened`, `concern_raised`, `concern_withdrawn`
+(with resolution note for department concerns), `scoping_meeting_decided`,
+`impacted_lead_changed`, `title_backfilled`, `release_deadline_set`,
+`quote_deadline_pushback`, `customer_response_recorded`.
 
 An auditor asking "who objected, and what was done about it" is answered by the
 concern rows plus the meeting decision that resolved them — not by inference
