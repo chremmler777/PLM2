@@ -81,7 +81,11 @@ export default function ChangesPage() {
                   </td>
                   <td className="px-4 py-3">{c.priority}</td>
                   <td className="px-4 py-3">
-                    <DeadlineChip date={c.required_by_date} state={c.deadline_state} />
+                    {/* Whichever phase is running owns the visible date. */}
+                    <DeadlineChip
+                      date={c.active_deadline === 'release' ? c.release_due_date
+                          : c.active_deadline === 'quote' ? c.required_by_date : null}
+                      state={c.deadline_state} />
                   </td>
                   <td className="px-4 py-3">
                     {pos && (

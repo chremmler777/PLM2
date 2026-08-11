@@ -124,6 +124,11 @@ export interface ChangeRequest {
   required_by_date: string | null;
   required_by_reason: string | null;
   deadline_state: 'on_track' | 'at_risk' | 'overdue' | null;
+  quoted_at: string | null;
+  quoted_on_time: boolean | null;
+  active_deadline: 'quote' | 'release' | null;
+  release_due_date: string | null;
+  release_due_reason: string | null;
   impact_confirmed_by?: number | null;
   impact_confirmed_by_name?: string | null;
   impact_confirmed_at?: string | null;

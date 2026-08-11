@@ -77,6 +77,22 @@ describe('ReportsPage', () => {
     expect(screen.getByText(/8[.,]000/)).toBeDefined()
   })
 
+  it('styles the at-risk deadline chip from the row state', async () => {
+    const { reportsApi } = await import('../api/reports')
+    vi.mocked(reportsApi.workload).mockResolvedValueOnce({
+      departments: [],
+      owners: [],
+      at_risk_changes: [
+        { id: 42, change_number: 'GB-CM-0042', title: 'Late change',
+          required_by_date: '2026-07-10', state: 'overdue' },
+      ],
+      escalation_count: 1,
+    } as Awaited<ReturnType<typeof reportsApi.workload>>)
+    renderPage()
+    const chip = await screen.findByTestId('deadline-chip')
+    expect(chip.className).toContain('red')
+  })
+
   it('shows an error tile for a failing section without blocking the others', async () => {
     const { reportsApi } = await import('../api/reports')
     vi.mocked(reportsApi.workload).mockRejectedValueOnce(new Error('boom'))

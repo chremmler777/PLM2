@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CockpitSummary from './CockpitSummary'
 import type { ChangeDetail } from '../../types/change'
+import { t } from '../../i18n/cmLabels'
 
 const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
   id: 7, change_number: 'CR-2026-0007', project_id: 1, title: 'Housing fix',
@@ -209,5 +210,38 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.getByRole('button', { name: /Scoping/ })).toBeDefined()
     expect(screen.queryByText(/Record the decision in the scoping meeting/)).toBeNull()
+  })
+})
+
+describe('CockpitSummary phase-aware deadline widget', () => {
+  afterEach(cleanup)
+
+  it('shows the frozen quoted-late fact while waiting on the customer', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'quoted', customer_relevant: true,
+      required_by_date: '2026-06-01T23:59:59', quoted_at: '2026-06-10T00:00:00',
+      quoted_on_time: false, active_deadline: null,
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('quoted-fact-chip')).toBeDefined()
+    expect(screen.getByText(new RegExp(t('deadline.quotedLate')))).toBeDefined()
+    expect(screen.queryByTestId('deadline-edit')).toBeNull()
+  })
+
+  it('shows the release deadline editor once active', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'approved', customer_relevant: true, active_deadline: 'release',
+      release_due_date: '2026-10-01T23:59:59', release_due_reason: null,
+      deadline_state: 'on_track',
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('deadline-chip')).toBeDefined()
+    expect(screen.getByTestId('deadline-edit')).toBeDefined()
+  })
+
+  it('hides the quote deadline editor for internal changes', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'costing', customer_relevant: false, active_deadline: null,
+      required_by_date: null,
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('deadline-edit')).toBeNull()
   })
 })

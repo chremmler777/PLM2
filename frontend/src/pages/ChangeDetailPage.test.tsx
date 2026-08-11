@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ChangeDetailPage from './ChangeDetailPage'
 import { changesApi } from '../api/changes'
 import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
+import { t } from '../i18n/cmLabels'
 
 // ChangeDetailPage fetches via changesApi (get/getImplementation/getGates/listDeviations),
 // plantsApi.list, and useDepartments (workflowApi.getDepartments). Heavy tab-content
@@ -36,6 +37,11 @@ const { change } = vi.hoisted(() => ({
     required_by_date: null,
     required_by_reason: null,
     deadline_state: null,
+    quoted_at: null,
+    quoted_on_time: null as boolean | null,
+    active_deadline: null as 'quote' | 'release' | null,
+    release_due_date: null,
+    release_due_reason: null,
     impacted_items: [],
     assessments: [],
     attachments: [],
@@ -53,6 +59,7 @@ vi.mock('../api/changes', () => ({
     signOff: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
     customerResponse: vi.fn().mockResolvedValue({}),
+    approveInternalCosts: vi.fn().mockResolvedValue({}),
   },
 }))
 vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
@@ -320,5 +327,63 @@ describe('ChangeDetailPage rejection', () => {
     await screen.findByText('mock-lifecycle-stepper')
     expect(screen.queryByText(/the flow is stopped/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /Reopen/ })).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage release-deadline collection', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+    vi.mocked(changesApi.customerResponse).mockClear()
+    vi.mocked(changesApi.approveInternalCosts).mockClear()
+  })
+
+  it('requires a release date before recording customer acceptance', async () => {
+    change.status = 'costing'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    fireEvent.click(await screen.findByText('Customer accepted'))
+    expect(changesApi.customerResponse).not.toHaveBeenCalled()
+    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('accept-release-due'), { target: { value: '2026-11-30' } })
+    fireEvent.click(screen.getByTestId('accept-confirm'))
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(
+      expect.any(Number), 'accepted',
+      { release_due_date: '2026-11-30T23:59:59Z', release_due_reason: null }))
+  })
+
+  it('posts a decline without opening the confirm row', async () => {
+    change.status = 'costing'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    fireEvent.click(await screen.findByText('Customer declined'))
+    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(
+      expect.any(Number), 'declined', undefined))
+    expect(screen.queryByTestId('accept-release-due')).toBeNull()
+  })
+
+  it('requires a release date before internal cost approval', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'costing'
+    change.customer_relevant = false
+    wrap('/changes/1?tab=commercial')
+    fireEvent.click(await screen.findByText(t('internal.approve')))
+    expect(changesApi.approveInternalCosts).not.toHaveBeenCalled()
+    const confirm = screen.getByTestId('internal-approve-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('internal-release-due'), { target: { value: '2026-12-15' } })
+    fireEvent.click(screen.getByTestId('internal-approve-confirm'))
+    await waitFor(() => expect(changesApi.approveInternalCosts).toHaveBeenCalledWith(
+      expect.any(Number),
+      { note: null, release_due_date: '2026-12-15T23:59:59Z', release_due_reason: null }))
   })
 })

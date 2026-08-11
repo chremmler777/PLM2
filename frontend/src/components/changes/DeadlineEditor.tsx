@@ -9,13 +9,20 @@ import type { ChangeRequest } from '../../types/change'
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-export function DeadlineEditor({ change }: { change: ChangeRequest }) {
+// The same editor drives both phases: the quote deadline (required_by_*) up to
+// the quote, and the release deadline (release_due_*) after acceptance.
+export function DeadlineEditor({ change, kind = 'quote' }:
+    { change: ChangeRequest; kind?: 'quote' | 'release' }) {
+  const dateField = kind === 'release' ? 'release_due_date' : 'required_by_date'
+  const reasonField = kind === 'release' ? 'release_due_reason' : 'required_by_reason'
+  const curDate = change[dateField]
+  const curReason = change[reasonField]
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [date, setDate] = useState(change.required_by_date?.slice(0, 10) ?? '')
-  const [reason, setReason] = useState(change.required_by_reason ?? '')
+  const [date, setDate] = useState(curDate?.slice(0, 10) ?? '')
+  const [reason, setReason] = useState(curReason ?? '')
   const save = useMutation({
-    mutationFn: (body: { required_by_date: string | null; required_by_reason: string | null }) =>
+    mutationFn: (body: Record<string, string | null>) =>
       changesApi.update(change.id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['change', change.id] })
@@ -26,19 +33,19 @@ export function DeadlineEditor({ change }: { change: ChangeRequest }) {
   })
   return (
     <span className="inline-flex items-center gap-1.5">
-      <DeadlineChip date={change.required_by_date} state={change.deadline_state} />
+      <DeadlineChip date={curDate} state={change.deadline_state} />
       <button type="button" title={t('deadline.set')} data-testid="deadline-edit"
         onClick={() => setOpen((o) => {
           // Re-seed from the current change each time the editor opens, so a
           // reopen after an external update doesn't show stale local edits.
           if (!o) {
-            setDate(change.required_by_date?.slice(0, 10) ?? '')
-            setReason(change.required_by_reason ?? '')
+            setDate(curDate?.slice(0, 10) ?? '')
+            setReason(curReason ?? '')
           }
           return !o
         })}
         className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
-        {change.required_by_date ? '✎' : `+ ${t('deadline.title')}`}
+        {curDate ? '✎' : `+ ${t(kind === 'release' ? 'deadline.release' : 'deadline.quote')}`}
       </button>
       {open && (
         <span className="flex flex-wrap items-center gap-2 ml-1">
@@ -51,8 +58,8 @@ export function DeadlineEditor({ change }: { change: ChangeRequest }) {
             disabled={save.isPending}
             onClick={() => save.mutate({
               // End-of-day UTC: picking *today* must not render as overdue.
-              required_by_date: date ? `${date}T23:59:59Z` : null,
-              required_by_reason: reason || null,
+              [dateField]: date ? `${date}T23:59:59Z` : null,
+              [reasonField]: reason || null,
             })}>
             {t('deadline.set')}
           </button>

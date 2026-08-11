@@ -67,6 +67,13 @@ export default function ChangeDetailPage() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
   const [openAssessment, setOpenAssessment] = useState<number | null>(null);
+  // Customer acceptance and internal approval both start the release phase, so
+  // both collect a mandatory release deadline through an inline confirm row.
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [acceptDue, setAcceptDue] = useState('');
+  const [acceptReason, setAcceptReason] = useState('');
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [internalDue, setInternalDue] = useState('');
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -167,13 +174,27 @@ export default function ChangeDetailPage() {
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
   });
   const customer = useMutation({
-    mutationFn: (response: string) => changesApi.customerResponse(changeId, response),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
+    mutationFn: (vars: { response: string; release_due_date?: string; release_due_reason?: string | null }) =>
+      changesApi.customerResponse(changeId, vars.response,
+        vars.response === 'accepted'
+          ? { release_due_date: vars.release_due_date, release_due_reason: vars.release_due_reason }
+          : undefined),
+    onSuccess: () => {
+      setAcceptOpen(false);
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to record customer response'),
   });
   const internalApprove = useMutation({
-    mutationFn: (note?: string) => changesApi.approveInternalCosts(changeId, note),
+    mutationFn: (vars: { note?: string | null; release_due_date: string }) =>
+      changesApi.approveInternalCosts(changeId, {
+        note: vars.note ?? null,
+        release_due_date: vars.release_due_date,
+        release_due_reason: null,
+      }),
     onSuccess: () => {
       toast.success(t('internal.approved'))
+      setInternalOpen(false);
       qc.invalidateQueries({ queryKey: ['change', changeId] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Approval failed'),
@@ -436,10 +457,33 @@ export default function ChangeDetailPage() {
             <>
               <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
               <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('accepted')}>Customer accepted</button>
-                <button className="px-3 py-1.5 border rounded-lg" onClick={() => customer.mutate('declined')}>Customer declined</button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="px-3 py-1.5 border rounded-lg"
+                  onClick={() => setAcceptOpen((o) => !o)}>Customer accepted</button>
+                <button className="px-3 py-1.5 border rounded-lg"
+                  onClick={() => customer.mutate({ response: 'declined' })}>Customer declined</button>
               </div>
+              {acceptOpen && (
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <label className="text-xs text-slate-400">{t('customer.releaseDue')}</label>
+                  <input type="date" data-testid="accept-release-due" value={acceptDue}
+                    onChange={(e) => setAcceptDue(e.target.value)}
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                  <input type="text" placeholder={t('customer.releaseDueReason')} value={acceptReason}
+                    onChange={(e) => setAcceptReason(e.target.value)}
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-40" />
+                  <button data-testid="accept-confirm"
+                    className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                    disabled={!acceptDue || customer.isPending}
+                    onClick={() => customer.mutate({
+                      response: 'accepted',
+                      release_due_date: `${acceptDue}T23:59:59Z`,
+                      release_due_reason: acceptReason || null,
+                    })}>
+                    {t('customer.confirmAccept')}
+                  </button>
+                </div>
+              )}
               <div className="flex gap-2 pt-2">
                 {canSignPm && (
                   <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
@@ -475,12 +519,28 @@ export default function ChangeDetailPage() {
                   )}
                 </div>
               ) : canApproveInternalCosts ? (
-                <button
-                  className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
-                  disabled={change.status !== 'costing' || internalApprove.isPending}
-                  onClick={() => internalApprove.mutate(undefined)}>
-                  {t('internal.approve')}
-                </button>
+                <>
+                  <button
+                    className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+                    disabled={change.status !== 'costing' || internalApprove.isPending}
+                    onClick={() => setInternalOpen((o) => !o)}>
+                    {t('internal.approve')}
+                  </button>
+                  {internalOpen && (
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      <label className="text-xs text-slate-400">{t('customer.releaseDue')}</label>
+                      <input type="date" data-testid="internal-release-due" value={internalDue}
+                        onChange={(e) => setInternalDue(e.target.value)}
+                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                      <button data-testid="internal-approve-confirm"
+                        className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                        disabled={!internalDue || internalApprove.isPending}
+                        onClick={() => internalApprove.mutate({ release_due_date: `${internalDue}T23:59:59Z` })}>
+                        {t('internal.approve')}
+                      </button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-xs text-slate-400">
                   Only a Project Manager department member or an admin may approve internal costs.

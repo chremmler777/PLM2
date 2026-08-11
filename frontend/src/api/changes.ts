@@ -46,8 +46,12 @@ export const changesApi = {
   submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number }) =>
     client.post(`/v1/changes/${id}/assessments`, body).then((r) => r.data),
 
-  customerResponse: (id: number, response: string) =>
-    client.post(`/v1/changes/${id}/customer-response`, { response }).then((r) => r.data),
+  customerResponse: (
+    id: number,
+    response: string,
+    body?: { release_due_date?: string; release_due_reason?: string | null },
+  ) =>
+    client.post(`/v1/changes/${id}/customer-response`, { response, ...body }).then((r) => r.data),
 
   signOff: (id: number, role: 'pm' | 'quality') =>
     client.post(`/v1/changes/${id}/sign-off`, { role }).then((r) => r.data),
@@ -139,6 +143,13 @@ export const changesApi = {
     client.delete<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}`).then((r) => r.data),
   decideMeeting: (id: number, meetingId: number, decision: 'proceed' | 'reject' | 'needs_info', reason?: string) =>
     client.post<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}/decide`, { decision, reason }).then((r) => r.data),
-  approveInternalCosts: (id: number, note?: string) =>
-    client.post<ChangeRequest>(`/v1/changes/${id}/internal-approval`, { note: note ?? null }).then((r) => r.data),
+  approveInternalCosts: (
+    id: number,
+    body: { note?: string | null; release_due_date?: string; release_due_reason?: string | null },
+  ) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/internal-approval`, {
+      note: body.note ?? null,
+      release_due_date: body.release_due_date,
+      release_due_reason: body.release_due_reason ?? null,
+    }).then((r) => r.data),
 };

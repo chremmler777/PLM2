@@ -2,6 +2,7 @@ import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
+import { QuotedFactChip } from './DeadlineChip'
 
 interface Props {
   change: ChangeDetail
@@ -99,7 +100,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           {STATUS_LABELS[change.status]}
         </span>
         {' '}
-        <DeadlineEditor change={change} />
+        {/* Phase-aware: release deadline once active, otherwise the frozen
+            quote verdict, otherwise the quote deadline for customer work. */}
+        {change.active_deadline === 'release' ? (
+          <DeadlineEditor change={change} kind="release" />
+        ) : change.quoted_on_time !== null ? (
+          <QuotedFactChip change={change} />
+        ) : change.customer_relevant ? (
+          <DeadlineEditor change={change} kind="quote" />
+        ) : null}
         <p className="mt-3 text-sm text-slate-300">
           {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '—'}</span>
         </p>

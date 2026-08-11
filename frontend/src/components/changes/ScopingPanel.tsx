@@ -152,7 +152,7 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       <div className={`rounded-lg border p-3 flex items-center gap-3 flex-wrap ${
         hasDeadline ? 'border-slate-700 bg-slate-800' : 'border-amber-700/60 bg-amber-950/30'}`}>
         <span className="text-slate-300 font-medium">{t('scoping.deadline')}</span>
-        <DeadlineEditor change={change} />
+        {change.customer_relevant && <DeadlineEditor change={change} kind="quote" />}
         {!hasDeadline && (
           <span className="text-xs text-amber-300">{t('scoping.deadlineRequired')}</span>
         )}
