@@ -63,6 +63,7 @@ vi.mock('../api/changes', () => ({
     signOff: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
     customerResponse: vi.fn().mockResolvedValue({}),
+    listConcerns: vi.fn().mockResolvedValue([]),
     approveInternalCosts: vi.fn().mockResolvedValue({}),
   },
 }))
@@ -83,7 +84,7 @@ vi.mock('../contexts/AuthContext', () => ({
   useAuth: () => authState.current,
 }))
 
-vi.mock('../components/changes/AssessmentRouting', () => ({ default: () => <div>mock-assessment-routing</div> }))
+vi.mock('../components/changes/AssessmentBuckets', () => ({ default: () => <div>mock-assessment-buckets</div> }))
 vi.mock('../components/changes/D1MasterPanel', () => ({ default: () => <div>mock-d1-panel</div> }))
 vi.mock('../components/changes/SummationView', () => ({ default: () => <div>mock-summation</div> }))
 vi.mock('../components/changes/CostLineGrid', () => ({ default: () => <div>mock-cost-line-grid</div> }))
@@ -539,39 +540,6 @@ describe('ChangeDetailPage impacted-tab attention dot', () => {
   })
 })
 
-describe('ChangeDetailPage department on-hold badge', () => {
-  afterEach(() => {
-    cleanup()
-    change.status = 'in_assessment'
-    change.blocked_department_ids = []
-    change.assessments = []
-    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
-  })
-
-  it('marks only the departments held by an open concern', async () => {
-    vi.mocked(useDepartments).mockReturnValue({
-      data: [
-        { id: 2, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 },
-        { id: 4, name: 'Tooling', flow_type: 'action', is_active: true, sort_order: 2 },
-      ],
-    } as unknown as ReturnType<typeof useDepartments>)
-    change.status = 'in_assessment' as ChangeDetail['status']
-    change.blocked_department_ids = [4]
-    change.assessments = [
-      { id: 1, department_id: 2, verdict: 'pending', stage_order: 1, rasic_letter: 'R',
-        status: 'active', owner_id: null, owner_name: null, accepted_at: null,
-        due_date: null, overdue: false },
-      { id: 2, department_id: 4, verdict: 'pending', stage_order: 1, rasic_letter: 'R',
-        status: 'active', owner_id: null, owner_name: null, accepted_at: null,
-        due_date: null, overdue: false },
-    ] as ChangeDetail['assessments']
-    wrap('/changes/1?tab=assessments')
-    const badges = await screen.findAllByTestId('dept-on-hold')
-    expect(badges).toHaveLength(1)
-    expect(badges[0].closest('span')?.parentElement?.textContent).toContain('Tooling')
-  })
-})
-
 describe('ChangeDetailPage project in the header', () => {
   afterEach(() => {
     cleanup()
@@ -592,5 +560,63 @@ describe('ChangeDetailPage project in the header', () => {
     wrap('/changes/1')
     await screen.findByRole('button', { name: /Overview/ })
     expect(screen.queryByTestId('change-project')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage wait banner', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    change.blocked_department_ids = []
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+  })
+
+  const concern = (over: Record<string, unknown> = {}) => ({
+    id: 1, change_id: 1, kind: 'needs_info', note: 'What is the target price?',
+    raised_by: 9, raised_at: '2026-08-01T09:00:00', is_open: true,
+    department_id: null, answer_note: null, ...over,
+  })
+
+  it('tells every viewer the change is waiting on Sales', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern()] as never)
+    wrap('/changes/1')
+    const banner = await screen.findByTestId('wait-banner')
+    expect(banner.textContent).toContain('What is the target price?')
+    expect(screen.getByTestId('wait-sales-info-1')).toBeTruthy()
+  })
+
+  it('switches to awaiting review once the answer is in', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ answer_note: 'customer confirmed 12.50' })] as never)
+    wrap('/changes/1')
+    expect(await screen.findByTestId('wait-review-1')).toBeTruthy()
+  })
+
+  it('names a held department during assessment', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 4, name: 'Tool Engineer', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    change.status = 'in_assessment' as ChangeDetail['status']
+    change.blocked_department_ids = [4]
+    wrap('/changes/1')
+    const line = await screen.findByTestId('wait-blocked-departments')
+    expect(line.textContent).toContain('Tool Engineer')
+  })
+
+  it('waits on the rejection letter after a rejection', async () => {
+    change.status = 'rejected' as ChangeDetail['status']
+    change.customer_relevant = true
+    wrap('/changes/1')
+    expect(await screen.findByTestId('wait-rejection-letter')).toBeTruthy()
+  })
+
+  it('shows no banner when nothing is waiting', async () => {
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Overview/ })
+    expect(screen.queryByTestId('wait-banner')).toBeNull()
   })
 })

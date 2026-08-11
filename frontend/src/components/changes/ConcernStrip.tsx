@@ -26,7 +26,7 @@ const KIND_STYLE: Record<ConcernKind, string> = {
  */
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
-  canAnswer = false, hideConcernIds = [],
+  canAnswer = false, hideConcernIds = [], onlyDepartmentId,
 }: {
   changeId: number
   editable: boolean
@@ -34,6 +34,8 @@ export default function ConcernStrip({
   canAnswer?: boolean
   /** Concerns shown as their own containers elsewhere on the page. */
   hideConcernIds?: number[]
+  /** Inside a department bucket: only that department's flags, raised for it. */
+  onlyDepartmentId?: number
   /** Assessment phase: every flag belongs to a department, and dropping one
    *  needs a written resolution. */
   scoped?: boolean
@@ -59,10 +61,10 @@ export default function ConcernStrip({
   const options = !scoped ? selectable
     : isAdmin ? selectable
     : selectable.filter((d) => myDepartmentIds.includes(d.id))
-  const [deptId, setDeptId] = useState<number | undefined>(undefined)
+  const [deptId, setDeptId] = useState<number | undefined>(onlyDepartmentId)
   // Scoping starts on "Team". Assessment starts on the master department when
   // the user holds it, and otherwise on nothing at all — they pick.
-  const effectiveDept = deptId ?? (scoped
+  const effectiveDept = onlyDepartmentId ?? deptId ?? (scoped
     ? preferredDepartmentId(myDepartmentIds, options)
     : undefined)
   const deptName = (id?: number | null) =>
@@ -104,7 +106,10 @@ export default function ConcernStrip({
   const salesSolvable = (c: ChangeConcern) => canAnswer && isTeamNeedsInfo(c)
   const mayClose = (c: ChangeConcern) => c.raised_by === userId || salesSolvable(c)
 
-  const listed = concerns.filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
+  const listed = concerns
+    .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
+    .filter((c: ChangeConcern) =>
+      onlyDepartmentId === undefined || c.department_id === onlyDepartmentId)
   const open = listed.filter((c: ChangeConcern) => c.is_open)
   const settled = listed.filter((c: ChangeConcern) => !c.is_open)
 
@@ -216,7 +221,7 @@ export default function ConcernStrip({
             <option value="needs_info">{t('concern.wantsInfo')}</option>
             <option value="reject_proposal">{t('concern.wouldReject')}</option>
           </select>
-          {(scoped || options.length > 0) && (
+          {onlyDepartmentId === undefined && (scoped || options.length > 0) && (
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
               onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">

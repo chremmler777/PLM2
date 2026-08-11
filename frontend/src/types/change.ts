@@ -40,6 +40,8 @@ export interface Assessment {
   due_date: string | null;
   overdue: boolean;
   effort_hours?: number | null;
+  /** Department-specific answers — shape is that department's questionnaire. */
+  details?: Record<string, unknown> | null;
 }
 
 export interface RoutingDepartment {
@@ -54,6 +56,27 @@ export interface RoutingDepartment {
 export interface RoutingStage {
   stage_order: number;
   departments: RoutingDepartment[];
+}
+
+/** What a department actually has to look at, per the impacted set. */
+export type AssessmentObjectType = 'tool' | 'equipment' | 'gauge' | 'document' | 'part';
+
+export interface AssessmentObject {
+  type: AssessmentObjectType;
+  id: number;
+  number: string;
+  name: string;
+  via_part_id?: number | null;
+}
+
+export interface DepartmentObjects {
+  department_id: number;
+  name: string;
+  objects: AssessmentObject[];
+}
+
+export interface AssessmentObjectsResponse {
+  departments: DepartmentObjects[];
 }
 
 export interface ChangeRouting {
@@ -334,6 +357,11 @@ export interface ChangeConcern {
   withdrawn_at?: string | null;
   resolved_by_meeting_id?: number | null;
   is_open: boolean;
+  /** Sales' stored answer to the question. Answering does not close the card. */
+  answer_note?: string | null;
+  answered_at?: string | null;
+  answered_by?: number | null;
+  answered_by_name?: string | null;
   /** The meeting whose needs-info decision raised this flag, when it was automatic. */
   raised_by_meeting_id?: number | null;
   /** Set for assessment-phase concerns: the department the flag is scoped to. */

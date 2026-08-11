@@ -1,0 +1,232 @@
+/**
+ * The assessment tab: one bucket per routed department.
+ *
+ * Collapsed, a row is the status board — everyone sees who is on the hook, where
+ * they stand and when it is due. Expanded, it is that department's workplace:
+ * what they have to look at, their own flags, and the form that answers it.
+ * A department's work never appears outside its own row, so there is exactly one
+ * place to look for it.
+ */
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { changesApi } from '../../api/changes'
+import AssessmentSubmitForm from './AssessmentSubmitForm'
+import ConcernStrip from './ConcernStrip'
+import { t } from '../../i18n/cmLabels'
+import type {
+  Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
+} from '../../types/change'
+
+const OBJECT_ICON: Record<string, string> = {
+  tool: '🛠', equipment: '⚙️', gauge: '📐', document: '📄', part: '🔩',
+}
+
+const VERDICT_ICON: Record<string, string> = {
+  feasible: '✓', feasible_with_conditions: '≈', not_feasible: '✗',
+}
+
+const VERDICT_TONE: Record<string, string> = {
+  feasible: 'text-emerald-300',
+  feasible_with_conditions: 'text-amber-300',
+  not_feasible: 'text-red-300',
+}
+
+type State = 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold'
+
+const STATE_STYLE: Record<State, string> = {
+  waiting: 'bg-slate-700 text-slate-300',
+  in_work: 'bg-sky-900/70 text-sky-200',
+  submitted: 'bg-emerald-900/70 text-emerald-200',
+  waived: 'bg-slate-800 text-slate-500',
+  on_hold: 'bg-amber-900/70 text-amber-200',
+}
+
+const STATE_LABEL: Record<State, string> = {
+  waiting: 'bucket.waiting', in_work: 'bucket.inWork', submitted: 'bucket.submitted',
+  waived: 'bucket.waived', on_hold: 'concern.onHold',
+}
+
+function stateOf(a: Assessment | undefined, onHold: boolean): State {
+  if (a?.status === 'waived') return 'waived'
+  if (a?.submitted_at || (a?.verdict && a.verdict !== 'pending')) return 'submitted'
+  if (onHold) return 'on_hold'
+  if (a?.owner_id != null || a?.accepted_at) return 'in_work'
+  return 'waiting'
+}
+
+function ObjectList({ objects }: { objects: AssessmentObject[] }) {
+  if (objects.length === 0) {
+    return <p className="text-xs text-slate-500">{t('bucket.noObjects')}</p>
+  }
+  // Grouped by kind: a gauge reads differently from a document, and a mixed
+  // list hides that difference.
+  const groups = [...new Set(objects.map((o) => o.type))]
+  return (
+    <div className="space-y-2">
+      {groups.map((type) => (
+        <div key={type}>
+          <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-0.5">
+            {t(`objtype.${type}`)}
+          </p>
+          <ul className="space-y-0.5">
+            {objects.filter((o) => o.type === type).map((o) => (
+              <li key={`${o.type}-${o.id}`}
+                className="flex items-baseline gap-2 text-sm min-w-0">
+                <span aria-hidden className="flex-shrink-0">{OBJECT_ICON[o.type] ?? '•'}</span>
+                <span className="font-mono text-slate-200 flex-shrink-0">{o.number}</span>
+                <span className="text-slate-400 truncate">{o.name}</span>
+                {o.via_part_id != null && (
+                  <span className="text-[11px] text-slate-600 flex-shrink-0">
+                    {t('bucket.via')} #{o.via_part_id}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export default function AssessmentBuckets({
+  change, departments, myDepartmentIds, editable,
+}: {
+  change: ChangeDetail
+  departments: { id: number; name: string; is_active?: boolean }[]
+  myDepartmentIds: number[]
+  /** Assessment phase: only then is there anything to submit. */
+  editable: boolean
+}) {
+  const changeId = change.id
+  const [openDept, setOpenDept] = useState<number | null>(null)
+
+  const { data: routing } = useQuery({
+    queryKey: ['change-routing', changeId],
+    queryFn: () => changesApi.getRouting(changeId),
+  })
+  const { data: objectData } = useQuery({
+    queryKey: ['change-assessment-objects', changeId],
+    queryFn: () => changesApi.assessmentObjects(changeId),
+  })
+
+  const deptName = (id: number) =>
+    departments.find((d) => d.id === id)?.name ?? `#${id}`
+  const objectsOf = (id: number): AssessmentObject[] =>
+    (objectData?.departments ?? []).find((d: DepartmentObjects) => d.department_id === id)
+      ?.objects ?? []
+
+  // Routing says who is on the hook; the assessment rows carry their answers.
+  // Either source alone can name a department, so both feed the list.
+  const routed = (routing?.stages ?? []).flatMap((s) =>
+    s.departments.map((d) => ({
+      department_id: d.department_id, rasic: d.rasic_letter, stage: s.stage_order,
+    })))
+  const ids = [...new Set([
+    ...routed.map((r) => r.department_id),
+    ...change.assessments.map((a) => a.department_id),
+  ])]
+  const rows = ids.map((id) => {
+    const a = change.assessments.find((x) => x.department_id === id)
+    const r = routed.find((x) => x.department_id === id)
+    return {
+      id,
+      assessment: a,
+      rasic: a?.rasic_letter ?? r?.rasic ?? null,
+      stage: a?.stage_order ?? r?.stage ?? 0,
+      onHold: change.blocked_department_ids?.includes(id) ?? false,
+    }
+  }).sort((x, y) => x.stage - y.stage || deptName(x.id).localeCompare(deptName(y.id)))
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-slate-400">{t('bucket.none')}</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => {
+        const a = row.assessment
+        const state = stateOf(a, row.onHold)
+        const isMine = myDepartmentIds.includes(row.id)
+        const expanded = openDept === row.id
+        const canSubmit = isMine && editable && a?.status === 'active'
+        return (
+          <section key={row.id} data-testid={`bucket-${row.id}`}
+            className={`rounded-lg border ${
+              expanded ? 'border-slate-600 bg-slate-800' : 'border-slate-700 bg-slate-800/50'}`}>
+            <button type="button" data-testid={`bucket-toggle-${row.id}`}
+              aria-expanded={expanded}
+              title={expanded ? t('bucket.collapse') : t('bucket.expand')}
+              onClick={() => setOpenDept(expanded ? null : row.id)}
+              className="w-full flex items-center gap-3 px-3 py-2 text-left">
+              <span aria-hidden className="text-slate-500 text-xs w-3 flex-shrink-0">
+                {expanded ? '▾' : '▸'}
+              </span>
+              {row.rasic && (
+                <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] leading-tight text-slate-300 flex-shrink-0">
+                  {row.rasic}
+                </span>
+              )}
+              <span className="text-slate-100 font-medium truncate">{deptName(row.id)}</span>
+              <span data-testid={`bucket-state-${row.id}`}
+                className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
+                {t(STATE_LABEL[state])}
+              </span>
+              {a?.verdict && a.verdict !== 'pending' && (
+                <span data-testid={`bucket-verdict-${row.id}`}
+                  className={`text-sm flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
+                  title={a.verdict}>
+                  {VERDICT_ICON[a.verdict] ?? ''}
+                </span>
+              )}
+              <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
+                <span className="text-slate-400">{a?.owner_name ?? t('tasks.unclaimed')}</span>
+                {a?.due_date && (
+                  <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
+                    {new Date(a.due_date).toLocaleDateString()}
+                    {a.overdue && ` ⚠ ${t('tasks.overdue')}`}
+                  </span>
+                )}
+              </span>
+            </button>
+
+            {expanded && (
+              <div className="border-t border-slate-700 px-3 py-3 space-y-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                    {t('bucket.objects')}
+                  </p>
+                  <ObjectList objects={objectsOf(row.id)} />
+                </div>
+
+                {/* This department's own holds, in the room where the work happens. */}
+                <ConcernStrip changeId={changeId} editable={isMine && editable}
+                  scoped departments={departments} myDepartmentIds={myDepartmentIds}
+                  onlyDepartmentId={row.id} />
+
+                {a?.submitted_at || (a?.verdict && a.verdict !== 'pending') ? (
+                  <div className="text-sm space-y-0.5" data-testid={`bucket-answer-${row.id}`}>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                      {t('bucket.answer')}
+                    </p>
+                    <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{a!.verdict}</p>
+                    {a!.conditions && <p className="text-slate-300">{a!.conditions}</p>}
+                    {a!.notes && <p className="text-slate-400 whitespace-pre-wrap">{a!.notes}</p>}
+                  </div>
+                ) : canSubmit ? (
+                  <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
+                    departmentName={deptName(row.id)} showEffort={false}
+                    onDone={() => setOpenDept(null)} />
+                ) : (
+                  <p className="text-xs text-slate-500" data-testid={`bucket-readonly-${row.id}`}>
+                    {t('bucket.readOnly')}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}

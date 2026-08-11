@@ -5,6 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
+  AssessmentObjectsResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -43,7 +44,13 @@ export const changesApi = {
   seedImpacted: (id: number) =>
     client.post(`/v1/changes/${id}/impacted-items/seed`).then((r) => r.data),
 
-  submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number }) =>
+  // What each routed department is actually assessing — tools, gauges, documents
+  // and parts, derived from the impacted set.
+  assessmentObjects: (id: number) =>
+    client.get<AssessmentObjectsResponse>(`/v1/changes/${id}/assessment-objects`)
+      .then((r) => r.data),
+
+  submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number; details?: Record<string, unknown> }) =>
     client.post(`/v1/changes/${id}/assessments`, body).then((r) => r.data),
 
   customerResponse: (
@@ -154,6 +161,12 @@ export const changesApi = {
     client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, {
       kind, note, ...(departmentId !== undefined ? { department_id: departmentId } : {}),
     }).then((r) => r.data),
+  // Answering records what the customer said; it does not close the question —
+  // the asking side (or PM) still decides whether it is settled.
+  answerConcern: (id: number, concernId: number, note: string) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/answer`, { note })
+      .then((r) => r.data),
+
   // Withdrawal is a recorded act, not a delete: the note says how the point was
   // addressed (mandatory for department-scoped concerns, optional in scoping).
   withdrawConcern: (id: number, concernId: number, resolutionNote?: string) =>

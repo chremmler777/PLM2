@@ -5,8 +5,9 @@ import { toast } from 'sonner';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
-import AssessmentRouting from '../components/changes/AssessmentRouting';
-import AssessmentSubmitForm from '../components/changes/AssessmentSubmitForm';
+import AssessmentBuckets from '../components/changes/AssessmentBuckets';
+import WaitBanner from '../components/changes/WaitBanner';
+import { resolveWaitStates } from '../lib/waitStates';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostLineGrid from '../components/changes/CostLineGrid';
@@ -25,7 +26,6 @@ import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEd
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
 import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
-import ConcernStrip from '../components/changes/ConcernStrip';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
@@ -97,7 +97,6 @@ export default function ChangeDetailPage() {
   // a memo dialog rather than a bare button.
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
-  const [openAssessment, setOpenAssessment] = useState<number | null>(null);
   // Customer acceptance and internal approval both start the release phase, so
   // both collect a mandatory release deadline through an inline confirm row.
   const [acceptOpen, setAcceptOpen] = useState(false);
@@ -133,6 +132,12 @@ export default function ChangeDetailPage() {
   const { data: deviations = [] } = useQuery({
     queryKey: ['change', changeId, 'deviations'],
     queryFn: () => changesApi.listDeviations(changeId),
+  });
+  // The waits are derived from data the page already shows; this shares the
+  // concern cache key with the strips, so it costs no extra request.
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', changeId, 'concerns'],
+    queryFn: () => changesApi.listConcerns(changeId),
   });
   const { data: myActions } = useQuery({
     queryKey: ['change-my-actions', changeId],
@@ -287,6 +292,13 @@ export default function ChangeDetailPage() {
 
       <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant} />
 
+      {/* What the change is waiting on — same line for every viewer, whoever
+          owns the next move. */}
+      <div className="mt-3">
+        <WaitBanner waits={resolveWaitStates(change, concerns, deptName)}
+          onGo={(tb) => setTab(tb as Tab)} />
+      </div>
+
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
           <p className="font-semibold text-red-200">This change was rejected — the flow is stopped.</p>
@@ -417,7 +429,7 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'scoping' && change && (
         <ScopingPanel change={change}
           canSendRejection={!myActions ? true : isSalesMember}
-          canAnswerConcerns={isSalesMember} />
+          canAnswerConcerns={isSalesMember} isPm={isPmMember} />
       )}
 
       {effectiveTab === 'impacted' && change && (
@@ -434,54 +446,12 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'assessments' && (
         <div className="space-y-4">
           <ScopingMappingHint changeId={changeId} assessments={change.assessments} departments={departments} />
-          {/* Assessment-phase concerns are department-scoped: an open one holds
-              that department's own submit, not the whole change. */}
-          <ConcernStrip changeId={changeId} editable={change.status === 'in_assessment'}
-            scoped departments={departments}
-            myDepartmentIds={myActions?.memberships ?? []} />
-          <AssessmentRouting changeId={changeId} />
-          <ul className="text-sm divide-y border rounded-lg">
-          {change.assessments.map((a) => (
-            <li key={a.id} className="px-4 py-2">
-              <div className="flex justify-between items-center gap-3">
-                <span className="flex items-center gap-1.5">
-                  {deptName(a.department_id)}
-                  {change.blocked_department_ids?.includes(a.department_id) && (
-                    <span data-testid="dept-on-hold" title={t('concern.title')}
-                      className="inline-flex items-center rounded bg-amber-900/70 text-amber-200 px-1 py-0 text-[10px] leading-tight font-medium">
-                      {t('concern.onHold')}
-                    </span>
-                  )}
-                </span>
-                <span className="flex items-center gap-3">
-                  <span className={a.verdict === 'not_feasible' ? 'text-red-600' : ''}>{a.verdict}</span>
-                  <span className="text-slate-400 text-xs">
-                    {a.owner_name ?? t('tasks.unclaimed')}
-                    {a.overdue && <span className="text-red-400 ml-2">⚠ {t('tasks.overdue')}</span>}
-                  </span>
-                  {a.status === 'active' && (
-                    <button
-                      onClick={() => setOpenAssessment(openAssessment === a.id ? null : a.id)}
-                      className="text-xs text-sky-400 hover:text-sky-300">
-                      {openAssessment === a.id ? t('common.close') : t('assessment.submit')}
-                    </button>
-                  )}
-                </span>
-              </div>
-              {a.status === 'active' && openAssessment === a.id && (
-                <div className="mt-2">
-                  <AssessmentSubmitForm
-                    changeId={changeId}
-                    departmentId={a.department_id}
-                    departmentName={deptName(a.department_id)}
-                    onDone={() => setOpenAssessment(null)}
-                  />
-                </div>
-              )}
-            </li>
-          ))}
-          {change.assessments.length === 0 && <li className="px-4 py-3 text-slate-400">No assessments.</li>}
-          </ul>
+          {/* One bucket per routed department: status board collapsed, that
+              department's workplace expanded. Everything that used to be a
+              separate routing list or loose submit form lives inside it. */}
+          <AssessmentBuckets change={change} departments={departments}
+            myDepartmentIds={myActions?.memberships ?? []}
+            editable={change.status === 'in_assessment'} />
           {change.assessments.map((a) => (
             <div key={a.id}>
               <div className="text-xs text-slate-400 mb-1">Cost lines — {deptName(a.department_id)}</div>

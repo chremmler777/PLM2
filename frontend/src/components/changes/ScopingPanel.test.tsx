@@ -195,70 +195,6 @@ describe('ScopingPanel refused decision', () => {
   })
 })
 
-describe('ScopingPanel needs-info upload slot', () => {
-  afterEach(cleanup)
-
-  it('files what goes out to the customer as the info request', async () => {
-    vi.mocked(changesApi.listMeetings).mockResolvedValue([{
-      id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
-      participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
-      decision_reason: 'target price', selected_department_ids: [],
-      created_by: 1, created_at: '2026-07-04T10:00:00Z',
-      decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
-    }] as never)
-    render(wrap(<ScopingPanel change={change()} />))
-    const slot = await screen.findByTestId('dropzone')
-    expect(slot.getAttribute('data-kind')).toBe('info_request')
-  })
-})
-
-describe('ScopingPanel needs-info loop is reachable where Sales lands', () => {
-  const pendingNeedsInfo = [{
-    id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
-    participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
-    decision_reason: 'target price for the new gauge', selected_department_ids: [],
-    created_by: 1, created_at: '2026-07-04T10:00:00Z',
-    decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
-  }]
-  const att = (over: Record<string, unknown>) => ({
-    id: 1, filename: 'questions.msg', content_type: 'application/vnd.ms-outlook',
-    size_bytes: 10, phase: 'baseline', created_at: '2026-07-05T00:00:00',
-    kind: 'info_request', responds_to_id: null, ...over,
-  })
-
-  beforeEach(() => {
-    vi.mocked(changesApi.listMeetings).mockResolvedValue(pendingNeedsInfo as never)
-  })
-  afterEach(cleanup)
-
-  it('shows the question document, downloadable, with a slot for the answer', async () => {
-    render(wrap(<ScopingPanel change={change({ attachments: [att({})] })} />))
-    // The reason is already there; now the document is too — no hunt on another tab.
-    expect(await screen.findByText(/target price for the new gauge/)).toBeTruthy()
-    const link = screen.getByRole('link', { name: 'questions.msg' })
-    expect(link.getAttribute('href')).toContain('/v1/changes/7/attachments/1/download')
-    expect(screen.getByTestId('attach-response-1')).toBeTruthy()
-  })
-
-  it('reads the answer beneath its question once it lands', async () => {
-    render(wrap(<ScopingPanel change={change({ attachments: [
-      att({}),
-      att({ id: 2, filename: 'customer-reply.msg', kind: 'info_response', responds_to_id: 1 }),
-    ] })} />))
-    const loop = await screen.findByTestId('scoping-info-loop')
-    expect(loop.textContent).toContain('customer-reply.msg')
-    // Answered: it stops asking for one.
-    expect(screen.queryByTestId('attach-response-1')).toBeNull()
-  })
-
-  it('offers the request slot while no question has been sent yet', async () => {
-    render(wrap(<ScopingPanel change={change({ attachments: [] })} />))
-    const slot = await screen.findByTestId('dropzone')
-    expect(slot.getAttribute('data-kind')).toBe('info_request')
-    expect(screen.queryByTestId('scoping-info-loop')).toBeNull()
-  })
-})
-
 describe('ScopingPanel rejection closure', () => {
   const rejected = [{
     id: 5, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'meeting',
@@ -338,7 +274,8 @@ describe('ScopingPanel question containers', () => {
     id: 11, change_id: 7, kind: 'needs_info', note: 'What is the target price?',
     raised_by: 1, raised_by_name: 'PM Jane', raised_at: '2026-07-04T11:00:00',
     withdrawn_at: null, resolved_by_meeting_id: null, is_open: true,
-    department_id: null, resolution_note: null, raised_by_meeting_id: 4, ...over,
+    department_id: null, resolution_note: null, answer_note: null,
+    raised_by_meeting_id: 4, ...over,
   })
 
   beforeEach(() => {
@@ -346,22 +283,26 @@ describe('ScopingPanel question containers', () => {
   })
   afterEach(cleanup)
 
-  it('nests a meeting-raised question inside that meeting record', async () => {
-    vi.mocked(changesApi.listConcerns).mockResolvedValue([question()] as never)
-    render(wrap(<ScopingPanel change={change()} />))
-    const nest = await screen.findByTestId('meeting-questions-4')
-    expect(nest.textContent).toContain('What is the target price?')
-    // It is the meeting's question, so it is not repeated in the standalone area.
-    expect(screen.queryByTestId('needs-info-cards')).toBeNull()
-  })
-
-  it('keeps a hand-raised question standing on its own', async () => {
+  it('gives a meeting-raised question the same working card as a hand-raised one', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      question({ id: 12, raised_by_meeting_id: null, note: 'raised by hand' })] as never)
-    render(wrap(<ScopingPanel change={change()} />))
-    const standalone = await screen.findByTestId('needs-info-cards')
-    expect(standalone.textContent).toContain('raised by hand')
-    expect(screen.queryByTestId('meeting-questions-4')).toBeNull()
+      question({ id: 11, raised_by_meeting_id: 4, note: 'from the meeting' }),
+      question({ id: 12, raised_by_meeting_id: null, note: 'raised by hand',
+        raised_at: '2026-07-05T09:00:00' }),
+    ] as never)
+    render(wrap(<ScopingPanel change={change()} canAnswerConcerns />))
+    // Both are open work, so both sit in "Now" — neither is buried in history.
+    await screen.findByTestId('needs-info-card-11')
+    const now = screen.getByTestId('scoping-now')
+    expect(now.textContent).toContain('from the meeting')
+    expect(now.textContent).toContain('raised by hand')
+    // And both carry the same answer zone for Sales.
+    expect(screen.getByTestId('needs-info-answer-note-11')).toBeTruthy()
+    expect(screen.getByTestId('needs-info-answer-note-12')).toBeTruthy()
+    // The meeting origin still shows on the card raised by a decision.
+    expect(screen.getByTestId('needs-info-card-11').textContent)
+      .toContain(t('concern.fromMeeting'))
+    expect(screen.getByTestId('needs-info-card-12').textContent)
+      .not.toContain(t('concern.fromMeeting'))
   })
 
   it('gives parallel questions parallel cards', async () => {
@@ -370,11 +311,37 @@ describe('ScopingPanel question containers', () => {
       question({ id: 12, note: 'timing?', raised_at: '2026-07-04T12:00:00' }),
     ] as never)
     render(wrap(<ScopingPanel change={change()} />))
-    await screen.findByTestId('meeting-questions-4')
+    await screen.findByTestId('needs-info-card-11')
     const first = screen.getByTestId('needs-info-card-11')
-    const second = screen.getByTestId('needs-info-card-12')
     expect(first.textContent).toContain('price?')
     expect(first.textContent).not.toContain('timing?')
-    expect(second.textContent).toContain('timing?')
+    expect(screen.getByTestId('needs-info-card-12').textContent).toContain('timing?')
+  })
+
+  it('drops a settled question into history under its meeting', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      question({ id: 11, is_open: false, withdrawn_at: '2026-07-06T00:00:00',
+        resolution_note: 'price agreed' })] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const nest = await screen.findByTestId('meeting-questions-4')
+    // One quiet line in history, not a working card in "Now".
+    expect(nest.textContent).toContain('What is the target price?')
+    expect(screen.getByTestId('needs-info-summary-11')).toBeTruthy()
+    expect(screen.getByTestId('scoping-now').textContent).not.toContain('What is the target price?')
+  })
+
+  it('keeps the latest meeting open and older ones one click away', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([] as never)
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([
+      meeting({ id: 3, meeting_date: '2026-07-01T10:00:00Z', decision: 'needs_info',
+        decision_reason: 'older question' }),
+      meeting({ id: 4, decision_reason: 'latest question' }),
+    ] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    await screen.findByText(/latest question/)
+    // The older record is a summary line until asked for.
+    expect(screen.queryByText(/older question/)).toBeNull()
+    fireEvent.click(screen.getByTestId('meeting-summary-3'))
+    expect(screen.getByText(/older question/)).toBeTruthy()
   })
 })

@@ -7,11 +7,11 @@ import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
-import { AttachmentRow, InfoRequestBlock } from './AttachmentRow'
+import { AttachmentRow } from './AttachmentRow'
 import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
 import { t } from '../../i18n/cmLabels'
-import type { Attachment, ChangeMeeting, ChangeRequest } from '../../types/change'
+import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -22,10 +22,12 @@ const DECISION_LABEL: Record<string, string> = {
 }
 
 export default function ScopingPanel(
-  { change, canSendRejection = true, canAnswerConcerns = false }: {
+  { change, canSendRejection = true, canAnswerConcerns = false, isPm = false }: {
     change: ChangeRequest & { attachments?: Attachment[] }
-    /** Sales membership: Sales answers and settles the customer questions. */
+    /** Sales membership: Sales writes the answer of record. */
     canAnswerConcerns?: boolean
+    /** Project Management may close a question the asking side left hanging. */
+    isPm?: boolean
     /** Sales membership — only Sales confirms the rejection letter went out.
      *  Defaults true until memberships load so the control doesn't flash-grey. */
     canSendRejection?: boolean
@@ -148,6 +150,8 @@ export default function ScopingPanel(
   // one before the call goes out rather than letting the server 400.
   const [pending, setPending] = useState<
     { meetingId: number; decision: 'reject' | 'needs_info' } | null>(null)
+  // Which older meeting record the user asked to see in full.
+  const [showMeeting, setShowMeeting] = useState<number | null>(null)
 
   const open = status === 'captured' || status === 'scoping'
   // Meetings belong to scoping: the backend refuses to create one while the
@@ -159,7 +163,6 @@ export default function ScopingPanel(
   // The change already carries its attachments; the loop reads them in place
   // rather than fetching again.
   const attachments = change.attachments ?? []
-  const infoRequests = attachments.filter((a) => a.kind === 'info_request')
   const rejectionLetters = attachments.filter((a) => a.kind === 'rejection_letter')
   // Team needs-info flags are the customer questions; they get their own cards,
   // in the order the questions were asked. A flag raised by a meeting's decision
@@ -167,9 +170,29 @@ export default function ScopingPanel(
   const needsInfo = [...concerns]
     .filter((c) => c.kind === 'needs_info' && c.department_id == null)
     .sort((a, b) => a.raised_at.localeCompare(b.raised_at))
-  const questionsOf = (meetingId: number) =>
-    needsInfo.filter((c) => c.raised_by_meeting_id === meetingId)
-  const standaloneQuestions = needsInfo.filter((c) => c.raised_by_meeting_id == null)
+  const openQuestions = needsInfo.filter((c) => c.is_open)
+  const solvedQuestions = needsInfo.filter((c) => !c.is_open)
+  const settledQuestionsOf = (meetingId: number) =>
+    solvedQuestions.filter((c) => c.raised_by_meeting_id === meetingId)
+  // A question raised by a decision keeps its origin on the card, so nesting
+  // survives even though open work is hoisted out of the history.
+  const meetingOf = (id?: number | null) =>
+    id == null ? undefined : meetings.find((m: ChangeMeeting) => m.id === id)
+  const originOf = (c: ChangeConcern) => {
+    const m = meetingOf(c.raised_by_meeting_id)
+    return m ? `${t('concern.fromMeeting')} ${new Date(m.meeting_date).toLocaleDateString()}` : undefined
+  }
+  const latestMeeting: ChangeMeeting | null =
+    meetings.length > 0 ? meetings[meetings.length - 1] : null
+  const olderMeetings: ChangeMeeting[] = meetings.slice(0, Math.max(0, meetings.length - 1))
+  // Both paths — meeting-raised and hand-raised — render the same card with the
+  // same gates. Closing belongs to the asker (or PM); answering to Sales.
+  const questionCard = (c: ChangeConcern) => (
+    <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
+      attachments={attachments} editable={open}
+      canAnswer={canAnswerConcerns} canSettle={c.raised_by === userId || isPm}
+      origin={originOf(c)} onChanged={invalidate} />
+  )
   const outstanding = [...meetings].reverse().find(
     (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
     ?? null
@@ -178,6 +201,64 @@ export default function ScopingPanel(
     setDeptIds((prev) =>
       prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
   }
+
+  const meetingRow = (m: ChangeMeeting) => (
+    <li key={m.id} className="p-3 space-y-1">
+      <div className="flex justify-between items-center">
+        <span className="text-slate-200 flex items-center gap-2">
+          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
+            {t(`channel.${m.channel ?? 'meeting'}`)}
+          </span>
+          {new Date(m.meeting_date).toLocaleDateString()} — {' '}
+          {m.participants.map((p) => p.name).join(', ') || '—'}
+        </span>
+        {m.decision ? (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
+            {DECISION_LABEL[m.decision] ?? m.decision}
+          </span>
+        ) : meetingOpen && (
+          <span className="flex gap-2">
+            <button className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
+              disabled={decide.isPending}
+              onClick={() => decide.mutate({ meetingId: m.id, decision: 'proceed' })}>
+              {t('meeting.proceed')}
+            </button>
+            <button className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs"
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
+              {t('meeting.needsInfo')}
+            </button>
+            <button className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs"
+              disabled={decide.isPending}
+              onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
+              {t('meeting.reject')}
+            </button>
+          </span>
+        )}
+      </div>
+      {m.decision_reason && (
+        <p className={`whitespace-pre-wrap ${
+          m.decision === 'reject' ? 'text-red-300' : 'text-amber-300'}`}>
+          {m.decision === 'needs_info' ? t('meeting.missingInfo') : t('meeting.rejectedBecause')}
+          {' '}{m.decision_reason}
+        </p>
+      )}
+      {/* Questions this decision raised that are already settled stay with their
+          meeting; the open ones are hoisted into "Now" above. */}
+      {settledQuestionsOf(m.id).length > 0 && (
+        <div data-testid={`meeting-questions-${m.id}`}
+          className="mt-2 ml-4 border-l-2 border-slate-700 pl-3 space-y-2">
+          {settledQuestionsOf(m.id).map(questionCard)}
+        </div>
+      )}
+      {m.selected_department_ids.length > 0 && (
+        <p className="text-xs text-slate-500">
+          {t('meeting.departments')}: {m.selected_department_ids.map((id) =>
+            departments.find((d) => d.id === id)?.name ?? `#${id}`).join(', ')}
+        </p>
+      )}
+    </li>
+  )
 
   return (
     <div className="space-y-4 text-sm">
@@ -195,46 +276,15 @@ export default function ScopingPanel(
         onClose={() => setPending(null)}
       />
 
-      {/* Each customer question is its own container: the docs that explain it,
-          the answer, and the docs behind the answer, owned by that card alone.
-          Everything else the team flagged stays in the strip below. */}
-      {standaloneQuestions.length > 0 && (
-        <section className="space-y-3" data-testid="needs-info-cards">
-          <h3 className="text-xs uppercase tracking-wide text-slate-500">
-            {t('concern.openRequests')}
-          </h3>
-          {standaloneQuestions.map((c) => (
-            <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
-              attachments={attachments} editable={open}
-              canAnswer={canAnswerConcerns} isAuthor={c.raised_by === userId}
-              onChanged={invalidate} />
-          ))}
-        </section>
-      )}
+      {/* NOW — what the change is waiting on, always open, always first. */}
+      <section className="space-y-3" data-testid="scoping-now">
+        <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.now')}</h3>
 
-      {/* Raised before or during the meeting, by anyone, in parallel. */}
-      {/* Scoping concerns may name a department as attribution — optional, and
-          open to anyone; "Team" is the default. */}
-      <ConcernStrip changeId={changeId} editable={open} departments={departments}
-        canAnswer={canAnswerConcerns} hideConcernIds={needsInfo.map((c) => c.id)} />
-
-      {outstanding && (
-        <div className={`rounded-lg border p-3 space-y-2 ${
-          outstanding.decision === 'reject'
-            ? 'border-red-800/60 bg-red-950/30' : 'border-amber-700/60 bg-amber-950/30'}`}>
-          <p className="font-medium text-slate-100">
-            {outstanding.decision === 'reject'
-              ? t('meeting.shareRejection') : t('meeting.shareNeedsInfo')}
-          </p>
-          <p className="text-xs text-slate-400">{t('meeting.shareHint')}</p>
-          {/* Sales and PM answer the customer; the document they send — the
-              rejection letter, the list of open questions, or a counter-
-              proposal — belongs on the change, not in someone's mailbox.
-              Whoever follows the "obtain info" task lands here, so the whole
-              loop is in reach: the question that went out, its answer, and the
-              slot for whichever half is still missing. */}
-          {outstanding.decision === 'reject' && change.customer_relevant ? (
-            // Rejection closure: the letter, then the confirmed send that closes it.
+        {outstanding?.decision === 'reject' && change.customer_relevant && (
+          <div className="rounded-lg border border-red-800/60 bg-red-950/30 p-3 space-y-2">
+            <p className="font-medium text-slate-100">{t('meeting.shareRejection')}</p>
+            <p className="text-xs text-slate-400">{t('meeting.shareHint')}</p>
+            {/* Rejection closure: the letter, then the confirmed send that closes it. */}
             <div className="space-y-2" data-testid="rejection-closure">
               {rejectionLetters.length > 0 && (
                 <ul className="text-sm divide-y divide-slate-700/60">
@@ -260,26 +310,22 @@ export default function ScopingPanel(
                 </button>
               )}
             </div>
-          ) : (
-            <>
-              {infoRequests.length > 0 && (
-                <ul className="text-sm divide-y divide-slate-700/60"
-                  data-testid="scoping-info-loop">
-                  {infoRequests.map((q) => (
-                    <InfoRequestBlock key={q.id} changeId={changeId} request={q}
-                      responses={attachments.filter((a) => a.responds_to_id === q.id)}
-                      onChanged={invalidate} />
-                  ))}
-                </ul>
-              )}
-              {infoRequests.length === 0 && (
-                <AttachmentDropzone changeId={changeId} kind="info_request"
-                  label={t('attach.requestSlot')} onUploaded={invalidate} />
-              )}
-            </>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+
+        {openQuestions.length > 0 ? (
+          <div className="space-y-3" data-testid="needs-info-cards">
+            <p className="text-xs text-slate-400">{t('concern.openRequests')}</p>
+            {openQuestions.map(questionCard)}
+          </div>
+        ) : (
+          !outstanding && <p className="text-xs text-slate-500">{t('concern.none')}</p>
+        )}
+
+        {/* Everything else the team flagged, in one strip. */}
+        <ConcernStrip changeId={changeId} editable={open} departments={departments}
+          canAnswer={canAnswerConcerns} hideConcernIds={needsInfo.map((c) => c.id)} />
+      </section>
 
       {decideError && (
         <p role="alert" data-testid="decide-error"
@@ -288,73 +334,54 @@ export default function ScopingPanel(
         </p>
       )}
 
-      <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">
-        {meetings.map((m: ChangeMeeting) => (
-          <li key={m.id} className="p-3 space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-200 flex items-center gap-2">
-                <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
-                  {t(`channel.${m.channel ?? 'meeting'}`)}
-                </span>
-                {new Date(m.meeting_date).toLocaleDateString()} — {' '}
-                {m.participants.map((p) => p.name).join(', ') || '—'}
-              </span>
-              {m.decision ? (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
-                  {DECISION_LABEL[m.decision] ?? m.decision}
-                </span>
-              ) : meetingOpen && (
-                <span className="flex gap-2">
-                  <button className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
-                    disabled={decide.isPending}
-                    onClick={() => decide.mutate({ meetingId: m.id, decision: 'proceed' })}>
-                    {t('meeting.proceed')}
-                  </button>
-                  <button className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs"
-                    disabled={decide.isPending}
-                    onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
-                    {t('meeting.needsInfo')}
-                  </button>
-                  <button className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs"
-                    disabled={decide.isPending}
-                    onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
-                    {t('meeting.reject')}
-                  </button>
-                </span>
-              )}
-            </div>
-            {m.decision_reason && (
-              <p className={`whitespace-pre-wrap ${
-                m.decision === 'reject' ? 'text-red-300' : 'text-amber-300'}`}>
-                {m.decision === 'needs_info' ? t('meeting.missingInfo') : t('meeting.rejectedBecause')}
-                {' '}{m.decision_reason}
-              </p>
-            )}
-            {/* The questions this meeting's decision put to the customer live
-                inside its record, indented, so the origin is unmistakable. */}
-            {questionsOf(m.id).length > 0 && (
-              <div data-testid={`meeting-questions-${m.id}`}
-                className="mt-2 ml-4 border-l-2 border-slate-700 pl-3 space-y-2">
-                {questionsOf(m.id).map((c) => (
-                  <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
-                    attachments={attachments} editable={open}
-                    canAnswer={canAnswerConcerns} isAuthor={c.raised_by === userId}
-                    onChanged={invalidate} />
-                ))}
-              </div>
-            )}
-            {m.selected_department_ids.length > 0 && (
-              <p className="text-xs text-slate-500">
-                {t('meeting.departments')}: {m.selected_department_ids.map((id) =>
-                  departments.find((d) => d.id === id)?.name ?? `#${id}`).join(', ')}
-              </p>
-            )}
-          </li>
-        ))}
-        {meetings.length === 0 && (
-          <li className="p-3 text-slate-400">{t('meeting.none')}</li>
+      {/* HISTORY — quiet by default: the latest record open, everything older
+          one line away. */}
+      <section className="space-y-2" data-testid="scoping-history">
+        <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.history')}</h3>
+
+        {solvedQuestions.filter((c) => c.raised_by_meeting_id == null).length > 0 && (
+          <div className="space-y-1" data-testid="settled-questions">
+            <p className="text-xs text-slate-500">{t('concern.solvedQuestions')}</p>
+            {solvedQuestions
+              .filter((c) => c.raised_by_meeting_id == null)
+              .map(questionCard)}
+          </div>
         )}
-      </ul>
+
+        {olderMeetings.length > 0 && (
+          <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg"
+            data-testid="older-meetings">
+            {olderMeetings.map((m: ChangeMeeting) => (
+              showMeeting === m.id ? meetingRow(m) : (
+                <li key={m.id}>
+                  <button type="button" data-testid={`meeting-summary-${m.id}`}
+                    onClick={() => setShowMeeting(m.id)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-800">
+                    <span className="px-1.5 py-0 rounded bg-slate-700 text-slate-300">
+                      {t(`channel.${m.channel ?? 'meeting'}`)}
+                    </span>
+                    <span className="text-slate-400">
+                      {new Date(m.meeting_date).toLocaleDateString()}
+                    </span>
+                    {m.decision && (
+                      <span className="px-1.5 py-0 rounded-full bg-slate-700 text-slate-300">
+                        {DECISION_LABEL[m.decision] ?? m.decision}
+                      </span>
+                    )}
+                    <span className="ml-auto text-slate-600">{t('scoping.showDetails')}</span>
+                  </button>
+                </li>
+              )
+            ))}
+          </ul>
+        )}
+
+        <ul className="divide-y divide-slate-700 border border-slate-700 rounded-lg">
+          {latestMeeting ? meetingRow(latestMeeting) : (
+            <li className="p-3 text-slate-400">{t('meeting.none')}</li>
+          )}
+        </ul>
+      </section>
 
       {meetingOpen && (
         <div className="border border-slate-700 rounded-lg p-4 space-y-3">

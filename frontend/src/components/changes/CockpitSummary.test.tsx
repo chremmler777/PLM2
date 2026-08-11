@@ -306,16 +306,13 @@ describe('CockpitSummary kickoff readiness at capture', () => {
 describe('CockpitSummary blocked departments', () => {
   afterEach(cleanup)
 
-  it('counts the departments an open concern is holding and points at the tab', () => {
-    const onAction = vi.fn()
+  it('counts a held department among the blockers, leaving the wording to the banner', () => {
     render(wrap(<CockpitSummary change={change({
       status: 'in_assessment', blocked_department_ids: [2, 4], assessments: [],
-    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
-      onAction={onAction} />))
-    const line = screen.getByText(new RegExp(
-      t('cockpit.blockedDepartments').replace('{n}', '2')))
-    fireEvent.click(line)
-    expect(onAction).toHaveBeenCalledWith('assessments')
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    // The wait itself is stated once, in the shared banner; the cockpit only
+    // stops claiming that nothing is blocking.
+    expect(screen.queryByText(/Nothing blocking/)).toBeNull()
   })
 
   it('says nothing when no department is blocked', () => {
