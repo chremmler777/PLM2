@@ -52,6 +52,7 @@ describe('ConcernStrip', () => {
     await screen.findByText('Mine')
     // One withdraw link — for the flag raised by userId 5.
     const links = screen.getAllByRole('button', { name: /withdraw/ })
+      .filter((b) => !(b as HTMLButtonElement).disabled)
     expect(links).toHaveLength(1)
     fireEvent.click(links[0])
     // Scoping withdrawal may explain itself, but does not have to.
@@ -59,13 +60,48 @@ describe('ConcernStrip', () => {
     await waitFor(() => expect(changesApi.withdrawConcern).toHaveBeenCalledWith(7, 2, undefined))
   })
 
-  it('gives an admin no way to clear someone else\'s flag', async () => {
+  it('greys the withdraw control for anyone but the author — admin included', async () => {
     authState.current = { userId: 5, isAdmin: true }
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ raised_by: 9, raised_by_name: 'Rita RD' })] as never)
+      concern({ id: 1, raised_by: 9, raised_by_name: 'Rita RD' })] as never)
     wrap(<ConcernStrip changeId={7} editable />)
     await screen.findByText('Tool cannot hold tolerance')
-    expect(screen.queryByRole('button', { name: /withdraw/ })).toBeNull()
+    const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.getAttribute('title')).toBe(t('concern.authorOnlyWithdraw'))
+  })
+
+  it('leaves the author their own withdraw', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, raised_by: 5, raised_by_name: 'Me' })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    await screen.findByText('Tool cannot hold tolerance')
+    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('lets Sales settle a team needs-info flag, but nothing else', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'needs_info', department_id: null, raised_by: 9, note: 'ask the customer' }),
+      concern({ id: 2, kind: 'reject_proposal', department_id: null, raised_by: 9, note: 'would reject' }),
+    ] as never)
+    wrap(<ConcernStrip changeId={7} editable canAnswer />)
+    await screen.findByText('ask the customer')
+    const solvable = screen.getByTestId('concern-close-1') as HTMLButtonElement
+    expect(solvable.disabled).toBe(false)
+    expect(solvable.textContent).toContain(t('concern.markSolved'))
+    const other = screen.getByTestId('concern-close-2') as HTMLButtonElement
+    expect(other.disabled).toBe(true)
+    expect(other.getAttribute('title')).toBe(t('concern.authorOnlyWithdraw'))
+  })
+
+  it('tells a non-Sales viewer who may settle a team question', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      concern({ id: 1, kind: 'needs_info', department_id: null, raised_by: 9 })] as never)
+    wrap(<ConcernStrip changeId={7} editable />)
+    await screen.findByText('Tool cannot hold tolerance')
+    const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.getAttribute('title')).toBe(t('concern.authorOrSales'))
   })
 
   it('raises a flag with its kind and note', async () => {

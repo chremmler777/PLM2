@@ -84,6 +84,8 @@ export interface Attachment {
   /** Needs-info loop: the question sent out, and the answer that came back. */
   kind?: AttachmentKind | null;
   responds_to_id?: number | null;
+  /** The needs-info container this document belongs to, if any. */
+  concern_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;
@@ -332,6 +334,8 @@ export interface ChangeConcern {
   withdrawn_at?: string | null;
   resolved_by_meeting_id?: number | null;
   is_open: boolean;
+  /** The meeting whose needs-info decision raised this flag, when it was automatic. */
+  raised_by_meeting_id?: number | null;
   /** Set for assessment-phase concerns: the department the flag is scoped to. */
   department_id?: number | null;
   /** How the concern was addressed — required to withdraw a scoped one. */

@@ -15,6 +15,7 @@ vi.mock('../../api/changes', () => ({
       decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
     }]),
     createMeeting: vi.fn(), decideMeeting: vi.fn(), update: vi.fn(),
+    listConcerns: vi.fn().mockResolvedValue([]), withdrawConcern: vi.fn(),
     markRejectionSent: vi.fn().mockResolvedValue({}),
     recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality' }]),
   },
@@ -33,6 +34,7 @@ vi.mock('./AttachmentDropzone', () => ({
     <div data-testid="dropzone" data-kind={props.kind ?? ''}>mock-attachment-dropzone</div>
   ),
 }))
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 vi.mock('../../api/contacts', () => ({
   contactsApi: { list: vi.fn().mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }]) },
 }))
@@ -321,5 +323,58 @@ describe('ScopingPanel rejection closure', () => {
     await screen.findByText(/customer withdrew/)
     expect(screen.queryByTestId('rejection-closure')).toBeNull()
     expect(screen.queryByTestId('rejection-sent')).toBeNull()
+  })
+})
+
+describe('ScopingPanel question containers', () => {
+  const meeting = (over: Record<string, unknown> = {}) => ({
+    id: 4, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'email',
+    participants: [{ name: 'PM Jane' }], notes: null, decision: 'needs_info',
+    decision_reason: 'target price', selected_department_ids: [],
+    created_by: 1, created_at: '2026-07-04T10:00:00Z',
+    decided_by: 1, decided_at: '2026-07-04T11:00:00Z', ...over,
+  })
+  const question = (over: Record<string, unknown> = {}) => ({
+    id: 11, change_id: 7, kind: 'needs_info', note: 'What is the target price?',
+    raised_by: 1, raised_by_name: 'PM Jane', raised_at: '2026-07-04T11:00:00',
+    withdrawn_at: null, resolved_by_meeting_id: null, is_open: true,
+    department_id: null, resolution_note: null, raised_by_meeting_id: 4, ...over,
+  })
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting()] as never)
+  })
+  afterEach(cleanup)
+
+  it('nests a meeting-raised question inside that meeting record', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([question()] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const nest = await screen.findByTestId('meeting-questions-4')
+    expect(nest.textContent).toContain('What is the target price?')
+    // It is the meeting's question, so it is not repeated in the standalone area.
+    expect(screen.queryByTestId('needs-info-cards')).toBeNull()
+  })
+
+  it('keeps a hand-raised question standing on its own', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      question({ id: 12, raised_by_meeting_id: null, note: 'raised by hand' })] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    const standalone = await screen.findByTestId('needs-info-cards')
+    expect(standalone.textContent).toContain('raised by hand')
+    expect(screen.queryByTestId('meeting-questions-4')).toBeNull()
+  })
+
+  it('gives parallel questions parallel cards', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      question({ id: 11, note: 'price?' }),
+      question({ id: 12, note: 'timing?', raised_at: '2026-07-04T12:00:00' }),
+    ] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    await screen.findByTestId('meeting-questions-4')
+    const first = screen.getByTestId('needs-info-card-11')
+    const second = screen.getByTestId('needs-info-card-12')
+    expect(first.textContent).toContain('price?')
+    expect(first.textContent).not.toContain('timing?')
+    expect(second.textContent).toContain('timing?')
   })
 })

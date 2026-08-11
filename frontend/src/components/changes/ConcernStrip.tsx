@@ -26,9 +26,14 @@ const KIND_STYLE: Record<ConcernKind, string> = {
  */
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
+  canAnswer = false, hideConcernIds = [],
 }: {
   changeId: number
   editable: boolean
+  /** Sales membership: Sales may solve a team needs-info flag by answering it. */
+  canAnswer?: boolean
+  /** Concerns shown as their own containers elsewhere on the page. */
+  hideConcernIds?: number[]
   /** Assessment phase: every flag belongs to a department, and dropping one
    *  needs a written resolution. */
   scoped?: boolean
@@ -92,8 +97,16 @@ export default function ConcernStrip({
     },
   })
 
-  const open = concerns.filter((c: ChangeConcern) => c.is_open)
-  const settled = concerns.filter((c: ChangeConcern) => !c.is_open)
+  // A team needs-info flag is the customer question in flag form: Sales closes it
+  // by writing the answer. Everything else is the author's own to withdraw.
+  const isTeamNeedsInfo = (c: ChangeConcern) =>
+    c.kind === 'needs_info' && c.department_id == null
+  const salesSolvable = (c: ChangeConcern) => canAnswer && isTeamNeedsInfo(c)
+  const mayClose = (c: ChangeConcern) => c.raised_by === userId || salesSolvable(c)
+
+  const listed = concerns.filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
+  const open = listed.filter((c: ChangeConcern) => c.is_open)
+  const settled = listed.filter((c: ChangeConcern) => !c.is_open)
 
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${
@@ -139,38 +152,50 @@ export default function ConcernStrip({
                   {t('concern.resolved')}: {c.resolution_note}
                 </span>
               )}
-              {withdrawing === c.id && (
-                <span className="mt-1 flex flex-wrap items-center gap-2">
-                  <input value={resolution} onChange={(e) => setResolution(e.target.value)}
-                    data-testid="concern-withdraw-note"
-                    placeholder={t('concern.resolution')} aria-label={t('concern.resolution')}
-                    className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-                  <button data-testid="concern-withdraw-confirm"
-                    className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
-                    disabled={withdraw.isPending
-                      || (c.department_id != null && !resolution.trim())}
-                    onClick={() => withdraw.mutate({ concernId: c.id, note: resolution })}>
-                    {t('concern.withdraw')}
-                  </button>
-                  <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
-                    onClick={() => { setWithdrawing(null); setResolution('') }}>
-                    {t('common.cancel')}
-                  </button>
-                </span>
-              )}
+              {withdrawing === c.id && (() => {
+                // Sales answering owes the answer itself; a department flag owes
+                // its resolution; a plain team withdrawal may go unexplained.
+                const answering = c.raised_by !== userId
+                const noteRequired = answering || c.department_id != null
+                return (
+                  <span className="mt-1 flex flex-wrap items-center gap-2">
+                    <textarea value={resolution} rows={2}
+                      onChange={(e) => setResolution(e.target.value)}
+                      data-testid="concern-withdraw-note"
+                      placeholder={answering ? t('concern.answerPlaceholder') : t('concern.resolution')}
+                      aria-label={answering ? t('concern.answer') : t('concern.resolution')}
+                      className="flex-1 min-w-[14rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+                    <button data-testid="concern-withdraw-confirm"
+                      className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                      disabled={withdraw.isPending || (noteRequired && !resolution.trim())}
+                      onClick={() => withdraw.mutate({ concernId: c.id, note: resolution })}>
+                      {answering ? t('concern.markSolved') : t('concern.withdraw')}
+                    </button>
+                    <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
+                      onClick={() => { setWithdrawing(null); setResolution('') }}>
+                      {t('common.cancel')}
+                    </button>
+                    {answering && (
+                      <span className="block w-full text-[11px] text-slate-500">
+                        {t('concern.answerHint')}
+                      </span>
+                    )}
+                  </span>
+                )
+              })()}
             </span>
-            {/* Only its author may drop it — not the lead, not an admin. */}
-            {c.is_open && editable && c.raised_by === userId && withdrawing !== c.id && (
-              <button className="text-xs underline decoration-dotted flex-shrink-0"
-                disabled={withdraw.isPending}
+            {/* Its author may drop it; Sales may settle a team needs-info flag.
+                Anyone else sees the control greyed with the rule, never a
+                vanished button or a late 403. Admin is no exception. */}
+            {c.is_open && editable && withdrawing !== c.id && (
+              <button data-testid={`concern-close-${c.id}`}
+                className="text-xs underline decoration-dotted flex-shrink-0 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
+                disabled={!mayClose(c) || withdraw.isPending}
+                title={mayClose(c) ? undefined
+                  : isTeamNeedsInfo(c) ? t('concern.authorOrSales') : t('concern.authorOnlyWithdraw')}
                 onClick={() => { setWithdrawing(c.id); setResolution('') }}>
-                {t('concern.withdraw')}
+                {c.raised_by === userId ? t('concern.withdraw') : t('concern.markSolved')}
               </button>
-            )}
-            {c.is_open && isAdmin && c.raised_by !== userId && (
-              <span className="text-xs opacity-60 flex-shrink-0" title={t('concern.authorOnly')}>
-                {t('concern.theirs')}
-              </span>
             )}
           </li>
         ))}

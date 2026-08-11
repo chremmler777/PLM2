@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { useAuth } from '../../contexts/AuthContext'
 import { contactsApi } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow, InfoRequestBlock } from './AttachmentRow'
+import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment, ChangeMeeting, ChangeRequest } from '../../types/change'
@@ -20,8 +22,10 @@ const DECISION_LABEL: Record<string, string> = {
 }
 
 export default function ScopingPanel(
-  { change, canSendRejection = true }: {
+  { change, canSendRejection = true, canAnswerConcerns = false }: {
     change: ChangeRequest & { attachments?: Attachment[] }
+    /** Sales membership: Sales answers and settles the customer questions. */
+    canAnswerConcerns?: boolean
     /** Sales membership — only Sales confirms the rejection letter went out.
      *  Defaults true until memberships load so the control doesn't flash-grey. */
     canSendRejection?: boolean
@@ -30,6 +34,11 @@ export default function ScopingPanel(
   const changeId = change.id
   const status = change.status
   const qc = useQueryClient()
+  const { userId } = useAuth()
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', changeId, 'concerns'],
+    queryFn: () => changesApi.listConcerns(changeId),
+  })
   const { data: meetings = [] } = useQuery({
     queryKey: ['change-meetings', changeId],
     queryFn: () => changesApi.listMeetings(changeId),
@@ -94,6 +103,7 @@ export default function ScopingPanel(
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
+    qc.invalidateQueries({ queryKey: ['change', changeId, 'concerns'] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
   const create = useMutation({
@@ -151,6 +161,15 @@ export default function ScopingPanel(
   const attachments = change.attachments ?? []
   const infoRequests = attachments.filter((a) => a.kind === 'info_request')
   const rejectionLetters = attachments.filter((a) => a.kind === 'rejection_letter')
+  // Team needs-info flags are the customer questions; they get their own cards,
+  // in the order the questions were asked. A flag raised by a meeting's decision
+  // belongs under that meeting's record; a hand-raised one stands on its own.
+  const needsInfo = [...concerns]
+    .filter((c) => c.kind === 'needs_info' && c.department_id == null)
+    .sort((a, b) => a.raised_at.localeCompare(b.raised_at))
+  const questionsOf = (meetingId: number) =>
+    needsInfo.filter((c) => c.raised_by_meeting_id === meetingId)
+  const standaloneQuestions = needsInfo.filter((c) => c.raised_by_meeting_id == null)
   const outstanding = [...meetings].reverse().find(
     (m: ChangeMeeting) => m.decision === 'reject' || m.decision === 'needs_info')
     ?? null
@@ -176,10 +195,28 @@ export default function ScopingPanel(
         onClose={() => setPending(null)}
       />
 
+      {/* Each customer question is its own container: the docs that explain it,
+          the answer, and the docs behind the answer, owned by that card alone.
+          Everything else the team flagged stays in the strip below. */}
+      {standaloneQuestions.length > 0 && (
+        <section className="space-y-3" data-testid="needs-info-cards">
+          <h3 className="text-xs uppercase tracking-wide text-slate-500">
+            {t('concern.openRequests')}
+          </h3>
+          {standaloneQuestions.map((c) => (
+            <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
+              attachments={attachments} editable={open}
+              canAnswer={canAnswerConcerns} isAuthor={c.raised_by === userId}
+              onChanged={invalidate} />
+          ))}
+        </section>
+      )}
+
       {/* Raised before or during the meeting, by anyone, in parallel. */}
       {/* Scoping concerns may name a department as attribution — optional, and
           open to anyone; "Team" is the default. */}
-      <ConcernStrip changeId={changeId} editable={open} departments={departments} />
+      <ConcernStrip changeId={changeId} editable={open} departments={departments}
+        canAnswer={canAnswerConcerns} hideConcernIds={needsInfo.map((c) => c.id)} />
 
       {outstanding && (
         <div className={`rounded-lg border p-3 space-y-2 ${
@@ -292,6 +329,19 @@ export default function ScopingPanel(
                 {m.decision === 'needs_info' ? t('meeting.missingInfo') : t('meeting.rejectedBecause')}
                 {' '}{m.decision_reason}
               </p>
+            )}
+            {/* The questions this meeting's decision put to the customer live
+                inside its record, indented, so the origin is unmistakable. */}
+            {questionsOf(m.id).length > 0 && (
+              <div data-testid={`meeting-questions-${m.id}`}
+                className="mt-2 ml-4 border-l-2 border-slate-700 pl-3 space-y-2">
+                {questionsOf(m.id).map((c) => (
+                  <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
+                    attachments={attachments} editable={open}
+                    canAnswer={canAnswerConcerns} isAuthor={c.raised_by === userId}
+                    onChanged={invalidate} />
+                ))}
+              </div>
             )}
             {m.selected_department_ids.length > 0 && (
               <p className="text-xs text-slate-500">

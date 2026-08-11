@@ -24,12 +24,15 @@ interface Props {
    *  nothing and the file stays 'general'. */
   kind?: AttachmentKind;
   respondsToId?: number;
+  concernId?: number;
   /** Slot label — the needs-info and response slots say what they are for. */
   label?: string;
+  /** Inside a card the zone is one quiet line, not a big dashed billboard. */
+  compact?: boolean;
 }
 
 export default function AttachmentDropzone({
-  changeId, onUploaded, kind, respondsToId, label,
+  changeId, onUploaded, kind, respondsToId, concernId, label, compact = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -48,7 +51,7 @@ export default function AttachmentDropzone({
     let uploaded = 0;
     for (const f of ok) {
       try {
-        await changesApi.uploadAttachment(changeId, f, { kind, respondsToId });
+        await changesApi.uploadAttachment(changeId, f, { kind, respondsToId, concernId });
         uploaded += 1;
       } catch (e) {
         toast.error(apiErrorMessage(e, t('attach.failed').replace('{name}', f.name)));
@@ -93,20 +96,21 @@ export default function AttachmentDropzone({
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         className={
-          'flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed ' +
-          'px-4 py-6 text-center cursor-pointer transition-colors ' +
+          'flex items-center justify-center gap-2 rounded-lg border border-dashed ' +
+          'text-center cursor-pointer transition-colors ' +
+          (compact ? 'px-3 py-2 text-xs ' : 'flex-col border-2 px-4 py-6 ') +
           (dragging
             ? 'border-sky-500 bg-sky-500/10 text-sky-200'
             : 'border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-500')
         }
       >
-        <span className="text-2xl leading-none" aria-hidden>
+        <span className={compact ? 'leading-none' : 'text-2xl leading-none'} aria-hidden>
           {busy ? '⏳' : '📎'}
         </span>
-        <span className="text-sm">
+        <span className={compact ? 'text-xs' : 'text-sm'}>
           {busy ? t('attach.uploading') : label ?? t('attach.dropHere')}
         </span>
-        <span className="text-xs text-slate-500">{t('attach.hint')}</span>
+        {!compact && <span className="text-xs text-slate-500">{t('attach.hint')}</span>}
       </div>
       <input
         ref={inputRef}

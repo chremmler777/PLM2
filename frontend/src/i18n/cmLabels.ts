@@ -88,7 +88,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Betroffene Teile festlegen und bestätigen',
     en: 'Define and confirm the impacted set',
   },
-  'tasks.kind.send_rejection': { de: 'Absage an Kunden senden', en: 'Send rejection to customer' },
+      'tasks.kind.send_rejection': { de: 'Absage an Kunden senden', en: 'Send rejection to customer' },
   'tasks.hint.send_rejection_letter': {
     de: 'Begründungsdokument hochladen',
     en: 'Upload the rejection document',
@@ -263,6 +263,32 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.pickDepartment': { de: 'Fachbereich wählen …', en: 'Select department…' },
   'concern.resolution': { de: 'Wie wurde der Punkt geklärt?', en: 'How was it addressed?' },
   'concern.resolved': { de: 'Geklärt', en: 'Addressed' },
+  'concern.awaitingAnswer': { de: 'Wartet auf Antwort', en: 'Awaiting answer' },
+  'concern.solved': { de: 'Geklärt', en: 'Solved' },
+  'concern.asked': { de: 'Gefragt von', en: 'Asked by' },
+  'concern.questionDocs': { de: 'Unterlagen zur Frage', en: 'Documents on the question' },
+  'concern.answerDocs': { de: 'Unterlagen zur Antwort', en: 'Documents on the answer' },
+  'concern.addDoc': { de: '+ Dokument', en: '+ Document' },
+  'concern.noDocs': { de: 'Keine Unterlagen', en: 'No documents' },
+  'concern.openRequests': { de: 'Rückfragen', en: 'Info requests' },
+  'concern.markSolved': { de: 'Als geklärt markieren', en: 'Mark solved' },
+  'concern.authorOnlyWithdraw': {
+    de: 'Nur der Ersteller kann zurückziehen',
+    en: 'Only the author can withdraw',
+  },
+  'concern.authorOrSales': {
+    de: 'Nur der Ersteller oder der Vertrieb kann diesen Punkt klären',
+    en: 'Only the author or Sales can settle this point',
+  },
+  'concern.answer': { de: 'Antwort', en: 'Answer' },
+  'concern.answerPlaceholder': {
+    de: 'Antwort des Kunden zusammenfassen …',
+    en: 'Summarise the customer’s answer …',
+  },
+  'concern.answerHint': {
+    de: 'Ein angehängtes Antwortdokument zählt ebenfalls als Beleg.',
+    en: 'An attached response document counts as substance too.',
+  },
   'concern.onHold': { de: 'Wartet', en: 'On hold' },
   'concern.note': { de: 'Einwand', en: 'Concern' },
   'concern.notePlaceholder': {
