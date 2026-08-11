@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ScopingPanel from './ScopingPanel'
+import { t } from '../../i18n/cmLabels'
+import { changesApi } from '../../api/changes'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -110,5 +112,26 @@ describe('ScopingPanel meeting recording is scoping-only', () => {
     await screen.findByText(/PM Jane/)
     expect(screen.queryByRole('button', { name: /save meeting/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /^proceed$/i })).toBeNull()
+  })
+})
+
+describe('ScopingPanel keeps the discussion out of the record', () => {
+  afterEach(cleanup)
+
+  it('neither renders meeting notes nor offers a notes field', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    await screen.findByText(/PM Jane/)
+    // The fixture meeting carries notes; they are not shown any more.
+    expect(screen.queryByText('scope ok')).toBeNull()
+    expect(document.querySelector('textarea')).toBeNull()
+    expect(screen.getByText(t('scoping.discussionByEmail'))).toBeTruthy()
+  })
+
+  it('records a meeting without sending notes', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    fireEvent.click(await screen.findByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
+    expect(body).not.toHaveProperty('notes')
   })
 })

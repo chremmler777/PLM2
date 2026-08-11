@@ -33,7 +33,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
   const [channel, setChannel] = useState<'meeting' | 'chat' | 'email'>('meeting')
   const [participants, setParticipants] = useState('')
   const [addName, setAddName] = useState('')
-  const [notes, setNotes] = useState('')
   const [deptIds, setDeptIds] = useState<number[]>([])
   const [deptTouched, setDeptTouched] = useState(false)
 
@@ -96,11 +95,10 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       channel,
       participants: participants.split(',').map((n) => n.trim())
         .filter(Boolean).map((name) => ({ name })),
-      notes: notes || undefined,
       selected_department_ids: deptIds,
     }),
     onSuccess: () => {
-      setNotes(''); setParticipants(''); setAddName('')
+      setParticipants(''); setAddName('')
       setDeptTouched(false); setDeptIds(recommendedIds); invalidate()
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
@@ -222,7 +220,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                 {' '}{m.decision_reason}
               </p>
             )}
-            {m.notes && <p className="text-slate-400 whitespace-pre-wrap">{m.notes}</p>}
             {m.selected_department_ids.length > 0 && (
               <p className="text-xs text-slate-500">
                 {t('meeting.departments')}: {m.selected_department_ids.map((id) =>
@@ -239,6 +236,9 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
       {meetingOpen && (
         <div className="border border-slate-700 rounded-lg p-4 space-y-3">
           <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
+          {/* No minutes field: the discussion itself lives in the mail thread,
+              which belongs on the change as a document. */}
+          <p className="text-xs text-slate-500">{t('scoping.discussionByEmail')}</p>
           <div className="flex flex-wrap gap-3">
             <div>
               <label className="block text-xs text-slate-500 mb-1">{t('channel.label')}</label>
@@ -298,11 +298,6 @@ export default function ScopingPanel({ change }: { change: ChangeRequest }) {
                 ))}
               </datalist>
             </div>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 mb-1">{t('meeting.notes')}</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4}
-              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
           </div>
           <div>
             <label className="block text-xs text-slate-500 mb-1">

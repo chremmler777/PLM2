@@ -9,8 +9,8 @@ const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 // The description is Sales' capture text. It freezes at kickoff: from scoping on
-// the project team records its thinking in meeting notes and minutes instead, so
-// the text a decision was made on cannot move underneath it.
+// the project team's thinking lives in the mail thread attached to the change,
+// so the text a decision was made on cannot move underneath it.
 const EDITABLE_STATUSES = ['captured']
 
 export function DescriptionEditor({ change, canEdit = true }:

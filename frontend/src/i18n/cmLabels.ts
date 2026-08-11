@@ -339,6 +339,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'description.saved': { de: 'Beschreibung gespeichert', en: 'Description saved' },
   'scoping.title': { de: 'Vorabklärung', en: 'Scoping' },
   'scoping.newMeeting': { de: 'Meeting erfassen', en: 'Record meeting' },
+  'scoping.discussionByEmail': {
+    de: 'Diskussion per E-Mail — Verlauf als Anhang ablegen',
+    en: 'Discussion happens by email — attach the thread as a document',
+  },
   'scoping.deadline': { de: 'Termin', en: 'Deadline' },
   'meeting.addAttendee': { de: 'Teilnehmer hinzufügen…', en: 'Add attendee…' },
   'meeting.recommended': { de: 'Empfohlen (Bewertung)', en: 'Recommended (assessment)' },
