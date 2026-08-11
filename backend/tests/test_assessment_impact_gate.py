@@ -20,10 +20,8 @@ async def _scoping_ready(client, auth, seed, session_factory, part):
     cid = res.json()["id"]
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part["part_id"], "is_lead": True}, headers=auth)
-    await client.post(f"/api/v1/changes/{cid}/transition",
-                      json={"to_status": "scoping"}, headers=auth)
-    await client.patch(f"/api/v1/changes/{cid}",
-                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
+    from tests.conftest import to_scoping
+    await to_scoping(client, auth, cid)
     await record_proceed_meeting(session_factory, cid)
     return cid
 

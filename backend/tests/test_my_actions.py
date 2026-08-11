@@ -5,7 +5,7 @@ performs it (see ChangeService.my_actions for the mirrored source)."""
 import pytest
 import pytest_asyncio
 
-from tests.conftest import login
+from tests.conftest import login, satisfy_capture_gate
 
 pytestmark = pytest.mark.asyncio
 
@@ -141,6 +141,7 @@ async def test_admin_sees_gate_action_on_soft_blocked_change(
     assert part.status_code in (200, 201), part.text
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part.json()["id"]}, headers=eng_auth)
+    await satisfy_capture_gate(client, eng_auth, cid)
     scop = await client.post(f"/api/v1/changes/{cid}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text

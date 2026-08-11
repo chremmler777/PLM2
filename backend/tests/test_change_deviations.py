@@ -113,6 +113,8 @@ async def test_blocked_transition_requires_approved_deviation(
     await client.post(f"/api/v1/changes/{c['id']}/impacted-items",
                       json={"part_id": part.json()["id"], "is_lead": True},
                       headers=eng_auth)
+    from tests.conftest import satisfy_capture_gate
+    await satisfy_capture_gate(client, eng_auth, c["id"])
     scop = await client.post(f"/api/v1/changes/{c['id']}/transition",
                              json={"to_status": "scoping"}, headers=eng_auth)
     assert scop.status_code == 200, scop.text

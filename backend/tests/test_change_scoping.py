@@ -2,7 +2,10 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import record_proceed_meeting, advance_to_assessment, lock_impact
+from tests.conftest import (
+    record_proceed_meeting, advance_to_assessment, lock_impact,
+    satisfy_capture_gate, to_scoping,
+)
 
 
 async def create_change(client, auth, project_id, **overrides):
@@ -45,11 +48,10 @@ async def add_item_and_lead(client, auth, change_id, part_id):
     res = await client.post(f"/api/v1/changes/{change_id}/impacted-items",
                             json={"part_id": part_id, "is_lead": True}, headers=auth)
     assert res.status_code == 200, res.text
-    # A required-by deadline is a scoping-exit gate; set it so these tests
-    # exercise the meeting/routing guards rather than blocking on the deadline.
-    res = await client.patch(f"/api/v1/changes/{change_id}",
-                             json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
-    assert res.status_code == 200, res.text
+    # Also completes the capture (description + attachment + required-by date)
+    # so these tests exercise the meeting/routing guards rather than blocking
+    # on the kickoff or scoping-exit gates.
+    await satisfy_capture_gate(client, auth, change_id)
 
 
 @pytest.mark.asyncio
@@ -93,6 +95,7 @@ async def test_scoping_decision_records_channel(client, admin_auth, seed, part):
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    await to_scoping(client, admin_auth, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
                             json={"channel": "email", "notes": "agreed by email with PM"},
                             headers=admin_auth)
@@ -107,16 +110,19 @@ async def test_scoping_decision_records_channel(client, admin_auth, seed, part):
 @pytest.mark.asyncio
 async def test_assessment_requires_a_deadline(client, admin_auth, seed, part,
                                               session_factory):
-    """A required-by deadline must be set in scoping before assessment starts."""
+    """A required-by deadline must be set in scoping before assessment starts.
+    Kickoff already demands one for a customer-relevant change, so the gate is
+    reached here by clearing it again during scoping."""
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"], customer_relevant=True)
-    # add_item_and_lead sets a deadline; add the item WITHOUT it here.
     res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                             json={"part_id": part["part_id"], "is_lead": True},
                             headers=admin_auth)
     assert res.status_code == 200, res.text
-    await client.post(f"/api/v1/changes/{change['id']}/transition",
-                      json={"to_status": "scoping"}, headers=admin_auth)
+    await to_scoping(client, admin_auth, change["id"])
+    res = await client.patch(f"/api/v1/changes/{change['id']}",
+                             json={"required_by_date": None}, headers=admin_auth)
+    assert res.status_code == 200, res.text
     await record_proceed_meeting(session_factory, change["id"], actor_id=seed["admin_id"])
     blocked = await client.post(f"/api/v1/changes/{change['id']}/transition",
                                 json={"to_status": "in_assessment"}, headers=admin_auth)
@@ -137,8 +143,7 @@ async def test_assessment_requires_proceed_meeting(client, admin_auth, seed, par
     change = await create_change(client, admin_auth, seed["project_id"],
                                  lead_id=seed["admin_id"])
     await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
-    await client.post(f"/api/v1/changes/{change['id']}/transition",
-                      json={"to_status": "scoping"}, headers=admin_auth)
+    await to_scoping(client, admin_auth, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/transition",
                             json={"to_status": "in_assessment"}, headers=admin_auth)
     assert res.status_code == 400
@@ -318,6 +323,7 @@ async def test_informational_only_scoping_is_rejected(
     # deciding 'proceed' auto-advances into assessment, which is hard-gated on the
     # impact lock — lock it so this test reaches the I-only routing check.
     await lock_impact(session_factory, change["id"])
+    await to_scoping(client, admin_auth, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
                             json={"selected_department_ids": picked}, headers=admin_auth)
     assert res.status_code == 200, res.text

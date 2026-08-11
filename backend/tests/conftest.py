@@ -138,9 +138,37 @@ async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def satisfy_capture_gate(client, auth, change_id: int):
+    """Kickoff (captured -> scoping) is soft-gated on a complete capture:
+    a description, at least one attachment, and — for customer-relevant
+    changes — the quote deadline. See ChangeService._guard. The date is set
+    unconditionally here; it is harmless on internal changes."""
+    res = await client.patch(
+        f"/api/v1/changes/{change_id}",
+        json={"description": "Captured by Sales",
+              "required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
+    assert res.status_code == 200, res.text
+    res = await client.post(
+        f"/api/v1/changes/{change_id}/attachments",
+        files={"file": ("capture.txt", b"capture evidence", "text/plain")},
+        headers=auth)
+    assert res.status_code in (200, 201), res.text
+
+
+async def to_scoping(client, auth, change_id: int):
+    """Complete the capture and kick the change off into scoping — where
+    meetings and the impacted-set lock live."""
+    await satisfy_capture_gate(client, auth, change_id)
+    res = await client.post(f"/api/v1/changes/{change_id}/transition",
+                            json={"to_status": "scoping"}, headers=auth)
+    assert res.status_code == 200, res.text
+    return res
+
+
 async def advance_to_assessment(client, auth, session_factory, change_id: int,
                                 dept_ids: list[int] | None = None):
     """captured -> scoping -> (deadline + proceed meeting) -> in_assessment."""
+    await satisfy_capture_gate(client, auth, change_id)
     res = await client.post(f"/api/v1/changes/{change_id}/transition",
                             json={"to_status": "scoping"}, headers=auth)
     assert res.status_code == 200, res.text

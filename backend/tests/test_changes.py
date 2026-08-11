@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
+    satisfy_capture_gate,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -57,23 +58,24 @@ async def _transition(client, auth, change_id, to_status, **over):
 
 
 async def test_transition_blocked_without_impacted_items(client, eng_auth, seed):
-    """Impact is an input to scoping, not an output of it: a change with
-    nothing listed cannot be scoped, and even once listed it cannot reach
-    assessment until the set is locked."""
+    """Impact is defined during scoping now, so an empty set no longer blocks
+    kickoff — but the set still cannot reach assessment until it is locked.
+    Kickoff itself is gated on a complete capture instead."""
     change = await _create_change(client, eng_auth, seed["project_id"],
                                   lead_id=seed["engineer_id"])
     await approve_gates(client, eng_auth, change["id"])
 
-    # Nothing listed -> scoping is soft-blocked (overridable by deviation).
+    # Incomplete capture -> scoping is soft-blocked (overridable by deviation).
     res = await _transition(client, eng_auth, change["id"], "scoping")
     assert res.status_code == 400, res.text
-    assert "no impacted items defined" in res.json()["detail"].lower()
+    assert "incomplete capture" in res.json()["detail"].lower()
 
-    # List one, and scoping opens.
+    # Complete the capture, and scoping opens — with or without impacted items.
     part_id = await _make_part(client, eng_auth, seed["project_id"],
                                f"ART-IMP{change['id']}")
     await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
+    await satisfy_capture_gate(client, eng_auth, change["id"])
     res = await _transition(client, eng_auth, change["id"], "scoping")
     assert res.status_code == 200, res.text
 
@@ -637,6 +639,7 @@ async def test_customer_relevant_locked_after_scoping(
     part_id2 = await _make_part(client, eng_auth, seed["project_id"], f"ART-CR{cid2}")
     await client.post(f"/api/v1/changes/{cid2}/impacted-items",
                       json={"part_id": part_id2}, headers=eng_auth)
+    await satisfy_capture_gate(client, eng_auth, cid2)
     res = await _transition(client, eng_auth, cid2, "scoping")
     assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{cid2}", headers=eng_auth)
@@ -736,6 +739,7 @@ async def test_reject_requires_a_memo_and_can_be_reopened(client, eng_auth, seed
     part_id = await _make_part(client, eng_auth, seed["project_id"], f"ART-RJ{cid}")
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part_id}, headers=eng_auth)
+    await satisfy_capture_gate(client, eng_auth, cid)
     assert (await _transition(client, eng_auth, cid, "scoping")).status_code == 200
 
     # No memo -> refused.

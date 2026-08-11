@@ -2,7 +2,7 @@
 import pytest
 from sqlalchemy import select
 
-from tests.conftest import login, ENGINEER_PASSWORD, lock_impact
+from tests.conftest import login, ENGINEER_PASSWORD, lock_impact, to_scoping
 from tests.test_change_scoping import create_change, add_item_and_lead
 from app.models.change import ChangeMeeting
 
@@ -18,6 +18,7 @@ async def post_meeting(client, auth, change_id, **overrides):
 @pytest.mark.asyncio
 async def test_meeting_crud_and_needs_info(client, admin_auth, seed):
     change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
     res = await post_meeting(client, admin_auth, change["id"])
     assert res.status_code == 200, res.text
     mid = res.json()["id"]
@@ -40,7 +41,7 @@ async def test_meeting_crud_and_needs_info(client, admin_auth, seed):
     assert res.status_code == 400
     # change unaffected by needs_info
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=admin_auth)
-    assert res.json()["status"] == "captured"
+    assert res.json()["status"] == "scoping"
     # list shows the meeting
     res = await client.get(f"/api/v1/changes/{change['id']}/meetings", headers=admin_auth)
     assert len(res.json()) == 1
@@ -62,6 +63,7 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
         await s.commit()
     async with session_factory() as s:
         dept_ids = [d for (d,) in await s.execute(select(Department.id))][:2]
+    await to_scoping(client, admin_auth, change["id"])
     res = await post_meeting(client, admin_auth, change["id"],
                              selected_department_ids=dept_ids)
     mid = res.json()["id"]
@@ -71,7 +73,7 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
         f"/api/v1/changes/{change['id']}/meetings/{res2.json()['id']}/decide",
         json={"decision": "proceed"}, headers=admin_auth)
     assert res3.status_code == 400
-    # proceed with departments: captured -> scoping -> in_assessment in one call.
+    # proceed with departments: scoping -> in_assessment in one call.
     # Entering assessment is hard-gated on the impact lock, so lock it first.
     await lock_impact(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
@@ -84,6 +86,7 @@ async def test_proceed_kicks_off_assessment(client, admin_auth, seed, part,
 @pytest.mark.asyncio
 async def test_reject_decision_rejects_change(client, admin_auth, seed):
     change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
     res = await post_meeting(client, admin_auth, change["id"])
     mid = res.json()["id"]
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
@@ -106,6 +109,7 @@ async def test_meeting_create_accepts_tz_aware_date_stored_naive(
     doesn't itself enforce this, so we assert on the stored value's
     tzinfo directly rather than relying on the insert failing."""
     change = await create_change(client, admin_auth, seed["project_id"])
+    await to_scoping(client, admin_auth, change["id"])
     res = await post_meeting(client, admin_auth, change["id"],
                              meeting_date="2026-07-07T12:00:00Z",
                              participants=[{"name": "X"}])

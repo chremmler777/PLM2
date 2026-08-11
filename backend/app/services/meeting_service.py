@@ -60,9 +60,13 @@ class MeetingService:
         channel: str = "meeting",
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
-        if change.status not in ("captured", "scoping"):
+        # Meetings belong to scoping: capture is Sales writing the request
+        # down, the scoping decision is the project team's. A change turned
+        # down at capture is rejected via the direct transition endpoint
+        # (with a rejection_reason), not via a meeting.
+        if change.status != "scoping":
             raise ChangeError(
-                "Scoping decisions can only be recorded before assessment starts")
+                "Scoping decisions can only be recorded while the change is in scoping")
         if channel not in MEETING_CHANNELS:
             raise ChangeError(f"Invalid channel '{channel}'")
         dept_ids = await MeetingService._validate_departments(
@@ -213,11 +217,8 @@ class MeetingService:
             field_name="decision", new_value=decision,
             notes=reason or meeting.notes)
         if decision in ("proceed", "reject"):
-            # Proceeding runs through scoping (that is where the work was done);
-            # rejecting goes straight there from wherever it is, so a change
-            # turned down at capture is not forced to be scoped on its way out.
-            if change.status == "captured" and decision == "proceed":
-                await ChangeService.transition(session, change, "scoping", user.id)
+            # Meetings only exist in scoping now, so proceed always goes
+            # straight to assessment; reject goes straight out.
             target = "in_assessment" if decision == "proceed" else "rejected"
             # The meeting's reason is the change's rejection reason — one
             # decision, one justification, not two places to keep in step.

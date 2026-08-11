@@ -1,0 +1,172 @@
+# Change Management — process flow (living document)
+
+**Purpose.** One place holding what the change process actually *is*, so the
+formal process flow + description can be written from it, and so an auditor can
+be shown how each rule is enforced rather than asserted. Updated as decisions
+land; every rule here names the code that enforces it.
+
+**Status:** in progress. Sections marked ⚠ are open questions, not decisions.
+
+---
+
+## 1. Where the flow came from
+
+Two different origins, worth keeping straight:
+
+| Part | Origin |
+|---|---|
+| Assessment routing, D1 approval matrix, per-department modules | `Documents/Changemanagement/ÄnderungsmitteilungChange_Management*.xlsx` — the real workbook |
+| The `captured → scoping → in_assessment → …` state machine | Our design, `docs/superpowers/specs/2026-07-04-change-flow-path-to-quote-design.md` |
+
+The original core design (2026-06-15) went `captured → in_assessment` directly.
+`scoping` was introduced on 2026-07-04. **No customer-supplied process flow
+defines these stages** — we are free to reshape them.
+
+### The workbook's own structure (to reconcile against)
+
+Tabs: `Änderungsinformation_D1` (master), then one per department —
+`Vertrieb (Sales)_D2`, `Entwicklung (R&D)_D3`, `Wkzg. Entw. (tool design)_D4`,
+`IE_D5`, `Qualität (QVP)_D6`, `Logistik_D7` (+`_D7_2`), `Produktion_D8`,
+`Einkauf (purchasing)_D9`, `Fertigungsst. (production c)_D10` — plus
+`Summierung`, `Std.-Sätze+Fzg`, `Änderungshistorie`, `Bauteilauswahl`.
+
+⚠ **To review:** the workbook is the template the business already fills in.
+Each D-tab should map 1:1 onto a department assessment module, `Summierung`
+onto the cost summation, `Änderungshistorie` onto the audit trail, and
+`Bauteilauswahl` onto the impacted-item picker. That mapping has not been
+checked field-by-field. Do this before writing the formal description.
+
+---
+
+## 2. Stages
+
+| Stage | What happens | Who |
+|---|---|---|
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales (only members of a `can_start_change` department, or an admin, may raise a change) |
+| `scoping` | Cross-functional meeting decides: proceed / needs info / reject. Impacted set worked out and locked, deadline set, documents gathered | Team, decision recorded by any member |
+| `in_assessment` | Routed departments answer feasibility + cost per the D1 matrix | Departments (RASIC) |
+| `costing` | Costs summed | — |
+| `quoted` | Offer to customer (customer-carried changes only) | Sales |
+| `approved` | Go decision | PM + Quality sign-off, or internal cost approval |
+| `in_implementation` | ECN revisions spawned, work done | — |
+| `in_validation` | Results checked | — |
+| `released` → `closed` | Change is live, then wrapped up | — |
+
+Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
+
+### Sanity checks per stage
+
+Run these when discussing any stage's implementation:
+
+1. **Can it be entered by accident?** Every entry should require the thing the
+   stage is *for* to already exist.
+2. **Does leaving it require a named person?** If not, the audit trail records a
+   state change with nobody behind it.
+3. **Is the negative path as well-served as the happy path?** Reject and
+   needs-info deserve the same care as proceed.
+4. **What does it cost to undo?** If irreversible, say so in the UI *before* the
+   click, not after.
+5. **Does the workbook have a tab for this?** If yes, the fields should line up.
+
+---
+
+## 3. Gates and rules, with enforcement
+
+### Entering `scoping`
+- **Soft:** the capture must be complete — a `description`, **at least one
+  attachment**, and (customer-relevant changes only) the **required-by date**.
+  Missing pieces are listed in the message: *"Incomplete capture — missing
+  description, at least one attachment before scoping"*. Overridable by
+  approved deviation. `change_service.py::_guard`.
+  Rationale: Sales captures, the project team scopes — kickoff means handing
+  over a request someone can actually work on. The impacted set is **no longer**
+  required here: it is defined during scoping (first PM action there) and stays
+  hard-locked before assessment, as before.
+
+### Inside `scoping`
+- The onward move is **the meeting's call, not a button**. The cockpit offers no
+  advance button at `scoping`; it points at the scoping tab.
+  `changeStatus.ts::DECIDED_BY_MEETING`.
+- **Concerns** — any team member may flag `reject_proposal` or `needs_info` with
+  a note. Only its author may withdraw it (admins are *not* exempt). One open
+  concern per person per kind. `meeting_service.py::raise_concern`.
+- **Open concerns block `proceed`** — the decision must either be answered by
+  the author withdrawing, or by a negative decision that consumes it.
+- Meeting decision `reject` requires a reason; `needs_info` requires stating
+  what is missing. `proceed` needs no justification.
+- A negative decision **resolves** the open concerns and its reason becomes the
+  change's `rejection_reason` — one decision, one justification.
+- `needs_info` keeps the change in `scoping` and raises a **Sales-accountable
+  action** ("obtain missing information"). Sales owns the customer relationship.
+- After a negative decision, an **attachment slot** appears for Sales/PM to file
+  what they send the customer — rejection letter, open questions, or a
+  counter-proposal.
+
+### Entering `in_assessment`
+- **Hard, unbypassable:** impacted set must be R&D-locked.
+  *"Impacted set is not locked — confirm impacted items before starting
+  assessment"*. Not even an approved deviation clears it.
+- **Soft:** ≥1 impacted item, lead assigned, deadline set, meeting with decision
+  `proceed`.
+- The **lead item pins here** — departments are routed against it. Editable in
+  `captured`/`scoping` only.
+
+### Rejecting at capture
+A request can go straight `captured → rejected` without passing through
+scoping, via the **direct transition endpoint** with a `rejection_reason` —
+forcing the scoping hop would demand a full capture for a change that is dying
+anyway. Meetings cannot be recorded at `captured` at all: the scoping decision
+is the project team's, so `meeting_service.py::create_meeting` requires status
+`scoping`.
+
+### Rejection and reopening
+- Rejecting requires a memo and warns that the flow stops.
+- `rejected → scoping` reopen requires its own memo.
+- Both write their own changelog entry, separate from the status hop.
+- **Cancellation stays terminal** — that is the irreversible one.
+
+---
+
+## 4. Naming and identity
+
+- **Change title is composed, never typed:**
+  `<our number>[ +n] - <customer number> - <item name>`, from the lead item.
+  `StartChangeModal.tsx::composeTitle`.
+- **Reason** is a one-line short description, hard-capped at 100 chars both
+  sides. Detail belongs in attachments and assessments.
+- **Cost carrier** replaces "customer-relevant": *Customer change* vs *Internal
+  change*. Deliberately not "internal/external" — the D1 master already uses
+  those words for its own independent `cm_internal` / `cm_external` flags.
+
+---
+
+## 5. Open questions
+
+- ⚠ **Cost carrier is never re-confirmed.** Sales picks it at capture and it
+  selects the whole commercial branch; the scoping meeting should confirm or
+  flip it before assessment, same pattern as the impact lock. A
+  misclassification currently surfaces at `quoted`.
+- ⚠ **Post-quote impact edits.** Editing the impacted set clears the R&D lock —
+  correct pre-quote, but after `quoted` it means the quote no longer covers the
+  scope, and nothing forces reconciliation.
+- ⚠ **Title staleness.** Composed once at creation; swapping the lead item later
+  leaves the old name. See
+  `docs/superpowers/plans/2026-08-06-title-backfill-dms-link.md`.
+- ⚠ **One meeting or two.** Current position (and Fable's, consulted 2026-08-06):
+  one. `captured` is originator data entry with no cross-functional obligation;
+  `scoping` is the single CCB-style review. A `needs_info` outcome produces a
+  *follow-up meeting row*, not a second meeting type.
+- ⚠ **Workbook field mapping** — see §1.
+
+---
+
+## 6. Audit trail
+
+Every rule above writes to the hash-chained `change_changelog`. Actions that
+carry a human decision get their own entry rather than being folded into the
+status change: `rejected`, `reopened`, `concern_raised`, `concern_withdrawn`,
+`scoping_meeting_decided`, `impacted_lead_changed`, `title_backfilled`.
+
+An auditor asking "who objected, and what was done about it" is answered by the
+concern rows plus the meeting decision that resolved them — not by inference
+from who pressed a button.

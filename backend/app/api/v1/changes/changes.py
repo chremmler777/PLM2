@@ -58,6 +58,11 @@ async def create_change(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    if not await ChangeService.user_can_start_change(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin or a member of a department allowed to start "
+                   "changes (e.g. Sales) may raise a change")
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,

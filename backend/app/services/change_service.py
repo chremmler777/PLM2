@@ -503,16 +503,28 @@ class ChangeService:
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
         """Return None if soft-OK, else a human reason string (overridable)."""
-        # Impact is an input to scoping, not an output of it: the meeting that
-        # decides to scope a change already knows which items are on the table,
-        # so entering scoping with an empty set means the decision was never
-        # recorded. Deliberately soft — an exploratory change that genuinely
-        # does not know its scope yet can proceed on an approved deviation, and
-        # the override is then on the record. The *hard*, unbypassable bar stays
-        # where it was: a locked set before assessment.
-        if to_status == "scoping" and not change.impacted_items:
-            return ("No impacted items defined — list what this change touches "
-                    "before scoping")
+        # Capture is Sales' job, scoping is the project team's: kickoff means
+        # handing over a request someone can actually work on. That needs the
+        # what (description), the evidence (at least one attachment) and — for
+        # customer-relevant changes — the quote deadline. Impact is NOT required
+        # here anymore: it is defined during scoping and hard-locked before
+        # assessment. Deliberately soft, so an urgent request can proceed on an
+        # approved deviation with the override on the record.
+        if to_status == "scoping":
+            missing = []
+            if not (change.description or "").strip():
+                missing.append("description")
+            att_count = (await session.execute(
+                select(func.count()).select_from(ChangeAttachment).where(
+                    ChangeAttachment.change_id == change.id))).scalar() or 0
+            if att_count == 0:
+                missing.append("at least one attachment")
+            # Internal changes have no quote deadline in the two-phase model.
+            if change.customer_relevant and change.required_by_date is None:
+                missing.append("required-by date")
+            if missing:
+                return ("Incomplete capture — missing " + ", ".join(missing)
+                        + " before scoping")
         if to_status == "in_assessment":
             count = len(change.impacted_items)
             if count == 0:
@@ -1072,6 +1084,33 @@ class ChangeService:
         return dept.id in dept_ids
 
     @staticmethod
+    async def user_can_start_change(session: AsyncSession, user: User) -> bool:
+        """Capture is not open to everyone: a change may only be raised by an
+        admin or a member of a department flagged can_start_change (Sales in
+        the seeded data). The flag has existed on wf_departments since
+        migration 032; this is where it finally bites."""
+        if user.role == "admin":
+            return True
+        # Nothing flagged anywhere means the org has not designated who
+        # captures yet — locking every non-admin out of the entry point would
+        # be worse than leaving it open. Migration 041 flags Sales.
+        configured = (await session.execute(
+            select(func.count()).select_from(Department).where(
+                Department.can_start_change.is_(True)))).scalar() or 0
+        if configured == 0:
+            return True
+        from app.services.workflow_service import WorkflowService
+        dept_ids = await WorkflowService.get_user_department_ids(session, user.id)
+        if not dept_ids:
+            return False
+        starter = (await session.execute(
+            select(func.count()).select_from(Department).where(
+                Department.id.in_(dept_ids),
+                Department.can_start_change.is_(True),
+            ))).scalar() or 0
+        return starter > 0
+
+    @staticmethod
     async def user_can_sign_off(session: AsyncSession, user: User, role: str) -> bool:
         """Quality & PM sign-off are department-gated: role='quality' requires
         admin or 'Quality' membership, role='pm' requires admin or 'Project
@@ -1177,19 +1216,20 @@ class ChangeService:
                 "deviation_id": dev.id,
             })
 
-        # kind "impact_confirm": captured or scoping, impacted items exist and
-        # are not yet locked, and this user may confirm it. Offered from
-        # captured on, because the set is meant to be defined before scoping
-        # starts — see the -> scoping soft guard. Locking is the step that
-        # unblocks assessment (the -> in_assessment hard gate in transition()).
-        # Mirrors ChangeService.user_can_confirm_impact /
-        # POST /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
-        if (change.status in SCOPING_STATUSES and change.impact_confirmed_at is None
-                and change.impacted_items
+        # kind "impact_confirm": defining and locking the impacted set is the
+        # first step INSIDE scoping — capture is Sales writing the request
+        # down, the impacted set is the project team's call. So it is offered
+        # in 'scoping' only, and offered even when the set is still empty
+        # (that is the work). Locking unblocks assessment (the -> in_assessment
+        # hard gate in transition()). Mirrors
+        # ChangeService.user_can_confirm_impact / POST
+        # /changes/{id}/impact/confirm's authz (changes.py confirm_impact).
+        if (change.status == "scoping" and change.impact_confirmed_at is None
                 and await ChangeService.user_can_confirm_impact(session, user)):
             actions.append({
                 "kind": "impact_confirm",
-                "label": "Confirm impacted items",
+                "label": ("Confirm impacted items" if change.impacted_items
+                          else "Define and confirm impacted items"),
                 "target_tab": "impacted",
             })
 

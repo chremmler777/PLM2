@@ -16,10 +16,10 @@ async def _change_in_scoping(client, auth, seed, suffix):
     assert part.status_code in (200, 201), part.text
     await client.post(f"/api/v1/changes/{cid}/impacted-items",
                       json={"part_id": part.json()["id"], "is_lead": True}, headers=auth)
-    # A required-by deadline is a scoping-exit gate; set it so these tests
-    # exercise the concern rules rather than blocking on the deadline.
-    await client.patch(f"/api/v1/changes/{cid}",
-                       json={"required_by_date": "2026-12-31T12:00:00Z"}, headers=auth)
+    # Complete the capture (description + attachment + required-by date) so
+    # these tests exercise the concern rules rather than the kickoff gate.
+    from tests.conftest import satisfy_capture_gate
+    await satisfy_capture_gate(client, auth, cid)
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "scoping"}, headers=auth)
     assert res.status_code == 200, res.text
@@ -184,16 +184,22 @@ async def test_needs_info_requires_saying_what_is_missing(
 
 async def test_a_change_can_be_rejected_at_capture_without_being_scoped(
         client, eng_auth, seed, session_factory):
-    """A request turned down outright never needed an impacted set — forcing it
-    through scoping on the way out would demand work on a change that is dying."""
+    """A request turned down outright never needed a full capture — forcing it
+    through scoping on the way out would demand work on a change that is dying.
+    Meetings live in scoping now, so the way out at capture is the direct
+    transition with a rejection reason."""
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "dead on arrival",
         "change_type": "physical_part", "lead_id": seed["engineer_id"]}, headers=eng_auth)
     cid = res.json()["id"]
-    mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
+    # ... and a meeting cannot be recorded before scoping at all.
+    early = await client.post(f"/api/v1/changes/{cid}/meetings", json={
+        "channel": "meeting", "participants": []}, headers=eng_auth)
+    assert early.status_code == 400
 
-    res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide", headers=eng_auth,
-                            json={"decision": "reject", "reason": "Customer withdrew"})
+    res = await client.post(f"/api/v1/changes/{cid}/transition", headers=eng_auth,
+                            json={"to_status": "rejected",
+                                  "rejection_reason": "Customer withdrew"})
     assert res.status_code == 200, res.text
     got = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
     assert got["status"] == "rejected"
