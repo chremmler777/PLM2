@@ -1,9 +1,14 @@
 """Internal costing branch: PM approves the summation total, no quote step."""
+from datetime import datetime, timedelta
+
 import pytest
 from sqlalchemy import update
 
 from tests.conftest import login, ENGINEER_PASSWORD, advance_to_assessment
 from tests.test_change_scoping import create_change, add_item_and_lead
+
+# Internal approval is where the release ("released-by") deadline is born.
+_RELEASE_DUE = (datetime.utcnow() + timedelta(days=120)).isoformat()
 
 
 async def to_costing(session_factory, change_id):
@@ -23,7 +28,7 @@ async def test_internal_approval_snapshots_amount_and_unblocks_approved(
     await advance_to_assessment(client, admin_auth, session_factory, change["id"])
     await to_costing(session_factory, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={"note": "budget ok"}, headers=admin_auth)
+                            json={"note": "budget ok", "release_due_date": _RELEASE_DUE}, headers=admin_auth)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["internal_approved_by"] == seed["admin_id"]
@@ -85,6 +90,31 @@ async def test_internal_approval_allows_pm_department_member(
     await to_costing(session_factory, change["id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={"note": "pm approved"}, headers=eng_auth)
+                            json={"note": "pm approved", "release_due_date": _RELEASE_DUE}, headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["internal_approved_by"] == seed["engineer_id"]
+
+
+@pytest.mark.asyncio
+async def test_internal_approval_requires_release_deadline(
+        client, admin_auth, seed, part, session_factory):
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    await to_costing(session_factory, change["id"])
+    cid = change["id"]
+    res = await client.post(f"/api/v1/changes/{cid}/internal-approval",
+                            json={"note": "ok"}, headers=admin_auth)
+    assert res.status_code == 400
+    assert "release deadline" in res.json()["detail"].lower()
+
+    due = (datetime.utcnow() + timedelta(days=30)).isoformat()
+    res = await client.post(f"/api/v1/changes/{cid}/internal-approval", json={
+        "note": "ok", "release_due_date": due, "release_due_reason": "plant window",
+    }, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["internal_approved_at"] is not None
+    assert body["release_due_date"] is not None
+    assert body["release_due_reason"] == "plant window"
+    assert body["active_deadline"] == "release"

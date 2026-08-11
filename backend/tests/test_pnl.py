@@ -5,7 +5,7 @@ revenue is `quoted_price` (customer changes) or `internal_approved_amount`
 (internal changes); cost is the sum of AssessmentCostLine actuals joined via
 ChangeAssessment. Only changes in status 'costing' or beyond are in scope.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -165,7 +165,9 @@ async def test_internal_branch_uses_approved_amount(session_factory, seed, pnl_d
         assert internal_row["total_cost"] == 3000.0
 
         change = await session.get(ChangeRequest, pnl_data["internal_id"])
-        await ChangeService.approve_internal_costs(session, change, admin)
+        await ChangeService.approve_internal_costs(
+            session, change, admin,
+            release_due_date=datetime.utcnow() + timedelta(days=120))
         await session.commit()
 
         rows = await PnlService.changes_pnl(session, admin)

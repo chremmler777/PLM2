@@ -703,7 +703,9 @@ async def approve_internal_costs(
                    "may approve internal costs")
     try:
         await ChangeService.approve_internal_costs(
-            db, change, current_user, note=body.note)
+            db, change, current_user, note=body.note,
+            release_due_date=body.release_due_date,
+            release_due_reason=body.release_due_reason)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -1587,6 +1587,8 @@ class ChangeService:
     async def approve_internal_costs(
         session: AsyncSession, change: ChangeRequest, actor: User,
         *, note: Optional[str] = None,
+        release_due_date: Optional[datetime] = None,
+        release_due_reason: Optional[str] = None,
     ) -> ChangeRequest:
         """Internal costing branch: PM approves the summation total instead of
         a customer quote. Amount is snapshotted for the later P&L view.
@@ -1603,12 +1605,20 @@ class ChangeService:
             raise ChangeError("Internal cost approval happens in 'costing' or 'quoted'")
         if change.internal_approved_at is not None:
             raise ChangeError("Internal costs are already approved")
+        # Internal path has no quote step, so approval is where deadline #2
+        # is born — mirror of the acceptance rule for customer changes.
+        if release_due_date is None and change.release_due_date is None:
+            raise ChangeError(
+                "Internal approval requires a release deadline (release_due_date)")
         from app.services.cost_service import CostService
         summ = await CostService.summation(session, change)
         change.internal_approved_by = actor.id
         change.internal_approved_at = datetime.utcnow()
         change.internal_approved_amount = summ["totals"]["grand_total"]
         change.internal_approval_note = note
+        if release_due_date is not None:
+            await ChangeService._apply_release_deadline(
+                session, change, release_due_date, release_due_reason, actor.id)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "internal_costs_approved",

@@ -334,7 +334,7 @@ async def test_legacy_quoted_internal_change_approves_internally(
         client, admin_auth, seed, part, session_factory):
     """F3/F5: an internal change stranded in 'quoted' can still record internal
     cost approval (and only once), then transition to approved."""
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from sqlalchemy import update
     from app.models.change import ChangeRequest
     change = await create_change(client, admin_auth, seed["project_id"],
@@ -344,8 +344,11 @@ async def test_legacy_quoted_internal_change_approves_internally(
         await s.execute(update(ChangeRequest).where(
             ChangeRequest.id == change["id"]).values(status="quoted"))
         await s.commit()
-    res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
-                            json={}, headers=admin_auth)
+    res = await client.post(
+        f"/api/v1/changes/{change['id']}/internal-approval",
+        json={"release_due_date": (
+            datetime.utcnow() + timedelta(days=120)).isoformat()},
+        headers=admin_auth)
     assert res.status_code == 200, res.text
     # F5: a second approval is refused.
     res = await client.post(f"/api/v1/changes/{change['id']}/internal-approval",
