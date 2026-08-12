@@ -524,6 +524,22 @@ class PlantMinutesRollup(BaseModel):
     minutes_per_part: float
 
 
+class PositionVendorDetail(BaseModel):
+    """One position's vendor story: what the department recommended, what
+    Sales chose, and why when the two differ. `cost` is what the summation
+    counted — the chosen offer once there is one."""
+    position_id: int
+    label: str
+    kind: str
+    cost: float = 0.0
+    recommended_vendor: Optional[str] = None
+    recommended_cost: Optional[float] = None
+    chosen_vendor: Optional[str] = None
+    chosen_cost: Optional[float] = None
+    chosen_reason: Optional[str] = None
+    choice_diverges: bool = False
+
+
 class PositionRollup(BaseModel):
     """The position half of a department's costs. Already inside
     by_department and totals; broken out so "how much of this is supplier
@@ -538,6 +554,9 @@ class PositionRollup(BaseModel):
     # Hours were declared but no rate is configured for this department at the
     # costing plant, so they are valued at zero. Flagged rather than guessed.
     unrated_hours: bool = False
+    # Per position, so the wrap-up can name the vendor decisions rather than
+    # only their sum.
+    positions: List[PositionVendorDetail] = []
 
 
 class SummationResponse(BaseModel):
@@ -619,12 +638,27 @@ class CostingOfferResponse(BaseModel):
     # The same promise on the calendar, for comparing offers quoted in
     # different units (business days scale by 7/5, rounded up).
     lead_time_calendar_days: Optional[int] = None
+    # The DEPARTMENT's recommendation.
     favorite: bool = False
     # cost plus shipping, unless the vendor already included it.
     total_cost: float = 0.0
+    # SALES' decision, with the accountability on it. chosen_reason is
+    # mandatory (enforced in the service) only when the decision goes against
+    # the recommendation above.
+    chosen: bool = False
+    chosen_reason: Optional[str] = None
+    chosen_by: Optional[int] = None
+    chosen_by_name: Optional[str] = None
+    chosen_at: Optional[datetime] = None
     created_by: int
     created_at: datetime
     attachments: List[CostingOfferAttachment] = []
+
+
+class VendorChoiceIn(BaseModel):
+    # Required when the chosen offer is not the department's favorite —
+    # refused with 400 naming the accountability. Optional when it agrees.
+    reason: Optional[str] = None
 
 
 class CostingPositionCreate(BaseModel):
@@ -682,6 +716,22 @@ class CostingPositionResponse(BaseModel):
     effective_lead_time_unit: str = "calendar_days"
     effective_lead_time_calendar_days: Optional[int] = None
     favorite_offer_id: Optional[int] = None
+    # Both sides of the vendor decision, flattened onto the position so a
+    # wrap-up line reads "recommended: A · chosen: B (reason)" with no joins.
+    recommended_vendor: Optional[str] = None
+    recommended_cost: Optional[float] = None
+    chosen_offer_id: Optional[int] = None
+    chosen_vendor: Optional[str] = None
+    chosen_cost: Optional[float] = None
+    chosen_reason: Optional[str] = None
+    chosen_by_name: Optional[str] = None
+    chosen_at: Optional[datetime] = None
+    # True when Sales went against the department's recommendation.
+    choice_diverges: bool = False
+    # The money in the OFFER: the chosen vendor's price once Sales has
+    # decided, effective_cost (the department's own number) until then. The
+    # summation totals this one.
+    quoted_cost: Optional[float] = None
     offers: List[CostingOfferResponse] = []
 
 

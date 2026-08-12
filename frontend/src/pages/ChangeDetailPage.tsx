@@ -561,6 +561,7 @@ export default function ChangeDetailPage() {
               quoting, the basis the price is judged against. */}
           {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
             <SummationView changeId={changeId}
+              status={change.status} canQuote={canEditQuotedPrice}
               plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
               validatedWeightG={change.validated_part_weight_g}
               deadline={change.active_deadline === 'release'

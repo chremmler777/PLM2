@@ -224,14 +224,19 @@ class CostService:
         position_rates: dict[int, Optional[float]] = {}
         pos_by_dep: dict[int, dict] = {}
         for p in positions:
-            cost = p.effective_cost or 0.0
+            # The money Sales is quoting, which is the CHOSEN vendor's price
+            # once Sales has decided and the department's own effective_cost
+            # until then. The recommendation is not overwritten — it travels
+            # alongside in the detail below, so a wrap-up can show that the
+            # buyer moved the number and by how much.
+            cost = p.quoted_cost or 0.0
             bucket = ("one_time_external" if p.kind == "external"
                       else "one_time_internal")
             agg = pos_by_dep.setdefault(
                 p.department_id,
                 {"department_id": p.department_id, "position_cost": 0.0,
                  "hours": 0.0, "hours_cost": 0.0, "position_count": 0,
-                 "unrated_hours": False})
+                 "unrated_hours": False, "positions": []})
 
             hours = float(p.hours or 0.0)
             hours_cost = 0.0
@@ -265,6 +270,25 @@ class CostService:
             agg["hours"] += hours
             agg["hours_cost"] += hours_cost
             agg["position_count"] += 1
+            # Both sides of the vendor decision, per position: what the
+            # department recommended and what Sales bought. The wrap-up line
+            # ("recommended: A · chosen: B (reason)") is the only place the
+            # divergence is ever seen, so the data for it has to be here and
+            # not one join away.
+            favorite = p.recommended_offer
+            chosen = p.chosen_offer
+            agg["positions"].append({
+                "position_id": p.id, "label": p.label, "kind": p.kind,
+                "cost": cost,
+                "recommended_vendor": favorite.vendor_name if favorite else None,
+                "recommended_cost": favorite.total_cost if favorite else None,
+                "chosen_vendor": chosen.vendor_name if chosen else None,
+                "chosen_cost": chosen.total_cost if chosen else None,
+                "chosen_reason": chosen.chosen_reason if chosen else None,
+                "choice_diverges": bool(
+                    chosen is not None and favorite is not None
+                    and chosen.id != favorite.id),
+            })
 
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])

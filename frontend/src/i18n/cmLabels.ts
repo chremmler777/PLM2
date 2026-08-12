@@ -1297,5 +1297,29 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Gewichtsabweichung nicht bestätigt — Vertrieb',
     en: 'weight delta unacknowledged — Sales',
   },
+
+  // Vendor decision, stage 5. The department's favourite is a recommendation;
+  // Sales decides and answers for it, and both stay readable side by side.
+  'vendor.decision': { de: 'Lieferantenentscheidung', en: 'Vendor decision' },
+  'vendor.decisionHint': {
+    de: 'Die Empfehlung des Fachbereichs ist nicht bindend — der Vertrieb entscheidet und verantwortet.',
+    en: 'The department’s recommendation is not binding — Sales decides and is accountable.',
+  },
+  'vendor.recommended': { de: 'Empfehlung', en: 'Recommended' },
+  'vendor.chosen': { de: 'Gewählt', en: 'Chosen' },
+  'vendor.choose': { de: 'Wählen', en: 'Choose' },
+  'vendor.rechoose': { de: 'Ändern', en: 'Change' },
+  'vendor.reasonLabel': {
+    de: 'Begründung — Entscheidung gegen die Empfehlung',
+    en: 'Reason — deciding against the recommendation',
+  },
+  'vendor.againstRecommendation': { de: 'gegen Empfehlung', en: 'against recommendation' },
+  'vendor.salesChose': { de: 'Vertrieb wählte', en: 'Sales chose' },
+  'vendor.confirm': { de: 'Bestätigen', en: 'Confirm' },
+  'vendor.cancel': { de: 'Abbrechen', en: 'Cancel' },
+  'vendor.noRecommendation': {
+    de: 'Keine Empfehlung des Fachbereichs',
+    en: 'No department recommendation',
+  },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

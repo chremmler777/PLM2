@@ -639,3 +639,203 @@ async def test_hours_with_no_configured_rate_are_flagged_not_invented(
     assert row["hours_cost"] == 0.0
     assert row["unrated_hours"] is True
     assert summ["total_position_hours_cost"] == 0.0
+
+
+# --- the vendor decision (stage 5) ------------------------------------------
+# The department's favorite is a RECOMMENDATION. Sales decides, Sales is
+# accountable, and going against the recommendation has to say why.
+
+async def _two_offers(client, admin_auth, costing):
+    """A quoted external position with vendor A (the department's favorite)
+    and the pricier vendor B behind it."""
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    a = (await _add_offer(client, admin_auth, costing, pid,
+                          vendor_name="Vendor A", cost=1000.0,
+                          favorite=True)).json()["id"]
+    b = (await _add_offer(client, admin_auth, costing, pid,
+                          vendor_name="Vendor B", cost=1500.0)).json()["id"]
+    return pid, a, b
+
+
+def _choose_url(costing, oid) -> str:
+    return (f"/api/v1/changes/{costing['change_id']}/costing/offers/"
+            f"{oid}/choose")
+
+
+async def _choose(client, auth, costing, oid, **body):
+    return await client.put(_choose_url(costing, oid), json=body, headers=auth)
+
+
+async def _sales_member(client, session_factory, seed, email="sales@pos.test"):
+    async with session_factory() as s:
+        dept = Department(name="Sales", flow_type="action", is_active=True,
+                          can_start_change=True)
+        s.add(dept)
+        await s.flush()
+        dept_id = dept.id
+        await s.commit()
+    return await _member(client, session_factory, seed, dept_id, email)
+
+
+async def _actions(client, auth, change_id):
+    res = await client.get(f"/api/v1/changes/{change_id}/changelog", headers=auth)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def test_choosing_against_the_recommendation_needs_a_reason(
+        client, admin_auth, costing):
+    pid, a, b = await _two_offers(client, admin_auth, costing)
+
+    res = await _choose(client, admin_auth, costing, b)
+    assert res.status_code == 400, res.text
+    detail = res.json()["detail"]
+    assert "Vendor B" in detail and "Vendor A" in detail
+    assert "Sales' to account for" in detail
+
+    res = await _choose(client, admin_auth, costing, b,
+                        reason="A cannot hold the date, B can")
+    assert res.status_code == 201 or res.status_code == 200, res.text
+    body = res.json()
+    assert body["chosen"] is True
+    assert body["chosen_reason"] == "A cannot hold the date, B can"
+    assert body["chosen_by"] is not None and body["chosen_at"] is not None
+
+    entries = await _actions(client, admin_auth, costing["change_id"])
+    chosen = [e for e in entries if e["action"] == "vendor_chosen"]
+    assert len(chosen) == 1
+    assert ("Vendor chosen against the department recommendation"
+            in chosen[0]["action_description"])
+    assert "A cannot hold the date, B can" in chosen[0]["action_description"]
+
+
+async def test_choosing_the_recommendation_needs_no_reason(
+        client, admin_auth, costing):
+    pid, a, b = await _two_offers(client, admin_auth, costing)
+    res = await _choose(client, admin_auth, costing, a)
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["chosen"] is True
+    assert res.json()["chosen_reason"] is None
+
+    entries = await _actions(client, admin_auth, costing["change_id"])
+    chosen = [e for e in entries if e["action"] == "vendor_chosen"]
+    assert "against the department recommendation" not in \
+        chosen[0]["action_description"]
+
+
+async def test_one_decision_per_position_and_re_deciding_is_audited(
+        client, admin_auth, costing):
+    pid, a, b = await _two_offers(client, admin_auth, costing)
+    await _choose(client, admin_auth, costing, a)
+    await _choose(client, admin_auth, costing, b, reason="A went bankrupt")
+
+    listed = await client.get(_positions_url(costing), headers=admin_auth)
+    position = listed.json()[0]
+    flags = {o["vendor_name"]: o["chosen"] for o in position["offers"]}
+    assert flags == {"Vendor A": False, "Vendor B": True}
+    # The reversed decision keeps no name on it.
+    old = next(o for o in position["offers"] if o["vendor_name"] == "Vendor A")
+    assert old["chosen_by"] is None and old["chosen_reason"] is None
+
+    entries = await _actions(client, admin_auth, costing["change_id"])
+    assert len([e for e in entries if e["action"] == "vendor_chosen"]) == 2
+
+
+async def test_the_department_recommends_and_sales_decides(
+        client, admin_auth, costing, session_factory, seed):
+    """The tool shop may vote for its favorite; it may not sign the order."""
+    pid, a, b = await _two_offers(client, admin_auth, costing)
+    tool = await _member(client, session_factory, seed, costing["tool"],
+                         "tool@pos.test")
+    sales = await _sales_member(client, session_factory, seed)
+
+    await _set_status(session_factory, costing["change_id"], "quoting")
+    res = await _choose(client, tool, costing, b, reason="we like B")
+    assert res.status_code == 403, res.text
+    assert "Sales decides" in res.json()["detail"]
+
+    res = await _choose(client, sales, costing, b, reason="B holds the date")
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["chosen"] is True
+    assert res.json()["chosen_by_name"] == "sales@pos.test"
+
+
+async def test_the_decision_belongs_to_the_quoting_window(
+        client, costing, session_factory, seed):
+    sales = await _sales_member(client, session_factory, seed)
+    admin = await login(client, "admin@test.io")
+    pid, a, b = await _two_offers(client, admin, costing)
+
+    # The change is still in costing: the offer is not being written yet.
+    res = await _choose(client, sales, costing, a)
+    assert res.status_code == 403, res.text
+
+    await _set_status(session_factory, costing["change_id"], "quoting")
+    assert (await _choose(client, sales, costing, a)).status_code in (200, 201)
+
+
+async def test_summation_quotes_the_chosen_vendor_while_the_vote_stays_visible(
+        client, admin_auth, costing):
+    pid, a, b = await _two_offers(client, admin_auth, costing)
+    url = f"/api/v1/changes/{costing['change_id']}/summation"
+
+    summ = (await client.get(url, headers=admin_auth)).json()
+    # Nobody has decided yet: the department's recommendation prices it.
+    assert summ["total_position_cost"] == 1000.0
+
+    await _choose(client, admin_auth, costing, b, reason="B holds the date")
+    summ = (await client.get(url, headers=admin_auth)).json()
+    # The money follows Sales' decision — that is what is being quoted.
+    assert summ["total_position_cost"] == 1500.0
+    assert summ["totals"]["one_time_external"] == 1500.0
+
+    detail = summ["positions_by_department"][0]["positions"][0]
+    # ...while the department's vote is still on the page next to it.
+    assert detail["recommended_vendor"] == "Vendor A"
+    assert detail["recommended_cost"] == 1000.0
+    assert detail["chosen_vendor"] == "Vendor B"
+    assert detail["chosen_cost"] == 1500.0
+    assert detail["chosen_reason"] == "B holds the date"
+    assert detail["choice_diverges"] is True
+
+    # The position payload says the same thing without a summation.
+    position = (await client.get(_positions_url(costing),
+                                 headers=admin_auth)).json()[0]
+    assert position["recommended_vendor"] == "Vendor A"
+    assert position["chosen_vendor"] == "Vendor B"
+    assert position["choice_diverges"] is True
+    # effective_cost stays the DEPARTMENT's number; quoted_cost is the offer.
+    assert position["effective_cost"] == 1000.0
+    assert position["quoted_cost"] == 1500.0
+
+
+async def test_with_no_vote_cast_any_offer_may_be_chosen_without_a_reason(
+        client, admin_auth, costing):
+    """A position nobody voted on carries no recommendation, so there is
+    nothing to diverge from — demanding a justification for disagreeing with
+    an opinion the department never expressed would be theatre."""
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    a = (await _add_offer(client, admin_auth, costing, pid,
+                          vendor_name="Vendor A", cost=1000.0)).json()["id"]
+    b = (await _add_offer(client, admin_auth, costing, pid,
+                          vendor_name="Vendor B", cost=1500.0)).json()["id"]
+
+    res = await _choose(client, admin_auth, costing, b)
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["chosen"] is True
+    assert res.json()["chosen_reason"] is None
+
+    position = (await client.get(_positions_url(costing),
+                                 headers=admin_auth)).json()[0]
+    assert position["recommended_vendor"] is None
+    assert position["choice_diverges"] is False
+    assert position["chosen_vendor"] == "Vendor B"
+    # And the money still follows the decision.
+    assert position["quoted_cost"] == 1500.0
+
+    entries = await _actions(client, admin_auth, costing["change_id"])
+    chosen = [e for e in entries if e["action"] == "vendor_chosen"]
+    assert "against the department recommendation" not in \
+        chosen[0]["action_description"]

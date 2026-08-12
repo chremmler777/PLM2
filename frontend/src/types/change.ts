@@ -533,6 +533,15 @@ export interface CostingOffer {
   lead_time_unit?: LeadTimeUnit | null;
   /** The department's vote — exactly one favourite per position. */
   favorite?: boolean;
+  /**
+   * Sales' binding decision — exactly one chosen offer per position. The
+   * favourite is only the recommendation; this is the offer that is bought.
+   */
+  chosen?: boolean;
+  /** Required when the chosen offer is not the department's favourite. */
+  chosen_reason?: string | null;
+  chosen_by_name?: string | null;
+  chosen_at?: string | null;
   attachments?: Attachment[];
 }
 

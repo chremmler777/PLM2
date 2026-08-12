@@ -173,6 +173,12 @@ export const changesApi = {
   // server-side, so the client only has to say which one won.
   updateCostingOffer: (id: number, oid: number, body: Partial<CostingOfferIn> & { favorite?: boolean }) =>
     client.put<CostingOffer>(`/v1/changes/${id}/costing/offers/${oid}`, body).then((r) => r.data),
+  // Sales' binding pick at quoting. Choosing clears the siblings server-side;
+  // a reason is required whenever the pick is not the department's favourite
+  // (the server answers 400 without one).
+  chooseCostingOffer: (id: number, oid: number, reason?: string) =>
+    client.put<CostingOffer>(`/v1/changes/${id}/costing/offers/${oid}/choose`,
+      reason ? { reason } : {}).then((r) => r.data),
   deleteCostingOffer: (id: number, oid: number) =>
     client.delete(`/v1/changes/${id}/costing/offers/${oid}`).then((r) => r.data),
 

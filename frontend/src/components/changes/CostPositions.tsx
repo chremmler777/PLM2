@@ -66,6 +66,37 @@ export function effectiveOf(p: CostPosition): number | null {
   return p.est_cost ?? null
 }
 
+/** Sales' binding pick, once there is one. */
+export const chosenOf = (p: CostPosition): CostingOffer | undefined =>
+  (p.offers ?? []).find((o) => o.chosen)
+
+/** The department's recommendation. */
+export const favoriteOf = (p: CostPosition): CostingOffer | undefined =>
+  (p.offers ?? []).find((o) => o.favorite)
+
+/** True when Sales bought something other than what the department recommended. */
+export function decisionDivergesOf(p: CostPosition): boolean {
+  const chosen = chosenOf(p)
+  const fav = favoriteOf(p)
+  return !!chosen && !!fav && chosen.id !== fav.id
+}
+
+const offerCost = (o: CostingOffer): number =>
+  o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0)
+
+/**
+ * What the position is worth once Sales has decided. The department's own block
+ * keeps reading its favourite (that is its vote, and it stays visible); the
+ * wrap-up Sales quotes off reads the offer Sales actually chose.
+ */
+export function salesEffectiveOf(p: CostPosition): number | null {
+  if (p.kind === 'external' && p.pricing === 'quote') {
+    const chosen = chosenOf(p)
+    if (chosen) return offerCost(chosen)
+  }
+  return effectiveOf(p)
+}
+
 /** The same rule for time: the favourite offer's lead time is the position's. */
 export function leadTimeOf(p: CostPosition): { days: number; unit: LeadTimeUnit } | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
@@ -318,6 +349,9 @@ function PositionRow({ changeId, position, editable, onChanged }: {
   // A quoted position with nobody's vote on it has no price and no date — the
   // department has collected offers and not finished the job.
   const needsFavorite = isQuote && !(p.offers ?? []).some((o) => o.favorite)
+  // Sales' decision, once it exists — shown, never edited from this block.
+  const chosen = chosenOf(p)
+  const diverges = decisionDivergesOf(p)
 
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
@@ -383,6 +417,19 @@ function PositionRow({ changeId, position, editable, onChanged }: {
         <p data-testid={`costpos-needs-favorite-${p.id}`}
           className="text-xs text-amber-300">
           ★ {t('costpos.pickFavorite')}
+        </p>
+      )}
+
+      {/* What became of the department's vote. Read-only here: the decision is
+          Sales' to make, but the engineer who voted gets to see the outcome. */}
+      {chosen && (
+        <p data-testid={`costpos-chosen-${p.id}`}
+          className={`text-xs ${diverges ? 'text-amber-300' : 'text-slate-400'}`}>
+          {t('vendor.salesChose')}: {chosen.vendor_name}
+          {diverges && ` (${t('vendor.againstRecommendation')})`}
+          {chosen.chosen_reason && (
+            <span className="block text-slate-500">{chosen.chosen_reason}</span>
+          )}
         </p>
       )}
 

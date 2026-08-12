@@ -44,6 +44,7 @@ from app.schemas.change import (
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
+    VendorChoiceIn,
     ImplementationBookingCreate, ImplementationBookingResponse,
     ImplementationReportCreate, ImplementationReportResponse,
     ImplementationEscalationCreate, ImplementationEscalationResolveIn,
@@ -1504,6 +1505,48 @@ async def update_costing_offer(
     try:
         offer = await CostingPositionService.update_offer(
             db, change, offer, body.model_dump(exclude_unset=True), current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return _offer_row(
+        (await CostingPositionService.serialize(db, [position]))[0], offer.id)
+
+
+@router.put("/{change_id}/costing/offers/{oid}/choose",
+            response_model=CostingOfferResponse)
+async def choose_costing_offer(
+    change_id: int, oid: int, body: VendorChoiceIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales decides which vendor gets the order.
+
+    The department's favorite is a RECOMMENDATION and stays visible as one;
+    this is the decision, and it carries a name and a timestamp. Choosing
+    against the recommendation needs a reason — refused with 400 otherwise —
+    while agreeing with it does not. One chosen offer per position: the
+    decision moves rather than accumulating.
+    """
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        offer = await CostingPositionService.get_offer(db, change, oid)
+        position = await CostingPositionService.get_position(
+            db, change, offer.position_id)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not await CostingPositionService.may_choose_vendor(
+            db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may choose the "
+                   "vendor, and only while the change is being quoted — the "
+                   "department recommends, Sales decides")
+    try:
+        offer = await CostingPositionService.choose_offer(
+            db, change, offer, body.reason, current_user)
     except CostingPositionError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
