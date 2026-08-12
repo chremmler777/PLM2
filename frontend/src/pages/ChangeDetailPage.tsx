@@ -133,7 +133,10 @@ export default function ChangeDetailPage() {
     queryKey: ['projects'],
     queryFn: async () => (await client.get('/v1/plants/projects')).data,
   });
-  const projectPlantId = projects.find((p) => p.id === change?.project_id)?.plant_id ?? null;
+  // An expired session answers this query with an error object, not an
+  // array — that must degrade to "no plant default", not a black page.
+  const projectPlantId = (Array.isArray(projects) ? projects : [])
+    .find((p) => p.id === change?.project_id)?.plant_id ?? null;
   const { data: impl } = useQuery({
     queryKey: ['change', changeId, 'implementation'],
     queryFn: () => changesApi.getImplementation(changeId),

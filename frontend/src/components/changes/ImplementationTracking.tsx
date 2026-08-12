@@ -447,10 +447,16 @@ export default function ImplementationTracking({
   // card is the record, for the implementing department too.
   const editable = status === 'in_implementation'
 
-  const { data: state = [] } = useQuery({
+  const { data: statePayload } = useQuery({
     queryKey: ['change', changeId, 'impl-state'],
     queryFn: () => changesApi.implementationState(changeId),
   })
+  // The endpoint wraps the rows: {change_id, status, cadence_hours,
+  // departments: [...]}. Accept a bare array too, so a mocked or older
+  // payload cannot black-screen the page.
+  const state = Array.isArray(statePayload)
+    ? statePayload
+    : statePayload?.departments ?? []
   const { data: bookings = [] } = useQuery({
     queryKey: ['change', changeId, 'impl-bookings'],
     queryFn: () => changesApi.listImplBookings(changeId),

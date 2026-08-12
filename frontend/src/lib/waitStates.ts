@@ -79,7 +79,7 @@ export function resolveWaitStates(
    * queries — the resolver stays pure and is handed what the page already has.
    */
   impl: {
-    state?: ImplDepartmentState[]
+    state?: ImplDepartmentState[] | { departments?: ImplDepartmentState[] }
     escalations?: { resolved_at?: string | null }[]
   } = {},
   /**
@@ -171,7 +171,11 @@ export function resolveWaitStates(
   // stopped saying how it is going, and a flagged risk nobody has taken
   // anywhere. Both are named for everyone, not only for the desk that owes it.
   if (change.status === 'in_implementation') {
-    const state = impl.state ?? []
+    const raw = impl.state as unknown
+    const state = Array.isArray(raw)
+      ? raw as { owes_report?: boolean; at_risk_open?: boolean }[]
+      : (raw as { departments?: { owes_report?: boolean; at_risk_open?: boolean }[] } | undefined)
+          ?.departments ?? []
     const owing = state.filter((s) => s.owes_report).length
     if (owing > 0) {
       waits.push({

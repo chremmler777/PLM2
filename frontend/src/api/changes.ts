@@ -290,7 +290,7 @@ export const changesApi = {
   // implementing department, with the backend's own cadence verdict — then the
   // three records the board is a summary of.
   implementationState: (id: number) =>
-    client.get<ImplDepartmentState[]>(`/v1/changes/${id}/implementation/state`)
+    client.get<{ departments?: ImplDepartmentState[] } | ImplDepartmentState[]>(`/v1/changes/${id}/implementation/state`)
       .then((r) => r.data),
 
   listImplBookings: (id: number) =>
