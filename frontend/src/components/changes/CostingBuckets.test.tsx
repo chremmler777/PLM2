@@ -16,6 +16,8 @@ vi.mock('../../api/changes', () => ({
       { department_id: 4, plant_id: 1, hourly_rate: 80, min_factor: 1 },
     ]),
     referenceActivities: vi.fn().mockResolvedValue([]),
+    listCostPositions: vi.fn().mockResolvedValue([]),
+    costingTags: vi.fn().mockResolvedValue({ items: [] }),
   },
 }))
 
@@ -62,13 +64,14 @@ const buckets = (props: Record<string, unknown> = {}) =>
 
 describe('CostingBuckets', () => {
   beforeEach(() => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue(summation as never)
+    vi.mocked(changesApi.getSummation).mockClear()
+      .mockResolvedValue(summation as never)
     vi.mocked(changesApi.setCostLeadTime).mockClear()
   })
   afterEach(cleanup)
 
   it('gives every participating department a bucket', () => {
-    buckets()
+    buckets({ canSeeAll: true })
     expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
     expect(screen.getByTestId('costing-bucket-4')).toBeTruthy()
   })
@@ -91,15 +94,25 @@ describe('CostingBuckets', () => {
     await waitFor(() => expect(changesApi.setCostLeadTime).toHaveBeenCalledWith(7, 2, 20))
   })
 
-  it('shows a department member nothing of another department’s figures', async () => {
+  it('shows a department member their own bucket and nobody else’s', async () => {
     buckets({ myDepartmentIds: [2] })
     // No summation is even requested without the privilege.
     expect(changesApi.getSummation).not.toHaveBeenCalled()
-    expect(screen.getByTestId('costing-state-4').textContent).toBe(t('costing.hidden'))
-    expect(screen.queryByTestId('costing-total-4')).toBeNull()
-    fireEvent.click(screen.getByTestId('costing-toggle-4'))
-    expect(screen.getByTestId('costing-hidden-4').textContent).toBe(t('costing.hiddenHint'))
-    expect(screen.queryByTestId('costing-readonly-4')).toBeNull()
+    expect(screen.getByTestId('costing-bucket-2')).toBeTruthy()
+    // Another department's block is gone entirely — not even a collapsed row.
+    expect(screen.queryByTestId('costing-bucket-4')).toBeNull()
+    expect(screen.queryByTestId('costing-state-4')).toBeNull()
+    // Just a line saying the change does not sit on them alone.
+    expect(screen.getByTestId('costing-others').textContent)
+      .toBe(t('costing.others').replace('{n}', '1'))
+  })
+
+  it('opens the member’s bucket onto their cost positions', async () => {
+    buckets({ myDepartmentIds: [2] })
+    fireEvent.click(screen.getByTestId('costing-toggle-2'))
+    expect(await screen.findByTestId('costpos-section-2')).toBeTruthy()
+    // Their own department during costing: the add form is there.
+    expect(await screen.findByTestId('costpos-new-2')).toBeTruthy()
   })
 
   it('lets PM see the figures and which buckets are still empty', async () => {
@@ -110,6 +123,9 @@ describe('CostingBuckets', () => {
     expect(screen.getByTestId('costing-lead-2').textContent).toContain('15')
     fireEvent.click(screen.getByTestId('costing-toggle-4'))
     expect(screen.getByTestId('costing-readonly-4')).toBeTruthy()
+    // Sales and the lead read another department's positions, never write them.
+    expect(await screen.findByTestId('costpos-readonly-4')).toBeTruthy()
+    expect(screen.queryByTestId('costpos-new-4')).toBeNull()
   })
 
   it('says so plainly when nobody is costing yet', () => {

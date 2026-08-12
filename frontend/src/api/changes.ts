@@ -6,6 +6,7 @@ import type {
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
+  CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -79,7 +80,7 @@ export const changesApi = {
     id: number, file: File,
     opts?: {
       kind?: AttachmentKind; respondsToId?: number;
-      concernId?: number; assessmentId?: number;
+      concernId?: number; assessmentId?: number; costingOfferId?: number;
     },
   ) => {
     const fd = new FormData();
@@ -92,6 +93,8 @@ export const changesApi = {
     // so it lands there and nowhere else.
     if (opts?.concernId !== undefined) fd.append('concern_id', String(opts.concernId));
     if (opts?.assessmentId !== undefined) fd.append('assessment_id', String(opts.assessmentId));
+    // A vendor quote belongs to the offer it prices, not to the change at large.
+    if (opts?.costingOfferId !== undefined) fd.append('costing_offer_id', String(opts.costingOfferId));
     // The client sets a global Content-Type: application/json default; it must
     // be cleared here so the browser sets multipart/form-data WITH its boundary.
     // Otherwise FastAPI can't find the `file` field and returns 422.
@@ -132,6 +135,34 @@ export const changesApi = {
     client.post(`/v1/changes/${id}/cost-lead-time`, {
       department_id: departmentId, lead_time_days: days,
     }).then((r) => r.data),
+
+  // Cost positions — what a department books against the change, next to the
+  // old grid. One list for the whole change; each row names its department.
+  listCostPositions: (id: number) =>
+    client.get<CostPosition[]>(`/v1/changes/${id}/costing/positions`).then((r) => r.data),
+  createCostPosition: (id: number, body: CostPositionIn) =>
+    client.post<CostPosition>(`/v1/changes/${id}/costing/positions`, body).then((r) => r.data),
+  updateCostPosition: (id: number, pid: number, body: Partial<CostPositionIn>) =>
+    client.put<CostPosition>(`/v1/changes/${id}/costing/positions/${pid}`, body).then((r) => r.data),
+  deleteCostPosition: (id: number, pid: number) =>
+    client.delete(`/v1/changes/${id}/costing/positions/${pid}`).then((r) => r.data),
+
+  // Vendor offers under an external position — one row per vendor asked.
+  addCostingOffer: (id: number, pid: number, body: CostingOfferIn) =>
+    client.post<CostingOffer>(`/v1/changes/${id}/costing/positions/${pid}/offers`, body)
+      .then((r) => r.data),
+  // The favourite is exclusive: sending {favorite: true} clears its siblings
+  // server-side, so the client only has to say which one won.
+  updateCostingOffer: (id: number, oid: number, body: Partial<CostingOfferIn> & { favorite?: boolean }) =>
+    client.put<CostingOffer>(`/v1/changes/${id}/costing/offers/${oid}`, body).then((r) => r.data),
+  deleteCostingOffer: (id: number, oid: number) =>
+    client.delete(`/v1/changes/${id}/costing/offers/${oid}`).then((r) => r.data),
+
+  // The tag vocabulary a department may file a position under.
+  costingTags: (departmentId?: number) =>
+    client.get<{ items: { key: string }[] }>('/v1/changes/reference/costing-tags',
+      { params: departmentId != null ? { department_id: departmentId } : undefined })
+      .then((r) => r.data),
 
   getSummation: (id: number) =>
     client.get<Summation>(`/v1/changes/${id}/summation`).then((r) => r.data),

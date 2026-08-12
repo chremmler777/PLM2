@@ -26,6 +26,8 @@ interface Props {
   respondsToId?: number;
   concernId?: number;
   assessmentId?: number;
+  /** A vendor quote files itself under the offer it prices. */
+  costingOfferId?: number;
   /** Slot label — the needs-info and response slots say what they are for. */
   label?: string;
   /** Inside a card the zone is one quiet line, not a big dashed billboard. */
@@ -34,7 +36,7 @@ interface Props {
 
 export default function AttachmentDropzone({
   changeId, onUploaded, kind, respondsToId, concernId, assessmentId,
-  label, compact = false,
+  costingOfferId, label, compact = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -54,7 +56,7 @@ export default function AttachmentDropzone({
     for (const f of ok) {
       try {
         await changesApi.uploadAttachment(changeId, f,
-          { kind, respondsToId, concernId, assessmentId });
+          { kind, respondsToId, concernId, assessmentId, costingOfferId });
         uploaded += 1;
       } catch (e) {
         toast.error(apiErrorMessage(e, t('attach.failed').replace('{name}', f.name)));

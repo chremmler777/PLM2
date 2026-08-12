@@ -190,6 +190,14 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(screen.getByText(t('tasks.hint.close_question'))).toBeDefined()
   })
 
+  it('sends a create-quote row to the commercial tab', async () => {
+    await renderWith(changeTask({ kind: 'create_quote' }))
+    expect(screen.getByText(t('tasks.kind.create_quote'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.create_quote'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
+  })
+
   it('sends a costing-input row to the commercial tab', async () => {
     await renderWith(changeTask({ kind: 'costing_input' }))
     expect(screen.getByText(t('tasks.kind.costing_input'))).toBeDefined()

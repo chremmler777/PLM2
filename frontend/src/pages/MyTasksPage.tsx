@@ -201,6 +201,7 @@ const TASK_TAB: Record<string, string> = {
   obtain_info: '?tab=scoping', close_question: '?tab=scoping',
   send_rejection: '?tab=scoping',
   costing_input: '?tab=commercial',
+  create_quote: '?tab=commercial',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -232,6 +233,8 @@ const taskHint = (task: ChangeTask): string | null => {
         ? t('tasks.hint.send_rejection_send') : t('tasks.hint.send_rejection_letter');
     case 'costing_input':
       return t('tasks.hint.costing_input');
+    case 'create_quote':
+      return t('tasks.hint.create_quote');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,

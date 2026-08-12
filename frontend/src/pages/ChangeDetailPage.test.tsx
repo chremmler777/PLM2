@@ -466,6 +466,42 @@ describe('ChangeDetailPage capture phase', () => {
   })
 })
 
+describe('ChangeDetailPage quote preparation (commercial tab)', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+  })
+
+  it('marks the implementation-timeline step for the people who quote', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'quoting' as ChangeDetail['status']
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    const card = await screen.findByTestId('quote-timeline-placeholder')
+    expect(card.textContent).toContain(t('quote.timeline'))
+    // Deliberately empty: the step is named, the tool is not built.
+    expect(card.textContent).toContain(t('quote.timelineBody'))
+  })
+
+  it('keeps the timeline card away from someone who may not see the costs', async () => {
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoting' as ChangeDetail['status']
+    wrap('/changes/1?tab=commercial')
+    await screen.findByRole('button', { name: /Commercial/ })
+    expect(screen.queryByTestId('quote-timeline-placeholder')).toBeNull()
+  })
+
+  it('opens the commercial tab at quote creation', async () => {
+    change.status = 'quoting' as ChangeDetail['status']
+    wrap('/changes/1?tab=commercial')
+    const commercial = await screen.findByRole('button', { name: /Commercial/ })
+    expect((commercial as HTMLButtonElement).disabled).toBe(false)
+    expect(commercial.className).toContain('border-b-2')
+  })
+})
+
 describe('ChangeDetailPage description authz', () => {
   afterEach(() => {
     cleanup()

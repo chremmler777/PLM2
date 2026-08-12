@@ -1,5 +1,6 @@
 export type ChangeStatus =
-  | 'captured' | 'scoping' | 'in_assessment' | 'costing' | 'quoted' | 'approved'
+  | 'captured' | 'scoping' | 'in_assessment' | 'costing' | 'quoting' | 'quoted'
+  | 'approved'
   | 'in_implementation' | 'in_validation' | 'released' | 'closed'
   | 'on_hold' | 'rejected' | 'cancelled';
 
@@ -7,7 +8,9 @@ export type ChangeType =
   | 'physical_part' | 'tooling' | 'document_spec' | 'process_im' | 'packaging';
 
 export const CHANGE_STATUS_ORDER: ChangeStatus[] = [
-  'captured', 'scoping', 'in_assessment', 'costing', 'quoted', 'approved',
+  // 'quoting' is Sales building the offer out of the costing wrap-up — the step
+  // between the departments finishing and the offer going out.
+  'captured', 'scoping', 'in_assessment', 'costing', 'quoting', 'quoted', 'approved',
   'in_implementation', 'in_validation', 'released', 'closed',
 ];
 
@@ -105,7 +108,9 @@ export type AttachmentKind =
    *  cannot be sent without one (backend-enforced). Filed per assessment. */
   | 'change_ppt'
   /** Saved customer correspondence (.msg/.eml/pdf). Change-level, no assessment. */
-  | 'customer_email';
+  | 'customer_email'
+  /** A vendor's written quote, filed under the offer it belongs to. */
+  | 'vendor_quote';
 
 export interface Attachment {
   id: number;
@@ -120,6 +125,8 @@ export interface Attachment {
   concern_id?: number | null;
   /** The assessment this document is evidence for — exclusive with concern_id. */
   assessment_id?: number | null;
+  /** The vendor offer this quote document belongs to. */
+  costing_offer_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;
@@ -202,7 +209,9 @@ export interface ChangeDetail extends ChangeRequest {
 /** Stage-responsibility rows my-tasks returns besides the assessment ones. */
 export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
-  | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input';
+  | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input'
+  /** Sales builds the offer once the departments are done costing. */
+  | 'create_quote';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -385,6 +394,68 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
 
 /** The five things that actually go wrong in a moulding change, as the backend
  *  serves them from /reference/risk-types. */
+/**
+ * A cost position is what a department actually books against a change: an
+ * hour figure for work it does itself, or money it has to spend outside.
+ * Three kinds, because the three are answered by different people and read
+ * differently in the summation.
+ */
+export type CostPositionKind = 'internal_effort' | 'support_effort' | 'external';
+
+/** External work is either a house number or a vendor's written offer. */
+export type CostPositionPricing = 'estimate' | 'quote';
+
+/** One vendor's answer to an external position. Several may compete. */
+export interface CostingOffer {
+  id: number;
+  vendor_name: string;
+  cost: number;
+  /** Freight billed on top; ignored when the vendor includes it in the price. */
+  shipping_cost?: number | null;
+  shipping_included?: boolean;
+  lead_time_days?: number | null;
+  /** The department's vote — exactly one favourite per position. */
+  favorite?: boolean;
+  attachments?: Attachment[];
+}
+
+export interface CostPosition {
+  id: number;
+  department_id: number;
+  label: string;
+  /** A key from the costing-tags reference, or a free-text word. */
+  tag?: string | null;
+  kind: CostPositionKind;
+  pricing?: CostPositionPricing | null;
+  est_cost?: number | null;
+  hours?: number | null;
+  lead_time_days?: number | null;
+  notes?: string | null;
+  /** What the backend counts: the estimate, or the favourite offer's price. */
+  effective_cost?: number | null;
+  offers: CostingOffer[];
+}
+
+export interface CostPositionIn {
+  department_id: number;
+  label: string;
+  tag?: string | null;
+  kind: CostPositionKind;
+  pricing?: CostPositionPricing | null;
+  est_cost?: number | null;
+  hours?: number | null;
+  lead_time_days?: number | null;
+  notes?: string | null;
+}
+
+export interface CostingOfferIn {
+  vendor_name: string;
+  cost: number;
+  shipping_cost?: number | null;
+  shipping_included?: boolean;
+  lead_time_days?: number | null;
+}
+
 export type RiskType =
   | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
   | 'process_capability' | 'other';

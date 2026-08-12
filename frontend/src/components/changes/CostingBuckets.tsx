@@ -2,17 +2,18 @@
  * The costing phase, one bucket per participating department — the same shape as
  * the assessment accordion, so the two phases read alike.
  *
- * A department opens its own bucket and works in it: cost lines and the lead time
- * it needs. Other people's figures are not theirs to see — a bucket they may not
- * read shows only whether it has been filled, and says so plainly. PM, Sales, the
- * lead and admins see the money in the summation below, which is where the whole
- * picture belongs.
+ * A department opens its own bucket and works in it: cost positions, cost lines
+ * and the lead time it needs. Other people's figures are not theirs to see — an
+ * ordinary member gets their own bucket and nothing else, the same way the
+ * assessment board works. PM, Sales, the lead and admins see every bucket and
+ * the money in the summation below, which is where the whole picture belongs.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import CostLineGrid from './CostLineGrid'
+import CostPositions from './CostPositions'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeDetail, Summation } from '../../types/change'
 
@@ -57,6 +58,7 @@ function LeadTimeField({ changeId, departmentId, initial }: {
 
 export default function CostingBuckets({
   change, departments, myDepartmentIds, plants, projectPlantId, canSeeAll, editable,
+  isPm = false,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -66,6 +68,8 @@ export default function CostingBuckets({
   /** PM, Sales, the change lead and admins see every figure. */
   canSeeAll: boolean
   editable: boolean
+  /** Project Management maintains any department's positions. */
+  isPm?: boolean
 }) {
   const changeId = change.id
   const [openDept, setOpenDept] = useState<number | null>(null)
@@ -98,9 +102,15 @@ export default function CostingBuckets({
     return <p className="text-sm text-slate-400">{t('costing.none')}</p>
   }
 
+  // An ordinary member gets their own bucket and nothing else — not even a
+  // collapsed row for a department whose figures they may not read. The full
+  // board belongs to PM, Sales, the lead and admins, exactly as in assessment.
+  const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.department_id))
+  const others = rows.length - visible.length
+
   return (
     <div className="space-y-2">
-      {rows.map((a) => {
+      {visible.map((a) => {
         const id = a.department_id
         const isMine = myDepartmentIds.includes(id)
         const expanded = openDept === id
@@ -151,6 +161,11 @@ export default function CostingBuckets({
               <div className="border-t border-slate-700 px-3 py-3 space-y-3">
                 {isMine ? (
                   <>
+                    {/* What this department books against the change, above the
+                        old grid — the grid keeps working, position by position
+                        is how departments actually think about it. */}
+                    <CostPositions changeId={changeId} departmentId={id}
+                      editable={editable && (isMine || isPm)} />
                     <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={id}
                       plants={plants} projectPlantId={projectPlantId} />
                     {editable && (
@@ -158,8 +173,8 @@ export default function CostingBuckets({
                         initial={leadTimeOf(id)} />
                     )}
                   </>
-                ) : canSeeAll ? (
-                  <div className="text-sm space-y-1" data-testid={`costing-readonly-${id}`}>
+                ) : (
+                  <div className="text-sm space-y-3" data-testid={`costing-readonly-${id}`}>
                     <p className="text-slate-300">
                       {t('costing.deptTotal')}: <span className="tabular-nums">
                         {total != null ? total.toFixed(2) : '—'}
@@ -170,17 +185,25 @@ export default function CostingBuckets({
                         {t('costing.leadTime')}: {leadTimeOf(id)}
                       </p>
                     )}
+                    {/* PM may still fix another department's positions; Sales
+                        and the lead only read them. */}
+                    <CostPositions changeId={changeId} departmentId={id}
+                      editable={editable && isPm} />
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-500" data-testid={`costing-hidden-${id}`}>
-                    {t('costing.hiddenHint')}
-                  </p>
                 )}
               </div>
             )}
           </section>
         )
       })}
+
+      {/* Everyone else, in one line: enough to know the change is not sitting on
+          this department alone, without showing figures they may not read. */}
+      {!canSeeAll && others > 0 && (
+        <p data-testid="costing-others" className="text-xs text-slate-400 px-1 py-1">
+          {t('costing.others').replace('{n}', String(others))}
+        </p>
+      )}
     </div>
   )
 }

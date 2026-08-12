@@ -2,7 +2,7 @@ import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/c
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
-  quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
+  quoting: 'Quote creation', quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
   in_validation: 'Validation', released: 'Released', closed: 'Closed',
   on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
 }
@@ -16,7 +16,9 @@ export const STATUS_LABELS: Record<ChangeStatus, string> = {
 export const NEXT_STATUS: Partial<Record<ChangeStatus, ChangeStatus[]>> = {
   captured: ['scoping'], scoping: ['in_assessment', 'rejected'],
   in_assessment: ['costing', 'rejected'],
-  costing: ['quoted', 'approved'], quoted: ['approved', 'rejected'],
+  costing: ['quoting', 'quoted', 'approved'],
+  quoting: ['quoted', 'approved', 'rejected'],
+  quoted: ['approved', 'rejected'],
   approved: ['in_implementation'], in_implementation: ['in_validation'],
   in_validation: ['released'], released: ['closed'],
 }
@@ -27,6 +29,7 @@ export const STATUS_PILL: Record<ChangeStatus, string> = {
   scoping: 'bg-violet-900 text-violet-200',
   in_assessment: 'bg-sky-900 text-sky-200',
   costing: 'bg-sky-900 text-sky-200',
+  quoting: 'bg-indigo-900 text-indigo-200',
   quoted: 'bg-indigo-900 text-indigo-200',
   approved: 'bg-emerald-900 text-emerald-200',
   in_implementation: 'bg-amber-900 text-amber-200',
@@ -56,6 +59,7 @@ export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
   scoping: 'Meet, decide, pick departments',
   in_assessment: 'Departments check feasibility & cost',
   costing: 'Sum up costs',
+  quoting: 'Sales builds the offer from the costing wrap-up',
   quoted: 'Offer sent to customer',
   approved: 'Go decision made',
   in_implementation: 'Doing the work',
@@ -70,7 +74,8 @@ export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
  * before the flag existed) as internal, so `undefined` is treated as internal too. */
 export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
   return !customerRelevant
-    ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoted')
+    // An internal change is never offered, so neither quoting step applies.
+    ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoting' && s !== 'quoted')
     : CHANGE_STATUS_ORDER
 }
 

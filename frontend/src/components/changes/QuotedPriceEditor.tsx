@@ -7,7 +7,7 @@ import type { ChangeRequest } from '../../types/change'
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-const EDITABLE_STATUSES = ['costing', 'quoted']
+const EDITABLE_STATUSES = ['costing', 'quoting', 'quoted']
 
 /**
  * F7: inline quoted-price editor for the commercial tab (customer branch).

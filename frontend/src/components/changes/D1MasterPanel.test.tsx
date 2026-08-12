@@ -45,6 +45,7 @@ vi.mock('../../api/changes', () => ({
     putGate: vi.fn(),
     update: vi.fn(),
     getSummation: vi.fn(),
+    listCostPositions: vi.fn(),
   },
 }));
 
@@ -82,6 +83,7 @@ describe('D1MasterPanel', () => {
       by_plant: [], by_department: [],
       totals: { one_time_internal: 100, one_time_external: 50, lifecycle_internal: 200, lifecycle_external: 75, grand_total: 425 },
     });
+    (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (plantsApi.list as ReturnType<typeof vi.fn>).mockResolvedValue(PLANTS);
   });
   afterEach(() => { cleanup(); });
@@ -183,6 +185,7 @@ describe('SummationView', () => {
       by_plant: [], by_department: [],
       totals: { one_time_internal: 100, one_time_external: 50, lifecycle_internal: 200, lifecycle_external: 75, grand_total: 425 },
     });
+    (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   });
   afterEach(() => { cleanup(); });
 
@@ -215,6 +218,46 @@ describe('SummationView', () => {
       // No department list loaded in this test -> name falls back to '#<id>'.
       expect(screen.getByText('#5')).toBeDefined();
     });
+  });
+
+  // The wrap-up Sales quotes off: the department's grid lines AND the positions
+  // it booked, with the vendor it picked carrying the price.
+  it('adds each department’s cost positions to the wrap-up', async () => {
+    const { changesApi } = await import('../../api/changes');
+    (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 3, department_id: 5, label: 'Anlagenumbau', tag: 'equipment_change',
+        kind: 'external', pricing: 'quote', effective_cost: null, offers: [
+          { id: 1, vendor_name: 'Vendor A', cost: 5000, shipping_cost: 200,
+            shipping_included: false, favorite: true },
+          { id: 2, vendor_name: 'Vendor B', cost: 9000, shipping_included: true,
+            favorite: false },
+        ] },
+      { id: 4, department_id: 5, label: 'Erprobung', kind: 'support_effort',
+        hours: 8, est_cost: 800, effective_cost: 800, offers: [] },
+    ]);
+    const withDept = {
+      by_plant: [],
+      by_department: [{ department_id: 5, one_time_internal: 10, one_time_external: 5,
+        lifecycle_internal: 20, lifecycle_external: 8 }],
+      totals: { one_time_internal: 10, one_time_external: 5, lifecycle_internal: 20,
+        lifecycle_external: 8, grand_total: 43 },
+    };
+    (changesApi.getSummation as ReturnType<typeof vi.fn>).mockResolvedValue(withDept);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change-summation', 1], withDept);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<SummationView changeId={1} />, { wrapper });
+    // 5000 + 200 shipping from the favourite offer, plus the 800 estimate.
+    await waitFor(() => expect(
+      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6000.00'));
+    // Grid lines (43) and positions (6000) side by side per department.
+    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6043.00');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6000.00');
+    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6043.00');
+    // The chosen vendor is named — it is the price the total is built on.
+    expect(screen.getByTestId('summation-position-vendor-3').textContent).toContain('Vendor A');
   });
 
   it('renders by_plant row', async () => {

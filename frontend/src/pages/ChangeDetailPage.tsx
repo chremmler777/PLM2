@@ -12,6 +12,7 @@ import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
 import QuoteBasis from '../components/changes/QuoteBasis';
+import QuoteTimelineCard from '../components/changes/QuoteTimelineCard';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
@@ -51,7 +52,9 @@ const GOVERNANCE_TABS: Tab[] = ['d1', 'audit'];
 const STATUS_ACTIVE_TAB: Record<string, Tab> = {
   captured: 'scoping', scoping: 'scoping',
   in_assessment: 'assessments',
-  costing: 'commercial', quoted: 'commercial', approved: 'commercial',
+  // Quote creation is Sales' step, and the commercial tab is where they do it.
+  costing: 'commercial', quoting: 'commercial', quoted: 'commercial',
+  approved: 'commercial',
   in_implementation: 'implementation', in_validation: 'implementation',
 };
 // F2: before costing there's no cost basis yet — the commercial tab shows an
@@ -491,7 +494,8 @@ export default function ChangeDetailPage() {
                 .filter((p) => p.is_active !== false)
                 .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))}
               projectPlantId={projectPlantId}
-              canSeeAll={canSeeCosts} editable={change.status === 'costing'} />
+              canSeeAll={canSeeCosts} editable={change.status === 'costing'}
+              isPm={isPmMember} />
           )}
           {/* The whole picture, for the people who answer for it — and, at
               quoting, the basis the price is judged against. */}
@@ -501,6 +505,11 @@ export default function ChangeDetailPage() {
               deadline={change.active_deadline === 'release'
                 ? { date: change.release_due_date, label: t('deadline.release') }
                 : { date: change.required_by_date, label: t('deadline.quote') }} />
+          )}
+          {/* The step after costing: Sales sequences the work before pricing it.
+              No tool yet — the card marks the place in the flow. */}
+          {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
+            <QuoteTimelineCard />
           )}
           {BEFORE_COSTING.includes(change.status) ? (
             <div className="border border-slate-700 bg-slate-800/60 rounded-lg p-4 text-slate-300">
