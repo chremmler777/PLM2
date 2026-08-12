@@ -7,7 +7,9 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeRequest, ChangeAssessment
-from app.models.change_cost import AssessmentCostLine, DepartmentRate, COST_KINDS
+from app.models.change_cost import (
+    AssessmentCostLine, CostingPosition, DepartmentRate, COST_KINDS,
+)
 
 
 class CostError(ValueError):
@@ -202,6 +204,31 @@ class CostService:
                 cell["minutes_per_part"] += line.minutes_per_part
                 minutes_by_plant[line.plant_id] = (
                     minutes_by_plant.get(line.plant_id, 0.0) + line.minutes_per_part)
+
+        # Costing positions ADD to the grid; they do not replace it. They carry
+        # no plant — an external tool-shop order is not made at a plant — so
+        # they land in the department margin and the grand total, and the
+        # per-plant matrix stays exactly what the cost lines said. All of them
+        # are one-off money: a position priced per part for the life of the
+        # programme is a lifecycle cost LINE, which already exists.
+        positions = (await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change.id))).scalars().all()
+        pos_by_dep: dict[int, dict] = {}
+        for p in positions:
+            cost = p.effective_cost or 0.0
+            bucket = ("one_time_external" if p.kind == "external"
+                      else "one_time_internal")
+            by_dep.setdefault(p.department_id, _blank())[bucket] += cost
+            totals[bucket] += cost
+            agg = pos_by_dep.setdefault(
+                p.department_id,
+                {"department_id": p.department_id, "position_cost": 0.0,
+                 "hours": 0.0, "position_count": 0})
+            agg["position_cost"] += cost
+            agg["hours"] += float(p.hours or 0.0)
+            agg["position_count"] += 1
+
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])
 
@@ -213,9 +240,21 @@ class CostService:
                    ChangeAssessment.lead_time_impact_days)
             .where(ChangeAssessment.change_id == change.id,
                    ChangeAssessment.lead_time_impact_days.is_not(None)))).all()
+        # Assessment lead times carry no unit and always meant the calendar,
+        # so the whole roll-up is reported in CALENDAR days and anything
+        # quoted in working days is converted before it is compared.
         lead_by_dept: dict[int, int] = {}
         for department_id, days in lead_rows:
             lead_by_dept[department_id] = max(lead_by_dept.get(department_id, 0), days)
+        # A supplier's delivery date is a lead time like any other — often THE
+        # long pole — so the FAVORITE offer's days (or the position's own)
+        # count towards the department's, by the same max-not-sum rule. A
+        # 5-business-day quote is 7 calendar days and beats a 6-day one.
+        for p in positions:
+            days = p.effective_lead_time_calendar_days
+            if days is not None:
+                lead_by_dept[p.department_id] = max(
+                    lead_by_dept.get(p.department_id, 0), days)
 
         efforts = (await session.execute(
             select(ChangeAssessment.department_id,
@@ -242,4 +281,12 @@ class CostService:
                 {"plant_id": pid, "minutes_per_part": mins}
                 for pid, mins in sorted(minutes_by_plant.items())],
             "total_minutes_per_part": float(sum(minutes_by_plant.values())),
+            # The position half of the department margin, broken out: the same
+            # money is already inside by_department and totals, reported
+            # separately so "how much of this is supplier money" is answerable
+            # without re-adding it.
+            "positions_by_department": [
+                pos_by_dep[d] for d in sorted(pos_by_dep)],
+            "total_position_cost": float(
+                sum(v["position_cost"] for v in pos_by_dep.values())),
         }

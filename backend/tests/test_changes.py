@@ -219,6 +219,8 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth, sessio
                           json={"department_id": a["department_id"], "verdict": "feasible"},
                           headers=auth)
     await _transition(client, auth, change["id"], "costing")
+    # Writing the offer is its own stage now: costing -> quoting -> quoted.
+    await _transition(client, auth, change["id"], "quoting")
     await client.patch(f"/api/v1/changes/{change['id']}",
                        json={"quoted_price": 12500.0}, headers=auth)
     await _transition(client, auth, change["id"], "quoted")

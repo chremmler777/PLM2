@@ -1,0 +1,561 @@
+"""Costing positions: either a direct quote or an estimate.
+
+The rules under test are the ones the cost grid could not express — who owns a
+position, where its number comes from when several suppliers answered, and what
+"this department owes a costing number" means once a department has already
+said the change does not touch it.
+"""
+import json
+
+import pytest
+
+from app.models.change import ChangeAssessment, ChangeRequest
+from app.models.change_cost import DepartmentRate
+from app.models.entities import Plant, Project
+from app.models.workflow import Department, UserDepartment
+from tests.conftest import login
+
+pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture
+async def costing(session_factory, seed):
+    """A change in costing with two feasible departments and rates — the same
+    setup test_costing_contract.py uses, so both files describe one world."""
+    async with session_factory() as s:
+        tool = Department(name="Tool Engineer", flow_type="action", is_active=True)
+        dev = Department(name="Development", flow_type="action", is_active=True)
+        s.add_all([tool, dev])
+        await s.flush()
+        project = await s.get(Project, seed["project_id"])
+        usa = Plant(organization_id=seed["org_id"], name="USA", code="usa",
+                    location="US", is_active=True)
+        s.add(usa)
+        await s.flush()
+        for dept in (tool, dev):
+            for plant_id, rate in ((project.plant_id, 65.0), (usa.id, 100.0)):
+                s.add(DepartmentRate(department_id=dept.id, plant_id=plant_id,
+                                     hourly_rate=rate, min_factor=1.0))
+        change = ChangeRequest(
+            change_number="C-POS-1", title="positions", reason="r",
+            change_type="physical_part", project_id=seed["project_id"],
+            raised_by=seed["admin_id"], lead_id=seed["admin_id"], status="costing")
+        s.add(change)
+        await s.flush()
+        rows = {}
+        for dept in (tool, dev):
+            a = ChangeAssessment(change_id=change.id, department_id=dept.id,
+                                 stage_order=1, verdict="feasible")
+            s.add(a)
+            await s.flush()
+            rows[dept.name] = a.id
+        await s.commit()
+        return {"change_id": change.id, "tool": tool.id, "dev": dev.id,
+                "assessments": rows, "home_plant": project.plant_id,
+                "usa_plant": usa.id}
+
+
+async def _member(client, session_factory, seed, dept_id, email):
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        u = User(organization_id=seed["org_id"], username=email.split("@")[0],
+                 email=email, full_name=email, role="engineer",
+                 hashed_password=get_password_hash("member-secret-1"),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=dept_id))
+        await s.commit()
+        return await login(client, email)
+
+
+def _positions_url(costing) -> str:
+    return f"/api/v1/changes/{costing['change_id']}/costing/positions"
+
+
+async def _add_position(client, auth, costing, **body):
+    payload = {"department_id": costing["tool"], "label": "Tool rework",
+               "kind": "external", **body}
+    return await client.post(_positions_url(costing), json=payload, headers=auth)
+
+
+async def _add_offer(client, auth, costing, pid, **body):
+    payload = {"vendor_name": "Vendor A", "cost": 1000.0, **body}
+    return await client.post(f"{_positions_url(costing)}/{pid}/offers",
+                             json=payload, headers=auth)
+
+
+async def _set_status(session_factory, change_id, status):
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, change_id)
+        change.status = status
+        await s.commit()
+
+
+# --- CRUD -------------------------------------------------------------------
+
+async def test_position_round_trips_with_its_estimate(client, admin_auth, costing):
+    res = await _add_position(
+        client, admin_auth, costing, kind="internal_effort",
+        label="Assessment time", tag="documentation", est_cost=320.0, hours=4.0)
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["effective_cost"] == 320.0
+    # Effort is never quoted, whatever the caller sent.
+    assert body["pricing"] == "estimate"
+    assert body["offers"] == []
+
+    listed = await client.get(_positions_url(costing), headers=admin_auth)
+    assert listed.status_code == 200, listed.text
+    assert [p["id"] for p in listed.json()] == [body["id"]]
+    assert listed.json()[0]["hours"] == 4.0
+
+
+async def test_position_update_and_delete(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               est_cost=100.0)).json()["id"]
+    res = await client.put(f"{_positions_url(costing)}/{pid}",
+                           json={"est_cost": 250.0, "tag": "tool_change"},
+                           headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["est_cost"] == 250.0
+    assert res.json()["tag"] == "tool_change"
+    # A field left out of a partial update is left alone.
+    assert res.json()["label"] == "Tool rework"
+
+    res = await client.delete(f"{_positions_url(costing)}/{pid}", headers=admin_auth)
+    assert res.status_code == 204, res.text
+    assert (await client.get(_positions_url(costing), headers=admin_auth)).json() == []
+
+
+async def test_a_position_needs_a_routed_department(client, admin_auth, costing):
+    """Only a department carrying an assessment has costs on this change."""
+    res = await _add_position(client, admin_auth, costing, department_id=999_999,
+                              est_cost=1.0)
+    assert res.status_code == 400
+    assert "no assessment on this change" in res.json()["detail"]
+
+
+async def test_a_label_is_required(client, admin_auth, costing):
+    res = await _add_position(client, admin_auth, costing, label="   ")
+    assert res.status_code == 400
+    assert "label" in res.json()["detail"]
+
+
+# --- permissions ------------------------------------------------------------
+
+async def test_department_writes_its_own_positions_only(
+        client, session_factory, seed, costing):
+    tool_member = await _member(client, session_factory, seed, costing["tool"],
+                                "posstool@test.io")
+    mine = await _add_position(client, tool_member, costing, est_cost=10.0)
+    assert mine.status_code == 201, mine.text
+
+    theirs = await _add_position(client, tool_member, costing,
+                                 department_id=costing["dev"], est_cost=10.0)
+    assert theirs.status_code == 403
+    assert "Project Management" in theirs.json()["detail"]
+
+
+async def test_positions_are_writable_only_while_the_change_is_in_costing(
+        client, admin_auth, session_factory, seed, costing):
+    tool_member = await _member(client, session_factory, seed, costing["tool"],
+                                "posstool2@test.io")
+    await _set_status(session_factory, costing["change_id"], "in_assessment")
+
+    denied = await _add_position(client, tool_member, costing, est_cost=10.0)
+    assert denied.status_code == 403
+    # PM/admin run costing and are not held to the window.
+    assert (await _add_position(client, admin_auth, costing,
+                                est_cost=10.0)).status_code == 201
+
+
+async def test_a_department_reads_only_its_own_positions(
+        client, admin_auth, session_factory, seed, costing):
+    await _add_position(client, admin_auth, costing, label="Tool work",
+                        est_cost=10.0)
+    await _add_position(client, admin_auth, costing, department_id=costing["dev"],
+                        label="Design work", est_cost=20.0)
+    tool_member = await _member(client, session_factory, seed, costing["tool"],
+                                "posstool3@test.io")
+
+    seen = (await client.get(_positions_url(costing), headers=tool_member)).json()
+    assert [p["label"] for p in seen] == ["Tool work"]
+    # The lead (here the admin who raised it) prices the change as a whole.
+    everything = (await client.get(_positions_url(costing), headers=admin_auth)).json()
+    assert len(everything) == 2
+
+
+# --- offers -----------------------------------------------------------------
+
+async def test_offers_belong_to_external_positions_only(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               kind="support_effort", est_cost=50.0)).json()["id"]
+    res = await _add_offer(client, admin_auth, costing, pid)
+    assert res.status_code == 400
+    assert "external" in res.json()["detail"]
+
+
+async def test_favorite_is_exclusive_per_position(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    first = (await _add_offer(client, admin_auth, costing, pid,
+                              vendor_name="A", cost=1000.0,
+                              favorite=True)).json()
+    second = (await _add_offer(client, admin_auth, costing, pid,
+                               vendor_name="B", cost=900.0,
+                               favorite=True)).json()
+    assert second["favorite"] is True
+
+    position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    favorites = [o["id"] for o in position["offers"] if o["favorite"]]
+    assert favorites == [second["id"]]
+    assert position["favorite_offer_id"] == second["id"]
+    assert position["effective_cost"] == 900.0
+
+    # Voting back is the same move in reverse.
+    res = await client.put(
+        f"/api/v1/changes/{costing['change_id']}/costing/offers/{first['id']}",
+        json={"favorite": True}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert position["favorite_offer_id"] == first["id"]
+
+
+async def test_effective_cost_adds_shipping_unless_it_is_included(
+        client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    stated = (await _add_offer(client, admin_auth, costing, pid, vendor_name="A",
+                               cost=1000.0, shipping_cost=150.0,
+                               favorite=True)).json()
+    assert stated["total_cost"] == 1150.0
+    position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert position["effective_cost"] == 1150.0
+
+    res = await client.put(
+        f"/api/v1/changes/{costing['change_id']}/costing/offers/{stated['id']}",
+        json={"shipping_included": True}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["total_cost"] == 1000.0
+    position = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert position["effective_cost"] == 1000.0
+
+
+async def test_a_single_offer_prices_the_position_without_a_vote(
+        client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote", est_cost=99.0)).json()["id"]
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    # A quoted position with no offer yet is worth nothing stated — the stale
+    # estimate must not stand in for a supplier's answer.
+    assert listed["effective_cost"] is None
+
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Only",
+                     cost=750.0)
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert listed["effective_cost"] == 750.0
+
+
+async def test_deleting_an_offer_leaves_the_position(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    oid = (await _add_offer(client, admin_auth, costing, pid, cost=500.0)).json()["id"]
+    res = await client.delete(
+        f"/api/v1/changes/{costing['change_id']}/costing/offers/{oid}",
+        headers=admin_auth)
+    assert res.status_code == 204, res.text
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert listed["offers"] == []
+    assert listed["effective_cost"] is None
+
+
+async def test_hours_are_accepted_on_an_external_position_too(
+        client, admin_auth, costing):
+    """The department's own time around a supplier's work is effort, and it
+    coexists with the supplier's price rather than replacing it."""
+    pid = (await _add_position(client, admin_auth, costing, pricing="quote",
+                               hours=6.5)).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, cost=800.0, favorite=True)
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert listed["hours"] == 6.5
+    assert listed["effective_cost"] == 800.0
+
+
+# --- lead time units --------------------------------------------------------
+
+async def test_a_lead_time_unit_must_be_one_we_know(client, admin_auth, costing):
+    res = await _add_position(client, admin_auth, costing, est_cost=1.0,
+                              lead_time_days=5, lead_time_unit="fortnights")
+    assert res.status_code == 400
+    assert "lead time unit" in res.json()["detail"]
+
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    res = await _add_offer(client, admin_auth, costing, pid, cost=1.0,
+                           lead_time_days=5, lead_time_unit="moons")
+    assert res.status_code == 400
+    assert "lead time unit" in res.json()["detail"]
+
+
+async def test_lead_time_defaults_to_calendar_days(client, admin_auth, costing):
+    res = await _add_position(client, admin_auth, costing, est_cost=1.0,
+                              lead_time_days=10)
+    assert res.status_code == 201, res.text
+    assert res.json()["lead_time_unit"] == "calendar_days"
+    assert res.json()["effective_lead_time_calendar_days"] == 10
+
+
+async def test_business_days_convert_for_the_roll_up(client, admin_auth, costing):
+    """Five working days are seven calendar days — and beat a six-day quote."""
+    res = await _add_position(client, admin_auth, costing, est_cost=1.0,
+                              lead_time_days=5, lead_time_unit="business_days")
+    body = res.json()
+    assert body["lead_time_days"] == 5                       # as entered
+    assert body["effective_lead_time_unit"] == "business_days"
+    assert body["effective_lead_time_calendar_days"] == 7    # as compared
+
+    await _add_position(client, admin_auth, costing, label="Other",
+                        est_cost=1.0, lead_time_days=6,
+                        lead_time_unit="calendar_days")
+    summ = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                             headers=admin_auth)).json()
+    assert summ["max_lead_time_days"] == 7
+
+
+async def test_the_favorite_offers_lead_time_wins_the_roll_up(
+        client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing, pricing="quote",
+                               lead_time_days=3)).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Slow",
+                     cost=900.0, lead_time_days=40)
+    fast = (await _add_offer(client, admin_auth, costing, pid, vendor_name="Fast",
+                             cost=1200.0, lead_time_days=10,
+                             favorite=True)).json()
+    assert fast["lead_time_calendar_days"] == 10
+
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    # The chosen supplier's date, not the other bidder's and not the stale
+    # estimate typed on the position.
+    assert listed["effective_lead_time_days"] == 10
+    assert listed["effective_cost"] == 1200.0
+
+    summ = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                             headers=admin_auth)).json()
+    assert summ["max_lead_time_days"] == 10
+    assert summ["total_position_cost"] == 1200.0
+
+
+async def test_a_favorite_quoted_in_business_days_is_compared_on_the_calendar(
+        client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Works days",
+                     cost=500.0, lead_time_days=20,
+                     lead_time_unit="business_days", favorite=True)
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert listed["effective_lead_time_days"] == 20
+    assert listed["effective_lead_time_unit"] == "business_days"
+    assert listed["effective_lead_time_calendar_days"] == 28
+
+    summ = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                             headers=admin_auth)).json()
+    assert summ["max_lead_time_days"] == 28
+    assert summ["lead_time_by_department"][0]["lead_time_days"] == 28
+
+
+# --- the quote document -----------------------------------------------------
+
+async def _upload(client, auth, change_id, **form):
+    return await client.post(
+        f"/api/v1/changes/{change_id}/attachments",
+        files={"file": ("quote.pdf", b"%PDF-1.4 q", "application/pdf")},
+        data={k: str(v) for k, v in form.items()}, headers=auth)
+
+
+async def test_a_vendor_quote_files_against_its_offer(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    oid = (await _add_offer(client, admin_auth, costing, pid, cost=500.0)).json()["id"]
+
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        kind="vendor_quote", costing_offer_id=oid)
+    assert res.status_code in (200, 201), res.text
+    assert res.json()["costing_offer_id"] == oid
+
+    listed = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    docs = listed["offers"][0]["attachments"]
+    assert [d["filename"] for d in docs] == ["quote.pdf"]
+
+
+async def test_a_vendor_quote_must_name_an_offer(client, admin_auth, costing):
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        kind="vendor_quote")
+    assert res.status_code == 400
+    assert "costing offer" in res.json()["detail"]
+
+
+async def test_only_a_vendor_quote_may_name_an_offer(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    oid = (await _add_offer(client, admin_auth, costing, pid, cost=500.0)).json()["id"]
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        kind="general", costing_offer_id=oid)
+    assert res.status_code == 400
+    assert "vendor_quote" in res.json()["detail"]
+
+
+async def test_a_quote_belongs_to_one_container_only(client, admin_auth, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    oid = (await _add_offer(client, admin_auth, costing, pid, cost=500.0)).json()["id"]
+    res = await _upload(client, admin_auth, costing["change_id"],
+                        kind="vendor_quote", costing_offer_id=oid,
+                        assessment_id=costing["assessments"]["Tool Engineer"])
+    assert res.status_code == 400
+    assert "not to more than one" in res.json()["detail"]
+
+
+async def test_a_stranger_cannot_document_another_departments_offer(
+        client, admin_auth, session_factory, seed, costing):
+    pid = (await _add_position(client, admin_auth, costing,
+                               pricing="quote")).json()["id"]
+    oid = (await _add_offer(client, admin_auth, costing, pid, cost=500.0)).json()["id"]
+    outsider = await _member(client, session_factory, seed, costing["dev"],
+                             "posdev@test.io")
+    res = await _upload(client, outsider, costing["change_id"],
+                        kind="vendor_quote", costing_offer_id=oid)
+    assert res.status_code == 400
+    assert "costing department" in res.json()["detail"]
+
+
+# --- tags -------------------------------------------------------------------
+
+async def test_costing_tags_offer_common_plus_department_extras(
+        client, admin_auth, costing):
+    res = await client.get("/api/v1/changes/reference/costing-tags",
+                           headers=admin_auth)
+    assert res.status_code == 200, res.text
+    common = [i["key"] for i in res.json()["items"]]
+    assert "tool_change" in common and "other" in common
+    assert all(i["extra"] is False for i in res.json()["items"])
+
+    res = await client.get(
+        f"/api/v1/changes/reference/costing-tags?department_id={costing['tool']}",
+        headers=admin_auth)
+    keys = [i["key"] for i in res.json()["items"]]
+    assert "tool_change" in keys              # common set is still there
+    assert "hot_runner" in keys               # and the department's own
+
+
+async def test_a_free_text_tag_is_accepted(client, admin_auth, costing):
+    res = await _add_position(client, admin_auth, costing, tag="whatever_we_call_it",
+                              est_cost=1.0)
+    assert res.status_code == 201, res.text
+    assert res.json()["tag"] == "whatever_we_call_it"
+
+
+# --- the costing queue ------------------------------------------------------
+
+async def _mark_nothing_impacted(session_factory, assessment_id):
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, assessment_id)
+        a.details = json.dumps({"impacts": [
+            {"key": "cycle_time_change", "impacted": False},
+            {"key": "scrap_increase", "impacted": False},
+        ]})
+        await s.commit()
+
+
+async def test_costing_queue_skips_the_department_that_marked_nothing_impacted(
+        client, admin_auth, session_factory, costing):
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=admin_auth)).json()
+    assert sorted(detail["costing_pending_department_ids"]) == sorted(
+        [costing["tool"], costing["dev"]])
+
+    await _mark_nothing_impacted(session_factory, costing["assessments"]["Development"])
+
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=admin_auth)).json()
+    assert detail["costing_pending_department_ids"] == [costing["tool"]]
+
+
+async def test_nothing_impacted_but_a_cost_declared_still_owes_a_number(
+        client, admin_auth, session_factory, costing):
+    await _mark_nothing_impacted(session_factory, costing["assessments"]["Development"])
+    async with session_factory() as s:
+        a = await s.get(ChangeAssessment, costing["assessments"]["Development"])
+        a.cost_impact = 500.0
+        await s.commit()
+
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=admin_auth)).json()
+    assert sorted(detail["costing_pending_department_ids"]) == sorted(
+        [costing["tool"], costing["dev"]])
+
+
+async def test_the_costing_input_task_disappears_for_a_nothing_impacted_department(
+        client, session_factory, seed, costing):
+    dev_member = await _member(client, session_factory, seed, costing["dev"],
+                               "posdev2@test.io")
+
+    async def rows():
+        res = await client.get("/api/v1/changes/my-tasks", headers=dev_member)
+        assert res.status_code == 200, res.text
+        return [t for t in res.json()
+                if t["kind"] == "costing_input"
+                and t["change_id"] == costing["change_id"]]
+
+    assert len(await rows()) == 1
+    await _mark_nothing_impacted(session_factory, costing["assessments"]["Development"])
+    assert await rows() == []
+
+
+async def test_a_position_answers_the_costing_queue(
+        client, admin_auth, costing):
+    await _add_position(client, admin_auth, costing, est_cost=42.0)
+    detail = (await client.get(f"/api/v1/changes/{costing['change_id']}",
+                               headers=admin_auth)).json()
+    assert detail["costing_pending_department_ids"] == [costing["dev"]]
+
+
+# --- summation --------------------------------------------------------------
+
+async def test_positions_add_to_the_department_totals(client, admin_auth, costing):
+    base = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                             headers=admin_auth)).json()
+    assert base["totals"]["grand_total"] == 0.0
+
+    await _add_position(client, admin_auth, costing, kind="internal_effort",
+                        label="Assessment time", est_cost=300.0, hours=4.0)
+    pid = (await _add_position(client, admin_auth, costing, kind="external",
+                               pricing="quote", label="New nozzle",
+                               lead_time_days=None)).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="A",
+                     cost=1000.0, shipping_cost=150.0, lead_time_days=30,
+                     favorite=True)
+
+    summ = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                             headers=admin_auth)).json()
+    assert summ["totals"]["one_time_internal"] == 300.0
+    assert summ["totals"]["one_time_external"] == 1150.0
+    assert summ["totals"]["grand_total"] == 1450.0
+
+    dept = [d for d in summ["by_department"]
+            if d["department_id"] == costing["tool"]][0]
+    assert dept["one_time_internal"] == 300.0
+    assert dept["one_time_external"] == 1150.0
+
+    broken_out = summ["positions_by_department"][0]
+    assert broken_out["department_id"] == costing["tool"]
+    assert broken_out["position_cost"] == 1450.0
+    assert broken_out["hours"] == 4.0
+    assert broken_out["position_count"] == 2
+    assert summ["total_position_cost"] == 1450.0
+
+    # The supplier's delivery date is a lead time like any other.
+    assert summ["max_lead_time_days"] == 30
+    # Positions carry no plant, so the per-plant matrix is untouched by them.
+    assert summ["by_plant"] == []

@@ -305,7 +305,9 @@ async def test_a_document_belongs_to_one_container(
                         assessment_id=costing["assessments"]["Tool Engineer"],
                         concern_id=concern_id)
     assert res.status_code == 400
-    assert "not both" in res.json()["detail"]
+    # Three containers now (concern, assessment, costing offer) — the rule is
+    # still "exactly one of them".
+    assert "not to more than one" in res.json()["detail"]
 
 
 def seed_admin(costing):

@@ -12,7 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change_cost import (
-    ChangeGate, AssessmentActivity, AssessmentCostLine,
+    ChangeGate, AssessmentActivity, AssessmentCostLine, CostingPosition,
     GATE_KEYS, GATE_DECISIONS, GATE_TARGET_STATUS,
 )
 from app.models.change import (
@@ -55,13 +55,21 @@ ALLOWED_TRANSITIONS = {
     "captured":          {"scoping", "rejected", "cancelled", "on_hold"},
     "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
     "in_assessment":     {"scoping", "costing", "rejected", "cancelled", "on_hold"},
-    "costing":           {"quoted", "approved", "on_hold", "cancelled"},
+    # 'approved' straight from costing is the INTERNAL branch (no quote at
+    # all). Customer-relevant changes go costing -> quoting -> quoted.
+    "costing":           {"quoting", "approved", "on_hold", "cancelled"},
+    # Back to costing is the correction path: Sales building the offer is the
+    # moment a wrong number gets noticed. Nothing has been offered yet, so
+    # there is no customer rejection to record here — that lives after
+    # 'quoted'.
+    "quoting":           {"quoted", "costing", "on_hold", "cancelled"},
     "quoted":            {"approved", "rejected", "on_hold", "cancelled"},
     "approved":          {"in_implementation", "on_hold", "cancelled"},
     "in_implementation": {"in_validation", "on_hold", "cancelled"},
     "in_validation":     {"released", "in_implementation", "on_hold", "cancelled"},
     "released":          {"closed"},
-    "on_hold":           {"scoping", "in_assessment", "costing", "quoted", "approved",
+    "on_hold":           {"scoping", "in_assessment", "costing", "quoting",
+                          "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
     # Rejection is reversible: a change rejected in error goes back to scoping
     # with a memo rather than forcing a whole new change request. Cancellation
@@ -575,7 +583,11 @@ class ChangeService:
                 )).scalar_one_or_none()
                 if proceed is None:
                     return "No scoping meeting with decision 'proceed' recorded"
-        if to_status == "costing":
+        # The costing-side guards hold for BOTH costing hops: entering costing,
+        # and leaving it to write the offer. A quote built while an assessment
+        # is still open or a routing deviation is unapproved is a quote for
+        # work nobody has agreed to do.
+        if to_status in ("costing", "quoting"):
             from app.services.change_routing_service import ChangeRoutingService
             if not await ChangeRoutingService.blocking_complete(session, change):
                 return "Not all responsible/accountable assessments are submitted"
@@ -585,6 +597,8 @@ class ChangeService:
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
                 return "Routing deviation is pending approval"
+        # 'quoted' means the offer is out with the customer, so by then there
+        # is a price. Writing it is the whole content of the 'quoting' stage.
         if to_status == "quoted":
             if change.quoted_price is None:
                 return "No quoted price recorded"
@@ -647,7 +661,7 @@ class ChangeService:
                 if change.internal_approved_at is None:
                     raise ChangeError(
                         "Internal cost approval is required before approval")
-        if to_status == "quoted" and not change.customer_relevant:
+        if to_status in ("quoting", "quoted") and not change.customer_relevant:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
 
@@ -1171,6 +1185,21 @@ class ChangeService:
             return True
         return await ChangeService._user_in_department(session, user, "Sales")
 
+    # Which hops belong to the quote stage — the ones only Sales may drive.
+    QUOTE_STAGE_TRANSITIONS = {("costing", "quoting"), ("quoting", "quoted")}
+
+    @staticmethod
+    async def user_can_run_quote_stage(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Who may start the offer and who may declare it sent.
+
+        The same people who may set the price, for the obvious reason: opening
+        the quote stage and writing the number in it are one job. Admin, the
+        change lead, or a Sales member (acts-as aware through
+        _user_in_department)."""
+        return await ChangeService.user_can_set_quoted_price(session, user, change)
+
     @staticmethod
     async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:
         """Internal cost approval is PM territory: admin or a 'Project
@@ -1491,7 +1520,9 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, department_id: int,
         lead_time_days: int, actor: User,
     ) -> ChangeAssessment:
-        """Record how many days THIS department's work adds to the timeline.
+        """Record how many CALENDAR days THIS department's work adds to the
+        timeline (costing positions carry an explicit unit; this number never
+        did, and the summation reads both in calendar days).
 
         It lives on the department's own assessment row rather than a new
         table: it is that department's answer, changes when they resubmit, and
@@ -1534,6 +1565,28 @@ class ChangeService:
         return a
 
     @staticmethod
+    def owes_costing_input(assessment: ChangeAssessment) -> bool:
+        """Does this department still owe a number at costing?
+
+        A department that answered its checklist and ticked NOTHING has already
+        given its answer — Packaging saying "no change for us" is not silence,
+        and asking it again for a cost is asking it to repeat itself. It keeps
+        the task only if it nevertheless declared money or time.
+
+        An assessment with no checklist at all is a different animal: nothing
+        was concluded, so it still owes. Legacy rows written before the
+        checklist existed land here and keep their task, which is the safe
+        side of the line.
+        """
+        impacts = assessment.details_dict.get("impacts")
+        if not isinstance(impacts, list):
+            return True
+        if any(i.get("impacted") for i in impacts if isinstance(i, dict)):
+            return True
+        return bool(assessment.cost_impact or assessment.lifecycle_cost
+                    or assessment.lead_time_impact_days)
+
+    @staticmethod
     async def costing_pending_department_ids(
         session: AsyncSession, change: ChangeRequest,
     ) -> list[int]:
@@ -1543,19 +1596,35 @@ class ChangeService:
         Only while the change is IN costing: before that nobody owes a number,
         and afterwards the totals are already snapshotted. A department that
         genuinely costs nothing says so with a zero line, which is an answer;
-        no lines at all is silence."""
+        no lines at all is silence — unless its checklist already said the
+        change does not touch it (see owes_costing_input).
+
+        Priced = a cost line OR a costing position: a supplier quote filed as a
+        position is an answer just as much as an hours line is."""
         if change.status != "costing":
             return []
-        rows = (await session.execute(
+        line_counts = dict((await session.execute(
             select(ChangeAssessment.department_id,
                    func.count(AssessmentCostLine.id))
             .outerjoin(AssessmentCostLine,
                        AssessmentCostLine.assessment_id == ChangeAssessment.id)
-            .where(ChangeAssessment.change_id == change.id,
-                   ChangeAssessment.verdict.in_(
-                       ("feasible", "feasible_with_conditions")))
-            .group_by(ChangeAssessment.department_id))).all()
-        return sorted({d for d, count in rows if not count})
+            .where(ChangeAssessment.change_id == change.id)
+            .group_by(ChangeAssessment.department_id))).all())
+        position_counts = dict((await session.execute(
+            select(CostingPosition.department_id, func.count(CostingPosition.id))
+            .where(CostingPosition.change_id == change.id)
+            .group_by(CostingPosition.department_id))).all())
+        # A department can carry several assessment rows (multi-stage routing);
+        # one row still owing keeps the whole department on the hook.
+        owed: dict[int, bool] = {}
+        for a in change.assessments:
+            if a.verdict not in ("feasible", "feasible_with_conditions"):
+                continue
+            owed[a.department_id] = (owed.get(a.department_id, False)
+                                     or ChangeService.owes_costing_input(a))
+        return sorted(d for d, still_owes in owed.items()
+                      if still_owes and not line_counts.get(d)
+                      and not position_counts.get(d))
 
     @staticmethod
     async def _validate_impacts(
@@ -2246,6 +2315,7 @@ class ChangeService:
         stored_path: str, content_type: str, size_bytes: int, sha256: str, user_id: int,
         kind: str = "general", responds_to_id: Optional[int] = None,
         concern_id: Optional[int] = None, assessment_id: Optional[int] = None,
+        costing_offer_id: Optional[int] = None,
         actor: Optional[User] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
@@ -2258,10 +2328,20 @@ class ChangeService:
         # it from everyone who is not looking in that container — the opposite
         # of why it is kept.
         if kind == "customer_email" and (assessment_id is not None
-                                         or concern_id is not None):
+                                         or concern_id is not None
+                                         or costing_offer_id is not None):
             raise ChangeError(
                 "Customer correspondence is filed on the change itself, not "
                 "into an assessment or a concern")
+        # A vendor quote is the document its offer IS: it has no meaning loose
+        # on the change (which offer?) and none in another container. So the
+        # link is required in one direction and exclusive in the other.
+        if kind == "vendor_quote" and costing_offer_id is None:
+            raise ChangeError(
+                "A vendor quote must name the costing offer it belongs to")
+        if costing_offer_id is not None and kind != "vendor_quote":
+            raise ChangeError(
+                "Only a vendor_quote is filed against a costing offer")
         # Only an answer may point at a question, and only at a real question
         # on THIS change — a dangling or cross-change link would make the
         # needs-info loop unreadable, which is the whole point of the field.
@@ -2288,9 +2368,11 @@ class ChangeService:
                     "instead")
         # A document belongs to ONE container: filing it into both a question
         # and an assessment would make "where does this live" unanswerable.
-        if concern_id is not None and assessment_id is not None:
+        if sum(1 for c in (concern_id, assessment_id, costing_offer_id)
+               if c is not None) > 1:
             raise ChangeError(
-                "An attachment belongs to a concern or an assessment, not both")
+                "An attachment belongs to a concern, an assessment or a "
+                "costing offer — not to more than one")
         if assessment_id is not None:
             a = await session.get(ChangeAssessment, assessment_id)
             if a is None or a.change_id != change.id:
@@ -2304,12 +2386,29 @@ class ChangeService:
                     "Only a member of the assessed department, the change "
                     "lead, Project Management, Sales or an admin may attach "
                     "evidence to that assessment")
+        if costing_offer_id is not None:
+            from app.services.costing_position_service import (
+                CostingPositionError, CostingPositionService,
+            )
+            try:
+                offer = await CostingPositionService.get_offer(
+                    session, change, costing_offer_id)
+            except CostingPositionError as e:
+                raise ChangeError(str(e))
+            # Whoever may write the position may document its offers: the
+            # quote and the number it justifies are one act.
+            position = await session.get(CostingPosition, offer.position_id)
+            if actor is not None and not await CostingPositionService.may_write(
+                    session, change, position.department_id, actor):
+                raise ChangeError(
+                    "Only a member of the costing department, Project "
+                    "Management or an admin may attach a quote to that offer")
         att = ChangeAttachment(
             change_id=change.id, filename=filename, stored_path=stored_path,
             content_type=content_type, size_bytes=size_bytes, sha256=sha256,
             uploaded_by=user_id, phase=phase, kind=kind,
             responds_to_id=responds_to_id, concern_id=concern_id,
-            assessment_id=assessment_id,
+            assessment_id=assessment_id, costing_offer_id=costing_offer_id,
         )
         session.add(att)
         await session.flush()
@@ -2319,7 +2418,8 @@ class ChangeService:
             new_value={"filename": filename, "phase": phase, "kind": kind,
                        "responds_to_id": responds_to_id,
                        "concern_id": concern_id,
-                       "assessment_id": assessment_id},
+                       "assessment_id": assessment_id,
+                       "costing_offer_id": costing_offer_id},
         )
         return att
 

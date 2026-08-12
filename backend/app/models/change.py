@@ -23,9 +23,13 @@ change_affected_plants = Table(
 
 CHANGE_TYPES = ("physical_part", "tooling", "document_spec", "process_im", "packaging")
 CHANGE_PRIORITIES = ("low", "medium", "high", "critical")
+# 'quoting' is the act of writing the offer, 'quoted' is the offer being out
+# with the customer. They were one status, which made "Sales is building the
+# quote" indistinguishable from "we are waiting on the customer" — two states
+# with different owners and different open work.
 CHANGE_STATUSES = (
-    "captured", "scoping", "in_assessment", "costing", "quoted", "approved",
-    "in_implementation", "in_validation", "released", "closed",
+    "captured", "scoping", "in_assessment", "costing", "quoting", "quoted",
+    "approved", "in_implementation", "in_validation", "released", "closed",
     "on_hold", "rejected", "cancelled",
 )
 ASSESSMENT_VERDICTS = ("pending", "feasible", "feasible_with_conditions", "not_feasible")
@@ -46,8 +50,13 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 # "customer_email" is correspondence with the customer. It stays change-level
 # (it is nobody's assessment evidence) and anyone may file one, because anyone
 # on the team may end up in that mail thread.
+# "vendor_quote" is the supplier's offer document. It files against the
+# costing offer it IS — never loose on the change, never into another
+# container — because the number in the offer row is only as good as the PDF
+# behind it.
 ATTACHMENT_KINDS = ("general", "info_request", "info_response",
-                    "rejection_letter", "rfq", "change_ppt", "customer_email")
+                    "rejection_letter", "rfq", "change_ppt", "customer_email",
+                    "vendor_quote")
 
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
@@ -452,6 +461,10 @@ class ChangeAttachment(Base):
     # Mutually exclusive with concern_id: a document belongs to one container.
     assessment_id: Mapped[int | None] = mapped_column(
         ForeignKey("change_assessments.id"), nullable=True, index=True)
+    # The vendor offer this document is. Third and last container, exclusive
+    # with the other two — a quote PDF is evidence for exactly one offer.
+    costing_offer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("costing_offers.id"), nullable=True, index=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -670,4 +683,6 @@ class ChangeTransitionDeviation(Base):
 from app.models.entities import Project, User, Plant  # noqa: E402,F811
 from app.models.part import Part, PartRevision  # noqa: E402
 from app.models.workflow import Department, WfInstanceTask  # noqa: E402
-from app.models.change_cost import AssessmentCostLine, ChangeGate  # noqa: E402
+from app.models.change_cost import (  # noqa: E402
+    AssessmentCostLine, ChangeGate, CostingPosition, CostingOffer,
+)

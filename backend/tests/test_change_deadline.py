@@ -320,6 +320,21 @@ async def test_transition_to_quoted_stamps_quoted_at(session_factory, seed):
         # above never touched it, so force a load before transitioning
         # (same async lazy-load pitfall as impacted_items above).
         await session.refresh(chg, ["gates"])
+        # Leaving costing now carries the costing-side guards, so the change
+        # needs the submitted assessment a real one would have.
+        from app.models.change import ChangeAssessment
+        session.add(ChangeAssessment(
+            change_id=chg.id, department_id=1, stage_order=1, rasic_letter="R",
+            status="submitted", verdict="feasible",
+            submitted_at=datetime.utcnow()))
+        await session.flush()
+        # ...and the guard reads routing as well as the assessments (same
+        # async lazy-load pitfall as gates above).
+        await session.refresh(chg, ["assessments", "routing"])
+        # The offer is written in 'quoting' and sent at 'quoted'; only the send
+        # freezes the quote milestone.
+        await ChangeService.transition(session, chg, "quoting", seed["admin_id"])
+        assert chg.quoted_at is None
         await ChangeService.transition(session, chg, "quoted", seed["admin_id"])
         assert chg.status == "quoted"
         assert chg.quoted_at is not None

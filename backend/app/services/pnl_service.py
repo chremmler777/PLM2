@@ -18,10 +18,14 @@ from app.models.change_cost import AssessmentCostLine
 from app.models.entities import Project, User
 from app.services.report_service import _org_scope
 
-PNL_STATUSES = ("costing", "quoted", "approved", "in_implementation",
+PNL_STATUSES = ("costing", "quoting", "quoted", "approved", "in_implementation",
                 "in_validation", "released", "closed")
-REALIZED_STATUSES = PNL_STATUSES[2:]
-PIPELINE_STATUSES = ("costing", "quoted")
+# Sliced by name, not by index: inserting a status into the tuple must not
+# silently move the line between pipeline and realized money.
+REALIZED_STATUSES = PNL_STATUSES[PNL_STATUSES.index("approved"):]
+# Money that is still an offer, not a commitment — 'quoting' is the same kind
+# of not-yet as 'quoted', one step earlier.
+PIPELINE_STATUSES = ("costing", "quoting", "quoted")
 
 
 def _round(value: Optional[float]) -> Optional[float]:

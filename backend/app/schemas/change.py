@@ -440,6 +440,16 @@ class PlantMinutesRollup(BaseModel):
     minutes_per_part: float
 
 
+class PositionRollup(BaseModel):
+    """The position half of a department's costs. Already inside
+    by_department and totals; broken out so "how much of this is supplier
+    money" is answerable without re-adding it."""
+    department_id: int
+    position_cost: float = 0.0
+    hours: float = 0.0
+    position_count: int = 0
+
+
 class SummationResponse(BaseModel):
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
@@ -447,11 +457,131 @@ class SummationResponse(BaseModel):
     totals: SummationTotals
     effort_by_department: List[EffortRollup] = []
     total_effort_hours: float = 0.0
+    # Always CALENDAR days: a position quoted in business days is converted
+    # (7/5, rounded up) before it joins the max.
     lead_time_by_department: List[LeadTimeRollup] = []
     # The slowest department, not the sum: they wait in parallel.
     max_lead_time_days: int = 0
     lifecycle_minutes_by_plant: List[PlantMinutesRollup] = []
     total_minutes_per_part: float = 0.0
+    positions_by_department: List[PositionRollup] = []
+    total_position_cost: float = 0.0
+
+
+# --- costing positions ------------------------------------------------------
+
+class CostingOfferCreate(BaseModel):
+    vendor_name: str
+    cost: float
+    # Either stated separately, or declared part of the price. Quotes come
+    # both ways and comparing them needs to know which.
+    shipping_cost: Optional[float] = None
+    shipping_included: bool = False
+    lead_time_days: Optional[int] = None
+    # business_days | calendar_days. A tool shop quotes working days; the plan
+    # runs on the calendar. Roll-ups convert before comparing.
+    lead_time_unit: str = "calendar_days"
+    favorite: bool = False
+
+
+class CostingOfferUpdate(BaseModel):
+    """Partial: only the fields actually sent are written, so clearing
+    shipping_cost to null is distinguishable from not mentioning it."""
+    vendor_name: Optional[str] = None
+    cost: Optional[float] = None
+    shipping_cost: Optional[float] = None
+    shipping_included: Optional[bool] = None
+    lead_time_days: Optional[int] = None
+    lead_time_unit: Optional[str] = None
+    favorite: Optional[bool] = None
+
+
+class CostingOfferAttachment(BaseModel):
+    id: int
+    filename: str
+    size_bytes: int
+    kind: str
+    uploaded_by: int
+    uploaded_by_name: Optional[str] = None
+    created_at: datetime
+
+
+class CostingOfferResponse(BaseModel):
+    id: int
+    position_id: int
+    vendor_name: str
+    cost: float
+    shipping_cost: Optional[float] = None
+    shipping_included: bool = False
+    lead_time_days: Optional[int] = None
+    lead_time_unit: str = "calendar_days"
+    # The same promise on the calendar, for comparing offers quoted in
+    # different units (business days scale by 7/5, rounded up).
+    lead_time_calendar_days: Optional[int] = None
+    favorite: bool = False
+    # cost plus shipping, unless the vendor already included it.
+    total_cost: float = 0.0
+    created_by: int
+    created_at: datetime
+    attachments: List[CostingOfferAttachment] = []
+
+
+class CostingPositionCreate(BaseModel):
+    department_id: int
+    label: str
+    kind: str = "external"          # internal_effort|support_effort|external
+    tag: Optional[str] = None       # free text; the reference list only suggests
+    pricing: str = "estimate"       # estimate|quote — external positions only
+    est_cost: Optional[float] = None
+    # Accepted on every kind, external included: the department's own time
+    # around a supplier's work is effort too.
+    hours: Optional[float] = None
+    lead_time_days: Optional[int] = None
+    lead_time_unit: str = "calendar_days"
+    notes: Optional[str] = None
+
+
+class CostingPositionUpdate(BaseModel):
+    """Partial. department_id is absent on purpose: moving a position between
+    departments would move money between budgets with no record."""
+    label: Optional[str] = None
+    kind: Optional[str] = None
+    tag: Optional[str] = None
+    pricing: Optional[str] = None
+    est_cost: Optional[float] = None
+    hours: Optional[float] = None
+    lead_time_days: Optional[int] = None
+    lead_time_unit: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CostingPositionResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    label: str
+    tag: Optional[str] = None
+    kind: str
+    pricing: str
+    est_cost: Optional[float] = None
+    hours: Optional[float] = None
+    lead_time_days: Optional[int] = None
+    lead_time_unit: str = "calendar_days"
+    notes: Optional[str] = None
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+    # What the position is worth however it is priced: the favorite offer
+    # (plus shipping when stated separately) for a quoted external position,
+    # the estimate otherwise. None means nobody has said yet.
+    effective_cost: Optional[float] = None
+    # The favorite offer's dates when a supplier set them, this position's
+    # own otherwise — in its own unit, and converted for the roll-ups.
+    effective_lead_time_days: Optional[int] = None
+    effective_lead_time_unit: str = "calendar_days"
+    effective_lead_time_calendar_days: Optional[int] = None
+    favorite_offer_id: Optional[int] = None
+    offers: List[CostingOfferResponse] = []
 
 
 class GateDecisionIn(BaseModel):

@@ -41,6 +41,8 @@ from app.schemas.change import (
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
     CostLeadTimeIn,
     InternalApprovalIn,
+    CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
+    CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,8 @@ async def my_change_tasks(
                         Sales — with has_letter saying what is still missing
       costing_input     the change is in costing and this caller's department
                         found it feasible but has priced nothing yet
+      create_quote      quoting, for Sales — build the offer out of the
+                        costing wrap-up, price it, then send it
       close_question    an ANSWERED question still open, for the department
                         that raised it and always for Project Management —
                         somebody has to say whether the answer settles it
@@ -241,6 +245,14 @@ async def my_change_tasks(
                 # Tells the UI which half of the job is left: write the
                 # explanation, or confirm it went out.
                 "has_letter": await ChangeService.has_rejection_letter(db, c),
+            })
+        # The quoting stage IS Sales' open task: costing is wrapped up and the
+        # offer has to be written from it. has_price says which half is left —
+        # put a number on it, then send it (-> quoted).
+        elif c.status == "quoting" and in_sales and c.customer_relevant:
+            tasks.append({
+                **await _base(c), "kind": "create_quote",
+                "has_price": c.quoted_price is not None,
             })
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
@@ -417,6 +429,28 @@ async def reference_risk_types(
     """
     from app.models.change import RISK_TYPES
     return {"items": [{"key": k} for k in RISK_TYPES]}
+
+
+@router.get("/reference/costing-tags")
+async def reference_costing_tags(
+    department_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Suggested tags for a costing position.
+
+    Suggestions, not a vocabulary: CostingPosition.tag is free text and the
+    write endpoints accept anything. The list exists so the common cases are
+    one click and positions stay countable across changes — see
+    app/services/costing_tags.py, where it is reviewed in a diff rather than
+    edited per department in the database.
+    """
+    from app.services import costing_tags
+    name = None
+    if department_id is not None:
+        dept = await db.get(Department, department_id)
+        name = dept.name if dept is not None else None
+    return {"items": costing_tags.tags_for(name)}
 
 
 @router.get("/reference/activities")
@@ -620,6 +654,18 @@ async def transition_change(
     change = await ChangeService.get_change(db, change_id)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    # The quote stage is Sales' own: starting the offer and declaring it sent
+    # are both statements about the customer relationship, and nobody else is
+    # in a position to make them. Enforced here, like every other role gate in
+    # this module, so the service stays callable by the flows that drive
+    # transitions internally.
+    if ((change.status, body.to_status) in ChangeService.QUOTE_STAGE_TRANSITIONS
+            and not await ChangeService.user_can_run_quote_stage(
+                db, current_user, change)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Sales department member, the change lead or an "
+                   "admin may create and send the quote")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
@@ -988,6 +1034,9 @@ async def upload_attachment(
     # Evidence for one department's assessment. Mutually exclusive with
     # concern_id — a document belongs to one container.
     assessment_id: Optional[int] = Form(None),
+    # The vendor offer this document IS (kind='vendor_quote'). Third container,
+    # exclusive with the other two; written by whoever may write the position.
+    costing_offer_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1010,7 +1059,7 @@ async def upload_attachment(
             size_bytes=len(contents), sha256=hashlib.sha256(contents).hexdigest(),
             user_id=current_user.id, kind=kind, responds_to_id=responds_to_id,
             concern_id=concern_id, assessment_id=assessment_id,
-            actor=current_user,
+            costing_offer_id=costing_offer_id, actor=current_user,
         )
     except ChangeError as e:
         os.remove(stored_path)      # do not leave an orphan on a rejected upload
@@ -1018,7 +1067,8 @@ async def upload_attachment(
     await db.commit()
     return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
             "kind": att.kind, "responds_to_id": att.responds_to_id,
-            "concern_id": att.concern_id, "assessment_id": att.assessment_id}
+            "concern_id": att.concern_id, "assessment_id": att.assessment_id,
+            "costing_offer_id": att.costing_offer_id}
 
 
 @router.get("/{change_id}/attachments/{attachment_id}/download")
@@ -1103,6 +1153,212 @@ async def put_cost_lines(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     return lines
+
+
+# --- costing positions ------------------------------------------------------
+# The other half of costing: what hours × rate cannot express. Permissions
+# mirror the cost grid — the department writes its own rows while the change is
+# in costing, PM and admins write anyone's, and the people accountable for the
+# change as a whole read everything.
+
+async def _costing_change(db: AsyncSession, change_id: int, current_user: User):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change
+
+
+async def _require_costing_write(db: AsyncSession, change, department_id: int,
+                                 current_user: User) -> None:
+    from app.services.costing_position_service import CostingPositionService
+    if not await CostingPositionService.may_write(
+            db, change, department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "costing, Project Management or an admin may change its "
+                   "costing positions")
+
+
+@router.get("/{change_id}/costing/positions",
+            response_model=List[CostingPositionResponse])
+async def list_costing_positions(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Every costing position this caller may see, with its vendor offers and
+    the quote documents filed against them."""
+    from app.services.costing_position_service import CostingPositionService
+    change = await _costing_change(db, change_id, current_user)
+    visible = await CostingPositionService.readable_department_ids(
+        db, change, current_user)
+    rows = await CostingPositionService.list_positions(db, change, visible)
+    return await CostingPositionService.serialize(db, rows)
+
+
+@router.post("/{change_id}/costing/positions",
+             response_model=CostingPositionResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_costing_position(
+    change_id: int, body: CostingPositionCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    await _require_costing_write(db, change, body.department_id, current_user)
+    try:
+        position = await CostingPositionService.create_position(
+            db, change, body.model_dump(), current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return (await CostingPositionService.serialize(db, [position]))[0]
+
+
+@router.put("/{change_id}/costing/positions/{pid}",
+            response_model=CostingPositionResponse)
+async def update_costing_position(
+    change_id: int, pid: int, body: CostingPositionUpdate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        position = await CostingPositionService.get_position(db, change, pid)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_costing_write(db, change, position.department_id, current_user)
+    try:
+        position = await CostingPositionService.update_position(
+            db, change, position, body.model_dump(exclude_unset=True),
+            current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return (await CostingPositionService.serialize(db, [position]))[0]
+
+
+@router.delete("/{change_id}/costing/positions/{pid}", status_code=204)
+async def delete_costing_position(
+    change_id: int, pid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        position = await CostingPositionService.get_position(db, change, pid)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_costing_write(db, change, position.department_id, current_user)
+    paths = await CostingPositionService.delete_position(
+        db, change, position, current_user)
+    await db.commit()
+    _unlink_all(paths)
+
+
+@router.post("/{change_id}/costing/positions/{pid}/offers",
+             response_model=CostingOfferResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_costing_offer(
+    change_id: int, pid: int, body: CostingOfferCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        position = await CostingPositionService.get_position(db, change, pid)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_costing_write(db, change, position.department_id, current_user)
+    try:
+        offer = await CostingPositionService.create_offer(
+            db, change, position, body.model_dump(), current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return _offer_row(
+        (await CostingPositionService.serialize(db, [position]))[0], offer.id)
+
+
+@router.put("/{change_id}/costing/offers/{oid}",
+            response_model=CostingOfferResponse)
+async def update_costing_offer(
+    change_id: int, oid: int, body: CostingOfferUpdate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        offer = await CostingPositionService.get_offer(db, change, oid)
+        position = await CostingPositionService.get_position(
+            db, change, offer.position_id)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_costing_write(db, change, position.department_id, current_user)
+    try:
+        offer = await CostingPositionService.update_offer(
+            db, change, offer, body.model_dump(exclude_unset=True), current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return _offer_row(
+        (await CostingPositionService.serialize(db, [position]))[0], offer.id)
+
+
+@router.delete("/{change_id}/costing/offers/{oid}", status_code=204)
+async def delete_costing_offer(
+    change_id: int, oid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        offer = await CostingPositionService.get_offer(db, change, oid)
+        position = await CostingPositionService.get_position(
+            db, change, offer.position_id)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_costing_write(db, change, position.department_id, current_user)
+    paths = await CostingPositionService.delete_offer(
+        db, change, offer, current_user)
+    await db.commit()
+    _unlink_all(paths)
+
+
+def _offer_row(position_payload: dict, offer_id: int) -> dict:
+    """The one offer out of a serialized position — so a single-offer response
+    carries the same shape (attachments included) the list endpoint gives."""
+    for offer in position_payload["offers"]:
+        if offer["id"] == offer_id:
+            return offer
+    raise HTTPException(status_code=404, detail="Offer not found")
+
+
+def _unlink_all(paths: List[str]) -> None:
+    """Files whose only container is gone. Best effort: a missing file must not
+    fail a delete that already committed."""
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 @router.post("/{change_id}/cost-lead-time", response_model=AssessmentResponse)
