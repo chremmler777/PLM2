@@ -150,10 +150,11 @@ export default function ChangeDetailPage() {
   const { isAdmin: isRealAdmin, userId } = useAuth();
   // The whole point of acts-as is walking the flow through a department's
   // eyes: the backend already drops the admin bypass then (spec D2), so the
-  // page must drop the admin overview too — otherwise "act as APQP" still
-  // shows the full board and every governance control, and nothing looks
-  // different from admin.
-  const isAdmin = isRealAdmin && getActsAsDepartmentId() == null;
+  // page must drop every personal privilege too — admin AND change-lead.
+  // Otherwise "act as APQP" on a change you happen to lead still shows the
+  // full board, and nothing looks different from admin.
+  const actingAs = getActsAsDepartmentId() != null;
+  const isAdmin = isRealAdmin && !actingAs;
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
   // Client-side mirror of the confirm-impact authz: Development members only —
@@ -170,7 +171,8 @@ export default function ChangeDetailPage() {
   const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
-  const isChangeLead = userId != null && change?.lead_id != null && userId === change.lead_id;
+  const isChangeLead = !actingAs
+    && userId != null && change?.lead_id != null && userId === change.lead_id;
   const isQualityMember = !!myActions && qualityDeptId !== undefined
     && myActions.memberships.includes(qualityDeptId);
   const isPmMember = !!myActions && pmDeptId !== undefined
