@@ -205,11 +205,10 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(
     apqp = next(d for st in routing["stages"] for d in st["departments"]
                 if d["department_id"] == departments["APQP"])
     assert apqp["status"] == "active"
-    # Costing still blocked until APQP (A) submits
-    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
-    assert res.status_code == 400, res.text
-    await client.post(f"/api/v1/changes/{c['id']}/assessments",
-                      json={"department_id": departments["APQP"], "verdict": "feasible"}, headers=auth)
+    # Only the ASSESSMENT stage gates costing (rule book: later template
+    # stages are lifecycle phases — summation, customer — not assessment
+    # work). The engine advanced and activated stage 2, and precisely that
+    # must not re-block the hop stage 1's completion just earned.
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
 

@@ -258,16 +258,25 @@ class ChangeRoutingService:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
-        # The first stage always gates — legacy no-engine rows sit there as
-        # "pending" and still owe their answer. A LATER stage gates only once
-        # the engine has activated it: multi-stage assessment templates
-        # activate stage 2 after stage 1 and stage 2 then blocks, but
-        # later-phase rows the engine never touches during assessment (PM's
-        # summation, Sales' customer activities) would block forever.
+        # ONLY assessment work gates this transition (rule book: Sales is
+        # exempt and relies on the departments; PM's summation happens in the
+        # costing/quoting phases of the change, not as an assessment row).
+        # That is: the FIRST stage — the engine advances its instance to
+        # stage 2 once stage 1 completes and activates those phase tasks, and
+        # precisely then they must not re-block the hop the completion just
+        # earned — PLUS any deviation-added row outside the template (its
+        # task carries step_id None): someone deliberately added that
+        # department to the assessment, whatever stage number it landed on.
         first = min((a.stage_order for a in rows), default=None)
         blocking = [a for a in rows
                     if a.rasic_letter in BLOCKING_LETTERS
-                    and (a.stage_order == first or a.effective_status != "pending")]
+                    and (a.stage_order == first
+                         # linked deviation row outside the template
+                         or (a.task is not None and a.task.step_id is None)
+                         # the same row before the repair links its task: an
+                         # unlinked later-stage row carrying its own "active"
+                         # (template phase rows sit unlinked as "pending")
+                         or (a.task is None and a.status == "active"))]
         return bool(blocking) and all(
             a.effective_status in ("submitted", "waived") for a in blocking)
 
