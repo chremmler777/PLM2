@@ -25,13 +25,15 @@ const TAGS = {
 
 const external = {
   id: 11, department_id: 2, label: 'Anlagenumbau', tag: 'equipment_change',
-  kind: 'external', pricing: 'quote', est_cost: null, hours: null,
-  lead_time_days: 30, notes: null, effective_cost: 5200,
+  kind: 'external', pricing: 'quote', est_cost: null, hours: 6,
+  lead_time_days: null, lead_time_unit: null, notes: null, effective_cost: null,
   offers: [
     { id: 91, vendor_name: 'Vendor A', cost: 5000, shipping_cost: 200,
-      shipping_included: false, lead_time_days: 30, favorite: true },
+      shipping_included: false, lead_time_days: 30,
+      lead_time_unit: 'business_days', favorite: true },
     { id: 92, vendor_name: 'Vendor B', cost: 5400, shipping_cost: null,
-      shipping_included: true, lead_time_days: 20, favorite: false },
+      shipping_included: true, lead_time_days: 20,
+      lead_time_unit: 'calendar_days', favorite: false },
   ],
 }
 
@@ -69,11 +71,15 @@ describe('CostPositions', () => {
     ).toContain(t('costtag.tool_change')))
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'tool_change' } })
     fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '8' } })
+    // The lead time is meaningless without saying which days are counted.
+    fireEvent.change(screen.getByTestId('costpos-new-lead-2'), { target: { value: '10' } })
+    fireEvent.change(screen.getByTestId('costpos-new-unit-2'), { target: { value: 'business_days' } })
     fireEvent.click(screen.getByTestId('costpos-add-2'))
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
       expect.objectContaining({
         department_id: 2, label: 'Moldflow', tag: 'tool_change',
         kind: 'internal_effort', hours: 8, pricing: null,
+        lead_time_days: 10, lead_time_unit: 'business_days',
       })))
   })
 
@@ -88,12 +94,32 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
 
     // External asks estimate-or-quote; an estimate wants a number, a quote
-    // wants vendors instead.
+    // wants vendors instead. The hours field stays: somebody still coordinates
+    // the vendor and runs the trials.
     fireEvent.change(kind, { target: { value: 'external' } })
-    expect(screen.queryByTestId('costpos-new-hours-2')).toBeNull()
+    const own = screen.getByTestId('costpos-new-hours-2')
+    expect(own.getAttribute('aria-label')).toBe(t('costpos.ownTime'))
     expect(screen.getByTestId('costpos-new-est-2')).toBeTruthy()
     fireEvent.change(screen.getByTestId('costpos-new-pricing-2'), { target: { value: 'quote' } })
     expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
+    expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
+  })
+
+  it('books own time on an external position alongside its price', async () => {
+    positions()
+    await screen.findByTestId('costpos-new-2')
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Anlagenumbau' } })
+    fireEvent.change(screen.getByTestId('costpos-new-kind-2'), { target: { value: 'external' } })
+    fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '1200' } })
+    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '6' } })
+    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({
+        kind: 'external', pricing: 'estimate', est_cost: 1200, hours: 6,
+      })))
+    // And it reads as both on the row: what it costs to buy, what it costs us
+    // to run.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('5200.00 + 6 h')
   })
 
   it('takes a free-text tag when the list does not have the word', async () => {
@@ -119,8 +145,40 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('offer-shipping-cost-91')).toBeTruthy()
     expect((screen.getByTestId('offer-shipping-included-92') as HTMLInputElement).checked).toBe(true)
     expect(screen.queryByTestId('offer-shipping-cost-92')).toBeNull()
-    // The position shows what it is worth — the favourite offer's price.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('5200.00')
+    // The position shows what it is worth — the favourite offer's price and
+    // its lead time, in the unit that offer was quoted in.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5200.00')
+    expect(screen.getByTestId('costpos-lead-11').textContent)
+      .toBe(`30 ${t('costpos.unitShort.business_days')}`)
+  })
+
+  it('reads the position’s price and lead time off whichever offer is starred', async () => {
+    // Vendor B wins the vote: cheaper freight, shorter lead, different unit.
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external,
+      offers: external.offers.map((o) => ({ ...o, favorite: o.id === 92 })),
+    }] as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    // 5400 with freight included — nothing on top.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5400.00')
+    expect(screen.getByTestId('costpos-lead-11').textContent)
+      .toBe(`20 ${t('costpos.unitShort.calendar_days')}`)
+    expect(screen.queryByTestId('costpos-needs-favorite-11')).toBeNull()
+  })
+
+  it('nags for a vote while a quoted position has none', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external,
+      offers: external.offers.map((o) => ({ ...o, favorite: false })),
+    }] as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    expect(screen.getByTestId('costpos-needs-favorite-11').textContent)
+      .toContain(t('costpos.pickFavorite'))
+    // No vote, no price and no date — the job is not finished.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('— + 6 h')
+    expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 
   it('adds the next vendor to a quoted position', async () => {
@@ -129,10 +187,13 @@ describe('CostPositions', () => {
     fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor C' } })
     fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '4800' } })
     fireEvent.click(screen.getByTestId('offer-new-shipping-included-11'))
+    fireEvent.change(screen.getByTestId('offer-new-lead-11'), { target: { value: '15' } })
+    fireEvent.change(screen.getByTestId('offer-new-unit-11'), { target: { value: 'business_days' } })
     fireEvent.click(screen.getByTestId('offer-add-11'))
     await waitFor(() => expect(changesApi.addCostingOffer).toHaveBeenCalledWith(7, 11,
       expect.objectContaining({
         vendor_name: 'Vendor C', cost: 4800, shipping_included: true, shipping_cost: null,
+        lead_time_days: 15, lead_time_unit: 'business_days',
       })))
   })
 
@@ -170,6 +231,8 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('offer-vendor-91').textContent).toBe('Vendor A')
     expect(screen.getByTestId('offer-shipping-92').textContent)
       .toContain(t('costpos.shippingIncluded'))
+    expect(screen.getByTestId('offer-lead-91').textContent)
+      .toBe(`30 ${t('costpos.unitShort.business_days')}`)
     // Tags read as words, in the labelled vocabulary.
     expect(screen.getByTestId('costpos-tag-10').textContent).toBe(t('costtag.moldflow'))
     expect(screen.getByTestId('costpos-kind-10').textContent)

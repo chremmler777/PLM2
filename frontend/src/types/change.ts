@@ -402,6 +402,13 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
  */
 export type CostPositionKind = 'internal_effort' | 'support_effort' | 'external';
 
+/**
+ * Lead time means different things in different departments: a shop floor
+ * counts working days, a vendor quotes calendar weeks. The number is useless
+ * without saying which, so every lead time carries its unit.
+ */
+export type LeadTimeUnit = 'business_days' | 'calendar_days';
+
 /** External work is either a house number or a vendor's written offer. */
 export type CostPositionPricing = 'estimate' | 'quote';
 
@@ -414,6 +421,7 @@ export interface CostingOffer {
   shipping_cost?: number | null;
   shipping_included?: boolean;
   lead_time_days?: number | null;
+  lead_time_unit?: LeadTimeUnit | null;
   /** The department's vote — exactly one favourite per position. */
   favorite?: boolean;
   attachments?: Attachment[];
@@ -430,6 +438,7 @@ export interface CostPosition {
   est_cost?: number | null;
   hours?: number | null;
   lead_time_days?: number | null;
+  lead_time_unit?: LeadTimeUnit | null;
   notes?: string | null;
   /** What the backend counts: the estimate, or the favourite offer's price. */
   effective_cost?: number | null;
@@ -445,6 +454,7 @@ export interface CostPositionIn {
   est_cost?: number | null;
   hours?: number | null;
   lead_time_days?: number | null;
+  lead_time_unit?: LeadTimeUnit | null;
   notes?: string | null;
 }
 
@@ -454,6 +464,7 @@ export interface CostingOfferIn {
   shipping_cost?: number | null;
   shipping_included?: boolean;
   lead_time_days?: number | null;
+  lead_time_unit?: LeadTimeUnit | null;
 }
 
 export type RiskType =

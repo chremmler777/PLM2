@@ -469,6 +469,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'costpos.kind.external': { de: 'Extern', en: 'External' },
   'costpos.hours': { de: 'Stunden', en: 'Hours' },
+  // External work still costs the department time — coordinating the vendor,
+  // running the trials. That is not the vendor's price and never was.
+  'costpos.ownTime': { de: 'Eigenzeit (h)', en: 'Own time (h)' },
+  'costpos.unit': { de: 'Zeiteinheit', en: 'Lead time unit' },
+  'costpos.unit.business_days': { de: 'Arbeitstage', en: 'business days' },
+  'costpos.unit.calendar_days': { de: 'Tage (gesamt)', en: 'days (total)' },
+  // Compact enough to sit behind a number in a list.
+  'costpos.unitShort.business_days': { de: 'AT', en: 'business days' },
+  'costpos.unitShort.calendar_days': { de: 'Tage', en: 'days' },
+  'costpos.pickFavorite': { de: 'Favorit wählen', en: 'pick a favorite' },
   'costpos.pricing': { de: 'Preisbasis', en: 'Pricing' },
   'costpos.pricing.estimate': { de: 'Schätzung', en: 'Estimate' },
   'costpos.pricing.quote': { de: 'Angebot', en: 'Quote' },
