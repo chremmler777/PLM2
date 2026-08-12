@@ -38,7 +38,7 @@ const external = {
 }
 
 const effort = {
-  id: 10, department_id: 2, label: 'Moldflow-Lauf', tag: 'moldflow',
+  id: 10, department_id: 2, label: t('costpos.internalEffortField'), tag: null,
   kind: 'internal_effort', pricing: null, est_cost: null, hours: 12,
   lead_time_days: null, notes: null, effective_cost: 1080, offers: [],
 }
@@ -56,70 +56,90 @@ describe('CostPositions', () => {
     vi.mocked(changesApi.listCostPositions).mockResolvedValue([effort, external] as never)
     vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
     vi.mocked(changesApi.createCostPosition).mockClear()
+    vi.mocked(changesApi.updateCostPosition).mockClear()
     vi.mocked(changesApi.addCostingOffer).mockClear()
     vi.mocked(changesApi.updateCostingOffer).mockClear()
   })
   afterEach(cleanup)
 
-  it('adds an internal-effort position with its tag and hours', async () => {
+  it('stands the two effort answers in front of the department', async () => {
+    positions()
+    // No hunting through an add-form: both fields are simply there, and the one
+    // already answered shows its number.
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
+    ).toBe('12'))
+    expect(screen.getByTestId('costpos-effort-support_effort-2')).toBeTruthy()
+    expect(screen.getByTestId(`costpos-effort-2`).textContent)
+      .toContain(t('costpos.internalEffortField'))
+    expect(screen.getByTestId(`costpos-effort-2`).textContent)
+      .toContain(t('costpos.supportEffortField'))
+    // The position behind a bound field is not repeated in the list below.
+    expect(screen.queryByTestId('costpos-row-10')).toBeNull()
+  })
+
+  it('creates the position behind an unanswered effort field on first save', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    const support = screen.getByTestId('costpos-effort-support_effort-2')
+    fireEvent.change(support, { target: { value: '16' } })
+    fireEvent.blur(support)
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7, {
+      department_id: 2, label: t('costpos.supportEffortField'),
+      kind: 'support_effort', hours: 16,
+    }))
+    expect(changesApi.updateCostPosition).not.toHaveBeenCalled()
+  })
+
+  it('edits that same position on every save after the first', async () => {
+    positions()
+    // Once the answered position has arrived, the field is bound to it.
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
+    ).toBe('12'))
+    const internal = screen.getByTestId('costpos-effort-internal_effort-2')
+    fireEvent.change(internal, { target: { value: '14' } })
+    fireEvent.click(screen.getByTestId('costpos-effort-save-internal_effort-2'))
+    await waitFor(() => expect(changesApi.updateCostPosition)
+      .toHaveBeenCalledWith(7, 10, { hours: 14 }))
+    expect(changesApi.createCostPosition).not.toHaveBeenCalled()
+  })
+
+  it('adds an external position — the only kind left to add', async () => {
     positions()
     await screen.findByTestId('costpos-new-2')
-    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Moldflow' } })
+    // The kind picker is gone; what remains is what an external position needs.
+    expect(screen.queryByTestId('costpos-new-kind-2')).toBeNull()
+    expect(screen.getByTestId('costpos-new-hours-2').getAttribute('aria-label'))
+      .toBe(t('costpos.ownTime'))
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Anlagenumbau' } })
     // The tag list is the backend's vocabulary, spelled out in both languages.
     await waitFor(() => expect(
       screen.getByTestId('costpos-new-tag-2').textContent,
     ).toContain(t('costtag.tool_change')))
     fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'tool_change' } })
-    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '8' } })
+    fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '1200' } })
+    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '6' } })
     // The lead time is meaningless without saying which days are counted.
     fireEvent.change(screen.getByTestId('costpos-new-lead-2'), { target: { value: '10' } })
     fireEvent.change(screen.getByTestId('costpos-new-unit-2'), { target: { value: 'business_days' } })
     fireEvent.click(screen.getByTestId('costpos-add-2'))
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        department_id: 2, label: 'Moldflow', tag: 'tool_change',
-        kind: 'internal_effort', hours: 8, pricing: null,
+        department_id: 2, label: 'Anlagenumbau', tag: 'tool_change',
+        kind: 'external', pricing: 'estimate', est_cost: 1200, hours: 6,
         lead_time_days: 10, lead_time_unit: 'business_days',
       })))
   })
 
-  it('asks for hours per effort kind and for a price basis when external', async () => {
+  it('swaps the estimate for a vendor table when the price is quoted', async () => {
     positions()
-    const kind = await screen.findByTestId('costpos-new-kind-2')
-    // Effort kinds want hours, no pricing toggle.
-    expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
-    expect(screen.queryByTestId('costpos-new-pricing-2')).toBeNull()
-
-    fireEvent.change(kind, { target: { value: 'support_effort' } })
-    expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
-
-    // External asks estimate-or-quote; an estimate wants a number, a quote
-    // wants vendors instead. The hours field stays: somebody still coordinates
-    // the vendor and runs the trials.
-    fireEvent.change(kind, { target: { value: 'external' } })
-    const own = screen.getByTestId('costpos-new-hours-2')
-    expect(own.getAttribute('aria-label')).toBe(t('costpos.ownTime'))
+    await screen.findByTestId('costpos-new-2')
     expect(screen.getByTestId('costpos-new-est-2')).toBeTruthy()
     fireEvent.change(screen.getByTestId('costpos-new-pricing-2'), { target: { value: 'quote' } })
     expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
+    // Own time survives the switch — somebody still runs the vendor.
     expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
-  })
-
-  it('books own time on an external position alongside its price', async () => {
-    positions()
-    await screen.findByTestId('costpos-new-2')
-    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Anlagenumbau' } })
-    fireEvent.change(screen.getByTestId('costpos-new-kind-2'), { target: { value: 'external' } })
-    fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '1200' } })
-    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '6' } })
-    fireEvent.click(screen.getByTestId('costpos-add-2'))
-    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
-      expect.objectContaining({
-        kind: 'external', pricing: 'estimate', est_cost: 1200, hours: 6,
-      })))
-    // And it reads as both on the row: what it costs to buy, what it costs us
-    // to run.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('5200.00 + 6 h')
   })
 
   it('takes a free-text tag when the list does not have the word', async () => {
@@ -130,7 +150,7 @@ describe('CostPositions', () => {
     fireEvent.change(screen.getByTestId('costpos-new-tag-free-2'), { target: { value: 'Kalibrierung' } })
     fireEvent.click(screen.getByTestId('costpos-add-2'))
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
-      expect.objectContaining({ tag: 'Kalibrierung' })))
+      expect.objectContaining({ tag: 'Kalibrierung', kind: 'external' })))
   })
 
   it('draws a quoted position as one row per vendor, shipping included or separate', async () => {
@@ -233,9 +253,13 @@ describe('CostPositions', () => {
       .toContain(t('costpos.shippingIncluded'))
     expect(screen.getByTestId('offer-lead-91').textContent)
       .toBe(`30 ${t('costpos.unitShort.business_days')}`)
+    // The effort answers read as plain text for someone who may not write them.
+    expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12')
+    expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('—')
+    expect(screen.queryByTestId('costpos-effort-internal_effort-2')).toBeNull()
     // Tags read as words, in the labelled vocabulary.
-    expect(screen.getByTestId('costpos-tag-10').textContent).toBe(t('costtag.moldflow'))
-    expect(screen.getByTestId('costpos-kind-10').textContent)
-      .toContain(t('costpos.kind.internal_effort'))
+    expect(screen.getByTestId('costpos-tag-11').textContent).toBe(t('costtag.equipment_change'))
+    expect(screen.getByTestId('costpos-kind-11').textContent)
+      .toContain(t('costpos.kind.external'))
   })
 })

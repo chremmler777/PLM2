@@ -1,10 +1,14 @@
 /**
  * Cost positions — what a department actually books against a change.
  *
- * A position is one nameable thing: hours the department spends itself, hours it
- * spends supporting the implementation, or money it has to spend outside.
- * External work carries hours too — somebody coordinates the vendor and runs the
- * trials — so the price and the own time sit next to each other.
+ * Two questions every department owes are always the same — how long the
+ * assessment took, and how much support the implementation will need — so they
+ * stand in the block as two labelled fields. Nobody should have to know that
+ * "spent time" hides behind an add-form's kind picker; the first time a field is
+ * filled it creates its position, and after that it edits it.
+ *
+ * Everything else is an external position: money the department has to spend
+ * outside, plus the own time it costs to run the vendor.
  *
  * External money is either a house number or real vendor offers, and then the
  * department picks its favourite. The favourite is not decoration: it is the
@@ -25,8 +29,6 @@ import { t } from '../../i18n/cmLabels'
 import type {
   CostPosition, CostPositionKind, CostPositionPricing, CostingOffer, LeadTimeUnit,
 } from '../../types/change'
-
-const KINDS: CostPositionKind[] = ['internal_effort', 'support_effort', 'external']
 
 const UNITS: LeadTimeUnit[] = ['calendar_days', 'business_days']
 
@@ -443,13 +445,82 @@ function PositionRow({ changeId, position, editable, onChanged }: {
   )
 }
 
+/** The two standing effort answers, and the title each one files itself under. */
+const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string }[] = [
+  { kind: 'internal_effort', labelKey: 'costpos.internalEffortField' },
+  { kind: 'support_effort', labelKey: 'costpos.supportEffortField' },
+]
+
+/**
+ * One standing effort field. It is a field, not a position anybody has to think
+ * about adding: filling it the first time creates the position behind it (with
+ * the fixed title as its label), and every save after that edits that one.
+ */
+function EffortField({
+  changeId, departmentId, kind, labelKey, position, editable, onChanged,
+}: {
+  changeId: number; departmentId: number
+  kind: CostPositionKind; labelKey: string
+  /** The department's position of this kind, once there is one. */
+  position?: CostPosition
+  editable: boolean; onChanged: () => void
+}) {
+  const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
+  const save = useMutation({
+    mutationFn: () => position
+      ? changesApi.updateCostPosition(changeId, position.id, { hours: num(hours) })
+      : changesApi.createCostPosition(changeId, {
+        department_id: departmentId, label: t(labelKey), kind, hours: num(hours),
+      }),
+    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the effort'),
+  })
+  const dirty = num(hours) !== (position?.hours ?? null)
+  const commit = () => { if (dirty && !save.isPending) save.mutate() }
+
+  if (!editable) {
+    return (
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="text-slate-400">{t(labelKey)}</span>
+        <span data-testid={`costpos-effort-value-${kind}-${departmentId}`}
+          className="tabular-nums text-slate-200">
+          {position?.hours != null ? position.hours : '—'}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor={`effort-${kind}-${departmentId}`} className="text-sm text-slate-300">
+        {t(labelKey)}
+      </label>
+      <input id={`effort-${kind}-${departmentId}`}
+        data-testid={`costpos-effort-${kind}-${departmentId}`}
+        type="number" step="0.5" min={0} value={hours}
+        onChange={(e) => setHours(e.target.value)}
+        // Leaving the field is the ordinary way to save it; the button is for
+        // people who want to see something happen.
+        onBlur={commit}
+        className={`${fieldCls} w-24 tabular-nums`} />
+      <button type="button" data-testid={`costpos-effort-save-${kind}-${departmentId}`}
+        disabled={!dirty || save.isPending} onClick={commit}
+        className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+        {t('common.save')}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * Adding a position means adding an external one — the two effort answers have
+ * their own standing fields above, so the kind is not a question any more.
+ */
 function NewPositionForm({ changeId, departmentId, onAdded }: {
   changeId: number; departmentId: number; onAdded: () => void
 }) {
   const [label, setLabel] = useState('')
   const [tag, setTag] = useState('')
   const [freeTag, setFreeTag] = useState('')
-  const [kind, setKind] = useState<CostPositionKind>('internal_effort')
   const [pricing, setPricing] = useState<CostPositionPricing>('estimate')
   const [hours, setHours] = useState('')
   const [est, setEst] = useState('')
@@ -461,18 +532,17 @@ function NewPositionForm({ changeId, departmentId, onAdded }: {
     queryFn: () => changesApi.costingTags(departmentId),
   })
 
-  const isExternal = kind === 'external'
-  const isQuote = isExternal && pricing === 'quote'
+  const isQuote = pricing === 'quote'
 
   const add = useMutation({
     mutationFn: () => changesApi.createCostPosition(changeId, {
       department_id: departmentId,
       label: label.trim(),
       tag: (tag === '__free' ? freeTag.trim() : tag) || null,
-      kind,
-      pricing: isExternal ? pricing : null,
+      kind: 'external',
+      pricing,
       hours: num(hours),
-      est_cost: isExternal && !isQuote ? num(est) : null,
+      est_cost: isQuote ? null : num(est),
       lead_time_days: num(lead), lead_time_unit: unit,
     }),
     onSuccess: () => {
@@ -505,32 +575,19 @@ function NewPositionForm({ changeId, departmentId, onAdded }: {
           onChange={(e) => setFreeTag(e.target.value)} className={`${fieldCls} w-40`} />
       )}
 
-      <select data-testid={`costpos-new-kind-${departmentId}`} value={kind}
-        aria-label={t('costpos.kind')}
-        onChange={(e) => setKind(e.target.value as CostPositionKind)}
-        className={`${fieldCls} w-56`}>
-        {KINDS.map((k) => (
-          <option key={k} value={k}>{t(`costpos.kind.${k}`)}</option>
-        ))}
-      </select>
-
-      {/* Every kind books hours: the effort kinds ARE hours, and external work
-          still takes the department's own time around the vendor. */}
+      {/* External work takes the department's own time around the vendor —
+          coordination, trials — and that is not the vendor's price. */}
       <input data-testid={`costpos-new-hours-${departmentId}`} type="number" step="0.5"
-        value={hours}
-        aria-label={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
-        placeholder={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
+        value={hours} aria-label={t('costpos.ownTime')} placeholder={t('costpos.ownTime')}
         onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
-      {isExternal && (
-        <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
-          aria-label={t('costpos.pricing')}
-          onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
-          className={`${fieldCls} w-32`}>
-          <option value="estimate">{t('costpos.pricing.estimate')}</option>
-          <option value="quote">{t('costpos.pricing.quote')}</option>
-        </select>
-      )}
-      {isExternal && !isQuote && (
+      <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
+        aria-label={t('costpos.pricing')}
+        onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
+        className={`${fieldCls} w-32`}>
+        <option value="estimate">{t('costpos.pricing.estimate')}</option>
+        <option value="quote">{t('costpos.pricing.quote')}</option>
+      </select>
+      {!isQuote && (
         <input data-testid={`costpos-new-est-${departmentId}`} type="number" step="0.01"
           value={est} aria-label={t('costpos.estCost')} placeholder={t('costpos.estCost')}
           onChange={(e) => setEst(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
@@ -543,7 +600,7 @@ function NewPositionForm({ changeId, departmentId, onAdded }: {
       <button type="button" data-testid={`costpos-add-${departmentId}`}
         disabled={label.trim() === '' || add.isPending} onClick={() => add.mutate()}
         className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
-        {t('costpos.add')}
+        {t('costpos.addExternal')}
       </button>
     </div>
   )
@@ -565,31 +622,59 @@ export default function CostPositions({ changeId, departmentId, editable }: {
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
   const mine = (positions ?? []).filter((p) => p.department_id === departmentId)
+  // Each standing field binds to THE position of its kind. A department that
+  // somehow has two keeps the extras in the list below rather than losing them.
+  const boundIds = new Set(
+    EFFORT_FIELDS.map(({ kind }) => mine.find((p) => p.kind === kind)?.id)
+      .filter((id): id is number => id != null))
+  const listed = mine.filter((p) => !boundIds.has(p.id))
 
   return (
-    <div data-testid={`costpos-section-${departmentId}`} className="space-y-2">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500">
-        {t('costpos.title')}
-      </p>
-      {mine.length === 0 ? (
-        <p className="text-xs text-slate-600" data-testid={`costpos-empty-${departmentId}`}>
-          {t('costpos.none')}
+    <div data-testid={`costpos-section-${departmentId}`} className="space-y-3">
+      {/* The two answers every department owes, in front of them from the
+          moment the block opens. */}
+      <div data-testid={`costpos-effort-${departmentId}`} className="space-y-1.5">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {t('costpos.effortTitle')}
         </p>
-      ) : (
-        <ul className="space-y-1.5" data-testid={`costpos-list-${departmentId}`}>
-          {mine.map((p) => (
-            <PositionRow key={p.id} changeId={changeId} position={p}
+        {EFFORT_FIELDS.map(({ kind, labelKey }) => {
+          const bound = mine.find((p) => p.kind === kind)
+          return (
+            // Keyed on the position it binds to, so the field remounts once that
+            // position arrives and shows the saved number instead of the empty
+            // box it started as.
+            <EffortField key={`${kind}-${bound?.id ?? 'new'}`}
+              changeId={changeId} departmentId={departmentId}
+              kind={kind} labelKey={labelKey} position={bound}
               editable={editable} onChanged={invalidate} />
-          ))}
-        </ul>
-      )}
-      {editable ? (
-        <NewPositionForm changeId={changeId} departmentId={departmentId} onAdded={invalidate} />
-      ) : (
-        <p className="text-xs text-slate-600" data-testid={`costpos-readonly-${departmentId}`}>
-          {t('costpos.readOnly')}
+          )
+        })}
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+          {t('costpos.externalTitle')}
         </p>
-      )}
+        {listed.length === 0 ? (
+          <p className="text-xs text-slate-600" data-testid={`costpos-empty-${departmentId}`}>
+            {t('costpos.noExternal')}
+          </p>
+        ) : (
+          <ul className="space-y-1.5" data-testid={`costpos-list-${departmentId}`}>
+            {listed.map((p) => (
+              <PositionRow key={p.id} changeId={changeId} position={p}
+                editable={editable} onChanged={invalidate} />
+            ))}
+          </ul>
+        )}
+        {editable ? (
+          <NewPositionForm changeId={changeId} departmentId={departmentId} onAdded={invalidate} />
+        ) : (
+          <p className="text-xs text-slate-600" data-testid={`costpos-readonly-${departmentId}`}>
+            {t('costpos.readOnly')}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

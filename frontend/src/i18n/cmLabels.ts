@@ -479,6 +479,23 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.unitShort.business_days': { de: 'AT', en: 'business days' },
   'costpos.unitShort.calendar_days': { de: 'Tage', en: 'days' },
   'costpos.pickFavorite': { de: 'Favorit wählen', en: 'pick a favorite' },
+  // The two effort answers every department owes: they stand in the block as
+  // fields, not as something you have to know to add.
+  'costpos.effortTitle': { de: 'Aufwand', en: 'Effort' },
+  'costpos.internalEffortField': {
+    de: 'Interner Aufwand — Zeit für Bewertung (h)',
+    en: 'Internal effort — time spent on assessment (h)',
+  },
+  'costpos.supportEffortField': {
+    de: 'Support Umsetzung — geschätzt (h)',
+    en: 'Implementation support — estimated (h)',
+  },
+  'costpos.externalTitle': { de: 'Externe Positionen', en: 'External positions' },
+  'costpos.addExternal': { de: '+ Externe Position', en: '+ External position' },
+  'costpos.noExternal': {
+    de: 'Keine externen Positionen.',
+    en: 'No external positions.',
+  },
   'costpos.pricing': { de: 'Preisbasis', en: 'Pricing' },
   'costpos.pricing.estimate': { de: 'Schätzung', en: 'Estimate' },
   'costpos.pricing.quote': { de: 'Angebot', en: 'Quote' },
