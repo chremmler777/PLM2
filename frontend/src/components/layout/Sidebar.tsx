@@ -26,6 +26,7 @@ export default function Sidebar() {
     { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
     { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
     { path: '/changes', label: 'Changes', icon: '🔄' },
+    { path: '/process-map', label: 'Prozesslandkarte', icon: '🗺️' },
     { path: '/pnl', label: 'P&L', icon: '💰' },
     { path: '/reports', label: 'Reports', icon: '📊' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
