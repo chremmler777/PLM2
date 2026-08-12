@@ -40,7 +40,7 @@ from app.schemas.change import (
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    CostLeadTimeIn, WeightEstimateIn,
+    CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
@@ -155,6 +155,11 @@ async def my_change_tasks(
                         that raised it and always for Project Management —
                         somebody has to say whether the answer settles it
       customer_response quoted and unanswered, for Sales
+      bank_build       approved with no bank-build decision yet, for
+                       Scheduling — running change or planned scrap, plus the
+                       outline of the plan
+      publish_plan     approved with a decided but unpublished plan, for
+                       Sales, on customer-relevant changes
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -223,6 +228,8 @@ async def my_change_tasks(
     is_pm_member = await MeetingService.user_is_pm_member(db, current_user)
     can_confirm = await ChangeService.user_can_confirm_impact(db, current_user)
     in_sales = await ChangeService._user_in_department(db, current_user, "Sales")
+    in_scheduling = await ChangeService._user_in_department(
+        db, current_user, ChangeService.SCHEDULING_DEPARTMENT)
 
     for c in open_changes:
         if c.status == "captured" and can_capture:
@@ -258,6 +265,26 @@ async def my_change_tasks(
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})
+
+        # The scheduling block. Acceptance leaves two errands in sequence:
+        # Scheduling decides how the change reaches the line, then Sales tells
+        # the customer what was planned. Neither is a transition gate — the
+        # row IS the pressure.
+        elif c.status == "approved":
+            if in_scheduling and c.bank_build_mode is None:
+                tasks.append({
+                    **await _base(c), "kind": "bank_build",
+                    "hint": "Decide running change vs planned scrap and "
+                            "outline the plan",
+                })
+            if (in_sales and c.customer_relevant
+                    and c.bank_build_mode is not None
+                    and c.plan_published_at is None):
+                tasks.append({
+                    **await _base(c), "kind": "publish_plan",
+                    "mode": c.bank_build_mode,
+                    "scrap_quote_price": c.scrap_quote_price,
+                })
 
         # Costing is a queue too: a department that called the change feasible
         # owes a number, and "no lines at all" is silence rather than a zero.
@@ -1045,6 +1072,66 @@ async def put_weight_estimate(
     try:
         await ChangeService.set_weight_estimate(
             db, change, body.weight_g, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
+@router.put("/{change_id}/bank-build", response_model=ChangeResponse)
+async def put_bank_build(
+    change_id: int, body: BankBuildIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The scheduling block: how the accepted change reaches the line.
+
+    Running change (consume the bank) or planned scrap (throw it away) — and
+    scrap is the customer's cost, so that half only exists with an additional
+    scrap quote behind it. Re-deciding overwrites; the changelog keeps every
+    round.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_decide_bank_build(db, current_user, change):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Scheduling or Project Manager department member, "
+                   "the change lead, or an admin may decide the bank build")
+    try:
+        await ChangeService.set_bank_build(
+            db, change, body.mode, current_user, note=body.note,
+            scrap_quote_price=body.scrap_quote_price)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
+@router.post("/{change_id}/bank-build/publish", response_model=ChangeResponse)
+async def publish_bank_build(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales puts the bank-build plan in front of the customer.
+
+    Requires a decided plan. Republishing refreshes the stamp — the customer
+    got a newer plan — and every publication is in the changelog.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_publish_bank_build(db, current_user, change):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Sales department member, the change lead, or an "
+                   "admin may publish the plan to the customer")
+    try:
+        await ChangeService.publish_bank_build_plan(db, change, current_user)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

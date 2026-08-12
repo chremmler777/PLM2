@@ -7,7 +7,7 @@ import type {
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
-  ChangeNegotiation, NegotiationChannel,
+  ChangeNegotiation, NegotiationChannel, BankBuildMode,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -259,4 +259,14 @@ export const changesApi = {
   }) => client.post<ChangeNegotiation>(`/v1/changes/${id}/negotiations`, body).then((r) => r.data),
   deleteNegotiation: (id: number, negotiationId: number) =>
     client.delete(`/v1/changes/${id}/negotiations/${negotiationId}`).then((r) => r.data),
+
+  // Stage 7: how the approved change reaches the line. Scheduling writes the
+  // mode (and, for planned scrap, the additional quote the customer bears);
+  // Sales publishes the resulting plan. Two calls because they are two people's
+  // decisions, not two halves of one form.
+  setBankBuild: (id: number, body: {
+    mode: BankBuildMode; note?: string; scrap_quote_price?: number;
+  }) => client.put<ChangeRequest>(`/v1/changes/${id}/bank-build`, body).then((r) => r.data),
+  publishBankBuildPlan: (id: number) =>
+    client.post<ChangeRequest>(`/v1/changes/${id}/bank-build/publish`).then((r) => r.data),
 };

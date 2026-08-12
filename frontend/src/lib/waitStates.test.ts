@@ -106,6 +106,33 @@ describe('resolveWaitStates', () => {
       change({ status: 'rejected', customer_relevant: false }), [], deptName)).toEqual([])
   })
 
+  it('waits on Scheduling for the bank-build decision once approved', () => {
+    const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName)
+    expect(waits.map((w) => w.key)).toEqual(['bank-build'])
+    expect(waits[0].text).toBe(t('wait.onBankBuild'))
+    expect(waits[0].tab).toBe('implementation')
+    // Only at approved: earlier the decision is not due, later it is history.
+    expect(resolveWaitStates(change({ status: 'quoted' }), [], deptName)).toEqual([])
+    expect(resolveWaitStates(
+      change({ status: 'in_implementation' }), [], deptName)).toEqual([])
+  })
+
+  it('waits on Sales to publish the plan once the mode is set', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'approved', bank_build_mode: 'planned_scrap' }), [], deptName)
+    expect(waits.map((w) => w.key)).toEqual(['plan-publish'])
+    expect(waits[0].text).toBe(t('wait.onPlanPublish'))
+    expect(waits[0].tab).toBe('implementation')
+    // Published — nothing left; and an internal change has nobody to publish to.
+    expect(resolveWaitStates(change({
+      status: 'approved', bank_build_mode: 'planned_scrap',
+      plan_published_at: '2026-08-10T09:00:00',
+    }), [], deptName)).toEqual([])
+    expect(resolveWaitStates(change({
+      status: 'approved', bank_build_mode: 'running_change', customer_relevant: false,
+    }), [], deptName)).toEqual([])
+  })
+
   it('names the departments the assessment round is still waiting on', () => {
     const waits = resolveWaitStates(
       change({ status: 'in_assessment' }), [], deptName,

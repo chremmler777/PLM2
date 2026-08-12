@@ -214,7 +214,25 @@ export interface ChangeRequest {
    * negotiation log, never typed into the change.
    */
   negotiated_final_price?: number | null;
+  /**
+   * How the change gets onto the line once it is approved (stage 7). Either the
+   * new state runs in on the fly, or the remaining old stock is scrapped on
+   * purpose — and then the customer pays for the scrap, quoted separately.
+   * Null until Scheduling has decided.
+   */
+  bank_build_mode?: BankBuildMode | null;
+  bank_build_note?: string | null;
+  /** Only set for planned scrap: the additional quote the customer bears. */
+  scrap_quote_price?: number | null;
+  bank_build_set_by_name?: string | null;
+  bank_build_set_at?: string | null;
+  /** Set once Sales has put the plan in front of the customer. */
+  plan_published_by_name?: string | null;
+  plan_published_at?: string | null;
 }
+
+/** Running change vs planned scrap — the two ways a change reaches the line. */
+export type BankBuildMode = 'running_change' | 'planned_scrap';
 
 /** How a negotiation round happened. Meetings, calls and mails are the three
  *  ways a price actually gets moved; nothing else is worth a vocabulary. */
@@ -249,7 +267,11 @@ export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
   | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input'
   /** Sales builds the offer once the departments are done costing. */
-  | 'create_quote';
+  | 'create_quote'
+  /** Scheduling picks running change vs planned scrap on an approved change. */
+  | 'bank_build'
+  /** Sales puts the resulting bank-build plan in front of the customer. */
+  | 'publish_plan';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the

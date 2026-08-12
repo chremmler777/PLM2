@@ -206,6 +206,22 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
   })
 
+  it('sends a bank-build row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'bank_build' }))
+    expect(screen.getByText(t('tasks.kind.bank_build'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.bank_build'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends a publish-plan row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'publish_plan' }))
+    expect(screen.getByText(t('tasks.kind.publish_plan'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.publish_plan'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

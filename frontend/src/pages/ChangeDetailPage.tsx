@@ -18,6 +18,7 @@ import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
+import BankBuildCard from '../components/changes/BankBuildCard';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
@@ -55,7 +56,9 @@ const STATUS_ACTIVE_TAB: Record<string, Tab> = {
   in_assessment: 'assessments',
   // Quote creation is Sales' step, and the commercial tab is where they do it.
   costing: 'commercial', quoting: 'commercial', quoted: 'commercial',
-  approved: 'commercial',
+  // Once approved, the open work is the bank-build decision and publishing the
+  // plan — both on the implementation tab.
+  approved: 'implementation',
   in_implementation: 'implementation', in_validation: 'implementation',
 };
 // F2: before costing there's no cost basis yet — the commercial tab shows an
@@ -72,7 +75,9 @@ const TAB_UNLOCK_STATUS: Partial<Record<Tab, ChangeStatus>> = {
   impacted: 'scoping',
   assessments: 'in_assessment',
   commercial: 'costing',
-  implementation: 'in_implementation',
+  // Stage 7 (bank build) is the first job of the implementation tab and it runs
+  // at `approved`, before the change formally moves into implementation.
+  implementation: 'approved',
 };
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
@@ -175,6 +180,7 @@ export default function ChangeDetailPage() {
   const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
+  const schedulingDeptId = departments.find((d) => d.name === 'Scheduling')?.id;
   const isChangeLead = !actingAs
     && userId != null && change?.lead_id != null && userId === change.lead_id;
   const isQualityMember = !!myActions && qualityDeptId !== undefined
@@ -183,6 +189,8 @@ export default function ChangeDetailPage() {
     && myActions.memberships.includes(pmDeptId);
   const isSalesMember = !!myActions && salesDeptId !== undefined
     && myActions.memberships.includes(salesDeptId);
+  const isSchedulingMember = !!myActions && schedulingDeptId !== undefined
+    && myActions.memberships.includes(schedulingDeptId);
   const isGovernanceDept = isQualityMember || isPmMember;
   const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
   // Governance authz (mirrors the backend 403 gates in change_service.py):
@@ -198,6 +206,10 @@ export default function ChangeDetailPage() {
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
   const canEditDescription = isAdmin || isChangeLead || isSalesMember;
+  // Stage 7 mirrors the backend's two gates: Scheduling (plus PM/lead/admin)
+  // decides how the change reaches the line, Sales publishes the plan.
+  const canSetBankBuild = isAdmin || isChangeLead || isSchedulingMember || isPmMember;
+  const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
   // F8: the backend enforces "PM and Quality sign-off must be different
   // users" (4-eyes) and 400s if violated. Disable the button in place and
   // name the rule instead of letting the user hit the error after clicking.
@@ -464,7 +476,15 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'implementation' && change && (
-        <ImplementationPanel changeId={change.id} />
+        <div className="space-y-3">
+          {/* Stage 7 opens the implementation tab: the bank-build decision is
+              made and published before any of the work below starts. */}
+          {phaseIndex(change.status) >= phaseIndex('approved') && (
+            <BankBuildCard change={change}
+              canSetMode={canSetBankBuild} canPublish={canPublishPlan} />
+          )}
+          <ImplementationPanel changeId={change.id} />
+        </div>
       )}
 
       {effectiveTab === 'assessments' && (

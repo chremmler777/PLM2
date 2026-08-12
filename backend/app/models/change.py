@@ -80,6 +80,11 @@ MEETING_CHANNELS = ("meeting", "chat", "email")
 # customer negotiation by phone call, and the two vocabularies answer different
 # questions.
 NEGOTIATION_CHANNELS = ("meeting", "call", "email")
+# How the changeover happens on the real line once the customer has accepted.
+# Either the new state runs in and the existing bank is consumed
+# ('running_change'), or the bank is thrown away ('planned_scrap') — which the
+# CUSTOMER pays for, so it is only sayable with a scrap quote behind it.
+BANK_BUILD_MODES = ("running_change", "planned_scrap")
 ATTACHMENT_PHASES = ("baseline", "post_scoping")
 SCOPING_STATUSES = ("captured", "scoping")
 
@@ -180,6 +185,24 @@ class ChangeRequest(Base):
         ForeignKey("users.id"), nullable=True)
     validated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # The scheduling block (stage 7): after acceptance Scheduling says how the
+    # changeover runs — running change, or planned scrap of the bank. Scrap is
+    # billed to the customer, so scrap_quote_price is the condition on that
+    # mode rather than a costing line. bank_build_note carries the plan (or the
+    # reference to it) until the real timeline gets its own model. Publication
+    # is Sales' separate act: the plan becomes a commitment when the customer
+    # has been told it.
+    bank_build_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    bank_build_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scrap_quote_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    bank_build_set_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    bank_build_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    plan_published_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    plan_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -216,6 +239,10 @@ class ChangeRequest(Base):
         foreign_keys=[estimated_weight_by], lazy="selectin")
     validated_weight_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[validated_weight_by], lazy="selectin")
+    bank_build_set_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[bank_build_set_by], lazy="selectin")
+    plan_published_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[plan_published_by], lazy="selectin")
 
     @property
     def project_number(self) -> Optional[str]:
@@ -242,6 +269,16 @@ class ChangeRequest(Base):
     @property
     def validated_weight_by_name(self) -> Optional[str]:
         u = self.validated_weight_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def bank_build_set_by_name(self) -> Optional[str]:
+        u = self.bank_build_set_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def plan_published_by_name(self) -> Optional[str]:
+        u = self.plan_published_by_user
         return u.full_name if u is not None else None
 
     @property

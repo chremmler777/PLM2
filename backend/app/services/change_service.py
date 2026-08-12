@@ -20,7 +20,7 @@ from app.models.change import (
     ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting, ChangeConcern,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
-    SCOPING_STATUSES, ATTACHMENT_KINDS,
+    SCOPING_STATUSES, ATTACHMENT_KINDS, BANK_BUILD_MODES,
 )
 from app.models.entities import User, Project, Plant
 from app.services import assessment_checklist as checklist
@@ -1281,6 +1281,145 @@ class ChangeService:
             user.id, field_name="estimated_part_weight_g",
             old_value={"weight_g": old} if old is not None else None,
             new_value={"weight_g": new},
+        )
+        return change
+
+    # --- the scheduling block (stage 7) ------------------------------------
+    # Acceptance is not a plan. Scheduling decides HOW the change reaches the
+    # line — running change, or planned scrap of the bank — and Sales publishes
+    # that plan to the customer. Neither act is a hard transition gate:
+    # 'approved' -> 'in_implementation' stays open, and the pressure comes from
+    # the my-tasks rows and the wait states derived off these columns.
+    SCHEDULING_DEPARTMENT = "Scheduling"
+
+    @staticmethod
+    async def user_can_decide_bank_build(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Who may say running change vs planned scrap.
+
+        Scheduling owns the call, but it is a coordination decision on a
+        specific change rather than a technical claim, so the change lead and
+        Project Management may make it too — a bank-build decision that only
+        one department can enter is a decision that waits for that department's
+        calendar. Admin through _user_in_department, acts-as aware."""
+        if user.id == change.lead_id:
+            return True
+        if await ChangeService._user_in_department(
+                session, user, ChangeService.SCHEDULING_DEPARTMENT):
+            return True
+        return await ChangeService._user_in_department(
+            session, user, "Project Manager")
+
+    @staticmethod
+    async def user_can_publish_bank_build(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Publishing the plan is telling the CUSTOMER, so it is the same
+        people who may put a price in front of them: admin, the change lead,
+        or a Sales member (user_can_set_quoted_price). Scheduling deliberately
+        cannot publish its own plan — the customer conversation has one
+        owner."""
+        return await ChangeService.user_can_set_quoted_price(session, user, change)
+
+    @staticmethod
+    async def set_bank_build(
+        session: AsyncSession, change: ChangeRequest, mode: str, user: User,
+        *, note: Optional[str] = None, scrap_quote_price: Optional[float] = None,
+    ) -> ChangeRequest:
+        """Record the bank-build decision on an accepted change.
+
+        planned_scrap REQUIRES a scrap quote: the customer bears the cost of
+        the bank we throw away, and a scrap plan with no additional quote
+        behind it is a bill nobody agreed to. running_change nulls any scrap
+        price that a previous planned_scrap left behind — the two facts must
+        never be readable together.
+
+        'approved' only (admins exempt, the same exemption the costing numbers
+        give them): a mode set before acceptance plans a change the customer
+        has not bought, and one set later is documenting what already happened,
+        which the changelog does better.
+
+        Re-deciding overwrites, and every previous decision survives in the
+        hash-chained changelog with its author. It does NOT clear the
+        publication stamp: Sales published a plan, that remains true, and the
+        my-tasks row for a stale publication is a judgement the frontend makes
+        off plan_published_at vs bank_build_set_at.
+        """
+        if mode not in BANK_BUILD_MODES:
+            raise ChangeError(f"Unknown bank build mode '{mode}'")
+        if change.status != "approved" and user.effective_role != "admin":
+            raise ChangeError(
+                "The bank build is planned after acceptance, while the change "
+                "is approved")
+        if mode == "planned_scrap":
+            if scrap_quote_price is None or scrap_quote_price <= 0:
+                raise ChangeError(
+                    "Planned scrap requires an additional scrap quote price: "
+                    "the customer bears the scrap cost")
+            price = round(float(scrap_quote_price), 2)
+        else:
+            # A running change scraps nothing, so there is nothing to bill.
+            price = None
+        old_mode = change.bank_build_mode
+        old_price = (float(change.scrap_quote_price)
+                     if change.scrap_quote_price is not None else None)
+        change.bank_build_mode = mode
+        change.bank_build_note = note
+        change.scrap_quote_price = price
+        change.bank_build_set_by = user.id
+        change.bank_build_set_at = datetime.utcnow()
+        label = ("running change" if mode == "running_change"
+                 else "planned scrap")
+        desc = f"Bank build decided: {label}"
+        if price is not None:
+            desc += f" (scrap quote {price:g})"
+        if old_mode is not None and old_mode != mode:
+            desc += f" — was {'running change' if old_mode == 'running_change' else 'planned scrap'}"
+        await ChangeService.append_changelog(
+            session, change, "bank_build_decided", desc, user.id,
+            field_name="bank_build_mode",
+            old_value=({"mode": old_mode, "scrap_quote_price": old_price}
+                       if old_mode is not None else None),
+            new_value={"mode": mode, "scrap_quote_price": price},
+            notes=note,
+        )
+        return change
+
+    @staticmethod
+    async def publish_bank_build_plan(
+        session: AsyncSession, change: ChangeRequest, user: User,
+    ) -> ChangeRequest:
+        """Sales stamps that the plan went to the customer.
+
+        There must be a plan to publish — publishing before Scheduling has
+        decided would promise the customer a changeover nobody has planned.
+        Same 'approved' window as the decision (admins exempt).
+
+        Idempotent in the only sense that matters: republishing refreshes the
+        stamp rather than refusing, because a re-published plan is a NEWER
+        plan in front of the customer, and the previous stamp is in the
+        changelog where the history belongs.
+        """
+        if change.status != "approved" and user.effective_role != "admin":
+            raise ChangeError(
+                "The bank build plan is published while the change is approved")
+        if change.bank_build_mode is None:
+            raise ChangeError(
+                "Decide the bank build (running change or planned scrap) "
+                "before publishing the plan to the customer")
+        previous = change.plan_published_at
+        change.plan_published_by = user.id
+        change.plan_published_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "bank_build_published",
+            ("Bank build plan re-published to the customer"
+             if previous is not None
+             else "Bank build plan published to the customer"),
+            user.id, field_name="plan_published_at",
+            old_value={"published_at": previous.isoformat()} if previous else None,
+            new_value={"published_at": change.plan_published_at.isoformat(),
+                       "mode": change.bank_build_mode},
         )
         return change
 

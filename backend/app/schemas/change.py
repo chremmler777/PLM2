@@ -266,6 +266,20 @@ class ChangeResponse(BaseModel):
     validated_weight_by: Optional[int] = None
     validated_weight_by_name: Optional[str] = None
     validated_weight_at: Optional[datetime] = None
+    # The scheduling block: how the changeover runs (running change vs planned
+    # scrap), what the scrap costs the customer, and whether Sales has put the
+    # plan in front of them yet. The frontend derives its wait states from the
+    # gaps here — mode unset means Scheduling still owes a decision, an
+    # unpublished mode means Sales still owes the customer the plan.
+    bank_build_mode: Optional[str] = None
+    bank_build_note: Optional[str] = None
+    scrap_quote_price: Optional[float] = None
+    bank_build_set_by: Optional[int] = None
+    bank_build_set_by_name: Optional[str] = None
+    bank_build_set_at: Optional[datetime] = None
+    plan_published_by: Optional[int] = None
+    plan_published_by_name: Optional[str] = None
+    plan_published_at: Optional[datetime] = None
     internal_approved_by: Optional[int] = None
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
@@ -299,6 +313,8 @@ class ChangeResponse(BaseModel):
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
             row["estimated_weight_by_name"] = data.estimated_weight_by_name
             row["validated_weight_by_name"] = data.validated_weight_by_name
+            row["bank_build_set_by_name"] = data.bank_build_set_by_name
+            row["plan_published_by_name"] = data.plan_published_by_name
             # Model properties (not in __dict__) must be injected explicitly.
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
@@ -706,6 +722,27 @@ class WeightEstimateIn(BaseModel):
     def _positive_or_absent(cls, v):
         if v is not None and v <= 0:
             raise ValueError("Part weight must be greater than zero")
+        return v
+
+
+class BankBuildIn(BaseModel):
+    # running_change | planned_scrap (BANK_BUILD_MODES). Validated in the
+    # service against the model's tuple so the vocabulary has one home.
+    mode: str
+    # The plan itself, or the reference to wherever it was built. Optional:
+    # the decision is the thing that unblocks Sales, and a scheduler who has
+    # decided but not yet written the summary should be able to say so.
+    note: Optional[str] = None
+    # Mandatory for planned_scrap and refused for running_change — the service
+    # states the rule (the customer bears the scrap cost). Strictly positive:
+    # a scrap quote of zero is not a quote.
+    scrap_quote_price: Optional[float] = None
+
+    @field_validator("scrap_quote_price")
+    @classmethod
+    def _positive_or_absent(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Scrap quote price must be greater than zero")
         return v
 
 

@@ -202,6 +202,10 @@ const TASK_TAB: Record<string, string> = {
   send_rejection: '?tab=scoping',
   costing_input: '?tab=commercial',
   create_quote: '?tab=commercial',
+  // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
+  // publishes from the same card.
+  bank_build: '?tab=implementation',
+  publish_plan: '?tab=implementation',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -235,6 +239,10 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.costing_input');
     case 'create_quote':
       return t('tasks.hint.create_quote');
+    case 'bank_build':
+      return t('tasks.hint.bank_build');
+    case 'publish_plan':
+      return t('tasks.hint.publish_plan');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,
@@ -440,19 +448,13 @@ export default function MyTasksPage() {
                         <span className="text-slate-300">{task.stage_name}</span>
                       )}
                     </td>
+                    {/* The task is mandatory — there is no "I take this one".
+                        A name appears once somebody has worked the row. */}
                     <td className="px-4 py-3">
                       {task.owner_id !== null ? (
                         <span className="text-slate-200">{task.owner_name}</span>
                       ) : (
-                        <button
-                          onClick={() =>
-                            acceptTask.mutate({ instanceId: task.instance_id, taskId: task.task_id })
-                          }
-                          disabled={acceptTask.isPending}
-                          className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
-                        >
-                          {t('tasks.accept')}
-                        </button>
+                        <span className="text-slate-500">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs">

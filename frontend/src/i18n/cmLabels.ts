@@ -994,5 +994,81 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'stepper.hint.in_validation': { de: 'Ergebnisse werden geprüft', en: 'Checking results' },
   'stepper.hint.released': { de: 'Änderung ist live', en: 'Change is live' },
   'stepper.hint.closed': { de: 'Abgeschlossen', en: 'Wrapped up' },
+
+  // Stage 7 — how the approved change reaches the line, and telling the customer.
+  'bankbuild.title': { de: 'Bankbau-Plan', en: 'Bank build plan' },
+  'bankbuild.intro': {
+    de: 'Wie kommt die Änderung in die Serie? Die Terminplanung entscheidet, '
+      + 'der Vertrieb veröffentlicht den Plan beim Kunden.',
+    en: 'How does the change reach the line? Scheduling decides, Sales publishes '
+      + 'the plan to the customer.',
+  },
+  'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
+  'bankbuild.mode.running_change.hint': {
+    de: 'Umstellung in der laufenden Produktion — kein Ausschuss geplant.',
+    en: 'Switch over in running production — no scrap planned.',
+  },
+  'bankbuild.mode.planned_scrap': { de: 'Geplanter Ausschuss', en: 'Planned scrap' },
+  'bankbuild.mode.planned_scrap.hint': {
+    de: 'Restbestand wird verschrottet und neu aufgebaut.',
+    en: 'Remaining stock is scrapped and the bank is rebuilt.',
+  },
+  'bankbuild.scrapPrice': { de: 'Ausschuss-Angebotspreis', en: 'Scrap quote price' },
+  'bankbuild.scrapPriceHint': {
+    de: 'Die Ausschusskosten trägt der Kunde — als zusätzliches Angebot.',
+    en: 'The customer bears the scrap cost — as an additional quote.',
+  },
+  'bankbuild.needPrice': {
+    de: 'Bei geplantem Ausschuss ist ein Angebotspreis erforderlich',
+    en: 'Planned scrap needs a scrap quote price',
+  },
+  'bankbuild.note': { de: 'Plan-Notiz', en: 'Plan note' },
+  'bankbuild.notePlaceholder': {
+    de: 'Umstellungstermin, Reichweite, Werke …',
+    en: 'Cut-over date, coverage, plants …',
+  },
+  'bankbuild.noMode': {
+    de: 'Noch keine Umstellungsart festgelegt',
+    en: 'No bank-build mode decided yet',
+  },
+  'bankbuild.setBy': { de: 'Festgelegt von {x} am {d}', en: 'Set by {x} on {d}' },
+  'bankbuild.unpublished': {
+    de: 'Noch nicht an den Kunden veröffentlicht',
+    en: 'Not yet published to the customer',
+  },
+  'bankbuild.published': {
+    de: 'Veröffentlicht von {x} am {d}',
+    en: 'Published by {x} on {d}',
+  },
+  'bankbuild.publish': {
+    de: 'Plan an Kunden veröffentlichen',
+    en: 'Publish plan to the customer',
+  },
+  'bankbuild.publishNeedsMode': {
+    de: 'Erst muss die Terminplanung die Umstellungsart festlegen',
+    en: 'Scheduling has to decide the mode first',
+  },
+  'bankbuild.readOnly': {
+    de: 'Nur Terminplanung, PM, Lead oder Admin können den Plan festlegen.',
+    en: 'Only Scheduling, PM, the change lead or an admin can set the plan.',
+  },
+  'tasks.kind.bank_build': { de: 'Bankbau festlegen', en: 'Decide bank build' },
+  'tasks.hint.bank_build': {
+    de: 'Fließende Änderung oder geplanter Ausschuss — und den Plan skizzieren',
+    en: 'Running change or planned scrap — and outline the plan',
+  },
+  'tasks.kind.publish_plan': { de: 'Plan veröffentlichen', en: 'Publish plan' },
+  'tasks.hint.publish_plan': {
+    de: 'Bankbau-Plan an den Kunden veröffentlichen',
+    en: 'Publish the bank-build plan to the customer',
+  },
+  'wait.onBankBuild': {
+    de: 'Wartet auf Terminplanung — Bankbau-Entscheidung offen',
+    en: 'Scheduling: bank-build decision pending',
+  },
+  'wait.onPlanPublish': {
+    de: 'Wartet auf Vertrieb — Plan noch nicht an den Kunden veröffentlicht',
+    en: 'Sales: plan not yet published to the customer',
+  },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

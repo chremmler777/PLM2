@@ -63,7 +63,8 @@ const isSubmitted = (a: Pick<Assessment, 'submitted_at' | 'verdict'>) =>
 
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
-    | 'rejection_sent_at' | 'costing_pending_department_ids'>,
+    | 'rejection_sent_at' | 'costing_pending_department_ids'
+    | 'bank_build_mode' | 'plan_published_at'>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
@@ -136,6 +137,17 @@ export function resolveWaitStates(
         change.costing_pending_department_ids!.map(departmentName).join(', ')),
       tab: 'commercial',
     })
+  }
+
+  // An approved change is not moving until Scheduling has said how it reaches
+  // the line, and — when the customer is the cost carrier — until Sales has put
+  // the resulting plan in front of them. Two waits, one after the other.
+  if (change.status === 'approved') {
+    if (!change.bank_build_mode) {
+      waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'implementation' })
+    } else if (change.customer_relevant && !change.plan_published_at) {
+      waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'implementation' })
+    }
   }
 
   // A rejected customer change is not finished until the customer has been told.
