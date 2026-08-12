@@ -144,35 +144,50 @@ One quote-by, one release-by; at any moment at most one is *active*
   `deadline_state` from then on; escalations and the workload report follow
   whichever deadline is active.
 
-### Inside `in_assessment` — department holds are the risk assessment (2026-08-11)
+### Inside `in_assessment` — the risk register (reworked 2026-08-11)
 
-The department-concern loop at assessment **is the change's risk register**:
-a department flags a risk, anyone proposes a mitigation with mandatory
-documentation (PPT in the risk's container), and the flagging department (or
-PM) accepts or loops — raised → mitigated → accepted, each step stamped.
-Risks are not vetoes: they hold only the flagging department's own submit;
-the pass decision is the feasible/not-feasible verdict. UI presents these as
-"Risks" in the assessment context.
+Risks at assessment are a **register, not a hold**. A department records a
+risk with a **standard type** — fill issue, dimensional issue, visual/surface,
+process capability, other (free text) — a **severity rating 1–3** (3 =
+highest) and a note, then submits its verdict regardless. No mitigation
+proposal loop, no submit block: the pass decision is the
+feasible / with-conditions / not-feasible verdict, and the register is what
+travels.
 
-- A department member may raise a **department-scoped concern**: kind
-  `reject_proposal` (grounds that would cancel) or `needs_info` (missing
-  information), with a note, attributed to their own department
-  (`meeting_service.py::raise_concern`, `department_id` required in this phase).
-- An open concern is a **soft hold on that department only**: its assessment
-  cannot be submitted while points are open
-  (`change_service.py::submit_assessment`); the change's status and deadlines
-  are untouched, other departments keep working. UI: "On hold" chip per
-  department, cockpit counts blocked departments
-  (`ChangeResponse.blocked_department_ids`).
-- Closing a department concern **requires a resolution note** ("how was it
-  addressed") — `POST .../concerns/{id}/withdraw`; author-only, audited with
-  the note.
+- **Severity-3 risks surface to Sales on the commercial view** — they belong
+  on the offer as technical judgment. Sales owns carrying them to the
+  customer; the assessing department owns raising them.
+- **"Reject" is not a raiseable option.** A department that cannot do it sets
+  verdict `not_feasible` (which hard-requires the Change PPT, below).
+- **"Needs info" is not a department concern anymore** — by assessment time
+  it is too late, and everyone communicates with the customer directly. The
+  mail lands in the change-level customer-mail log (below). The
+  scoping-*meeting* decision `needs_info` (a meeting outcome) stays.
+- Legacy concerns (`reject_proposal` / `needs_info`) on old changes stay
+  readable and closable with their old rules; only raising them is gone.
+
+### Assessment documents & customer communication (2026-08-11)
+
+Three typed containers, three responsibilities:
+
+| Artifact | Container | Responsible | Rule |
+|---|---|---|---|
+| **Change PPT** (internal explanation of the change) | per assessing department's bucket (`kind=change_ppt`) | assessing department | required for a `not_feasible` verdict (replaces the generic evidence gate) |
+| **RFQ** (external — supplier pricing & timing) | per assessing department's bucket (`kind=rfq`) | assessing department | expected when "external modification" is ticked; reported, not gated |
+| **Customer mails** (.msg/.eml/pdf) | change level (`kind=customer_email`) | everyone uploads, Sales owns the customer relationship | chronological tracked list, visible to all — the customer-communication record of the change |
 
 ### Assessment shape (2026-08-11, in build)
 
-- **One expandable bucket per routed department**; collapsed = status +
-  verdict, expanded = that department's working surface. Members work only
-  their own bucket; everyone sees all statuses.
+- **Process owners see their task, not the board (2026-08-11).** An ordinary
+  member's assessment tab is their own department's bucket, auto-expanded,
+  plus one slim progress line ("4/6 submitted — waiting on …"). The full
+  per-department board belongs to PM, Sales, the change lead and admins.
+  A **team wait-banner line** during `in_assessment` tells every viewer who
+  is still owed ("Assessment: waiting on Development, APQP (4/6)").
+- **A bucket binds to the row that matters now**: the active one, else the
+  latest answer, else the earliest dormant one — a submitted verdict never
+  disappears behind a not-yet-started later stage, which shows as "Later
+  stage" (queued), not as unclaimed work.
 - **Buckets auto-populate with the department's domain objects**, derived
   from the impacted parts via the serves links: Tool Engineer → tools/molds,
   Manufacturing Engineer → equipment, APQP → gauges + documents,
@@ -194,8 +209,8 @@ the pass decision is the feasible/not-feasible verdict. UI presents these as
   matching/sampling. **Extras**: APQP → PFMEA update, control plan update;
   Development → article design update (internal vs customer-given). External
   modification expects an **RFQ document** (costs & timing request to the
-  supplier; reported, not gated). **`not_feasible` hard-requires the
-  explanation document (PPT) for the customer** as assessment evidence.
+  supplier; reported, not gated). **`not_feasible` hard-requires the Change
+  PPT** in the department's bucket (see the document table above).
   Checked items seed the department's costing grid (cycle time → lifecycle
   line, rest one-time; remark travels as the line note; deliberate deletions
   are remembered).
