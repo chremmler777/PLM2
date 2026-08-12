@@ -1,6 +1,7 @@
 # PLM2 Project Memory
 
-- [ECR buildout 2026-08-11](ecr-buildout-2026-08-11.md) — READ FIRST for change-flow work: full ECR rework shipped (deadlines, capture→costing, risk register, acts-as); flow truth lives in docs/CHANGE_MANAGEMENT_FLOW.md; open items + operational lessons listed
+- [ECR costing/quoting 2026-08-12](ecr-costing-quoting-2026-08-12.md) — costing positions/vendor favorites/hours-as-money, quoting stage, process-flow chart shipped; gate semantics; open items incl. no-accept question for wf tasks
+- [ECR buildout 2026-08-11](ecr-buildout-2026-08-11.md) — READ FIRST for change-flow work: full ECR rework shipped (deadlines, capture→costing, risk register, acts-as); flow truth lives in docs/CHANGE_MANAGEMENT_FLOW.md; **docs/ECR_PROCESS_MAP.md (2026-08-12) is the governing target-state map + build order — new ECR work traces to a stage there**; open items + operational lessons listed
 
 - [Phase 5 status & expansion roadmap](phase5-status.md) — revision-based files DONE (Jun 2026); next: ECR UI, BOM editing, viewer RevisionTree
 - [Architecture map](architecture-map.md) — models, routers, services, frontend pages, startup, DB
