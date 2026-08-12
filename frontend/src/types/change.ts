@@ -42,6 +42,10 @@ export interface Assessment {
   effort_hours?: number | null;
   /** Department-specific answers — shape is that department's questionnaire. */
   details?: Record<string, unknown> | null;
+  /** Whether the internal change deck is on file for this row. The backend's own
+   *  answer to the not-feasible gate, so the UI does not have to guess from the
+   *  attachment list it happens to hold. */
+  has_change_ppt?: boolean;
 }
 
 export interface RoutingDepartment {
@@ -96,7 +100,12 @@ export interface DeviationRequest {
 }
 
 export type AttachmentKind =
-  | 'general' | 'info_request' | 'info_response' | 'rejection_letter' | 'rfq';
+  | 'general' | 'info_request' | 'info_response' | 'rejection_letter' | 'rfq'
+  /** The internal deck behind a department's answer — a not-feasible verdict
+   *  cannot be sent without one (backend-enforced). Filed per assessment. */
+  | 'change_ppt'
+  /** Saved customer correspondence (.msg/.eml/pdf). Change-level, no assessment. */
+  | 'customer_email';
 
 export interface Attachment {
   id: number;
@@ -370,7 +379,18 @@ export interface MeetingParticipant { name: string; user_id?: number | null }
 
 export type MeetingChannel = 'meeting' | 'chat' | 'email';
 
-export type ConcernKind = 'reject_proposal' | 'needs_info';
+/** Raisable today: only 'risk'. The other two are history — meetings and the old
+ *  assessment flow created them, so they still arrive and still render. */
+export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
+
+/** The five things that actually go wrong in a moulding change, as the backend
+ *  serves them from /reference/risk-types. */
+export type RiskType =
+  | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
+  | 'process_capability' | 'other';
+
+/** 1 low … 3 highest. A number, so it sorts and compares without a lookup. */
+export type RiskSeverity = 1 | 2 | 3;
 
 /** A team member's flag against a change, raised in parallel with the meeting. */
 export interface ChangeConcern {
@@ -395,6 +415,9 @@ export interface ChangeConcern {
   department_id?: number | null;
   /** How the concern was addressed — required to withdraw a scoped one. */
   resolution_note?: string | null;
+  /** Risk rows only: what kind of risk it is and how bad it is. */
+  risk_type?: RiskType | null;
+  severity?: RiskSeverity | null;
 }
 
 export interface ChangeMeeting {

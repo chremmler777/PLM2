@@ -5,7 +5,7 @@ import type {
   CostLine, CostLineIn, Summation, Gate, DepartmentRateRef, ActivityRef,
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
-  AssessmentObjectsResponse, ChecklistItemDef,
+  AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -174,10 +174,17 @@ export const changesApi = {
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
   listConcerns: (id: number) =>
     client.get<ChangeConcern[]>(`/v1/changes/${id}/concerns`).then((r) => r.data),
-  raiseConcern: (id: number, kind: ConcernKind, note: string, departmentId?: number) =>
-    client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, {
-      kind, note, ...(departmentId !== undefined ? { department_id: departmentId } : {}),
-    }).then((r) => r.data),
+  // Only risks are raisable now: a kind, how bad it is, and what it is about.
+  // The old reject_proposal / needs_info raises are gone from the API.
+  raiseConcern: (id: number, body: {
+    kind: ConcernKind; note: string; department_id?: number;
+    risk_type?: RiskType; severity?: RiskSeverity;
+  }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
+
+  // The risk vocabulary is the backend's list, not a hard-coded one here.
+  riskTypes: () =>
+    client.get<{ items: { key: string }[] }>('/v1/changes/reference/risk-types')
+      .then((r) => r.data),
   // Answering records what the customer said; it does not close the question —
   // the asking side (or PM) still decides whether it is settled.
   answerConcern: (id: number, concernId: number, note: string) =>

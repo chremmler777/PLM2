@@ -12,6 +12,7 @@ vi.mock('../../api/changes', () => ({
     assessmentObjects: vi.fn(),
     submitAssessment: vi.fn().mockResolvedValue({}),
     listConcerns: vi.fn().mockResolvedValue([]),
+    riskTypes: vi.fn().mockResolvedValue({ items: [] }),
     referenceActivities: vi.fn().mockResolvedValue([]),
     assessmentChecklist: vi.fn().mockResolvedValue([]),
     withdrawConcern: vi.fn(),
@@ -89,7 +90,7 @@ describe('AssessmentBuckets dormant stages', () => {
     // The bucket must not present PM as on the hook ("R … unclaimed, waiting").
     vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
-    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable canSeeAll
       change={change({ assessments: [assessment({
         department_id: 2, status: 'pending', stage_order: 2 })] })} />)
     expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.queued'))
@@ -102,7 +103,6 @@ describe('AssessmentBuckets dormant stages', () => {
     wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable
       change={change({ assessments: [assessment({
         department_id: 2, status: 'pending', stage_order: 2 })] })} />)
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     expect((await screen.findByTestId('bucket-readonly-2')).textContent)
       .toBe(t('bucket.notOpenYet'))
   })
@@ -129,7 +129,7 @@ describe('AssessmentBuckets', () => {
   afterEach(cleanup)
 
   it('gives every routed department a row, whether or not it has answered', async () => {
-    buckets()
+    buckets({ canSeeAll: true })
     expect(await screen.findByTestId('bucket-2')).toBeTruthy()
     // Routed but with no assessment row of its own — still on the board.
     expect(await screen.findByTestId('bucket-4')).toBeTruthy()
@@ -137,7 +137,7 @@ describe('AssessmentBuckets', () => {
   })
 
   it('says a department is on hold when a concern blocks it', async () => {
-    buckets({ change: change({ blocked_department_ids: [2] }) })
+    buckets({ canSeeAll: true, change: change({ blocked_department_ids: [2] }) })
     expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('concern.onHold'))
   })
 
@@ -151,9 +151,10 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('bucket-answer-2').textContent).toContain('needs a new gauge')
   })
 
-  it('opens a member row into their objects and the form', async () => {
+  it('opens a member’s own row on its objects and form, unasked', async () => {
+    // A member came here to do their department's work — it should be in front
+    // of them, not one click away.
     buckets({ myDepartmentIds: [2] })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     await waitFor(() => expect(screen.getByText('20-3450-001-0')).toBeTruthy())
     // Objects are grouped by kind, with the via-part reference kept.
     expect(screen.getByText(t('objtype.gauge'))).toBeTruthy()
@@ -161,19 +162,41 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('assessment-submit')).toBeTruthy()
   })
 
-  it('gives an ordinary member the status board and nothing else of another department', async () => {
+  it('gives an ordinary member their own bucket and one line for the rest', async () => {
     buckets({ myDepartmentIds: [4] })
-    const toggle = await screen.findByTestId('bucket-toggle-2') as HTMLButtonElement
-    // Status is public; the work behind it is not.
-    expect(screen.getByTestId('bucket-state-2')).toBeTruthy()
-    expect(toggle.disabled).toBe(true)
-    expect(toggle.getAttribute('title')).toBe(t('bucket.othersHidden'))
-    fireEvent.click(toggle)
-    expect(screen.queryByText('20-3450-001-0')).toBeNull()
-    expect(screen.queryByTestId('bucket-readonly-2')).toBeNull()
-    // Their own bucket still opens.
-    fireEvent.click(await screen.findByTestId('bucket-toggle-4'))
+    // Their own bucket, already open. Another department's work is not theirs to
+    // read — it is not even on the page.
+    expect(await screen.findByTestId('bucket-4')).toBeTruthy()
     expect(screen.getByTestId('bucket-readonly-4')).toBeTruthy()
+    expect(screen.queryByTestId('bucket-2')).toBeNull()
+    expect(screen.queryByText('20-3450-001-0')).toBeNull()
+    // But they still learn whether the change is moving, and who it sits with.
+    expect(screen.getByTestId('bucket-progress').textContent).toBe(
+      t('bucket.progress').replace('{n}', '0').replace('{m}', '1')
+        .replace('{x}', 'Development'))
+  })
+
+  it('leaves a viewer with no department the progress line alone', async () => {
+    buckets({ myDepartmentIds: [] })
+    expect(await screen.findByTestId('bucket-progress')).toBeTruthy()
+    expect(screen.queryByTestId('bucket-2')).toBeNull()
+    expect(screen.queryByTestId('bucket-4')).toBeNull()
+  })
+
+  it('keeps the whole board for PM, Sales, the lead and admin', async () => {
+    buckets({ myDepartmentIds: [4], canSeeAll: true })
+    expect(await screen.findByTestId('bucket-4')).toBeTruthy()
+    expect(screen.getByTestId('bucket-2')).toBeTruthy()
+    // The board is the summary; a progress line would only repeat it.
+    expect(screen.queryByTestId('bucket-progress')).toBeNull()
+  })
+
+  it('summarises the rest as done once everyone has answered', async () => {
+    buckets({ myDepartmentIds: [4], change: change({ assessments: [
+      assessment({ id: 1, department_id: 2, status: 'submitted', verdict: 'feasible',
+        submitted_at: '2026-08-01T00:00:00' })] }) })
+    expect((await screen.findByTestId('bucket-progress')).textContent).toBe(
+      t('bucket.progressDone').replace('{n}', '1').replace('{m}', '1'))
   })
 
   it('lets PM, Sales, the lead and admin read any bucket', async () => {
@@ -189,13 +212,11 @@ describe('AssessmentBuckets', () => {
 
   it('says so plainly when a department has nothing linked to look at', async () => {
     buckets({ myDepartmentIds: [4] })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-4'))
     expect(await screen.findByText(t('bucket.noObjects'))).toBeTruthy()
   })
 
   it('asks nothing about cost — that belongs to costing', async () => {
     buckets({ myDepartmentIds: [2] })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
     expect(screen.queryByLabelText(/effort/i)).toBeNull()
     expect(screen.queryByText(t('effort.hours'))).toBeNull()
@@ -223,7 +244,7 @@ describe('AssessmentBuckets department questionnaires', () => {
 
   it('asks packaging first whether packaging is impacted at all', async () => {
     packaging()
-    fireEvent.click(await screen.findByTestId('bucket-toggle-6'))
+    await screen.findByTestId('bucket-6')
     expect(screen.getByText(t('pkg.impacted'))).toBeTruthy()
     // The detail only exists once the answer is yes.
     expect(screen.queryByTestId('pkg-detail')).toBeNull()
@@ -234,7 +255,7 @@ describe('AssessmentBuckets department questionnaires', () => {
 
   it('submits a not-impacted answer in one step', async () => {
     packaging()
-    fireEvent.click(await screen.findByTestId('bucket-toggle-6'))
+    await screen.findByTestId('bucket-6')
     fireEvent.click(screen.getByTestId('pkg-impacted-no'))
     // Nothing else to ask: no verdict picker, no notes — just record it.
     const submit = screen.getByTestId('assessment-submit') as HTMLButtonElement
@@ -249,7 +270,7 @@ describe('AssessmentBuckets department questionnaires', () => {
 
   it('carries the checked boxes into the submission', async () => {
     packaging()
-    fireEvent.click(await screen.findByTestId('bucket-toggle-6'))
+    await screen.findByTestId('bucket-6')
     fireEvent.click(screen.getByTestId('pkg-impacted-yes'))
     fireEvent.click(screen.getByTestId('pkg-layout_change'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
@@ -304,7 +325,6 @@ describe('AssessmentBuckets checklist', () => {
 
   const open2 = async () => {
     buckets({ myDepartmentIds: [2] })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     return screen.findByTestId('check-cycle_time_change')
   }
 
@@ -329,7 +349,6 @@ describe('AssessmentBuckets checklist', () => {
   it('asks for the RFQ where supplier work was ticked, and files it there', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     await screen.findByTestId('check-modification_external')
     // Nothing asked until the box is ticked.
     expect(screen.queryByTestId('check-rfq-modification_external')).toBeNull()
@@ -354,7 +373,6 @@ describe('AssessmentBuckets checklist', () => {
       attachments: [{ id: 60, filename: 'rfq-supplier.pdf', content_type: 'application/pdf',
         size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
         kind: 'rfq', responds_to_id: null, concern_id: null, assessment_id: 1 }] }) })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     fireEvent.click(await screen.findByTestId('check-modification_external'))
     expect(screen.getByTestId('check-rfq-modification_external').textContent)
       .toContain('rfq-supplier.pdf')
@@ -433,39 +451,73 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
   })
   afterEach(cleanup)
 
-  const evidence = {
+  const changePpt = {
     id: 50, filename: 'why-not.pptx', content_type: 'application/vnd.ms-powerpoint',
     size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
-    kind: 'general', responds_to_id: null, concern_id: null, assessment_id: 1,
+    kind: 'change_ppt', responds_to_id: null, concern_id: null, assessment_id: 1,
   }
 
-  it('gates the submit until the explanation is attached', async () => {
+  it('gates the submit until the change PPT is attached', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    await screen.findByTestId('bucket-2')
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
-    // The evidence block says what is owed, and the submit waits for it.
+    // The document block says what is owed, and the submit waits for it.
     expect(screen.getByTestId('bucket-evidence-required-2').textContent)
-      .toBe(t('check.evidenceRequired'))
+      .toBe(t('check.changePptRequired'))
     expect(screen.getByTestId('assessment-evidence-required')).toBeTruthy()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('lets it through once the explanation is on the assessment', async () => {
+  it('is not satisfied by just any document on the assessment', async () => {
+    // The rule is the deck, not a file count: an RFQ is not an explanation.
     buckets({ myDepartmentIds: [2], change: change({
-      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [evidence] }) })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+      assessments: [assessment({ id: 1, department_id: 2 })],
+      attachments: [{ ...changePpt, id: 51, filename: 'rfq.pdf', kind: 'rfq' }] }) })
+    await screen.findByTestId('bucket-2')
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    expect(screen.getByTestId('bucket-evidence-required-2')).toBeTruthy()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('lets it through once the change PPT is on the assessment', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [changePpt] }) })
+    await screen.findByTestId('bucket-2')
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('takes the backend’s word for it when the deck is not in the list', async () => {
+    // The serialised row knows; the page's attachment list may not carry it.
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2, has_change_ppt: true })],
+      attachments: [] }) })
+    await screen.findByTestId('bucket-2')
+    fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
+      { target: { value: 'not_feasible' } })
+    expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('files the bucket’s slot as the change PPT, labelled as internal', async () => {
+    buckets({ myDepartmentIds: [2], change: change({
+      assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
+    await screen.findByTestId('bucket-2')
+    expect(screen.getByText(t('bucket.changePpt'))).toBeTruthy()
+    const zone = screen.getAllByTestId('dropzone')
+      .find((z) => z.getAttribute('data-kind') === 'change_ppt')
+    expect(zone?.getAttribute('data-assessment')).toBe('1')
+  })
+
   it('asks nothing extra of a feasible verdict', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    await screen.findByTestId('bucket-2')
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect(screen.queryByTestId('assessment-evidence-required')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
@@ -503,7 +555,6 @@ describe('AssessmentBuckets with a re-routed history', () => {
     expect(screen.getByTestId('bucket-toggle-4').textContent).toContain('R')
     expect(screen.getByTestId('bucket-stale-4').textContent).toBe('+1')
     // And the member gets their entry mask.
-    fireEvent.click(screen.getByTestId('bucket-toggle-4'))
     await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
   })
 
@@ -558,7 +609,6 @@ describe('AssessmentBuckets evidence', () => {
   it('shows a department its own evidence and nobody else’s', async () => {
     buckets({ myDepartmentIds: [2], change: withEvidence() })
     expect((await screen.findByTestId('bucket-evidence-count-2')).textContent).toContain('1')
-    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
     const block = screen.getByTestId('bucket-evidence-2')
     expect(block.textContent).toContain('measurement.pdf')
     expect(block.textContent).not.toContain('other-dept.pdf')
@@ -567,7 +617,7 @@ describe('AssessmentBuckets evidence', () => {
 
   it('files an upload against that department’s assessment', async () => {
     buckets({ myDepartmentIds: [2], change: withEvidence() })
-    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    await screen.findByTestId('bucket-2')
     expect(screen.getByTestId('dropzone').getAttribute('data-assessment')).toBe('1')
   })
 

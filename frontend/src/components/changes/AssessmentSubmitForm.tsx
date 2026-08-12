@@ -14,12 +14,13 @@ const VERDICTS = ['feasible', 'feasible_with_conditions', 'not_feasible'] as con
 
 export default function AssessmentSubmitForm({
   changeId, departmentId, departmentName, onDone, showEffort = true,
-  evidenceCount = 0, onVerdictChange, assessmentId, evidence = [], onUploaded,
+  changePptCount = 0, onVerdictChange, assessmentId, evidence = [], onUploaded,
 }: {
   changeId: number; departmentId: number; departmentName: string; onDone: () => void
-  /** Documents already filed against this assessment. A not-feasible verdict
-   *  owes the customer an explanation, so it cannot be sent without one. */
-  evidenceCount?: number
+  /** Internal change decks already filed against this assessment. A not-feasible
+   *  verdict owes an explanation, so it cannot be sent without one — the same
+   *  rule the backend enforces. */
+  changePptCount?: number
   onVerdictChange?: (verdict: string) => void
   /** Lets the checklist collect its own documents (the RFQ) against this row. */
   assessmentId?: number
@@ -32,7 +33,7 @@ export default function AssessmentSubmitForm({
   const qc = useQueryClient()
   const [verdict, setVerdict] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
-  const needsEvidence = verdict === 'not_feasible' && evidenceCount === 0
+  const needsChangePpt = verdict === 'not_feasible' && changePptCount === 0
   const [effort, setEffort] = useState('')
   const [conditions, setConditions] = useState('')
   const [notes, setNotes] = useState('')
@@ -66,7 +67,7 @@ export default function AssessmentSubmitForm({
       toast.error(detail)
     },
   })
-  const ready = !needsEvidence && (notImpacted || (verdict !== ''
+  const ready = !needsChangePpt && (notImpacted || (verdict !== ''
     && (!showEffort || (effort !== '' && parseFloat(effort) >= 0))
     && (!Fields || details.impacted !== undefined)))
   return (
@@ -121,10 +122,10 @@ export default function AssessmentSubmitForm({
           onChange={(e) => setNotes(e.target.value)}
           className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
       )}
-      {needsEvidence && (
+      {needsChangePpt && (
         <p data-testid="assessment-evidence-required"
           className="rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-xs text-amber-200">
-          {t('check.evidenceRequired')}
+          {t('check.changePptRequired')}
         </p>
       )}
       {failure && (

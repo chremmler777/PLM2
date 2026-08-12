@@ -8,7 +8,7 @@
  * Derived purely from data the detail page already holds; nothing is fetched.
  */
 import { t } from '../i18n/cmLabels'
-import type { ChangeConcern, ChangeRequest } from '../types/change'
+import type { Assessment, ChangeConcern, ChangeRequest } from '../types/change'
 
 export interface WaitState {
   /** Stable key, also the test id suffix. */
@@ -22,11 +22,53 @@ export interface WaitState {
 const excerpt = (s: string, max = 90) =>
   s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s
 
+/**
+ * How far the assessment round has got, over the rows that actually owe an
+ * answer: R and A. S/C/I are consulted, not on the hook, so counting them would
+ * make the board look permanently unfinished.
+ *
+ * Deliberately takes normalised rows rather than raw assessments: the buckets
+ * derive theirs from routing plus assessments, the banner from assessments
+ * alone, and both must produce the same "3/5" for the same change.
+ */
+export interface ProgressRow {
+  departmentId: number
+  rasic: string | null
+  submitted: boolean
+  /** Waived and not-yet-started rows owe nothing right now. */
+  dormant: boolean
+}
+
+export function assessmentProgress(rows: ProgressRow[]): {
+  done: number; total: number; waiting: number[]
+} {
+  // One entry per department: a department that has answered anywhere counts as
+  // answered, whatever leftover rows an earlier routing version left behind.
+  const owed = rows.filter((r) => r.rasic === 'R' || r.rasic === 'A')
+  const byDept = new Map<number, boolean>()
+  for (const r of owed) {
+    if (r.submitted) byDept.set(r.departmentId, true)
+    else if (!r.dormant && !byDept.get(r.departmentId)) byDept.set(r.departmentId, false)
+  }
+  const entries = [...byDept.entries()]
+  return {
+    done: entries.filter(([, ok]) => ok).length,
+    total: entries.length,
+    waiting: entries.filter(([, ok]) => !ok).map(([id]) => id),
+  }
+}
+
+const isSubmitted = (a: Pick<Assessment, 'submitted_at' | 'verdict'>) =>
+  !!a.submitted_at || (!!a.verdict && a.verdict !== 'pending')
+
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
     | 'rejection_sent_at' | 'costing_pending_department_ids'>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
+  /** The change's assessment rows — the detail page already holds them. */
+  assessments: Pick<Assessment,
+    'department_id' | 'rasic_letter' | 'status' | 'submitted_at' | 'verdict'>[] = [],
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -48,6 +90,26 @@ export function resolveWaitStates(
         text: t('wait.onSales.info').replace('{x}', excerpt(c.note)),
         tab: 'scoping',
       })
+  }
+
+  // Who the assessment round is still waiting on — stated for everyone, not just
+  // the departments on the hook, so the change never looks idle without a reason.
+  if (change.status === 'in_assessment') {
+    const p = assessmentProgress(assessments.map((a) => ({
+      departmentId: a.department_id,
+      rasic: a.rasic_letter,
+      submitted: isSubmitted(a),
+      dormant: a.status === 'waived' || a.status === 'pending',
+    })))
+    if (p.waiting.length > 0) {
+      waits.push({
+        key: 'assessment-round',
+        text: t('wait.onAssessment')
+          .replace('{x}', p.waiting.map(departmentName).join(', '))
+          .replace('{n}', String(p.done)).replace('{m}', String(p.total)),
+        tab: 'assessments',
+      })
+    }
   }
 
   // A department cannot submit while it holds its own open concern.

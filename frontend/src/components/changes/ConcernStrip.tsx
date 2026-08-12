@@ -7,7 +7,9 @@ import { t } from '../../i18n/cmLabels'
 import { preferredDepartmentId } from '../../lib/departments'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
-import type { Attachment, ChangeConcern, ConcernKind } from '../../types/change'
+import type {
+  Attachment, ChangeConcern, ConcernKind, RiskSeverity, RiskType,
+} from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -15,14 +17,43 @@ const errDetail = (e: unknown): string | undefined =>
 const KIND_STYLE: Record<ConcernKind, string> = {
   reject_proposal: 'bg-red-900/60 text-red-200 border-red-800',
   needs_info: 'bg-amber-900/50 text-amber-200 border-amber-800',
+  // A risk holds nothing up, so it is not painted as an obstruction. Its weight
+  // is carried by the severity badge, where it belongs.
+  risk: 'bg-slate-900/50 text-slate-200 border-slate-700',
+}
+
+/** The vocabulary the backend serves; kept here as the offline fallback so the
+ *  form still works when /reference/risk-types is unreachable. */
+const RISK_TYPES: RiskType[] = [
+  'fill_issue', 'dimensional_issue', 'visual_surface', 'process_capability', 'other',
+]
+
+const SEVERITIES: RiskSeverity[] = [1, 2, 3]
+
+/** 1 is noted, 2 wants watching, 3 is the one that gets someone out of bed. */
+const SEVERITY_STYLE: Record<RiskSeverity, string> = {
+  1: 'bg-slate-700 text-slate-200 border-slate-600',
+  2: 'bg-amber-900/70 text-amber-100 border-amber-700',
+  3: 'bg-red-900/80 text-red-100 border-red-700',
+}
+
+function SeverityBadge({ value, testId }: { value?: number | null; testId: string }) {
+  if (value == null) return null
+  const style = SEVERITY_STYLE[value as RiskSeverity] ?? SEVERITY_STYLE[1]
+  return (
+    <span data-testid={testId} title={t('risk.severity')}
+      className={`inline-flex items-center rounded border px-1.5 py-0 text-[10px] leading-tight font-semibold ${style}`}>
+      {value}
+    </span>
+  )
 }
 
 /**
- * Concerns let the team work the decision in parallel: anyone can flag that
- * they'd reject the change or that something is missing, without waiting for
- * the meeting. Open flags block 'proceed', so the meeting cannot quietly run
- * over an objection — it has to be withdrawn by its author, or answered by a
- * reject / needs-info decision, which closes it.
+ * Risks are the per-change risk register: anyone on a routed department records
+ * what could go wrong, how bad it would be, and what kind of problem it is.
+ * A risk blocks nothing — it is worked with a mitigation proposal and closed by
+ * the raising side. Only the legacy flags (a meeting's needs-info, an old
+ * reject_proposal) still block 'proceed'; they can no longer be raised here.
  *
  * Deliberately no "clear all": only the person who raised a flag may drop it.
  */
@@ -48,7 +79,10 @@ export default function ConcernStrip({
 }) {
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
-  const [kind, setKind] = useState<ConcernKind>('needs_info')
+  // The risk form: nothing is guessed — the type is picked, the severity is a
+  // deliberate choice (2 = the honest middle), the note says what it is.
+  const [riskType, setRiskType] = useState<RiskType | ''>('')
+  const [severity, setSeverity] = useState<RiskSeverity>(2)
   const [note, setNote] = useState('')
   const [adding, setAdding] = useState(false)
   // Which concern is being withdrawn, and the note explaining how it was met.
@@ -88,8 +122,25 @@ export default function ConcernStrip({
     qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
 
+  // Fetched only once the form is open — an unopened strip asks for nothing.
+  const { data: riskTypeData } = useQuery({
+    queryKey: ['risk-types'],
+    queryFn: () => changesApi.riskTypes(),
+    enabled: adding,
+    retry: false,
+  })
+  const riskTypeOptions: string[] = riskTypeData?.items?.length
+    ? riskTypeData.items.map((i) => i.key)
+    : RISK_TYPES
+  const riskTypeLabel = (k?: string | null) =>
+    k ? t(`risktype.${k}`) : t('risk.kind')
+
   const raise = useMutation({
-    mutationFn: () => changesApi.raiseConcern(changeId, kind, note.trim(), effectiveDept),
+    mutationFn: () => changesApi.raiseConcern(changeId, {
+      kind: 'risk', note: note.trim(), severity,
+      ...(riskType ? { risk_type: riskType } : {}),
+      ...(effectiveDept !== undefined ? { department_id: effectiveDept } : {}),
+    }),
     onSuccess: () => { setNote(''); setAdding(false); setFailure(null); invalidate() },
     onError: (e: unknown) => {
       const detail = errDetail(e) ?? 'Could not raise the flag'
@@ -127,7 +178,8 @@ export default function ConcernStrip({
   const w = {
     title: scoped ? t('risk.title') : t('concern.title'),
     hint: t('risk.hint'),
-    raise: scoped ? t('risk.raise') : t('concern.raise'),
+    // Whatever the card is called, the only thing raisable in it is a risk.
+    raise: t('risk.raise'),
     proposal: scoped ? t('risk.proposal') : t('concern.proposal'),
     settle: scoped ? t('risk.resolved') : t('concern.markSolved'),
     kindOf: (k: ConcernKind) => scoped
@@ -158,15 +210,25 @@ export default function ConcernStrip({
       onlyDepartmentId === undefined || c.department_id === onlyDepartmentId)
   const open = listed.filter((c: ChangeConcern) => c.is_open)
   const settled = listed.filter((c: ChangeConcern) => !c.is_open)
+  // Only the legacy flags obstruct anything. Risks are counted and shown, but the
+  // card must not dress them up as a blockade — they never were one.
+  const blocking = open.filter((c: ChangeConcern) => c.kind !== 'risk')
+  const openRisks = open.filter((c: ChangeConcern) => c.kind === 'risk')
 
   return (
     <div className={`rounded-lg border p-3 space-y-2 ${
-      open.length > 0 ? 'border-amber-700/60 bg-amber-950/20' : 'border-slate-700 bg-slate-800'}`}>
+      blocking.length > 0 ? 'border-amber-700/60 bg-amber-950/20' : 'border-slate-700 bg-slate-800'}`}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="font-medium text-slate-100">{w.title}</span>
-        {open.length > 0 && (
+        {blocking.length > 0 && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900 text-amber-100">
-            {t('concern.blocking').replace('{n}', String(open.length))}
+            {t('concern.blocking').replace('{n}', String(blocking.length))}
+          </span>
+        )}
+        {openRisks.length > 0 && (
+          <span data-testid="risk-open-count" title={t('risk.open')}
+            className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
+            {t('risk.openCount').replace('{n}', String(openRisks.length))}
           </span>
         )}
         {editable && !adding && (
@@ -186,9 +248,20 @@ export default function ConcernStrip({
           <li key={c.id}
             className={`flex items-start gap-2 text-sm rounded border px-2 py-1.5 ${
               c.is_open ? KIND_STYLE[c.kind] : 'border-slate-700 bg-slate-900/40 text-slate-500'}`}>
-            <span className="text-xs font-semibold flex-shrink-0 mt-0.5">
-              {w.kindOf(c.kind)}
-            </span>
+            {/* A risk reads as "how bad / what kind"; a legacy flag keeps the
+                wording it was raised under. */}
+            {c.kind === 'risk' ? (
+              <span className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+                <SeverityBadge value={c.severity} testId={`risk-severity-${c.id}`} />
+                <span className="text-xs font-semibold" data-testid={`risk-type-${c.id}`}>
+                  {riskTypeLabel(c.risk_type)}
+                </span>
+              </span>
+            ) : (
+              <span className="text-xs font-semibold flex-shrink-0 mt-0.5">
+                {w.kindOf(c.kind)}
+              </span>
+            )}
             <span className="min-w-0 flex-1">
               {c.department_id != null && (
                 <span className="mr-1.5 rounded bg-slate-800/80 px-1 py-0 text-[10px] leading-tight align-middle">
@@ -337,35 +410,61 @@ export default function ConcernStrip({
         </p>
       )}
 
+      {/* One form, one kind: a risk. What used to be raisable here — "would
+          reject", "needs info" — is history the API no longer accepts. */}
       {adding && (
-        <div className="flex gap-2 items-start flex-wrap">
-          <select value={kind} onChange={(e) => setKind(e.target.value as ConcernKind)}
-            aria-label={t('concern.kind')}
-            className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-            <option value="needs_info">{t('concern.wantsInfo')}</option>
-            <option value="reject_proposal">{t('concern.wouldReject')}</option>
-          </select>
-          {onlyDepartmentId === undefined && (scoped || options.length > 0) && (
-            <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+        <div className="space-y-2" data-testid="risk-form">
+          <div className="flex gap-2 items-center flex-wrap">
+            <select value={riskType} aria-label={t('risk.type')} data-testid="risk-type-select"
+              onChange={(e) => setRiskType(e.target.value as RiskType | '')}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-              {scoped
-                ? effectiveDept === undefined
-                  && <option value="">{t('concern.pickDepartment')}</option>
-                : <option value="">{t('concern.team')}</option>}
-              {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <option value="">{t('risk.pickType')}</option>
+              {riskTypeOptions.map((k) => (
+                <option key={k} value={k}>{riskTypeLabel(k)}</option>
+              ))}
             </select>
-          )}
-          <input value={note} onChange={(e) => setNote(e.target.value)}
-            placeholder={t('concern.notePlaceholder')} aria-label={t('concern.note')}
-            className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-          <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
-            disabled={!note.trim() || raise.isPending || (scoped && effectiveDept === undefined)}
-            onClick={() => raise.mutate()}>{w.raise}</button>
-          <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
-            onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
-            {t('common.cancel')}
-          </button>
+            {onlyDepartmentId === undefined && (scoped || options.length > 0) && (
+              <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
+                onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+                className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
+                {scoped
+                  ? effectiveDept === undefined
+                    && <option value="">{t('concern.pickDepartment')}</option>
+                  : <option value="">{t('concern.team')}</option>}
+                {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )}
+            {/* Three buttons, not a dropdown: the weight of the choice should be
+                visible on the card without opening anything. */}
+            <span className="flex items-center gap-1" role="group" aria-label={t('risk.severity')}>
+              <span className="text-[11px] text-slate-500 mr-0.5">{t('risk.severity')}</span>
+              {SEVERITIES.map((s) => (
+                <button key={s} type="button" data-testid={`risk-severity-pick-${s}`}
+                  aria-pressed={severity === s} title={t('risk.severityHint')}
+                  onClick={() => setSeverity(s)}
+                  className={`w-7 h-6 rounded border text-xs font-semibold ${
+                    severity === s ? SEVERITY_STYLE[s]
+                      : 'border-slate-600 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                  {s}
+                </button>
+              ))}
+            </span>
+          </div>
+          <textarea value={note} rows={2} onChange={(e) => setNote(e.target.value)}
+            placeholder={t('risk.notePlaceholder')} aria-label={t('risk.note')}
+            data-testid="risk-note"
+            className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+          <div className="flex gap-2 items-center">
+            <button data-testid="risk-submit"
+              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!note.trim() || !riskType || raise.isPending
+                || (scoped && effectiveDept === undefined)}
+              onClick={() => raise.mutate()}>{w.raise}</button>
+            <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
+              onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
+              {t('common.cancel')}
+            </button>
+          </div>
         </div>
       )}
     </div>

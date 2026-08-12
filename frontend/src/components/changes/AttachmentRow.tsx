@@ -16,6 +16,8 @@ const KIND_LABEL: Record<string, string> = {
   info_response: 'attach.infoResponse',
   rejection_letter: 'attach.rejectionLetter',
   rfq: 'attach.rfq',
+  change_ppt: 'bucket.changePpt',
+  customer_email: 'attach.customerEmail',
 }
 
 const KIND_STYLE: Record<string, string> = {
@@ -23,6 +25,8 @@ const KIND_STYLE: Record<string, string> = {
   info_response: 'bg-emerald-900/70 text-emerald-200',
   rejection_letter: 'bg-red-900/70 text-red-200',
   rfq: 'bg-violet-900/70 text-violet-200',
+  change_ppt: 'bg-sky-900/70 text-sky-200',
+  customer_email: 'bg-teal-900/70 text-teal-200',
 }
 
 export function KindChip({ kind }: { kind?: string | null }) {

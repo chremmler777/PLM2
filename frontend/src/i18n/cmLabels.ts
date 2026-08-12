@@ -254,10 +254,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // there. Scoping keeps its questions-and-concerns language.
   'risk.title': { de: 'Risiken', en: 'Risks' },
   'risk.hint': {
-    de: 'Ein offenes Risiko hält nur die Bewertung dieses Fachbereichs auf — '
-      + 'entschieden wird mit dem Urteil.',
-    en: 'An open risk holds only this department’s assessment — the verdict is '
-      + 'the decision.',
+    // Risks are a register, not a gate: they are rated, tracked and closed with
+    // a proposal. Nothing about them stops the assessment.
+    de: 'Ein Risiko hält nichts auf — es wird bewertet, verfolgt und mit einem '
+      + 'Lösungsvorschlag geschlossen. Entschieden wird mit dem Urteil.',
+    en: 'A risk blocks nothing — it is rated, tracked and closed with a mitigation '
+      + 'proposal. The verdict is the decision.',
   },
   'risk.raise': { de: 'Risiko melden', en: 'Flag risk' },
   'risk.kind': { de: 'Risiko', en: 'Risk' },
@@ -265,6 +267,22 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risk.proposal': { de: 'Lösungsvorschlag', en: 'Mitigation proposal' },
   'risk.resolved': { de: 'Risiko geklärt', en: 'Risk resolved' },
   'risk.open': { de: 'Offene Risiken', en: 'Open risks' },
+  'risk.openCount': { de: '{n} offen', en: '{n} open' },
+  // The risk form: what kind, how bad, and what exactly.
+  'risk.type': { de: 'Risikoart', en: 'Risk type' },
+  'risk.pickType': { de: 'Risikoart wählen …', en: 'Select risk type…' },
+  'risk.severity': { de: 'Bewertung 1–3', en: 'rating 1–3' },
+  'risk.severityHint': { de: '3 = höchstes Risiko', en: '3 = highest risk' },
+  'risk.note': { de: 'Beschreibung', en: 'Description' },
+  'risk.notePlaceholder': {
+    de: 'Was genau ist das Risiko — und woran zeigt es sich?',
+    en: 'What exactly is the risk — and how does it show?',
+  },
+  'risktype.fill_issue': { de: 'Füllprobleme', en: 'Fill issues' },
+  'risktype.dimensional_issue': { de: 'Maßabweichung', en: 'Dimensional issue' },
+  'risktype.visual_surface': { de: 'Oberfläche/Optik', en: 'Visual/surface' },
+  'risktype.process_capability': { de: 'Prozessfähigkeit', en: 'Process capability' },
+  'risktype.other': { de: 'Sonstiges', en: 'Other' },
   'concern.proposal': { de: 'Lösungsvorschlag', en: 'Proposal' },
   'concern.proposalPlaceholder': {
     de: 'Wie lässt sich der Punkt lösen?',
@@ -466,6 +484,38 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bucket.expand': { de: 'Aufklappen', en: 'Expand' },
   'bucket.collapse': { de: 'Zuklappen', en: 'Collapse' },
+  // A member sees their own bucket in full; the rest of the board is one line.
+  'bucket.progress': {
+    de: '{n}/{m} Bewertungen abgegeben — offen: {x}',
+    en: '{n}/{m} submitted — waiting on: {x}',
+  },
+  'bucket.progressDone': {
+    de: '{n}/{m} Bewertungen abgegeben',
+    en: '{n}/{m} submitted',
+  },
+  // The internal deck behind the answer — required when the answer is "no".
+  'bucket.changePpt': { de: 'Change-PPT (intern)', en: 'Change PPT (internal)' },
+  'bucket.changePptSlot': {
+    de: 'Change-PPT ablegen (intern)',
+    en: 'Drop the change PPT here (internal)',
+  },
+  'bucket.changePptHint': {
+    de: 'Interne Präsentation zur Bewertung — bei „nicht machbar" erforderlich',
+    en: 'Internal deck behind the assessment — required for “not feasible”',
+  },
+  'check.changePptRequired': {
+    de: '„Nicht machbar" braucht die Change-PPT als Begründung.',
+    en: '“Not feasible” needs the change PPT as its explanation.',
+  },
+  // Customer correspondence, kept on the change where everyone can find it.
+  'mail.title': { de: 'Kundenkommunikation', en: 'Customer mails' },
+  'mail.hint': {
+    de: 'E-Mails als .msg/.eml speichern und hier ablegen (auch PDF-Ausdrucke).',
+    en: 'Save emails as .msg/.eml and drop them here (PDF printouts work too).',
+  },
+  'mail.slot': { de: 'Kundenmail ablegen', en: 'Drop a customer mail here' },
+  'attach.customerEmail': { de: 'Kundenmail', en: 'Customer mail' },
+  'mail.none': { de: 'Noch keine Kundenmails abgelegt.', en: 'No customer mails yet.' },
   'objtype.tool': { de: 'Werkzeug', en: 'Tool' },
   'objtype.equipment': { de: 'Betriebsmittel', en: 'Equipment' },
   'objtype.gauge': { de: 'Lehre', en: 'Gauge' },
@@ -496,6 +546,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'wait.onDepartments': {
     de: 'Wartet: {x} hat offene Punkte',
     en: 'Waiting: {x} has open concerns',
+  },
+  'wait.onAssessment': {
+    de: 'Bewertung: wartet auf {x} ({n}/{m})',
+    en: 'Assessment: waiting on {x} ({n}/{m})',
   },
   'wait.onRejectionLetter': {
     de: 'Wartet auf Vertrieb — Absage an Kunden versenden',

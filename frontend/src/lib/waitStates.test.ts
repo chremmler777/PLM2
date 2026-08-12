@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveWaitStates } from './waitStates'
+import { assessmentProgress, resolveWaitStates } from './waitStates'
 import { t } from '../i18n/cmLabels'
 
 const change = (over: Record<string, unknown> = {}) => ({
@@ -14,6 +14,24 @@ const concern = (over: Record<string, unknown> = {}) => ({
 }) as never
 
 const deptName = (id: number) => ({ 2: 'Development', 4: 'Tool Engineer' }[id] ?? `#${id}`)
+
+const row = (over: Record<string, unknown> = {}) => ({
+  department_id: 2, rasic_letter: 'R', status: 'active',
+  submitted_at: null, verdict: 'pending', ...over,
+}) as never
+
+describe('assessmentProgress', () => {
+  it('counts a department once, however many rows it left behind', () => {
+    // Re-routing and multi-stage routing both leave several rows per department;
+    // "3/5" must mean five departments, not five rows.
+    const p = assessmentProgress([
+      { departmentId: 2, rasic: 'R', submitted: true, dormant: false },
+      { departmentId: 2, rasic: 'R', submitted: false, dormant: false },
+      { departmentId: 4, rasic: 'A', submitted: false, dormant: false },
+    ])
+    expect(p).toEqual({ done: 1, total: 2, waiting: [4] })
+  })
+})
 
 describe('resolveWaitStates', () => {
   it('says nothing when nothing is waiting', () => {
@@ -86,6 +104,42 @@ describe('resolveWaitStates', () => {
     // An internal change owes the customer nothing.
     expect(resolveWaitStates(
       change({ status: 'rejected', customer_relevant: false }), [], deptName)).toEqual([])
+  })
+
+  it('names the departments the assessment round is still waiting on', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'in_assessment' }), [], deptName,
+      [row({ department_id: 2, status: 'submitted', verdict: 'feasible',
+        submitted_at: '2026-08-05T00:00:00' }),
+      row({ department_id: 4 })])
+    expect(waits[0].key).toBe('assessment-round')
+    expect(waits[0].tab).toBe('assessments')
+    expect(waits[0].text).toContain('Tool Engineer')
+    expect(waits[0].text).toContain('(1/2)')
+    // Everyone sees it — it is not gated on membership or role.
+    expect(waits[0].text).not.toContain('Development')
+  })
+
+  it('says nothing once every department has answered', () => {
+    expect(resolveWaitStates(change({ status: 'in_assessment' }), [], deptName,
+      [row({ department_id: 2, status: 'submitted', verdict: 'feasible' })])).toEqual([])
+  })
+
+  it('only counts the departments that owe an answer', () => {
+    // S/C/I are consulted, not on the hook — counting them would make the board
+    // look permanently unfinished.
+    expect(resolveWaitStates(change({ status: 'in_assessment' }), [], deptName,
+      [row({ department_id: 4, rasic_letter: 'C' }),
+        row({ department_id: 2, rasic_letter: 'I' })])).toEqual([])
+    // Waived and not-yet-started rows owe nothing right now either.
+    expect(resolveWaitStates(change({ status: 'in_assessment' }), [], deptName,
+      [row({ department_id: 4, status: 'waived' }),
+        row({ department_id: 2, status: 'pending' })])).toEqual([])
+  })
+
+  it('keeps the assessment line out of every other phase', () => {
+    expect(resolveWaitStates(change({ status: 'costing' }), [], deptName,
+      [row({ department_id: 4 })])).toEqual([])
   })
 
   it('lists every wait at once', () => {

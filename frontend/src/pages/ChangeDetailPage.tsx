@@ -21,6 +21,7 @@ import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import ChangeAttachments from '../components/changes/ChangeAttachments';
+import CustomerMailLog from '../components/changes/CustomerMailLog';
 import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
@@ -299,7 +300,7 @@ export default function ChangeDetailPage() {
       {/* What the change is waiting on — same line for every viewer, whoever
           owns the next move. */}
       <div className="mt-3">
-        <WaitBanner waits={resolveWaitStates(change, concerns, deptName)}
+        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments)}
           onGo={(tb) => setTab(tb as Tab)} />
       </div>
 
@@ -425,6 +426,12 @@ export default function ChangeDetailPage() {
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '—'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
           <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
+
+          {/* Customer correspondence sits above the document lists: it is what
+              everyone comes looking for, and it belongs to no phase. */}
+          <div className="pt-3">
+            <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} />
+          </div>
 
           <ChangeAttachments change={change} />
         </div>

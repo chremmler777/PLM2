@@ -15,6 +15,7 @@ import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { impactedCount, impactsOf } from './departmentForms/ActivityChecklist'
+import { assessmentProgress } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import type {
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
@@ -127,7 +128,9 @@ export default function AssessmentBuckets({
   canSeeAll?: boolean
 }) {
   const changeId = change.id
-  const [openDept, setOpenDept] = useState<number | null>(null)
+  // `undefined` means the user has not touched a row yet, so their own bucket
+  // may open itself. Once they click anything, their choice stands.
+  const [openDept, setOpenDept] = useState<number | null | undefined>(undefined)
   // What each open form currently says, so the evidence block can shout when the
   // verdict turns the explanation into a requirement.
   const [verdictOf, setVerdictOf] = useState<Record<number, string>>({})
@@ -135,6 +138,9 @@ export default function AssessmentBuckets({
   const evidenceOf = (assessmentId?: number) =>
     assessmentId == null ? []
       : (change.attachments ?? []).filter((a) => a.assessment_id === assessmentId)
+  // The internal deck specifically — the one document a "not feasible" owes.
+  const changePptOf = (assessmentId?: number) =>
+    evidenceOf(assessmentId).filter((a) => a.kind === 'change_ppt')
 
   const { data: routing } = useQuery({
     queryKey: ['change-routing', changeId],
@@ -180,16 +186,32 @@ export default function AssessmentBuckets({
     return <p className="text-sm text-slate-400">{t('bucket.none')}</p>
   }
 
+  // An ordinary member gets their own workplace, not the whole board: their
+  // department's bucket open in front of them, and one line for where everyone
+  // else stands. PM/Sales/lead/admin keep the full board — reading across
+  // departments is their job. A viewer with neither gets the line alone.
+  const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.id))
+  const summarised = canSeeAll ? [] : rows.filter((r) => !myDepartmentIds.includes(r.id))
+  const progress = assessmentProgress(summarised.map((r) => ({
+    departmentId: r.id,
+    rasic: r.rasic,
+    submitted: !!r.assessment?.submitted_at
+      || !!(r.assessment?.verdict && r.assessment.verdict !== 'pending'),
+    dormant: r.assessment?.status === 'waived' || r.assessment?.status === 'pending',
+  })))
+  // Untouched, a member's own bucket starts open — it is the thing they came for.
+  const autoOpen = openDept === undefined && !canSeeAll
+
   return (
     <div className="space-y-2">
-      {rows.map((row) => {
+      {visible.map((row) => {
         const a = row.assessment
         const state = stateOf(a, row.onHold)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
         const mayOpen = isMine || canSeeAll
-        const expanded = mayOpen && openDept === row.id
+        const expanded = mayOpen && (autoOpen ? isMine : openDept === row.id)
         const areas = impactedCount(a?.details)
         const canSubmit = isMine && editable && a?.status === 'active'
         return (
@@ -284,7 +306,8 @@ export default function AssessmentBuckets({
                 ) : canSubmit ? (
                   <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
                     departmentName={deptName(row.id)} showEffort={false}
-                    evidenceCount={evidenceOf(a?.id).length}
+                    changePptCount={changePptOf(a?.id).length
+                      + (a?.has_change_ppt ? 1 : 0)}
                     assessmentId={a?.id} evidence={evidenceOf(a?.id)}
                     onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })}
                     onVerdictChange={(v) => setVerdictOf((m) => ({ ...m, [row.id]: v }))}
@@ -297,22 +320,23 @@ export default function AssessmentBuckets({
                     {isMine ? t('bucket.notOpenYet') : t('bucket.readOnly')}
                   </p>
                 )}
-                {/* Evidence: reports and results behind the answer. Optional —
-                    nothing here gates the submit. */}
+                {/* The documents behind the answer. The generic slot is gone: what
+                    this department files here is the internal change deck, and a
+                    "not feasible" cannot be sent without it. */}
                 {a && (() => {
-                  const required = verdictOf[row.id] === 'not_feasible'
-                    && evidenceOf(a.id).length === 0
+                  const hasPpt = changePptOf(a.id).length > 0 || a.has_change_ppt === true
+                  const required = verdictOf[row.id] === 'not_feasible' && !hasPpt
                   return (
                   <div data-testid={`bucket-evidence-${row.id}`}
                     className={`space-y-1 ${required
                       ? 'rounded border border-amber-700/60 bg-amber-950/20 p-2' : ''}`}>
                     <p className={`text-[11px] uppercase tracking-wide ${
                       required ? 'text-amber-300' : 'text-slate-500'}`}>
-                      {t('bucket.evidence')}
+                      {t('bucket.changePpt')}
                     </p>
                     {required && (
                       <p className="text-xs text-amber-200" data-testid={`bucket-evidence-required-${row.id}`}>
-                        {t('check.evidenceRequired')}
+                        {t('check.changePptRequired')}
                       </p>
                     )}
                     {evidenceOf(a.id).length > 0 && (
@@ -324,10 +348,10 @@ export default function AssessmentBuckets({
                     )}
                     {isMine && editable ? (
                       <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
-                        label={t('bucket.evidenceSlot')}
+                        kind="change_ppt" label={t('bucket.changePptSlot')}
                         onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })} />
                     ) : evidenceOf(a.id).length === 0 && (
-                      <p className="text-xs text-slate-600">{t('bucket.evidenceHint')}</p>
+                      <p className="text-xs text-slate-600">{t('bucket.changePptHint')}</p>
                     )}
                   </div>
                   )
@@ -349,6 +373,18 @@ export default function AssessmentBuckets({
           </section>
         )
       })}
+
+      {/* Everyone else's standing, in one line. Not a board they can open — just
+          enough to know whether the change is moving and who it sits with. */}
+      {summarised.length > 0 && (
+        <p data-testid="bucket-progress"
+          className="text-xs text-slate-400 px-1 py-1">
+          {(progress.waiting.length > 0 ? t('bucket.progress') : t('bucket.progressDone'))
+            .replace('{n}', String(progress.done))
+            .replace('{m}', String(progress.total))
+            .replace('{x}', progress.waiting.map(deptName).join(', '))}
+        </p>
+      )}
     </div>
   )
 }
