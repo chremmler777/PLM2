@@ -267,8 +267,10 @@ export default function AssessmentBuckets({
                 </span>
               )}
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
-                {state !== 'queued' && (
-                  <span className="text-slate-400">{a?.owner_name ?? t('tasks.unclaimed')}</span>
+                {/* Tasks are mandatory per department — there is no claim step,
+                    so an empty owner is not a state worth announcing. */}
+                {a?.owner_name && (
+                  <span className="text-slate-400">{a.owner_name}</span>
                 )}
                 {a?.due_date && (
                   <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>

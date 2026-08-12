@@ -212,14 +212,24 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(screen.getByText('Clip rattles')).toBeDefined()
   })
 
-  it('keeps the assessment row with its owner and Accept control', async () => {
+  it('shows the assessment task without an accept step — tasks are mandatory', async () => {
+    // The department owes the answer either way; a name appears only once
+    // somebody has submitted.
     await renderWith(changeTask({
       kind: 'assessment', department_id: 2, assessment_id: 3,
       owner_id: null, owner_name: null, mine: true,
     }))
-    fireEvent.click(screen.getByRole('button', { name: t('tasks.accept') }))
-    await waitFor(() => expect(changesApi.acceptAssessment).toHaveBeenCalledWith(7, 3))
+    expect(screen.queryByRole('button', { name: t('tasks.accept') })).toBeNull()
+    expect(screen.getByText(t('tasks.kind.assessment'))).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Assess' }))
     expect(navigate).toHaveBeenCalledWith('/changes/7')
+  })
+
+  it('names the submitter on an answered assessment row', async () => {
+    await renderWith(changeTask({
+      kind: 'assessment', department_id: 2, assessment_id: 3,
+      owner_id: 9, owner_name: 'Toola Engineer', mine: false,
+    }))
+    expect(screen.getByText('Toola Engineer')).toBeTruthy()
   })
 })

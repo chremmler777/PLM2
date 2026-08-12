@@ -256,22 +256,11 @@ const taskLabel = (kind: string): string => {
 
 function ChangeTasksSection() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const { data: tasks = [] } = useQuery({
     queryKey: ['change-my-tasks'],
     queryFn: () => changesApi.myTasks(),
     refetchInterval: 60_000,
-  });
-
-  const accept = useMutation({
-    mutationFn: ({ changeId, assessmentId }: { changeId: number; assessmentId: number }) =>
-      changesApi.acceptAssessment(changeId, assessmentId),
-    onSuccess: () => {
-      toast.success('Assessment accepted');
-      queryClient.invalidateQueries({ queryKey: ['change-my-tasks'] });
-    },
-    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to accept'),
   });
 
   if (tasks.length === 0) return null;
@@ -312,31 +301,17 @@ function ChangeTasksSection() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {task.kind === 'assessment' ? (
-                    task.owner_id != null ? (
-                      <span className="text-slate-200">{task.owner_name}</span>
-                    ) : (
-                      <button
-                        onClick={() =>
-                          accept.mutate({
-                            changeId: task.change_id,
-                            assessmentId: task.assessment_id as number,
-                          })
-                        }
-                        disabled={accept.isPending}
-                        className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
-                      >
-                        {t('tasks.accept')}
-                      </button>
-                    )
-                  ) : (
-                    <span className="block">
-                      <span className="text-slate-200">{taskLabel(task.kind)}</span>
-                      {taskHint(task) && (
-                        <span className="block text-xs text-slate-400">{taskHint(task)}</span>
-                      )}
-                    </span>
-                  )}
+                  {/* The department's task is mandatory — there is no accept
+                      step. A name appears once somebody has submitted. */}
+                  <span className="block">
+                    <span className="text-slate-200">{taskLabel(task.kind)}</span>
+                    {task.kind === 'assessment' && task.owner_name && (
+                      <span className="block text-xs text-slate-400">{task.owner_name}</span>
+                    )}
+                    {taskHint(task) && (
+                      <span className="block text-xs text-slate-400">{taskHint(task)}</span>
+                    )}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-xs">
                   {task.due_date ? (
