@@ -2,15 +2,22 @@ import { t } from '../../i18n/cmLabels'
 import type { ChangeStatus } from '../../types/change'
 
 /**
- * Which role owns a change while it sits in a given stage: Sales writes the
- * request, project management runs the scoping. The badge is chip-sized, so the
- * map points at short labels ('PM', later 'Team') rather than the full role
- * names. It is the extension point for the remaining stages once their
- * ownership is agreed.
+ * Which role owns a change while it sits in a given stage (agreed 2026-08-12):
+ * Sales writes the request and owns everything quote-shaped — creating it,
+ * and at `quoted` the fork to rejection, negotiation or go. Assessment,
+ * costing, implementation and validation belong to the team; release is PM's
+ * end responsibility. Closed states are just closed — no badge.
  */
 export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   captured: 'role.sales',
   scoping: 'role.pmShort',
+  in_assessment: 'role.team',
+  costing: 'role.team',
+  quoting: 'role.sales',
+  quoted: 'role.sales',
+  in_implementation: 'role.team',
+  in_validation: 'role.team',
+  released: 'role.pmShort',
 }
 
 export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {

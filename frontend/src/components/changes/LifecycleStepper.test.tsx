@@ -40,14 +40,19 @@ describe('LifecycleStepper', () => {
 })
 
 describe('LifecycleStepper stage responsibility', () => {
-  it('tags captured with Sales, scoping with project management, nothing else', () => {
+  it('tags every stage with its agreed owner along the whole path', () => {
+    // Agreed 2026-08-12: Sales owns capture and everything quote-shaped,
+    // the team owns assessment/costing/implementation/validation, PM the
+    // scoping and the release. Closed states carry no badge.
     render(<LifecycleStepper status="scoping" customerRelevant />)
     const tags = screen.getAllByTestId('stage-responsible')
-    expect(tags).toHaveLength(2)
+    expect(tags.length).toBeGreaterThanOrEqual(2)
     expect(tags[0].textContent).toContain(t('role.sales'))
     expect(tags[0].parentElement?.textContent).toContain('Captured')
     expect(tags[1].textContent).toContain(t('role.pmShort'))
     expect(tags[1].parentElement?.textContent).toContain('Scoping')
+    const all = tags.map((el) => el.textContent).join('|')
+    expect(all).toContain(t('role.team'))
   })
 })
 

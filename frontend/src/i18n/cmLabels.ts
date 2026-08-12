@@ -139,6 +139,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'role.pm': { de: 'Projektmanagement', en: 'Project Management' },
   // Badge-sized variant — the stage chips are tiny, so they carry the short form.
   'role.pmShort': { de: 'PM', en: 'PM' },
+  'role.team': { de: 'Team', en: 'Team' },
   'cockpit.where': { de: 'Status', en: 'Status' },
   'cockpit.blocking': { de: 'Blockiert durch', en: 'Blocked by' },
   'cockpit.next': { de: 'Nächster Schritt', en: 'Next step' },
