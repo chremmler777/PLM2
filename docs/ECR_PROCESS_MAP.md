@@ -16,11 +16,12 @@ flowchart TD
     E --> F[quoted - submitted\nSales]
     F --> G{negotiation\nSales}
     G -->|final result + go-ahead| H[scheduling block\nScheduling + Sales]
-    G -->|no deal| X[rejected]
+    G -->|declined| X[rejected]
     H --> I[in_implementation\ndepartments + vendors]
     I --> J[in_validation\ndepartments]
     J -->|checks good| K[released - implemented]
-    J -->|not good| L[escalation\nPM + Sales: new timing / more money]
+    J -->|not good| L[escalation\nPM + Sales: replan timing,
+renegotiate commercial terms]
     L --> I
 ```
 
@@ -37,7 +38,7 @@ flowchart TD
 | 7 | **scheduling block** | Scheduling (+ Sales publishes) | Real bank-build plan (bank-build planning partially exists). Decision: **running change vs planned scrap** — customer pays scrap → additional cost quote if they scrap. Sales publishes the plan to the customer. Samplings planned on this timeline; blocked machines are part of it. **The scheduling timeline leads everything downstream** | bank-build plan; scrap decision + scrap quote; published plan | TO BUILD (bank-build basis exists) |
 | 8 | **in_implementation** | Implementing departments + vendors | Simple time tracking per department. **Progress report at least 2×/week** with an at-risk flag. Flagged → **Sales escalates** to customer or internally. Samplings happen per the scheduling timeline | progress reports; risk flags; escalations | TO BUILD (skeleton exists) |
 | 9 | **in_validation** | Each department (its own checks) | Tool sampled, measured, **cycle time taken**; **weight validated against the costing guess → Sales updates quote (additional cost)**; **revision levels increased per customer statement and validated as correctly implemented**; **second P&L**: real time spent + extra costs | check completion per department; weight delta; revision bump; actuals P&L | TO BUILD (check workflows exist as basis) |
-| 10 | **released — implemented** | PM | Validation good → implemented/released. Not good → escalation: PM + Sales identify new timings, possibly ask for additional money, loop back | release | BUILT (transition) |
+| 10 | **released — implemented** | PM | Validation good → implemented/released. Not good → escalation: PM + Sales replan the timing and renegotiate the commercial terms, loop back | release | BUILT (transition) |
 
 ## Cross-cutting rules
 
