@@ -215,7 +215,7 @@ Three typed containers, three responsibilities:
   line, rest one-time; remark travels as the line note; deliberate deletions
   are remembered).
 
-### Costing & timing shape (2026-08-11, in build)
+### Costing & timing shape (2026-08-11, in build; positions added 2026-08-12)
 
 - **Per-department cost buckets at `costing`** — same accordion philosophy as
   assessment: each participating department files one-time lines (activity
@@ -223,8 +223,28 @@ Three typed containers, three responsibilities:
   cost) and lifecycle lines as **production-time deltas** (± min/part, per
   plant). Departments see only their own figures; **PM and Sales see all**
   (summation: per-department, one-time vs lifecycle, grand total).
+- **Cost positions (2026-08-12)** — each department states, as tagged
+  positions (standard tags like moldflow, external design, tool change, gauge
+  change, testing … or free text): its **internal effort** (time spent on the
+  assessment), its **estimated support during implementation**, and
+  **external positions** priced either as an estimate or by **vendor quotes**
+  — one table row per vendor: uploaded quote document, cost, lead time,
+  shipping stated separately or declared included in the offer. The
+  department **votes a favorite vendor**; Sales chooses later. **Sales has no
+  input at costing** — they receive the full picture and build the quote from
+  it. A department whose assessment marked nothing impacted (e.g. Packaging's
+  "no change") owes no costing input and carries no costing task.
 - **Timing**: each department's costing entry carries an implementation
   lead-time estimate; the change-level roll-up is the max.
+- **Scoping like assessment**: at costing a department sees **only its own
+  block**; PM and Sales see all blocks.
+- **`quoting` — the create-quote stage (2026-08-12)**: costing closes the
+  quote inputs, then the change moves `costing → quoting → quoted`. The
+  quoting stage is **Sales-only**: they see all costs wrapped up per
+  department (lines, lifecycle, positions with the favorite vendor) and build
+  the quote from it. The implementation-timeline builder (MS-Project-like,
+  Sales decides what runs in parallel) is a **future tool** — the stage
+  carries a placeholder statement for now.
 - **Quote**: Sales sets the quoted price manually with the summation (incl.
   the lifecycle time roll-up) as the internal basis — departments give time,
   Sales prices (the D2 "recalculation" job).
