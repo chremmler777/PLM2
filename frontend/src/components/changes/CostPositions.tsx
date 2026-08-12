@@ -26,6 +26,7 @@ import { changesApi } from '../../api/changes'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
+import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
 import type {
   CostPosition, CostPositionKind, CostPositionPricing, CostingOffer, LeadTimeUnit,
 } from '../../types/change'
@@ -512,6 +513,60 @@ function EffortField({
 }
 
 /**
+ * What the part will weigh, quoted by Tooling while they cost the change.
+ *
+ * It stands next to the effort answers because it is the same kind of thing: a
+ * question the department owes every time, not a position anybody adds. It is
+ * an estimate and the label says so — the validated figure comes later from
+ * somewhere else entirely, and this field never writes it.
+ */
+function PartWeightField({ changeId, departmentId, weightG, editable, onSaved }: {
+  changeId: number; departmentId: number
+  weightG: number | null | undefined
+  editable: boolean; onSaved: () => void
+}) {
+  const [grams, setGrams] = useState(weightG != null ? String(weightG) : '')
+  const save = useMutation({
+    mutationFn: () => changesApi.setWeightEstimate(changeId, num(grams)),
+    onSuccess: () => { toast.success(t('costpos.partWeightSaved')); onSaved() },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the weight'),
+  })
+  const dirty = num(grams) !== (weightG ?? null)
+  const commit = () => { if (dirty && !save.isPending) save.mutate() }
+
+  if (!editable) {
+    return (
+      <div className="flex items-baseline gap-2 text-sm">
+        <span className="text-slate-400">{t('costpos.partWeightField')}</span>
+        <span data-testid={`costpos-weight-value-${departmentId}`}
+          className="tabular-nums text-slate-200">
+          {weightG != null ? weightG : '—'}
+        </span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor={`part-weight-${departmentId}`} className="text-sm text-slate-300">
+        {t('costpos.partWeightField')}
+      </label>
+      <input id={`part-weight-${departmentId}`}
+        data-testid={`costpos-weight-${departmentId}`}
+        type="number" step="1" min={0} value={grams}
+        onChange={(e) => setGrams(e.target.value)}
+        // Same habit as the effort fields: leaving the box is what saves it.
+        onBlur={commit}
+        className={`${fieldCls} w-28 tabular-nums`} />
+      <button type="button" data-testid={`costpos-weight-save-${departmentId}`}
+        disabled={!dirty || save.isPending} onClick={commit}
+        className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+        {t('common.save')}
+      </button>
+    </div>
+  )
+}
+
+/**
  * Adding a position means adding an external one — the two effort answers have
  * their own standing fields above, so the kind is not a question any more.
  */
@@ -606,11 +661,17 @@ function NewPositionForm({ changeId, departmentId, onAdded }: {
   )
 }
 
-export default function CostPositions({ changeId, departmentId, editable }: {
+export default function CostPositions({
+  changeId, departmentId, editable, departmentName, partWeightG,
+}: {
   changeId: number
   departmentId: number
   /** The department's own members during costing (and PM). Everyone else reads. */
   editable: boolean
+  /** Told by name, because the weight question belongs to Tooling alone. */
+  departmentName?: string
+  /** The change's current weight estimate, when there is one. */
+  partWeightG?: number | null
 }) {
   const qc = useQueryClient()
   const { data: positions } = useQuery({
@@ -628,6 +689,13 @@ export default function CostPositions({ changeId, departmentId, editable }: {
     EFFORT_FIELDS.map(({ kind }) => mine.find((p) => p.kind === kind)?.id)
       .filter((id): id is number => id != null))
   const listed = mine.filter((p) => !boundIds.has(p.id))
+  // The weight lives on the change, not on a position, so saving it refreshes
+  // the change and the wrap-up that reads it — the positions are untouched.
+  const isToolEngineer = departmentName === TOOL_ENGINEER_DEPARTMENT
+  const weightSaved = () => {
+    qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
+  }
 
   return (
     <div data-testid={`costpos-section-${departmentId}`} className="space-y-3">
@@ -649,6 +717,13 @@ export default function CostPositions({ changeId, departmentId, editable }: {
               editable={editable} onChanged={invalidate} />
           )
         })}
+        {/* Tooling is the department that can answer this one, so it is asked
+            here and nowhere else. */}
+        {isToolEngineer && (
+          <PartWeightField key={`weight-${partWeightG ?? 'new'}`}
+            changeId={changeId} departmentId={departmentId}
+            weightG={partWeightG} editable={editable} onSaved={weightSaved} />
+        )}
       </div>
 
       <div className="space-y-2">

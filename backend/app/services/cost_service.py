@@ -330,4 +330,10 @@ class CostService:
             # time" is answerable without re-multiplying anything.
             "total_position_hours_cost": float(
                 sum(v["hours_cost"] for v in pos_by_dep.values())),
+            # The Tooling Engineer's weight estimate rides along with the
+            # costs: it is priced into the same quote, and it is an ESTIMATE
+            # until validation weighs the sampled part.
+            "part_weight_estimate_g": (
+                float(change.estimated_part_weight_g)
+                if change.estimated_part_weight_g is not None else None),
         }

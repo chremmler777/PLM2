@@ -502,6 +502,7 @@ export default function ChangeDetailPage() {
           {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
             <SummationView changeId={changeId}
               plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+              validatedWeightG={change.validated_part_weight_g}
               deadline={change.active_deadline === 'release'
                 ? { date: change.release_due_date, label: t('deadline.release') }
                 : { date: change.required_by_date, label: t('deadline.quote') }} />

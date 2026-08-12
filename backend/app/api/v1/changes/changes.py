@@ -39,7 +39,7 @@ from app.schemas.change import (
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    CostLeadTimeIn,
+    CostLeadTimeIn, WeightEstimateIn,
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
@@ -1013,6 +1013,37 @@ async def approve_internal_costs(
             db, change, current_user, note=body.note,
             release_due_date=body.release_due_date,
             release_due_reason=body.release_due_reason)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
+@router.put("/{change_id}/weight-estimate", response_model=ChangeResponse)
+async def put_weight_estimate(
+    change_id: int, body: WeightEstimateIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The Tooling Engineer quotes the part weight during costing.
+
+    An estimate, and flagged as one everywhere it is shown: the tool has not
+    been reworked yet. Validation weighs the sampled part and Sales prices the
+    delta into a quote update. Editable — re-stating it overwrites, with the
+    previous value kept in the changelog.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_quote_part_weight(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Tool Engineer department member or an admin may "
+                   "quote the part weight")
+    try:
+        await ChangeService.set_weight_estimate(
+            db, change, body.weight_g, current_user)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -3,6 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import D1MasterPanel from './D1MasterPanel';
 import SummationView from './SummationView';
+import { t } from '../../i18n/cmLabels';
 
 const GATES = [
   { gate_key: 'feasibility', decision: 'yes', decided_by: null, decided_at: null, remark: null },
@@ -275,5 +276,48 @@ describe('SummationView', () => {
     await waitFor(() => {
       expect(screen.getByText('Plant #3')).toBeDefined();
     });
+  });
+
+  // Tooling's weight quote travels with the money into Sales' wrap-up, and says
+  // out loud that it is a guess until somebody has validated it.
+  it('shows the part weight as an estimate until it is validated', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change-summation', 1], {
+      by_plant: [], by_department: [],
+      totals: { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0,
+                lifecycle_external: 0, grand_total: 0 },
+      part_weight_estimate_g: 412,
+    });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<SummationView changeId={1} />, { wrapper });
+    const line = await screen.findByTestId('summation-part-weight');
+    expect(line.textContent).toContain(t('summation.partWeightEstimate'));
+    expect(line.textContent).toContain('412');
+    expect(line.textContent).toContain(t('summation.grams'));
+  });
+
+  it('drops the estimate caveat once a validated weight exists', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change-summation', 1], {
+      by_plant: [], by_department: [],
+      totals: { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0,
+                lifecycle_external: 0, grand_total: 0 },
+      part_weight_estimate_g: 412,
+    });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<SummationView changeId={1} validatedWeightG={430} />, { wrapper });
+    const line = await screen.findByTestId('summation-part-weight');
+    expect(line.textContent).toContain(t('summation.partWeight'));
+    expect(line.textContent).not.toContain(t('summation.partWeightEstimate'));
+    expect(line.textContent).toContain('430');
+  });
+
+  it('says nothing about weight when nobody has quoted one', async () => {
+    render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
+    expect(screen.queryByTestId('summation-part-weight')).toBeNull();
   });
 });

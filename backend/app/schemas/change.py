@@ -1,7 +1,7 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
 
@@ -254,6 +254,18 @@ class ChangeResponse(BaseModel):
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
+    # The part weight, quoted at costing and weighed at validation. Both halves
+    # ride on every change response: the estimate is what Sales priced, the
+    # validated number is what the tool actually makes, and the delta between
+    # them is a quote update.
+    estimated_part_weight_g: Optional[float] = None
+    estimated_weight_by: Optional[int] = None
+    estimated_weight_by_name: Optional[str] = None
+    estimated_weight_at: Optional[datetime] = None
+    validated_part_weight_g: Optional[float] = None
+    validated_weight_by: Optional[int] = None
+    validated_weight_by_name: Optional[str] = None
+    validated_weight_at: Optional[datetime] = None
     internal_approved_by: Optional[int] = None
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
@@ -285,6 +297,8 @@ class ChangeResponse(BaseModel):
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
+            row["estimated_weight_by_name"] = data.estimated_weight_by_name
+            row["validated_weight_by_name"] = data.validated_weight_by_name
             # Model properties (not in __dict__) must be injected explicitly.
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
@@ -473,6 +487,11 @@ class SummationResponse(BaseModel):
     positions_by_department: List[PositionRollup] = []
     total_position_cost: float = 0.0
     total_position_hours_cost: float = 0.0
+    # Not money, but it belongs to the same wrap-up: Sales prices the weight
+    # change into the quote off this number, and looking it up on a different
+    # screen than the costs is how it gets forgotten. Grams; None until the
+    # Tooling Engineer states it.
+    part_weight_estimate_g: Optional[float] = None
 
 
 # --- costing positions ------------------------------------------------------
@@ -643,6 +662,21 @@ class ConcernCreate(BaseModel):
 class CostLeadTimeIn(BaseModel):
     department_id: int
     lead_time_days: int = Field(ge=0)
+
+
+class WeightEstimateIn(BaseModel):
+    # Grams, strictly positive: a part that weighs nothing is a typo, and the
+    # validation delta computed against a zero would be meaningless. null is
+    # the erase — the estimate was wrong and there is no replacement yet, which
+    # is a different statement from "0 g" and must not be storable as one.
+    weight_g: Optional[float] = None
+
+    @field_validator("weight_g")
+    @classmethod
+    def _positive_or_absent(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Part weight must be greater than zero")
+        return v
 
 
 class ConcernAnswerIn(BaseModel):

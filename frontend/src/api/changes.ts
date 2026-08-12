@@ -136,6 +136,13 @@ export const changesApi = {
       department_id: departmentId, lead_time_days: days,
     }).then((r) => r.data),
 
+  // What the part will weigh, as the Tool Engineer quotes it during costing.
+  // An estimate by contract: the validated figure is a separate field the
+  // backend fills later, so this endpoint only ever writes the guess.
+  setWeightEstimate: (id: number, weightG: number | null) =>
+    client.put(`/v1/changes/${id}/weight-estimate`, { weight_g: weightG })
+      .then((r) => r.data),
+
   // Cost positions — what a department books against the change, next to the
   // old grid. One list for the whole change; each row names its department.
   listCostPositions: (id: number) =>

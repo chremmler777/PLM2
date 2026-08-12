@@ -490,6 +490,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Support Umsetzung — geschätzt (h)',
     en: 'Implementation support — estimated (h)',
   },
+  // The Tool Engineer's other standing answer during costing: what the part
+  // will weigh. A quote, not a measurement — the real figure comes later.
+  'costpos.partWeightField': {
+    de: 'Teilegewicht (g) — Schätzung, wird validiert',
+    en: 'Part weight (g) — estimate, validated later',
+  },
+  'costpos.partWeightSaved': {
+    de: 'Gewichtsschätzung gespeichert',
+    en: 'Weight estimate saved',
+  },
   'costpos.externalTitle': { de: 'Externe Positionen', en: 'External positions' },
   'costpos.addExternal': { de: '+ Externe Position', en: '+ External position' },
   'costpos.noExternal': {
@@ -555,6 +565,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'summation.days': { de: 'Tage', en: 'days' },
   'summation.earliestDone': { de: 'Frühestens fertig', en: 'Earliest completion' },
   'summation.pastDeadline': { de: 'nach Termin', en: 'past the deadline' },
+  // The Tool Engineer's weight quote, as Sales reads it in the wrap-up. It says
+  // "estimate" until somebody has validated the figure against a real part.
+  'summation.partWeight': { de: 'Teilegewicht', en: 'Part weight' },
+  'summation.partWeightEstimate': {
+    de: 'Teilegewicht (Schätzung)',
+    en: 'Part weight (estimate)',
+  },
+  'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
   'tasks.kind.create_quote': { de: 'Angebot erstellen', en: 'Create quote' },
   'tasks.hint.create_quote': {

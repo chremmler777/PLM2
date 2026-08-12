@@ -14,6 +14,7 @@ vi.mock('../../api/changes', () => ({
     addCostingOffer: vi.fn().mockResolvedValue({}),
     updateCostingOffer: vi.fn().mockResolvedValue({}),
     deleteCostingOffer: vi.fn().mockResolvedValue({}),
+    setWeightEstimate: vi.fn().mockResolvedValue({}),
     costingTags: vi.fn(),
     uploadAttachment: vi.fn().mockResolvedValue({}),
   },
@@ -59,6 +60,7 @@ describe('CostPositions', () => {
     vi.mocked(changesApi.updateCostPosition).mockClear()
     vi.mocked(changesApi.addCostingOffer).mockClear()
     vi.mocked(changesApi.updateCostingOffer).mockClear()
+    vi.mocked(changesApi.setWeightEstimate).mockClear()
   })
   afterEach(cleanup)
 
@@ -261,5 +263,52 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-tag-11').textContent).toBe(t('costtag.equipment_change'))
     expect(screen.getByTestId('costpos-kind-11').textContent)
       .toContain(t('costpos.kind.external'))
+  })
+})
+
+// The weight the part will come out at is Tooling's answer, and only theirs —
+// an estimate on purpose, written straight onto the change.
+describe('CostPositions — part weight', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+    vi.mocked(changesApi.setWeightEstimate).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('asks Tooling for the weight and nobody else', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable
+      departmentName="Tool Engineer" partWeightG={412} />)
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-weight-2') as HTMLInputElement).value,
+    ).toBe('412'))
+    // The label carries the caveat: it is a guess until somebody validates it.
+    expect(screen.getByTestId('costpos-effort-2').textContent)
+      .toContain(t('costpos.partWeightField'))
+  })
+
+  it('leaves the field out of another department’s block', async () => {
+    wrap(<CostPositions changeId={7} departmentId={3} editable
+      departmentName="Quality" partWeightG={412} />)
+    await screen.findByTestId('costpos-effort-3')
+    expect(screen.queryByTestId('costpos-weight-3')).toBeNull()
+    expect(screen.queryByTestId('costpos-weight-value-3')).toBeNull()
+  })
+
+  it('saves the estimate when the field is left', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable
+      departmentName="Tool Engineer" partWeightG={null} />)
+    const field = await screen.findByTestId('costpos-weight-2')
+    fireEvent.change(field, { target: { value: '412' } })
+    fireEvent.blur(field)
+    await waitFor(() => expect(changesApi.setWeightEstimate).toHaveBeenCalledWith(7, 412))
+  })
+
+  it('gives a reader the number and no input', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable={false}
+      departmentName="Tool Engineer" partWeightG={412} />)
+    await screen.findByTestId('costpos-weight-value-2')
+    expect(screen.getByTestId('costpos-weight-value-2').textContent).toBe('412')
+    expect(screen.queryByTestId('costpos-weight-2')).toBeNull()
   })
 })

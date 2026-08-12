@@ -4,11 +4,18 @@ import { useDepartments } from '../../hooks/queries/useWorkflows';
 import { effectiveOf, tagLabel } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
 
-export default function SummationView({ changeId, deadline, plants = [] }: {
+export default function SummationView({
+  changeId, deadline, plants = [], validatedWeightG = null,
+}: {
   changeId: number
   /** The deadline the timing roll-up is measured against, when there is one. */
   deadline?: { date: string | null; label: string }
   plants?: { id: number; name: string }[]
+  /**
+   * The weight once somebody has checked it against a real part. Until that
+   * exists the Tool Engineer's figure is shown as the estimate it is.
+   */
+  validatedWeightG?: number | null
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['change-summation', changeId],
@@ -75,6 +82,22 @@ export default function SummationView({ changeId, deadline, plants = [] }: {
             )}
           </tbody>
         </table>
+        {/* Not money, so it sits below the money rather than inside it — but
+            Sales quotes off it, so it belongs on the same card. It reads as an
+            estimate until the validated figure exists. */}
+        {data.part_weight_estimate_g != null && (
+          <div data-testid="summation-part-weight"
+            className="flex justify-between pt-2 text-xs text-slate-300">
+            <span>
+              {validatedWeightG != null
+                ? t('summation.partWeight')
+                : t('summation.partWeightEstimate')}
+            </span>
+            <span className="tabular-nums">
+              {validatedWeightG ?? data.part_weight_estimate_g} {t('summation.grams')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* What each department actually booked, position by position — with the

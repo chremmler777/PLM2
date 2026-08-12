@@ -1207,6 +1207,83 @@ class ChangeService:
         member and isn't admin may not approve their own change's costs."""
         return await ChangeService._user_in_department(session, user, "Project Manager")
 
+    # The department that owns tools (_DOMAIN_BY_DEPARTMENT's tool domain) and
+    # therefore owns what the tool produces. Named once so the weight quote and
+    # the object buckets cannot drift apart.
+    TOOL_DEPARTMENT = "Tool Engineer"
+
+    @staticmethod
+    async def user_can_quote_part_weight(
+        session: AsyncSession, user: User,
+    ) -> bool:
+        """Only the people who own the tool may say what it will produce:
+        admin or a 'Tool Engineer' member (acts-as aware through
+        _user_in_department). No lead bypass and no PM bypass — a weight is a
+        technical claim, not a coordination one, and whoever states it is the
+        person the validation delta is discussed with."""
+        return await ChangeService._user_in_department(
+            session, user, ChangeService.TOOL_DEPARTMENT)
+
+    @staticmethod
+    async def set_weight_estimate(
+        session: AsyncSession, change: ChangeRequest, weight_g: float,
+        user: User,
+    ) -> ChangeRequest:
+        """Stamp the Tooling Engineer's part-weight ESTIMATE.
+
+        Costing-phase only, like every other costing number: the estimate is an
+        input to the quote, and one arriving after the quote went out would
+        describe a price nobody offered. Admins are exempt from the window (the
+        same exemption costing positions give them) because they fill numbers
+        in on someone's behalf after the fact.
+
+        Re-stating it overwrites — an estimate that cannot be corrected when
+        the tool concept changes is worse than one that can, and every previous
+        value survives in the hash-chained changelog with its author.
+
+        weight_g=None ERASES the estimate: the engineer no longer stands behind
+        the number and has no replacement yet. All three fields go with it —
+        keeping a by/at stamp on an absent value would claim somebody vouched
+        for nothing. Who erased it and what it was is in the changelog, which
+        is where a withdrawn claim belongs.
+        """
+        if weight_g is not None and weight_g <= 0:
+            raise ChangeError("Part weight must be greater than zero")
+        if change.status != "costing" and user.effective_role != "admin":
+            raise ChangeError(
+                "The part weight is quoted while the change is in costing")
+        old = (float(change.estimated_part_weight_g)
+               if change.estimated_part_weight_g is not None else None)
+        if weight_g is None:
+            # Erasing an estimate that was never given changes no fact, so it
+            # writes no history — the frontend clears an empty field on every
+            # blur and a changelog full of those is a changelog nobody reads.
+            if old is None:
+                return change
+            change.estimated_part_weight_g = None
+            change.estimated_weight_by = None
+            change.estimated_weight_at = None
+            await ChangeService.append_changelog(
+                session, change, "weight_estimate_cleared",
+                f"Part weight estimate withdrawn (was {old:g} g)",
+                user.id, field_name="estimated_part_weight_g",
+                old_value={"weight_g": old}, new_value=None,
+            )
+            return change
+        new = round(float(weight_g), 2)
+        change.estimated_part_weight_g = new
+        change.estimated_weight_by = user.id
+        change.estimated_weight_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "weight_estimated",
+            f"Part weight estimated at {new:g} g"
+            + (f" (was {old:g} g)" if old is not None else ""),
+            user.id, field_name="estimated_part_weight_g",
+            old_value={"weight_g": old} if old is not None else None,
+            new_value={"weight_g": new},
+        )
+        return change
+
     @staticmethod
     async def my_actions(
         session: AsyncSession, change: ChangeRequest, user: User,

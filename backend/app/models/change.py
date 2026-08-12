@@ -9,7 +9,10 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON, Boolean, Table, Column
+from sqlalchemy import (
+    String, Text, DateTime, Float, Integer, Numeric, ForeignKey, JSON, Boolean,
+    Table, Column,
+)
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -154,6 +157,24 @@ class ChangeRequest(Base):
     impact_confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     impact_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # The part's weight, stamped twice by two different people at two different
+    # stages. The Tooling Engineer quotes it at COSTING and can only guess: the
+    # tool has not been reworked yet. Validation weighs the sampled part for
+    # real, and the delta between the two is a commercial event — Sales updates
+    # the quote with it. Two triples, not one overwritten number, because the
+    # comparison IS the point. Grams. validated_* is filled by the validation
+    # stage (not built yet); the columns exist so it only has to fill them.
+    estimated_part_weight_g: Mapped[float | None] = mapped_column(
+        Numeric(10, 2, asdecimal=False), nullable=True)
+    estimated_weight_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    estimated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    validated_part_weight_g: Mapped[float | None] = mapped_column(
+        Numeric(10, 2, asdecimal=False), nullable=True)
+    validated_weight_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    validated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -186,6 +207,10 @@ class ChangeRequest(Base):
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
     impact_confirmed_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[impact_confirmed_by], lazy="selectin")
+    estimated_weight_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[estimated_weight_by], lazy="selectin")
+    validated_weight_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[validated_weight_by], lazy="selectin")
 
     @property
     def project_number(self) -> Optional[str]:
@@ -203,6 +228,16 @@ class ChangeRequest(Base):
     @property
     def impact_confirmed_by_name(self) -> Optional[str]:
         return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
+
+    @property
+    def estimated_weight_by_name(self) -> Optional[str]:
+        u = self.estimated_weight_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def validated_weight_by_name(self) -> Optional[str]:
+        u = self.validated_weight_by_user
+        return u.full_name if u is not None else None
 
     @property
     def active_deadline(self) -> str | None:

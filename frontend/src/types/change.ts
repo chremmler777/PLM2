@@ -198,6 +198,16 @@ export interface ChangeRequest {
   internal_approved_at?: string | null;
   internal_approved_amount?: number | null;
   internal_approval_note?: string | null;
+  /**
+   * What the Tool Engineer says the part will weigh, quoted during costing.
+   * It is an estimate on purpose — the validated figure arrives later, and
+   * until it does everything reading this number has to say so.
+   */
+  estimated_part_weight_g?: number | null;
+  estimated_weight_by_name?: string | null;
+  estimated_weight_at?: string | null;
+  /** Set once the estimate has been checked against a real part. */
+  validated_part_weight_g?: number | null;
 }
 
 export interface ChangeDetail extends ChangeRequest {
@@ -297,6 +307,8 @@ export interface Summation {
   /** Production-time delta the change carries per part, summed per plant. */
   lifecycle_minutes_by_plant?: { plant_id: number; minutes_per_part: number }[];
   total_minutes_per_part?: number;
+  /** The Tool Engineer's weight quote, carried into the wrap-up Sales prices. */
+  part_weight_estimate_g?: number | null;
 }
 
 export type GateKey = 'feasibility' | 'budget' | 'release';
