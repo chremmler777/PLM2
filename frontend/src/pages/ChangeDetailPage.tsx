@@ -515,7 +515,8 @@ export default function ChangeDetailPage() {
                   what it does to production time. The price itself stays a
                   judgement — nothing here sums into it. */}
               {canSeeCosts && <QuoteBasis changeId={changeId}
-                plants={allPlants.map((p) => ({ id: p.id, name: p.name }))} />}
+                plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+                concerns={concerns} departments={departments} />}
               <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
               <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
               <div className="flex flex-wrap items-center gap-2">

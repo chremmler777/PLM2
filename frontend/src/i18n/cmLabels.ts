@@ -420,6 +420,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Der Preis bleibt Ihre Entscheidung — hier wird nichts summiert.',
     en: 'The price stays your call — nothing here is summed into it.',
   },
+  // Only the severity-3 risks travel this far — Sales carries them onto the
+  // offer as technical judgement, not as a cost line.
+  'quote.risks': {
+    de: 'Technische Risiken für das Angebot',
+    en: 'Technical risks for the offer',
+  },
+  'quote.risksHint': {
+    de: 'Offene Risiken der Bewertung 3 — im Angebot benennen, nicht einpreisen.',
+    en: 'Open rating-3 risks — state them in the offer, do not price them in.',
+  },
   'summation.timeBasis': { de: 'Zeitbasis für das Angebot', en: 'Time basis for the quote' },
   'summation.perPart': { de: 'pro Teil', en: 'per part' },
   'costing.leadTime': { de: 'Vorlaufzeit (Tage)', en: 'Lead time (days)' },
