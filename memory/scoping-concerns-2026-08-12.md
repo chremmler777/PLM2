@@ -20,4 +20,4 @@ Session record; full spec in
 - **Test-data caveat:** id 2 `admin` is in every department (incl. Sales + PM),
   id 7 `admin-1` has none — both make role-gate testing misleading. Parked:
   seed one single-department user per role.
-- All uncommitted on `main` as of this session (user hasn't asked for a commit).
+- Committed and pushed to origin/main as c07cccb1 (includes the consulted-rows-owe-no-task fix).
