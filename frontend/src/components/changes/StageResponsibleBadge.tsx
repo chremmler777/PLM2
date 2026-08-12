@@ -15,6 +15,9 @@ export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   costing: 'role.team',
   quoting: 'role.sales',
   quoted: 'role.sales',
+  // The go/no-go at approval is the customer's — the badge keeps every
+  // stage on the path owned.
+  approved: 'role.customer',
   in_implementation: 'role.team',
   in_validation: 'role.team',
   released: 'role.pmShort',
