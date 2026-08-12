@@ -1,8 +1,16 @@
 """Closing the needs-info loop: a decision raises a Team flag, Sales gets the
-task, and the question/answer documents are linked to each other."""
+task, and the question/answer documents are linked to each other.
+
+A needs_info question now has exactly one producer — the scoping meeting that
+decided it — and that is how the Team flags below are created. Questions
+attributed to a DEPARTMENT have no producer left at all, but plenty of them
+exist on live changes, and everything downstream (the Sales errand, the
+close_question errand, the proposal-with-document rule) still has to handle
+them. Those tests seed the row directly; see conftest.insert_legacy_concern.
+"""
 import pytest
 
-from tests.conftest import login, satisfy_capture_gate
+from tests.conftest import insert_legacy_concern, login, satisfy_capture_gate
 
 pytestmark = pytest.mark.asyncio
 
@@ -346,12 +354,9 @@ async def test_any_member_of_the_raising_department_may_settle_its_flag(
         c.status = "in_assessment"
         await s.commit()
 
-    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
-                            json={"kind": "reject_proposal", "note": "Tolerance",
-                                  "department_id": dept_id})
-    assert res.status_code == 200, res.text
-    dept_concern = res.json()["id"]
+    dept_concern = await insert_legacy_concern(
+        session_factory, cid, kind="reject_proposal", note="Tolerance",
+        raised_by=seed["admin_id"], department_id=dept_id)
 
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{dept_concern}/withdraw",
                             json={"resolution_note": "Supplier confirmed"},
@@ -470,12 +475,14 @@ async def test_the_auto_flag_names_the_meeting_that_raised_it(
 
     concerns = (await client.get(f"/api/v1/changes/{cid}/concerns",
                                  headers=admin_auth)).json()
-    auto = next(c for c in concerns if c["is_open"])
+    auto = next(c for c in concerns if c["kind"] == "needs_info" and c["is_open"])
     assert auto["raised_by_meeting_id"] == mid
 
-    # a hand-raised flag stands on its own
+    # a hand-raised flag (a risk — the only kind anyone raises now) stands on
+    # its own, with no meeting behind it
     manual = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                               json={"kind": "reject_proposal", "note": "mine"})
+                               json={"kind": "risk", "note": "mine",
+                                     "risk_type": "other", "severity": 1})
     assert manual.status_code == 200, manual.text
     assert manual.json()["raised_by_meeting_id"] is None
 
@@ -505,12 +512,10 @@ async def test_department_raised_question_reaches_sales(
 
     assert await rows() == []
 
-    # APQP asks — at scoping the department is attribution, no meeting involved
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                            json={"kind": "needs_info", "note": "Which tolerance class?",
-                                  "department_id": apqp_id})
-    assert res.status_code == 200, res.text
-    concern_id = res.json()["id"]
+    # APQP asks — attribution says who wants to know, not who has to ask
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Which tolerance class?",
+        raised_by=seed["engineer_id"], department_id=apqp_id)
 
     got = await rows()
     assert len(got) == 1
@@ -528,10 +533,10 @@ async def test_one_row_per_change_counts_the_questions(
         client, admin_auth, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, admin_auth, seed, "18")
     sales = await _sales_member(client, session_factory, seed)
-    for auth, note in ((admin_auth, "First question"), (eng_auth, "Second question")):
-        res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=auth,
-                                json={"kind": "needs_info", "note": note})
-        assert res.status_code == 200, res.text
+    for who, note in ((seed["admin_id"], "First question"),
+                      (seed["engineer_id"], "Second question")):
+        await insert_legacy_concern(session_factory, cid, kind="needs_info",
+                                    note=note, raised_by=who)
 
     res = await client.get("/api/v1/changes/my-tasks", headers=sales)
     rows = [t for t in res.json()
@@ -546,8 +551,8 @@ async def test_objections_are_not_questions(client, admin_auth, seed,
     """reject_proposal is an objection — nobody can answer it for its author."""
     cid = await _change_in_scoping(client, admin_auth, seed, "19")
     sales = await _sales_member(client, session_factory, seed)
-    await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                      json={"kind": "reject_proposal", "note": "Too expensive"})
+    await insert_legacy_concern(session_factory, cid, kind="reject_proposal",
+                                note="Too expensive", raised_by=seed["admin_id"])
     res = await client.get("/api/v1/changes/my-tasks", headers=sales)
     assert [t for t in res.json()
             if t["kind"] == "obtain_info" and t["change_id"] == cid] == []
@@ -569,11 +574,9 @@ async def test_a_question_in_assessment_still_reaches_sales(
         c.status = "in_assessment"
         await s.commit()
 
-    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
-                            json={"kind": "needs_info", "note": "Steel grade?",
-                                  "department_id": dept_id})
-    assert res.status_code == 200, res.text
+    await insert_legacy_concern(session_factory, cid, kind="needs_info",
+                                note="Steel grade?", raised_by=seed["admin_id"],
+                                department_id=dept_id)
 
     res = await client.get("/api/v1/changes/my-tasks", headers=sales)
     rows = [t for t in res.json()
@@ -622,12 +625,9 @@ async def test_answered_department_question_reaches_that_department_and_pm(
     pm = await _dept_member(client, session_factory, seed,
                             "Project Manager", "pm2@test.io")
 
-    res = await client.post(f"/api/v1/changes/{cid}/concerns",
-                            headers=apqp["auth"],
-                            json={"kind": "needs_info", "note": "Which tolerance?",
-                                  "department_id": apqp["dept_id"]})
-    assert res.status_code == 200, res.text
-    concern_id = res.json()["id"]
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Which tolerance?",
+        raised_by=apqp["user_id"], department_id=apqp["dept_id"])
 
     # unanswered: nobody is asked to close it yet
     assert await _close_rows(client, apqp["auth"], cid) == []
@@ -665,9 +665,9 @@ async def test_answered_team_flag_goes_to_project_management(
     pm = await _dept_member(client, session_factory, seed,
                             "Project Manager", "pm3@test.io")
 
-    concern_id = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-        json={"kind": "needs_info", "note": "Customer drawing?"})).json()["id"]
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Customer drawing?",
+        raised_by=seed["admin_id"])
     await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                       json={"note": "Rev C received"}, headers=sales)
 
@@ -693,13 +693,12 @@ async def test_pm_sees_both_kinds_and_counts_them_once_per_change(
     tool = await _dept_member(client, session_factory, seed,
                               "Tool Engineer", "tool2@test.io")
 
-    team = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-        json={"kind": "needs_info", "note": "Team question"})).json()["id"]
-    dept = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=tool["auth"],
-        json={"kind": "needs_info", "note": "Tool question",
-              "department_id": tool["dept_id"]})).json()["id"]
+    team = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Team question",
+        raised_by=seed["admin_id"])
+    dept = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Tool question",
+        raised_by=tool["user_id"], department_id=tool["dept_id"])
     for concern_id, note in ((team, "Team answer"), (dept, "Tool answer")):
         await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                           json={"note": note}, headers=sales)
@@ -731,13 +730,11 @@ async def _dept_concern_in_assessment(client, admin_auth, seed, session_factory,
         c = await s.get(ChangeRequest, cid)
         c.status = "in_assessment"
         await s.commit()
-    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
-                            json={"kind": "needs_info",
-                                  "note": "Tolerance cannot be held",
-                                  "department_id": dept_id})
-    assert res.status_code == 200, res.text
-    return cid, res.json()["id"], dept_id
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info",
+        note="Tolerance cannot be held", raised_by=seed["admin_id"],
+        department_id=dept_id)
+    return cid, concern_id, dept_id
 
 
 async def test_anyone_may_propose_a_solution_with_its_documentation(
@@ -818,10 +815,9 @@ async def test_a_department_attribution_during_scoping_stays_sales_only(
         s.add(dept)
         await s.commit()
         dept_id = dept.id
-    concern_id = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-        json={"kind": "needs_info", "note": "Which tolerance class?",
-              "department_id": dept_id})).json()["id"]
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="needs_info", note="Which tolerance class?",
+        raised_by=seed["admin_id"], department_id=dept_id)
 
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
                             json={"note": "Class 2"}, headers=eng_auth)

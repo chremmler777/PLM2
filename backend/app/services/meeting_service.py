@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import (
     ChangeRequest, ChangeMeeting, ChangeConcern, CONCERN_KINDS,
+    RISK_TYPES, RISK_SEVERITIES,
     MEETING_DECISIONS, MEETING_CHANNELS, SCOPING_STATUSES)
 from app.models.entities import User
 from app.models.workflow import Department
@@ -136,6 +137,7 @@ class MeetingService:
     async def raise_concern(
         session: AsyncSession, change: ChangeRequest, user: User,
         kind: str, note: str, department_id: Optional[int] = None,
+        risk_type: Optional[str] = None, severity: Optional[int] = None,
     ) -> ChangeConcern:
         """Two phases, two meanings for department_id.
 
@@ -159,6 +161,23 @@ class MeetingService:
                 "Concerns can only be raised during scoping or assessment")
         if kind not in CONCERN_KINDS:
             raise ChangeError(f"Invalid concern kind '{kind}'")
+        # The only thing a person raises by hand now is a risk. reject_proposal
+        # and needs_info are decision outcomes — they arrive from the scoping
+        # meeting (which writes them directly, bypassing this) and are settled
+        # by the loop that created them. Letting somebody mint one from the
+        # side produced open points with no decision behind them and nobody
+        # obliged to answer.
+        if kind != "risk":
+            raise ChangeError(
+                f"'{kind}' concerns come from a scoping decision, not from a "
+                "direct raise — raise a risk instead")
+        if risk_type not in RISK_TYPES:
+            raise ChangeError(
+                f"Invalid risk type '{risk_type}' — one of: "
+                + ", ".join(RISK_TYPES))
+        if severity not in RISK_SEVERITIES:
+            raise ChangeError(
+                "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
         if not (note or "").strip():
             raise ChangeError("A concern needs a note saying what the problem is")
         if in_assessment:
@@ -183,22 +202,32 @@ class MeetingService:
                     f"Unknown or inactive department {department_id}")
         # One open concern per person per kind — a second is an edit, not a
         # vote. Scoped per department during assessment, so a person sitting in
-        # two departments can still hold each of them.
-        if any(c.is_open and c.raised_by == user.id and c.kind == kind
-               and c.department_id == department_id
-               for c in change.concerns):
+        # two departments can still hold each of them. Risks are exempt: a
+        # register is a list, and one person routinely sees a fill risk AND a
+        # dimensional one on the same change.
+        if kind != "risk" and any(
+                c.is_open and c.raised_by == user.id and c.kind == kind
+                and c.department_id == department_id
+                for c in change.concerns):
             raise ChangeError(
                 "You already have an open concern of this kind — withdraw it first")
         concern = ChangeConcern(
             change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id,
-            department_id=department_id)
+            department_id=department_id,
+            risk_type=risk_type if kind == "risk" else None,
+            severity=severity if kind == "risk" else None)
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_raised",
-            f"Concern ({kind}): {concern.note}", user.id,
+            f"Concern ({kind}"
+            + (f"/{concern.risk_type}, severity {concern.severity}"
+               if kind == "risk" else "")
+            + f"): {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": kind,
-                       "department_id": department_id},
+                       "department_id": department_id,
+                       "risk_type": concern.risk_type,
+                       "severity": concern.severity},
             notes=concern.note)
         return concern
 
@@ -363,11 +392,19 @@ class MeetingService:
     ) -> list[ChangeConcern]:
         """Open concerns holding one department's assessment."""
         return [c for c in change.concerns
-                if c.is_open and c.department_id == department_id]
+                if c.is_open and c.kind != "risk"
+                and c.department_id == department_id]
 
     @staticmethod
     def open_concerns(change: ChangeRequest) -> list[ChangeConcern]:
-        return [c for c in change.concerns if c.is_open]
+        """Open points somebody still owes an answer to.
+
+        Risks are excluded on both counts this list is used for: they do not
+        block 'proceed' (a change ships with its risks recorded — refusing to
+        decide until the register is empty would just teach people to withdraw
+        them), and a reject/needs_info decision does not answer them, so they
+        must not be closed as though it had."""
+        return [c for c in change.concerns if c.is_open and c.kind != "risk"]
 
     @staticmethod
     async def decide_meeting(

@@ -114,9 +114,10 @@ class AssessmentResponse(BaseModel):
     effort_hours: Optional[float] = None
     submitted_at: Optional[datetime] = None
     # Evidence filed against this assessment, and whether its checklist implies
-    # an RFQ is owed (modification_external). Both advisory — only
-    # "not feasible" actually requires a document.
+    # an RFQ is owed (modification_external). Advisory — except has_change_ppt,
+    # which is the thing "not feasible" is actually gated on.
     has_evidence: bool = False
+    has_change_ppt: bool = False
     has_rfq: bool = False
     rfq_expected: bool = False
     stage_order: int = 1
@@ -152,6 +153,7 @@ class AssessmentResponse(BaseModel):
                 "details": data.details_dict,
                 # Set by the detail endpoint; absent elsewhere, hence getattr.
                 "has_evidence": getattr(data, "has_evidence", False),
+                "has_change_ppt": getattr(data, "has_change_ppt", False),
                 "has_rfq": getattr(data, "has_rfq", False),
                 "rfq_expected": getattr(data, "rfq_expected", False),
             }
@@ -489,11 +491,16 @@ class MeetingUpdate(BaseModel):
 
 
 class ConcernCreate(BaseModel):
-    kind: str  # reject_proposal | needs_info
+    # Direct raises are risks only; reject_proposal/needs_info are written by
+    # the scoping decision that produced them.
+    kind: str = "risk"
     note: str = Field(min_length=1)
     # Required while the change is in assessment (the raiser's own
     # department); must stay unset during scoping.
     department_id: Optional[int] = None
+    # Required for kind "risk" — see RISK_TYPES / severity 1-3 in models.
+    risk_type: Optional[str] = None
+    severity: Optional[int] = None
 
 
 class CostLeadTimeIn(BaseModel):
@@ -520,6 +527,9 @@ class ConcernResponse(BaseModel):
     raised_by_name: Optional[str] = None
     raised_at: datetime
     department_id: Optional[int] = None
+    # Set on kind "risk" only; null on legacy kinds.
+    risk_type: Optional[str] = None
+    severity: Optional[int] = None
     raised_by_meeting_id: Optional[int] = None
     answer_note: Optional[str] = None
     answered_at: Optional[datetime] = None

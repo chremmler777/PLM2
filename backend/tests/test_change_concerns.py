@@ -1,7 +1,19 @@
-"""Concerns: parallel team flags feeding the scoping decision."""
+"""Concerns: the flags a change carries alongside its decisions.
+
+Two producers now. A RISK is raised by hand — that is the only kind anyone may
+file directly, and it is a register entry rather than a hold. reject_proposal
+and needs_info are outcomes: the scoping meeting writes the needs_info it
+decided on, and older rows of both kinds are still out there. What those legacy
+rows do — block their department's submit until they are settled with a note —
+is unchanged, so it is covered here with the row seeded the way history left it.
+"""
 import pytest
 
+from tests.conftest import insert_legacy_concern
+
 pytestmark = pytest.mark.asyncio
+
+RISK = {"kind": "risk", "risk_type": "dimensional_issue", "severity": 2}
 
 
 async def _change_in_scoping(client, auth, seed, suffix):
@@ -58,14 +70,31 @@ async def _meeting(client, auth, cid, dept_ids):
     return res.json()["id"]
 
 
-async def test_concern_records_who_objects_and_why(client, eng_auth, seed):
+async def _raise(client, auth, cid, note, **extra):
+    body = {**RISK, "note": note}
+    body.update(extra)
+    return await client.post(f"/api/v1/changes/{cid}/concerns", json=body,
+                             headers=auth)
+
+
+async def test_a_decision_kind_cannot_be_raised_by_hand(client, eng_auth, seed):
+    """The pinning test for the removed capability: needs_info comes from the
+    meeting that decided it, and reject_proposal has no producer at all."""
     cid = await _change_in_scoping(client, eng_auth, seed, "1")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "reject_proposal", "note": "Tool cannot hold the tolerance"})
+    for kind in ("reject_proposal", "needs_info"):
+        res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
+                                json={"kind": kind, "note": "Tool cannot hold it"})
+        assert res.status_code == 400, res.text
+        assert "scoping decision" in res.json()["detail"]
+
+
+async def test_a_risk_records_who_flagged_it_and_why(client, eng_auth, seed):
+    cid = await _change_in_scoping(client, eng_auth, seed, "1b")
+    res = await _raise(client, eng_auth, cid, "Datum B will move")
     assert res.status_code == 200, res.text
     c = res.json()
-    assert c["kind"] == "reject_proposal"
-    assert c["note"] == "Tool cannot hold the tolerance"
+    assert c["kind"] == "risk"
+    assert c["note"] == "Datum B will move"
     assert c["raised_by"] == seed["engineer_id"]
     assert c["raised_by_name"]           # the flag names its author
     assert c["is_open"] is True
@@ -73,29 +102,16 @@ async def test_concern_records_who_objects_and_why(client, eng_auth, seed):
 
 async def test_concern_needs_a_note(client, eng_auth, seed):
     cid = await _change_in_scoping(client, eng_auth, seed, "2")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "   "})
+    res = await _raise(client, eng_auth, cid, "   ")
     assert res.status_code == 400, res.text
-
-
-async def test_second_open_concern_of_a_kind_is_refused(client, eng_auth, seed):
-    cid = await _change_in_scoping(client, eng_auth, seed, "3")
-    body = {"kind": "needs_info", "note": "Missing the CAD"}
-    assert (await client.post(f"/api/v1/changes/{cid}/concerns", json=body,
-                              headers=eng_auth)).status_code == 200
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", json=body, headers=eng_auth)
-    assert res.status_code == 400, res.text
-    assert "already have an open concern" in res.json()["detail"]
 
 
 async def test_only_the_author_may_withdraw_even_for_an_admin(
         client, eng_auth, admin_auth, seed):
     cid = await _change_in_scoping(client, eng_auth, seed, "4")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "reject_proposal", "note": "No capacity"})
-    concern_id = res.json()["id"]
+    concern_id = (await _raise(client, eng_auth, cid, "No capacity")).json()["id"]
 
-    # Clearing somebody else's objection is the thing this prevents — an admin
+    # Clearing somebody else's flag is the thing this prevents — an admin
     # is not exempt.
     res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}", headers=admin_auth)
     assert res.status_code == 400, res.text
@@ -113,9 +129,9 @@ async def test_open_concern_blocks_proceed_until_withdrawn(
         client, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, eng_auth, seed, "5")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "reject_proposal", "note": "Timing impossible"})
-    concern_id = res.json()["id"]
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="reject_proposal", note="Timing impossible",
+        raised_by=seed["engineer_id"])
 
     res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide",
                             json={"decision": "proceed"}, headers=eng_auth)
@@ -131,12 +147,32 @@ async def test_open_concern_blocks_proceed_until_withdrawn(
     assert res.status_code == 200, res.text
 
 
+async def test_an_open_risk_does_not_block_the_decision(
+        client, eng_auth, seed, session_factory):
+    """A change proceeds WITH its risks — gating the decision on an empty
+    register would only teach people to withdraw risks they still believe in."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "5b")
+    mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
+    assert (await _raise(client, eng_auth, cid, "Warpage on the long rib")).status_code == 200
+    await _lock_impact(session_factory, cid)
+
+    res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide",
+                            json={"decision": "proceed"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    # ...and it is still standing afterwards: proceeding did not answer it.
+    concerns = (await client.get(f"/api/v1/changes/{cid}/concerns", headers=eng_auth)).json()
+    assert [c["is_open"] for c in concerns] == [True]
+
+
 async def test_negative_decision_resolves_the_open_concerns(
         client, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, eng_auth, seed, "6")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
-    await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                      json={"kind": "needs_info", "note": "Need the customer drawing"})
+    await insert_legacy_concern(
+        session_factory, cid, kind="needs_info",
+        note="Need the customer drawing", raised_by=seed["engineer_id"])
+    # A risk is not a question, so the decision must leave it alone.
+    assert (await _raise(client, eng_auth, cid, "Sink marks")).status_code == 200
 
     res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide", headers=eng_auth,
                             json={"decision": "needs_info",
@@ -152,10 +188,13 @@ async def test_negative_decision_resolves_the_open_concerns(
     assert answered[0]["resolved_by_meeting_id"] == mid
     # ...and the decision itself becomes the open Team question that replaces
     # it, so the change still visibly owes an answer.
-    still_open = [c for c in concerns if c["is_open"]]
-    assert len(still_open) == 1
-    assert still_open[0]["note"] == "Customer drawing missing"
-    assert still_open[0]["department_id"] is None
+    questions = [c for c in concerns if c["is_open"] and c["kind"] == "needs_info"]
+    assert len(questions) == 1
+    assert questions[0]["note"] == "Customer drawing missing"
+    assert questions[0]["department_id"] is None
+    # The risk is untouched — nothing about it was decided.
+    risk = next(c for c in concerns if c["kind"] == "risk")
+    assert risk["is_open"] is True
     # The change stays in scoping — needs_info is not a rejection.
     got = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
     assert got.json()["status"] == "scoping"
@@ -214,7 +253,7 @@ async def test_a_change_can_be_rejected_at_capture_without_being_scoped(
     assert got["rejection_reason"] == "Customer withdrew"
 
 
-# --- assessment phase: a concern is one department's soft hold ---------------
+# --- assessment phase --------------------------------------------------------
 
 async def _change_in_assessment(client, auth, seed, session_factory, suffix):
     """Scoping change driven to in_assessment (proceed meeting + impact lock).
@@ -238,50 +277,52 @@ async def _join_department(session_factory, user_id, department_id):
         await s.commit()
 
 
-async def test_assessment_concern_requires_a_department(
+async def test_a_risk_in_assessment_must_name_its_department(
         client, admin_auth, seed, session_factory):
     cid, _ = await _change_in_assessment(client, admin_auth, seed, session_factory, "A1")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                            json={"kind": "needs_info", "note": "Need the CAD"})
+    res = await _raise(client, admin_auth, cid, "Need the CAD")
     assert res.status_code == 400
     assert "department_id" in res.json()["detail"]
 
 
-async def test_assessment_concern_only_for_your_own_department(
+async def test_a_risk_in_assessment_is_only_for_your_own_department(
         client, admin_auth, eng_auth, seed, session_factory):
     cid, dept_ids = await _change_in_assessment(
         client, admin_auth, seed, session_factory, "A2")
     # the engineer is in no department -> refused
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "Need the CAD",
-                                  "department_id": dept_ids[0]})
+    res = await _raise(client, eng_auth, cid, "Wall too thin",
+                       department_id=dept_ids[0])
     assert res.status_code == 400
     assert "own department" in res.json()["detail"]
 
     await _join_department(session_factory, seed["engineer_id"], dept_ids[0])
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "Need the CAD",
-                                  "department_id": dept_ids[0]})
+    res = await _raise(client, eng_auth, cid, "Wall too thin",
+                       department_id=dept_ids[0])
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["department_id"] == dept_ids[0]
     assert body["is_open"] is True
-    # surfaced as a badge on the change itself
+    # ...and it is NOT a hold, so no badge on the change
     got = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
-    assert got["blocked_department_ids"] == [dept_ids[0]]
+    assert got["blocked_department_ids"] == []
 
 
-async def test_department_concern_holds_only_its_own_assessment(
+async def test_a_legacy_hold_still_blocks_and_is_settled_with_a_note(
         client, admin_auth, seed, session_factory):
+    """The one surviving reject_proposal test: nothing produces these any more,
+    but the rows exist and the department that carries one still cannot sign
+    off until it is lifted, on the record."""
     cid, dept_ids = await _change_in_assessment(
         client, admin_auth, seed, session_factory, "A3")
     held = dept_ids[0]
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                            json={"kind": "reject_proposal",
-                                  "note": "Tolerance cannot be held",
-                                  "department_id": held})
-    assert res.status_code == 200, res.text
-    concern_id = res.json()["id"]
+    concern_id = await insert_legacy_concern(
+        session_factory, cid, kind="reject_proposal",
+        note="Tolerance cannot be held", raised_by=seed["admin_id"],
+        department_id=held)
+
+    # it is a hold, and it says so on the change
+    got = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
+    assert got["blocked_department_ids"] == [held]
 
     blocked = await client.post(f"/api/v1/changes/{cid}/assessments", headers=admin_auth,
                                 json={"department_id": held, "verdict": "feasible"})
@@ -290,7 +331,6 @@ async def test_department_concern_holds_only_its_own_assessment(
     assert "open concerns" in detail and "Tolerance cannot be held" in detail
 
     # the change itself is untouched — still in assessment
-    got = (await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)).json()
     assert got["status"] == "in_assessment"
 
     # note-less withdrawal is refused for a department concern
@@ -316,27 +356,6 @@ async def test_department_concern_holds_only_its_own_assessment(
     assert "Supplier confirmed the tolerance" in withdrawn[0]["action_description"]
 
 
-async def test_scoping_concerns_keep_their_old_shape(
-        client, eng_auth, seed):
-    """No department, and withdrawal still needs no resolution note."""
-    cid = await _change_in_scoping(client, eng_auth, seed, "A4")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "Missing drawing"})
-    assert res.status_code == 200, res.text
-    assert res.json()["department_id"] is None
-    concern_id = res.json()["id"]
-    got = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
-    assert got["blocked_department_ids"] == []
-
-    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
-                              headers=eng_auth)
-    assert res.status_code == 200, res.text
-    assert res.json()["is_open"] is False
-    assert res.json()["resolution_note"] is None
-
-
-
-
 # --- scoping attribution: a department is a label there, not a hold ---------
 
 async def _a_department(session_factory, name="Tool Engineer", active=True):
@@ -348,15 +367,13 @@ async def _a_department(session_factory, name="Tool Engineer", active=True):
         return d.id
 
 
-async def test_scoping_concern_may_name_a_department_without_membership(
+async def test_a_scoping_risk_may_name_a_department_without_membership(
         client, eng_auth, seed, session_factory):
     """At scoping the department is attribution, not a submission gate — so no
     membership is required (unlike assessment)."""
     cid = await _change_in_scoping(client, eng_auth, seed, "S1")
     dept_id = await _a_department(session_factory)
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "Tooling unclear",
-                                  "department_id": dept_id})
+    res = await _raise(client, eng_auth, cid, "Tooling unclear", department_id=dept_id)
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] == dept_id
     # attribution does NOT soft-hold anything
@@ -364,41 +381,26 @@ async def test_scoping_concern_may_name_a_department_without_membership(
     assert got["blocked_department_ids"] == []
 
 
-async def test_scoping_concern_without_a_department_is_the_whole_team(
-        client, eng_auth, seed):
-    cid = await _change_in_scoping(client, eng_auth, seed, "S2")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "Change info missing"})
-    assert res.status_code == 200, res.text
-    assert res.json()["department_id"] is None
-
-
-async def test_scoping_concern_department_must_exist_and_be_active(
+async def test_a_named_department_must_exist_and_be_active(
         client, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, eng_auth, seed, "S3")
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "x",
-                                  "department_id": 999_999})
+    res = await _raise(client, eng_auth, cid, "x", department_id=999_999)
     assert res.status_code == 400
     assert "Unknown or inactive" in res.json()["detail"]
 
     dead = await _a_department(session_factory, name="Retired dept", active=False)
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                            json={"kind": "needs_info", "note": "x",
-                                  "department_id": dead})
+    res = await _raise(client, eng_auth, cid, "x", department_id=dead)
     assert res.status_code == 400
 
 
-async def test_withdrawing_an_attributed_scoping_concern_still_needs_a_note(
+async def test_withdrawing_an_attributed_concern_still_needs_a_note(
         client, eng_auth, seed, session_factory):
     """The rule keys off department_id, not the phase — naming a department
     means the withdrawal says how the point was addressed."""
     cid = await _change_in_scoping(client, eng_auth, seed, "S4")
     dept_id = await _a_department(session_factory)
-    concern_id = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-        json={"kind": "needs_info", "note": "Tooling unclear",
-              "department_id": dept_id})).json()["id"]
+    concern_id = (await _raise(client, eng_auth, cid, "Tooling unclear",
+                               department_id=dept_id)).json()["id"]
 
     res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
                               headers=eng_auth)
@@ -433,36 +435,31 @@ async def _plain_member(client, session_factory, seed, dept_name="Tool Engineer"
                 "user_id": u.id, "dept_id": dept.id}
 
 
-async def test_any_member_may_raise_a_scoping_concern(
+async def test_any_member_may_flag_a_risk(
         client, eng_auth, seed, session_factory):
     """Not the lead, not PM, not admin — the flag must still land, both as a
     whole-team point and attributed to a department."""
     cid = await _change_in_scoping(client, eng_auth, seed, "W1")
     member = await _plain_member(client, session_factory, seed)
 
-    res = await client.post(f"/api/v1/changes/{cid}/concerns",
-                            headers=member["auth"],
-                            json={"kind": "reject_proposal", "note": "Team point"})
+    res = await _raise(client, member["auth"], cid, "Team point")
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] is None
     assert res.json()["raised_by"] == member["user_id"]
 
-    res = await client.post(f"/api/v1/changes/{cid}/concerns",
-                            headers=member["auth"],
-                            json={"kind": "needs_info", "note": "Tooling point",
-                                  "department_id": member["dept_id"]})
+    res = await _raise(client, member["auth"], cid, "Tooling point",
+                       department_id=member["dept_id"])
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] == member["dept_id"]
 
 
-async def test_admin_acting_as_development_may_raise_an_assessment_concern(
+async def test_admin_acting_as_a_department_may_flag_for_it(
         client, admin_auth, seed, session_factory):
     cid, dept_ids = await _change_in_assessment(
         client, admin_auth, seed, session_factory, "W2")
     acting = {**admin_auth, "X-Acts-As-Department": str(dept_ids[0])}
-    res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=acting,
-                            json={"kind": "needs_info", "note": "Need the CAD",
-                                  "department_id": dept_ids[0]})
+    res = await _raise(client, acting, cid, "Gate freeze marginal",
+                       department_id=dept_ids[0])
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] == dept_ids[0]
 
@@ -473,11 +470,9 @@ async def test_only_the_author_may_withdraw_even_without_meeting_rights(
     whole authz on withdrawal."""
     cid = await _change_in_scoping(client, eng_auth, seed, "W3")
     member = await _plain_member(client, session_factory, seed)
-    concern_id = (await client.post(
-        f"/api/v1/changes/{cid}/concerns", headers=member["auth"],
-        json={"kind": "reject_proposal", "note": "Mine"})).json()["id"]
+    concern_id = (await _raise(client, member["auth"], cid, "Mine")).json()["id"]
 
-    # the lead cannot clear someone else's objection...
+    # the lead cannot clear someone else's flag...
     res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
                               headers=eng_auth)
     assert res.status_code == 400

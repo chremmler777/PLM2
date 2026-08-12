@@ -1442,24 +1442,26 @@ class ChangeService:
     async def assessment_evidence_state(
         session: AsyncSession, change: ChangeRequest,
     ) -> dict:
-        """Per assessment: does it have evidence, does it have an RFQ, and does
-        its checklist say an RFQ is expected? Cheap enough to answer for the
-        whole change in one query, so the UI can nudge without asking per row.
+        """Per assessment: does it have evidence, does it have the customer
+        deck, does it have an RFQ, and does its checklist say an RFQ is
+        expected? Cheap enough to answer for the whole change in one query, so
+        the UI can nudge without asking per row.
         """
+        blank = {"has_evidence": False, "has_change_ppt": False, "has_rfq": False}
         rows = (await session.execute(
             select(ChangeAttachment.assessment_id, ChangeAttachment.kind)
             .where(ChangeAttachment.change_id == change.id,
                    ChangeAttachment.assessment_id.is_not(None)))).all()
         out: dict[int, dict] = {}
         for assessment_id, kind in rows:
-            state = out.setdefault(assessment_id,
-                                   {"has_evidence": False, "has_rfq": False})
+            state = out.setdefault(assessment_id, dict(blank))
             state["has_evidence"] = True
             if kind == "rfq":
                 state["has_rfq"] = True
+            if kind == "change_ppt":
+                state["has_change_ppt"] = True
         for a in change.assessments:
-            state = out.setdefault(a.id,
-                                   {"has_evidence": False, "has_rfq": False})
+            state = out.setdefault(a.id, dict(blank))
             keys = {i.get("key") for i in (a.details_dict.get("impacts") or [])
                     if isinstance(i, dict) and i.get("impacted")}
             state["rfq_expected"] = bool(keys & checklist.RFQ_EXPECTED_KEYS)
@@ -1771,25 +1773,29 @@ class ChangeService:
             raise ChangeError(f"Invalid verdict '{verdict}'")
         # A "not feasible" is the answer that stops a change dead, and it is
         # the one the customer will ask to see in writing. So it arrives with
-        # the document that explains it — evidence filed against THIS
-        # assessment, not a promise to send something later. Every other
-        # verdict is ungated: evidence stays "if needed".
+        # the document that explains it — specifically a change_ppt filed
+        # against THIS assessment, because that is the deck the customer is
+        # actually shown. A moldflow report proves the department did the work;
+        # it is not the thing that gets sent out. Every other verdict is
+        # ungated: evidence stays "if needed".
         if verdict == "not_feasible":
             target = (await session.execute(
                 select(ChangeAssessment).where(
                     ChangeAssessment.change_id == change.id,
                     ChangeAssessment.department_id == department_id)
                 .order_by(ChangeAssessment.stage_order))).scalars().first()
-            evidence = 0
+            decks = 0
             if target is not None:
-                evidence = (await session.execute(
+                decks = (await session.execute(
                     select(func.count()).select_from(ChangeAttachment).where(
                         ChangeAttachment.change_id == change.id,
-                        ChangeAttachment.assessment_id == target.id))).scalar() or 0
-            if not evidence:
+                        ChangeAttachment.assessment_id == target.id,
+                        ChangeAttachment.kind == "change_ppt"))).scalar() or 0
+            if not decks:
                 raise ChangeError(
                     "Not feasible requires the explanation document (PPT) for "
-                    "the customer")
+                    "the customer — attach it to this assessment as a "
+                    "'change_ppt'")
 
         # Soft hold: a department that flagged an open concern on this change
         # cannot sign its own answer off until that point is withdrawn with a
@@ -1797,10 +1803,15 @@ class ChangeService:
         # assessment, the change status and the deadlines are untouched.
         # Scoping-phase attribution cannot reach here: an open concern blocks
         # the 'proceed' decision, so no change enters assessment carrying one.
+        # Risks are excluded on purpose: a department submits its verdict WITH
+        # its open risks — that is what the register is for. Holding the submit
+        # on them would force people to withdraw a risk they still believe in
+        # just to get past the button.
         held = (await session.execute(
             select(ChangeConcern).where(
                 ChangeConcern.change_id == change.id,
                 ChangeConcern.department_id == department_id,
+                ChangeConcern.kind != "risk",
                 ChangeConcern.withdrawn_at.is_(None),
                 ChangeConcern.resolved_by_meeting_id.is_(None),
             ))).scalars().all()
@@ -1846,6 +1857,21 @@ class ChangeService:
             a.details = json.dumps(details)
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
+        # Doing the work IS taking it. There is no claim step in front of an
+        # assessment — the department owes the answer either way — so the
+        # person who submits becomes the owner of record if nobody had put
+        # their name on it. Without this the finished row reads "unassigned",
+        # which is the one thing it certainly is not. An existing owner (a
+        # deliberate assignment, or an accept) is never overwritten.
+        #
+        # Assigned through the relationship rather than the id column so the
+        # name the response serializes is right in this same session — the
+        # already-loaded `owner` would otherwise stay the None it was loaded as.
+        submitter = await session.get(User, user_id)
+        if a.owner_id is None:
+            a.owner = submitter
+        if a.accepted_at is None:
+            a.accepted_at = a.submitted_at
         await session.flush()
         # Blocking (R/A) rows linked to an engine task complete that task, which
         # drives stage advancement through the workflow engine. S/C rows and any
@@ -1853,6 +1879,16 @@ class ChangeService:
         # bare-submit row) are payload-only: mark the row submitted directly.
         if a.rasic_letter in BLOCKING_LETTERS and a.wf_instance_task_id is not None:
             from app.services.workflow_service import WorkflowService
+            from app.models.workflow import WfInstanceTask
+            # R/A rows read their owner through the linked task, so the stamp
+            # has to land there too — set before completing, while the task is
+            # still active and the engine's own guards still apply.
+            task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+            if task is not None and task.owner_id is None:
+                task.owner = submitter
+                if task.accepted_at is None:
+                    task.accepted_at = a.submitted_at
+                await session.flush()
             await WorkflowService.complete_task(
                 session, a.wf_instance_task_id, "approved",
                 notes or f"Assessment: {verdict}", user_id)
@@ -2217,6 +2253,15 @@ class ChangeService:
         phase = "baseline" if change.status in SCOPING_STATUSES else "post_scoping"
         if kind not in ATTACHMENT_KINDS:
             raise ChangeError(f"Invalid attachment kind '{kind}'")
+        # Customer correspondence belongs to the change, not to one department's
+        # assessment or one open question. Filing it into a container would hide
+        # it from everyone who is not looking in that container — the opposite
+        # of why it is kept.
+        if kind == "customer_email" and (assessment_id is not None
+                                         or concern_id is not None):
+            raise ChangeError(
+                "Customer correspondence is filed on the change itself, not "
+                "into an assessment or a concern")
         # Only an answer may point at a question, and only at a real question
         # on THIS change — a dangling or cross-change link would make the
         # needs-info loop unreadable, which is the whole point of the field.

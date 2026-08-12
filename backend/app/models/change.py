@@ -40,8 +40,14 @@ TERMINAL_STATUSES = ("released", "closed", "rejected", "cancelled")
 # without.
 # "rfq" is the costs-and-timing request sent to a supplier, filed against the
 # assessment that called for external work.
+# "change_ppt" is the slide deck a department puts its own case in — the
+# document a "not feasible" is shown to the customer through, so it files
+# against an assessment like any other evidence.
+# "customer_email" is correspondence with the customer. It stays change-level
+# (it is nobody's assessment evidence) and anyone may file one, because anyone
+# on the team may end up in that mail thread.
 ATTACHMENT_KINDS = ("general", "info_request", "info_response",
-                    "rejection_letter", "rfq")
+                    "rejection_letter", "rfq", "change_ppt", "customer_email")
 
 BLOCKING_LETTERS = ("R", "A")
 TASK_LETTERS = ("R", "A", "S", "C")
@@ -208,12 +214,14 @@ class ChangeRequest(Base):
         """Departments currently soft-held by an open assessment concern — the
         badge source. Scoping-phase attribution does NOT hold anything (its
         teeth there are blocking the 'proceed' decision), so the hold only
-        exists while the change is in assessment. `concerns` is selectin-loaded,
-        so this is free."""
+        exists while the change is in assessment. Risks are register entries,
+        not holds — they never appear here. `concerns` is selectin-loaded, so
+        this is free."""
         if self.status != "in_assessment":
             return []
         return sorted({c.department_id for c in self.concerns
-                       if c.department_id is not None and c.is_open})
+                       if c.department_id is not None and c.is_open
+                       and c.kind != "risk"})
 
     @property
     def quoted_on_time(self) -> bool | None:
@@ -491,7 +499,17 @@ class ChangeMeeting(Base):
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
 
 
-CONCERN_KINDS = ("reject_proposal", "needs_info")
+CONCERN_KINDS = ("reject_proposal", "needs_info", "risk")
+
+# What a "risk" concern is about. A fixed vocabulary rather than free text so
+# the register can be counted across changes — "how often does fill bite us"
+# is a question the notes column cannot answer. "other" is the escape hatch;
+# the note still says what it actually is.
+RISK_TYPES = ("fill_issue", "dimensional_issue", "visual_surface",
+              "process_capability", "other")
+# 1 low / 2 medium / 3 high. Deliberately three steps: a finer scale invites an
+# argument about the scale instead of about the risk.
+RISK_SEVERITIES = (1, 2, 3)
 
 
 class ChangeConcern(Base):
@@ -511,8 +529,14 @@ class ChangeConcern(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
 
-    kind: Mapped[str] = mapped_column(String(20))   # reject_proposal | needs_info
+    kind: Mapped[str] = mapped_column(String(20))   # reject_proposal | needs_info | risk
     note: Mapped[str] = mapped_column(Text)
+
+    # Risk register fields — set only on kind "risk", null on every legacy row.
+    # A risk is recorded, not resolved-before-submit: it travels with the
+    # change so the next department (and the customer conversation) can see it.
+    risk_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    severity: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # In assessment: the department this concern soft-holds (required there).
     # In scoping: optional attribution — NULL means the whole team's point.

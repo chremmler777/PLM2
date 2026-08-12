@@ -403,6 +403,22 @@ async def reference_assessment_checklist(
     return checklist.items_for(name)
 
 
+@router.get("/reference/risk-types")
+async def reference_risk_types(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The vocabulary a risk concern is typed with.
+
+    Same reasoning as the checklist above: the list lives in
+    app/models/change.py because that is what the raise endpoint validates
+    against, so the frontend is served it rather than keeping its own copy.
+    Shaped as objects so a label can be added later without a breaking change.
+    """
+    from app.models.change import RISK_TYPES
+    return {"items": [{"key": k} for k in RISK_TYPES]}
+
+
 @router.get("/reference/activities")
 async def reference_activities(department_id: Optional[int] = Query(None),
                                db: AsyncSession = Depends(get_db),
@@ -433,6 +449,7 @@ async def get_change(
     for a in change.assessments:
         state = evidence.get(a.id, {})
         a.has_evidence = state.get("has_evidence", False)
+        a.has_change_ppt = state.get("has_change_ppt", False)
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
     return change
@@ -1272,7 +1289,8 @@ async def raise_concern(
     try:
         concern = await MeetingService.raise_concern(
             db, change, current_user, body.kind, body.note,
-            department_id=body.department_id)
+            department_id=body.department_id,
+            risk_type=body.risk_type, severity=body.severity)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

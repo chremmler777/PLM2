@@ -200,7 +200,8 @@ async def test_not_feasible_requires_the_explanation_document(
         files={"file": ("why-not.pptx", b"PK x",
                         "application/vnd.openxmlformats-officedocument."
                         "presentationml.presentation")},
-        data={"assessment_id": str(tab["assessment_id"])}, headers=admin_auth)
+        data={"assessment_id": str(tab["assessment_id"]), "kind": "change_ppt"},
+        headers=admin_auth)
     assert up.status_code in (200, 201), up.text
 
     res = await client.post(f"/api/v1/changes/{tab['change_id']}/assessments",
