@@ -37,7 +37,7 @@ describe('ChangesPage project column', () => {
     vi.mocked(changesApi.list).mockResolvedValue([] as never)
     wrap()
     const link = screen.getByTestId('process-map-link')
-    expect(link.textContent).toBe(t('procmap.link', 'de'))
+    expect(link.textContent).toBe(t('procmap.link'))
     expect(link.getAttribute('href')).toBe('/process-map')
   })
 

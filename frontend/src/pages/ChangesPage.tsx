@@ -32,7 +32,7 @@ export default function ChangesPage() {
           {/* The whole flow, one click from the list it governs. */}
           <Link to="/process-map" data-testid="process-map-link"
             className="text-sm text-sky-400 hover:underline">
-            {t('procmap.link', 'de')}
+            {t('procmap.link')}
           </Link>
           <StartChangeButton label="New Change Request" onClick={() => setShowCreate(true)} />
         </div>

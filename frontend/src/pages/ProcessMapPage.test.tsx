@@ -2,12 +2,19 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ProcessMapPage from './ProcessMapPage'
-import { t } from '../i18n/cmLabels'
 
-// The ten stages of docs/ECR_PROCESS_MAP.md, in order.
-const STAGES = [
-  'captured', 'scoping', 'in_assessment', 'costing', 'quoting', 'quoted',
-  'scheduling', 'in_implementation', 'in_validation', 'released',
+// The ten stages of docs/ECR_PROCESS_MAP.md, in order, as the chart names them.
+const STAGES: [string, string][] = [
+  ['captured', 'Capture'],
+  ['scoping', 'Scoping'],
+  ['in_assessment', 'Assessment'],
+  ['costing', 'Costing'],
+  ['quoting', 'Quote Creation'],
+  ['quoted', 'Quote & Negotiation'],
+  ['scheduling', 'Scheduling / Bank Build'],
+  ['in_implementation', 'Implementation'],
+  ['in_validation', 'Validation'],
+  ['released', 'Released'],
 ]
 
 const wrap = () => render(<MemoryRouter><ProcessMapPage /></MemoryRouter>)
@@ -15,52 +22,87 @@ const wrap = () => render(<MemoryRouter><ProcessMapPage /></MemoryRouter>)
 describe('ProcessMapPage', () => {
   afterEach(cleanup)
 
-  it('lays out all ten stages with their German title and responsible', () => {
+  it('draws a box per stage in the chart, named and badged', () => {
     wrap()
-    for (const key of STAGES) {
-      const card = screen.getByTestId(`procmap-stage-${key}`)
-      expect(card.textContent).toContain(t(`procmap.stage.${key}`, 'de'))
-      expect(screen.getByTestId(`procmap-role-${key}`).textContent)
-        .toBe(t(`procmap.role.${key}`, 'de'))
+    const chart = screen.getByTestId('procmap-chart')
+    for (const [key, name] of STAGES) {
+      const node = screen.getByTestId(`procmap-node-${key}`)
+      expect(chart.contains(node)).toBe(true)
+      expect(node.textContent).toContain(name)
     }
-    // The map's own vocabulary, in the language the team reviews it in.
-    expect(screen.getByTestId('procmap-stage-quoting').textContent)
-      .toContain('Angebotserstellung')
-    expect(screen.getByTestId('procmap-stage-scheduling').textContent)
-      .toContain('Terminplanung / Bank-Build')
+    // Who owns the stage rides inside its box.
+    expect(screen.getByTestId('procmap-node-quoting').textContent).toContain('Sales')
+    expect(screen.getByTestId('procmap-node-scoping').textContent).toContain('PM')
+    expect(screen.getByTestId('procmap-node-costing').textContent).toContain('Team')
   })
 
-  it('says of every stage how much of it is built', () => {
+  it('runs one arrow from each stage into the next', () => {
     wrap()
-    const states = STAGES.map((k) => screen.getByTestId(`procmap-status-${k}`).textContent)
-    expect(states).toHaveLength(10)
-    expect(states.every((s) => ['BUILT', 'IN BUILD', 'PARTIAL', 'TO BUILD'].includes(s ?? '')))
-      .toBe(true)
-    expect(screen.getByTestId('procmap-status-captured').textContent).toBe('BUILT')
-    expect(screen.getByTestId('procmap-status-costing').textContent).toBe('IN BUILD')
-    // The doc calls the negotiation stage partial — acceptance is live, the
-    // negotiation loop is not.
-    expect(screen.getByTestId('procmap-status-quoted').textContent).toBe('PARTIAL')
-    expect(screen.getByTestId('procmap-status-scheduling').textContent).toBe('TO BUILD')
+    for (let i = 0; i < STAGES.length - 1; i += 1) {
+      const edge = screen.getByTestId(`procmap-edge-${STAGES[i][0]}-${STAGES[i + 1][0]}`)
+      expect(edge.getAttribute('marker-end')).toBe('url(#arrow)')
+    }
   })
 
-  it('draws the two places the flow leaves the straight line', () => {
+  it('branches off to Rejected and to the escalation loop', () => {
     wrap()
-    expect(screen.getByTestId('procmap-branch-quoted').textContent).toContain('no deal')
-    expect(screen.getByTestId('procmap-branch-quoted').textContent).toContain('rejected')
-    const validation = screen.getByTestId('procmap-branch-in_validation').textContent
-    expect(validation).toContain('not good')
-    expect(validation).toContain('escalation')
+    expect(screen.getByTestId('procmap-node-rejected').textContent).toContain('Rejected')
+    expect(screen.getByTestId('procmap-edge-quoted-rejected')).toBeTruthy()
+    const esc = screen.getByTestId('procmap-node-escalation')
+    expect(esc.textContent).toContain('Escalation')
+    expect(esc.textContent).toContain('PM + Sales')
+    expect(screen.getByTestId('procmap-edge-validation-escalation')).toBeTruthy()
+    // And the loop back into implementation, drawn as an edge of its own.
+    const loop = screen.getByTestId('procmap-loop-edge')
+    expect(loop.getAttribute('marker-end')).toBe('url(#arrow-amber)')
+    expect(loop.getAttribute('d')).toBeTruthy()
   })
 
-  it('carries the cross-cutting rules and the build order', () => {
+  it('colours every box by how much of the stage is built', () => {
     wrap()
-    const rules = screen.getByTestId('procmap-rules')
-    expect(rules.textContent).toContain(t('procmap.rules', 'de'))
-    expect(rules.querySelectorAll('li')).toHaveLength(5)
-    expect(rules.textContent).toContain('a department sees its own input only')
-    const order = screen.getByTestId('procmap-build-order')
-    expect(order.querySelectorAll('li')).toHaveLength(7)
-    expect(order.textContent).toContain('Weight quote at costing')
+    const strokeOf = (key: string) =>
+      screen.getByTestId(`procmap-node-${key}`).querySelector('rect')?.getAttribute('stroke')
+    expect(strokeOf('captured')).toBe('#34d399')   // built
+    expect(strokeOf('costing')).toBe('#38bdf8')    // in build
+    expect(strokeOf('quoted')).toBe('#fbbf24')     // partial
+    expect(strokeOf('scheduling')).toBe('#64748b') // to build
+    // And the same reading is spelled out in the table and the legend.
+    expect(screen.getByTestId('procmap-status-costing').textContent).toBe('In build')
+    expect(screen.getByTestId('procmap-status-quoted').textContent).toBe('Partial')
+    expect(screen.getByTestId('procmap-legend').textContent).toContain('To build')
+  })
+
+  it('describes every stage under the chart', () => {
+    wrap()
+    const detail = screen.getByTestId('procmap-detail')
+    for (const [key] of STAGES) {
+      expect(detail.contains(screen.getByTestId(`procmap-detail-${key}`))).toBe(true)
+    }
+    // What happens, what it produces, how much of it is built.
+    const costing = screen.getByTestId('procmap-detail-costing').textContent ?? ''
+    expect(costing).toContain('internal effort (assessment time)')
+    expect(costing).toContain('vendor quote docs')
+    expect(costing).toContain('In build')
+    expect(screen.getByTestId('procmap-detail-in_validation').textContent)
+      .toContain('weight validated against the costing guess')
+  })
+
+  it('keeps the responsibles and the build order in their own blocks', () => {
+    wrap()
+    expect(screen.getByTestId('procmap-role-in_assessment').textContent)
+      .toBe('Routed departments (Sales exempt)')
+    expect(screen.getByTestId('procmap-role-scheduling').textContent)
+      .toBe('Scheduling (+ Sales publishes)')
+    expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(10)
+    expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(5)
+    expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
+  })
+
+  it('says nothing in German', () => {
+    const { container } = wrap()
+    const text = container.textContent ?? ''
+    for (const word of ['Angebot', 'Erfassung', 'Bewertung', 'Umsetzung', 'Prozess']) {
+      expect(text).not.toContain(word)
+    }
   })
 })
