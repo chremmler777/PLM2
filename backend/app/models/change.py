@@ -9,7 +9,10 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, Float, Integer, ForeignKey, JSON, Boolean, Table, Column
+from sqlalchemy import (
+    String, Text, DateTime, Float, Integer, Numeric, ForeignKey, JSON, Boolean,
+    Table, Column,
+)
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +75,16 @@ ROUTING_DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 IMPLEMENTATION_MODES = ("integrated", "separational")
 MEETING_DECISIONS = ("proceed", "reject", "needs_info")
 MEETING_CHANNELS = ("meeting", "chat", "email")
+# How a negotiation round with the customer happened. Deliberately NOT the same
+# tuple as MEETING_CHANNELS: an internal scoping decision arrives by chat, a
+# customer negotiation by phone call, and the two vocabularies answer different
+# questions.
+NEGOTIATION_CHANNELS = ("meeting", "call", "email")
+# How the changeover happens on the real line once the customer has accepted.
+# Either the new state runs in and the existing bank is consumed
+# ('running_change'), or the bank is thrown away ('planned_scrap') — which the
+# CUSTOMER pays for, so it is only sayable with a scrap quote behind it.
+BANK_BUILD_MODES = ("running_change", "planned_scrap")
 ATTACHMENT_PHASES = ("baseline", "post_scoping")
 SCOPING_STATUSES = ("captured", "scoping")
 
@@ -154,6 +167,53 @@ class ChangeRequest(Base):
     impact_confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     impact_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # The part's weight, stamped twice by two different people at two different
+    # stages. The Tooling Engineer quotes it at COSTING and can only guess: the
+    # tool has not been reworked yet. Validation weighs the sampled part for
+    # real, and the delta between the two is a commercial event — Sales updates
+    # the quote with it. Two triples, not one overwritten number, because the
+    # comparison IS the point. Grams. validated_* is filled by the validation
+    # stage (not built yet); the columns exist so it only has to fill them.
+    estimated_part_weight_g: Mapped[float | None] = mapped_column(
+        Numeric(10, 2, asdecimal=False), nullable=True)
+    estimated_weight_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    estimated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    validated_part_weight_g: Mapped[float | None] = mapped_column(
+        Numeric(10, 2, asdecimal=False), nullable=True)
+    validated_weight_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    validated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The commercial half of the weight validation. A delta between the
+    # estimate and the weighed part is money: the quote has to be updated with
+    # it, and Sales carries a my-tasks row until somebody says it was. This
+    # stamp is that answer — "we re-quoted", or "we decided to absorb it".
+    # A person and a moment rather than a boolean, because who decided is the
+    # part anybody will ask about later.
+    weight_delta_ack_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
+    weight_delta_ack_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    weight_delta_ack_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # The scheduling block (stage 7): after acceptance Scheduling says how the
+    # changeover runs — running change, or planned scrap of the bank. Scrap is
+    # billed to the customer, so scrap_quote_price is the condition on that
+    # mode rather than a costing line. bank_build_note carries the plan (or the
+    # reference to it) until the real timeline gets its own model. Publication
+    # is Sales' separate act: the plan becomes a commitment when the customer
+    # has been told it.
+    bank_build_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    bank_build_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scrap_quote_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    bank_build_set_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    bank_build_set_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    plan_published_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    plan_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -186,6 +246,14 @@ class ChangeRequest(Base):
     raised_by_user: Mapped["User"] = relationship(foreign_keys=[raised_by])
     impact_confirmed_by_user: Mapped["User | None"] = relationship(
         foreign_keys=[impact_confirmed_by], lazy="selectin")
+    estimated_weight_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[estimated_weight_by], lazy="selectin")
+    validated_weight_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[validated_weight_by], lazy="selectin")
+    bank_build_set_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[bank_build_set_by], lazy="selectin")
+    plan_published_by_user: Mapped["User | None"] = relationship(
+        foreign_keys=[plan_published_by], lazy="selectin")
 
     @property
     def project_number(self) -> Optional[str]:
@@ -203,6 +271,26 @@ class ChangeRequest(Base):
     @property
     def impact_confirmed_by_name(self) -> Optional[str]:
         return self.impact_confirmed_by_user.full_name if self.impact_confirmed_by_user is not None else None
+
+    @property
+    def estimated_weight_by_name(self) -> Optional[str]:
+        u = self.estimated_weight_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def validated_weight_by_name(self) -> Optional[str]:
+        u = self.validated_weight_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def bank_build_set_by_name(self) -> Optional[str]:
+        u = self.bank_build_set_by_user
+        return u.full_name if u is not None else None
+
+    @property
+    def plan_published_by_name(self) -> Optional[str]:
+        u = self.plan_published_by_user
+        return u.full_name if u is not None else None
 
     @property
     def active_deadline(self) -> str | None:
@@ -240,6 +328,22 @@ class ChangeRequest(Base):
             return None
         return self.quoted_at <= self.required_by_date
 
+    @property
+    def negotiated_final_price(self) -> float | None:
+        """The number the go-ahead is actually based on: the counter price on
+        the FINAL negotiation round, when that round stated one.
+
+        Read-through, never a column: quoted_price is what we offered and must
+        stay what we offered. What the customer ended up agreeing to is a fact
+        about the negotiation, and it lives on the round that closed it — so it
+        cannot drift from the record it comes from. None means either nothing
+        is final yet or the final round settled on the quoted price without
+        naming a new one. `negotiations` is selectin-loaded, so this is free."""
+        for n in self.negotiations:
+            if n.is_final and n.counter_price is not None:
+                return float(n.counter_price)
+        return None
+
     impacted_items: Mapped[list["ChangeImpactedItem"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -273,6 +377,10 @@ class ChangeRequest(Base):
     meetings: Mapped[list["ChangeMeeting"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
         order_by="ChangeMeeting.id",
+    )
+    negotiations: Mapped[list["ChangeNegotiation"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeNegotiation.id",
     )
 
 
@@ -510,6 +618,56 @@ class ChangeMeeting(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
+
+
+class ChangeNegotiation(Base):
+    """One round of the customer negotiation that follows a submitted quote.
+
+    The offer going out is not the end of the commercial conversation: the
+    customer calls back, asks for a different number, and the two sides go
+    around a few times before anybody says yes. Each of those rounds is a fact
+    somebody has to be able to point at later — WHO said WHAT, through which
+    channel — and the result of the last one is the basis Sales decides the
+    go-ahead on. Without the rounds recorded, the only surviving trace of a
+    three-month negotiation is the accepted price, and the reason it moved is
+    gone.
+
+    Exactly one round per change may be final (is_final): a negotiation has one
+    result, and marking a new one final clears the flag on its siblings. The
+    counter_price is optional because plenty of rounds move nothing but the
+    date — "they want it two weeks earlier" is a result with no number in it.
+
+    Rounds only exist while the change is 'quoted' — before that there is no
+    offer to negotiate about, after it Sales' decision has already been taken
+    on the record it left.
+    """
+    __tablename__ = "change_negotiations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+
+    # meeting | call | email — see NEGOTIATION_CHANNELS.
+    channel: Mapped[str] = mapped_column(String(15), default="call", server_default="call")
+    # What came out of this round. Required: a round with no result is not a
+    # record of anything.
+    note: Mapped[str] = mapped_column(Text)
+    # The number the customer put on the table, when they named one.
+    counter_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    # The round that ended it. At most one per change.
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    change: Mapped["ChangeRequest"] = relationship(
+        back_populates="negotiations", foreign_keys=[change_id])
+    created_by_user: Mapped["User"] = relationship(
+        foreign_keys=[created_by], lazy="selectin")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by_user.full_name if self.created_by_user is not None else None
 
 
 CONCERN_KINDS = ("reject_proposal", "needs_info", "risk")

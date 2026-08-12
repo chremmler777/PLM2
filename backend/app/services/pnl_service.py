@@ -206,3 +206,137 @@ class PnlService:
             "by_branch": by_branch,
             "count": len(rows),
         }
+
+    # ------------------------------------------------------------------
+    # Stage 9: plan versus actual, for one change
+    # ------------------------------------------------------------------
+    # Additive and per-change on purpose. The portfolio rows above stay exactly
+    # what they were — they are a grouped query over every change in scope, and
+    # pricing booked hours per department inside them would be an N+1 across
+    # the whole portfolio for a number only one change's own P&L card asks for.
+    #
+    # Served ON THE SUMMATION (CostService.summation calls this and hangs the
+    # result under 'actuals'), because plan and actual are read together or not
+    # at all: a plan-vs-actual card that has to fetch two endpoints will render
+    # half of itself first, and the halves will disagree while it does.
+    @staticmethod
+    async def _rate_plant(session: AsyncSession, change) -> Optional[int]:
+        """Which plant's rates value the booked hours: the change's own
+        affected plant when it names exactly one, otherwise its project's.
+
+        The same rule as CostService._costing_plant, asked in SQL rather than
+        through change.affected_plants. This runs on every summation, and a
+        summation is called with hand-built ChangeRequest objects whose
+        relationships were never loaded; touching one there is a lazy load in
+        async context, which is a MissingGreenlet rather than a query.
+        """
+        from app.models.change import change_affected_plants
+        plants = (await session.execute(
+            select(change_affected_plants.c.plant_id).where(
+                change_affected_plants.c.change_id == change.id))).scalars().all()
+        if len(plants) == 1:
+            return plants[0]
+        if change.project_id is None:
+            return None
+        return (await session.execute(
+            select(Project.plant_id).where(
+                Project.id == change.project_id))).scalar_one_or_none()
+
+    @staticmethod
+    async def change_actuals(
+        session: AsyncSession, change, *,
+        plan_by_department: Optional[list[dict]] = None,
+    ) -> dict:
+        """What the change actually cost us, against what it was priced at.
+
+        The actual cost is booked hours × the department's CURRENT rate,
+        deliberately not a rate frozen onto the booking: the plan side (the
+        cost lines) values hours the same way, and two different rates would
+        make the comparison meaningless. A department with no rate configured
+        at the costing plant is reported `unrated` and counted at zero — the
+        summation makes the same call, because an invented rate is a number
+        somebody quotes.
+
+        extras are the money that is not hours: the scrap the customer was
+        quoted for a planned-scrap changeover, and — as a delta, never as a
+        made-up euro amount — a validated part weight that missed the
+        estimate. What a gram is worth on this part is a negotiation, not
+        arithmetic this service is entitled to do.
+
+        plan_by_department is the summation's own roll-up, passed in by the
+        caller that already computed it so this never recurses into it.
+        """
+        from app.models.workflow import Department
+        from app.services.cost_service import CostService
+        from app.services.implementation_service import ImplementationService
+        from app.services.validation_service import ValidationService
+
+        booked = await ImplementationService.booked_hours_by_department(
+            session, change)
+        implementing = await ImplementationService.implementing_department_ids(
+            session, change)
+        plant_id = await PnlService._rate_plant(session, change)
+        plan_by_dept = {row["department_id"]: row
+                        for row in (plan_by_department or [])}
+        names = dict((await session.execute(
+            select(Department.id, Department.name))).all())
+
+        departments = []
+        for dept_id in sorted(set(implementing) | set(booked)):
+            hours = booked.get(dept_id, 0.0)
+            rate = (await CostService.rate_for(session, dept_id, plant_id)
+                    if plant_id is not None else None)
+            plan = plan_by_dept.get(dept_id) or {}
+            plan_cost = (plan.get("one_time_internal", 0.0)
+                         + plan.get("one_time_external", 0.0)
+                         + plan.get("lifecycle_internal", 0.0)
+                         + plan.get("lifecycle_external", 0.0))
+            actual = 0.0 if rate is None else hours * rate
+            departments.append({
+                "department_id": dept_id,
+                "department_name": names.get(dept_id),
+                "booked_hours": _round(hours),
+                "hourly_rate": rate,
+                "actual_cost": _round(actual),
+                "plan_cost": _round(plan_cost),
+                "variance": _round(actual - plan_cost),
+                # True when hours were booked against a department the plant
+                # has no rate for: actual_cost is then a floor, not a total,
+                # and the card must say so rather than quietly under-report.
+                "unrated": bool(rate is None and hours),
+            })
+
+        extras = []
+        if change.bank_build_mode == "planned_scrap":
+            extras.append({
+                "key": "scrap_quote",
+                "label": "Planned scrap quoted to the customer",
+                "amount": (_round(float(change.scrap_quote_price))
+                           if change.scrap_quote_price is not None else None),
+            })
+        weight_delta = ValidationService.weight_delta(change)
+        if weight_delta:
+            extras.append({
+                "key": "weight_delta",
+                "label": f"Validated part weight is {weight_delta:+g} g against "
+                         "the estimate the quote was built on",
+                # No euros: what a gram is worth here is Sales' negotiation.
+                "amount": None,
+                "delta_g": weight_delta,
+                "acknowledged": change.weight_delta_ack_at is not None,
+            })
+
+        total_actual = sum(d["actual_cost"] for d in departments)
+        total_plan = sum(d["plan_cost"] for d in departments)
+        return {
+            "departments": departments,
+            "extras": extras,
+            "total_actual": _round(total_actual),
+            "total_plan": _round(total_plan),
+            "total_booked_hours": _round(
+                sum(d["booked_hours"] for d in departments)),
+            "total_extras": _round(sum(e["amount"] or 0.0 for e in extras)),
+            "unrated_hours": any(d["unrated"] for d in departments),
+            "rate_plant_id": plant_id,
+            "variance": _round(total_actual - total_plan),
+        }

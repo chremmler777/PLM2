@@ -1,14 +1,155 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { useDepartments } from '../../hooks/queries/useWorkflows';
-import { effectiveOf, tagLabel } from './CostPositions';
+import {
+  chosenOf, decisionDivergesOf, favoriteOf, salesEffectiveOf, tagLabel,
+} from './CostPositions';
 import { t } from '../../i18n/cmLabels';
+import type { CostPosition } from '../../types/change';
 
-export default function SummationView({ changeId, deadline, plants = [] }: {
+const errDetail = (e: unknown): string | undefined =>
+  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+
+/**
+ * Sales' vendor decision on one quoted position.
+ *
+ * The department's favourite is a recommendation and stays named as one. Sales
+ * makes the binding call here and answers for it: picking anything else needs a
+ * written reason before it goes anywhere, and the divergence stays marked on the
+ * position afterwards. Both figures stay readable side by side — the wish and
+ * the decision.
+ */
+function VendorDecision({ changeId, position }: { changeId: number; position: CostPosition }) {
+  const qc = useQueryClient();
+  const [pendingOfferId, setPendingOfferId] = useState<number | null>(null);
+  const [reason, setReason] = useState('');
+  const p = position;
+  const fav = favoriteOf(p);
+  const chosen = chosenOf(p);
+  const diverges = decisionDivergesOf(p);
+
+  const choose = useMutation({
+    mutationFn: (v: { offerId: number; reason?: string }) =>
+      changesApi.chooseCostingOffer(changeId, v.offerId, v.reason),
+    onSuccess: () => {
+      setPendingOfferId(null);
+      setReason('');
+      qc.invalidateQueries({ queryKey: ['costing-positions', changeId] });
+      qc.invalidateQueries({ queryKey: ['change-summation', changeId] });
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the decision'),
+  });
+
+  const pick = (offerId: number) => {
+    // The favourite needs no defence; anything else does, and the reason box
+    // opens before a single request goes out.
+    if (fav && offerId !== fav.id) {
+      setPendingOfferId(offerId);
+      setReason('');
+      return;
+    }
+    choose.mutate({ offerId });
+  };
+
+  return (
+    <div data-testid={`vendor-decision-${p.id}`}
+      className="mt-1 ml-2 border-l border-slate-700 pl-2 space-y-1">
+      <div className="text-[11px] text-slate-500">
+        {t('vendor.decision')} — {t('vendor.decisionHint')}
+      </div>
+      <div data-testid={`vendor-recommended-${p.id}`} className="text-xs text-slate-400">
+        {fav
+          ? <>{t('vendor.recommended')}: <span className="text-amber-300">{fav.vendor_name} ★</span></>
+          : t('vendor.noRecommendation')}
+      </div>
+
+      {chosen && (
+        <div data-testid={`vendor-chosen-${p.id}`} className="text-xs text-slate-200">
+          {t('vendor.chosen')}: <span className="font-semibold">{chosen.vendor_name}</span>
+          {(chosen.chosen_by_name || chosen.chosen_at) && (
+            <span className="text-slate-500">
+              {' — '}{chosen.chosen_by_name ?? ''}
+              {chosen.chosen_at && `${chosen.chosen_by_name ? ', ' : ''}${new Date(chosen.chosen_at).toLocaleDateString()}`}
+            </span>
+          )}
+          {diverges && (
+            <span data-testid={`vendor-divergence-${p.id}`}
+              className="ml-2 rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[10px] leading-tight">
+              {t('vendor.againstRecommendation')}
+            </span>
+          )}
+          {chosen.chosen_reason && (
+            <span data-testid={`vendor-chosen-reason-${p.id}`}
+              className="block text-slate-400">{chosen.chosen_reason}</span>
+          )}
+        </div>
+      )}
+
+      {/* Re-choosing stays open while the change is being quoted. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(p.offers ?? []).map((o) => (
+          <button key={o.id} type="button" data-testid={`vendor-choose-${o.id}`}
+            disabled={choose.isPending || !!o.chosen}
+            onClick={() => pick(o.id)}
+            className={`rounded border px-1.5 py-0.5 text-[11px] disabled:opacity-60 ${
+              o.chosen
+                ? 'border-sky-500 bg-sky-900/40 text-sky-200'
+                : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}>
+            {o.chosen ? t('vendor.chosen') : t('vendor.choose')}: {o.vendor_name}
+            {o.favorite && ' ★'}
+          </button>
+        ))}
+      </div>
+
+      {pendingOfferId != null && (
+        <div data-testid={`vendor-reason-${p.id}`} className="space-y-1">
+          <label className="block text-[11px] text-amber-300"
+            htmlFor={`vendor-reason-input-${p.id}`}>
+            {t('vendor.reasonLabel')}
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input id={`vendor-reason-input-${p.id}`}
+              data-testid={`vendor-reason-input-${p.id}`}
+              aria-label={t('vendor.reasonLabel')} value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 flex-1 min-w-[12rem]" />
+            <button type="button" data-testid={`vendor-reason-confirm-${p.id}`}
+              disabled={reason.trim() === '' || choose.isPending}
+              onClick={() => choose.mutate({ offerId: pendingOfferId, reason: reason.trim() })}
+              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-[11px] disabled:opacity-50">
+              {t('vendor.confirm')}
+            </button>
+            <button type="button" data-testid={`vendor-reason-cancel-${p.id}`}
+              onClick={() => { setPendingOfferId(null); setReason(''); }}
+              className="text-slate-400 hover:text-slate-200 text-[11px]">
+              {t('vendor.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function SummationView({
+  changeId, deadline, plants = [], validatedWeightG = null,
+  status, canQuote = false,
+}: {
   changeId: number
   /** The deadline the timing roll-up is measured against, when there is one. */
   deadline?: { date: string | null; label: string }
   plants?: { id: number; name: string }[]
+  /**
+   * The weight once somebody has checked it against a real part. Until that
+   * exists the Tool Engineer's figure is shown as the estimate it is.
+   */
+  validatedWeightG?: number | null
+  /** Where the change stands — the vendor decision is a quoting-stage act. */
+  status?: string
+  /** Sales, the lead or an admin: the people who answer for the price. */
+  canQuote?: boolean
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['change-summation', changeId],
@@ -28,9 +169,12 @@ export default function SummationView({ changeId, deadline, plants = [] }: {
   if (!data) return null;
   const tot = data.totals;
   const posOf = (deptId: number) => allPositions.filter((p) => p.department_id === deptId);
+  // The wrap-up counts what Sales decided to buy; the department's own block
+  // keeps showing the figure its favourite carries.
   const posTotalOf = (deptId: number) =>
-    posOf(deptId).reduce((s, p) => s + (effectiveOf(p) ?? 0), 0);
-  const positionsTotal = allPositions.reduce((s, p) => s + (effectiveOf(p) ?? 0), 0);
+    posOf(deptId).reduce((s, p) => s + (salesEffectiveOf(p) ?? 0), 0);
+  const positionsTotal = allPositions.reduce((s, p) => s + (salesEffectiveOf(p) ?? 0), 0);
+  const canDecideVendor = canQuote && status === 'quoting';
   // Departments in position order, plus any that only show up in the summation.
   const posDeptIds = [...new Set(allPositions.map((p) => p.department_id))];
 
@@ -75,6 +219,22 @@ export default function SummationView({ changeId, deadline, plants = [] }: {
             )}
           </tbody>
         </table>
+        {/* Not money, so it sits below the money rather than inside it — but
+            Sales quotes off it, so it belongs on the same card. It reads as an
+            estimate until the validated figure exists. */}
+        {data.part_weight_estimate_g != null && (
+          <div data-testid="summation-part-weight"
+            className="flex justify-between pt-2 text-xs text-slate-300">
+            <span>
+              {validatedWeightG != null
+                ? t('summation.partWeight')
+                : t('summation.partWeightEstimate')}
+            </span>
+            <span className="tabular-nums">
+              {validatedWeightG ?? data.part_weight_estimate_g} {t('summation.grams')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* What each department actually booked, position by position — with the
@@ -94,22 +254,44 @@ export default function SummationView({ changeId, deadline, plants = [] }: {
                 </div>
                 <ul className="text-xs">
                   {posOf(deptId).map((p) => {
-                    const fav = (p.offers ?? []).find((o) => o.favorite);
+                    const fav = favoriteOf(p);
+                    const chosen = chosenOf(p);
+                    // A quoted external position with offers is a decision Sales
+                    // owes; everything else is just a figure.
+                    const decidable = p.kind === 'external' && p.pricing === 'quote'
+                      && (p.offers ?? []).length > 0;
                     return (
                       <li key={p.id} data-testid={`summation-position-${p.id}`}
-                        className="flex items-baseline gap-2 border-b border-slate-800 py-0.5">
-                        <span className="text-slate-200">{p.label}</span>
-                        {p.tag && <span className="text-slate-500">{tagLabel(p.tag)}</span>}
-                        <span className="text-slate-500">{t(`costpos.kind.${p.kind}`)}</span>
-                        {fav && (
-                          <span className="text-amber-300"
-                            data-testid={`summation-position-vendor-${p.id}`}>
-                            ★ {fav.vendor_name}
+                        className="border-b border-slate-800 py-0.5">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-slate-200">{p.label}</span>
+                          {p.tag && <span className="text-slate-500">{tagLabel(p.tag)}</span>}
+                          <span className="text-slate-500">{t(`costpos.kind.${p.kind}`)}</span>
+                          {fav && (
+                            <span className="text-amber-300"
+                              data-testid={`summation-position-vendor-${p.id}`}>
+                              ★ {fav.vendor_name}
+                            </span>
+                          )}
+                          {chosen && (
+                            <span className="text-sky-300"
+                              data-testid={`summation-position-chosen-${p.id}`}>
+                              {t('vendor.chosen')}: {chosen.vendor_name}
+                            </span>
+                          )}
+                          {decisionDivergesOf(p) && (
+                            <span data-testid={`summation-position-divergence-${p.id}`}
+                              className="rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[10px] leading-tight">
+                              {t('vendor.againstRecommendation')}
+                            </span>
+                          )}
+                          <span className="ml-auto tabular-nums text-slate-300">
+                            {(salesEffectiveOf(p) ?? 0).toFixed(2)}
                           </span>
+                        </div>
+                        {canDecideVendor && decidable && (
+                          <VendorDecision changeId={changeId} position={p} />
                         )}
-                        <span className="ml-auto tabular-nums text-slate-300">
-                          {(effectiveOf(p) ?? 0).toFixed(2)}
-                        </span>
                       </li>
                     );
                   })}

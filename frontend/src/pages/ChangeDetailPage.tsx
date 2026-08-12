@@ -12,11 +12,15 @@ import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
 import QuoteBasis from '../components/changes/QuoteBasis';
+import NegotiationCard from '../components/changes/NegotiationCard';
 import QuoteTimelineCard from '../components/changes/QuoteTimelineCard';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
+import BankBuildCard from '../components/changes/BankBuildCard';
+import ImplementationTracking from '../components/changes/ImplementationTracking';
+import ValidationPanel from '../components/changes/ValidationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
@@ -54,7 +58,9 @@ const STATUS_ACTIVE_TAB: Record<string, Tab> = {
   in_assessment: 'assessments',
   // Quote creation is Sales' step, and the commercial tab is where they do it.
   costing: 'commercial', quoting: 'commercial', quoted: 'commercial',
-  approved: 'commercial',
+  // Once approved, the open work is the bank-build decision and publishing the
+  // plan — both on the implementation tab.
+  approved: 'implementation',
   in_implementation: 'implementation', in_validation: 'implementation',
 };
 // F2: before costing there's no cost basis yet — the commercial tab shows an
@@ -71,7 +77,9 @@ const TAB_UNLOCK_STATUS: Partial<Record<Tab, ChangeStatus>> = {
   impacted: 'scoping',
   assessments: 'in_assessment',
   commercial: 'costing',
-  implementation: 'in_implementation',
+  // Stage 7 (bank build) is the first job of the implementation tab and it runs
+  // at `approved`, before the change formally moves into implementation.
+  implementation: 'approved',
 };
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
@@ -125,11 +133,35 @@ export default function ChangeDetailPage() {
     queryKey: ['projects'],
     queryFn: async () => (await client.get('/v1/plants/projects')).data,
   });
-  const projectPlantId = projects.find((p) => p.id === change?.project_id)?.plant_id ?? null;
+  // An expired session answers this query with an error object, not an
+  // array — that must degrade to "no plant default", not a black page.
+  const projectPlantId = (Array.isArray(projects) ? projects : [])
+    .find((p) => p.id === change?.project_id)?.plant_id ?? null;
   const { data: impl } = useQuery({
     queryKey: ['change', changeId, 'implementation'],
     queryFn: () => changesApi.getImplementation(changeId),
     enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
+  });
+  // Stage 8: the per-department board and its escalations. The tracking card
+  // asks for the same keys, so the banner costs no extra request; both are
+  // needed here because the waits are derived from them.
+  const implTracked = !!change && change.status === 'in_implementation';
+  const { data: implState = [] } = useQuery({
+    queryKey: ['change', changeId, 'impl-state'],
+    queryFn: () => changesApi.implementationState(changeId),
+    enabled: implTracked,
+  });
+  const { data: implEscalations = [] } = useQuery({
+    queryKey: ['change', changeId, 'impl-escalations'],
+    queryFn: () => changesApi.listImplEscalations(changeId),
+    enabled: implTracked,
+  });
+  // Stage 9: the validation board. Shares the panel's cache key, so the banner
+  // costs no extra request; the waits below are derived from it.
+  const { data: validation } = useQuery({
+    queryKey: ['change', changeId, 'validation'],
+    queryFn: () => changesApi.validationState(changeId),
+    enabled: !!change && change.status === 'in_validation',
   });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
@@ -174,6 +206,7 @@ export default function ChangeDetailPage() {
   const qualityDeptId = departments.find((d) => d.name === 'Quality')?.id;
   const pmDeptId = departments.find((d) => d.name === 'Project Manager')?.id;
   const salesDeptId = departments.find((d) => d.name === 'Sales')?.id;
+  const schedulingDeptId = departments.find((d) => d.name === 'Scheduling')?.id;
   const isChangeLead = !actingAs
     && userId != null && change?.lead_id != null && userId === change.lead_id;
   const isQualityMember = !!myActions && qualityDeptId !== undefined
@@ -182,6 +215,8 @@ export default function ChangeDetailPage() {
     && myActions.memberships.includes(pmDeptId);
   const isSalesMember = !!myActions && salesDeptId !== undefined
     && myActions.memberships.includes(salesDeptId);
+  const isSchedulingMember = !!myActions && schedulingDeptId !== undefined
+    && myActions.memberships.includes(schedulingDeptId);
   const isGovernanceDept = isQualityMember || isPmMember;
   const canSeeGovernance = isAdmin || isChangeLead || isGovernanceDept;
   // Governance authz (mirrors the backend 403 gates in change_service.py):
@@ -197,6 +232,10 @@ export default function ChangeDetailPage() {
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
   const canEditDescription = isAdmin || isChangeLead || isSalesMember;
+  // Stage 7 mirrors the backend's two gates: Scheduling (plus PM/lead/admin)
+  // decides how the change reaches the line, Sales publishes the plan.
+  const canSetBankBuild = isAdmin || isChangeLead || isSchedulingMember || isPmMember;
+  const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
   // F8: the backend enforces "PM and Quality sign-off must be different
   // users" (4-eyes) and 400s if violated. Disable the button in place and
   // name the rule instead of letting the user hit the error after clicking.
@@ -312,7 +351,8 @@ export default function ChangeDetailPage() {
       {/* What the change is waiting on — same line for every viewer, whoever
           owns the next move. */}
       <div className="mt-3">
-        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments)}
+        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments,
+          { state: implState, escalations: implEscalations }, validation)}
           onGo={(tb) => setTab(tb as Tab)} />
       </div>
 
@@ -463,7 +503,30 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'implementation' && change && (
-        <ImplementationPanel changeId={change.id} />
+        <div className="space-y-3">
+          {/* Stage 7 opens the implementation tab: the bank-build decision is
+              made and published before any of the work below starts. */}
+          {phaseIndex(change.status) >= phaseIndex('approved') && (
+            <BankBuildCard change={change}
+              canSetMode={canSetBankBuild} canPublish={canPublishPlan} />
+          )}
+          {/* Stage 8 sits under the plan: the plan says how the change reaches
+              the line, this says how the work is actually going. */}
+          {phaseIndex(change.status) >= phaseIndex('in_implementation') && (
+            <ImplementationTracking changeId={change.id} status={change.status}
+              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
+              canSeeAll={canSeeCosts} canEscalate={canPublishPlan} />
+          )}
+          {/* Stage 9 sits under the tracking: the work is done, this says
+              whether it holds. Read-only once the change has moved on. */}
+          {phaseIndex(change.status) >= phaseIndex('in_validation') && (
+            <ValidationPanel changeId={change.id} status={change.status}
+              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
+              canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
+              canEscalate={canSeeCosts} />
+          )}
+          <ImplementationPanel changeId={change.id} />
+        </div>
       )}
 
       {effectiveTab === 'assessments' && (
@@ -481,7 +544,7 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'commercial' && (
         <div className="space-y-3 text-sm">
-          <PnlCard change={change} />
+          <PnlCard change={change} departments={departments} />
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
               the people entitled to see it. */}
@@ -501,7 +564,9 @@ export default function ChangeDetailPage() {
               quoting, the basis the price is judged against. */}
           {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
             <SummationView changeId={changeId}
+              status={change.status} canQuote={canEditQuotedPrice}
               plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+              validatedWeightG={change.validated_part_weight_g}
               deadline={change.active_deadline === 'release'
                 ? { date: change.release_due_date, label: t('deadline.release') }
                 : { date: change.required_by_date, label: t('deadline.quote') }} />
@@ -536,6 +601,13 @@ export default function ChangeDetailPage() {
                 plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
                 concerns={concerns} departments={departments} />}
               <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
+              {/* Once the offer is out, the price stops being a single number
+                  and becomes a conversation. The log runs it to a final result;
+                  the go-ahead stays with the acceptance controls below. */}
+              {canSeeCosts && phaseIndex(change.status) >= phaseIndex('quoted') && (
+                <NegotiationCard changeId={changeId} status={change.status}
+                  canWrite={canEditQuotedPrice} />
+              )}
               <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <button className="px-3 py-1.5 border rounded-lg"

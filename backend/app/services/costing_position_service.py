@@ -64,6 +64,28 @@ class CostingPositionService:
             session, actor, department_id)
 
     @staticmethod
+    async def may_choose_vendor(session: AsyncSession, change: ChangeRequest,
+                                actor: User) -> bool:
+        """Who decides which supplier gets the order: Sales, the change lead,
+        or an admin — the same set that may put a price in front of the
+        customer, because choosing the vendor IS setting the price.
+
+        Deliberately NOT the department that raised the position. The
+        department recommends (its favorite offer); it does not decide. The
+        window is 'quoting': the decision belongs to the moment the offer is
+        being written, when the costing is finished and the price is being
+        put together. Admins are exempt from the window, as everywhere else in
+        this module, because they record decisions after the fact.
+        """
+        from app.services.change_service import ChangeService
+        if actor.effective_role == "admin":
+            return True
+        if change.status != "quoting":
+            return False
+        return await ChangeService.user_can_set_quoted_price(
+            session, actor, change)
+
+    @staticmethod
     async def readable_department_ids(
         session: AsyncSession, change: ChangeRequest, actor: User,
     ) -> set | None:
@@ -119,9 +141,26 @@ class CostingPositionService:
                     "uploaded_by_name": att.uploaded_by_name,
                     "created_at": att.created_at,
                 })
+        # Who stamped each decision, by name: "chosen by user 41" is not a
+        # record anybody can act on, and making the frontend fetch the user
+        # directory to render a wrap-up line is a round trip that goes stale.
+        chooser_ids = {o.chosen_by for p in positions for o in p.offers
+                       if o.chosen_by is not None}
+        choosers: dict[int, str] = {}
+        if chooser_ids:
+            choosers = dict((await session.execute(
+                select(User.id, User.full_name).where(
+                    User.id.in_(chooser_ids)))).all())
         out = []
         for p in positions:
-            favorite = p.favorite_offer
+            # Two different questions, two different properties:
+            # favorite_offer is the offer this position is PRICED from (with
+            # the single-offer fallback), recommended_offer is the vote the
+            # department actually cast — and only a real vote can be
+            # diverged from.
+            priced_from = p.favorite_offer
+            favorite = p.recommended_offer
+            chosen = p.chosen_offer
             out.append({
                 "id": p.id, "change_id": p.change_id,
                 "department_id": p.department_id, "label": p.label,
@@ -136,7 +175,27 @@ class CostingPositionService:
                 "effective_lead_time_unit": p.effective_lead_time_unit,
                 "effective_lead_time_calendar_days":
                     p.effective_lead_time_calendar_days,
-                "favorite_offer_id": favorite.id if favorite else None,
+                "favorite_offer_id": priced_from.id if priced_from else None,
+                # The department RECOMMENDS, Sales DECIDES. Both sides ride on
+                # the position so a wrap-up line reads "recommended: A ·
+                # chosen: B (reason)" without joining anything.
+                "recommended_vendor": favorite.vendor_name if favorite else None,
+                "recommended_cost": favorite.total_cost if favorite else None,
+                "chosen_offer_id": chosen.id if chosen else None,
+                "chosen_vendor": chosen.vendor_name if chosen else None,
+                "chosen_cost": chosen.total_cost if chosen else None,
+                "chosen_reason": chosen.chosen_reason if chosen else None,
+                "chosen_by_name": (choosers.get(chosen.chosen_by)
+                                   if chosen else None),
+                "chosen_at": chosen.chosen_at if chosen else None,
+                # True when Sales went against the recommendation. Computed
+                # here so every screen draws the same conclusion from it.
+                "choice_diverges": bool(
+                    chosen is not None and favorite is not None
+                    and chosen.id != favorite.id),
+                # The money in the offer: the chosen vendor's price once there
+                # is one, the department's own effective_cost until then.
+                "quoted_cost": p.quoted_cost,
                 "offers": [{
                     "id": o.id, "position_id": o.position_id,
                     "vendor_name": o.vendor_name, "cost": o.cost,
@@ -146,6 +205,10 @@ class CostingPositionService:
                     "lead_time_unit": o.lead_time_unit,
                     "lead_time_calendar_days": o.lead_time_calendar_days,
                     "favorite": o.favorite, "total_cost": o.total_cost,
+                    "chosen": o.chosen, "chosen_reason": o.chosen_reason,
+                    "chosen_by": o.chosen_by,
+                    "chosen_by_name": choosers.get(o.chosen_by),
+                    "chosen_at": o.chosen_at,
                     "created_by": o.created_by, "created_at": o.created_at,
                     "attachments": docs.get(o.id, []),
                 } for o in p.offers],
@@ -377,6 +440,84 @@ class CostingPositionService:
             f"Offer from {vendor} on '{position.label}' removed", actor.id,
             old_value={"position_id": position.id, "vendor_name": vendor})
         return paths
+
+    @staticmethod
+    async def choose_offer(
+        session: AsyncSession, change: ChangeRequest, offer: CostingOffer,
+        reason: str | None, actor: User,
+    ) -> CostingOffer:
+        """Sales decides which vendor gets the order.
+
+        Two rules, and they are the whole feature:
+
+        One decision per position — choosing an offer un-chooses its siblings,
+        the same way voting for a favorite un-votes the others. A position with
+        two chosen offers is a purchase order nobody can execute.
+
+        A reason is REQUIRED when the decision diverges from the department's
+        recommendation, and optional when it agrees. Going with the engineers
+        needs no defence; going around them does, and the person who did it is
+        stamped on the row. Re-deciding is allowed and audited: a supplier can
+        fall over a week after the decision, and forcing that correction to
+        happen by deleting offers would erase the history of the first call.
+        """
+        position = await session.get(CostingPosition, offer.position_id)
+        await session.refresh(position, ["offers"])
+        if position.kind != "external":
+            raise CostingPositionError(
+                "Only an external position has a vendor to choose")
+        # The department's VOTE, not the pricing fallback: a position nobody
+        # voted on carries no recommendation to diverge from, so choosing any
+        # of its offers needs no defence.
+        favorite = position.recommended_offer
+        diverges = favorite is not None and favorite.id != offer.id
+        reason = (reason or "").strip()
+        if diverges and not reason:
+            raise CostingPositionError(
+                f"Choosing {offer.vendor_name} over the department's "
+                f"recommendation "
+                f"({favorite.vendor_name}) needs a reason — the decision is "
+                "Sales' to make and Sales' to account for")
+
+        previous = position.chosen_offer
+        for other in position.offers:
+            if other.id != offer.id and other.chosen:
+                other.chosen = False
+                # The stamp goes with the flag: a chosen_by on an offer nobody
+                # is buying from is a name against a decision that was reversed.
+                other.chosen_reason = None
+                other.chosen_by = None
+                other.chosen_at = None
+        offer.chosen = True
+        offer.chosen_reason = reason or None
+        offer.chosen_by = actor.id
+        offer.chosen_at = datetime.utcnow()
+        await session.flush()
+        await session.refresh(position, ["offers"])
+
+        from app.services.change_service import ChangeService
+        if diverges:
+            description = (
+                f"Vendor chosen against the department recommendation: "
+                f"{offer.vendor_name} instead of {favorite.vendor_name} on "
+                f"'{position.label}' — {reason}")
+        else:
+            description = (f"Vendor chosen: {offer.vendor_name} on "
+                           f"'{position.label}'")
+        await ChangeService.append_changelog(
+            session, change, "vendor_chosen", description, actor.id,
+            field_name="chosen_offer_id",
+            old_value=({"offer_id": previous.id,
+                        "vendor_name": previous.vendor_name}
+                       if previous is not None else None),
+            new_value={"position_id": position.id, "offer_id": offer.id,
+                       "vendor_name": offer.vendor_name,
+                       "total_cost": offer.total_cost,
+                       "recommended_vendor": (favorite.vendor_name
+                                              if favorite else None),
+                       "diverges_from_recommendation": diverges},
+            notes=reason or None)
+        return offer
 
     # ------------------------------------------------------------------
     @staticmethod

@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useDepartments, useMyTasks, useAcceptTask } from '../hooks/queries/useWorkflows';
+import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import { rasicColors } from '../lib/constants';
@@ -202,6 +202,18 @@ const TASK_TAB: Record<string, string> = {
   send_rejection: '?tab=scoping',
   costing_input: '?tab=commercial',
   create_quote: '?tab=commercial',
+  // Stage 7 lives on the implementation tab: Scheduling decides there, Sales
+  // publishes from the same card.
+  bank_build: '?tab=implementation',
+  publish_plan: '?tab=implementation',
+  // Stage 8 lives on the same tab: the department reports there, Sales
+  // escalates from the same blocks.
+  progress_report: '?tab=implementation',
+  escalate_risk: '?tab=implementation',
+  // Stage 9 shares the tab: the department confirms its checks there, and the
+  // weight delta that sends Sales back to the quote is stated on the same panel.
+  validation_check: '?tab=implementation',
+  update_quote: '?tab=implementation',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -235,6 +247,18 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.costing_input');
     case 'create_quote':
       return t('tasks.hint.create_quote');
+    case 'bank_build':
+      return t('tasks.hint.bank_build');
+    case 'publish_plan':
+      return t('tasks.hint.publish_plan');
+    case 'progress_report':
+      return t('tasks.hint.progress_report');
+    case 'escalate_risk':
+      return t('tasks.hint.escalate_risk');
+    case 'validation_check':
+      return t('tasks.hint.validation_check');
+    case 'update_quote':
+      return t('tasks.hint.update_quote');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,
@@ -350,7 +374,6 @@ export default function MyTasksPage() {
   const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
 
   const { data: tasks = [], isLoading: loadingTasks } = useMyTasks(selectedDeptId);
-  const acceptTask = useAcceptTask();
 
   const activeDepartments = departments.filter((d) => d.is_active);
 
@@ -440,19 +463,13 @@ export default function MyTasksPage() {
                         <span className="text-slate-300">{task.stage_name}</span>
                       )}
                     </td>
+                    {/* The task is mandatory — there is no "I take this one".
+                        A name appears once somebody has worked the row. */}
                     <td className="px-4 py-3">
                       {task.owner_id !== null ? (
                         <span className="text-slate-200">{task.owner_name}</span>
                       ) : (
-                        <button
-                          onClick={() =>
-                            acceptTask.mutate({ instanceId: task.instance_id, taskId: task.task_id })
-                          }
-                          disabled={acceptTask.isPending}
-                          className="px-2 py-0.5 rounded bg-sky-700 hover:bg-sky-600 text-sky-100 text-xs"
-                        >
-                          {t('tasks.accept')}
-                        </button>
+                        <span className="text-slate-500">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs">

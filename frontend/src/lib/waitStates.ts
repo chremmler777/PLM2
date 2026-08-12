@@ -8,7 +8,9 @@
  * Derived purely from data the detail page already holds; nothing is fetched.
  */
 import { t } from '../i18n/cmLabels'
-import type { Assessment, ChangeConcern, ChangeRequest } from '../types/change'
+import type {
+  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, ValidationState,
+} from '../types/change'
 
 export interface WaitState {
   /** Stable key, also the test id suffix. */
@@ -63,13 +65,29 @@ const isSubmitted = (a: Pick<Assessment, 'submitted_at' | 'verdict'>) =>
 
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
-    | 'rejection_sent_at' | 'costing_pending_department_ids'>,
+    | 'rejection_sent_at' | 'costing_pending_department_ids'
+    | 'bank_build_mode' | 'plan_published_at'>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
   assessments: Pick<Assessment,
     'department_id' | 'rasic_letter' | 'status' | 'submitted_at' | 'verdict'
     | 'stage_order'>[] = [],
+  /**
+   * Stage 8, while the work is being done: the per-department board and the
+   * escalations raised against it. Both come from the implementation tab's own
+   * queries — the resolver stays pure and is handed what the page already has.
+   */
+  impl: {
+    state?: ImplDepartmentState[] | { departments?: ImplDepartmentState[] }
+    escalations?: { resolved_at?: string | null }[]
+  } = {},
+  /**
+   * Stage 9, the same way: the validation board as the panel already fetched
+   * it. Two waits come out of it — the departments that still owe a check, and
+   * the weight delta nobody has taken into the quote.
+   */
+  validation?: ValidationState | null,
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -136,6 +154,68 @@ export function resolveWaitStates(
         change.costing_pending_department_ids!.map(departmentName).join(', ')),
       tab: 'commercial',
     })
+  }
+
+  // An approved change is not moving until Scheduling has said how it reaches
+  // the line, and — when the customer is the cost carrier — until Sales has put
+  // the resulting plan in front of them. Two waits, one after the other.
+  if (change.status === 'approved') {
+    if (!change.bank_build_mode) {
+      waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'implementation' })
+    } else if (change.customer_relevant && !change.plan_published_at) {
+      waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'implementation' })
+    }
+  }
+
+  // While the work runs, two things stall it silently: a department that has
+  // stopped saying how it is going, and a flagged risk nobody has taken
+  // anywhere. Both are named for everyone, not only for the desk that owes it.
+  if (change.status === 'in_implementation') {
+    const raw = impl.state as unknown
+    const state = Array.isArray(raw)
+      ? raw as { owes_report?: boolean; at_risk_open?: boolean }[]
+      : (raw as { departments?: { owes_report?: boolean; at_risk_open?: boolean }[] } | undefined)
+          ?.departments ?? []
+    const owing = state.filter((s) => s.owes_report).length
+    if (owing > 0) {
+      waits.push({
+        key: 'implementation-reports',
+        text: t('wait.onProgressReports').replace('{n}', String(owing)),
+        tab: 'implementation',
+      })
+    }
+    // An escalation is a change-level act, so the pairing is change-level too:
+    // any at-risk department while nothing is open means Sales still owes one.
+    const openEscalation = (impl.escalations ?? []).some((e) => !e.resolved_at)
+    if (state.some((s) => s.at_risk_open) && !openEscalation) {
+      waits.push({
+        key: 'implementation-escalation',
+        text: t('wait.onRiskEscalation'),
+        tab: 'implementation',
+      })
+    }
+  }
+
+  // While the results are being checked: the departments that have not answered
+  // their checks, and — separately, because it is a different desk and a
+  // different consequence — a validated weight the quote has not caught up with.
+  if (change.status === 'in_validation' && validation) {
+    const owing = (validation.departments ?? [])
+      .filter((d) => d.checks.some((c) => c.status !== 'passed')).length
+    if (owing > 0) {
+      waits.push({
+        key: 'validation-checks',
+        text: t('wait.onValidationChecks').replace('{n}', String(owing)),
+        tab: 'implementation',
+      })
+    }
+    if ((validation.weight_delta_g ?? 0) !== 0 && !validation.weight_ack_at) {
+      waits.push({
+        key: 'validation-weight-ack',
+        text: t('wait.onWeightAck'),
+        tab: 'implementation',
+      })
+    }
   }
 
   // A rejected customer change is not finished until the customer has been told.

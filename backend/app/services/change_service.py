@@ -20,7 +20,7 @@ from app.models.change import (
     ChangeAttachment, ChangeTransitionDeviation, ChangeMeeting, ChangeConcern,
     CHANGE_TYPES, CHANGE_STATUSES, ASSESSMENT_VERDICTS, CUSTOMER_RESPONSES,
     SIGN_OFF_ROLES, IMPLEMENTATION_MODES, TERMINAL_STATUSES, BLOCKING_LETTERS,
-    SCOPING_STATUSES, ATTACHMENT_KINDS,
+    SCOPING_STATUSES, ATTACHMENT_KINDS, BANK_BUILD_MODES,
 )
 from app.models.entities import User, Project, Plant
 from app.services import assessment_checklist as checklist
@@ -622,6 +622,15 @@ class ChangeService:
                     return ("no check-workflow template mapped for item "
                             f"category: {', '.join(missing)}")
         if to_status == "released":
+            # Stage 9 first: "the Tool Engineer's weight check failed" is a
+            # more useful refusal than "2 of 5 revisions have not completed
+            # their check workflow", and it is the one somebody can act on
+            # today. Silent for changes with no validation rows at all — see
+            # ValidationService.release_blocker.
+            from app.services.validation_service import ValidationService
+            blocker = await ValidationService.release_blocker(session, change)
+            if blocker is not None:
+                return blocker
             progress = await ChangeService.implementation_progress(session, change)
             if not progress["ready_to_go"]:
                 pending = sum(1 for e in progress["items"] if not e["ready"])
@@ -640,6 +649,7 @@ class ChangeService:
         user_id: int, *, cancellation_reason: Optional[str] = None,
         rejection_reason: Optional[str] = None,
         reopen_reason: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> ChangeRequest:
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
@@ -674,6 +684,23 @@ class ChangeService:
             if started:
                 raise ChangeError(
                     "Cannot recall: assessment work has already started")
+
+        # HARD precondition: validation sending the change BACK is the stage's
+        # other outcome, and it is expensive — the timeline has to be replanned
+        # and the commercial terms may have to be renegotiated. A bare status
+        # hop would leave nobody able to say, months later, which check failed
+        # and what was agreed about it. The reason is recorded under its own
+        # action ('validation_escalated') below.
+        validation_escalation = (change.status == "in_validation"
+                                 and to_status == "in_implementation")
+        # Captured before the guard below reuses the name `reason` for its own
+        # refusal string.
+        escalation_note = (reason or "").strip()
+        if validation_escalation and not escalation_note:
+            raise ChangeError(
+                "A reason is required to send a change back from "
+                "validation to implementation — say what failed and what has "
+                "to be replanned or renegotiated")
 
         if to_status == "cancelled":
             if not cancellation_reason:
@@ -771,6 +798,14 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change, "rejected", f"Rejected: {rejection_reason}",
                 user_id, notes=rejection_reason)
+        if validation_escalation:
+            await ChangeService.append_changelog(
+                session, change, "validation_escalated",
+                f"Validation escalated back to implementation: {escalation_note}",
+                user_id, notes=escalation_note,
+                old_value={"status": "in_validation"},
+                new_value={"status": "in_implementation",
+                           "reason": escalation_note})
         if reopening:
             prior = change.rejection_reason
             change.rejected_at = None
@@ -1206,6 +1241,222 @@ class ChangeService:
         Manager' department member. No lead bypass — a lead who isn't a PM
         member and isn't admin may not approve their own change's costs."""
         return await ChangeService._user_in_department(session, user, "Project Manager")
+
+    # The department that owns tools (_DOMAIN_BY_DEPARTMENT's tool domain) and
+    # therefore owns what the tool produces. Named once so the weight quote and
+    # the object buckets cannot drift apart.
+    TOOL_DEPARTMENT = "Tool Engineer"
+
+    @staticmethod
+    async def user_can_quote_part_weight(
+        session: AsyncSession, user: User,
+    ) -> bool:
+        """Only the people who own the tool may say what it will produce:
+        admin or a 'Tool Engineer' member (acts-as aware through
+        _user_in_department). No lead bypass and no PM bypass — a weight is a
+        technical claim, not a coordination one, and whoever states it is the
+        person the validation delta is discussed with."""
+        return await ChangeService._user_in_department(
+            session, user, ChangeService.TOOL_DEPARTMENT)
+
+    @staticmethod
+    async def set_weight_estimate(
+        session: AsyncSession, change: ChangeRequest, weight_g: float,
+        user: User,
+    ) -> ChangeRequest:
+        """Stamp the Tooling Engineer's part-weight ESTIMATE.
+
+        Costing-phase only, like every other costing number: the estimate is an
+        input to the quote, and one arriving after the quote went out would
+        describe a price nobody offered. Admins are exempt from the window (the
+        same exemption costing positions give them) because they fill numbers
+        in on someone's behalf after the fact.
+
+        Re-stating it overwrites — an estimate that cannot be corrected when
+        the tool concept changes is worse than one that can, and every previous
+        value survives in the hash-chained changelog with its author.
+
+        weight_g=None ERASES the estimate: the engineer no longer stands behind
+        the number and has no replacement yet. All three fields go with it —
+        keeping a by/at stamp on an absent value would claim somebody vouched
+        for nothing. Who erased it and what it was is in the changelog, which
+        is where a withdrawn claim belongs.
+        """
+        if weight_g is not None and weight_g <= 0:
+            raise ChangeError("Part weight must be greater than zero")
+        if change.status != "costing" and user.effective_role != "admin":
+            raise ChangeError(
+                "The part weight is quoted while the change is in costing")
+        old = (float(change.estimated_part_weight_g)
+               if change.estimated_part_weight_g is not None else None)
+        if weight_g is None:
+            # Erasing an estimate that was never given changes no fact, so it
+            # writes no history — the frontend clears an empty field on every
+            # blur and a changelog full of those is a changelog nobody reads.
+            if old is None:
+                return change
+            change.estimated_part_weight_g = None
+            change.estimated_weight_by = None
+            change.estimated_weight_at = None
+            await ChangeService.append_changelog(
+                session, change, "weight_estimate_cleared",
+                f"Part weight estimate withdrawn (was {old:g} g)",
+                user.id, field_name="estimated_part_weight_g",
+                old_value={"weight_g": old}, new_value=None,
+            )
+            return change
+        new = round(float(weight_g), 2)
+        change.estimated_part_weight_g = new
+        change.estimated_weight_by = user.id
+        change.estimated_weight_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "weight_estimated",
+            f"Part weight estimated at {new:g} g"
+            + (f" (was {old:g} g)" if old is not None else ""),
+            user.id, field_name="estimated_part_weight_g",
+            old_value={"weight_g": old} if old is not None else None,
+            new_value={"weight_g": new},
+        )
+        return change
+
+    # --- the scheduling block (stage 7) ------------------------------------
+    # Acceptance is not a plan. Scheduling decides HOW the change reaches the
+    # line — running change, or planned scrap of the bank — and Sales publishes
+    # that plan to the customer. Neither act is a hard transition gate:
+    # 'approved' -> 'in_implementation' stays open, and the pressure comes from
+    # the my-tasks rows and the wait states derived off these columns.
+    SCHEDULING_DEPARTMENT = "Scheduling"
+
+    @staticmethod
+    async def user_can_decide_bank_build(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Who may say running change vs planned scrap.
+
+        Scheduling owns the call, but it is a coordination decision on a
+        specific change rather than a technical claim, so the change lead and
+        Project Management may make it too — a bank-build decision that only
+        one department can enter is a decision that waits for that department's
+        calendar. Admin through _user_in_department, acts-as aware."""
+        if user.id == change.lead_id:
+            return True
+        if await ChangeService._user_in_department(
+                session, user, ChangeService.SCHEDULING_DEPARTMENT):
+            return True
+        return await ChangeService._user_in_department(
+            session, user, "Project Manager")
+
+    @staticmethod
+    async def user_can_publish_bank_build(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Publishing the plan is telling the CUSTOMER, so it is the same
+        people who may put a price in front of them: admin, the change lead,
+        or a Sales member (user_can_set_quoted_price). Scheduling deliberately
+        cannot publish its own plan — the customer conversation has one
+        owner."""
+        return await ChangeService.user_can_set_quoted_price(session, user, change)
+
+    @staticmethod
+    async def set_bank_build(
+        session: AsyncSession, change: ChangeRequest, mode: str, user: User,
+        *, note: Optional[str] = None, scrap_quote_price: Optional[float] = None,
+    ) -> ChangeRequest:
+        """Record the bank-build decision on an accepted change.
+
+        planned_scrap REQUIRES a scrap quote: the customer bears the cost of
+        the bank we throw away, and a scrap plan with no additional quote
+        behind it is a bill nobody agreed to. running_change nulls any scrap
+        price that a previous planned_scrap left behind — the two facts must
+        never be readable together.
+
+        'approved' only (admins exempt, the same exemption the costing numbers
+        give them): a mode set before acceptance plans a change the customer
+        has not bought, and one set later is documenting what already happened,
+        which the changelog does better.
+
+        Re-deciding overwrites, and every previous decision survives in the
+        hash-chained changelog with its author. It does NOT clear the
+        publication stamp: Sales published a plan, that remains true, and the
+        my-tasks row for a stale publication is a judgement the frontend makes
+        off plan_published_at vs bank_build_set_at.
+        """
+        if mode not in BANK_BUILD_MODES:
+            raise ChangeError(f"Unknown bank build mode '{mode}'")
+        if change.status != "approved" and user.effective_role != "admin":
+            raise ChangeError(
+                "The bank build is planned after acceptance, while the change "
+                "is approved")
+        if mode == "planned_scrap":
+            if scrap_quote_price is None or scrap_quote_price <= 0:
+                raise ChangeError(
+                    "Planned scrap requires an additional scrap quote price: "
+                    "the customer bears the scrap cost")
+            price = round(float(scrap_quote_price), 2)
+        else:
+            # A running change scraps nothing, so there is nothing to bill.
+            price = None
+        old_mode = change.bank_build_mode
+        old_price = (float(change.scrap_quote_price)
+                     if change.scrap_quote_price is not None else None)
+        change.bank_build_mode = mode
+        change.bank_build_note = note
+        change.scrap_quote_price = price
+        change.bank_build_set_by = user.id
+        change.bank_build_set_at = datetime.utcnow()
+        label = ("running change" if mode == "running_change"
+                 else "planned scrap")
+        desc = f"Bank build decided: {label}"
+        if price is not None:
+            desc += f" (scrap quote {price:g})"
+        if old_mode is not None and old_mode != mode:
+            desc += f" — was {'running change' if old_mode == 'running_change' else 'planned scrap'}"
+        await ChangeService.append_changelog(
+            session, change, "bank_build_decided", desc, user.id,
+            field_name="bank_build_mode",
+            old_value=({"mode": old_mode, "scrap_quote_price": old_price}
+                       if old_mode is not None else None),
+            new_value={"mode": mode, "scrap_quote_price": price},
+            notes=note,
+        )
+        return change
+
+    @staticmethod
+    async def publish_bank_build_plan(
+        session: AsyncSession, change: ChangeRequest, user: User,
+    ) -> ChangeRequest:
+        """Sales stamps that the plan went to the customer.
+
+        There must be a plan to publish — publishing before Scheduling has
+        decided would promise the customer a changeover nobody has planned.
+        Same 'approved' window as the decision (admins exempt).
+
+        Idempotent in the only sense that matters: republishing refreshes the
+        stamp rather than refusing, because a re-published plan is a NEWER
+        plan in front of the customer, and the previous stamp is in the
+        changelog where the history belongs.
+        """
+        if change.status != "approved" and user.effective_role != "admin":
+            raise ChangeError(
+                "The bank build plan is published while the change is approved")
+        if change.bank_build_mode is None:
+            raise ChangeError(
+                "Decide the bank build (running change or planned scrap) "
+                "before publishing the plan to the customer")
+        previous = change.plan_published_at
+        change.plan_published_by = user.id
+        change.plan_published_at = datetime.utcnow()
+        await ChangeService.append_changelog(
+            session, change, "bank_build_published",
+            ("Bank build plan re-published to the customer"
+             if previous is not None
+             else "Bank build plan published to the customer"),
+            user.id, field_name="plan_published_at",
+            old_value={"published_at": previous.isoformat()} if previous else None,
+            new_value={"published_at": change.plan_published_at.isoformat(),
+                       "mode": change.bank_build_mode},
+        )
+        return change
 
     @staticmethod
     async def my_actions(

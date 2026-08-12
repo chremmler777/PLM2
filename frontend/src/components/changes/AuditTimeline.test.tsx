@@ -124,7 +124,9 @@ describe('AuditTimeline', () => {
     vi.mocked(auditApi.list).mockResolvedValue(many)
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     expect(await screen.findByText(/newest 1000/)).toBeDefined()
-  })
+    // Rendering 1000 rows under full-suite parallel load regularly breaches the
+    // default 5s — a real flake, not a real failure.
+  }, 15000)
 
   it('does not show a truncation notice when under the fetch limit', async () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)

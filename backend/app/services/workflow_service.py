@@ -245,6 +245,13 @@ class WorkflowService:
                         t.decision = "approved"
                         t.completed_by = a.submitted_by
                         t.completed_at = a.submitted_at
+                        # Same rule as complete_task: the submitter owns what
+                        # they answered, so the mirrored task carries the
+                        # assessment's owner rather than reading "unassigned".
+                        if t.owner_id is None:
+                            t.owner_id = a.owner_id or a.submitted_by
+                            if t.accepted_at is None:
+                                t.accepted_at = a.accepted_at or a.submitted_at
             await db.flush()
 
         if actionable_departments:
@@ -384,6 +391,21 @@ class WorkflowService:
         task.completed_at = datetime.utcnow()
         task.decision = decision
         task.notes = notes
+        # Doing the work IS taking it. There is no accept step in front of a
+        # task any more — accept_task still works, but no flow requires it —
+        # so whoever records the decision becomes the owner of record if
+        # nobody had put their name on it. Without this a finished task reads
+        # "unassigned", which is the one thing it certainly is not. A
+        # deliberate assignment (or an actual accept) is never overwritten.
+        #
+        # Assigned through the relationship, not the id column, so the name
+        # the response serializes is right in this same session — the
+        # already-loaded `owner` would otherwise stay the None it was loaded
+        # as. Same call as ChangeService.submit_assessment.
+        if task.owner_id is None:
+            task.owner = actor
+            if task.accepted_at is None:
+                task.accepted_at = task.completed_at
         await db.flush()
 
         await WorkflowService._audit(

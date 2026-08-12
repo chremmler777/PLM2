@@ -38,11 +38,19 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
+    NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
-    CostLeadTimeIn,
+    CostLeadTimeIn, WeightEstimateIn, BankBuildIn,
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
+    VendorChoiceIn,
+    ImplementationBookingCreate, ImplementationBookingResponse,
+    ImplementationReportCreate, ImplementationReportResponse,
+    ImplementationEscalationCreate, ImplementationEscalationResolveIn,
+    ImplementationEscalationResponse, ImplementationStateResponse,
+    ValidationCheckIn, ValidationCheckResponse, ValidationStateResponse,
+    WeightDeltaAckIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,6 +162,19 @@ async def my_change_tasks(
                         that raised it and always for Project Management —
                         somebody has to say whether the answer settles it
       customer_response quoted and unanswered, for Sales
+      bank_build       approved with no bank-build decision yet, for
+                       Scheduling — running change or planned scrap, plus the
+                       outline of the plan
+      publish_plan     approved with a decided but unpublished plan, for
+                       Sales, on customer-relevant changes
+      progress_report  in_implementation and this caller's implementing
+                       department has not reported inside the cadence
+                       (REPORT_CADENCE_HOURS) — or has never reported at all
+      escalate_risk    in_implementation with an at-risk flag nobody has
+                       answered yet, for Sales — customer or internal
+      update_quote     the validated part weight missed the estimate and
+                       nobody has settled the difference, for Sales — the
+                       delta rides on the row
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -222,6 +243,8 @@ async def my_change_tasks(
     is_pm_member = await MeetingService.user_is_pm_member(db, current_user)
     can_confirm = await ChangeService.user_can_confirm_impact(db, current_user)
     in_sales = await ChangeService._user_in_department(db, current_user, "Sales")
+    in_scheduling = await ChangeService._user_in_department(
+        db, current_user, ChangeService.SCHEDULING_DEPARTMENT)
 
     for c in open_changes:
         if c.status == "captured" and can_capture:
@@ -258,6 +281,26 @@ async def my_change_tasks(
                 and c.customer_response in (None, "pending")):
             tasks.append({**await _base(c), "kind": "customer_response"})
 
+        # The scheduling block. Acceptance leaves two errands in sequence:
+        # Scheduling decides how the change reaches the line, then Sales tells
+        # the customer what was planned. Neither is a transition gate — the
+        # row IS the pressure.
+        elif c.status == "approved":
+            if in_scheduling and c.bank_build_mode is None:
+                tasks.append({
+                    **await _base(c), "kind": "bank_build",
+                    "hint": "Decide running change vs planned scrap and "
+                            "outline the plan",
+                })
+            if (in_sales and c.customer_relevant
+                    and c.bank_build_mode is not None
+                    and c.plan_published_at is None):
+                tasks.append({
+                    **await _base(c), "kind": "publish_plan",
+                    "mode": c.bank_build_mode,
+                    "scrap_quote_price": c.scrap_quote_price,
+                })
+
         # Costing is a queue too: a department that called the change feasible
         # owes a number, and "no lines at all" is silence rather than a zero.
         if c.status == "costing" and dep_ids:
@@ -266,6 +309,53 @@ async def my_change_tasks(
                 tasks.append({
                     **await _base(c), "kind": "costing_input",
                     "department_id": dept_id,
+                })
+
+        # Stage 8 is a cadence, not a milestone: while the change is being
+        # implemented, every implementing department owes a progress report
+        # at least twice a week, and a flag raised in one of those reports is
+        # Sales' errand until they take it somewhere.
+        if c.status == "in_implementation":
+            from app.services.implementation_service import ImplementationService
+            impl = await ImplementationService.state(db, c, current_user)
+            for row in impl["departments"]:
+                if row["owes_report"] and row["department_id"] in dep_ids:
+                    tasks.append({
+                        **await _base(c), "kind": "progress_report",
+                        "department_id": row["department_id"],
+                        "last_report_at": row["last_report_at"],
+                        "hint": "Report progress at least twice a week",
+                    })
+            # "No unresolved escalation for it yet" needs no separate check:
+            # at_risk_open is already false once ANY escalation (open or
+            # resolved) answers the flag, so a row here means nobody has taken
+            # this risk anywhere.
+            flagged = [row["department_id"] for row in impl["departments"]
+                       if row["at_risk_open"]]
+            if in_sales and flagged:
+                tasks.append({
+                    **await _base(c), "kind": "escalate_risk",
+                    "department_ids": flagged,
+                    "hint": "Take it to the customer, or escalate internally",
+                })
+
+        # Stage 9's one commercial errand: the sampled part came off the scale
+        # at a different weight than the quote was built on. Not tied to a
+        # status — the delta stays owed whether the change is still validating
+        # or went back round to implementation — and cleared by the explicit
+        # acknowledgement (POST /validation/weight-ack), never by guessing at a
+        # quoted_price edit that may have happened for another reason.
+        if in_sales:
+            from app.services.validation_service import ValidationService
+            if ValidationService.weight_delta_open(c):
+                delta = ValidationService.weight_delta(c)
+                tasks.append({
+                    **await _base(c), "kind": "update_quote",
+                    "delta_g": delta,
+                    "estimated_part_weight_g": c.estimated_part_weight_g,
+                    "validated_part_weight_g": c.validated_part_weight_g,
+                    "hint": f"Validated part weight is {delta:+g} g against the "
+                            "estimate — update the quote or record the decision",
                 })
 
         # Independent of the stage chain: a question can be waiting on Sales at
@@ -666,12 +756,25 @@ async def transition_change(
             status_code=403,
             detail="Only a Sales department member, the change lead or an "
                    "admin may create and send the quote")
+    # Sending a change back out of validation replans the timing and reopens
+    # the commercial terms — PM owns the first, Sales the second. A department
+    # whose own check failed says so on the check; it does not get to move the
+    # whole change on its own.
+    if change.status == "in_validation" and body.to_status == "in_implementation":
+        from app.services.validation_service import ValidationService
+        if not await ValidationService.may_escalate(db, change, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only Project Management, Sales, the change lead or an "
+                       "admin may send a change back from validation to "
+                       "implementation")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
             cancellation_reason=body.cancellation_reason,
             rejection_reason=body.rejection_reason,
             reopen_reason=body.reopen_reason,
+            reason=body.reason or body.escalation_reason,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1021,6 +1124,97 @@ async def approve_internal_costs(
     return change
 
 
+@router.put("/{change_id}/weight-estimate", response_model=ChangeResponse)
+async def put_weight_estimate(
+    change_id: int, body: WeightEstimateIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The Tooling Engineer quotes the part weight during costing.
+
+    An estimate, and flagged as one everywhere it is shown: the tool has not
+    been reworked yet. Validation weighs the sampled part and Sales prices the
+    delta into a quote update. Editable — re-stating it overwrites, with the
+    previous value kept in the changelog.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_quote_part_weight(db, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Tool Engineer department member or an admin may "
+                   "quote the part weight")
+    try:
+        await ChangeService.set_weight_estimate(
+            db, change, body.weight_g, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
+@router.put("/{change_id}/bank-build", response_model=ChangeResponse)
+async def put_bank_build(
+    change_id: int, body: BankBuildIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """The scheduling block: how the accepted change reaches the line.
+
+    Running change (consume the bank) or planned scrap (throw it away) — and
+    scrap is the customer's cost, so that half only exists with an additional
+    scrap quote behind it. Re-deciding overwrites; the changelog keeps every
+    round.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_decide_bank_build(db, current_user, change):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Scheduling or Project Manager department member, "
+                   "the change lead, or an admin may decide the bank build")
+    try:
+        await ChangeService.set_bank_build(
+            db, change, body.mode, current_user, note=body.note,
+            scrap_quote_price=body.scrap_quote_price)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
+@router.post("/{change_id}/bank-build/publish", response_model=ChangeResponse)
+async def publish_bank_build(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales puts the bank-build plan in front of the customer.
+
+    Requires a decided plan. Republishing refreshes the stamp — the customer
+    got a newer plan — and every publication is in the changelog.
+    """
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await ChangeService.user_can_publish_bank_build(db, current_user, change):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a Sales department member, the change lead, or an "
+                   "admin may publish the plan to the customer")
+    try:
+        await ChangeService.publish_bank_build_plan(db, change, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    change.deadline_state = await ChangeService.deadline_state(db, change)
+    return change
+
+
 @router.post("/{change_id}/attachments", status_code=status.HTTP_201_CREATED)
 async def upload_attachment(
     change_id: int,
@@ -1319,6 +1513,48 @@ async def update_costing_offer(
         (await CostingPositionService.serialize(db, [position]))[0], offer.id)
 
 
+@router.put("/{change_id}/costing/offers/{oid}/choose",
+            response_model=CostingOfferResponse)
+async def choose_costing_offer(
+    change_id: int, oid: int, body: VendorChoiceIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales decides which vendor gets the order.
+
+    The department's favorite is a RECOMMENDATION and stays visible as one;
+    this is the decision, and it carries a name and a timestamp. Choosing
+    against the recommendation needs a reason — refused with 400 otherwise —
+    while agreeing with it does not. One chosen offer per position: the
+    decision moves rather than accumulating.
+    """
+    from app.services.costing_position_service import (
+        CostingPositionError, CostingPositionService,
+    )
+    change = await _costing_change(db, change_id, current_user)
+    try:
+        offer = await CostingPositionService.get_offer(db, change, oid)
+        position = await CostingPositionService.get_position(
+            db, change, offer.position_id)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not await CostingPositionService.may_choose_vendor(
+            db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may choose the "
+                   "vendor, and only while the change is being quoted — the "
+                   "department recommends, Sales decides")
+    try:
+        offer = await CostingPositionService.choose_offer(
+            db, change, offer, body.reason, current_user)
+    except CostingPositionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(position)
+    return _offer_row(
+        (await CostingPositionService.serialize(db, [position]))[0], offer.id)
+
+
 @router.delete("/{change_id}/costing/offers/{oid}", status_code=204)
 async def delete_costing_offer(
     change_id: int, oid: int,
@@ -1523,6 +1759,81 @@ async def update_meeting(
     return meeting
 
 
+# --- the negotiation loop at 'quoted' ---------------------------------------
+# The quote is out; what comes back is a sequence of rounds ending in one final
+# result. Sales' go-ahead (the existing acceptance mechanics, with its
+# mandatory release deadline) is decided on that result and stays where it is.
+
+@router.get("/{change_id}/negotiations", response_model=List[NegotiationResponse])
+async def list_negotiations(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Every recorded round. Commercial read: admin, the change lead, Project
+    Management, Sales — the crowd that sees the costing numbers."""
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_read(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, Project Management, the change lead or an "
+                   "admin may see the negotiation record")
+    return await NegotiationService.list_rounds(db, change)
+
+
+@router.post("/{change_id}/negotiations", response_model=NegotiationResponse,
+             status_code=status.HTTP_201_CREATED)
+async def record_negotiation(
+    change_id: int, body: NegotiationCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_write(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may record a "
+                   "negotiation round")
+    try:
+        row = await NegotiationService.record_round(
+            db, change, current_user, channel=body.channel, note=body.note,
+            counter_price=body.counter_price, is_final=body.is_final)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/{change_id}/negotiations/{nid}", status_code=204)
+async def delete_negotiation(
+    change_id: int, nid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        row = await NegotiationService.get_round(db, change, nid)
+    except ChangeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not NegotiationService.may_delete(row, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the author of a negotiation round or an admin may "
+                   "remove it")
+    try:
+        await NegotiationService.delete_round(db, change, row, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+
+
 @router.get("/{change_id}/concerns", response_model=List[ConcernResponse])
 async def list_concerns(
     change_id: int,
@@ -1634,3 +1945,319 @@ async def decide_meeting(
     await db.commit()
     await db.refresh(meeting)
     return meeting
+
+
+# --- stage 8: implementation tracking ---------------------------------------
+# Bookings and reports follow the costing scoping rules with the status window
+# moved to 'in_implementation': a department writes its own while the change is
+# in the stage, PM and admins write anyone's, and the people accountable for
+# the change as a whole read everything. Escalations are Sales' — the customer
+# relationship has one owner.
+
+async def _implementation_change(db: AsyncSession, change_id: int,
+                                 current_user: User):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change
+
+
+async def _require_implementation_write(db: AsyncSession, change,
+                                        department_id: int,
+                                        current_user: User) -> None:
+    from app.services.implementation_service import ImplementationService
+    if not await ImplementationService.may_write(
+            db, change, department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "implementation, Project Management or an admin may book "
+                   "time or report progress for it")
+
+
+async def _require_escalation_right(db: AsyncSession, change,
+                                    current_user: User) -> None:
+    from app.services.implementation_service import ImplementationService
+    if not await ImplementationService.may_escalate(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may escalate an "
+                   "implementation risk — the customer relationship has one "
+                   "owner")
+
+
+@router.get("/{change_id}/implementation/state",
+            response_model=ImplementationStateResponse)
+async def implementation_state(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Per implementing department: booked hours, report cadence, risk.
+
+    "Implementing" is derived — the departments that put a costing position or
+    a cost line on this change. The booked-hours totals live here because the
+    actuals P&L at validation reads exactly them.
+    """
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    return await ImplementationService.state(db, change, current_user)
+
+
+@router.get("/{change_id}/implementation/bookings",
+            response_model=List[ImplementationBookingResponse])
+async def list_implementation_bookings(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    visible = await ImplementationService.readable_department_ids(
+        db, change, current_user)
+    rows = await ImplementationService.list_bookings(db, change, visible)
+    return await ImplementationService.serialize_bookings(db, rows)
+
+
+@router.post("/{change_id}/implementation/bookings",
+             response_model=ImplementationBookingResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_booking(
+    change_id: int, body: ImplementationBookingCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_implementation_write(
+        db, change, body.department_id, current_user)
+    try:
+        booking = await ImplementationService.create_booking(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(booking)
+    return (await ImplementationService.serialize_bookings(db, [booking]))[0]
+
+
+@router.delete("/{change_id}/implementation/bookings/{bid}", status_code=204)
+async def delete_implementation_booking(
+    change_id: int, bid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Remove a booking you entered. Corrections are delete-and-rebook rather
+    than an edit, so the changelog carries both halves of the fix."""
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    try:
+        booking = await ImplementationService.get_booking(db, change, bid)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_implementation_write(
+        db, change, booking.department_id, current_user)
+    # Membership is not enough: somebody else's hours are their statement
+    # about their day. PM and admins clean up regardless.
+    from app.services.meeting_service import MeetingService
+    if (booking.booked_by != current_user.id
+            and current_user.effective_role != "admin"
+            and not await MeetingService.user_is_pm_member(db, current_user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the person who booked that time (or Project "
+                   "Management) may remove it")
+    await ImplementationService.delete_booking(db, change, booking, current_user)
+    await db.commit()
+
+
+@router.get("/{change_id}/implementation/reports",
+            response_model=List[ImplementationReportResponse])
+async def list_implementation_reports(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    visible = await ImplementationService.readable_department_ids(
+        db, change, current_user)
+    rows = await ImplementationService.list_reports(db, change, visible)
+    return await ImplementationService.serialize_reports(db, rows)
+
+
+@router.post("/{change_id}/implementation/reports",
+             response_model=ImplementationReportResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_report(
+    change_id: int, body: ImplementationReportCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A progress report. at_risk=true without a risk_note is accepted — the
+    flag matters more than the paperwork behind it."""
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_implementation_write(
+        db, change, body.department_id, current_user)
+    try:
+        report = await ImplementationService.create_report(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(report)
+    return (await ImplementationService.serialize_reports(db, [report]))[0]
+
+
+@router.get("/{change_id}/implementation/escalations",
+            response_model=List[ImplementationEscalationResponse])
+async def list_implementation_escalations(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Not department-scoped: an escalation is a statement about the change."""
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    rows = await ImplementationService.list_escalations(db, change)
+    return await ImplementationService.serialize_escalations(db, rows)
+
+
+@router.post("/{change_id}/implementation/escalations",
+             response_model=ImplementationEscalationResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_escalation(
+    change_id: int, body: ImplementationEscalationCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_escalation_right(db, change, current_user)
+    try:
+        escalation = await ImplementationService.create_escalation(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(escalation)
+    return (await ImplementationService.serialize_escalations(db, [escalation]))[0]
+
+
+@router.put("/{change_id}/implementation/escalations/{eid}/resolve",
+            response_model=ImplementationEscalationResponse)
+async def resolve_implementation_escalation(
+    change_id: int, eid: int, body: ImplementationEscalationResolveIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_escalation_right(db, change, current_user)
+    try:
+        escalation = await ImplementationService.get_escalation(db, change, eid)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        escalation = await ImplementationService.resolve_escalation(
+            db, change, escalation, body.resolution_note, current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(escalation)
+    return (await ImplementationService.serialize_escalations(db, [escalation]))[0]
+
+
+# --- stage 9: validation checks ---------------------------------------------
+# Each implementing department fulfils its own checks; the rows are seeded from
+# the catalog the first time anybody looks. Reading is NOT department-scoped —
+# a validation verdict is a statement about the change, and the release meeting
+# argues over one picture — while writing follows the stage-8 rule with the
+# window moved to 'in_validation'.
+
+@router.get("/{change_id}/validation/state",
+            response_model=ValidationStateResponse)
+async def validation_state(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Per implementing department: its checks, their answers, and what still
+    blocks the release.
+
+    The cycle-time check carries the costing's lifecycle assumption
+    (planned_delta_seconds) so the measurement can be argued against the
+    number the change was priced on, and the weight check carries the estimate
+    and the delta for the same reason.
+
+    Seeds the catalog rows on first read: from then on the release guard has
+    something to hold the change to. Changes nobody ever opened this on keep
+    releasing exactly as before.
+    """
+    from app.services.validation_service import ValidationService
+    change = await _implementation_change(db, change_id, current_user)
+    state = await ValidationService.state(db, change)
+    await db.commit()
+    return state
+
+
+@router.post("/{change_id}/validation/checks",
+             response_model=ValidationCheckResponse,
+             status_code=status.HTTP_201_CREATED)
+async def record_validation_check(
+    change_id: int, body: ValidationCheckIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Tick (or fail) one of your department's validation checks.
+
+    Passing a measurement check without its number is refused: a cycle time
+    nobody wrote down cannot be compared to the lifecycle assumption, and a
+    weight nobody wrote down produces no delta for Sales to re-quote.
+    """
+    from app.services.validation_service import (
+        ValidationError as VError, ValidationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    if not await ValidationService.may_write(
+            db, change, body.department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "validation, Project Management or an admin may sign off "
+                   "its validation checks")
+    try:
+        row = await ValidationService.record_check(
+            db, change, body.model_dump(), current_user)
+    except VError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.post("/{change_id}/validation/weight-ack", response_model=ChangeResponse)
+async def acknowledge_weight_delta(
+    change_id: int, body: WeightDeltaAckIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales closes the loop the weight delta opened: the quote was updated,
+    or the difference was absorbed. Clears the 'update_quote' task."""
+    from app.services.validation_service import (
+        ValidationError as VError, ValidationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    if not await ValidationService.may_acknowledge_weight_delta(
+            db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may settle the "
+                   "weight delta against the quote")
+    try:
+        await ValidationService.acknowledge_weight_delta(
+            db, change, body.note, current_user)
+    except VError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return change

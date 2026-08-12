@@ -14,6 +14,7 @@ vi.mock('../../api/changes', () => ({
     addCostingOffer: vi.fn().mockResolvedValue({}),
     updateCostingOffer: vi.fn().mockResolvedValue({}),
     deleteCostingOffer: vi.fn().mockResolvedValue({}),
+    setWeightEstimate: vi.fn().mockResolvedValue({}),
     costingTags: vi.fn(),
     uploadAttachment: vi.fn().mockResolvedValue({}),
   },
@@ -59,6 +60,7 @@ describe('CostPositions', () => {
     vi.mocked(changesApi.updateCostPosition).mockClear()
     vi.mocked(changesApi.addCostingOffer).mockClear()
     vi.mocked(changesApi.updateCostingOffer).mockClear()
+    vi.mocked(changesApi.setWeightEstimate).mockClear()
   })
   afterEach(cleanup)
 
@@ -261,5 +263,107 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-tag-11').textContent).toBe(t('costtag.equipment_change'))
     expect(screen.getByTestId('costpos-kind-11').textContent)
       .toContain(t('costpos.kind.external'))
+  })
+})
+
+// The weight the part will come out at is Tooling's answer, and only theirs —
+// an estimate on purpose, written straight onto the change.
+describe('CostPositions — part weight', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+    vi.mocked(changesApi.setWeightEstimate).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('asks Tooling for the weight and nobody else', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable
+      departmentName="Tool Engineer" partWeightG={412} />)
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-weight-2') as HTMLInputElement).value,
+    ).toBe('412'))
+    // The label carries the caveat: it is a guess until somebody validates it.
+    expect(screen.getByTestId('costpos-effort-2').textContent)
+      .toContain(t('costpos.partWeightField'))
+  })
+
+  it('leaves the field out of another department’s block', async () => {
+    wrap(<CostPositions changeId={7} departmentId={3} editable
+      departmentName="Quality" partWeightG={412} />)
+    await screen.findByTestId('costpos-effort-3')
+    expect(screen.queryByTestId('costpos-weight-3')).toBeNull()
+    expect(screen.queryByTestId('costpos-weight-value-3')).toBeNull()
+  })
+
+  it('saves the estimate when the field is left', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable
+      departmentName="Tool Engineer" partWeightG={null} />)
+    const field = await screen.findByTestId('costpos-weight-2')
+    fireEvent.change(field, { target: { value: '412' } })
+    fireEvent.blur(field)
+    await waitFor(() => expect(changesApi.setWeightEstimate).toHaveBeenCalledWith(7, 412))
+  })
+
+  it('gives a reader the number and no input', async () => {
+    wrap(<CostPositions changeId={7} departmentId={2} editable={false}
+      departmentName="Tool Engineer" partWeightG={412} />)
+    await screen.findByTestId('costpos-weight-value-2')
+    expect(screen.getByTestId('costpos-weight-value-2').textContent).toBe('412')
+    expect(screen.queryByTestId('costpos-weight-2')).toBeNull()
+  })
+})
+
+// Sales decides which offer is bought; the department reads the outcome of
+// its own vote here, and cannot touch it.
+describe('CostPositions — vendor decision', () => {
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([external] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+  })
+  afterEach(cleanup)
+
+  // The engineer voted; Sales decided. The block says what happened to the vote
+  // without offering to change it — the decision is not theirs to make here.
+  it('shows Sales’ decision against the department’s recommendation, read-only', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external,
+      offers: [
+        { ...external.offers[0], favorite: true, chosen: false },
+        { ...external.offers[1], favorite: false, chosen: true,
+          chosen_reason: 'Liefertermin', chosen_by_name: 'Sara Sales',
+          chosen_at: '2026-08-01T10:00:00Z' },
+      ],
+    }] as never)
+    positions()
+    const line = await screen.findByTestId('costpos-chosen-11')
+    expect(line.textContent).toContain(t('vendor.salesChose'))
+    expect(line.textContent).toContain('Vendor B')
+    expect(line.textContent).toContain(t('vendor.againstRecommendation'))
+    expect(line.textContent).toContain('Liefertermin')
+    // Nothing to press: no choose control leaks into the department's block.
+    expect(screen.queryByTestId('vendor-choose-92')).toBeNull()
+    // The department's own figures still read off its favourite.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5200.00')
+  })
+
+  it('says nothing about a decision nobody has made', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    expect(screen.queryByTestId('costpos-chosen-11')).toBeNull()
+  })
+
+  it('marks agreement without the divergence wording', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external,
+      offers: [
+        { ...external.offers[0], favorite: true, chosen: true,
+          chosen_by_name: 'Sara Sales', chosen_at: '2026-08-01T10:00:00Z' },
+        { ...external.offers[1], favorite: false, chosen: false },
+      ],
+    }] as never)
+    positions()
+    const line = await screen.findByTestId('costpos-chosen-11')
+    expect(line.textContent).toContain('Vendor A')
+    expect(line.textContent).not.toContain(t('vendor.againstRecommendation'))
   })
 })

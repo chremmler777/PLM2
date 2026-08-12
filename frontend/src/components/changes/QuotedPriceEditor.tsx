@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
+import { t } from '../../i18n/cmLabels'
 import type { ChangeRequest } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -34,14 +35,32 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to save quoted price'),
   })
 
+  // What the negotiation ended on, next to what was offered — the two numbers
+  // only mean something side by side. Derived from the negotiation log, so it
+  // is stated, never edited here.
+  const negotiated = change.negotiated_final_price != null && (
+    <p data-testid="quoted-price-negotiated">
+      <span className="text-slate-400">{t('negotiation.finalPrice')}:</span>{' '}
+      <span className="tabular-nums text-emerald-200">
+        {change.negotiated_final_price.toFixed(2)}
+      </span>
+    </p>
+  )
+
   if (!editable) {
-    return <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+    return (
+      <>
+        <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+        {negotiated}
+      </>
+    )
   }
 
   const parsed = Number(value)
   const canSave = value.trim() !== '' && !Number.isNaN(parsed) && !save.isPending
 
   return (
+    <>
     <p className="flex items-center gap-2">
       <span className="text-slate-400">Quoted price:</span>
       <input type="number" step="0.01" value={value}
@@ -54,5 +73,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
         Save
       </button>
     </p>
+    {negotiated}
+    </>
   )
 }

@@ -68,7 +68,6 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.owner': { de: 'Verantwortlich', en: 'Owner' },
   'tasks.due': { de: 'Fällig', en: 'Due' },
   'tasks.overdue': { de: 'überfällig', en: 'overdue' },
-  'tasks.accept': { de: 'Übernehmen', en: 'Accept' },
   'tasks.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'tasks.mine': { de: 'Meine', en: 'Mine' },
   'tasks.changeWork': { de: 'Änderungsaufgaben', en: 'Change tasks' },
@@ -432,6 +431,35 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Offene Risiken der Bewertung 3 — im Angebot benennen, nicht einpreisen.',
     en: 'Open rating-3 risks — state them in the offer, do not price them in.',
   },
+  // The negotiation log at `quoted`: every round that moved the price, and the
+  // one entry that ended it. The go-ahead itself stays where it always was —
+  // customer acceptance, with its release deadline.
+  'negotiation.title': { de: 'Verhandlung', en: 'Negotiation' },
+  'negotiation.hint': {
+    de: 'Jede Verhandlungsrunde mit Kanal, Ergebnis und ggf. Gegenpreis festhalten.',
+    en: 'Record each round with its channel, what came out of it, and any counter price.',
+  },
+  'negotiation.none': { de: 'Noch keine Verhandlungsrunde erfasst.', en: 'No negotiation round recorded yet.' },
+  'negotiation.add': { de: 'Runde erfassen', en: 'Record round' },
+  'negotiation.channel': { de: 'Kanal', en: 'Channel' },
+  'negotiation.channel.meeting': { de: 'Termin', en: 'Meeting' },
+  'negotiation.channel.call': { de: 'Telefonat', en: 'Call' },
+  'negotiation.channel.email': { de: 'E-Mail', en: 'Email' },
+  'negotiation.note': { de: 'Ergebnis der Runde', en: 'What came out of the round' },
+  'negotiation.notePlaceholder': {
+    de: 'Was wurde besprochen, worauf hat der Kunde bestanden?',
+    en: 'What was discussed, what did the customer insist on?',
+  },
+  'negotiation.counterPrice': { de: 'Gegenpreis', en: 'Counter price' },
+  'negotiation.isFinal': { de: 'Das ist das Endergebnis', en: 'This is the final result' },
+  'negotiation.final': { de: 'Endergebnis', en: 'Final result' },
+  'negotiation.finalPrice': { de: 'Verhandelter Endpreis', en: 'Negotiated final price' },
+  'negotiation.submit': { de: 'Runde speichern', en: 'Save round' },
+  'negotiation.delete': { de: 'Löschen', en: 'Delete' },
+  'negotiation.goAheadHint': {
+    de: 'Freigabe über die Kundenannahme erfassen — Freigabetermin erforderlich.',
+    en: 'Record the go-ahead via customer acceptance — release deadline required.',
+  },
   'summation.timeBasis': { de: 'Zeitbasis für das Angebot', en: 'Time basis for the quote' },
   'summation.perPart': { de: 'pro Teil', en: 'per part' },
   'costing.leadTime': { de: 'Vorlaufzeit (Tage)', en: 'Lead time (days)' },
@@ -489,6 +517,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.supportEffortField': {
     de: 'Support Umsetzung — geschätzt (h)',
     en: 'Implementation support — estimated (h)',
+  },
+  // The Tool Engineer's other standing answer during costing: what the part
+  // will weigh. A quote, not a measurement — the real figure comes later.
+  'costpos.partWeightField': {
+    de: 'Teilegewicht (g) — Schätzung, wird validiert',
+    en: 'Part weight (g) — estimate, validated later',
+  },
+  'costpos.partWeightSaved': {
+    de: 'Gewichtsschätzung gespeichert',
+    en: 'Weight estimate saved',
   },
   'costpos.externalTitle': { de: 'Externe Positionen', en: 'External positions' },
   'costpos.addExternal': { de: '+ Externe Position', en: '+ External position' },
@@ -555,6 +593,14 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'summation.days': { de: 'Tage', en: 'days' },
   'summation.earliestDone': { de: 'Frühestens fertig', en: 'Earliest completion' },
   'summation.pastDeadline': { de: 'nach Termin', en: 'past the deadline' },
+  // The Tool Engineer's weight quote, as Sales reads it in the wrap-up. It says
+  // "estimate" until somebody has validated the figure against a real part.
+  'summation.partWeight': { de: 'Teilegewicht', en: 'Part weight' },
+  'summation.partWeightEstimate': {
+    de: 'Teilegewicht (Schätzung)',
+    en: 'Part weight (estimate)',
+  },
+  'summation.grams': { de: 'g', en: 'g' },
   'tasks.kind.costing_input': { de: 'Kosten erfassen', en: 'Enter costs' },
   'tasks.kind.create_quote': { de: 'Angebot erstellen', en: 'Create quote' },
   'tasks.hint.create_quote': {
@@ -947,5 +993,333 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'stepper.hint.in_validation': { de: 'Ergebnisse werden geprüft', en: 'Checking results' },
   'stepper.hint.released': { de: 'Änderung ist live', en: 'Change is live' },
   'stepper.hint.closed': { de: 'Abgeschlossen', en: 'Wrapped up' },
+
+  // Stage 7 — how the approved change reaches the line, and telling the customer.
+  'bankbuild.title': { de: 'Bankbau-Plan', en: 'Bank build plan' },
+  'bankbuild.intro': {
+    de: 'Wie kommt die Änderung in die Serie? Die Terminplanung entscheidet, '
+      + 'der Vertrieb veröffentlicht den Plan beim Kunden.',
+    en: 'How does the change reach the line? Scheduling decides, Sales publishes '
+      + 'the plan to the customer.',
+  },
+  'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
+  'bankbuild.mode.running_change.hint': {
+    de: 'Umstellung in der laufenden Produktion — kein Ausschuss geplant.',
+    en: 'Switch over in running production — no scrap planned.',
+  },
+  'bankbuild.mode.planned_scrap': { de: 'Geplanter Ausschuss', en: 'Planned scrap' },
+  'bankbuild.mode.planned_scrap.hint': {
+    de: 'Restbestand wird verschrottet und neu aufgebaut.',
+    en: 'Remaining stock is scrapped and the bank is rebuilt.',
+  },
+  'bankbuild.scrapPrice': { de: 'Ausschuss-Angebotspreis', en: 'Scrap quote price' },
+  'bankbuild.scrapPriceHint': {
+    de: 'Die Ausschusskosten trägt der Kunde — als zusätzliches Angebot.',
+    en: 'The customer bears the scrap cost — as an additional quote.',
+  },
+  'bankbuild.needPrice': {
+    de: 'Bei geplantem Ausschuss ist ein Angebotspreis erforderlich',
+    en: 'Planned scrap needs a scrap quote price',
+  },
+  'bankbuild.note': { de: 'Plan-Notiz', en: 'Plan note' },
+  'bankbuild.notePlaceholder': {
+    de: 'Umstellungstermin, Reichweite, Werke …',
+    en: 'Cut-over date, coverage, plants …',
+  },
+  'bankbuild.noMode': {
+    de: 'Noch keine Umstellungsart festgelegt',
+    en: 'No bank-build mode decided yet',
+  },
+  'bankbuild.setBy': { de: 'Festgelegt von {x} am {d}', en: 'Set by {x} on {d}' },
+  'bankbuild.unpublished': {
+    de: 'Noch nicht an den Kunden veröffentlicht',
+    en: 'Not yet published to the customer',
+  },
+  'bankbuild.published': {
+    de: 'Veröffentlicht von {x} am {d}',
+    en: 'Published by {x} on {d}',
+  },
+  'bankbuild.publish': {
+    de: 'Plan an Kunden veröffentlichen',
+    en: 'Publish plan to the customer',
+  },
+  'bankbuild.publishNeedsMode': {
+    de: 'Erst muss die Terminplanung die Umstellungsart festlegen',
+    en: 'Scheduling has to decide the mode first',
+  },
+  'bankbuild.readOnly': {
+    de: 'Nur Terminplanung, PM, Lead oder Admin können den Plan festlegen.',
+    en: 'Only Scheduling, PM, the change lead or an admin can set the plan.',
+  },
+  'tasks.kind.bank_build': { de: 'Bankbau festlegen', en: 'Decide bank build' },
+  'tasks.hint.bank_build': {
+    de: 'Fließende Änderung oder geplanter Ausschuss — und den Plan skizzieren',
+    en: 'Running change or planned scrap — and outline the plan',
+  },
+  'tasks.kind.publish_plan': { de: 'Plan veröffentlichen', en: 'Publish plan' },
+  'tasks.hint.publish_plan': {
+    de: 'Bankbau-Plan an den Kunden veröffentlichen',
+    en: 'Publish the bank-build plan to the customer',
+  },
+  'wait.onBankBuild': {
+    de: 'Wartet auf Terminplanung — Bankbau-Entscheidung offen',
+    en: 'Scheduling: bank-build decision pending',
+  },
+  'wait.onPlanPublish': {
+    de: 'Wartet auf Vertrieb — Plan noch nicht an den Kunden veröffentlicht',
+    en: 'Sales: plan not yet published to the customer',
+  },
+
+  // Stage 8 — how the work is going while it is being done.
+  'impl2.title': { de: 'Umsetzungsstand', en: 'Implementation tracking' },
+  'impl2.intro': {
+    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat — und was davon '
+      + 'eskaliert werden muss.',
+    en: 'What each department has booked and last reported — and what of it has '
+      + 'to be escalated.',
+  },
+  'impl2.none': {
+    de: 'Noch kein Fachbereich in der Umsetzung.',
+    en: 'No department is implementing yet.',
+  },
+  'impl2.others': {
+    de: '{n} weitere Fachbereiche setzen ihren Teil um.',
+    en: '{n} other departments are implementing their part.',
+  },
+  'impl2.readOnly': {
+    de: 'Nur während der Umsetzung änderbar.',
+    en: 'Editable only while the change is being implemented.',
+  },
+  'impl2.vendorLeadTimes': { de: 'Lieferzeiten', en: 'Vendor lead times' },
+
+  // Booked time
+  'impl2.booked': { de: 'Gebuchte Zeit', en: 'Booked time' },
+  'impl2.bookedHours': { de: '{n} h gebucht', en: '{n} h booked' },
+  'impl2.noBookings': { de: 'Noch nichts gebucht.', en: 'Nothing booked yet.' },
+  'impl2.hours': { de: 'Stunden', en: 'Hours' },
+  'impl2.bookingNote': { de: 'Wofür?', en: 'What for?' },
+  'impl2.addBooking': { de: 'Zeit buchen', en: 'Book time' },
+  'impl2.deleteBooking': { de: 'Löschen', en: 'Delete' },
+
+  // Progress reports and their cadence
+  'impl2.reports': { de: 'Fortschrittsmeldungen', en: 'Progress reports' },
+  'impl2.noReports': { de: 'Noch keine Meldung.', en: 'No report yet.' },
+  'impl2.reported': { de: 'gemeldet', en: 'reported' },
+  'impl2.reportDue': { de: 'Meldung fällig', en: 'report due' },
+  'impl2.lastReport': { de: 'Zuletzt gemeldet am {d}', en: 'Last reported on {d}' },
+  'impl2.reportNote': { de: 'Was ist passiert?', en: 'What happened?' },
+  'impl2.addReport': { de: 'Melden', en: 'Report' },
+  'impl2.atRisk': { de: 'Gefährdet', en: 'At risk' },
+  'impl2.atRiskToggle': {
+    de: 'Umsetzung ist gefährdet',
+    en: 'This is at risk',
+  },
+  'impl2.riskNote': { de: 'Was ist gefährdet?', en: 'What is at risk?' },
+  'impl2.riskNoteRequired': {
+    de: 'Eine gefährdete Meldung braucht eine Begründung.',
+    en: 'An at-risk report needs a reason.',
+  },
+
+  // Escalations
+  'impl2.escalations': { de: 'Eskalationen', en: 'Escalations' },
+  'impl2.noEscalations': { de: 'Keine Eskalation.', en: 'No escalation.' },
+  'impl2.escalationsChange': {
+    de: 'Eskalationen ohne Fachbereich',
+    en: 'Escalations not tied to a department',
+  },
+  'impl2.direction.customer': { de: 'Kunde', en: 'Customer' },
+  'impl2.direction.internal': { de: 'Intern', en: 'Internal' },
+  'impl2.escalationNote': { de: 'Was wird eskaliert?', en: 'What is being escalated?' },
+  'impl2.addEscalation': { de: 'Eskalieren', en: 'Escalate' },
+  'impl2.escalationOpen': { de: 'offen', en: 'open' },
+  'impl2.escalationResolved': { de: 'Erledigt am {d}', en: 'Resolved on {d}' },
+  'impl2.resolve': { de: 'Erledigt melden', en: 'Mark resolved' },
+  'impl2.resolutionNote': { de: 'Wie wurde es gelöst?', en: 'How was it settled?' },
+  'impl2.escalationHint': {
+    de: 'Gefährdung gemeldet — an den Kunden oder intern eskalieren.',
+    en: 'At-risk flagged — escalate to the customer or internally.',
+  },
+
+  // My-tasks rows
+  'tasks.kind.progress_report': { de: 'Fortschritt melden', en: 'Report progress' },
+  'tasks.hint.progress_report': {
+    de: 'Stand der Umsetzung melden — und Gefährdungen benennen',
+    en: 'Report where the work stands — and name anything at risk',
+  },
+  'tasks.kind.escalate_risk': { de: 'Gefährdung eskalieren', en: 'Escalate risk' },
+  'tasks.hint.escalate_risk': {
+    de: 'Gemeldete Gefährdung an den Kunden oder intern eskalieren',
+    en: 'Take a flagged risk to the customer or internally',
+  },
+
+  // Waits
+  'wait.onProgressReports': {
+    de: '{n} Fachbereiche schulden eine Fortschrittsmeldung',
+    en: '{n} departments owe a progress report',
+  },
+  'wait.onRiskEscalation': {
+    de: 'Gefährdung gemeldet — Eskalation durch den Vertrieb offen',
+    en: 'At-risk flagged — Sales escalation pending',
+  },
+
+  // ── Stage 9: validation ───────────────────────────────────────────────────
+  'validation.title': { de: 'Validierung', en: 'Validation' },
+  'validation.intro': {
+    de: 'Jeder umsetzende Fachbereich bestätigt seine Prüfpunkte. '
+      + 'Gemessene Werte werden gegen die Annahmen aus der Kalkulation gehalten.',
+    en: 'Every implementing department confirms its checks. Measured values are '
+      + 'held against the assumptions costing was built on.',
+  },
+  'validation.none': {
+    de: 'Noch keine Prüfpunkte — die Validierung beginnt mit dem Statuswechsel.',
+    en: 'No checks yet — validation starts when the change reaches this stage.',
+  },
+  'validation.readOnly': {
+    de: 'Abgeschlossen — die Prüfpunkte sind hier nur noch das Protokoll.',
+    en: 'Closed — the checks below are the record, not a form.',
+  },
+  'validation.others': {
+    de: '{n} weitere Fachbereiche validieren ebenfalls.',
+    en: '{n} further departments are validating too.',
+  },
+
+  // The five checks, and the one that needs saying out loud.
+  'validation.check.sampled': { de: 'Bemusterung erfolgt', en: 'Sampling done' },
+  'validation.check.measured': { de: 'Vermessung erfolgt', en: 'Measurement done' },
+  'validation.check.cycle_time': { de: 'Taktzeit geprüft', en: 'Cycle time checked' },
+  'validation.check.weight': { de: 'Gewicht geprüft', en: 'Weight checked' },
+  'validation.check.revision_bump': { de: 'Indexstände angehoben', en: 'Revision levels raised' },
+  'validation.hint.revision_bump': {
+    de: 'Indexstände gemäß Kundenaussage angehoben und geprüft',
+    en: 'Revision levels raised per customer statement and verified',
+  },
+
+  'validation.pass': { de: 'Bestanden', en: 'Pass' },
+  'validation.fail': { de: 'Nicht bestanden', en: 'Fail' },
+  'validation.status.open': { de: 'offen', en: 'open' },
+  'validation.status.passed': { de: 'bestanden', en: 'passed' },
+  'validation.status.failed': { de: 'nicht bestanden', en: 'failed' },
+  'validation.note': { de: 'Bemerkung', en: 'Note' },
+  'validation.failNote': { de: 'Was ist nicht in Ordnung?', en: 'What is not in order?' },
+  'validation.failNoteRequired': {
+    de: 'Ein „nicht bestanden“ ohne Begründung ist keine Prüfung.',
+    en: 'A fail without a reason is not a check.',
+  },
+  'validation.checkedBy': { de: '{who} · {d}', en: '{who} · {d}' },
+
+  // The two checks that carry a number, next to what was planned.
+  'validation.cycleValue': { de: 'Gemessene Taktzeit (s)', en: 'Measured cycle time (s)' },
+  'validation.cycleAssumption': {
+    de: 'kalkuliert: {x} min/Teil',
+    en: 'planned {x} min/part',
+  },
+  'validation.cycleNoAssumption': {
+    de: 'keine Taktzeit kalkuliert',
+    en: 'no cycle time in the costing',
+  },
+  'validation.weightValue': { de: 'Gemessenes Gewicht (g)', en: 'Measured weight (g)' },
+  'validation.weightEstimate': { de: 'geschätzt: {x} g', en: 'estimated {x} g' },
+  'validation.weightNoEstimate': { de: 'keine Schätzung', en: 'no estimate' },
+  'validation.weightDelta': { de: 'Abweichung {x} g', en: 'Delta {x} g' },
+
+  // The commercial consequence of a weight that moved.
+  'validation.quoteUpdate': {
+    de: 'Angebot nachziehen — das Gewicht war geschätzt, Abweichung {x} g',
+    en: 'Quote update required — weight was estimated, delta {x} g',
+  },
+  'validation.acknowledge': { de: 'Zur Kenntnis genommen', en: 'Acknowledge' },
+  'validation.ackNote': { de: 'Bemerkung (optional)', en: 'Note (optional)' },
+  'validation.acked': {
+    de: 'Vom Vertrieb übernommen: {who} · {d}',
+    en: 'Taken into the quote by {who} · {d}',
+  },
+
+  // Going back a stage, in professional words.
+  'validation.escalate': {
+    de: 'Prüfpunkte nicht bestanden — zurück in die Umsetzung',
+    en: 'Checks not passed — escalate',
+  },
+  'validation.escalateTitle': {
+    de: 'Zurück in die Umsetzung',
+    en: 'Return the change to implementation',
+  },
+  'validation.escalateLabel': {
+    de: 'Begründung — was ist nicht bestanden und was folgt daraus?',
+    en: 'Reason — what did not pass, and what follows from it?',
+  },
+  'validation.escalateWarning': {
+    de: 'Die Änderung geht in die Umsetzung zurück. Termine sind neu zu planen '
+      + 'und die kommerziellen Konditionen gegebenenfalls nachzuverhandeln.',
+    en: 'The change returns to implementation. Timing has to be replanned and '
+      + 'the commercial terms renegotiated where affected.',
+  },
+  'validation.escalateSubmit': { de: 'Zurückgeben', en: 'Return to implementation' },
+
+  // ── Actuals on the P&L card ───────────────────────────────────────────────
+  'actuals.title': { de: 'Ist-Kosten', en: 'Actuals' },
+  'actuals.intro': {
+    de: 'Gebuchte Zeit zum Kostensatz, plus was der Plan nicht getragen hat.',
+    en: 'Booked time at rate, plus what the plan did not carry.',
+  },
+  'actuals.department': { de: 'Fachbereich', en: 'Department' },
+  'actuals.hours': { de: 'Stunden', en: 'Hours' },
+  'actuals.actual': { de: 'Ist', en: 'Actual' },
+  'actuals.plan': { de: 'Plan', en: 'Plan' },
+  'actuals.delta': { de: 'Abweichung', en: 'Delta' },
+  'actuals.unrated': { de: 'ohne Kostensatz', en: 'no rate' },
+  'actuals.unratedHint': {
+    de: 'Für mindestens einen Fachbereich fehlt der Kostensatz — die Summe ist eine Untergrenze.',
+    en: 'At least one department has no rate — the total is a floor, not the figure.',
+  },
+  'actuals.extras': { de: 'Zusatzkosten', en: 'Extra costs' },
+  'actuals.extra.scrap_quote': { de: 'Verschrottung (Angebot)', en: 'Scrap quote' },
+  'actuals.extra.weight_delta': { de: 'Gewichtsabweichung', en: 'Weight delta' },
+  'actuals.total': { de: 'Ist gesamt', en: 'Actual total' },
+
+  // My-tasks rows, stage 9
+  'tasks.kind.validation_check': { de: 'Validierung bestätigen', en: 'Confirm validation' },
+  'tasks.hint.validation_check': {
+    de: 'Offene Prüfpunkte des Fachbereichs bestätigen — Messwerte eintragen',
+    en: 'Confirm your department’s open checks — enter the measured values',
+  },
+  'tasks.kind.update_quote': { de: 'Angebot nachziehen', en: 'Update the quote' },
+  'tasks.hint.update_quote': {
+    de: 'Das validierte Gewicht weicht von der Schätzung ab — Angebot nachziehen',
+    en: 'The validated weight differs from the estimate — bring the quote in line',
+  },
+
+  // Waits, stage 9
+  'wait.onValidationChecks': {
+    de: 'Prüfpunkte offen ({n} Fachbereiche)',
+    en: 'validation checks open ({n} departments)',
+  },
+  'wait.onWeightAck': {
+    de: 'Gewichtsabweichung nicht bestätigt — Vertrieb',
+    en: 'weight delta unacknowledged — Sales',
+  },
+
+  // Vendor decision, stage 5. The department's favourite is a recommendation;
+  // Sales decides and answers for it, and both stay readable side by side.
+  'vendor.decision': { de: 'Lieferantenentscheidung', en: 'Vendor decision' },
+  'vendor.decisionHint': {
+    de: 'Die Empfehlung des Fachbereichs ist nicht bindend — der Vertrieb entscheidet und verantwortet.',
+    en: 'The department’s recommendation is not binding — Sales decides and is accountable.',
+  },
+  'vendor.recommended': { de: 'Empfehlung', en: 'Recommended' },
+  'vendor.chosen': { de: 'Gewählt', en: 'Chosen' },
+  'vendor.choose': { de: 'Wählen', en: 'Choose' },
+  'vendor.rechoose': { de: 'Ändern', en: 'Change' },
+  'vendor.reasonLabel': {
+    de: 'Begründung — Entscheidung gegen die Empfehlung',
+    en: 'Reason — deciding against the recommendation',
+  },
+  'vendor.againstRecommendation': { de: 'gegen Empfehlung', en: 'against recommendation' },
+  'vendor.salesChose': { de: 'Vertrieb wählte', en: 'Sales chose' },
+  'vendor.confirm': { de: 'Bestätigen', en: 'Confirm' },
+  'vendor.cancel': { de: 'Abbrechen', en: 'Cancel' },
+  'vendor.noRecommendation': {
+    de: 'Keine Empfehlung des Fachbereichs',
+    en: 'No department recommendation',
+  },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

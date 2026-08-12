@@ -1,7 +1,7 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
 
@@ -54,6 +54,13 @@ class TransitionRequest(BaseModel):
     cancellation_reason: Optional[str] = None
     rejection_reason: Optional[str] = None
     reopen_reason: Optional[str] = None
+    # The generic one, for hops whose reason has no dedicated field. Currently
+    # mandatory for exactly one: in_validation -> in_implementation, where it
+    # says what failed validation and what has to be replanned or renegotiated
+    # (recorded as 'validation_escalated'). escalation_reason is accepted as
+    # its alias so an older client keeps working.
+    reason: Optional[str] = None
+    escalation_reason: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):
@@ -254,6 +261,38 @@ class ChangeResponse(BaseModel):
     impact_confirmed_by: Optional[int] = None
     impact_confirmed_by_name: Optional[str] = None
     impact_confirmed_at: Optional[datetime] = None
+    # The part weight, quoted at costing and weighed at validation. Both halves
+    # ride on every change response: the estimate is what Sales priced, the
+    # validated number is what the tool actually makes, and the delta between
+    # them is a quote update.
+    estimated_part_weight_g: Optional[float] = None
+    estimated_weight_by: Optional[int] = None
+    estimated_weight_by_name: Optional[str] = None
+    estimated_weight_at: Optional[datetime] = None
+    validated_part_weight_g: Optional[float] = None
+    validated_weight_by: Optional[int] = None
+    validated_weight_by_name: Optional[str] = None
+    validated_weight_at: Optional[datetime] = None
+    # The commercial answer to a validated weight that missed the estimate:
+    # the quote was updated, or the delta was absorbed. Null while the
+    # question is still open.
+    weight_delta_ack_at: Optional[datetime] = None
+    weight_delta_ack_by: Optional[int] = None
+    weight_delta_ack_note: Optional[str] = None
+    # The scheduling block: how the changeover runs (running change vs planned
+    # scrap), what the scrap costs the customer, and whether Sales has put the
+    # plan in front of them yet. The frontend derives its wait states from the
+    # gaps here — mode unset means Scheduling still owes a decision, an
+    # unpublished mode means Sales still owes the customer the plan.
+    bank_build_mode: Optional[str] = None
+    bank_build_note: Optional[str] = None
+    scrap_quote_price: Optional[float] = None
+    bank_build_set_by: Optional[int] = None
+    bank_build_set_by_name: Optional[str] = None
+    bank_build_set_at: Optional[datetime] = None
+    plan_published_by: Optional[int] = None
+    plan_published_by_name: Optional[str] = None
+    plan_published_at: Optional[datetime] = None
     internal_approved_by: Optional[int] = None
     internal_approved_at: Optional[datetime] = None
     internal_approved_amount: Optional[float] = None
@@ -285,10 +324,15 @@ class ChangeResponse(BaseModel):
             row["affected_plant_ids"] = plant_ids
             row["lead_name"] = data.lead_name
             row["impact_confirmed_by_name"] = data.impact_confirmed_by_name
+            row["estimated_weight_by_name"] = data.estimated_weight_by_name
+            row["validated_weight_by_name"] = data.validated_weight_by_name
+            row["bank_build_set_by_name"] = data.bank_build_set_by_name
+            row["plan_published_by_name"] = data.plan_published_by_name
             # Model properties (not in __dict__) must be injected explicitly.
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
+            row["negotiated_final_price"] = data.negotiated_final_price
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
             return row
@@ -302,6 +346,10 @@ class ChangeDetailResponse(ChangeResponse):
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []
+    # Read-through from the final negotiation round (see
+    # ChangeRequest.negotiated_final_price) — the number Sales' go-ahead is
+    # based on when it is not the quoted one. No column behind it.
+    negotiated_final_price: Optional[float] = None
 
 
 class RoutingDepartment(BaseModel):
@@ -389,6 +437,42 @@ class CostLineResponse(BaseModel):
         from_attributes = True
 
 
+class ActualsDeptRow(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    booked_hours: float
+    # The rate the hours were valued at, and null when the plant has none for
+    # this department — in which case actual_cost is a floor, not a total.
+    hourly_rate: Optional[float] = None
+    actual_cost: float
+    plan_cost: float
+    variance: float
+    unrated: bool
+
+
+class ActualsExtra(BaseModel):
+    # scrap_quote | weight_delta
+    key: str
+    label: Optional[str] = None
+    # Null where the cost is real but not yet a number anybody may state — the
+    # weight delta is a negotiation, not arithmetic.
+    amount: Optional[float] = None
+    delta_g: Optional[float] = None
+    acknowledged: Optional[bool] = None
+
+
+class ActualsBlock(BaseModel):
+    departments: List[ActualsDeptRow] = []
+    extras: List[ActualsExtra] = []
+    total_actual: float = 0.0
+    total_plan: float = 0.0
+    total_booked_hours: float = 0.0
+    total_extras: float = 0.0
+    unrated_hours: bool = False
+    rate_plant_id: Optional[int] = None
+    variance: float = 0.0
+
+
 class PlantRollup(BaseModel):
     plant_id: int
     one_time_internal: float
@@ -440,6 +524,22 @@ class PlantMinutesRollup(BaseModel):
     minutes_per_part: float
 
 
+class PositionVendorDetail(BaseModel):
+    """One position's vendor story: what the department recommended, what
+    Sales chose, and why when the two differ. `cost` is what the summation
+    counted — the chosen offer once there is one."""
+    position_id: int
+    label: str
+    kind: str
+    cost: float = 0.0
+    recommended_vendor: Optional[str] = None
+    recommended_cost: Optional[float] = None
+    chosen_vendor: Optional[str] = None
+    chosen_cost: Optional[float] = None
+    chosen_reason: Optional[str] = None
+    choice_diverges: bool = False
+
+
 class PositionRollup(BaseModel):
     """The position half of a department's costs. Already inside
     by_department and totals; broken out so "how much of this is supplier
@@ -454,6 +554,9 @@ class PositionRollup(BaseModel):
     # Hours were declared but no rate is configured for this department at the
     # costing plant, so they are valued at zero. Flagged rather than guessed.
     unrated_hours: bool = False
+    # Per position, so the wrap-up can name the vendor decisions rather than
+    # only their sum.
+    positions: List[PositionVendorDetail] = []
 
 
 class SummationResponse(BaseModel):
@@ -473,6 +576,16 @@ class SummationResponse(BaseModel):
     positions_by_department: List[PositionRollup] = []
     total_position_cost: float = 0.0
     total_position_hours_cost: float = 0.0
+    # Not money, but it belongs to the same wrap-up: Sales prices the weight
+    # change into the quote off this number, and looking it up on a different
+    # screen than the costs is how it gets forgotten. Grams; None until the
+    # Tooling Engineer states it.
+    part_weight_estimate_g: Optional[float] = None
+    # Stage 9: what the change ACTUALLY cost, next to the plan above. Booked
+    # implementation hours × the departments' current rates, plus the costs
+    # that are not hours. Additive — a caller that only wants the plan reads
+    # exactly what it always read.
+    actuals: Optional[ActualsBlock] = None
 
 
 # --- costing positions ------------------------------------------------------
@@ -525,12 +638,27 @@ class CostingOfferResponse(BaseModel):
     # The same promise on the calendar, for comparing offers quoted in
     # different units (business days scale by 7/5, rounded up).
     lead_time_calendar_days: Optional[int] = None
+    # The DEPARTMENT's recommendation.
     favorite: bool = False
     # cost plus shipping, unless the vendor already included it.
     total_cost: float = 0.0
+    # SALES' decision, with the accountability on it. chosen_reason is
+    # mandatory (enforced in the service) only when the decision goes against
+    # the recommendation above.
+    chosen: bool = False
+    chosen_reason: Optional[str] = None
+    chosen_by: Optional[int] = None
+    chosen_by_name: Optional[str] = None
+    chosen_at: Optional[datetime] = None
     created_by: int
     created_at: datetime
     attachments: List[CostingOfferAttachment] = []
+
+
+class VendorChoiceIn(BaseModel):
+    # Required when the chosen offer is not the department's favorite —
+    # refused with 400 naming the accountability. Optional when it agrees.
+    reason: Optional[str] = None
 
 
 class CostingPositionCreate(BaseModel):
@@ -588,6 +716,22 @@ class CostingPositionResponse(BaseModel):
     effective_lead_time_unit: str = "calendar_days"
     effective_lead_time_calendar_days: Optional[int] = None
     favorite_offer_id: Optional[int] = None
+    # Both sides of the vendor decision, flattened onto the position so a
+    # wrap-up line reads "recommended: A · chosen: B (reason)" with no joins.
+    recommended_vendor: Optional[str] = None
+    recommended_cost: Optional[float] = None
+    chosen_offer_id: Optional[int] = None
+    chosen_vendor: Optional[str] = None
+    chosen_cost: Optional[float] = None
+    chosen_reason: Optional[str] = None
+    chosen_by_name: Optional[str] = None
+    chosen_at: Optional[datetime] = None
+    # True when Sales went against the department's recommendation.
+    choice_diverges: bool = False
+    # The money in the OFFER: the chosen vendor's price once Sales has
+    # decided, effective_cost (the department's own number) until then. The
+    # summation totals this one.
+    quoted_cost: Optional[float] = None
     offers: List[CostingOfferResponse] = []
 
 
@@ -627,6 +771,31 @@ class MeetingUpdate(BaseModel):
     selected_department_ids: Optional[List[int]] = None
 
 
+class NegotiationCreate(BaseModel):
+    channel: str = "call"  # meeting | call | email
+    # The round's result — the whole point of the record.
+    note: str = Field(min_length=1)
+    # The customer's counter, when they named one. Not every round has a
+    # number in it.
+    counter_price: Optional[float] = Field(default=None, ge=0)
+    is_final: bool = False
+
+
+class NegotiationResponse(BaseModel):
+    id: int
+    change_id: int
+    channel: str
+    note: str
+    counter_price: Optional[float] = None
+    is_final: bool = False
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class ConcernCreate(BaseModel):
     # Direct raises are risks only; reject_proposal/needs_info are written by
     # the scoping decision that produced them.
@@ -643,6 +812,42 @@ class ConcernCreate(BaseModel):
 class CostLeadTimeIn(BaseModel):
     department_id: int
     lead_time_days: int = Field(ge=0)
+
+
+class WeightEstimateIn(BaseModel):
+    # Grams, strictly positive: a part that weighs nothing is a typo, and the
+    # validation delta computed against a zero would be meaningless. null is
+    # the erase — the estimate was wrong and there is no replacement yet, which
+    # is a different statement from "0 g" and must not be storable as one.
+    weight_g: Optional[float] = None
+
+    @field_validator("weight_g")
+    @classmethod
+    def _positive_or_absent(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Part weight must be greater than zero")
+        return v
+
+
+class BankBuildIn(BaseModel):
+    # running_change | planned_scrap (BANK_BUILD_MODES). Validated in the
+    # service against the model's tuple so the vocabulary has one home.
+    mode: str
+    # The plan itself, or the reference to wherever it was built. Optional:
+    # the decision is the thing that unblocks Sales, and a scheduler who has
+    # decided but not yet written the summary should be able to say so.
+    note: Optional[str] = None
+    # Mandatory for planned_scrap and refused for running_change — the service
+    # states the rule (the customer bears the scrap cost). Strictly positive:
+    # a scrap quote of zero is not a quote.
+    scrap_quote_price: Optional[float] = None
+
+    @field_validator("scrap_quote_price")
+    @classmethod
+    def _positive_or_absent(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Scrap quote price must be greater than zero")
+        return v
 
 
 class ConcernAnswerIn(BaseModel):
@@ -733,6 +938,210 @@ class TransitionDeviationResponse(BaseModel):
     decided_by: Optional[int] = None
     decided_at: Optional[datetime] = None
     decision_note: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# --- stage 8: implementation tracking ---------------------------------------
+
+class ImplementationBookingCreate(BaseModel):
+    department_id: int
+    # Strictly positive: a zero booking says nothing and a negative one is a
+    # correction, which is DELETE plus a fresh booking.
+    hours: float = Field(gt=0)
+    note: Optional[str] = None
+
+
+class ImplementationBookingResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    hours: float
+    note: Optional[str] = None
+    # The stored columns. Kept in the payload because "booked" is what the
+    # act is called on the shop floor.
+    booked_by: int
+    booked_at: datetime
+    # The same two facts under the naming every other change child uses, plus
+    # the author's name so a list renders without a user lookup.
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationReportCreate(BaseModel):
+    department_id: int
+    note: str = Field(min_length=1)
+    at_risk: bool = False
+    # Recommended when at_risk is true, never required: demanding a written
+    # justification before a department may raise its hand is how at-risk
+    # flags stop being raised.
+    risk_note: Optional[str] = None
+
+
+class ImplementationReportResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    note: str
+    at_risk: bool
+    risk_note: Optional[str] = None
+    reported_by: int
+    reported_by_name: Optional[str] = None
+    reported_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationEscalationCreate(BaseModel):
+    # customer | internal (ESCALATION_DIRECTIONS). Validated in the service
+    # against the model's tuple so the vocabulary has one home.
+    direction: str
+    note: str = Field(min_length=1)
+    # The flagged report this answers, when there is one.
+    report_id: Optional[int] = None
+
+
+class ImplementationEscalationResolveIn(BaseModel):
+    resolution_note: str = Field(min_length=1)
+
+
+class ImplementationEscalationResponse(BaseModel):
+    id: int
+    change_id: int
+    report_id: Optional[int] = None
+    direction: str
+    note: str
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[int] = None
+    resolved_by_name: Optional[str] = None
+    resolution_note: Optional[str] = None
+    is_open: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationDepartmentState(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    booked_hours: float
+    report_count: int
+    last_report_at: Optional[datetime] = None
+    at_risk_open: bool
+    owes_report: bool
+
+
+class ImplementationStateResponse(BaseModel):
+    change_id: int
+    status: str
+    cadence_hours: int
+    departments: List[ImplementationDepartmentState]
+    total_booked_hours: float
+    open_escalations: int
+
+
+# --- stage 9: validation checks ---------------------------------------------
+
+class ValidationCheckIn(BaseModel):
+    department_id: int
+    # A key from the department's catalog (validation_checklist.items_for);
+    # validated in the service so the vocabulary has one home.
+    check_key: str
+    # passed | failed. 'open' is not writable: a check is un-answered only
+    # before anybody touched it, and a wrong answer is corrected by posting
+    # the right one.
+    status: str
+    # Seconds for cycle_time, grams for weight. Required to PASS a check the
+    # catalog marks as a measurement — refused in the service with the unit in
+    # the message.
+    value: Optional[float] = None
+    note: Optional[str] = None
+
+
+class WeightDeltaAckIn(BaseModel):
+    # Optional: the act is the decision ("re-quoted", "absorbed"), and forcing
+    # a sentence out of Sales before they may clear the task is how the task
+    # gets ignored instead of cleared.
+    note: Optional[str] = None
+
+
+class ValidationCheckState(BaseModel):
+    check_key: str
+    label_de: str
+    label_en: str
+    expects_value: bool
+    unit: Optional[str] = None
+    status: str
+    # Seconds for cycle_time, grams for weight — stored exactly as recorded.
+    value: Optional[float] = None
+    note: Optional[str] = None
+    checked_by: Optional[int] = None
+    checked_by_name: Optional[str] = None
+    checked_at: Optional[datetime] = None
+    # cycle_time only: the seconds per part this department's costing assumed
+    # the change would add. A delta, not an absolute cycle time — the costing
+    # never stated one.
+    planned_delta_seconds: Optional[float] = None
+    # weight only: what the quote was built on, and the gap to the weighed part.
+    estimated_part_weight_g: Optional[float] = None
+    delta_g: Optional[float] = None
+
+
+class ValidationDepartmentState(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    checks: List[ValidationCheckState]
+    open_count: int
+    failed_count: int
+    all_passed: bool
+
+
+class ValidationStateResponse(BaseModel):
+    change_id: int
+    status: str
+    departments: List[ValidationDepartmentState]
+    check_count: int
+    open_count: int
+    failed_count: int
+    all_passed: bool
+    # The costing's lifecycle assumption for the whole change, in the unit the
+    # costing states it. Measured cycle times are recorded in SECONDS; both
+    # units are named so a bare number is never ambiguous.
+    planned_cycle_time_min_per_part: Optional[float] = None
+    # The weight story, flat: quoted, weighed, and the delta between them —
+    # always computed backend-side so two screens cannot disagree about it.
+    weight_estimate_g: Optional[float] = None
+    validated_weight_g: Optional[float] = None
+    weight_delta_g: Optional[float] = None
+    weight_ack_at: Optional[datetime] = None
+    weight_ack_by: Optional[int] = None
+    weight_ack_by_name: Optional[str] = None
+    weight_ack_note: Optional[str] = None
+    weight_quote_update_open: bool = False
+    # Exactly the string the -> released guard would refuse with, or null. The
+    # badge and the block read the same sentence.
+    release_blocker: Optional[str] = None
+
+
+class ValidationCheckResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    check_key: str
+    status: str
+    value: Optional[float] = None
+    note: Optional[str] = None
+    checked_by: Optional[int] = None
+    checked_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

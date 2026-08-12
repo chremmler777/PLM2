@@ -155,6 +155,32 @@ class CostingPosition(Base):
         return min(self.offers, key=lambda o: o.id)
 
     @property
+    def recommended_offer(self) -> "CostingOffer | None":
+        """The department's actual VOTE, or None if it never cast one.
+
+        Deliberately not favorite_offer: that property falls back to the first
+        offer so a position with a single quote still has a price, which is
+        the right rule for MONEY and the wrong one for a RECOMMENDATION. A
+        fallback here would invent an opinion the department never expressed
+        and then demand Sales justify disagreeing with it.
+        """
+        for offer in self.offers:
+            if offer.favorite:
+                return offer
+        return None
+
+    @property
+    def chosen_offer(self) -> "CostingOffer | None":
+        """The offer SALES decided on, if they have decided. Never falls back
+        to the favorite: the whole point of the column is that "the department
+        recommended A" and "we are buying from A" are different statements,
+        and a fallback would make the second one unfalsifiable."""
+        for offer in self.offers:
+            if offer.chosen:
+                return offer
+        return None
+
+    @property
     def effective_cost(self) -> float | None:
         """What this position actually costs, whichever way it is priced.
 
@@ -172,6 +198,23 @@ class CostingPosition(Base):
                 total += float(offer.shipping_cost or 0.0)
             return total
         return None if self.est_cost is None else float(self.est_cost)
+
+    @property
+    def quoted_cost(self) -> float | None:
+        """What this position costs in the OFFER — the money Sales is putting
+        in front of the customer.
+
+        Identical to effective_cost until Sales decides against the
+        department's recommendation, and the chosen offer's price from then
+        on. effective_cost deliberately stays favorite-driven: it is the
+        department's own number, the one it defends in the costing meeting,
+        and rewriting it under the department's feet would leave nobody able
+        to see that the buyer moved the price.
+        """
+        chosen = self.chosen_offer
+        if chosen is not None:
+            return chosen.total_cost
+        return self.effective_cost
 
     @property
     def _lead_time_source(self):
@@ -228,6 +271,18 @@ class CostingOffer(Base):
         String(20), default="calendar_days", server_default="calendar_days")
     favorite: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())
+    # Sales' DECISION, as against `favorite` above, which is the department's
+    # recommendation. Two facts, two columns: which supplier the engineers
+    # wanted and which one the buyer took are different questions, and the
+    # only interesting one is asked when the answers differ. chosen_reason is
+    # required (in the service) exactly then — overruling your own engineers
+    # is allowed, doing it anonymously and without saying why is not.
+    chosen: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false())
+    chosen_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chosen_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    chosen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(

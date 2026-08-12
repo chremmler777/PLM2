@@ -68,8 +68,11 @@ renegotiate commercial terms]
 6. **Validation checks** — per-department checklist (sampled/measured/cycle
    time), weight validation with quote delta to Sales, revision-level bump
    validation, actuals P&L.
-7. **Sales' binding vendor choice at quoting** (departments vote, Sales
-   decides).
+7. **Sales' vendor decision at quoting** — the department's favorite is a
+   RECOMMENDATION, not binding, but always visible. Sales decides; choosing
+   against the engineer's recommendation requires a recorded reason and the
+   divergence stays visible (wish and decision side by side). Accountability
+   is enforced: whoever decides owns the decision.
 8. **Future tool**: Sales timeline builder (MS-Project-like) — placeholder
    until then.
 

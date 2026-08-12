@@ -51,13 +51,16 @@ describe('MyTasksPage ownership', () => {
   })
   afterEach(cleanup)
 
-  it('shows owner, overdue flag, and Accept on unclaimed rows', async () => {
+  it('shows owner and overdue flag, and never offers to accept a task', async () => {
+    // Workflow tasks are mandatory too: the row is owed whether or not anyone
+    // has claimed it, so there is no "I take this one" — only a name once
+    // somebody has worked it.
     wrap(<MyTasksPage />)
     expect(await screen.findByText('Eva Eng')).toBeDefined()
     expect(screen.getByText(/overdue/)).toBeDefined()
-    const accept = screen.getByRole('button', { name: /Accept/ })
-    fireEvent.click(accept)
-    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith(
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
+    expect(screen.getByText('unclaimed step')).toBeDefined()
+    await waitFor(() => expect(clientMocks.post).not.toHaveBeenCalledWith(
       '/v1/workflow-instances/9/tasks/2/accept'))
   })
 })
@@ -206,6 +209,54 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=commercial')
   })
 
+  it('sends a bank-build row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'bank_build' }))
+    expect(screen.getByText(t('tasks.kind.bank_build'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.bank_build'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends a publish-plan row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'publish_plan' }))
+    expect(screen.getByText(t('tasks.kind.publish_plan'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.publish_plan'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends a progress-report row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'progress_report', department_id: 2, mine: true }))
+    expect(screen.getByText(t('tasks.kind.progress_report'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.progress_report'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends an escalate-risk row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'escalate_risk' }))
+    expect(screen.getByText(t('tasks.kind.escalate_risk'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.escalate_risk'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends a validation-check row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'validation_check', department_id: 2, mine: true }))
+    expect(screen.getByText(t('tasks.kind.validation_check'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.validation_check'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends an update-quote row to the implementation tab, where the delta is stated', async () => {
+    await renderWith(changeTask({ kind: 'update_quote' }))
+    expect(screen.getByText(t('tasks.kind.update_quote'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.update_quote'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()
@@ -227,7 +278,7 @@ describe('MyTasksPage change tasks by kind', () => {
       kind: 'assessment', department_id: 2, assessment_id: 3,
       owner_id: null, owner_name: null, mine: true,
     }))
-    expect(screen.queryByRole('button', { name: t('tasks.accept') })).toBeNull()
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
     expect(screen.getByText(t('tasks.kind.assessment'))).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Assess' }))
     expect(navigate).toHaveBeenCalledWith('/changes/7')

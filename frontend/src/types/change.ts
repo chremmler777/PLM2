@@ -198,6 +198,62 @@ export interface ChangeRequest {
   internal_approved_at?: string | null;
   internal_approved_amount?: number | null;
   internal_approval_note?: string | null;
+  /**
+   * What the Tool Engineer says the part will weigh, quoted during costing.
+   * It is an estimate on purpose — the validated figure arrives later, and
+   * until it does everything reading this number has to say so.
+   */
+  estimated_part_weight_g?: number | null;
+  estimated_weight_by_name?: string | null;
+  estimated_weight_at?: string | null;
+  /** Set once the estimate has been checked against a real part. */
+  validated_part_weight_g?: number | null;
+  /**
+   * The price the negotiation ended on — the counter price of the entry Sales
+   * marked as the final result. Read-only here: it is derived from the
+   * negotiation log, never typed into the change.
+   */
+  negotiated_final_price?: number | null;
+  /**
+   * How the change gets onto the line once it is approved (stage 7). Either the
+   * new state runs in on the fly, or the remaining old stock is scrapped on
+   * purpose — and then the customer pays for the scrap, quoted separately.
+   * Null until Scheduling has decided.
+   */
+  bank_build_mode?: BankBuildMode | null;
+  bank_build_note?: string | null;
+  /** Only set for planned scrap: the additional quote the customer bears. */
+  scrap_quote_price?: number | null;
+  bank_build_set_by_name?: string | null;
+  bank_build_set_at?: string | null;
+  /** Set once Sales has put the plan in front of the customer. */
+  plan_published_by_name?: string | null;
+  plan_published_at?: string | null;
+}
+
+/** Running change vs planned scrap — the two ways a change reaches the line. */
+export type BankBuildMode = 'running_change' | 'planned_scrap';
+
+/** How a negotiation round happened. Meetings, calls and mails are the three
+ *  ways a price actually gets moved; nothing else is worth a vocabulary. */
+export type NegotiationChannel = 'meeting' | 'call' | 'email';
+
+/**
+ * One round of the price negotiation at `quoted`: what was said, through which
+ * channel, and — when the customer named one — the price they countered with.
+ * Exactly one entry per change may be the final result; the backend clears the
+ * flag on its siblings when a new final arrives.
+ */
+export interface ChangeNegotiation {
+  id: number;
+  channel: NegotiationChannel;
+  note: string;
+  counter_price?: number | null;
+  is_final: boolean;
+  created_by_name?: string | null;
+  /** Present when the backend serves the raw id; used to gate the delete. */
+  created_by?: number | null;
+  created_at: string;
 }
 
 export interface ChangeDetail extends ChangeRequest {
@@ -211,7 +267,19 @@ export type ChangeTaskKind =
   | 'assessment' | 'kickoff' | 'scoping_wrapup' | 'impact_confirm' | 'customer_response'
   | 'obtain_info' | 'close_question' | 'send_rejection' | 'costing_input'
   /** Sales builds the offer once the departments are done costing. */
-  | 'create_quote';
+  | 'create_quote'
+  /** Scheduling picks running change vs planned scrap on an approved change. */
+  | 'bank_build'
+  /** Sales puts the resulting bank-build plan in front of the customer. */
+  | 'publish_plan'
+  /** An implementing department owes a word on how the work is going. */
+  | 'progress_report'
+  /** Sales takes a flagged risk to the customer or internally. */
+  | 'escalate_risk'
+  /** An implementing department owes a validation check (stage 9). */
+  | 'validation_check'
+  /** A validated weight moved the part off its estimate — Sales re-quotes. */
+  | 'update_quote';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -297,6 +365,47 @@ export interface Summation {
   /** Production-time delta the change carries per part, summed per plant. */
   lifecycle_minutes_by_plant?: { plant_id: number; minutes_per_part: number }[];
   total_minutes_per_part?: number;
+  /** The Tool Engineer's weight quote, carried into the wrap-up Sales prices. */
+  part_weight_estimate_g?: number | null;
+  /**
+   * What the change actually cost, once the work has run (stage 8/9). Absent
+   * before implementation — everything reading it must survive that.
+   */
+  actuals?: PnlActuals;
+}
+
+/** One department's booked time, priced. */
+export interface PnlActualDepartment {
+  department_id: number;
+  hours: number;
+  /** €/h as configured; null when the department has no rate. */
+  rate?: number | null;
+  /** hours × rate, or 0 when there is no rate to multiply by. */
+  internal_cost: number;
+  /** True when the hours could not be priced — the figure below is incomplete. */
+  unrated?: boolean;
+  /** What costing planned for this department, for the side-by-side. */
+  plan_internal_cost?: number | null;
+}
+
+/** A cost the plan did not carry: planned scrap, a weight delta, and so on. */
+export interface PnlActualExtra {
+  key: string;
+  label?: string | null;
+  amount: number;
+}
+
+export interface PnlActuals {
+  by_department: PnlActualDepartment[];
+  internal_cost: number;
+  plan_internal_cost?: number | null;
+  extras?: PnlActualExtra[];
+  extra_cost?: number | null;
+  total_cost?: number | null;
+  /** actual − plan, as the backend computes it. */
+  delta?: number | null;
+  /** True when any department's hours are unpriced, i.e. the total is a floor. */
+  unrated?: boolean;
 }
 
 export type GateKey = 'feasibility' | 'budget' | 'release';
@@ -424,6 +533,15 @@ export interface CostingOffer {
   lead_time_unit?: LeadTimeUnit | null;
   /** The department's vote — exactly one favourite per position. */
   favorite?: boolean;
+  /**
+   * Sales' binding decision — exactly one chosen offer per position. The
+   * favourite is only the recommendation; this is the offer that is bought.
+   */
+  chosen?: boolean;
+  /** Required when the chosen offer is not the department's favourite. */
+  chosen_reason?: string | null;
+  chosen_by_name?: string | null;
+  chosen_at?: string | null;
   attachments?: Attachment[];
 }
 
@@ -528,4 +646,132 @@ export interface TransitionDeviation {
   decided_by?: number | null;
   decided_at?: string | null;
   decision_note?: string | null;
+}
+
+// --- Stage 8: what actually happens while the change is being implemented ---
+//
+// The scheduling plan says how the change reaches the line; this says how the
+// work is going. Three records, because three different people write them: the
+// department books its hours, the department reports progress (and flags when
+// it is going wrong), and Sales escalates a flagged risk to the customer or
+// internally. Nothing here is derived from anything else.
+
+/** Hours a department has booked against the change, one entry per sitting. */
+export interface ImplBooking {
+  id: number;
+  department_id: number;
+  hours: number;
+  note?: string | null;
+  /** Present when the backend serves the raw id; used to gate the delete. */
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * A progress report. `at_risk` is the whole point of the cadence: a department
+ * that says nothing is not the same as one that says "this is going wrong",
+ * and the risk note explains which it is.
+ */
+export interface ImplReport {
+  id: number;
+  department_id: number;
+  note: string;
+  at_risk: boolean;
+  risk_note?: string | null;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/** Outwards to the customer, or inwards to management. */
+export type ImplEscalationDirection = 'customer' | 'internal';
+
+/**
+ * Sales taking a flagged risk somewhere. It hangs off the report it answers
+ * (`report_id`), which is also how a department block finds its own; an
+ * escalation without one belongs to the change as a whole.
+ */
+export interface ImplEscalation {
+  id: number;
+  direction: ImplEscalationDirection;
+  note: string;
+  report_id?: number | null;
+  resolved_at?: string | null;
+  resolution_note?: string | null;
+  resolved_by_name?: string | null;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * The board the tracking card is drawn from: one row per implementing
+ * department, as the backend counts it. `owes_report` is the backend's cadence
+ * verdict — the client never recomputes it from `last_report_at`.
+ */
+export interface ImplDepartmentState {
+  department_id: number;
+  booked_hours: number;
+  last_report_at: string | null;
+  at_risk_open: boolean;
+  owes_report: boolean;
+}
+
+// ── Stage 9: validation ─────────────────────────────────────────────────────
+//
+// The work is done; now somebody has to show it actually works. Every
+// implementing department answers a fixed, small list of checks — the same five
+// keys across the flow, not a free-text sign-off — and two of them carry a
+// number the rest of the system already has an opinion about: the cycle time
+// costing assumed, and the weight the Tool Engineer estimated. A measured value
+// that disagrees with the assumption is the whole reason this stage exists.
+
+/**
+ * The five things a department can be asked at validation. `weight` is the Tool
+ * Engineer's, `revision_bump` is Development's ("revision levels raised per
+ * customer statement and verified"); the other three are asked of whoever is
+ * implementing.
+ */
+export type ValidationCheckKey =
+  | 'sampled' | 'measured' | 'cycle_time' | 'weight' | 'revision_bump';
+
+/** Open until somebody says otherwise; a fail is a statement, not a silence. */
+export type ValidationCheckStatus = 'open' | 'passed' | 'failed';
+
+export interface ValidationCheck {
+  check_key: ValidationCheckKey | (string & {});
+  status: ValidationCheckStatus;
+  /** Seconds for `cycle_time`, grams for `weight`; null for the yes/no checks. */
+  value?: number | null;
+  note?: string | null;
+  checked_by_name?: string | null;
+  checked_at?: string | null;
+}
+
+export interface ValidationDepartmentState {
+  department_id: number;
+  checks: ValidationCheck[];
+}
+
+/**
+ * What validation is standing on, in one payload: the per-department checks,
+ * plus the two planned figures they are measured against. The delta is the
+ * backend's — the client never recomputes it from estimate and value, so the
+ * banner and the quote always argue with the same number.
+ */
+export interface ValidationState {
+  departments: ValidationDepartmentState[];
+  /** The costing assumption for production time, minutes per part. */
+  planned_cycle_time_min_per_part?: number | null;
+  /** What the Tool Engineer quoted during costing, grams. */
+  weight_estimate_g?: number | null;
+  /** What the part actually weighs, once the weight check has passed. */
+  validated_weight_g?: number | null;
+  /** validated − estimate, in grams. Non-zero means the quote is out of date. */
+  weight_delta_g?: number | null;
+  /** Set once Sales has taken the delta into the quote. */
+  weight_ack_at?: string | null;
+  weight_ack_by_name?: string | null;
+  weight_ack_note?: string | null;
 }

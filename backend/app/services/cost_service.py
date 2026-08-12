@@ -224,14 +224,19 @@ class CostService:
         position_rates: dict[int, Optional[float]] = {}
         pos_by_dep: dict[int, dict] = {}
         for p in positions:
-            cost = p.effective_cost or 0.0
+            # The money Sales is quoting, which is the CHOSEN vendor's price
+            # once Sales has decided and the department's own effective_cost
+            # until then. The recommendation is not overwritten — it travels
+            # alongside in the detail below, so a wrap-up can show that the
+            # buyer moved the number and by how much.
+            cost = p.quoted_cost or 0.0
             bucket = ("one_time_external" if p.kind == "external"
                       else "one_time_internal")
             agg = pos_by_dep.setdefault(
                 p.department_id,
                 {"department_id": p.department_id, "position_cost": 0.0,
                  "hours": 0.0, "hours_cost": 0.0, "position_count": 0,
-                 "unrated_hours": False})
+                 "unrated_hours": False, "positions": []})
 
             hours = float(p.hours or 0.0)
             hours_cost = 0.0
@@ -265,6 +270,25 @@ class CostService:
             agg["hours"] += hours
             agg["hours_cost"] += hours_cost
             agg["position_count"] += 1
+            # Both sides of the vendor decision, per position: what the
+            # department recommended and what Sales bought. The wrap-up line
+            # ("recommended: A · chosen: B (reason)") is the only place the
+            # divergence is ever seen, so the data for it has to be here and
+            # not one join away.
+            favorite = p.recommended_offer
+            chosen = p.chosen_offer
+            agg["positions"].append({
+                "position_id": p.id, "label": p.label, "kind": p.kind,
+                "cost": cost,
+                "recommended_vendor": favorite.vendor_name if favorite else None,
+                "recommended_cost": favorite.total_cost if favorite else None,
+                "chosen_vendor": chosen.vendor_name if chosen else None,
+                "chosen_cost": chosen.total_cost if chosen else None,
+                "chosen_reason": chosen.chosen_reason if chosen else None,
+                "choice_diverges": bool(
+                    chosen is not None and favorite is not None
+                    and chosen.id != favorite.id),
+            })
 
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
                                  + totals["lifecycle_internal"] + totals["lifecycle_external"])
@@ -300,9 +324,23 @@ class CostService:
                    ChangeAssessment.effort_hours.is_not(None))
             .group_by(ChangeAssessment.department_id))).all()
 
+        by_department = [{"department_id": did, **vals}
+                         for did, vals in sorted(by_dep.items())]
+
+        # Stage 9's other half of the same page: what the change was PLANNED to
+        # cost is this whole grid, and what it ACTUALLY cost is the booked
+        # implementation hours at the departments' current rates. They are read
+        # together — a plan-vs-actual card that fetches two endpoints renders
+        # half of itself first, and the halves disagree while it does — so the
+        # actuals ride on the summation rather than living behind their own
+        # roll-up. Additive: every existing key is untouched.
+        from app.services.pnl_service import PnlService
+        actuals = await PnlService.change_actuals(
+            session, change, plan_by_department=by_department)
+
         return {
             "by_plant": [{"plant_id": pid, **vals} for pid, vals in sorted(by_plant.items())],
-            "by_department": [{"department_id": did, **vals} for did, vals in sorted(by_dep.items())],
+            "by_department": by_department,
             "by_department_plant": [
                 {"department_id": did, "plant_id": pid, **vals}
                 for (did, pid), vals in sorted(by_cell.items())],
@@ -330,4 +368,14 @@ class CostService:
             # time" is answerable without re-multiplying anything.
             "total_position_hours_cost": float(
                 sum(v["hours_cost"] for v in pos_by_dep.values())),
+            # The Tooling Engineer's weight estimate rides along with the
+            # costs: it is priced into the same quote, and it is an ESTIMATE
+            # until validation weighs the sampled part.
+            "part_weight_estimate_g": (
+                float(change.estimated_part_weight_g)
+                if change.estimated_part_weight_g is not None else None),
+            # Booked implementation time priced at today's rates, the plan it
+            # is measured against, and the costs that are not hours (quoted
+            # scrap, validated weight delta). See PnlService.change_actuals.
+            "actuals": actuals,
         }

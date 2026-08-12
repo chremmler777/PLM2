@@ -165,6 +165,8 @@ export default function CostingBuckets({
                         old grid — the grid keeps working, position by position
                         is how departments actually think about it. */}
                     <CostPositions changeId={changeId} departmentId={id}
+                      departmentName={deptName(id)}
+                      partWeightG={change.estimated_part_weight_g}
                       editable={editable && (isMine || isPm)} />
                     <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={id}
                       plants={plants} projectPlantId={projectPlantId} />
@@ -188,6 +190,8 @@ export default function CostingBuckets({
                     {/* PM may still fix another department's positions; Sales
                         and the lead only read them. */}
                     <CostPositions changeId={changeId} departmentId={id}
+                      departmentName={deptName(id)}
+                      partWeightG={change.estimated_part_weight_g}
                       editable={editable && isPm} />
                   </div>
                 )}

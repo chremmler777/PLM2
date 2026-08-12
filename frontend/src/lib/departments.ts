@@ -7,6 +7,13 @@
  */
 export const MASTER_DEPARTMENT = 'Development'
 
+/**
+ * Tooling owns the part's weight: during costing they are the ones who can say
+ * what it will come out at, so the weight estimate stands in their block and
+ * nobody else's.
+ */
+export const TOOL_ENGINEER_DEPARTMENT = 'Tool Engineer'
+
 export function preferredDepartmentId<T extends { id: number; name: string }>(
   membershipIds: number[],
   departments: T[],
