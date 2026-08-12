@@ -7,6 +7,7 @@ import { projectLabel } from '../lib/project';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import { DeadlineChip } from '../components/changes/DeadlineChip';
+import { t } from '../i18n/cmLabels';
 
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
@@ -27,7 +28,14 @@ export default function ChangesPage() {
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Change Management</h1>
-        <StartChangeButton label="New Change Request" onClick={() => setShowCreate(true)} />
+        <div className="flex items-center gap-4">
+          {/* The whole flow, one click from the list it governs. */}
+          <Link to="/process-map" data-testid="process-map-link"
+            className="text-sm text-sky-400 hover:underline">
+            {t('procmap.link', 'de')}
+          </Link>
+          <StartChangeButton label="New Change Request" onClick={() => setShowCreate(true)} />
+        </div>
       </div>
 
       <div className="mb-4">

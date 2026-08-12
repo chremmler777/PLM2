@@ -22,6 +22,7 @@ import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
 import PnlPage from './pages/PnlPage';
+import ProcessMapPage from './pages/ProcessMapPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -148,6 +149,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PnlPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* The ECR process map — the team's shared picture of the flow. */}
+      <Route
+        path="/process-map"
+        element={
+          <ProtectedRoute>
+            <ProcessMapPage />
           </ProtectedRoute>
         }
       />
