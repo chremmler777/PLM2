@@ -64,7 +64,13 @@ async def test_seed_assessment_standard_maps_all_change_types(session_factory, s
         assert {r.change_type for r in rows} == set(CHANGE_TYPES)
         tmpl = (await s.execute(select(WfTemplate).where(
             WfTemplate.name == "ECM Assessment"))).scalar_one()
-        assert all(r.template_id == tmpl.id for r in rows)
+        # Physical parts route through their own five-department template
+        # (2026-08-11); every other change type keeps the generic standard.
+        physical = (await s.execute(select(WfTemplate).where(
+            WfTemplate.name == "ECM Assessment (Physical Part)"))).scalar_one()
+        for r in rows:
+            expected = physical.id if r.change_type == "physical_part" else tmpl.id
+            assert r.template_id == expected, r.change_type
         stages = (await s.execute(select(WfStage).where(
             WfStage.template_id == tmpl.id))).scalars().all()
         assert len(stages) == 3

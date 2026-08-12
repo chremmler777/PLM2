@@ -258,13 +258,16 @@ class ChangeRoutingService:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
-        # Only the assessment stage gates this transition. Later stages (PM's
-        # summation, Sales' customer activities) also carry R/A rows, but they
-        # cannot be submitted while the change still sits in assessment —
-        # counting them would block the transition forever.
+        # The first stage always gates — legacy no-engine rows sit there as
+        # "pending" and still owe their answer. A LATER stage gates only once
+        # the engine has activated it: multi-stage assessment templates
+        # activate stage 2 after stage 1 and stage 2 then blocks, but
+        # later-phase rows the engine never touches during assessment (PM's
+        # summation, Sales' customer activities) would block forever.
         first = min((a.stage_order for a in rows), default=None)
         blocking = [a for a in rows
-                    if a.rasic_letter in BLOCKING_LETTERS and a.stage_order == first]
+                    if a.rasic_letter in BLOCKING_LETTERS
+                    and (a.stage_order == first or a.effective_status != "pending")]
         return bool(blocking) and all(
             a.effective_status in ("submitted", "waived") for a in blocking)
 
