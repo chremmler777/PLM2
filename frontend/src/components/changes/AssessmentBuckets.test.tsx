@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import AssessmentBuckets from './AssessmentBuckets'
+import AssessmentBuckets, { pickAssessment } from './AssessmentBuckets'
+import type { Assessment } from '../../types/change'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 
@@ -50,6 +51,62 @@ const wrap = (ui: React.ReactElement) =>
 const buckets = (props: Record<string, unknown> = {}) =>
   wrap(<AssessmentBuckets change={change()} departments={DEPTS}
     myDepartmentIds={[]} editable {...props} />)
+
+describe('pickAssessment', () => {
+  const row = (over: Partial<Assessment>) => assessment(over) as unknown as Assessment
+
+  it('keeps the submitted answer in front of a not-yet-started later stage', () => {
+    // Multi-stage routing pre-creates later-stage rows as `pending`. After the
+    // department submits its stage-1 answer, the bucket must keep showing that
+    // answer — not rebind to the dormant stage-2 row and act as if nothing
+    // happened (the "my assessment went away" bug).
+    const submitted = row({ id: 1, stage_order: 1, rasic_letter: 'R',
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-11T23:57:41Z' })
+    const dormant = row({ id: 2, stage_order: 2, rasic_letter: 'C',
+      status: 'pending', verdict: 'pending' })
+    expect(pickAssessment([submitted, dormant])?.id).toBe(1)
+  })
+
+  it('still binds to the active row over an old answer', () => {
+    const answered = row({ id: 1, stage_order: 1, status: 'submitted',
+      verdict: 'feasible', submitted_at: '2026-08-11T23:57:41Z' })
+    const active = row({ id: 2, stage_order: 1, status: 'active', verdict: 'pending' })
+    expect(pickAssessment([answered, active])?.id).toBe(2)
+  })
+
+  it('binds to the earliest pending row when nothing is active or answered', () => {
+    const later = row({ id: 1, stage_order: 3, status: 'pending', verdict: 'pending' })
+    const earlier = row({ id: 2, stage_order: 2, status: 'pending', verdict: 'pending' })
+    expect(pickAssessment([later, earlier])?.id).toBe(2)
+  })
+})
+
+describe('AssessmentBuckets dormant stages', () => {
+  afterEach(cleanup)
+
+  it('marks a not-yet-started stage as queued, not as unclaimed work', async () => {
+    // PM's stage-2 row exists from routing but the stage has not started.
+    // The bucket must not present PM as on the hook ("R … unclaimed, waiting").
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable
+      change={change({ assessments: [assessment({
+        department_id: 2, status: 'pending', stage_order: 2 })] })} />)
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.queued'))
+    expect(screen.queryByText(t('tasks.unclaimed'))).toBeNull()
+  })
+
+  it('tells a member there is nothing to submit yet, not that access is denied', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable
+      change={change({ assessments: [assessment({
+        department_id: 2, status: 'pending', stage_order: 2 })] })} />)
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect((await screen.findByTestId('bucket-readonly-2')).textContent)
+      .toBe(t('bucket.notOpenYet'))
+  })
+})
 
 describe('AssessmentBuckets', () => {
   beforeEach(() => {

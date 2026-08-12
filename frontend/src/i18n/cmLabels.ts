@@ -450,6 +450,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Antworten anderer Fachbereiche sind nicht einsehbar',
     en: 'Other departments’ answers are not shared',
   },
+  'bucket.queued': { de: 'Späterer Schritt', en: 'Later stage' },
+  'bucket.notOpenYet': {
+    de: 'Hier gibt es gerade nichts einzureichen',
+    en: 'Nothing to submit here right now',
+  },
   'bucket.readOnly': {
     de: 'Nur Mitglieder dieses Fachbereichs bewerten hier',
     en: 'Only members of this department assess here',

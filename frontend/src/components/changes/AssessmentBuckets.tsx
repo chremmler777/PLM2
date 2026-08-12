@@ -34,7 +34,7 @@ const VERDICT_TONE: Record<string, string> = {
   not_feasible: 'text-red-300',
 }
 
-type State = 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold'
+type State = 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold' | 'queued'
 
 const STATE_STYLE: Record<State, string> = {
   waiting: 'bg-slate-700 text-slate-300',
@@ -42,32 +42,37 @@ const STATE_STYLE: Record<State, string> = {
   submitted: 'bg-emerald-900/70 text-emerald-200',
   waived: 'bg-slate-800 text-slate-500',
   on_hold: 'bg-amber-900/70 text-amber-200',
+  queued: 'bg-slate-800 text-slate-500',
 }
 
 const STATE_LABEL: Record<State, string> = {
   waiting: 'bucket.waiting', in_work: 'bucket.inWork', submitted: 'bucket.submitted',
-  waived: 'bucket.waived', on_hold: 'concern.onHold',
+  waived: 'bucket.waived', on_hold: 'concern.onHold', queued: 'bucket.queued',
 }
 
 /**
- * A department can carry more than one assessment row — a change re-routed onto
- * a new template keeps the old template's rows alongside the new ones. The
- * bucket must bind to the row that can actually be worked: the active one, else
- * the earliest still-pending one, else the latest answer. Binding to a stale
- * row is how a department ends up staring at a bucket with no entry mask.
+ * A department can carry more than one assessment row — multi-stage routing
+ * pre-creates later-stage rows as `pending`, and a re-routed template keeps
+ * the old template's rows alongside the new ones. The bucket must bind to the
+ * row that matters right now: the active one, else the latest answer, else the
+ * earliest dormant one. An answer must never lose to a stage that has not
+ * started — that is how a department submits and watches its verdict vanish.
  */
 export function pickAssessment(list: Assessment[]): Assessment | undefined {
   if (list.length <= 1) return list[0]
   const byStage = [...list].sort((a, b) => a.stage_order - b.stage_order)
   return byStage.find((a) => a.status === 'active')
-    ?? byStage.find((a) => a.status !== 'waived' && (!a.verdict || a.verdict === 'pending'))
     ?? [...byStage].reverse().find((a) => a.submitted_at || (a.verdict && a.verdict !== 'pending'))
+    ?? byStage.find((a) => a.status !== 'waived')
     ?? byStage[0]
 }
 
 function stateOf(a: Assessment | undefined, onHold: boolean): State {
   if (a?.status === 'waived') return 'waived'
   if (a?.submitted_at || (a?.verdict && a.verdict !== 'pending')) return 'submitted'
+  // A pending row belongs to a stage that has not started — the department is
+  // not on the hook yet, so no hold, no owner, no "waiting" urgency.
+  if (a?.status === 'pending') return 'queued'
   if (onHold) return 'on_hold'
   if (a?.owner_id != null || a?.accepted_at) return 'in_work'
   return 'waiting'
@@ -240,7 +245,9 @@ export default function AssessmentBuckets({
                 </span>
               )}
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
-                <span className="text-slate-400">{a?.owner_name ?? t('tasks.unclaimed')}</span>
+                {state !== 'queued' && (
+                  <span className="text-slate-400">{a?.owner_name ?? t('tasks.unclaimed')}</span>
+                )}
                 {a?.due_date && (
                   <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
                     {new Date(a.due_date).toLocaleDateString()}
@@ -284,7 +291,10 @@ export default function AssessmentBuckets({
                     onDone={() => setOpenDept(null)} />
                 ) : (
                   <p className="text-xs text-slate-500" data-testid={`bucket-readonly-${row.id}`}>
-                    {t('bucket.readOnly')}
+                    {/* A member with no open form is not locked out — their step
+                        just isn't open. Saying "members only" to a member reads
+                        as "not your department". */}
+                    {isMine ? t('bucket.notOpenYet') : t('bucket.readOnly')}
                   </p>
                 )}
                 {/* Evidence: reports and results behind the answer. Optional —
