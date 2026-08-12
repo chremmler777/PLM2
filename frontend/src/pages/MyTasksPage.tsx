@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useDepartments, useMyTasks, useAcceptTask } from '../hooks/queries/useWorkflows';
+import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import { rasicColors } from '../lib/constants';
@@ -358,7 +358,6 @@ export default function MyTasksPage() {
   const [selectedDeptId, setSelectedDeptId] = useState<number>(0);
 
   const { data: tasks = [], isLoading: loadingTasks } = useMyTasks(selectedDeptId);
-  const acceptTask = useAcceptTask();
 
   const activeDepartments = departments.filter((d) => d.is_active);
 

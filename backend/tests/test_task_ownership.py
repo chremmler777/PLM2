@@ -206,3 +206,62 @@ async def test_due_date_authz(client, eng_auth, admin_auth, seed,
         json={"due_date": new_due}, headers=eng_auth)
     assert res.status_code == 200, res.text
     assert res.json()["due_date"].startswith(new_due[:10])
+
+
+async def test_completing_an_unowned_task_names_the_completer_as_owner(
+        client, eng_auth, seed, session_factory, part, two_stage_template):
+    """There is no accept step in front of a task any more: doing the work IS
+    taking it. A task completed by someone who never accepted it must read as
+    theirs, not as unassigned."""
+    from app.models.workflow import WfInstanceTask
+    from app.services.workflow_service import WorkflowService
+    async with session_factory() as s:
+        inst = await WorkflowService.start_workflow(
+            s, part["revision_id"], two_stage_template["template_id"],
+            seed["engineer_id"])
+        await s.commit()
+        inst_id = inst.id
+    task_id = await _active_task(session_factory, inst_id)
+    async with session_factory() as s:
+        assert (await s.get(WfInstanceTask, task_id)).owner_id is None
+
+    res = await client.post(
+        f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
+        json={"decision": "approved", "notes": "done"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+    done = [t for t in res.json()["tasks"] if t["id"] == task_id][0]
+    assert done["owner_id"] == seed["engineer_id"]
+    assert done["owner_name"] == "Engineer"      # serialized in the same session
+    assert done["accepted_at"] is not None
+
+
+async def test_completion_never_steals_an_existing_owner(
+        client, eng_auth, admin_auth, seed, session_factory, part,
+        two_stage_template):
+    """A deliberate assignment survives someone else completing the task."""
+    from app.models.workflow import UserDepartment, WfInstanceTask
+    from app.services.workflow_service import WorkflowService
+    async with session_factory() as s:
+        inst = await WorkflowService.start_workflow(
+            s, part["revision_id"], two_stage_template["template_id"],
+            seed["engineer_id"])
+        # The admin completes below, so they need the membership the guard
+        # would otherwise wave them through on anyway.
+        s.add(UserDepartment(user_id=seed["admin_id"],
+                             department_id=two_stage_template["dept_id"]))
+        await s.commit()
+        inst_id = inst.id
+    task_id = await _active_task(session_factory, inst_id)
+    res = await client.post(
+        f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/accept",
+        headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+    res = await client.post(
+        f"/api/v1/workflow-instances/{inst_id}/tasks/{task_id}/complete",
+        json={"decision": "approved", "notes": "done by the admin"},
+        headers=admin_auth)
+    assert res.status_code == 200, res.text
+    done = [t for t in res.json()["tasks"] if t["id"] == task_id][0]
+    assert done["owner_id"] == seed["engineer_id"]
+    assert done["completed_by"] == seed["admin_id"]

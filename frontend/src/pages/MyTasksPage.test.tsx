@@ -51,13 +51,16 @@ describe('MyTasksPage ownership', () => {
   })
   afterEach(cleanup)
 
-  it('shows owner, overdue flag, and Accept on unclaimed rows', async () => {
+  it('shows owner and overdue flag, and never offers to accept a task', async () => {
+    // Workflow tasks are mandatory too: the row is owed whether or not anyone
+    // has claimed it, so there is no "I take this one" — only a name once
+    // somebody has worked it.
     wrap(<MyTasksPage />)
     expect(await screen.findByText('Eva Eng')).toBeDefined()
     expect(screen.getByText(/overdue/)).toBeDefined()
-    const accept = screen.getByRole('button', { name: /Accept/ })
-    fireEvent.click(accept)
-    await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith(
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
+    expect(screen.getByText('unclaimed step')).toBeDefined()
+    await waitFor(() => expect(clientMocks.post).not.toHaveBeenCalledWith(
       '/v1/workflow-instances/9/tasks/2/accept'))
   })
 })
@@ -243,7 +246,7 @@ describe('MyTasksPage change tasks by kind', () => {
       kind: 'assessment', department_id: 2, assessment_id: 3,
       owner_id: null, owner_name: null, mine: true,
     }))
-    expect(screen.queryByRole('button', { name: t('tasks.accept') })).toBeNull()
+    expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
     expect(screen.getByText(t('tasks.kind.assessment'))).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Assess' }))
     expect(navigate).toHaveBeenCalledWith('/changes/7')

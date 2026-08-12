@@ -68,7 +68,6 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'tasks.owner': { de: 'Verantwortlich', en: 'Owner' },
   'tasks.due': { de: 'Fällig', en: 'Due' },
   'tasks.overdue': { de: 'überfällig', en: 'overdue' },
-  'tasks.accept': { de: 'Übernehmen', en: 'Accept' },
   'tasks.unclaimed': { de: 'Nicht übernommen', en: 'Unclaimed' },
   'tasks.mine': { de: 'Meine', en: 'Mine' },
   'tasks.changeWork': { de: 'Änderungsaufgaben', en: 'Change tasks' },
