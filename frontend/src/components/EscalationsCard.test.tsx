@@ -38,7 +38,8 @@ describe('EscalationsCard', () => {
     wrap(<EscalationsCard />)
     expect((await screen.findAllByText(/CR-2026-0009/)).length).toBeGreaterThan(0)
     expect(screen.getByText('Eva Eng')).toBeDefined()
-    expect(screen.getByText(/Unclaimed/)).toBeDefined()
+    // Tasks are mandatory — an ownerless row names no "Unclaimed" state.
+    expect(screen.queryByText(/Unclaimed/)).toBeNull()
     expect(screen.getByText(/4d overdue/)).toBeDefined()
     const links = screen.getAllByRole('link')
     expect(links.some(l => l.getAttribute('href') === '/changes/3')).toBe(true)

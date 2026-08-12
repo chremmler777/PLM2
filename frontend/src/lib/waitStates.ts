@@ -68,7 +68,8 @@ export function resolveWaitStates(
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
   assessments: Pick<Assessment,
-    'department_id' | 'rasic_letter' | 'status' | 'submitted_at' | 'verdict'>[] = [],
+    'department_id' | 'rasic_letter' | 'status' | 'submitted_at' | 'verdict'
+    | 'stage_order'>[] = [],
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -95,7 +96,12 @@ export function resolveWaitStates(
   // Who the assessment round is still waiting on — stated for everyone, not just
   // the departments on the hook, so the change never looks idle without a reason.
   if (change.status === 'in_assessment') {
-    const p = assessmentProgress(assessments.map((a) => ({
+    // Only the assessment stage itself: later stages (summation, customer
+    // activities) also live as rows, but Sales/PM are not assessing.
+    const first = Math.min(...assessments.map((a) => a.stage_order))
+    const p = assessmentProgress(assessments.filter(
+      (a) => a.stage_order === first,
+    ).map((a) => ({
       departmentId: a.department_id,
       rasic: a.rasic_letter,
       submitted: isSubmitted(a),

@@ -258,7 +258,13 @@ class ChangeRoutingService:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
-        blocking = [a for a in rows if a.rasic_letter in BLOCKING_LETTERS]
+        # Only the assessment stage gates this transition. Later stages (PM's
+        # summation, Sales' customer activities) also carry R/A rows, but they
+        # cannot be submitted while the change still sits in assessment —
+        # counting them would block the transition forever.
+        first = min((a.stage_order for a in rows), default=None)
+        blocking = [a for a in rows
+                    if a.rasic_letter in BLOCKING_LETTERS and a.stage_order == first]
         return bool(blocking) and all(
             a.effective_status in ("submitted", "waived") for a in blocking)
 

@@ -37,9 +37,11 @@ export default function EscalationsCard() {
             ) : (
               <>
                 <span className="text-slate-300">{e.label}</span>
-                <span className="text-slate-400">
-                  {e.owner_name ?? t('tasks.unclaimed')}
-                </span>
+                {/* Tasks are mandatory per department — no claim step, so a
+                    missing owner is not a state worth announcing. */}
+                {e.owner_name && (
+                  <span className="text-slate-400">{e.owner_name}</span>
+                )}
                 <span className="text-red-400 font-semibold">
                   {e.days_overdue}d {t('tasks.overdue')}
                 </span>

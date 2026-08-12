@@ -159,13 +159,25 @@ export default function AssessmentBuckets({
 
   // Routing says who is on the hook; the assessment rows carry their answers.
   // Either source alone can name a department, so both feed the list.
-  const routed = (routing?.stages ?? []).flatMap((s) =>
+  const allRouted = (routing?.stages ?? []).flatMap((s) =>
     s.departments.map((d) => ({
       department_id: d.department_id, rasic: d.rasic_letter, stage: s.stage_order,
     })))
+  // This board is the ASSESSMENT stage only — the first one. Later stages
+  // (PM's summation, Sales' customer activities) also live as assessment rows
+  // in the engine, but Sales is exempt from assessing and relies on the
+  // departments; their work has its own surfaces. A department earns a bucket
+  // by being on the hook in the first stage; once it has one, all its rows
+  // still feed the binding and the stale count.
+  const assessStage = Math.min(
+    ...allRouted.map((r) => r.stage),
+    ...change.assessments.map((a) => a.stage_order),
+  )
+  const routed = allRouted.filter((r) => r.stage === assessStage)
   const ids = [...new Set([
     ...routed.map((r) => r.department_id),
-    ...change.assessments.map((a) => a.department_id),
+    ...change.assessments.filter((a) => a.stage_order === assessStage)
+      .map((a) => a.department_id),
   ])]
   // One bucket per department, whatever the routing history left behind.
   const rows = ids.map((id) => {

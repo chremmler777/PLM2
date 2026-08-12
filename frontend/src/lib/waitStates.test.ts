@@ -16,7 +16,7 @@ const concern = (over: Record<string, unknown> = {}) => ({
 const deptName = (id: number) => ({ 2: 'Development', 4: 'Tool Engineer' }[id] ?? `#${id}`)
 
 const row = (over: Record<string, unknown> = {}) => ({
-  department_id: 2, rasic_letter: 'R', status: 'active',
+  department_id: 2, rasic_letter: 'R', status: 'active', stage_order: 1,
   submitted_at: null, verdict: 'pending', ...over,
 }) as never
 

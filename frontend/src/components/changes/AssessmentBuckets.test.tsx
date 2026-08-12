@@ -97,6 +97,20 @@ describe('AssessmentBuckets dormant stages', () => {
     expect(screen.queryByText(t('tasks.unclaimed'))).toBeNull()
   })
 
+  it('keeps later-stage departments off the assessment board entirely', async () => {
+    // Sales is exempt from assessing — its rows belong to the customer-
+    // activities stage and must not appear here as if Sales owed an answer.
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[]} editable canSeeAll
+      change={change({ assessments: [
+        assessment({ id: 1, department_id: 2, stage_order: 1, status: 'active' }),
+        assessment({ id: 2, department_id: 4, stage_order: 3, status: 'pending' }),
+      ] })} />)
+    expect(await screen.findByTestId('bucket-2')).toBeTruthy()
+    expect(screen.queryByTestId('bucket-4')).toBeNull()
+  })
+
   it('tells a member there is nothing to submit yet, not that access is denied', async () => {
     vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)

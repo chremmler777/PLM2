@@ -411,3 +411,45 @@ async def test_blocking_complete_over_effective_status(session_factory, seed):
         t_appr.status = "active"
         await session.flush()
         assert await ChangeRoutingService.blocking_complete(session, chg) is False
+
+
+@pytest.mark.asyncio
+async def test_blocking_complete_ignores_later_stages(session_factory, seed):
+    """Only the assessment stage gates -> costing. Later stages (summation,
+    customer activities) carry R/A rows that cannot be submitted while the
+    change sits in assessment; counting them would block the transition
+    forever."""
+    from app.services.change_routing_service import ChangeRoutingService
+    async with session_factory() as session:
+        t = await _mk_template(session)
+        chg = ChangeRequest(change_number="C-E-LS", title="x", reason="y",
+                            change_type="physical_part",
+                            project_id=seed["project_id"],
+                            raised_by=seed["admin_id"])
+        d1 = Department(name="LS-D1", flow_type="change")
+        d2 = Department(name="LS-Sales", flow_type="change")
+        session.add_all([chg, d1, d2])
+        await session.flush()
+        inst = WfInstance(template_id=t.id, change_id=chg.id, status="active",
+                          current_stage_order=1, started_by=seed["admin_id"])
+        session.add(inst)
+        await session.flush()
+        t_appr = WfInstanceTask(instance_id=inst.id, stage_order=1, step_id=None,
+                                department_id=d1.id, rasic_letter="R",
+                                status="approved", is_actionable=True)
+        session.add(t_appr)
+        await session.flush()
+        session.add_all([
+            ChangeAssessment(change_id=chg.id, department_id=d1.id, stage_order=1,
+                             rasic_letter="R", status="pending",
+                             wf_instance_task_id=t_appr.id),
+            # Dormant later-stage rows: Sales A in summation, Sales R in the
+            # customer stage. Neither may hold the assessment gate hostage.
+            ChangeAssessment(change_id=chg.id, department_id=d2.id, stage_order=2,
+                             rasic_letter="A", status="pending"),
+            ChangeAssessment(change_id=chg.id, department_id=d2.id, stage_order=3,
+                             rasic_letter="R", status="pending"),
+        ])
+        await session.flush()
+
+        assert await ChangeRoutingService.blocking_complete(session, chg) is True

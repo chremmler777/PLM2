@@ -43,8 +43,6 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key]))
   const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key]))
   const overdue = change.assessments.filter((a) => a.overdue).length
-  const unclaimed = change.assessments.filter(
-    (a) => a.status === 'active' && a.owner_id === null).length
   // Blocks two transitions on the same signal: entering assessment (from scoping,
   // hard-gated) and kickoff (from approved, soft-guarded). Only meaningful once
   // there is an impacted set to lock.
@@ -135,7 +133,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
 
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.blocking')}</h3>
-        {blockers === 0 && unclaimed === 0 ? (
+        {blockers === 0 ? (
           <>
             <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
             {laterGates.length > 0 && (
@@ -163,9 +161,6 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                   </button>
                 ) : <>⚠ {t('impact.pending')}</>}
               </li>
-            )}
-            {unclaimed > 0 && (
-              <li className="text-slate-400">{t('cockpit.unclaimed')}: {unclaimed}</li>
             )}
             {laterGates.map((g) => gateRow(g, false))}
           </ul>
