@@ -322,40 +322,73 @@ export default function AssessmentBuckets({
                     {isMine ? t('bucket.notOpenYet') : t('bucket.readOnly')}
                   </p>
                 )}
-                {/* The documents behind the answer. The generic slot is gone: what
-                    this department files here is the internal change deck, and a
-                    "not feasible" cannot be sent without it. */}
+                {/* The three document homes of an assessment, always visible so
+                    nobody hunts for where a file belongs: the internal change
+                    deck (owed by this department, gates "not feasible"), the
+                    supplier RFQ (this department, when external work is in
+                    play), and the customer mail trail (change-level — everyone
+                    talks to the customer, so it uploads from here too). */}
                 {a && (() => {
                   const hasPpt = changePptOf(a.id).length > 0 || a.has_change_ppt === true
                   const required = verdictOf[row.id] === 'not_feasible' && !hasPpt
-                  return (
-                  <div data-testid={`bucket-evidence-${row.id}`}
-                    className={`space-y-1 ${required
-                      ? 'rounded border border-amber-700/60 bg-amber-950/20 p-2' : ''}`}>
-                    <p className={`text-[11px] uppercase tracking-wide ${
-                      required ? 'text-amber-300' : 'text-slate-500'}`}>
-                      {t('bucket.changePpt')}
-                    </p>
-                    {required && (
-                      <p className="text-xs text-amber-200" data-testid={`bucket-evidence-required-${row.id}`}>
-                        {t('check.changePptRequired')}
+                  const ofKind = (k: string) =>
+                    evidenceOf(a.id).filter((att) => att.kind === k)
+                  const legacy = evidenceOf(a.id).filter(
+                    (att) => att.kind !== 'change_ppt' && att.kind !== 'rfq')
+                  const mails = (change.attachments ?? [])
+                    .filter((att) => att.kind === 'customer_email')
+                  const invalidate = () =>
+                    qc.invalidateQueries({ queryKey: ['change', changeId] })
+                  const slot = (
+                    testId: string, title: string, atts: typeof legacy,
+                    hint: string, drop: React.ReactNode, isRequired = false,
+                  ) => (
+                    <div data-testid={testId}
+                      className={`space-y-1 ${isRequired
+                        ? 'rounded border border-amber-700/60 bg-amber-950/20 p-2' : ''}`}>
+                      <p className={`text-[11px] uppercase tracking-wide ${
+                        isRequired ? 'text-amber-300' : 'text-slate-500'}`}>
+                        {title}
                       </p>
-                    )}
-                    {evidenceOf(a.id).length > 0 && (
-                      <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
-                        {evidenceOf(a.id).map((att) => (
-                          <AttachmentRow key={att.id} changeId={changeId} attachment={att} />
-                        ))}
-                      </ul>
-                    )}
-                    {isMine && editable ? (
-                      <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
-                        kind="change_ppt" label={t('bucket.changePptSlot')}
-                        onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })} />
-                    ) : evidenceOf(a.id).length === 0 && (
-                      <p className="text-xs text-slate-600">{t('bucket.changePptHint')}</p>
-                    )}
-                  </div>
+                      {isRequired && (
+                        <p className="text-xs text-amber-200"
+                          data-testid={`bucket-evidence-required-${row.id}`}>
+                          {t('check.changePptRequired')}
+                        </p>
+                      )}
+                      {atts.length > 0 && (
+                        <ul className="text-sm rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1">
+                          {atts.map((att) => (
+                            <AttachmentRow key={att.id} changeId={changeId} attachment={att} />
+                          ))}
+                        </ul>
+                      )}
+                      {isMine && editable ? drop : atts.length === 0 && (
+                        <p className="text-xs text-slate-600">{hint}</p>
+                      )}
+                    </div>
+                  )
+                  return (
+                    <div className="grid gap-2 sm:grid-cols-3"
+                      data-testid={`bucket-docs-${row.id}`}>
+                      {/* Keeps its historic test id: the PPT slot grew out of the
+                          old evidence block and its tests. */}
+                      {slot(`bucket-evidence-${row.id}`, t('bucket.changePpt'),
+                        [...ofKind('change_ppt'), ...legacy], t('bucket.changePptHint'),
+                        <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
+                          kind="change_ppt" label={t('bucket.changePptSlot')}
+                          onUploaded={invalidate} />, required)}
+                      {slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
+                        ofKind('rfq'), t('attach.rfqSlot'),
+                        <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
+                          kind="rfq" label={t('attach.rfqSlot')}
+                          onUploaded={invalidate} />)}
+                      {slot(`bucket-mail-${row.id}`, t('mail.title'),
+                        mails, t('mail.none'),
+                        <AttachmentDropzone changeId={changeId} compact
+                          kind="customer_email" label={t('mail.slot')}
+                          onUploaded={invalidate} />)}
+                    </div>
                   )
                 })()}
 

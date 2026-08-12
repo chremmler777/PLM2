@@ -32,6 +32,7 @@ import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import { STATUS_LABELS, OFF_PATH_STATUSES } from '../lib/changeStatus';
+import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 
@@ -146,7 +147,13 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.myActions(changeId),
   });
   const { data: departments = [] } = useDepartments();
-  const { isAdmin, userId } = useAuth();
+  const { isAdmin: isRealAdmin, userId } = useAuth();
+  // The whole point of acts-as is walking the flow through a department's
+  // eyes: the backend already drops the admin bypass then (spec D2), so the
+  // page must drop the admin overview too — otherwise "act as APQP" still
+  // shows the full board and every governance control, and nothing looks
+  // different from admin.
+  const isAdmin = isRealAdmin && getActsAsDepartmentId() == null;
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
   // Client-side mirror of the confirm-impact authz: Development members only —

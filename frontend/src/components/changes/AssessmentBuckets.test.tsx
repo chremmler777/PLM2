@@ -377,8 +377,8 @@ describe('AssessmentBuckets checklist', () => {
     expect(screen.getByTestId('check-rfq-modification_external').textContent)
       .toContain('rfq-supplier.pdf')
     expect(screen.queryByTestId('check-rfq-missing')).toBeNull()
-    // It is an assessment document like any other, so the evidence list has it too.
-    expect(screen.getByTestId('bucket-evidence-2').textContent).toContain('rfq-supplier.pdf')
+    // The bucket's own RFQ slot lists it too — same file, its named home.
+    expect(screen.getByTestId('bucket-rfq-2').textContent).toContain('rfq-supplier.pdf')
   })
 
   it('makes a choice-bearing item say which kind it is', async () => {
@@ -615,10 +615,15 @@ describe('AssessmentBuckets evidence', () => {
     expect(screen.getByRole('link', { name: 'measurement.pdf' })).toBeTruthy()
   })
 
-  it('files an upload against that department’s assessment', async () => {
+  it('files uploads against that department’s assessment — mails on the change', async () => {
     buckets({ myDepartmentIds: [2], change: withEvidence() })
     await screen.findByTestId('bucket-2')
-    expect(screen.getByTestId('dropzone').getAttribute('data-assessment')).toBe('1')
+    const zones = screen.getAllByTestId('dropzone')
+    const byKind = (k: string) => zones.find((z) => z.getAttribute('data-kind') === k)
+    expect(byKind('change_ppt')?.getAttribute('data-assessment')).toBe('1')
+    expect(byKind('rfq')?.getAttribute('data-assessment')).toBe('1')
+    // Customer mail is a change-level document: no assessment container.
+    expect(byKind('customer_email')?.getAttribute('data-assessment')).toBe('')
   })
 
   it('lets a privileged reader see evidence without an upload slot', async () => {
