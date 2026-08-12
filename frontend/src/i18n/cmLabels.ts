@@ -1069,5 +1069,97 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Wartet auf Vertrieb — Plan noch nicht an den Kunden veröffentlicht',
     en: 'Sales: plan not yet published to the customer',
   },
+
+  // Stage 8 — how the work is going while it is being done.
+  'impl2.title': { de: 'Umsetzungsstand', en: 'Implementation tracking' },
+  'impl2.intro': {
+    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat — und was davon '
+      + 'eskaliert werden muss.',
+    en: 'What each department has booked and last reported — and what of it has '
+      + 'to be escalated.',
+  },
+  'impl2.none': {
+    de: 'Noch kein Fachbereich in der Umsetzung.',
+    en: 'No department is implementing yet.',
+  },
+  'impl2.others': {
+    de: '{n} weitere Fachbereiche setzen ihren Teil um.',
+    en: '{n} other departments are implementing their part.',
+  },
+  'impl2.readOnly': {
+    de: 'Nur während der Umsetzung änderbar.',
+    en: 'Editable only while the change is being implemented.',
+  },
+  'impl2.vendorLeadTimes': { de: 'Lieferzeiten', en: 'Vendor lead times' },
+
+  // Booked time
+  'impl2.booked': { de: 'Gebuchte Zeit', en: 'Booked time' },
+  'impl2.bookedHours': { de: '{n} h gebucht', en: '{n} h booked' },
+  'impl2.noBookings': { de: 'Noch nichts gebucht.', en: 'Nothing booked yet.' },
+  'impl2.hours': { de: 'Stunden', en: 'Hours' },
+  'impl2.bookingNote': { de: 'Wofür?', en: 'What for?' },
+  'impl2.addBooking': { de: 'Zeit buchen', en: 'Book time' },
+  'impl2.deleteBooking': { de: 'Löschen', en: 'Delete' },
+
+  // Progress reports and their cadence
+  'impl2.reports': { de: 'Fortschrittsmeldungen', en: 'Progress reports' },
+  'impl2.noReports': { de: 'Noch keine Meldung.', en: 'No report yet.' },
+  'impl2.reported': { de: 'gemeldet', en: 'reported' },
+  'impl2.reportDue': { de: 'Meldung fällig', en: 'report due' },
+  'impl2.lastReport': { de: 'Zuletzt gemeldet am {d}', en: 'Last reported on {d}' },
+  'impl2.reportNote': { de: 'Was ist passiert?', en: 'What happened?' },
+  'impl2.addReport': { de: 'Melden', en: 'Report' },
+  'impl2.atRisk': { de: 'Gefährdet', en: 'At risk' },
+  'impl2.atRiskToggle': {
+    de: 'Umsetzung ist gefährdet',
+    en: 'This is at risk',
+  },
+  'impl2.riskNote': { de: 'Was ist gefährdet?', en: 'What is at risk?' },
+  'impl2.riskNoteRequired': {
+    de: 'Eine gefährdete Meldung braucht eine Begründung.',
+    en: 'An at-risk report needs a reason.',
+  },
+
+  // Escalations
+  'impl2.escalations': { de: 'Eskalationen', en: 'Escalations' },
+  'impl2.noEscalations': { de: 'Keine Eskalation.', en: 'No escalation.' },
+  'impl2.escalationsChange': {
+    de: 'Eskalationen ohne Fachbereich',
+    en: 'Escalations not tied to a department',
+  },
+  'impl2.direction.customer': { de: 'Kunde', en: 'Customer' },
+  'impl2.direction.internal': { de: 'Intern', en: 'Internal' },
+  'impl2.escalationNote': { de: 'Was wird eskaliert?', en: 'What is being escalated?' },
+  'impl2.addEscalation': { de: 'Eskalieren', en: 'Escalate' },
+  'impl2.escalationOpen': { de: 'offen', en: 'open' },
+  'impl2.escalationResolved': { de: 'Erledigt am {d}', en: 'Resolved on {d}' },
+  'impl2.resolve': { de: 'Erledigt melden', en: 'Mark resolved' },
+  'impl2.resolutionNote': { de: 'Wie wurde es gelöst?', en: 'How was it settled?' },
+  'impl2.escalationHint': {
+    de: 'Gefährdung gemeldet — an den Kunden oder intern eskalieren.',
+    en: 'At-risk flagged — escalate to the customer or internally.',
+  },
+
+  // My-tasks rows
+  'tasks.kind.progress_report': { de: 'Fortschritt melden', en: 'Report progress' },
+  'tasks.hint.progress_report': {
+    de: 'Stand der Umsetzung melden — und Gefährdungen benennen',
+    en: 'Report where the work stands — and name anything at risk',
+  },
+  'tasks.kind.escalate_risk': { de: 'Gefährdung eskalieren', en: 'Escalate risk' },
+  'tasks.hint.escalate_risk': {
+    de: 'Gemeldete Gefährdung an den Kunden oder intern eskalieren',
+    en: 'Take a flagged risk to the customer or internally',
+  },
+
+  // Waits
+  'wait.onProgressReports': {
+    de: '{n} Fachbereiche schulden eine Fortschrittsmeldung',
+    en: '{n} departments owe a progress report',
+  },
+  'wait.onRiskEscalation': {
+    de: 'Gefährdung gemeldet — Eskalation durch den Vertrieb offen',
+    en: 'At-risk flagged — Sales escalation pending',
+  },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

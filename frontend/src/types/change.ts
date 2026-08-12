@@ -271,7 +271,11 @@ export type ChangeTaskKind =
   /** Scheduling picks running change vs planned scrap on an approved change. */
   | 'bank_build'
   /** Sales puts the resulting bank-build plan in front of the customer. */
-  | 'publish_plan';
+  | 'publish_plan'
+  /** An implementing department owes a word on how the work is going. */
+  | 'progress_report'
+  /** Sales takes a flagged risk to the customer or internally. */
+  | 'escalate_risk';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -590,4 +594,74 @@ export interface TransitionDeviation {
   decided_by?: number | null;
   decided_at?: string | null;
   decision_note?: string | null;
+}
+
+// --- Stage 8: what actually happens while the change is being implemented ---
+//
+// The scheduling plan says how the change reaches the line; this says how the
+// work is going. Three records, because three different people write them: the
+// department books its hours, the department reports progress (and flags when
+// it is going wrong), and Sales escalates a flagged risk to the customer or
+// internally. Nothing here is derived from anything else.
+
+/** Hours a department has booked against the change, one entry per sitting. */
+export interface ImplBooking {
+  id: number;
+  department_id: number;
+  hours: number;
+  note?: string | null;
+  /** Present when the backend serves the raw id; used to gate the delete. */
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * A progress report. `at_risk` is the whole point of the cadence: a department
+ * that says nothing is not the same as one that says "this is going wrong",
+ * and the risk note explains which it is.
+ */
+export interface ImplReport {
+  id: number;
+  department_id: number;
+  note: string;
+  at_risk: boolean;
+  risk_note?: string | null;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/** Outwards to the customer, or inwards to management. */
+export type ImplEscalationDirection = 'customer' | 'internal';
+
+/**
+ * Sales taking a flagged risk somewhere. It hangs off the report it answers
+ * (`report_id`), which is also how a department block finds its own; an
+ * escalation without one belongs to the change as a whole.
+ */
+export interface ImplEscalation {
+  id: number;
+  direction: ImplEscalationDirection;
+  note: string;
+  report_id?: number | null;
+  resolved_at?: string | null;
+  resolution_note?: string | null;
+  resolved_by_name?: string | null;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * The board the tracking card is drawn from: one row per implementing
+ * department, as the backend counts it. `owes_report` is the backend's cadence
+ * verdict — the client never recomputes it from `last_report_at`.
+ */
+export interface ImplDepartmentState {
+  department_id: number;
+  booked_hours: number;
+  last_report_at: string | null;
+  at_risk_open: boolean;
+  owes_report: boolean;
 }

@@ -23,6 +23,9 @@ from app.models.change_cost import (
     DepartmentRate, AssessmentActivity, AssessmentCostLine, ChangeGate,
     CostingPosition, CostingOffer,
 )
+from app.models.change_impl import (
+    ImplementationBooking, ImplementationReport, ImplementationEscalation,
+)
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
@@ -74,4 +77,7 @@ __all__ = [
     "ChangeGate",
     "CostingPosition",
     "CostingOffer",
+    "ImplementationBooking",
+    "ImplementationReport",
+    "ImplementationEscalation",
 ]

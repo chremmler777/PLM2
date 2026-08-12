@@ -225,6 +225,22 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
   })
 
+  it('sends a progress-report row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'progress_report', department_id: 2, mine: true }))
+    expect(screen.getByText(t('tasks.kind.progress_report'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.progress_report'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends an escalate-risk row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'escalate_risk' }))
+    expect(screen.getByText(t('tasks.kind.escalate_risk'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.escalate_risk'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

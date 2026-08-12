@@ -169,6 +169,55 @@ describe('resolveWaitStates', () => {
       [row({ department_id: 4 })])).toEqual([])
   })
 
+  it('counts the departments that owe a progress report, while the work runs', () => {
+    const waits = resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [], {
+      state: [
+        { department_id: 2, booked_hours: 4, last_report_at: null,
+          at_risk_open: false, owes_report: true },
+        { department_id: 4, booked_hours: 0, last_report_at: null,
+          at_risk_open: false, owes_report: true },
+        { department_id: 6, booked_hours: 2, last_report_at: '2026-08-10T09:00:00',
+          at_risk_open: false, owes_report: false },
+      ],
+    })
+    expect(waits.map((w) => w.key)).toEqual(['implementation-reports'])
+    expect(waits[0].text).toBe(t('wait.onProgressReports').replace('{n}', '2'))
+    expect(waits[0].tab).toBe('implementation')
+  })
+
+  it('keeps the implementation waits out of every other phase', () => {
+    const state = [{ department_id: 2, booked_hours: 0, last_report_at: null,
+      at_risk_open: true, owes_report: true }]
+    expect(resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], { state }))
+      .toEqual([])
+  })
+
+  it('waits on Sales while a flagged risk has been taken nowhere', () => {
+    const state = [{ department_id: 2, booked_hours: 6, last_report_at: '2026-08-10T09:00:00',
+      at_risk_open: true, owes_report: false }]
+    const waits = resolveWaitStates(
+      change({ status: 'in_implementation' }), [], deptName, [], { state })
+    expect(waits.map((w) => w.key)).toEqual(['implementation-escalation'])
+    expect(waits[0].text).toBe(t('wait.onRiskEscalation'))
+    expect(waits[0].tab).toBe('implementation')
+
+    // An open escalation is the answer; a settled one is not.
+    expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [],
+      { state, escalations: [{ resolved_at: null }] })).toEqual([])
+    expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [],
+      { state, escalations: [{ resolved_at: '2026-08-11T09:00:00' }] })
+      .map((w) => w.key)).toEqual(['implementation-escalation'])
+  })
+
+  it('says nothing about implementation when nothing is owed and nothing is flagged', () => {
+    expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [], {
+      state: [{ department_id: 2, booked_hours: 6, last_report_at: '2026-08-10T09:00:00',
+        at_risk_open: false, owes_report: false }],
+    })).toEqual([])
+    // And nothing at all when the board has not loaded yet.
+    expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName)).toEqual([])
+  })
+
   it('lists every wait at once', () => {
     const waits = resolveWaitStates(
       change({ status: 'in_assessment', blocked_department_ids: [2] }),

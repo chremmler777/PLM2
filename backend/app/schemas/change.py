@@ -837,3 +837,109 @@ class TransitionDeviationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- stage 8: implementation tracking ---------------------------------------
+
+class ImplementationBookingCreate(BaseModel):
+    department_id: int
+    # Strictly positive: a zero booking says nothing and a negative one is a
+    # correction, which is DELETE plus a fresh booking.
+    hours: float = Field(gt=0)
+    note: Optional[str] = None
+
+
+class ImplementationBookingResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    hours: float
+    note: Optional[str] = None
+    # The stored columns. Kept in the payload because "booked" is what the
+    # act is called on the shop floor.
+    booked_by: int
+    booked_at: datetime
+    # The same two facts under the naming every other change child uses, plus
+    # the author's name so a list renders without a user lookup.
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationReportCreate(BaseModel):
+    department_id: int
+    note: str = Field(min_length=1)
+    at_risk: bool = False
+    # Recommended when at_risk is true, never required: demanding a written
+    # justification before a department may raise its hand is how at-risk
+    # flags stop being raised.
+    risk_note: Optional[str] = None
+
+
+class ImplementationReportResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    note: str
+    at_risk: bool
+    risk_note: Optional[str] = None
+    reported_by: int
+    reported_by_name: Optional[str] = None
+    reported_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationEscalationCreate(BaseModel):
+    # customer | internal (ESCALATION_DIRECTIONS). Validated in the service
+    # against the model's tuple so the vocabulary has one home.
+    direction: str
+    note: str = Field(min_length=1)
+    # The flagged report this answers, when there is one.
+    report_id: Optional[int] = None
+
+
+class ImplementationEscalationResolveIn(BaseModel):
+    resolution_note: str = Field(min_length=1)
+
+
+class ImplementationEscalationResponse(BaseModel):
+    id: int
+    change_id: int
+    report_id: Optional[int] = None
+    direction: str
+    note: str
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[int] = None
+    resolved_by_name: Optional[str] = None
+    resolution_note: Optional[str] = None
+    is_open: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ImplementationDepartmentState(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    booked_hours: float
+    report_count: int
+    last_report_at: Optional[datetime] = None
+    at_risk_open: bool
+    owes_report: bool
+
+
+class ImplementationStateResponse(BaseModel):
+    change_id: int
+    status: str
+    cadence_hours: int
+    departments: List[ImplementationDepartmentState]
+    total_booked_hours: float
+    open_escalations: int

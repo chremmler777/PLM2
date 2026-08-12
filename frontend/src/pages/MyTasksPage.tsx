@@ -206,6 +206,10 @@ const TASK_TAB: Record<string, string> = {
   // publishes from the same card.
   bank_build: '?tab=implementation',
   publish_plan: '?tab=implementation',
+  // Stage 8 lives on the same tab: the department reports there, Sales
+  // escalates from the same blocks.
+  progress_report: '?tab=implementation',
+  escalate_risk: '?tab=implementation',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -243,6 +247,10 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.bank_build');
     case 'publish_plan':
       return t('tasks.hint.publish_plan');
+    case 'progress_report':
+      return t('tasks.hint.progress_report');
+    case 'escalate_risk':
+      return t('tasks.hint.escalate_risk');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,

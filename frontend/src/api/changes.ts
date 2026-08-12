@@ -8,6 +8,7 @@ import type {
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
+  ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -269,4 +270,42 @@ export const changesApi = {
   }) => client.put<ChangeRequest>(`/v1/changes/${id}/bank-build`, body).then((r) => r.data),
   publishBankBuildPlan: (id: number) =>
     client.post<ChangeRequest>(`/v1/changes/${id}/bank-build/publish`).then((r) => r.data),
+
+  // Stage 8: how the work is actually going. The board first — one row per
+  // implementing department, with the backend's own cadence verdict — then the
+  // three records the board is a summary of.
+  implementationState: (id: number) =>
+    client.get<ImplDepartmentState[]>(`/v1/changes/${id}/implementation/state`)
+      .then((r) => r.data),
+
+  listImplBookings: (id: number) =>
+    client.get<ImplBooking[]>(`/v1/changes/${id}/implementation/bookings`).then((r) => r.data),
+  addImplBooking: (id: number, body: {
+    department_id: number; hours: number; note?: string;
+  }) => client.post<ImplBooking>(`/v1/changes/${id}/implementation/bookings`, body)
+    .then((r) => r.data),
+  deleteImplBooking: (id: number, bookingId: number) =>
+    client.delete(`/v1/changes/${id}/implementation/bookings/${bookingId}`).then((r) => r.data),
+
+  listImplReports: (id: number) =>
+    client.get<ImplReport[]>(`/v1/changes/${id}/implementation/reports`).then((r) => r.data),
+  addImplReport: (id: number, body: {
+    department_id: number; note: string; at_risk: boolean; risk_note?: string;
+  }) => client.post<ImplReport>(`/v1/changes/${id}/implementation/reports`, body)
+    .then((r) => r.data),
+
+  listImplEscalations: (id: number) =>
+    client.get<ImplEscalation[]>(`/v1/changes/${id}/implementation/escalations`)
+      .then((r) => r.data),
+  addImplEscalation: (id: number, body: {
+    direction: ImplEscalationDirection; note: string; report_id?: number;
+  }) => client.post<ImplEscalation>(`/v1/changes/${id}/implementation/escalations`, body)
+    .then((r) => r.data),
+  // Resolving is a written act, like withdrawing a concern: the note says how
+  // the escalation was settled, and the row stays as the record.
+  resolveImplEscalation: (id: number, escalationId: number, resolutionNote: string) =>
+    client.put<ImplEscalation>(
+      `/v1/changes/${id}/implementation/escalations/${escalationId}/resolve`,
+      { resolution_note: resolutionNote },
+    ).then((r) => r.data),
 };

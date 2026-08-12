@@ -44,6 +44,10 @@ from app.schemas.change import (
     InternalApprovalIn,
     CostingPositionCreate, CostingPositionUpdate, CostingPositionResponse,
     CostingOfferCreate, CostingOfferUpdate, CostingOfferResponse,
+    ImplementationBookingCreate, ImplementationBookingResponse,
+    ImplementationReportCreate, ImplementationReportResponse,
+    ImplementationEscalationCreate, ImplementationEscalationResolveIn,
+    ImplementationEscalationResponse, ImplementationStateResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,6 +164,11 @@ async def my_change_tasks(
                        outline of the plan
       publish_plan     approved with a decided but unpublished plan, for
                        Sales, on customer-relevant changes
+      progress_report  in_implementation and this caller's implementing
+                       department has not reported inside the cadence
+                       (REPORT_CADENCE_HOURS) — or has never reported at all
+      escalate_risk    in_implementation with an at-risk flag nobody has
+                       answered yet, for Sales — customer or internal
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -294,6 +303,34 @@ async def my_change_tasks(
                 tasks.append({
                     **await _base(c), "kind": "costing_input",
                     "department_id": dept_id,
+                })
+
+        # Stage 8 is a cadence, not a milestone: while the change is being
+        # implemented, every implementing department owes a progress report
+        # at least twice a week, and a flag raised in one of those reports is
+        # Sales' errand until they take it somewhere.
+        if c.status == "in_implementation":
+            from app.services.implementation_service import ImplementationService
+            impl = await ImplementationService.state(db, c, current_user)
+            for row in impl["departments"]:
+                if row["owes_report"] and row["department_id"] in dep_ids:
+                    tasks.append({
+                        **await _base(c), "kind": "progress_report",
+                        "department_id": row["department_id"],
+                        "last_report_at": row["last_report_at"],
+                        "hint": "Report progress at least twice a week",
+                    })
+            # "No unresolved escalation for it yet" needs no separate check:
+            # at_risk_open is already false once ANY escalation (open or
+            # resolved) answers the flag, so a row here means nobody has taken
+            # this risk anywhere.
+            flagged = [row["department_id"] for row in impl["departments"]
+                       if row["at_risk_open"]]
+            if in_sales and flagged:
+                tasks.append({
+                    **await _base(c), "kind": "escalate_risk",
+                    "department_ids": flagged,
+                    "hint": "Take it to the customer, or escalate internally",
                 })
 
         # Independent of the stage chain: a question can be waiting on Sales at
@@ -1828,3 +1865,226 @@ async def decide_meeting(
     await db.commit()
     await db.refresh(meeting)
     return meeting
+
+
+# --- stage 8: implementation tracking ---------------------------------------
+# Bookings and reports follow the costing scoping rules with the status window
+# moved to 'in_implementation': a department writes its own while the change is
+# in the stage, PM and admins write anyone's, and the people accountable for
+# the change as a whole read everything. Escalations are Sales' — the customer
+# relationship has one owner.
+
+async def _implementation_change(db: AsyncSession, change_id: int,
+                                 current_user: User):
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return change
+
+
+async def _require_implementation_write(db: AsyncSession, change,
+                                        department_id: int,
+                                        current_user: User) -> None:
+    from app.services.implementation_service import ImplementationService
+    if not await ImplementationService.may_write(
+            db, change, department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "implementation, Project Management or an admin may book "
+                   "time or report progress for it")
+
+
+async def _require_escalation_right(db: AsyncSession, change,
+                                    current_user: User) -> None:
+    from app.services.implementation_service import ImplementationService
+    if not await ImplementationService.may_escalate(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may escalate an "
+                   "implementation risk — the customer relationship has one "
+                   "owner")
+
+
+@router.get("/{change_id}/implementation/state",
+            response_model=ImplementationStateResponse)
+async def implementation_state(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Per implementing department: booked hours, report cadence, risk.
+
+    "Implementing" is derived — the departments that put a costing position or
+    a cost line on this change. The booked-hours totals live here because the
+    actuals P&L at validation reads exactly them.
+    """
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    return await ImplementationService.state(db, change, current_user)
+
+
+@router.get("/{change_id}/implementation/bookings",
+            response_model=List[ImplementationBookingResponse])
+async def list_implementation_bookings(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    visible = await ImplementationService.readable_department_ids(
+        db, change, current_user)
+    rows = await ImplementationService.list_bookings(db, change, visible)
+    return await ImplementationService.serialize_bookings(db, rows)
+
+
+@router.post("/{change_id}/implementation/bookings",
+             response_model=ImplementationBookingResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_booking(
+    change_id: int, body: ImplementationBookingCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_implementation_write(
+        db, change, body.department_id, current_user)
+    try:
+        booking = await ImplementationService.create_booking(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(booking)
+    return (await ImplementationService.serialize_bookings(db, [booking]))[0]
+
+
+@router.delete("/{change_id}/implementation/bookings/{bid}", status_code=204)
+async def delete_implementation_booking(
+    change_id: int, bid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Remove a booking you entered. Corrections are delete-and-rebook rather
+    than an edit, so the changelog carries both halves of the fix."""
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    try:
+        booking = await ImplementationService.get_booking(db, change, bid)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await _require_implementation_write(
+        db, change, booking.department_id, current_user)
+    # Membership is not enough: somebody else's hours are their statement
+    # about their day. PM and admins clean up regardless.
+    from app.services.meeting_service import MeetingService
+    if (booking.booked_by != current_user.id
+            and current_user.effective_role != "admin"
+            and not await MeetingService.user_is_pm_member(db, current_user)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the person who booked that time (or Project "
+                   "Management) may remove it")
+    await ImplementationService.delete_booking(db, change, booking, current_user)
+    await db.commit()
+
+
+@router.get("/{change_id}/implementation/reports",
+            response_model=List[ImplementationReportResponse])
+async def list_implementation_reports(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    visible = await ImplementationService.readable_department_ids(
+        db, change, current_user)
+    rows = await ImplementationService.list_reports(db, change, visible)
+    return await ImplementationService.serialize_reports(db, rows)
+
+
+@router.post("/{change_id}/implementation/reports",
+             response_model=ImplementationReportResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_report(
+    change_id: int, body: ImplementationReportCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """A progress report. at_risk=true without a risk_note is accepted — the
+    flag matters more than the paperwork behind it."""
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_implementation_write(
+        db, change, body.department_id, current_user)
+    try:
+        report = await ImplementationService.create_report(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(report)
+    return (await ImplementationService.serialize_reports(db, [report]))[0]
+
+
+@router.get("/{change_id}/implementation/escalations",
+            response_model=List[ImplementationEscalationResponse])
+async def list_implementation_escalations(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Not department-scoped: an escalation is a statement about the change."""
+    from app.services.implementation_service import ImplementationService
+    change = await _implementation_change(db, change_id, current_user)
+    rows = await ImplementationService.list_escalations(db, change)
+    return await ImplementationService.serialize_escalations(db, rows)
+
+
+@router.post("/{change_id}/implementation/escalations",
+             response_model=ImplementationEscalationResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_implementation_escalation(
+    change_id: int, body: ImplementationEscalationCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_escalation_right(db, change, current_user)
+    try:
+        escalation = await ImplementationService.create_escalation(
+            db, change, body.model_dump(), current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(escalation)
+    return (await ImplementationService.serialize_escalations(db, [escalation]))[0]
+
+
+@router.put("/{change_id}/implementation/escalations/{eid}/resolve",
+            response_model=ImplementationEscalationResponse)
+async def resolve_implementation_escalation(
+    change_id: int, eid: int, body: ImplementationEscalationResolveIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.implementation_service import (
+        ImplementationError, ImplementationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    await _require_escalation_right(db, change, current_user)
+    try:
+        escalation = await ImplementationService.get_escalation(db, change, eid)
+    except ImplementationError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        escalation = await ImplementationService.resolve_escalation(
+            db, change, escalation, body.resolution_note, current_user)
+    except ImplementationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(escalation)
+    return (await ImplementationService.serialize_escalations(db, [escalation]))[0]

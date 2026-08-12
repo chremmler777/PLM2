@@ -19,6 +19,7 @@ import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import BankBuildCard from '../components/changes/BankBuildCard';
+import ImplementationTracking from '../components/changes/ImplementationTracking';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
@@ -136,6 +137,20 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'implementation'],
     queryFn: () => changesApi.getImplementation(changeId),
     enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
+  });
+  // Stage 8: the per-department board and its escalations. The tracking card
+  // asks for the same keys, so the banner costs no extra request; both are
+  // needed here because the waits are derived from them.
+  const implTracked = !!change && change.status === 'in_implementation';
+  const { data: implState = [] } = useQuery({
+    queryKey: ['change', changeId, 'impl-state'],
+    queryFn: () => changesApi.implementationState(changeId),
+    enabled: implTracked,
+  });
+  const { data: implEscalations = [] } = useQuery({
+    queryKey: ['change', changeId, 'impl-escalations'],
+    queryFn: () => changesApi.listImplEscalations(changeId),
+    enabled: implTracked,
   });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
@@ -325,7 +340,8 @@ export default function ChangeDetailPage() {
       {/* What the change is waiting on — same line for every viewer, whoever
           owns the next move. */}
       <div className="mt-3">
-        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments)}
+        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments,
+          { state: implState, escalations: implEscalations })}
           onGo={(tb) => setTab(tb as Tab)} />
       </div>
 
@@ -482,6 +498,13 @@ export default function ChangeDetailPage() {
           {phaseIndex(change.status) >= phaseIndex('approved') && (
             <BankBuildCard change={change}
               canSetMode={canSetBankBuild} canPublish={canPublishPlan} />
+          )}
+          {/* Stage 8 sits under the plan: the plan says how the change reaches
+              the line, this says how the work is actually going. */}
+          {phaseIndex(change.status) >= phaseIndex('in_implementation') && (
+            <ImplementationTracking changeId={change.id} status={change.status}
+              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
+              canSeeAll={canSeeCosts} canEscalate={canPublishPlan} />
           )}
           <ImplementationPanel changeId={change.id} />
         </div>

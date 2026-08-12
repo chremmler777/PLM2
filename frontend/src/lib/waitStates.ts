@@ -8,7 +8,9 @@
  * Derived purely from data the detail page already holds; nothing is fetched.
  */
 import { t } from '../i18n/cmLabels'
-import type { Assessment, ChangeConcern, ChangeRequest } from '../types/change'
+import type {
+  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState,
+} from '../types/change'
 
 export interface WaitState {
   /** Stable key, also the test id suffix. */
@@ -71,6 +73,15 @@ export function resolveWaitStates(
   assessments: Pick<Assessment,
     'department_id' | 'rasic_letter' | 'status' | 'submitted_at' | 'verdict'
     | 'stage_order'>[] = [],
+  /**
+   * Stage 8, while the work is being done: the per-department board and the
+   * escalations raised against it. Both come from the implementation tab's own
+   * queries — the resolver stays pure and is handed what the page already has.
+   */
+  impl: {
+    state?: ImplDepartmentState[]
+    escalations?: { resolved_at?: string | null }[]
+  } = {},
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -147,6 +158,31 @@ export function resolveWaitStates(
       waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'implementation' })
     } else if (change.customer_relevant && !change.plan_published_at) {
       waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'implementation' })
+    }
+  }
+
+  // While the work runs, two things stall it silently: a department that has
+  // stopped saying how it is going, and a flagged risk nobody has taken
+  // anywhere. Both are named for everyone, not only for the desk that owes it.
+  if (change.status === 'in_implementation') {
+    const state = impl.state ?? []
+    const owing = state.filter((s) => s.owes_report).length
+    if (owing > 0) {
+      waits.push({
+        key: 'implementation-reports',
+        text: t('wait.onProgressReports').replace('{n}', String(owing)),
+        tab: 'implementation',
+      })
+    }
+    // An escalation is a change-level act, so the pairing is change-level too:
+    // any at-risk department while nothing is open means Sales still owes one.
+    const openEscalation = (impl.escalations ?? []).some((e) => !e.resolved_at)
+    if (state.some((s) => s.at_risk_open) && !openEscalation) {
+      waits.push({
+        key: 'implementation-escalation',
+        text: t('wait.onRiskEscalation'),
+        tab: 'implementation',
+      })
     }
   }
 
