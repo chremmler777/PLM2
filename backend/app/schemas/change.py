@@ -54,6 +54,13 @@ class TransitionRequest(BaseModel):
     cancellation_reason: Optional[str] = None
     rejection_reason: Optional[str] = None
     reopen_reason: Optional[str] = None
+    # The generic one, for hops whose reason has no dedicated field. Currently
+    # mandatory for exactly one: in_validation -> in_implementation, where it
+    # says what failed validation and what has to be replanned or renegotiated
+    # (recorded as 'validation_escalated'). escalation_reason is accepted as
+    # its alias so an older client keeps working.
+    reason: Optional[str] = None
+    escalation_reason: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):
@@ -266,6 +273,12 @@ class ChangeResponse(BaseModel):
     validated_weight_by: Optional[int] = None
     validated_weight_by_name: Optional[str] = None
     validated_weight_at: Optional[datetime] = None
+    # The commercial answer to a validated weight that missed the estimate:
+    # the quote was updated, or the delta was absorbed. Null while the
+    # question is still open.
+    weight_delta_ack_at: Optional[datetime] = None
+    weight_delta_ack_by: Optional[int] = None
+    weight_delta_ack_note: Optional[str] = None
     # The scheduling block: how the changeover runs (running change vs planned
     # scrap), what the scrap costs the customer, and whether Sales has put the
     # plan in front of them yet. The frontend derives its wait states from the
@@ -424,6 +437,42 @@ class CostLineResponse(BaseModel):
         from_attributes = True
 
 
+class ActualsDeptRow(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    booked_hours: float
+    # The rate the hours were valued at, and null when the plant has none for
+    # this department — in which case actual_cost is a floor, not a total.
+    hourly_rate: Optional[float] = None
+    actual_cost: float
+    plan_cost: float
+    variance: float
+    unrated: bool
+
+
+class ActualsExtra(BaseModel):
+    # scrap_quote | weight_delta
+    key: str
+    label: Optional[str] = None
+    # Null where the cost is real but not yet a number anybody may state — the
+    # weight delta is a negotiation, not arithmetic.
+    amount: Optional[float] = None
+    delta_g: Optional[float] = None
+    acknowledged: Optional[bool] = None
+
+
+class ActualsBlock(BaseModel):
+    departments: List[ActualsDeptRow] = []
+    extras: List[ActualsExtra] = []
+    total_actual: float = 0.0
+    total_plan: float = 0.0
+    total_booked_hours: float = 0.0
+    total_extras: float = 0.0
+    unrated_hours: bool = False
+    rate_plant_id: Optional[int] = None
+    variance: float = 0.0
+
+
 class PlantRollup(BaseModel):
     plant_id: int
     one_time_internal: float
@@ -513,6 +562,11 @@ class SummationResponse(BaseModel):
     # screen than the costs is how it gets forgotten. Grams; None until the
     # Tooling Engineer states it.
     part_weight_estimate_g: Optional[float] = None
+    # Stage 9: what the change ACTUALLY cost, next to the plan above. Booked
+    # implementation hours × the departments' current rates, plus the costs
+    # that are not hours. Additive — a caller that only wants the plan reads
+    # exactly what it always read.
+    actuals: Optional[ActualsBlock] = None
 
 
 # --- costing positions ------------------------------------------------------
@@ -943,3 +997,101 @@ class ImplementationStateResponse(BaseModel):
     departments: List[ImplementationDepartmentState]
     total_booked_hours: float
     open_escalations: int
+
+
+# --- stage 9: validation checks ---------------------------------------------
+
+class ValidationCheckIn(BaseModel):
+    department_id: int
+    # A key from the department's catalog (validation_checklist.items_for);
+    # validated in the service so the vocabulary has one home.
+    check_key: str
+    # passed | failed. 'open' is not writable: a check is un-answered only
+    # before anybody touched it, and a wrong answer is corrected by posting
+    # the right one.
+    status: str
+    # Seconds for cycle_time, grams for weight. Required to PASS a check the
+    # catalog marks as a measurement — refused in the service with the unit in
+    # the message.
+    value: Optional[float] = None
+    note: Optional[str] = None
+
+
+class WeightDeltaAckIn(BaseModel):
+    # Optional: the act is the decision ("re-quoted", "absorbed"), and forcing
+    # a sentence out of Sales before they may clear the task is how the task
+    # gets ignored instead of cleared.
+    note: Optional[str] = None
+
+
+class ValidationCheckState(BaseModel):
+    check_key: str
+    label_de: str
+    label_en: str
+    expects_value: bool
+    unit: Optional[str] = None
+    status: str
+    # Seconds for cycle_time, grams for weight — stored exactly as recorded.
+    value: Optional[float] = None
+    note: Optional[str] = None
+    checked_by: Optional[int] = None
+    checked_by_name: Optional[str] = None
+    checked_at: Optional[datetime] = None
+    # cycle_time only: the seconds per part this department's costing assumed
+    # the change would add. A delta, not an absolute cycle time — the costing
+    # never stated one.
+    planned_delta_seconds: Optional[float] = None
+    # weight only: what the quote was built on, and the gap to the weighed part.
+    estimated_part_weight_g: Optional[float] = None
+    delta_g: Optional[float] = None
+
+
+class ValidationDepartmentState(BaseModel):
+    department_id: int
+    department_name: Optional[str] = None
+    checks: List[ValidationCheckState]
+    open_count: int
+    failed_count: int
+    all_passed: bool
+
+
+class ValidationStateResponse(BaseModel):
+    change_id: int
+    status: str
+    departments: List[ValidationDepartmentState]
+    check_count: int
+    open_count: int
+    failed_count: int
+    all_passed: bool
+    # The costing's lifecycle assumption for the whole change, in the unit the
+    # costing states it. Measured cycle times are recorded in SECONDS; both
+    # units are named so a bare number is never ambiguous.
+    planned_cycle_time_min_per_part: Optional[float] = None
+    # The weight story, flat: quoted, weighed, and the delta between them —
+    # always computed backend-side so two screens cannot disagree about it.
+    weight_estimate_g: Optional[float] = None
+    validated_weight_g: Optional[float] = None
+    weight_delta_g: Optional[float] = None
+    weight_ack_at: Optional[datetime] = None
+    weight_ack_by: Optional[int] = None
+    weight_ack_by_name: Optional[str] = None
+    weight_ack_note: Optional[str] = None
+    weight_quote_update_open: bool = False
+    # Exactly the string the -> released guard would refuse with, or null. The
+    # badge and the block read the same sentence.
+    release_blocker: Optional[str] = None
+
+
+class ValidationCheckResponse(BaseModel):
+    id: int
+    change_id: int
+    department_id: int
+    check_key: str
+    status: str
+    value: Optional[float] = None
+    note: Optional[str] = None
+    checked_by: Optional[int] = None
+    checked_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

@@ -275,7 +275,11 @@ export type ChangeTaskKind =
   /** An implementing department owes a word on how the work is going. */
   | 'progress_report'
   /** Sales takes a flagged risk to the customer or internally. */
-  | 'escalate_risk';
+  | 'escalate_risk'
+  /** An implementing department owes a validation check (stage 9). */
+  | 'validation_check'
+  /** A validated weight moved the part off its estimate — Sales re-quotes. */
+  | 'update_quote';
 
 /**
  * A row of my-tasks. Every row carries the change and its active deadline; the
@@ -363,6 +367,45 @@ export interface Summation {
   total_minutes_per_part?: number;
   /** The Tool Engineer's weight quote, carried into the wrap-up Sales prices. */
   part_weight_estimate_g?: number | null;
+  /**
+   * What the change actually cost, once the work has run (stage 8/9). Absent
+   * before implementation — everything reading it must survive that.
+   */
+  actuals?: PnlActuals;
+}
+
+/** One department's booked time, priced. */
+export interface PnlActualDepartment {
+  department_id: number;
+  hours: number;
+  /** €/h as configured; null when the department has no rate. */
+  rate?: number | null;
+  /** hours × rate, or 0 when there is no rate to multiply by. */
+  internal_cost: number;
+  /** True when the hours could not be priced — the figure below is incomplete. */
+  unrated?: boolean;
+  /** What costing planned for this department, for the side-by-side. */
+  plan_internal_cost?: number | null;
+}
+
+/** A cost the plan did not carry: planned scrap, a weight delta, and so on. */
+export interface PnlActualExtra {
+  key: string;
+  label?: string | null;
+  amount: number;
+}
+
+export interface PnlActuals {
+  by_department: PnlActualDepartment[];
+  internal_cost: number;
+  plan_internal_cost?: number | null;
+  extras?: PnlActualExtra[];
+  extra_cost?: number | null;
+  total_cost?: number | null;
+  /** actual − plan, as the backend computes it. */
+  delta?: number | null;
+  /** True when any department's hours are unpriced, i.e. the total is a floor. */
+  unrated?: boolean;
 }
 
 export type GateKey = 'feasibility' | 'budget' | 'release';
@@ -664,4 +707,62 @@ export interface ImplDepartmentState {
   last_report_at: string | null;
   at_risk_open: boolean;
   owes_report: boolean;
+}
+
+// ── Stage 9: validation ─────────────────────────────────────────────────────
+//
+// The work is done; now somebody has to show it actually works. Every
+// implementing department answers a fixed, small list of checks — the same five
+// keys across the flow, not a free-text sign-off — and two of them carry a
+// number the rest of the system already has an opinion about: the cycle time
+// costing assumed, and the weight the Tool Engineer estimated. A measured value
+// that disagrees with the assumption is the whole reason this stage exists.
+
+/**
+ * The five things a department can be asked at validation. `weight` is the Tool
+ * Engineer's, `revision_bump` is Development's ("revision levels raised per
+ * customer statement and verified"); the other three are asked of whoever is
+ * implementing.
+ */
+export type ValidationCheckKey =
+  | 'sampled' | 'measured' | 'cycle_time' | 'weight' | 'revision_bump';
+
+/** Open until somebody says otherwise; a fail is a statement, not a silence. */
+export type ValidationCheckStatus = 'open' | 'passed' | 'failed';
+
+export interface ValidationCheck {
+  check_key: ValidationCheckKey | (string & {});
+  status: ValidationCheckStatus;
+  /** Seconds for `cycle_time`, grams for `weight`; null for the yes/no checks. */
+  value?: number | null;
+  note?: string | null;
+  checked_by_name?: string | null;
+  checked_at?: string | null;
+}
+
+export interface ValidationDepartmentState {
+  department_id: number;
+  checks: ValidationCheck[];
+}
+
+/**
+ * What validation is standing on, in one payload: the per-department checks,
+ * plus the two planned figures they are measured against. The delta is the
+ * backend's — the client never recomputes it from estimate and value, so the
+ * banner and the quote always argue with the same number.
+ */
+export interface ValidationState {
+  departments: ValidationDepartmentState[];
+  /** The costing assumption for production time, minutes per part. */
+  planned_cycle_time_min_per_part?: number | null;
+  /** What the Tool Engineer quoted during costing, grams. */
+  weight_estimate_g?: number | null;
+  /** What the part actually weighs, once the weight check has passed. */
+  validated_weight_g?: number | null;
+  /** validated − estimate, in grams. Non-zero means the quote is out of date. */
+  weight_delta_g?: number | null;
+  /** Set once Sales has taken the delta into the quote. */
+  weight_ack_at?: string | null;
+  weight_ack_by_name?: string | null;
+  weight_ack_note?: string | null;
 }

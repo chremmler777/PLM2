@@ -300,9 +300,23 @@ class CostService:
                    ChangeAssessment.effort_hours.is_not(None))
             .group_by(ChangeAssessment.department_id))).all()
 
+        by_department = [{"department_id": did, **vals}
+                         for did, vals in sorted(by_dep.items())]
+
+        # Stage 9's other half of the same page: what the change was PLANNED to
+        # cost is this whole grid, and what it ACTUALLY cost is the booked
+        # implementation hours at the departments' current rates. They are read
+        # together — a plan-vs-actual card that fetches two endpoints renders
+        # half of itself first, and the halves disagree while it does — so the
+        # actuals ride on the summation rather than living behind their own
+        # roll-up. Additive: every existing key is untouched.
+        from app.services.pnl_service import PnlService
+        actuals = await PnlService.change_actuals(
+            session, change, plan_by_department=by_department)
+
         return {
             "by_plant": [{"plant_id": pid, **vals} for pid, vals in sorted(by_plant.items())],
-            "by_department": [{"department_id": did, **vals} for did, vals in sorted(by_dep.items())],
+            "by_department": by_department,
             "by_department_plant": [
                 {"department_id": did, "plant_id": pid, **vals}
                 for (did, pid), vals in sorted(by_cell.items())],
@@ -336,4 +350,8 @@ class CostService:
             "part_weight_estimate_g": (
                 float(change.estimated_part_weight_g)
                 if change.estimated_part_weight_g is not None else None),
+            # Booked implementation time priced at today's rates, the plan it
+            # is measured against, and the costs that are not hours (quoted
+            # scrap, validated weight delta). See PnlService.change_actuals.
+            "actuals": actuals,
         }

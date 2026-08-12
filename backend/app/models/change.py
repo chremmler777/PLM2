@@ -184,6 +184,17 @@ class ChangeRequest(Base):
     validated_weight_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
     validated_weight_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The commercial half of the weight validation. A delta between the
+    # estimate and the weighed part is money: the quote has to be updated with
+    # it, and Sales carries a my-tasks row until somebody says it was. This
+    # stamp is that answer — "we re-quoted", or "we decided to absorb it".
+    # A person and a moment rather than a boolean, because who decided is the
+    # part anybody will ask about later.
+    weight_delta_ack_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True)
+    weight_delta_ack_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    weight_delta_ack_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # The scheduling block (stage 7): after acceptance Scheduling says how the
     # changeover runs — running change, or planned scrap of the bank. Scrap is

@@ -20,6 +20,7 @@ import ImpactTree from '../components/changes/ImpactTree';
 import ImplementationPanel from '../components/changes/ImplementationPanel';
 import BankBuildCard from '../components/changes/BankBuildCard';
 import ImplementationTracking from '../components/changes/ImplementationTracking';
+import ValidationPanel from '../components/changes/ValidationPanel';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
@@ -151,6 +152,13 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'impl-escalations'],
     queryFn: () => changesApi.listImplEscalations(changeId),
     enabled: implTracked,
+  });
+  // Stage 9: the validation board. Shares the panel's cache key, so the banner
+  // costs no extra request; the waits below are derived from it.
+  const { data: validation } = useQuery({
+    queryKey: ['change', changeId, 'validation'],
+    queryFn: () => changesApi.validationState(changeId),
+    enabled: !!change && change.status === 'in_validation',
   });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
@@ -341,7 +349,7 @@ export default function ChangeDetailPage() {
           owns the next move. */}
       <div className="mt-3">
         <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments,
-          { state: implState, escalations: implEscalations })}
+          { state: implState, escalations: implEscalations }, validation)}
           onGo={(tb) => setTab(tb as Tab)} />
       </div>
 
@@ -506,6 +514,14 @@ export default function ChangeDetailPage() {
               departments={departments} myDepartmentIds={myActions?.memberships ?? []}
               canSeeAll={canSeeCosts} canEscalate={canPublishPlan} />
           )}
+          {/* Stage 9 sits under the tracking: the work is done, this says
+              whether it holds. Read-only once the change has moved on. */}
+          {phaseIndex(change.status) >= phaseIndex('in_validation') && (
+            <ValidationPanel changeId={change.id} status={change.status}
+              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
+              canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
+              canEscalate={canSeeCosts} />
+          )}
           <ImplementationPanel changeId={change.id} />
         </div>
       )}
@@ -525,7 +541,7 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'commercial' && (
         <div className="space-y-3 text-sm">
-          <PnlCard change={change} />
+          <PnlCard change={change} departments={departments} />
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
               the people entitled to see it. */}

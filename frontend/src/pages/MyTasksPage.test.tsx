@@ -241,6 +241,22 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
   })
 
+  it('sends a validation-check row to the implementation tab', async () => {
+    await renderWith(changeTask({ kind: 'validation_check', department_id: 2, mine: true }))
+    expect(screen.getByText(t('tasks.kind.validation_check'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.validation_check'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
+  it('sends an update-quote row to the implementation tab, where the delta is stated', async () => {
+    await renderWith(changeTask({ kind: 'update_quote' }))
+    expect(screen.getByText(t('tasks.kind.update_quote'))).toBeDefined()
+    expect(screen.getByText(t('tasks.hint.update_quote'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
+    expect(navigate).toHaveBeenCalledWith('/changes/7?tab=implementation')
+  })
+
   it('chases the customer on a quoted change', async () => {
     await renderWith(changeTask({ kind: 'customer_response' }))
     expect(screen.getByText(t('tasks.kind.customer_response'))).toBeDefined()

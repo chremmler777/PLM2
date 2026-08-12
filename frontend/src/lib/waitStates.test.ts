@@ -218,6 +218,51 @@ describe('resolveWaitStates', () => {
     expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName)).toEqual([])
   })
 
+  it('counts the departments that still owe a validation check', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'in_validation' }), [], deptName, [], {}, {
+        departments: [
+          { department_id: 2, checks: [
+            { check_key: 'sampled', status: 'passed' },
+            { check_key: 'revision_bump', status: 'open' }] },
+          { department_id: 4, checks: [{ check_key: 'weight', status: 'failed' }] },
+          { department_id: 6, checks: [{ check_key: 'measured', status: 'passed' }] },
+        ],
+      })
+    expect(waits.map((w) => w.key)).toEqual(['validation-checks'])
+    expect(waits[0].text).toBe(t('wait.onValidationChecks').replace('{n}', '2'))
+    expect(waits[0].tab).toBe('implementation')
+  })
+
+  it('names the unacknowledged weight delta as its own wait, on Sales', () => {
+    const state = {
+      departments: [{ department_id: 4, checks: [
+        { check_key: 'weight', status: 'passed' as const, value: 512 }] }],
+      weight_estimate_g: 500, validated_weight_g: 512, weight_delta_g: 12,
+    }
+    const waits = resolveWaitStates(
+      change({ status: 'in_validation' }), [], deptName, [], {}, state)
+    expect(waits.map((w) => w.key)).toEqual(['validation-weight-ack'])
+    expect(waits[0].text).toBe(t('wait.onWeightAck'))
+
+    // Acknowledged is settled; a delta of zero never was a wait.
+    expect(resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {},
+      { ...state, weight_ack_at: '2026-08-11T09:00:00' })).toEqual([])
+    expect(resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {},
+      { ...state, weight_delta_g: 0 })).toEqual([])
+  })
+
+  it('keeps the validation waits out of every other phase, and off an unloaded board', () => {
+    const state = {
+      departments: [{ department_id: 2, checks: [
+        { check_key: 'sampled', status: 'open' as const }] }],
+      weight_delta_g: 12,
+    }
+    expect(resolveWaitStates(
+      change({ status: 'in_implementation' }), [], deptName, [], {}, state)).toEqual([])
+    expect(resolveWaitStates(change({ status: 'in_validation' }), [], deptName)).toEqual([])
+  })
+
   it('lists every wait at once', () => {
     const waits = resolveWaitStates(
       change({ status: 'in_assessment', blocked_department_ids: [2] }),

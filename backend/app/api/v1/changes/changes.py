@@ -48,6 +48,8 @@ from app.schemas.change import (
     ImplementationReportCreate, ImplementationReportResponse,
     ImplementationEscalationCreate, ImplementationEscalationResolveIn,
     ImplementationEscalationResponse, ImplementationStateResponse,
+    ValidationCheckIn, ValidationCheckResponse, ValidationStateResponse,
+    WeightDeltaAckIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +171,9 @@ async def my_change_tasks(
                        (REPORT_CADENCE_HOURS) — or has never reported at all
       escalate_risk    in_implementation with an at-risk flag nobody has
                        answered yet, for Sales — customer or internal
+      update_quote     the validated part weight missed the estimate and
+                       nobody has settled the difference, for Sales — the
+                       delta rides on the row
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -331,6 +336,25 @@ async def my_change_tasks(
                     **await _base(c), "kind": "escalate_risk",
                     "department_ids": flagged,
                     "hint": "Take it to the customer, or escalate internally",
+                })
+
+        # Stage 9's one commercial errand: the sampled part came off the scale
+        # at a different weight than the quote was built on. Not tied to a
+        # status — the delta stays owed whether the change is still validating
+        # or went back round to implementation — and cleared by the explicit
+        # acknowledgement (POST /validation/weight-ack), never by guessing at a
+        # quoted_price edit that may have happened for another reason.
+        if in_sales:
+            from app.services.validation_service import ValidationService
+            if ValidationService.weight_delta_open(c):
+                delta = ValidationService.weight_delta(c)
+                tasks.append({
+                    **await _base(c), "kind": "update_quote",
+                    "delta_g": delta,
+                    "estimated_part_weight_g": c.estimated_part_weight_g,
+                    "validated_part_weight_g": c.validated_part_weight_g,
+                    "hint": f"Validated part weight is {delta:+g} g against the "
+                            "estimate — update the quote or record the decision",
                 })
 
         # Independent of the stage chain: a question can be waiting on Sales at
@@ -731,12 +755,25 @@ async def transition_change(
             status_code=403,
             detail="Only a Sales department member, the change lead or an "
                    "admin may create and send the quote")
+    # Sending a change back out of validation replans the timing and reopens
+    # the commercial terms — PM owns the first, Sales the second. A department
+    # whose own check failed says so on the check; it does not get to move the
+    # whole change on its own.
+    if change.status == "in_validation" and body.to_status == "in_implementation":
+        from app.services.validation_service import ValidationService
+        if not await ValidationService.may_escalate(db, change, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only Project Management, Sales, the change lead or an "
+                       "admin may send a change back from validation to "
+                       "implementation")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
             cancellation_reason=body.cancellation_reason,
             rejection_reason=body.rejection_reason,
             reopen_reason=body.reopen_reason,
+            reason=body.reason or body.escalation_reason,
         )
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2088,3 +2125,96 @@ async def resolve_implementation_escalation(
     await db.commit()
     await db.refresh(escalation)
     return (await ImplementationService.serialize_escalations(db, [escalation]))[0]
+
+
+# --- stage 9: validation checks ---------------------------------------------
+# Each implementing department fulfils its own checks; the rows are seeded from
+# the catalog the first time anybody looks. Reading is NOT department-scoped —
+# a validation verdict is a statement about the change, and the release meeting
+# argues over one picture — while writing follows the stage-8 rule with the
+# window moved to 'in_validation'.
+
+@router.get("/{change_id}/validation/state",
+            response_model=ValidationStateResponse)
+async def validation_state(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Per implementing department: its checks, their answers, and what still
+    blocks the release.
+
+    The cycle-time check carries the costing's lifecycle assumption
+    (planned_delta_seconds) so the measurement can be argued against the
+    number the change was priced on, and the weight check carries the estimate
+    and the delta for the same reason.
+
+    Seeds the catalog rows on first read: from then on the release guard has
+    something to hold the change to. Changes nobody ever opened this on keep
+    releasing exactly as before.
+    """
+    from app.services.validation_service import ValidationService
+    change = await _implementation_change(db, change_id, current_user)
+    state = await ValidationService.state(db, change)
+    await db.commit()
+    return state
+
+
+@router.post("/{change_id}/validation/checks",
+             response_model=ValidationCheckResponse,
+             status_code=status.HTTP_201_CREATED)
+async def record_validation_check(
+    change_id: int, body: ValidationCheckIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Tick (or fail) one of your department's validation checks.
+
+    Passing a measurement check without its number is refused: a cycle time
+    nobody wrote down cannot be compared to the lifecycle assumption, and a
+    weight nobody wrote down produces no delta for Sales to re-quote.
+    """
+    from app.services.validation_service import (
+        ValidationError as VError, ValidationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    if not await ValidationService.may_write(
+            db, change, body.department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "validation, Project Management or an admin may sign off "
+                   "its validation checks")
+    try:
+        row = await ValidationService.record_check(
+            db, change, body.model_dump(), current_user)
+    except VError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.post("/{change_id}/validation/weight-ack", response_model=ChangeResponse)
+async def acknowledge_weight_delta(
+    change_id: int, body: WeightDeltaAckIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Sales closes the loop the weight delta opened: the quote was updated,
+    or the difference was absorbed. Clears the 'update_quote' task."""
+    from app.services.validation_service import (
+        ValidationError as VError, ValidationService,
+    )
+    change = await _implementation_change(db, change_id, current_user)
+    if not await ValidationService.may_acknowledge_weight_delta(
+            db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may settle the "
+                   "weight delta against the quote")
+    try:
+        await ValidationService.acknowledge_weight_delta(
+            db, change, body.note, current_user)
+    except VError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(change)
+    return change

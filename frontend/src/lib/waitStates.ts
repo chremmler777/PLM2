@@ -9,7 +9,7 @@
  */
 import { t } from '../i18n/cmLabels'
 import type {
-  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState,
+  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, ValidationState,
 } from '../types/change'
 
 export interface WaitState {
@@ -82,6 +82,12 @@ export function resolveWaitStates(
     state?: ImplDepartmentState[]
     escalations?: { resolved_at?: string | null }[]
   } = {},
+  /**
+   * Stage 9, the same way: the validation board as the panel already fetched
+   * it. Two waits come out of it — the departments that still owe a check, and
+   * the weight delta nobody has taken into the quote.
+   */
+  validation?: ValidationState | null,
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -181,6 +187,28 @@ export function resolveWaitStates(
       waits.push({
         key: 'implementation-escalation',
         text: t('wait.onRiskEscalation'),
+        tab: 'implementation',
+      })
+    }
+  }
+
+  // While the results are being checked: the departments that have not answered
+  // their checks, and — separately, because it is a different desk and a
+  // different consequence — a validated weight the quote has not caught up with.
+  if (change.status === 'in_validation' && validation) {
+    const owing = (validation.departments ?? [])
+      .filter((d) => d.checks.some((c) => c.status !== 'passed')).length
+    if (owing > 0) {
+      waits.push({
+        key: 'validation-checks',
+        text: t('wait.onValidationChecks').replace('{n}', String(owing)),
+        tab: 'implementation',
+      })
+    }
+    if ((validation.weight_delta_g ?? 0) !== 0 && !validation.weight_ack_at) {
+      waits.push({
+        key: 'validation-weight-ack',
+        text: t('wait.onWeightAck'),
         tab: 'implementation',
       })
     }

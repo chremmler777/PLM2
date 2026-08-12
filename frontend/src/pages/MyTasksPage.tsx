@@ -210,6 +210,10 @@ const TASK_TAB: Record<string, string> = {
   // escalates from the same blocks.
   progress_report: '?tab=implementation',
   escalate_risk: '?tab=implementation',
+  // Stage 9 shares the tab: the department confirms its checks there, and the
+  // weight delta that sends Sales back to the quote is stated on the same panel.
+  validation_check: '?tab=implementation',
+  update_quote: '?tab=implementation',
 };
 
 const kickoffHint = (missing?: string[]): string => {
@@ -251,6 +255,10 @@ const taskHint = (task: ChangeTask): string | null => {
       return t('tasks.hint.progress_report');
     case 'escalate_risk':
       return t('tasks.hint.escalate_risk');
+    case 'validation_check':
+      return t('tasks.hint.validation_check');
+    case 'update_quote':
+      return t('tasks.hint.update_quote');
     case 'obtain_info':
     case 'close_question': {
       // The question (or the answer to it) is the brief; when several are open,

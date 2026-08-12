@@ -26,6 +26,7 @@ from app.models.change_cost import (
 from app.models.change_impl import (
     ImplementationBooking, ImplementationReport, ImplementationEscalation,
 )
+from app.models.change_validation import ValidationCheck
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
@@ -80,4 +81,5 @@ __all__ = [
     "ImplementationBooking",
     "ImplementationReport",
     "ImplementationEscalation",
+    "ValidationCheck",
 ]

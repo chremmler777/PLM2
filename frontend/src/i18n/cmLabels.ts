@@ -1161,5 +1161,141 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Gefährdung gemeldet — Eskalation durch den Vertrieb offen',
     en: 'At-risk flagged — Sales escalation pending',
   },
+
+  // ── Stage 9: validation ───────────────────────────────────────────────────
+  'validation.title': { de: 'Validierung', en: 'Validation' },
+  'validation.intro': {
+    de: 'Jeder umsetzende Fachbereich bestätigt seine Prüfpunkte. '
+      + 'Gemessene Werte werden gegen die Annahmen aus der Kalkulation gehalten.',
+    en: 'Every implementing department confirms its checks. Measured values are '
+      + 'held against the assumptions costing was built on.',
+  },
+  'validation.none': {
+    de: 'Noch keine Prüfpunkte — die Validierung beginnt mit dem Statuswechsel.',
+    en: 'No checks yet — validation starts when the change reaches this stage.',
+  },
+  'validation.readOnly': {
+    de: 'Abgeschlossen — die Prüfpunkte sind hier nur noch das Protokoll.',
+    en: 'Closed — the checks below are the record, not a form.',
+  },
+  'validation.others': {
+    de: '{n} weitere Fachbereiche validieren ebenfalls.',
+    en: '{n} further departments are validating too.',
+  },
+
+  // The five checks, and the one that needs saying out loud.
+  'validation.check.sampled': { de: 'Bemusterung erfolgt', en: 'Sampling done' },
+  'validation.check.measured': { de: 'Vermessung erfolgt', en: 'Measurement done' },
+  'validation.check.cycle_time': { de: 'Taktzeit geprüft', en: 'Cycle time checked' },
+  'validation.check.weight': { de: 'Gewicht geprüft', en: 'Weight checked' },
+  'validation.check.revision_bump': { de: 'Indexstände angehoben', en: 'Revision levels raised' },
+  'validation.hint.revision_bump': {
+    de: 'Indexstände gemäß Kundenaussage angehoben und geprüft',
+    en: 'Revision levels raised per customer statement and verified',
+  },
+
+  'validation.pass': { de: 'Bestanden', en: 'Pass' },
+  'validation.fail': { de: 'Nicht bestanden', en: 'Fail' },
+  'validation.status.open': { de: 'offen', en: 'open' },
+  'validation.status.passed': { de: 'bestanden', en: 'passed' },
+  'validation.status.failed': { de: 'nicht bestanden', en: 'failed' },
+  'validation.note': { de: 'Bemerkung', en: 'Note' },
+  'validation.failNote': { de: 'Was ist nicht in Ordnung?', en: 'What is not in order?' },
+  'validation.failNoteRequired': {
+    de: 'Ein „nicht bestanden“ ohne Begründung ist keine Prüfung.',
+    en: 'A fail without a reason is not a check.',
+  },
+  'validation.checkedBy': { de: '{who} · {d}', en: '{who} · {d}' },
+
+  // The two checks that carry a number, next to what was planned.
+  'validation.cycleValue': { de: 'Gemessene Taktzeit (s)', en: 'Measured cycle time (s)' },
+  'validation.cycleAssumption': {
+    de: 'kalkuliert: {x} min/Teil',
+    en: 'planned {x} min/part',
+  },
+  'validation.cycleNoAssumption': {
+    de: 'keine Taktzeit kalkuliert',
+    en: 'no cycle time in the costing',
+  },
+  'validation.weightValue': { de: 'Gemessenes Gewicht (g)', en: 'Measured weight (g)' },
+  'validation.weightEstimate': { de: 'geschätzt: {x} g', en: 'estimated {x} g' },
+  'validation.weightNoEstimate': { de: 'keine Schätzung', en: 'no estimate' },
+  'validation.weightDelta': { de: 'Abweichung {x} g', en: 'Delta {x} g' },
+
+  // The commercial consequence of a weight that moved.
+  'validation.quoteUpdate': {
+    de: 'Angebot nachziehen — das Gewicht war geschätzt, Abweichung {x} g',
+    en: 'Quote update required — weight was estimated, delta {x} g',
+  },
+  'validation.acknowledge': { de: 'Zur Kenntnis genommen', en: 'Acknowledge' },
+  'validation.ackNote': { de: 'Bemerkung (optional)', en: 'Note (optional)' },
+  'validation.acked': {
+    de: 'Vom Vertrieb übernommen: {who} · {d}',
+    en: 'Taken into the quote by {who} · {d}',
+  },
+
+  // Going back a stage, in professional words.
+  'validation.escalate': {
+    de: 'Prüfpunkte nicht bestanden — zurück in die Umsetzung',
+    en: 'Checks not passed — escalate',
+  },
+  'validation.escalateTitle': {
+    de: 'Zurück in die Umsetzung',
+    en: 'Return the change to implementation',
+  },
+  'validation.escalateLabel': {
+    de: 'Begründung — was ist nicht bestanden und was folgt daraus?',
+    en: 'Reason — what did not pass, and what follows from it?',
+  },
+  'validation.escalateWarning': {
+    de: 'Die Änderung geht in die Umsetzung zurück. Termine sind neu zu planen '
+      + 'und die kommerziellen Konditionen gegebenenfalls nachzuverhandeln.',
+    en: 'The change returns to implementation. Timing has to be replanned and '
+      + 'the commercial terms renegotiated where affected.',
+  },
+  'validation.escalateSubmit': { de: 'Zurückgeben', en: 'Return to implementation' },
+
+  // ── Actuals on the P&L card ───────────────────────────────────────────────
+  'actuals.title': { de: 'Ist-Kosten', en: 'Actuals' },
+  'actuals.intro': {
+    de: 'Gebuchte Zeit zum Kostensatz, plus was der Plan nicht getragen hat.',
+    en: 'Booked time at rate, plus what the plan did not carry.',
+  },
+  'actuals.department': { de: 'Fachbereich', en: 'Department' },
+  'actuals.hours': { de: 'Stunden', en: 'Hours' },
+  'actuals.actual': { de: 'Ist', en: 'Actual' },
+  'actuals.plan': { de: 'Plan', en: 'Plan' },
+  'actuals.delta': { de: 'Abweichung', en: 'Delta' },
+  'actuals.unrated': { de: 'ohne Kostensatz', en: 'no rate' },
+  'actuals.unratedHint': {
+    de: 'Für mindestens einen Fachbereich fehlt der Kostensatz — die Summe ist eine Untergrenze.',
+    en: 'At least one department has no rate — the total is a floor, not the figure.',
+  },
+  'actuals.extras': { de: 'Zusatzkosten', en: 'Extra costs' },
+  'actuals.extra.scrap_quote': { de: 'Verschrottung (Angebot)', en: 'Scrap quote' },
+  'actuals.extra.weight_delta': { de: 'Gewichtsabweichung', en: 'Weight delta' },
+  'actuals.total': { de: 'Ist gesamt', en: 'Actual total' },
+
+  // My-tasks rows, stage 9
+  'tasks.kind.validation_check': { de: 'Validierung bestätigen', en: 'Confirm validation' },
+  'tasks.hint.validation_check': {
+    de: 'Offene Prüfpunkte des Fachbereichs bestätigen — Messwerte eintragen',
+    en: 'Confirm your department’s open checks — enter the measured values',
+  },
+  'tasks.kind.update_quote': { de: 'Angebot nachziehen', en: 'Update the quote' },
+  'tasks.hint.update_quote': {
+    de: 'Das validierte Gewicht weicht von der Schätzung ab — Angebot nachziehen',
+    en: 'The validated weight differs from the estimate — bring the quote in line',
+  },
+
+  // Waits, stage 9
+  'wait.onValidationChecks': {
+    de: 'Prüfpunkte offen ({n} Fachbereiche)',
+    en: 'validation checks open ({n} departments)',
+  },
+  'wait.onWeightAck': {
+    de: 'Gewichtsabweichung nicht bestätigt — Vertrieb',
+    en: 'weight delta unacknowledged — Sales',
+  },
 };
 export const t = (key: string, lang: Lang = 'en'): string => cmLabels[key]?.[lang] ?? key;

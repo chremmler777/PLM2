@@ -622,6 +622,15 @@ class ChangeService:
                     return ("no check-workflow template mapped for item "
                             f"category: {', '.join(missing)}")
         if to_status == "released":
+            # Stage 9 first: "the Tool Engineer's weight check failed" is a
+            # more useful refusal than "2 of 5 revisions have not completed
+            # their check workflow", and it is the one somebody can act on
+            # today. Silent for changes with no validation rows at all — see
+            # ValidationService.release_blocker.
+            from app.services.validation_service import ValidationService
+            blocker = await ValidationService.release_blocker(session, change)
+            if blocker is not None:
+                return blocker
             progress = await ChangeService.implementation_progress(session, change)
             if not progress["ready_to_go"]:
                 pending = sum(1 for e in progress["items"] if not e["ready"])
@@ -640,6 +649,7 @@ class ChangeService:
         user_id: int, *, cancellation_reason: Optional[str] = None,
         rejection_reason: Optional[str] = None,
         reopen_reason: Optional[str] = None,
+        reason: Optional[str] = None,
     ) -> ChangeRequest:
         if to_status not in CHANGE_STATUSES:
             raise ChangeError(f"Unknown status '{to_status}'")
@@ -674,6 +684,23 @@ class ChangeService:
             if started:
                 raise ChangeError(
                     "Cannot recall: assessment work has already started")
+
+        # HARD precondition: validation sending the change BACK is the stage's
+        # other outcome, and it is expensive — the timeline has to be replanned
+        # and the commercial terms may have to be renegotiated. A bare status
+        # hop would leave nobody able to say, months later, which check failed
+        # and what was agreed about it. The reason is recorded under its own
+        # action ('validation_escalated') below.
+        validation_escalation = (change.status == "in_validation"
+                                 and to_status == "in_implementation")
+        # Captured before the guard below reuses the name `reason` for its own
+        # refusal string.
+        escalation_note = (reason or "").strip()
+        if validation_escalation and not escalation_note:
+            raise ChangeError(
+                "A reason is required to send a change back from "
+                "validation to implementation — say what failed and what has "
+                "to be replanned or renegotiated")
 
         if to_status == "cancelled":
             if not cancellation_reason:
@@ -771,6 +798,14 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change, "rejected", f"Rejected: {rejection_reason}",
                 user_id, notes=rejection_reason)
+        if validation_escalation:
+            await ChangeService.append_changelog(
+                session, change, "validation_escalated",
+                f"Validation escalated back to implementation: {escalation_note}",
+                user_id, notes=escalation_note,
+                old_value={"status": "in_validation"},
+                new_value={"status": "in_implementation",
+                           "reason": escalation_note})
         if reopening:
             prior = change.rejection_reason
             change.rejected_at = None
