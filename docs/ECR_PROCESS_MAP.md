@@ -32,7 +32,7 @@ flowchart TD
 | 2 | **scoping** | PM (+ project team) | Impacted set built and Development-locked; scoping meeting decides who assesses | impact lock (hard gate), proceed decision | BUILT |
 | 3 | **in_assessment** | Routed departments (Sales exempt — relies on departments) | Each department: impact checklist, verdict (feasible / with conditions / not feasible + Change PPT), typed risks 1–3, documents (Change PPT / RFQ / customer mails) | risk register; severity-3 risks → offer; not-feasible gate | BUILT (2026-08-11/12 rework) |
 | 4 | **costing** | Departments; PM sees all | Cost positions: internal effort (assessment time), implementation support estimate, external positions — estimate or vendor quotes (upload, cost, lead time, shipping separate/included, favorite vote). **Tooling Engineer also quotes part WEIGHT (a guess — validated later).** P&L starts here. Nothing-impacted departments owe nothing | tagged positions; vendor quote docs | IN BUILD (positions/vendors); **weight quote TO BUILD** |
-| 5 | **quoting — create quote** | **Sales only** | Sales sees all costs wrapped per department, builds the quote. Timeline-builder tool (MS-Project-like, parallel/serial) is FUTURE — placeholder for now | per-department wrap-up; quoted price | IN BUILD |
+| 5 | **quoting — create quote** | **Sales only** | Sales sees all costs wrapped per department, builds the quote. **The binding vendor choice is Sales' — made here** (departments only voted a favorite at costing). Timeline-builder tool (MS-Project-like, parallel/serial) is FUTURE — placeholder for now | per-department wrap-up; vendor choice; quoted price | IN BUILD (**vendor choice TO BUILD**) |
 | 6 | **quoted + negotiation** | Sales | Quote submitted to customer; negotiation tracked to a **final result**; Sales decides go-ahead | negotiation record; final price; go-ahead decision (acceptance carries release deadline — built) | PARTIAL (acceptance built; **negotiation loop TO BUILD**) |
 | 7 | **scheduling block** | Scheduling (+ Sales publishes) | Real bank-build plan (bank-build planning partially exists). Decision: **running change vs planned scrap** — customer pays scrap → additional cost quote if they scrap. Sales publishes the plan to the customer. Samplings planned on this timeline; blocked machines are part of it. **The scheduling timeline leads everything downstream** | bank-build plan; scrap decision + scrap quote; published plan | TO BUILD (bank-build basis exists) |
 | 8 | **in_implementation** | Implementing departments + vendors | Simple time tracking per department. **Progress report at least 2×/week** with an at-risk flag. Flagged → **Sales escalates** to customer or internally. Samplings happen per the scheduling timeline | progress reports; risk flags; escalations | TO BUILD (skeleton exists) |
@@ -67,5 +67,11 @@ flowchart TD
 6. **Validation checks** — per-department checklist (sampled/measured/cycle
    time), weight validation with quote delta to Sales, revision-level bump
    validation, actuals P&L.
-7. **Future tool**: Sales timeline builder (MS-Project-like) — placeholder
+7. **Sales' binding vendor choice at quoting** (departments vote, Sales
+   decides).
+8. **Future tool**: Sales timeline builder (MS-Project-like) — placeholder
    until then.
+
+Deliberately deferred (do not lose): the ORDERING/structuring of the cost
+position buckets ("we order them later") — tag list stays flat until the team
+defines the order.
