@@ -75,6 +75,11 @@ ROUTING_DEVIATION_STATUSES = ("none", "pending_approval", "approved")
 IMPLEMENTATION_MODES = ("integrated", "separational")
 MEETING_DECISIONS = ("proceed", "reject", "needs_info")
 MEETING_CHANNELS = ("meeting", "chat", "email")
+# How a negotiation round with the customer happened. Deliberately NOT the same
+# tuple as MEETING_CHANNELS: an internal scoping decision arrives by chat, a
+# customer negotiation by phone call, and the two vocabularies answer different
+# questions.
+NEGOTIATION_CHANNELS = ("meeting", "call", "email")
 ATTACHMENT_PHASES = ("baseline", "post_scoping")
 SCOPING_STATUSES = ("captured", "scoping")
 
@@ -275,6 +280,22 @@ class ChangeRequest(Base):
             return None
         return self.quoted_at <= self.required_by_date
 
+    @property
+    def negotiated_final_price(self) -> float | None:
+        """The number the go-ahead is actually based on: the counter price on
+        the FINAL negotiation round, when that round stated one.
+
+        Read-through, never a column: quoted_price is what we offered and must
+        stay what we offered. What the customer ended up agreeing to is a fact
+        about the negotiation, and it lives on the round that closed it — so it
+        cannot drift from the record it comes from. None means either nothing
+        is final yet or the final round settled on the quoted price without
+        naming a new one. `negotiations` is selectin-loaded, so this is free."""
+        for n in self.negotiations:
+            if n.is_final and n.counter_price is not None:
+                return float(n.counter_price)
+        return None
+
     impacted_items: Mapped[list["ChangeImpactedItem"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -308,6 +329,10 @@ class ChangeRequest(Base):
     meetings: Mapped[list["ChangeMeeting"]] = relationship(
         back_populates="change", cascade="all, delete-orphan", lazy="selectin",
         order_by="ChangeMeeting.id",
+    )
+    negotiations: Mapped[list["ChangeNegotiation"]] = relationship(
+        back_populates="change", cascade="all, delete-orphan", lazy="selectin",
+        order_by="ChangeNegotiation.id",
     )
 
 
@@ -545,6 +570,56 @@ class ChangeMeeting(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
+
+
+class ChangeNegotiation(Base):
+    """One round of the customer negotiation that follows a submitted quote.
+
+    The offer going out is not the end of the commercial conversation: the
+    customer calls back, asks for a different number, and the two sides go
+    around a few times before anybody says yes. Each of those rounds is a fact
+    somebody has to be able to point at later — WHO said WHAT, through which
+    channel — and the result of the last one is the basis Sales decides the
+    go-ahead on. Without the rounds recorded, the only surviving trace of a
+    three-month negotiation is the accepted price, and the reason it moved is
+    gone.
+
+    Exactly one round per change may be final (is_final): a negotiation has one
+    result, and marking a new one final clears the flag on its siblings. The
+    counter_price is optional because plenty of rounds move nothing but the
+    date — "they want it two weeks earlier" is a result with no number in it.
+
+    Rounds only exist while the change is 'quoted' — before that there is no
+    offer to negotiate about, after it Sales' decision has already been taken
+    on the record it left.
+    """
+    __tablename__ = "change_negotiations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(ForeignKey("change_requests.id"), index=True)
+
+    # meeting | call | email — see NEGOTIATION_CHANNELS.
+    channel: Mapped[str] = mapped_column(String(15), default="call", server_default="call")
+    # What came out of this round. Required: a round with no result is not a
+    # record of anything.
+    note: Mapped[str] = mapped_column(Text)
+    # The number the customer put on the table, when they named one.
+    counter_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    # The round that ended it. At most one per change.
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    change: Mapped["ChangeRequest"] = relationship(
+        back_populates="negotiations", foreign_keys=[change_id])
+    created_by_user: Mapped["User"] = relationship(
+        foreign_keys=[created_by], lazy="selectin")
+
+    @property
+    def created_by_name(self) -> Optional[str]:
+        return self.created_by_user.full_name if self.created_by_user is not None else None
 
 
 CONCERN_KINDS = ("reject_proposal", "needs_info", "risk")

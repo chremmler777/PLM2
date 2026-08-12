@@ -303,6 +303,7 @@ class ChangeResponse(BaseModel):
             row["active_deadline"] = data.active_deadline
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
+            row["negotiated_final_price"] = data.negotiated_final_price
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
             return row
@@ -316,6 +317,10 @@ class ChangeDetailResponse(ChangeResponse):
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []
+    # Read-through from the final negotiation round (see
+    # ChangeRequest.negotiated_final_price) — the number Sales' go-ahead is
+    # based on when it is not the quoted one. No column behind it.
+    negotiated_final_price: Optional[float] = None
 
 
 class RoutingDepartment(BaseModel):
@@ -644,6 +649,31 @@ class MeetingUpdate(BaseModel):
     participants: Optional[List[MeetingParticipant]] = None
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None
+
+
+class NegotiationCreate(BaseModel):
+    channel: str = "call"  # meeting | call | email
+    # The round's result — the whole point of the record.
+    note: str = Field(min_length=1)
+    # The customer's counter, when they named one. Not every round has a
+    # number in it.
+    counter_price: Optional[float] = Field(default=None, ge=0)
+    is_final: bool = False
+
+
+class NegotiationResponse(BaseModel):
+    id: int
+    change_id: int
+    channel: str
+    note: str
+    counter_price: Optional[float] = None
+    is_final: bool = False
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class ConcernCreate(BaseModel):

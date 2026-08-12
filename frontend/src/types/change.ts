@@ -208,6 +208,34 @@ export interface ChangeRequest {
   estimated_weight_at?: string | null;
   /** Set once the estimate has been checked against a real part. */
   validated_part_weight_g?: number | null;
+  /**
+   * The price the negotiation ended on — the counter price of the entry Sales
+   * marked as the final result. Read-only here: it is derived from the
+   * negotiation log, never typed into the change.
+   */
+  negotiated_final_price?: number | null;
+}
+
+/** How a negotiation round happened. Meetings, calls and mails are the three
+ *  ways a price actually gets moved; nothing else is worth a vocabulary. */
+export type NegotiationChannel = 'meeting' | 'call' | 'email';
+
+/**
+ * One round of the price negotiation at `quoted`: what was said, through which
+ * channel, and — when the customer named one — the price they countered with.
+ * Exactly one entry per change may be the final result; the backend clears the
+ * flag on its siblings when a new final arrives.
+ */
+export interface ChangeNegotiation {
+  id: number;
+  channel: NegotiationChannel;
+  note: string;
+  counter_price?: number | null;
+  is_final: boolean;
+  created_by_name?: string | null;
+  /** Present when the backend serves the raw id; used to gate the delete. */
+  created_by?: number | null;
+  created_at: string;
 }
 
 export interface ChangeDetail extends ChangeRequest {

@@ -12,6 +12,7 @@ import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
 import QuoteBasis from '../components/changes/QuoteBasis';
+import NegotiationCard from '../components/changes/NegotiationCard';
 import QuoteTimelineCard from '../components/changes/QuoteTimelineCard';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
@@ -537,6 +538,13 @@ export default function ChangeDetailPage() {
                 plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
                 concerns={concerns} departments={departments} />}
               <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
+              {/* Once the offer is out, the price stops being a single number
+                  and becomes a conversation. The log runs it to a final result;
+                  the go-ahead stays with the acceptance controls below. */}
+              {canSeeCosts && phaseIndex(change.status) >= phaseIndex('quoted') && (
+                <NegotiationCard changeId={changeId} status={change.status}
+                  canWrite={canEditQuotedPrice} />
+              )}
               <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <button className="px-3 py-1.5 border rounded-lg"

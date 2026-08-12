@@ -432,6 +432,35 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Offene Risiken der Bewertung 3 — im Angebot benennen, nicht einpreisen.',
     en: 'Open rating-3 risks — state them in the offer, do not price them in.',
   },
+  // The negotiation log at `quoted`: every round that moved the price, and the
+  // one entry that ended it. The go-ahead itself stays where it always was —
+  // customer acceptance, with its release deadline.
+  'negotiation.title': { de: 'Verhandlung', en: 'Negotiation' },
+  'negotiation.hint': {
+    de: 'Jede Verhandlungsrunde mit Kanal, Ergebnis und ggf. Gegenpreis festhalten.',
+    en: 'Record each round with its channel, what came out of it, and any counter price.',
+  },
+  'negotiation.none': { de: 'Noch keine Verhandlungsrunde erfasst.', en: 'No negotiation round recorded yet.' },
+  'negotiation.add': { de: 'Runde erfassen', en: 'Record round' },
+  'negotiation.channel': { de: 'Kanal', en: 'Channel' },
+  'negotiation.channel.meeting': { de: 'Termin', en: 'Meeting' },
+  'negotiation.channel.call': { de: 'Telefonat', en: 'Call' },
+  'negotiation.channel.email': { de: 'E-Mail', en: 'Email' },
+  'negotiation.note': { de: 'Ergebnis der Runde', en: 'What came out of the round' },
+  'negotiation.notePlaceholder': {
+    de: 'Was wurde besprochen, worauf hat der Kunde bestanden?',
+    en: 'What was discussed, what did the customer insist on?',
+  },
+  'negotiation.counterPrice': { de: 'Gegenpreis', en: 'Counter price' },
+  'negotiation.isFinal': { de: 'Das ist das Endergebnis', en: 'This is the final result' },
+  'negotiation.final': { de: 'Endergebnis', en: 'Final result' },
+  'negotiation.finalPrice': { de: 'Verhandelter Endpreis', en: 'Negotiated final price' },
+  'negotiation.submit': { de: 'Runde speichern', en: 'Save round' },
+  'negotiation.delete': { de: 'Löschen', en: 'Delete' },
+  'negotiation.goAheadHint': {
+    de: 'Freigabe über die Kundenannahme erfassen — Freigabetermin erforderlich.',
+    en: 'Record the go-ahead via customer acceptance — release deadline required.',
+  },
   'summation.timeBasis': { de: 'Zeitbasis für das Angebot', en: 'Time basis for the quote' },
   'summation.perPart': { de: 'pro Teil', en: 'per part' },
   'costing.leadTime': { de: 'Vorlaufzeit (Tage)', en: 'Lead time (days)' },

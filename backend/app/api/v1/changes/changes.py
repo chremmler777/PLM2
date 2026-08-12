@@ -38,6 +38,7 @@ from app.schemas.change import (
     CheckStandardIn, CheckStandardResponse,
     ImpactSuggestIn, ImpactSelectionIn,
     MeetingCreate, MeetingUpdate, MeetingDecideIn, MeetingResponse,
+    NegotiationCreate, NegotiationResponse,
     ConcernCreate, ConcernResponse, ConcernWithdrawIn, ConcernAnswerIn,
     CostLeadTimeIn, WeightEstimateIn,
     InternalApprovalIn,
@@ -1552,6 +1553,81 @@ async def update_meeting(
     await db.commit()
     await db.refresh(meeting)
     return meeting
+
+
+# --- the negotiation loop at 'quoted' ---------------------------------------
+# The quote is out; what comes back is a sequence of rounds ending in one final
+# result. Sales' go-ahead (the existing acceptance mechanics, with its
+# mandatory release deadline) is decided on that result and stays where it is.
+
+@router.get("/{change_id}/negotiations", response_model=List[NegotiationResponse])
+async def list_negotiations(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Every recorded round. Commercial read: admin, the change lead, Project
+    Management, Sales — the crowd that sees the costing numbers."""
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_read(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, Project Management, the change lead or an "
+                   "admin may see the negotiation record")
+    return await NegotiationService.list_rounds(db, change)
+
+
+@router.post("/{change_id}/negotiations", response_model=NegotiationResponse,
+             status_code=status.HTTP_201_CREATED)
+async def record_negotiation(
+    change_id: int, body: NegotiationCreate,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_write(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may record a "
+                   "negotiation round")
+    try:
+        row = await NegotiationService.record_round(
+            db, change, current_user, channel=body.channel, note=body.note,
+            counter_price=body.counter_price, is_final=body.is_final)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/{change_id}/negotiations/{nid}", status_code=204)
+async def delete_negotiation(
+    change_id: int, nid: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        row = await NegotiationService.get_round(db, change, nid)
+    except ChangeError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not NegotiationService.may_delete(row, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the author of a negotiation round or an admin may "
+                   "remove it")
+    try:
+        await NegotiationService.delete_round(db, change, row, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
 
 
 @router.get("/{change_id}/concerns", response_model=List[ConcernResponse])

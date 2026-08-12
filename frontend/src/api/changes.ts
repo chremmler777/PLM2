@@ -7,6 +7,7 @@ import type {
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
+  ChangeNegotiation, NegotiationChannel,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -246,4 +247,16 @@ export const changesApi = {
       release_due_date: body.release_due_date,
       release_due_reason: body.release_due_reason ?? null,
     }).then((r) => r.data),
+
+  // The negotiation log at `quoted`: rounds in the order they happened, and the
+  // one entry Sales marked as the result. Posting a final clears the flag on
+  // the others server-side — the client never has to reconcile that itself.
+  listNegotiations: (id: number) =>
+    client.get<ChangeNegotiation[]>(`/v1/changes/${id}/negotiations`).then((r) => r.data),
+  addNegotiation: (id: number, body: {
+    channel: NegotiationChannel; note: string;
+    counter_price?: number | null; is_final?: boolean;
+  }) => client.post<ChangeNegotiation>(`/v1/changes/${id}/negotiations`, body).then((r) => r.data),
+  deleteNegotiation: (id: number, negotiationId: number) =>
+    client.delete(`/v1/changes/${id}/negotiations/${negotiationId}`).then((r) => r.data),
 };
