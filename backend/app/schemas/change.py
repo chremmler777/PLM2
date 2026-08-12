@@ -447,7 +447,13 @@ class PositionRollup(BaseModel):
     department_id: int
     position_cost: float = 0.0
     hours: float = 0.0
+    # hours × the department's rate at the costing plant, the same valuation a
+    # cost line gives demand_hours. Counted in one_time_internal.
+    hours_cost: float = 0.0
     position_count: int = 0
+    # Hours were declared but no rate is configured for this department at the
+    # costing plant, so they are valued at zero. Flagged rather than guessed.
+    unrated_hours: bool = False
 
 
 class SummationResponse(BaseModel):
@@ -466,6 +472,7 @@ class SummationResponse(BaseModel):
     total_minutes_per_part: float = 0.0
     positions_by_department: List[PositionRollup] = []
     total_position_cost: float = 0.0
+    total_position_hours_cost: float = 0.0
 
 
 # --- costing positions ------------------------------------------------------

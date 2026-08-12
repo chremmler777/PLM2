@@ -539,23 +539,103 @@ async def test_positions_add_to_the_department_totals(client, admin_auth, costin
 
     summ = (await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
                              headers=admin_auth)).json()
-    assert summ["totals"]["one_time_internal"] == 300.0
+    # 300 estimate + 4 h × 65 €/h at the home plant.
+    assert summ["totals"]["one_time_internal"] == 560.0
     assert summ["totals"]["one_time_external"] == 1150.0
-    assert summ["totals"]["grand_total"] == 1450.0
+    assert summ["totals"]["grand_total"] == 1710.0
 
     dept = [d for d in summ["by_department"]
             if d["department_id"] == costing["tool"]][0]
-    assert dept["one_time_internal"] == 300.0
+    assert dept["one_time_internal"] == 560.0
     assert dept["one_time_external"] == 1150.0
 
     broken_out = summ["positions_by_department"][0]
     assert broken_out["department_id"] == costing["tool"]
     assert broken_out["position_cost"] == 1450.0
     assert broken_out["hours"] == 4.0
+    assert broken_out["hours_cost"] == 260.0
+    assert broken_out["unrated_hours"] is False
     assert broken_out["position_count"] == 2
     assert summ["total_position_cost"] == 1450.0
+    assert summ["total_position_hours_cost"] == 260.0
 
     # The supplier's delivery date is a lead time like any other.
     assert summ["max_lead_time_days"] == 30
     # Positions carry no plant, so the per-plant matrix is untouched by them.
     assert summ["by_plant"] == []
+
+
+async def _summation(client, auth, costing):
+    res = await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                           headers=auth)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def test_declared_hours_become_money_at_the_department_rate(
+        client, admin_auth, costing):
+    """The assessment time IS a cost. Reporting 6 h and no euros was the bug:
+    Sales quotes euros."""
+    await _add_position(client, admin_auth, costing, kind="internal_effort",
+                        label="Time spent on the assessment", hours=6.0)
+    summ = await _summation(client, admin_auth, costing)
+
+    assert summ["totals"]["one_time_internal"] == 390.0     # 6 h × 65 €/h
+    assert summ["totals"]["grand_total"] == 390.0
+    dept = [d for d in summ["by_department"]
+            if d["department_id"] == costing["tool"]][0]
+    assert dept["one_time_internal"] == 390.0
+
+    row = summ["positions_by_department"][0]
+    assert row["hours"] == 6.0                 # the raw hours are still there
+    assert row["hours_cost"] == 390.0
+    assert row["position_cost"] == 0.0         # no estimate was given
+    assert row["unrated_hours"] is False
+
+
+async def test_an_external_positions_own_time_is_valued_too(
+        client, admin_auth, costing):
+    """Specifying and chasing a supplier is our time, and it is priced at our
+    rate on top of the supplier's number."""
+    pid = (await _add_position(client, admin_auth, costing, kind="external",
+                               pricing="quote", label="New nozzle",
+                               hours=2.0)).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, cost=1000.0, favorite=True)
+
+    summ = await _summation(client, admin_auth, costing)
+    assert summ["totals"]["one_time_external"] == 1000.0    # the supplier
+    assert summ["totals"]["one_time_internal"] == 130.0     # 2 h × 65 €/h
+    assert summ["totals"]["grand_total"] == 1130.0
+    row = summ["positions_by_department"][0]
+    assert row["hours_cost"] == 130.0
+    assert row["position_cost"] == 1000.0
+
+
+async def test_hours_with_no_configured_rate_are_flagged_not_invented(
+        client, admin_auth, session_factory, seed, costing):
+    """A department with no rate at the costing plant is counted at zero and
+    said so — an invented rate is a number somebody would quote."""
+    async with session_factory() as s:
+        unrated = Department(name="Quality", flow_type="action", is_active=True)
+        s.add(unrated)
+        await s.flush()
+        s.add(ChangeAssessment(change_id=costing["change_id"],
+                               department_id=unrated.id, stage_order=1,
+                               verdict="feasible"))
+        await s.commit()
+        unrated_id = unrated.id
+
+    res = await _add_position(client, admin_auth, costing,
+                              department_id=unrated_id, kind="internal_effort",
+                              label="Layout inspection time", hours=8.0)
+    assert res.status_code == 201, res.text
+
+    summ = await _summation(client, admin_auth, costing)
+    assert summ["totals"]["one_time_internal"] == 0.0
+    assert summ["totals"]["grand_total"] == 0.0
+    row = [r for r in summ["positions_by_department"]
+           if r["department_id"] == unrated_id][0]
+    assert row["hours"] == 8.0          # the work is still on the record
+    assert row["hours_cost"] == 0.0
+    assert row["unrated_hours"] is True
+    assert summ["total_position_hours_cost"] == 0.0

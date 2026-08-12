@@ -214,19 +214,56 @@ class CostService:
         positions = (await session.execute(
             select(CostingPosition).where(
                 CostingPosition.change_id == change.id))).scalars().all()
+        # A position's HOURS are money too — the assessment time and the
+        # implementation support the department declared. Valued exactly the
+        # way a cost line values demand_hours: the department's rate at the
+        # costing plant. Reporting the hours without the euros left Sales
+        # looking at "6 h, €0".
+        position_plant = (await CostService._costing_plant(session, change)
+                          if positions else None)
+        position_rates: dict[int, Optional[float]] = {}
         pos_by_dep: dict[int, dict] = {}
         for p in positions:
             cost = p.effective_cost or 0.0
             bucket = ("one_time_external" if p.kind == "external"
                       else "one_time_internal")
-            by_dep.setdefault(p.department_id, _blank())[bucket] += cost
-            totals[bucket] += cost
             agg = pos_by_dep.setdefault(
                 p.department_id,
                 {"department_id": p.department_id, "position_cost": 0.0,
-                 "hours": 0.0, "position_count": 0})
+                 "hours": 0.0, "hours_cost": 0.0, "position_count": 0,
+                 "unrated_hours": False})
+
+            hours = float(p.hours or 0.0)
+            hours_cost = 0.0
+            if hours:
+                if p.department_id not in position_rates:
+                    position_rates[p.department_id] = (
+                        await CostService.rate_for(
+                            session, p.department_id, position_plant)
+                        if position_plant is not None else None)
+                rate = position_rates[p.department_id]
+                if rate is None:
+                    # No rate configured for this department at this plant.
+                    # The grid refuses to price hours it has no rate for
+                    # rather than inventing one; the roll-up cannot refuse, so
+                    # it counts zero and says so. An invented rate would be a
+                    # number somebody quotes.
+                    agg["unrated_hours"] = True
+                else:
+                    hours_cost = hours * rate
+
+            # Own time is internal money whatever the position is FOR: the
+            # hours a department spends specifying and chasing a supplier are
+            # ours, not the supplier's.
+            by_dep.setdefault(p.department_id, _blank())[bucket] += cost
+            totals[bucket] += cost
+            if hours_cost:
+                by_dep[p.department_id]["one_time_internal"] += hours_cost
+                totals["one_time_internal"] += hours_cost
+
             agg["position_cost"] += cost
-            agg["hours"] += float(p.hours or 0.0)
+            agg["hours"] += hours
+            agg["hours_cost"] += hours_cost
             agg["position_count"] += 1
 
         totals["grand_total"] = (totals["one_time_internal"] + totals["one_time_external"]
@@ -289,4 +326,8 @@ class CostService:
                 pos_by_dep[d] for d in sorted(pos_by_dep)],
             "total_position_cost": float(
                 sum(v["position_cost"] for v in pos_by_dep.values())),
+            # The valued half of the same rows, so "how much of this is our own
+            # time" is answerable without re-multiplying anything.
+            "total_position_hours_cost": float(
+                sum(v["hours_cost"] for v in pos_by_dep.values())),
         }
