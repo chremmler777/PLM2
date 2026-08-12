@@ -87,9 +87,14 @@ Run these when discussing any stage's implementation:
 - The onward move is **the meeting's call, not a button**. The cockpit offers no
   advance button at `scoping`; it points at the scoping tab.
   `changeStatus.ts::DECIDED_BY_MEETING`.
-- **Concerns** — any team member may flag `reject_proposal` or `needs_info` with
-  a note. Only its author may withdraw it (admins are *not* exempt). One open
-  concern per person per kind. `meeting_service.py::raise_concern`.
+- **Concerns** — any team member may flag `reject_proposal` (cancel vote) or
+  `needs_info` (question) with a note; naming a department is attribution only.
+  Risks are **not** raisable here — the register belongs to assessment. Settling
+  ("mark solved") belongs to the author or a Project Manager member — attribution
+  hands the named department (Sales, typically) nothing, admins are *not* exempt,
+  and the acts-as switch sets personal authorship aside. One open concern per
+  person per kind. `meeting_service.py::raise_concern` / `withdraw_concern`; see
+  `superpowers/specs/2026-08-12-scoping-concerns-and-settle-rights-design.md`.
 - **Open concerns block `proceed`** — the decision must either be answered by
   the author withdrawing, or by a negative decision that consumes it.
 - Meeting decision `reject` requires a reason; `needs_info` requires stating
@@ -118,9 +123,12 @@ note nobody owns:
    (`general | info_request | info_response`) and a response links to its
    request (`responds_to_id`, migration 046). The needs-info slot uploads as
    `info_request`; the UI pairs responses under their requests.
-4. **Closure**: the decider withdraws their flag once the answers suffice
-   (author-only — whoever asked the question judges the answer), then a
-   follow-up meeting decides `proceed`. All steps audited.
+4. **Answer vs. closure are two acts** (2026-08-12): Sales *answers* the
+   question (`answer_concern` — a comment; the flag stays open, and the
+   `close_question` task goes to the asker and PM). **Closure** is the asker's
+   or a PM member's call — whoever asked the question judges the answer;
+   Sales never marks solved. Question cards name the asker with their
+   department role(s), not just the username. All steps audited.
 
 ### The two deadlines (2026-08-11)
 
@@ -146,7 +154,9 @@ One quote-by, one release-by; at any moment at most one is *active*
 
 ### Inside `in_assessment` — the risk register (reworked 2026-08-11)
 
-Risks at assessment are a **register, not a hold**. A department records a
+Risks at assessment are a **register, not a hold** — and assessment is the only
+phase that hand-raises them (a scoping raise of kind `risk` is refused, and
+assessment refuses the scoping kinds; 2026-08-12). A department records a
 risk with a **standard type** — fill issue, dimensional issue, visual/surface,
 process capability, other (free text) — a **severity rating 1–3** (3 =
 highest) and a note, then submits its verdict regardless. No mitigation

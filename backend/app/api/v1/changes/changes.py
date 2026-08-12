@@ -19,7 +19,7 @@ from app.dependencies import get_current_user
 from app.models import get_db, User
 from app.models.change import (
     ChangeChangelog, ChangeAttachment, ChangeRequest, ChangeAssessment,
-    ChangeImpactedItem, SIGN_OFF_ROLES,
+    ChangeImpactedItem, SIGN_OFF_ROLES, BLOCKING_LETTERS,
 )
 from app.models.workflow import UserDepartment, Department
 from app.services.change_service import ChangeService, ChangeError, _org_scope
@@ -196,6 +196,15 @@ async def my_change_tasks(
             # when it is *effectively* active (task active, or an unlinked row
             # carrying its own "active" status from a routing deviation).
             if a.effective_status != "active":
+                continue
+            # Only R/A letters OWE a submit. A Consulted/Support row activates
+            # with its stage so the department may chime in, but its 'noted'
+            # task gates nothing — queueing it as a task tells a department
+            # that already did its Responsible work in an earlier stage that
+            # it still owes something. Exception: a non-blocking row somebody
+            # explicitly took (owner) is that person's to-do.
+            if (a.rasic_letter not in BLOCKING_LETTERS
+                    and a.effective_owner_id != current_user.id):
                 continue
             tasks.append({
                 "kind": "assessment", "change_id": c.id, "change_number": c.change_number,
@@ -374,15 +383,24 @@ async def my_change_tasks(
                 })
 
         # The other half of the same loop: an answer is waiting on the side
-        # that asked. Addressed to the department that raised it (any member —
-        # the flag is the department's), and always to Project Management, the
-        # standing arbiter who can settle either kind. An answered question
+        # that asked. Addressed to the person who asked and to Project
+        # Management, the standing arbiter — mirroring withdraw_concern's
+        # rule. A department only owns the flag (any member may close it)
+        # while the change is in assessment; a scoping question's attribution
+        # is a label and hands its department nothing. An answered question
         # nobody is told to review stalls exactly like an unanswered one.
         answered = ChangeService.answered_questions(c)
         if answered:
+            # Under acts-as the personal requester errand steps aside with the
+            # real memberships — the task list shows the department's view.
+            am_requester = (getattr(current_user, "acts_as_department_id", None)
+                            is None)
             mine = [q for q in answered
                     if is_pm_member
-                    or (q.department_id is not None and q.department_id in dep_ids)]
+                    or (am_requester and q.raised_by == current_user.id)
+                    or (c.status == "in_assessment"
+                        and q.department_id is not None
+                        and q.department_id in dep_ids)]
             if mine:
                 newest = mine[-1]
                 tasks.append({
@@ -1842,7 +1860,31 @@ async def list_concerns(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    return change.concerns
+    # Who asks matters as much as what is asked: each row carries the asker's
+    # department memberships (their role in the room) and the answerer's name,
+    # so the card never shows a bare username — or worse, a '#id'.
+    user_ids = ({c.raised_by for c in change.concerns}
+                | {c.answered_by for c in change.concerns
+                   if c.answered_by is not None})
+    dept_names: dict[int, list[str]] = {}
+    names: dict[int, str] = {}
+    if user_ids:
+        for uid, dname in await db.execute(
+                select(UserDepartment.user_id, Department.name)
+                .join(Department, Department.id == UserDepartment.department_id)
+                .where(UserDepartment.user_id.in_(user_ids))):
+            dept_names.setdefault(uid, []).append(dname)
+        for uid, full_name in await db.execute(
+                select(User.id, User.full_name).where(User.id.in_(user_ids))):
+            names[uid] = full_name
+    out = []
+    for c in change.concerns:
+        row = ConcernResponse.model_validate(c)
+        row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
+        if c.answered_by is not None:
+            row.answered_by_name = names.get(c.answered_by)
+        out.append(row)
+    return out
 
 
 @router.post("/{change_id}/concerns", response_model=ConcernResponse)

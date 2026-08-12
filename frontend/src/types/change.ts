@@ -600,6 +600,8 @@ export interface ChangeConcern {
   note: string;
   raised_by: number;
   raised_by_name?: string | null;
+  /** The asker's department memberships — their role in the room. */
+  raised_by_departments?: string[];
   raised_at: string;
   withdrawn_at?: string | null;
   resolved_by_meeting_id?: number | null;

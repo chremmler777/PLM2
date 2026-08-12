@@ -10,6 +10,7 @@ import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
+import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest } from '../../types/change'
 
@@ -195,10 +196,14 @@ export default function ScopingPanel(
   const olderMeetings: ChangeMeeting[] = meetings.slice(0, Math.max(0, meetings.length - 1))
   // Both paths — meeting-raised and hand-raised — render the same card with the
   // same gates. Closing belongs to the asker (or PM); answering to Sales.
+  // While an admin acts as a department, their personal asker right steps
+  // aside with their real memberships — the card shows that department's view.
+  const actingAs = getActsAsDepartmentId() != null
   const questionCard = (c: ChangeConcern) => (
     <NeedsInfoCard key={c.id} changeId={changeId} concern={c}
       attachments={attachments} editable={open}
-      canAnswer={canAnswerConcerns} canSettle={c.raised_by === userId || isPm}
+      canAnswer={canAnswerConcerns}
+      canSettle={(!actingAs && c.raised_by === userId) || isPm}
       origin={originOf(c)} onChanged={invalidate} />
   )
   const outstanding = [...meetings].reverse().find(

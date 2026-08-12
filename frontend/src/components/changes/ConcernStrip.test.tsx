@@ -86,25 +86,35 @@ describe('ConcernStrip', () => {
     expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('greys the settle control for a viewer who is neither author, PM, nor the raising department', async () => {
+  it('acting as a department sets your own authorship aside', async () => {
+    // The admin driving the Sales view must not keep the requester right on
+    // their own flag — acts-as means being that department and nothing else.
+    sessionStorage.setItem('plm2.actsAsDepartmentId', '5')
+    try {
+      vi.mocked(changesApi.listConcerns).mockResolvedValue([
+        concern({ id: 1, raised_by: 5, raised_by_name: 'Me' })] as never)
+      wrap(<ConcernStrip changeId={7} editable />)
+      await screen.findByText('Tool cannot hold tolerance')
+      expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(true)
+    } finally {
+      sessionStorage.removeItem('plm2.actsAsDepartmentId')
+    }
+  })
+
+  it('in scoping, attribution hands the named department no settle right', async () => {
+    // The Sales hole: a question attributed to a department must NOT unlock
+    // for that department's members — in scoping it is author or PM, period.
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
-    wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Packaging Engineer' }]}
-      myDepartmentIds={[2]} />)
+      concern({ id: 1, kind: 'needs_info', raised_by: 9, department_id: 6 })] as never)
+    wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Sales' }]}
+      myDepartmentIds={[6]} />)
     await screen.findByText('Tool cannot hold tolerance')
     const btn = screen.getByTestId('concern-close-1') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
-    expect(btn.getAttribute('title')).toBe(t('concern.authorDeptOrPm'))
+    expect(btn.getAttribute('title')).toBe(t('concern.authorOrPm'))
   })
 
-  it('lets the raising department and PM settle it', async () => {
-    vi.mocked(changesApi.listConcerns).mockResolvedValue([
-      concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
-    wrap(<ConcernStrip changeId={7} editable departments={[{ id: 6, name: 'Packaging Engineer' }]}
-      myDepartmentIds={[6]} />)
-    await screen.findByText('Tool cannot hold tolerance')
-    expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(false)
-    cleanup()
+  it('lets PM settle an attributed flag in scoping', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([
       concern({ id: 1, kind: 'reject_proposal', raised_by: 9, department_id: 6 })] as never)
     wrap(<ConcernStrip changeId={7} editable isPm
@@ -124,42 +134,40 @@ describe('ConcernStrip', () => {
     expect((screen.getByTestId('concern-close-1') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('raises a risk — the only kind there is — with its type, rating and note', async () => {
-    // The old "would reject" / "needs info" raises are gone: the API refuses
-    // them, so the form must not offer them either.
+  it('raises a question or a cancel vote — the scoping kinds, not a risk', async () => {
     wrap(<ConcernStrip changeId={7} editable />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
-    expect(screen.queryByText(t('concern.wouldReject'))).toBeNull()
-    expect(screen.queryByText(t('concern.wantsInfo'))).toBeNull()
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'fill_issue' } })
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: '  short shots  ' } })
-    fireEvent.click(screen.getByTestId('risk-severity-pick-3'))
-    fireEvent.click(screen.getByTestId('risk-submit'))
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    // The risk furniture stays out of scoping — that register is assessment's.
+    expect(screen.queryByTestId('risk-form')).toBeNull()
+    expect(screen.queryByTestId('risk-type-select')).toBeNull()
+    // A question is the default; the cancel vote is one pick away.
+    const kind = screen.getByLabelText(t('concern.kind')) as HTMLSelectElement
+    expect(kind.value).toBe('needs_info')
+    fireEvent.change(kind, { target: { value: 'reject_proposal' } })
+    fireEvent.change(screen.getByLabelText(t('concern.note')),
+      { target: { value: '  Tool cannot hold it  ' } })
+    fireEvent.click(screen.getByRole('button', { name: t('concern.raise') }))
     await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
-      kind: 'risk', note: 'short shots', risk_type: 'fill_issue', severity: 3,
+      kind: 'reject_proposal', note: 'Tool cannot hold it',
     }))
   })
 
-  it('will not send a risk whose type nobody picked', async () => {
+  it('asks for more information as a question, without naming a department', async () => {
     wrap(<ConcernStrip changeId={7} editable />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'something is off' } })
-    // Nothing is guessed — an unpicked type is not silently 'other'.
-    expect((screen.getByTestId('risk-type-select') as HTMLSelectElement).value).toBe('')
-    expect((screen.getByTestId('risk-submit') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
-    expect((screen.getByTestId('risk-submit') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.change(screen.getByLabelText(t('concern.note')),
+      { target: { value: 'Which revision applies?' } })
+    fireEvent.click(screen.getByRole('button', { name: t('concern.raise') }))
+    await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
+      kind: 'needs_info', note: 'Which revision applies?',
+    }))
   })
 
-  it('rates a risk in the middle until someone says otherwise', async () => {
+  it('will not send an empty flag', async () => {
     wrap(<ConcernStrip changeId={7} editable />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
-    expect(screen.getByTestId('risk-severity-pick-2').getAttribute('aria-pressed')).toBe('true')
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'x' } })
-    fireEvent.click(screen.getByTestId('risk-submit'))
-    await waitFor(() => expect(changesApi.raiseConcern)
-      .toHaveBeenCalledWith(7, expect.objectContaining({ severity: 2 })))
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    expect((screen.getByRole('button', { name: t('concern.raise') }) as HTMLButtonElement)
+      .disabled).toBe(true)
   })
 
   it('shows settled flags struck through and un-withdrawable', async () => {
@@ -224,6 +232,30 @@ describe('ConcernStrip in the assessment phase', () => {
       kind: 'risk', note: 'gauge missing', risk_type: 'dimensional_issue',
       severity: 2, department_id: 4,
     }))
+  })
+
+  it('will not send a risk whose type nobody picked', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'something is off' } })
+    fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '4' } })
+    // Nothing is guessed — an unpicked type is not silently 'other'.
+    expect((screen.getByTestId('risk-type-select') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByTestId('risk-submit') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
+    expect((screen.getByTestId('risk-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('rates a risk in the middle until someone says otherwise', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    expect(screen.getByTestId('risk-severity-pick-2').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '4' } })
+    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
+    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'x' } })
+    fireEvent.click(screen.getByTestId('risk-submit'))
+    await waitFor(() => expect(changesApi.raiseConcern)
+      .toHaveBeenCalledWith(7, expect.objectContaining({ severity: 2 })))
   })
 
   it('preselects Development for a member of several departments', async () => {
@@ -302,11 +334,11 @@ describe('ConcernStrip attribution in scoping', () => {
     // Team plus the two active departments — no membership restriction here.
     expect(picker.querySelectorAll('option')).toHaveLength(3)
     expect(screen.queryByText('Logistics')).toBeNull()
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'whole team issue' } })
-    fireEvent.click(screen.getByTestId('risk-submit'))
+    fireEvent.change(screen.getByLabelText(t('concern.note')),
+      { target: { value: 'whole team issue' } })
+    fireEvent.click(screen.getByRole('button', { name: t('concern.raise') }))
     await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
-      kind: 'risk', note: 'whole team issue', risk_type: 'other', severity: 2,
+      kind: 'needs_info', note: 'whole team issue',
     }))
   })
 
@@ -314,12 +346,11 @@ describe('ConcernStrip attribution in scoping', () => {
     wrap(<ConcernStrip changeId={7} editable departments={depts} />)
     fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
     fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '6' } })
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'box will not fit' } })
-    fireEvent.click(screen.getByTestId('risk-submit'))
+    fireEvent.change(screen.getByLabelText(t('concern.note')),
+      { target: { value: 'box will not fit' } })
+    fireEvent.click(screen.getByRole('button', { name: t('concern.raise') }))
     await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
-      kind: 'risk', note: 'box will not fit', risk_type: 'other',
-      severity: 2, department_id: 6,
+      kind: 'needs_info', note: 'box will not fit', department_id: 6,
     }))
   })
 
@@ -351,14 +382,14 @@ describe('ConcernStrip refused flag', () => {
         'Only Project Management, the change lead, or an admin may manage scoping meetings' } },
     })
     wrap(<ConcernStrip changeId={7} editable />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
-    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
-    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'tool risk' } })
-    fireEvent.click(screen.getByTestId('risk-submit'))
+    fireEvent.click(await screen.findByRole('button', { name: /\+ Flag/ }))
+    fireEvent.change(screen.getByLabelText(t('concern.note')),
+      { target: { value: 'tool concern' } })
+    fireEvent.click(screen.getByRole('button', { name: t('concern.raise') }))
     const alert = await screen.findByTestId('concern-error')
     expect(alert.textContent).toContain('Only Project Management')
     // The form stays open with the note — the failure must not eat the typing.
-    expect((screen.getByTestId('risk-note') as HTMLTextAreaElement).value).toBe('tool risk')
+    expect((screen.getByLabelText(t('concern.note')) as HTMLInputElement).value).toBe('tool concern')
   })
 })
 

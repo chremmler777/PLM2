@@ -264,12 +264,63 @@ async def test_sales_answers_but_does_not_settle(
     assert body["answered_by"] is not None
     assert body["is_open"] is True          # answering does not settle it
 
+    # ...and the list names who answered, not a bare '#id'
+    listed = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                               headers=admin_auth)).json()
+    row = next(x for x in listed if x["id"] == concern_id)
+    assert row["answered_by_name"] == "Sales Person"
+
     # ...and Sales cannot settle it either
     res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
                             json={"resolution_note": "closing my own answer"},
                             headers=sales)
     assert res.status_code == 400
     assert "Project Management" in res.json()["detail"]
+
+
+async def test_attribution_to_sales_gives_sales_no_settle_right(
+        client, admin_auth, seed, session_factory):
+    """The hole this pins shut: a question ATTRIBUTED to the Sales department
+    ("Sales must ask the customer") must still not be Sales' to settle. In
+    scoping, attribution is a label anyone may pick — settling stays with the
+    person who asked, or Project Management."""
+    from sqlalchemy import select
+    from app.models.workflow import Department
+    cid = await _change_in_scoping(client, admin_auth, seed, "7b")
+    sales = await _sales_member(client, session_factory, seed)
+    async with session_factory() as s:
+        sales_dept_id = (await s.execute(select(Department.id).where(
+            Department.name == "Sales"))).scalar_one()
+
+    concern_id = (await client.post(
+        f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
+        json={"kind": "needs_info", "note": "Ask the customer for rev D",
+              "department_id": sales_dept_id})).json()["id"]
+
+    # Sales answers — that is their part, and it changes nothing about who
+    # decides the answer was good enough.
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/answer",
+                            json={"note": "Customer confirmed rev D"}, headers=sales)
+    assert res.status_code == 200, res.text
+
+    # the close-question errand goes to the asker, not to Sales
+    assert await _close_rows(client, sales, cid) == []
+    author_rows = await _close_rows(client, admin_auth, cid)
+    assert len(author_rows) == 1 and author_rows[0]["concern_id"] == concern_id
+
+    # Sales cannot settle it, resolution note or not
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "closing it myself"},
+                            headers=sales)
+    assert res.status_code == 400
+    assert "Project Management" in res.json()["detail"]
+
+    # the person who asked settles it, on the record
+    res = await client.post(f"/api/v1/changes/{cid}/concerns/{concern_id}/withdraw",
+                            json={"resolution_note": "Rev D confirmed is enough"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["is_open"] is False
 
 
 async def test_re_answering_overwrites_and_keeps_every_round_in_the_chain(
@@ -478,11 +529,10 @@ async def test_the_auto_flag_names_the_meeting_that_raised_it(
     auto = next(c for c in concerns if c["kind"] == "needs_info" and c["is_open"])
     assert auto["raised_by_meeting_id"] == mid
 
-    # a hand-raised flag (a risk — the only kind anyone raises now) stands on
-    # its own, with no meeting behind it
+    # a hand-raised flag stands on its own, with no meeting behind it (the
+    # decider already owns the open needs_info above, so this one is a vote)
     manual = await client.post(f"/api/v1/changes/{cid}/concerns", headers=admin_auth,
-                               json={"kind": "risk", "note": "mine",
-                                     "risk_type": "other", "severity": 1})
+                               json={"kind": "reject_proposal", "note": "mine"})
     assert manual.status_code == 200, manual.text
     assert manual.json()["raised_by_meeting_id"] is None
 

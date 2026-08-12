@@ -65,6 +65,53 @@ async def test_engineer_with_owned_active_task_gets_assessment_action(
     assert assessment_actions[0]["assessment_id"] == a.id
 
 
+async def test_unowned_consulted_row_owes_nothing(
+        client, eng_auth, seed, session_factory):
+    """The live bug: multi-stage routing gives a department R in stage 1 and C
+    in stage 2. Once stage 2 starts, the C row reads effectively 'active' (its
+    stage has begun) — but Consulted gates nothing, so it must not appear as
+    an owed action. Only an explicit owner turns a non-blocking row into a
+    to-do (see the owned-S-row test above)."""
+    from app.models.change import ChangeRequest, ChangeAssessment
+    from app.models.workflow import Department, UserDepartment
+
+    async with session_factory() as s:
+        dept = Department(name="Tool Engineer", flow_type="action", is_active=True)
+        s.add(dept)
+        await s.flush()
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=dept.id))
+        chg = ChangeRequest(change_number="C-MA-C1", title="x", reason="y",
+                            change_type="physical_part", project_id=seed["project_id"],
+                            raised_by=seed["admin_id"], status="in_assessment")
+        s.add(chg)
+        await s.flush()
+        # Stage 1: this department's R work, already submitted.
+        from datetime import datetime
+        s.add(ChangeAssessment(
+            change_id=chg.id, department_id=dept.id, stage_order=1,
+            rasic_letter="R", status="submitted", verdict="feasible",
+            submitted_at=datetime.utcnow(), submitted_by=seed["engineer_id"]))
+        # Stage 2: the same department, Consulted, unowned, stage started.
+        c_row = ChangeAssessment(
+            change_id=chg.id, department_id=dept.id, stage_order=2,
+            rasic_letter="C", status="active", verdict="pending")
+        s.add(c_row)
+        await s.commit()
+        cid = chg.id
+
+    res = await client.get(f"/api/v1/changes/{cid}/my-actions", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    kinds = [act["kind"] for act in res.json()["actions"]]
+    assert "assessment" not in kinds
+
+    # ...and the task queue agrees: no my-tasks row for the consulted stage.
+    res = await client.get("/api/v1/changes/my-tasks", headers=eng_auth)
+    assert res.status_code == 200, res.text
+    rows = [t for t in res.json()
+            if t["kind"] == "assessment" and t["change_id"] == cid]
+    assert rows == []
+
+
 async def test_lead_with_pending_deviation_gets_deviation_decision(
         client, eng_auth, admin_auth, seed):
     res = await client.post("/api/v1/changes", json={

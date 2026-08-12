@@ -129,15 +129,15 @@ async def record_proceed_meeting(session_factory, change_id: int,
 async def insert_legacy_concern(session_factory, change_id: int, *, kind: str,
                                 note: str, raised_by: int,
                                 department_id: int | None = None) -> int:
-    """Write a reject_proposal / needs_info concern straight to the table.
+    """Write a concern row straight to the table, bypassing the phase rules.
 
-    These kinds no longer have a hand-raise endpoint — needs_info now only
-    appears as a scoping-meeting outcome (Team-attributed, no department), and
-    reject_proposal has no producer left at all. The rows are still out there
-    in production and everything downstream of them — Sales answering, the
-    close_question errand, the department hold on submit — has to keep working,
-    so the tests that cover those flows seed the row the way history left it.
-    Anything testing the raise itself belongs in the risk-register tests.
+    For rows the API can no longer mint in the state under test: a department
+    hold (reject_proposal with a department) during assessment, or a risk row
+    sitting on a change that is back in scoping. Everything downstream of such
+    rows — Sales answering, the close_question errand, the department hold on
+    submit — has to keep working, so the tests that cover those flows seed the
+    row the way history left it. Anything testing the raise itself goes
+    through the endpoint.
     """
     from app.models.change import ChangeConcern
     async with session_factory() as s:

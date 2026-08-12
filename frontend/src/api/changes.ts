@@ -229,8 +229,8 @@ export const changesApi = {
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
   listConcerns: (id: number) =>
     client.get<ChangeConcern[]>(`/v1/changes/${id}/concerns`).then((r) => r.data),
-  // Only risks are raisable now: a kind, how bad it is, and what it is about.
-  // The old reject_proposal / needs_info raises are gone from the API.
+  // Phase-split kinds: scoping raises needs_info / reject_proposal (the
+  // team's question or cancel vote); assessment raises typed, rated risks.
   raiseConcern: (id: number, body: {
     kind: ConcernKind; note: string; department_id?: number;
     risk_type?: RiskType; severity?: RiskSeverity;

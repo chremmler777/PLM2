@@ -102,12 +102,12 @@ async def test_several_risks_may_stand_at_once(client, admin_auth, assessing):
 
 
 async def test_a_direct_raise_can_only_be_a_risk(client, admin_auth, assessing):
-    """reject_proposal and needs_info are outcomes of a scoping decision; minted
-    by hand they are open points nobody owes an answer to."""
+    """reject_proposal and needs_info are scoping's vocabulary — during
+    assessment a hand raise is a register entry, nothing else."""
     for kind in ("reject_proposal", "needs_info"):
         res = await _raise(client, admin_auth, assessing, kind=kind)
         assert res.status_code == 400, res.text
-        assert "scoping decision" in res.json()["detail"]
+        assert "belong to scoping" in res.json()["detail"]
 
 
 async def test_the_risk_vocabulary_is_served(client, admin_auth):

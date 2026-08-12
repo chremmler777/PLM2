@@ -118,8 +118,12 @@ export default function NeedsInfoCard({
           className={`inline-flex items-center rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${STATE_STYLE[state]}`}>
           {t(STATE_LABEL[state])}
         </span>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-slate-500" data-testid={`needs-info-asker-${c.id}`}>
           {t('concern.asked')} {c.raised_by_name ?? `#${c.raised_by}`}
+          {/* The asker's role: a question from Quality reads differently than
+              one from Logistics, so the hat stands next to the name. */}
+          {(c.raised_by_departments?.length ?? 0) > 0
+            && ` (${c.raised_by_departments!.join(', ')})`}
           {' · '}{new Date(c.raised_at).toLocaleDateString()}
           {origin && ` · ${origin}`}
         </span>

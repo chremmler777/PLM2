@@ -1485,6 +1485,15 @@ class ChangeService:
         for a in change.assessments:
             if a.effective_status != "active":
                 continue
+            # Only R/A letters owe a submit — a Consulted/Support row is
+            # active with its stage so the department may chime in, but it
+            # gates nothing and must not read as owed work (mirrors the
+            # my-tasks filter in changes.py my_change_tasks). Exception: a
+            # non-blocking row somebody explicitly took (owner) is that
+            # person's to-do.
+            if (a.rasic_letter not in BLOCKING_LETTERS
+                    and a.effective_owner_id != user.id):
+                continue
             if a.department_id not in dept_ids and a.effective_owner_id != user.id:
                 continue
             actions.append({

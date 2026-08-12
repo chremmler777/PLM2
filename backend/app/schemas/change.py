@@ -797,12 +797,13 @@ class NegotiationResponse(BaseModel):
 
 
 class ConcernCreate(BaseModel):
-    # Direct raises are risks only; reject_proposal/needs_info are written by
-    # the scoping decision that produced them.
-    kind: str = "risk"
+    # Phase-split kinds: during scoping the team raises needs_info (a
+    # question) or reject_proposal (a cancel vote); during assessment only
+    # risks are raisable by hand.
+    kind: str = "needs_info"
     note: str = Field(min_length=1)
     # Required while the change is in assessment (the raiser's own
-    # department); must stay unset during scoping.
+    # department); optional attribution during scoping.
     department_id: Optional[int] = None
     # Required for kind "risk" — see RISK_TYPES / severity 1-3 in models.
     risk_type: Optional[str] = None
@@ -867,6 +868,11 @@ class ConcernResponse(BaseModel):
     note: str
     raised_by: int
     raised_by_name: Optional[str] = None
+    # The asker's department memberships — who is asking matters as much as
+    # what is asked, and a bare name says nothing about the hat. Served by the
+    # list endpoint; single-concern responses leave it empty and the UI
+    # re-fetches the list anyway.
+    raised_by_departments: List[str] = []
     raised_at: datetime
     department_id: Optional[int] = None
     # Set on kind "risk" only; null on legacy kinds.
@@ -876,6 +882,9 @@ class ConcernResponse(BaseModel):
     answer_note: Optional[str] = None
     answered_at: Optional[datetime] = None
     answered_by: Optional[int] = None
+    # The answerer's name, same deal as the asker's — the UI already renders
+    # it and fell back to '#id' while nothing served it.
+    answered_by_name: Optional[str] = None
     withdrawn_at: Optional[datetime] = None
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None

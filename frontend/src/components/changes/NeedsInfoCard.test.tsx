@@ -52,6 +52,12 @@ describe('NeedsInfoCard states', () => {
     expect(screen.queryByTestId('needs-info-answer-1')).toBeNull()
   })
 
+  it('names the asker with their role, not just the username', () => {
+    card({ concern: concern({ raised_by_departments: ['Quality', 'APQP'] }) })
+    expect(screen.getByTestId('needs-info-asker-1').textContent)
+      .toContain('PM Jane (Quality, APQP)')
+  })
+
   it('shows the stored answer and still asks to be closed', () => {
     card({ concern: concern({
       answer_note: 'customer confirmed 12.50', answered_at: '2026-08-02T00:00:00',

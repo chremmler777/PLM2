@@ -153,7 +153,8 @@ class MeetingService:
         This is the one thing the feature exists for — an objection that only
         the lead or a PM could file is not a parallel team voice, it is the
         meeting again. The scoping-meeting gate (_authz) belongs to meetings,
-        not to this. Withdrawal has its own rule: author only, no exceptions.
+        not to this. Withdrawal has its own rule (see withdraw_concern):
+        the author, the raising department, or Project Management.
         """
         in_assessment = change.status == "in_assessment"
         if change.status not in SCOPING_STATUSES and not in_assessment:
@@ -161,23 +162,29 @@ class MeetingService:
                 "Concerns can only be raised during scoping or assessment")
         if kind not in CONCERN_KINDS:
             raise ChangeError(f"Invalid concern kind '{kind}'")
-        # The only thing a person raises by hand now is a risk. reject_proposal
-        # and needs_info are decision outcomes — they arrive from the scoping
-        # meeting (which writes them directly, bypassing this) and are settled
-        # by the loop that created them. Letting somebody mint one from the
-        # side produced open points with no decision behind them and nobody
-        # obliged to answer.
-        if kind != "risk":
+        # Two phases, two vocabularies. Scoping is the team working the
+        # decision in parallel: anyone may ask for missing information
+        # (needs_info) or vote to reject the change (reject_proposal), and
+        # those flags block 'proceed' until they are withdrawn or answered by
+        # a decision. The risk register belongs to assessment — a risk holds
+        # nothing and is worked with a mitigation proposal where the technical
+        # work happens, not in the scoping room.
+        if in_assessment and kind != "risk":
             raise ChangeError(
-                f"'{kind}' concerns come from a scoping decision, not from a "
-                "direct raise — raise a risk instead")
-        if risk_type not in RISK_TYPES:
+                f"'{kind}' concerns belong to scoping — during assessment "
+                "the register takes risks")
+        if not in_assessment and kind == "risk":
             raise ChangeError(
-                f"Invalid risk type '{risk_type}' — one of: "
-                + ", ".join(RISK_TYPES))
-        if severity not in RISK_SEVERITIES:
-            raise ChangeError(
-                "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
+                "Risks belong to the assessment phase — during scoping, flag "
+                "a concern (needs_info or reject_proposal) instead")
+        if kind == "risk":
+            if risk_type not in RISK_TYPES:
+                raise ChangeError(
+                    f"Invalid risk type '{risk_type}' — one of: "
+                    + ", ".join(RISK_TYPES))
+            if severity not in RISK_SEVERITIES:
+                raise ChangeError(
+                    "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
         if not (note or "").strip():
             raise ChangeError("A concern needs a note saying what the problem is")
         if in_assessment:
@@ -242,37 +249,46 @@ class MeetingService:
         if not concern.is_open:
             raise ChangeError("Concern is no longer open")
         # Settling a concern belongs to the side that raised it, plus Project
-        # Management as the standing arbiter. A department flag is the
-        # DEPARTMENT's, not one member's — colleagues cover for each other and
-        # people leave — so any member of that department may settle it. A
-        # Team or personal flag has only its author behind it.
+        # Management as the standing arbiter. Who "the side" is depends on
+        # what the flag is. An assessment hold or a risk is the DEPARTMENT's,
+        # not one member's — colleagues cover for each other and people leave
+        # — so any member of that department may settle it. A scoping question
+        # or cancel vote belongs to the person who raised it, even when
+        # attributed to a department: attribution is a label anyone may pick,
+        # so it grants nobody — Sales least of all — the right to declare the
+        # point settled.
         #
         # Nobody else, however senior: an objection cleared by the person it
         # inconveniences is the failure this feature exists to prevent, and
         # answering a question (see answer_concern) is deliberately NOT the
         # same act as deciding the answer was good enough.
         note = (resolution_note or "").strip()
-        if concern.department_id is not None:
-            allowed = (concern.raised_by == user.id
-                       or await WorkflowService.actor_in_department(
-                           session, user, concern.department_id)
-                       or await MeetingService.user_is_pm_member(session, user))
-            if not allowed:
-                raise ChangeError(
-                    "Only a member of the department that raised this concern, "
-                    "or Project Management, may settle it")
-            # The flag held that department's assessment. Lifting the hold has
-            # to say how the point was addressed.
-            if not note:
-                raise ChangeError(
-                    "Withdrawing a department concern requires a resolution note "
-                    "saying how it was addressed")
-        else:
-            if (concern.raised_by != user.id
-                    and not await MeetingService.user_is_pm_member(session, user)):
-                raise ChangeError(
-                    "Only the person who raised this concern, or Project "
-                    "Management, may settle it")
+        department_owns_it = (concern.department_id is not None
+                              and (concern.kind == "risk"
+                                   or change.status == "in_assessment"))
+        # Acting-as means being exactly that department and nothing else
+        # (spec D2): the admin's personal authorship steps aside with their
+        # real memberships, so driving the Sales view never keeps the
+        # requester right on a question they asked as themselves.
+        acting_as = getattr(user, "acts_as_department_id", None) is not None
+        allowed = ((concern.raised_by == user.id and not acting_as)
+                   or await MeetingService.user_is_pm_member(session, user)
+                   or (department_owns_it
+                       and await WorkflowService.actor_in_department(
+                           session, user, concern.department_id)))
+        if not allowed:
+            raise ChangeError(
+                "Only a member of the department that raised this concern, "
+                "or Project Management, may settle it"
+                if department_owns_it else
+                "Only the person who raised this concern, or Project "
+                "Management, may settle it")
+        if concern.department_id is not None and not note:
+            # A department-attributed flag owes its resolution — how was the
+            # point addressed, on the record.
+            raise ChangeError(
+                "Withdrawing a department concern requires a resolution note "
+                "saying how it was addressed")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
         concern.resolution_note = note or None

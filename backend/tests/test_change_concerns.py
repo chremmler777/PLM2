@@ -1,11 +1,12 @@
 """Concerns: the flags a change carries alongside its decisions.
 
-Two producers now. A RISK is raised by hand — that is the only kind anyone may
-file directly, and it is a register entry rather than a hold. reject_proposal
-and needs_info are outcomes: the scoping meeting writes the needs_info it
-decided on, and older rows of both kinds are still out there. What those legacy
-rows do — block their department's submit until they are settled with a note —
-is unchanged, so it is covered here with the row seeded the way history left it.
+Two phases, two vocabularies. During SCOPING the team works the decision in
+parallel: anyone may ask for missing information (needs_info) or vote to
+reject the change (reject_proposal), those flags block 'proceed', and the
+scoping meeting also writes the needs_info it decided on. During ASSESSMENT
+the only hand-raised kind is a RISK — a register entry, not a hold. Legacy
+department holds (reject_proposal rows with a department) still block their
+department's submit until settled with a note.
 """
 import pytest
 
@@ -70,30 +71,39 @@ async def _meeting(client, auth, cid, dept_ids):
     return res.json()["id"]
 
 
-async def _raise(client, auth, cid, note, **extra):
-    body = {**RISK, "note": note}
+async def _raise(client, auth, cid, note, kind="needs_info", **extra):
+    body = {"kind": kind, "note": note}
     body.update(extra)
     return await client.post(f"/api/v1/changes/{cid}/concerns", json=body,
                              headers=auth)
 
 
-async def test_a_decision_kind_cannot_be_raised_by_hand(client, eng_auth, seed):
-    """The pinning test for the removed capability: needs_info comes from the
-    meeting that decided it, and reject_proposal has no producer at all."""
+async def test_scoping_takes_questions_and_cancel_votes_by_hand(
+        client, eng_auth, seed):
+    """The team works the decision in parallel: a member may ask for more
+    information, or vote for cancellation, without waiting for the meeting."""
     cid = await _change_in_scoping(client, eng_auth, seed, "1")
-    for kind in ("reject_proposal", "needs_info"):
-        res = await client.post(f"/api/v1/changes/{cid}/concerns", headers=eng_auth,
-                                json={"kind": kind, "note": "Tool cannot hold it"})
-        assert res.status_code == 400, res.text
-        assert "scoping decision" in res.json()["detail"]
+    for kind in ("needs_info", "reject_proposal"):
+        res = await _raise(client, eng_auth, cid, "Tool cannot hold it", kind=kind)
+        assert res.status_code == 200, res.text
+        assert res.json()["kind"] == kind
+        assert res.json()["is_open"] is True
 
 
-async def test_a_risk_records_who_flagged_it_and_why(client, eng_auth, seed):
+async def test_a_risk_cannot_be_raised_during_scoping(client, eng_auth, seed):
+    """The risk register belongs to assessment — scoping talks concerns."""
+    cid = await _change_in_scoping(client, eng_auth, seed, "1r")
+    res = await _raise(client, eng_auth, cid, "Datum B will move", **RISK)
+    assert res.status_code == 400, res.text
+    assert "assessment" in res.json()["detail"]
+
+
+async def test_a_concern_records_who_flagged_it_and_why(client, eng_auth, seed):
     cid = await _change_in_scoping(client, eng_auth, seed, "1b")
     res = await _raise(client, eng_auth, cid, "Datum B will move")
     assert res.status_code == 200, res.text
     c = res.json()
-    assert c["kind"] == "risk"
+    assert c["kind"] == "needs_info"
     assert c["note"] == "Datum B will move"
     assert c["raised_by"] == seed["engineer_id"]
     assert c["raised_by_name"]           # the flag names its author
@@ -129,9 +139,8 @@ async def test_open_concern_blocks_proceed_until_withdrawn(
         client, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, eng_auth, seed, "5")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
-    concern_id = await insert_legacy_concern(
-        session_factory, cid, kind="reject_proposal", note="Timing impossible",
-        raised_by=seed["engineer_id"])
+    concern_id = (await _raise(client, eng_auth, cid, "Timing impossible",
+                               kind="reject_proposal")).json()["id"]
 
     res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide",
                             json={"decision": "proceed"}, headers=eng_auth)
@@ -150,10 +159,14 @@ async def test_open_concern_blocks_proceed_until_withdrawn(
 async def test_an_open_risk_does_not_block_the_decision(
         client, eng_auth, seed, session_factory):
     """A change proceeds WITH its risks — gating the decision on an empty
-    register would only teach people to withdraw risks they still believe in."""
+    register would only teach people to withdraw risks they still believe in.
+    Risks are assessment-raised now, so the row is seeded the way one would
+    exist on a change that came back around."""
     cid = await _change_in_scoping(client, eng_auth, seed, "5b")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
-    assert (await _raise(client, eng_auth, cid, "Warpage on the long rib")).status_code == 200
+    await insert_legacy_concern(
+        session_factory, cid, kind="risk", note="Warpage on the long rib",
+        raised_by=seed["engineer_id"])
     await _lock_impact(session_factory, cid)
 
     res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide",
@@ -168,11 +181,12 @@ async def test_negative_decision_resolves_the_open_concerns(
         client, eng_auth, seed, session_factory):
     cid = await _change_in_scoping(client, eng_auth, seed, "6")
     mid = await _meeting(client, eng_auth, cid, await _dept_ids(session_factory))
-    await insert_legacy_concern(
-        session_factory, cid, kind="needs_info",
-        note="Need the customer drawing", raised_by=seed["engineer_id"])
+    assert (await _raise(client, eng_auth, cid,
+                         "Need the customer drawing")).status_code == 200
     # A risk is not a question, so the decision must leave it alone.
-    assert (await _raise(client, eng_auth, cid, "Sink marks")).status_code == 200
+    await insert_legacy_concern(
+        session_factory, cid, kind="risk", note="Sink marks",
+        raised_by=seed["engineer_id"])
 
     res = await client.post(f"/api/v1/changes/{cid}/meetings/{mid}/decide", headers=eng_auth,
                             json={"decision": "needs_info",
@@ -277,10 +291,23 @@ async def _join_department(session_factory, user_id, department_id):
         await s.commit()
 
 
+async def test_assessment_takes_only_risks_by_hand(
+        client, admin_auth, seed, session_factory):
+    """The scoping vocabulary stops at the phase door: once the change is in
+    assessment, a hand raise is a register entry, not a question or a vote."""
+    cid, dept_ids = await _change_in_assessment(
+        client, admin_auth, seed, session_factory, "A0")
+    for kind in ("needs_info", "reject_proposal"):
+        res = await _raise(client, admin_auth, cid, "Too late for this", kind=kind,
+                           department_id=dept_ids[0])
+        assert res.status_code == 400, res.text
+        assert "belong to scoping" in res.json()["detail"]
+
+
 async def test_a_risk_in_assessment_must_name_its_department(
         client, admin_auth, seed, session_factory):
     cid, _ = await _change_in_assessment(client, admin_auth, seed, session_factory, "A1")
-    res = await _raise(client, admin_auth, cid, "Need the CAD")
+    res = await _raise(client, admin_auth, cid, "Need the CAD", **RISK)
     assert res.status_code == 400
     assert "department_id" in res.json()["detail"]
 
@@ -291,13 +318,13 @@ async def test_a_risk_in_assessment_is_only_for_your_own_department(
         client, admin_auth, seed, session_factory, "A2")
     # the engineer is in no department -> refused
     res = await _raise(client, eng_auth, cid, "Wall too thin",
-                       department_id=dept_ids[0])
+                       department_id=dept_ids[0], **RISK)
     assert res.status_code == 400
     assert "own department" in res.json()["detail"]
 
     await _join_department(session_factory, seed["engineer_id"], dept_ids[0])
     res = await _raise(client, eng_auth, cid, "Wall too thin",
-                       department_id=dept_ids[0])
+                       department_id=dept_ids[0], **RISK)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["department_id"] == dept_ids[0]
@@ -367,7 +394,7 @@ async def _a_department(session_factory, name="Tool Engineer", active=True):
         return d.id
 
 
-async def test_a_scoping_risk_may_name_a_department_without_membership(
+async def test_a_scoping_concern_may_name_a_department_without_membership(
         client, eng_auth, seed, session_factory):
     """At scoping the department is attribution, not a submission gate — so no
     membership is required (unlike assessment)."""
@@ -435,7 +462,7 @@ async def _plain_member(client, session_factory, seed, dept_name="Tool Engineer"
                 "user_id": u.id, "dept_id": dept.id}
 
 
-async def test_any_member_may_flag_a_risk(
+async def test_any_member_may_flag_a_concern(
         client, eng_auth, seed, session_factory):
     """Not the lead, not PM, not admin — the flag must still land, both as a
     whole-team point and attributed to a department."""
@@ -452,6 +479,14 @@ async def test_any_member_may_flag_a_risk(
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] == member["dept_id"]
 
+    # The list names the asker's role next to their name: who is asking is
+    # read with the hat they wear, not as a bare username.
+    listed = (await client.get(f"/api/v1/changes/{cid}/concerns",
+                               headers=eng_auth)).json()
+    mine = next(c for c in listed if c["note"] == "Team point")
+    assert mine["raised_by_name"] == "Tool Guy"
+    assert mine["raised_by_departments"] == ["Tool Engineer"]
+
 
 async def test_admin_acting_as_a_department_may_flag_for_it(
         client, admin_auth, seed, session_factory):
@@ -459,9 +494,31 @@ async def test_admin_acting_as_a_department_may_flag_for_it(
         client, admin_auth, seed, session_factory, "W2")
     acting = {**admin_auth, "X-Acts-As-Department": str(dept_ids[0])}
     res = await _raise(client, acting, cid, "Gate freeze marginal",
-                       department_id=dept_ids[0])
+                       department_id=dept_ids[0], **RISK)
     assert res.status_code == 200, res.text
     assert res.json()["department_id"] == dept_ids[0]
+
+
+async def test_acting_as_a_department_sets_authorship_aside(
+        client, admin_auth, seed, session_factory):
+    """The acts-as switch means being exactly that department (spec D2): an
+    admin driving another department's view — Sales, typically — must not
+    keep their personal requester right on a question they asked as
+    themselves. Dropping the switch brings the right back."""
+    cid = await _change_in_scoping(client, admin_auth, seed, "AA1")
+    dept_id = await _a_department(session_factory)
+    concern_id = (await _raise(client, admin_auth, cid,
+                               "Need the drawing")).json()["id"]
+
+    acting = {**admin_auth, "X-Acts-As-Department": str(dept_id)}
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=acting)
+    assert res.status_code == 400
+    assert "Project Management" in res.json()["detail"]
+
+    res = await client.delete(f"/api/v1/changes/{cid}/concerns/{concern_id}",
+                              headers=admin_auth)
+    assert res.status_code == 200, res.text
 
 
 async def test_only_the_author_may_withdraw_even_without_meeting_rights(

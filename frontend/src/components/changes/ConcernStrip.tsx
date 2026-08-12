@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
+import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { preferredDepartmentId } from '../../lib/departments'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
@@ -49,11 +50,13 @@ function SeverityBadge({ value, testId }: { value?: number | null; testId: strin
 }
 
 /**
- * Risks are the per-change risk register: anyone on a routed department records
- * what could go wrong, how bad it would be, and what kind of problem it is.
- * A risk blocks nothing — it is worked with a mitigation proposal and closed by
- * the raising side. Only the legacy flags (a meeting's needs-info, an old
- * reject_proposal) still block 'proceed'; they can no longer be raised here.
+ * Two phases, two vocabularies. In scoping (scoped=false) the strip is the
+ * team working the decision in parallel: anyone may flag that they'd reject
+ * the change or that information is missing, open flags block 'proceed', and
+ * the meeting cannot quietly run over an objection. In assessment
+ * (scoped=true) the strip is the per-change risk register: a risk blocks
+ * nothing — it is worked with a mitigation proposal and closed by the raising
+ * side.
  *
  * Deliberately no "clear all": only the person who raised a flag may drop it.
  */
@@ -79,8 +82,11 @@ export default function ConcernStrip({
 }) {
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
-  // The risk form: nothing is guessed — the type is picked, the severity is a
-  // deliberate choice (2 = the honest middle), the note says what it is.
+  // The scoping form: a question or a cancel vote, in the raiser's words.
+  const [kind, setKind] = useState<Exclude<ConcernKind, 'risk'>>('needs_info')
+  // The risk form (assessment): nothing is guessed — the type is picked, the
+  // severity is a deliberate choice (2 = the honest middle), the note says
+  // what it is.
   const [riskType, setRiskType] = useState<RiskType | ''>('')
   const [severity, setSeverity] = useState<RiskSeverity>(2)
   const [note, setNote] = useState('')
@@ -122,11 +128,12 @@ export default function ConcernStrip({
     qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
 
-  // Fetched only once the form is open — an unopened strip asks for nothing.
+  // Fetched only once the risk form is open — an unopened strip asks for
+  // nothing, and the scoping form never needs the vocabulary.
   const { data: riskTypeData } = useQuery({
     queryKey: ['risk-types'],
     queryFn: () => changesApi.riskTypes(),
-    enabled: adding,
+    enabled: adding && scoped,
     retry: false,
   })
   const riskTypeOptions: string[] = riskTypeData?.items?.length
@@ -135,10 +142,15 @@ export default function ConcernStrip({
   const riskTypeLabel = (k?: string | null) =>
     k ? t(`risktype.${k}`) : t('risk.kind')
 
+  // Scoping raises a concern (question / cancel vote); assessment raises a
+  // risk. The backend enforces the same split.
   const raise = useMutation({
     mutationFn: () => changesApi.raiseConcern(changeId, {
-      kind: 'risk', note: note.trim(), severity,
-      ...(riskType ? { risk_type: riskType } : {}),
+      note: note.trim(),
+      ...(scoped
+        ? { kind: 'risk' as const, severity,
+            ...(riskType ? { risk_type: riskType } : {}) }
+        : { kind }),
       ...(effectiveDept !== undefined ? { department_id: effectiveDept } : {}),
     }),
     onSuccess: () => { setNote(''); setAdding(false); setFailure(null); invalidate() },
@@ -159,27 +171,35 @@ export default function ConcernStrip({
     },
   })
 
-  // A team needs-info flag is the customer question in flag form: Sales closes it
-  // by writing the answer. Everything else is the author's own to withdraw.
-  // Who may settle a row, mirroring the backend: the author always, PM always,
-  // and for a department-attributed flag its own members.
+  // Who may settle a row, mirroring the backend: the author always, PM always.
+  // The raising department's members only where the department really owns
+  // the flag — the assessment strip (holds and risks). A scoping question's
+  // attribution is a label anyone may pick; it hands the named department
+  // (Sales, typically) no right to declare the point settled.
   //
   // `userId != null` matters: without it an unloaded session (userId null) and a
   // payload with a null raiser compare equal, and the control unlocks for
   // everyone. That is exactly how it went wrong in the field.
-  const isAuthor = (c: ChangeConcern) => userId != null && c.raised_by === userId
+  //
+  // Acting-as means being exactly that department: personal authorship steps
+  // aside with the real memberships, so the simulated view never keeps the
+  // admin's own requester rights.
+  const actingAs = getActsAsDepartmentId() != null
+  const isAuthor = (c: ChangeConcern) =>
+    !actingAs && userId != null && c.raised_by === userId
   const isRaisingDept = (c: ChangeConcern) =>
     c.department_id != null && myDepartmentIds.includes(c.department_id)
-  const mayClose = (c: ChangeConcern) => isAuthor(c) || isPm || isRaisingDept(c)
+  const mayClose = (c: ChangeConcern) =>
+    isAuthor(c) || isPm || (scoped && isRaisingDept(c))
   const closerRule = (c: ChangeConcern) =>
-    c.department_id != null ? t('concern.authorDeptOrPm') : t('concern.authorOrPm')
+    scoped && c.department_id != null
+      ? t('concern.authorDeptOrPm') : t('concern.authorOrPm')
 
   // One vocabulary switch: assessment talks risks, scoping talks concerns.
   const w = {
     title: scoped ? t('risk.title') : t('concern.title'),
     hint: t('risk.hint'),
-    // Whatever the card is called, the only thing raisable in it is a risk.
-    raise: t('risk.raise'),
+    raise: scoped ? t('risk.raise') : t('concern.raise'),
     proposal: scoped ? t('risk.proposal') : t('concern.proposal'),
     settle: scoped ? t('risk.resolved') : t('concern.markSolved'),
     kindOf: (k: ConcernKind) => scoped
@@ -271,6 +291,10 @@ export default function ConcernStrip({
               <span className={c.is_open ? '' : 'line-through'}>{c.note}</span>
               <span className="block text-xs opacity-70">
                 {c.raised_by_name ?? `#${c.raised_by}`}
+                {/* The raiser's role next to their name — who objects is read
+                    with the hat they wear. */}
+                {(c.raised_by_departments?.length ?? 0) > 0
+                  && ` (${c.raised_by_departments!.join(', ')})`}
                 {!c.is_open && ` — ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
               </span>
               {!c.is_open && c.resolution_note && (
@@ -387,8 +411,8 @@ export default function ConcernStrip({
                 )
               })()}
             </span>
-            {/* Its author may drop it; Sales may settle a team needs-info flag.
-                Anyone else sees the control greyed with the rule, never a
+            {/* Its author may drop it; PM or the raising department may settle
+                it. Anyone else sees the control greyed with the rule, never a
                 vanished button or a late 403. Admin is no exception. */}
             {c.is_open && editable && withdrawing !== c.id && (
               <button data-testid={`concern-close-${c.id}`}
@@ -410,9 +434,38 @@ export default function ConcernStrip({
         </p>
       )}
 
-      {/* One form, one kind: a risk. What used to be raisable here — "would
-          reject", "needs info" — is history the API no longer accepts. */}
-      {adding && (
+      {/* Two forms for two phases. Scoping: a question or a cancel vote, with
+          the department as optional attribution. Assessment: a typed, rated
+          risk for the raiser's own department. */}
+      {adding && !scoped && (
+        <div className="flex gap-2 items-start flex-wrap" data-testid="concern-form">
+          <select value={kind} aria-label={t('concern.kind')}
+            onChange={(e) => setKind(e.target.value as Exclude<ConcernKind, 'risk'>)}
+            className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
+            <option value="needs_info">{t('concern.wantsInfo')}</option>
+            <option value="reject_proposal">{t('concern.wouldReject')}</option>
+          </select>
+          {onlyDepartmentId === undefined && options.length > 0 && (
+            <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
+              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+              className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
+              <option value="">{t('concern.team')}</option>
+              {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          )}
+          <input value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder={t('concern.notePlaceholder')} aria-label={t('concern.note')}
+            className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
+          <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+            disabled={!note.trim() || raise.isPending}
+            onClick={() => raise.mutate()}>{w.raise}</button>
+          <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
+            onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
+            {t('common.cancel')}
+          </button>
+        </div>
+      )}
+      {adding && scoped && (
         <div className="space-y-2" data-testid="risk-form">
           <div className="flex gap-2 items-center flex-wrap">
             <select value={riskType} aria-label={t('risk.type')} data-testid="risk-type-select"
@@ -423,14 +476,12 @@ export default function ConcernStrip({
                 <option key={k} value={k}>{riskTypeLabel(k)}</option>
               ))}
             </select>
-            {onlyDepartmentId === undefined && (scoped || options.length > 0) && (
+            {onlyDepartmentId === undefined && (
               <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
                 onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
                 className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-                {scoped
-                  ? effectiveDept === undefined
-                    && <option value="">{t('concern.pickDepartment')}</option>
-                  : <option value="">{t('concern.team')}</option>}
+                {effectiveDept === undefined
+                  && <option value="">{t('concern.pickDepartment')}</option>}
                 {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             )}
@@ -458,7 +509,7 @@ export default function ConcernStrip({
             <button data-testid="risk-submit"
               className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={!note.trim() || !riskType || raise.isPending
-                || (scoped && effectiveDept === undefined)}
+                || effectiveDept === undefined}
               onClick={() => raise.mutate()}>{w.raise}</button>
             <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
               onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
