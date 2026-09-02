@@ -27,3 +27,10 @@ B-release is CATPart-only on U:), G02..G07 B-release. **Still without 3D:** 971.
 STEP on `U:\RFQ\RFQ25\Loop_09\02_CAD\Old Data for Ref`, U: needs `sudo mount -t drvfs 'U:'
 /mnt/u`), 206.881.480 RH (mirror, no file), 4M0.881.547 (no CAD received), Griff 5NA.881.253
 (CATPart on U: only).
+
+**PROD (2026-09-02 20:05-20:25):** both scripts ran on `ktx-server` (compose-plm2-backend-1): projects 1994A/1994B
++ all 20 STEP files with viewers are live at https://apps.ad.us.ktx.group/plm2/. Prod DB was NOT overwritten
+(it holds changes local lacks); backup `db-backups/plm2-before-brose-20260902-200453.sql.gz`. Added the
+`/data/appdata/plm2/revision-uploads:/app/uploads` mount (owned by uid 1000) so revision files and change
+attachments survive rebuilds. RFQ2 prod already had RFQ 25/26 and is newer than local: never push the local
+RFQ2 DB to prod. Runbook §11 in adminpanel/docs/plm2-prod-deploy-runbook.md has the log.
