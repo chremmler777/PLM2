@@ -23,10 +23,12 @@ RFQ1 revisions from the RFQ2 working copies on `C:\temp` (rfq26_step, brose_step
 probe_971.stp), staged in `backend/scripts/brose_cad_stage/` (git-ignored, 1.3 GB). RFQ2's
 `.stp.fine.glb` viewer files are reused. Coverage: all 12 B-release seat-trim parts, top tether
 (only the 3G0 ADS-2021 STEP, no 85H data yet), back panel 971 (CP3 2026-02-20 STEP; the
-B-release is CATPart-only on U:), G02..G07 B-release. **Still without 3D:** 971.B / 972.A (CP3
-STEP on `U:\RFQ\RFQ25\Loop_09\02_CAD\Old Data for Ref`, U: needs `sudo mount -t drvfs 'U:'
-/mnt/u`), 206.881.480 RH (mirror, no file), 4M0.881.547 (no CAD received), Griff 5NA.881.253
-(CATPart on U: only).
+B-release is CATPart-only on U:), G02..G07 B-release. **Second batch (U: mounted 2026-09-02 evening, staged in
+`brose_cad_stage2/`):** B-RELEASE STEP for 971 main (PCA_TM 003_001, supersedes the CP3 file which
+stays attached too), 971.B, 972.A, 480 RH; Griff 5NA.881.253 as CATPart (no viewer); 4M0.881.547
+only as the Audi concept STEP from Brose data 2026-05-04. Every article now has 3D on RFQ1.
+U: paths: `RFQ\RFQ25_260112_Brose Backpanel\10_Deliveries\B-Release_2026-05-28\02_CAD`,
+`RFQ\RFQ26_260112_Brose Seat Trim\10_Deliveries\...`, `RFQ\260112_Brose Sitech\RFQ Internal\REV7 - 25 part RFQ\Brose info`.
 
 **PROD (2026-09-02 20:05-20:25):** both scripts ran on `ktx-server` (compose-plm2-backend-1): projects 1994A/1994B
 + all 20 STEP files with viewers are live at https://apps.ad.us.ktx.group/plm2/. Prod DB was NOT overwritten
