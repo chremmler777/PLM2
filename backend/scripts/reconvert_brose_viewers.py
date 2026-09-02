@@ -36,7 +36,14 @@ async def main():
             if size > PLACEHOLDER_MAX:
                 continue
             out = os.path.join(os.path.dirname(rf.file_path), f"{uuid.uuid4().hex}.glb")
-            ok = await convert_step_to_gltf(rf.file_path, out, timeout_seconds=3600)
+            # Preview mesh: the default 0.05 mm deflection takes hours on 150-200 MB
+            # panels. Scale the deflection with file size; 0.5 mm is plenty for a
+            # viewer of a 500 mm part.
+            mb = rf.file_size / 1e6
+            lin = 0.05 if mb < 20 else 0.25 if mb < 80 else 0.5
+            print(f"converting {cpn} file {rf.id} ({mb:.0f} MB, deflection {lin})", flush=True)
+            ok = await convert_step_to_gltf(rf.file_path, out, linear_deflection=lin,
+                                            angular_deflection=0.5, timeout_seconds=5400)
             new_size = os.path.getsize(out) if ok and os.path.exists(out) else 0
             if ok and new_size > PLACEHOLDER_MAX:
                 old = rf.viewer_file_path
