@@ -15,12 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.models.entities import Plant, Project
-from app.models.part import Part, PartRevision, PartRelation
+from app.models.part import Part, PartRevision, PartRelation, PartBOMItem
 
 CREATED_BY = 3            # chris
 PLANT_CODE = "usa-toccoa"
 BASELINE_REV = "RFQ1"     # awarded quote baseline
 CUSTOMER = "Brose Sitech"
+NOT_AWARDED = "NOT ON AWARD LIST (KTX 17 parts). Loaded for full RFQ scope."
 
 # project code -> (name, RFQ2 id)
 PROJECTS = {
@@ -72,6 +73,29 @@ ARTICLES = [
     ("1994B", 15, "85H.886.747", "Trim Top Tether", "S000VJ-110",
      "PA6", None, "85.52 x 53.23 x 34.56", 24.81, 300000, 2900000, 375,
      "Award list number 85H.886.747; RFQ quoted 3G0.886.747."),
+    # --- full RFQ scope, NOT on the award list (loaded 2026-09-02 on request) ---
+    ("1994A", 4, "206.881.971_G02", "Map Pocket", "S00G5U-000",
+     "PP-TD20 (TL 52388-F)", None, "401.1 x 228.8 x 69.6", 337.41, 273800, 2301566, 316, NOT_AWARDED),
+    ("1994A", 5, "206.881.971_G05", "Pivot Axis (G05)", "S00G5Q-001",
+     "PA6-GF15", None, "10 x 34 x 10", 0.97, 821400, 4603132, 341, NOT_AWARDED),
+    ("1994A", 6, "206.881.971_G07", "Rossette (G07)", "S00G5Q-000",
+     "TPU (TL 52622, Shore 95A)", None, "90 x 24 x 7", 6.69, 547600, 4603132, 343, NOT_AWARDED),
+    ("1994B", 16, "5NA.881.253", "Griff", "S000ZP-110",
+     "PP/PE-TD20", None, "194 x 66 x 20", 17.82, 45000, 413000, 374, NOT_AWARDED),
+]
+
+# Purchased parts from RFQ 25 (50- family = bought components).
+# (project, seq, customer_pn, name, material/spec, box, weight_g, rfq_bom_id)
+PURCHASED = [
+    ("1994A", 1, "206.881.971_G03", "Spring (G03)", "Spring steel DH per DIN EN 10270-2", "39.5 x 47.3 x 66.1", 8.2, 339),
+    ("1994A", 2, "206.881.971_G04", "Rubber Bumper (G04)", "TPE acc. TL 52622", "9.4 x 7.9 x 7.5", 0.2, 340),
+    ("1994A", 3, "206.881.971_G06", "Strap Sub-Assy (G06)", "Elastic strap + 2x PP fixation plate (TL 52388-F)", "48.2 x 360.6 x 80.6", 30.7, 342),
+]
+
+# Back panel 206.881.971 assembly BOM per RFQ 25: (child customer_pn, qty)
+BACKPANEL_BOM = [
+    ("206.881.971_G02", 1), ("206.881.971_G03", 1), ("206.881.971_G04", 1),
+    ("206.881.971_G05", 3), ("206.881.971_G06", 1), ("206.881.971_G07", 2),
 ]
 
 # (project, tool_seq, name, [(customer_pn, cavities)], mold_type, rfq_tool_id)
@@ -90,11 +114,25 @@ TOOLS = [
     ("1994B", 10, "A-Bracket Outer Cover", [("206.881.799", 2)], "2-plate", 213),
     ("1994B", 11, "Light Fixture Mount Cover", [("4M0.881.547", 2)], "2-plate", 215),
     ("1994B", 12, "Trim Top Tether", [("85H.886.747", 1)], "2-plate", 217),
+    # not awarded
+    ("1994A", 3, "Map Pocket", [("206.881.971_G02", 2)], "fixed side ejector", 200),
+    ("1994A", 4, "Pivot Axis (G05)", [("206.881.971_G05", 8)], "2-plate", 201),
+    ("1994A", 5, "Rossette (G07)", [("206.881.971_G07", 4)], "2-plate", 199),
+    ("1994B", 13, "Griff", [("5NA.881.253", 2)], "2-plate", 216),
 ]
 
 
-def article_pn(project: str, seq: int) -> str:
-    return f"20-{project}-{seq:03d}-0"
+def article_pn(project: str, seq: int, family: int = 20) -> str:
+    return f"{family}-{project}-{seq:03d}-0"
+
+
+def purchased_desc(p) -> str:
+    proj, _, cpn, _, spec, box, wt, bom_id = p
+    return "\n".join([
+        f"Customer {CUSTOMER}, program {PROJECTS[proj][0]}. Purchased component of back panel 206.881.971.",
+        f"Customer number {cpn}. Spec: {spec}. Box {box} mm, weight {wt} g. RFQ2 bom_item {bom_id}.",
+        NOT_AWARDED,
+    ])
 
 
 def article_desc(a) -> str:
@@ -161,6 +199,22 @@ async def main():
         print(f"Articles created={created} (of {len(ARTICLES)})")
 
         created = 0
+        for p in PURCHASED:
+            proj, seq, cpn, name = p[0], p[1], p[2], p[3]
+            pn = article_pn(proj, seq, family=50)
+            part = await get_part(pn)
+            if part is None:
+                part = Part(project_id=projects[proj].id, part_number=pn, customer_part_number=cpn,
+                            name=name, description=purchased_desc(p), part_type="purchased",
+                            item_category="article", data_classification="confidential",
+                            created_by=CREATED_BY)
+                s.add(part)
+                await s.flush()
+                created += 1
+            by_customer_pn[cpn] = part
+        print(f"Purchased parts created={created} (of {len(PURCHASED)})")
+
+        created = 0
         tools = {}
         for t in TOOLS:
             proj, seq, name = t[0], t[1], t[2]
@@ -205,6 +259,22 @@ async def main():
                                        notes=f"{n} cavities", created_by=CREATED_BY))
                     created += 1
         print(f"Produces relations created={created}")
+        await s.commit()
+
+        parent = by_customer_pn["206.881.971"]
+        created = 0
+        for pos, (cpn, qty) in enumerate(BACKPANEL_BOM, start=1):
+            child = by_customer_pn[cpn]
+            ex = (await s.execute(select(PartBOMItem).where(
+                PartBOMItem.revision_id == parent.active_revision_id,
+                PartBOMItem.child_part_id == child.id))).scalar_one_or_none()
+            if ex is None:
+                s.add(PartBOMItem(revision_id=parent.active_revision_id, child_part_id=child.id,
+                                  item_number=str(pos * 10), name=child.name, quantity=float(qty),
+                                  unit="pcs", position=pos, created_by=CREATED_BY,
+                                  notes="Per RFQ 25 BOM (206.881.971 assembly)."))
+                created += 1
+        print(f"Back panel BOM items created={created}")
         await s.commit()
     await engine.dispose()
 
