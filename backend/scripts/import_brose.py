@@ -189,7 +189,7 @@ async def main():
             part = await get_part(pn)
             if part is None:
                 part = Part(project_id=projects[proj].id, part_number=pn, customer_part_number=cpn,
-                            name=name, description=article_desc(a), part_type="internal_mfg",
+                            name=f"{cpn} {name}", description=article_desc(a), part_type="internal_mfg",
                             item_category="article", data_classification="confidential",
                             created_by=CREATED_BY)
                 s.add(part)
@@ -205,7 +205,7 @@ async def main():
             part = await get_part(pn)
             if part is None:
                 part = Part(project_id=projects[proj].id, part_number=pn, customer_part_number=cpn,
-                            name=name, description=purchased_desc(p), part_type="purchased",
+                            name=f"{cpn} {name}", description=purchased_desc(p), part_type="purchased",
                             item_category="article", data_classification="confidential",
                             created_by=CREATED_BY)
                 s.add(part)
