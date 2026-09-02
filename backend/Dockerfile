@@ -10,6 +10,7 @@ RUN conda config --add channels conda-forge && \
     conda install -y \
     python=3.12 \
     pythonocc-core \
+    libgomp \
     postgresql \
     && conda clean -afy
 
