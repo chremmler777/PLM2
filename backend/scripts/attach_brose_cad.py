@@ -26,33 +26,42 @@ STAGE = os.environ.get("BROSE_CAD_STAGE") or os.path.join(os.path.dirname(os.pat
 UPLOADS = os.path.join(os.getcwd(), "uploads", "revisions")
 B_REL = "B-RELEASE 2026-05-28 (customer STEP, PCA_TM)"
 
-# customer_part_number -> (staged filename, cad revision note)
-FILES = {
+# (customer_part_number, staged filename, cad revision note)
+FILES = [
     # 1994B Seat Trim
-    "206.881.479": ("206_881_479____PCA_TM__003_____INNER_SIDE_COVER___B-RELEASE___20260528.stp", B_REL),
-    "206.881.793": ("206_881_793____PCA_TM__002_____DECOR_COVER________B-RELEASE___20260528.stp", B_REL),
-    "206.881.799": ("206_881_799____PCA_TM__003_____A-BRKT_OUTER_TRIM__B-RELEASE___20260528.stp", B_REL),
-    "206.881.800": ("206_881_800____PCA_TM__003_____A-BRKT_INNER_TRIM__B-RELEASE___20260528.stp", B_REL),
-    "206.882.251": ("206_882_251____PCA_TM__003_____HANDLE_HA_LEFT_____B-RELEASE___20260528.stp", B_REL),
-    "206.882.252": ("206_882_252____PCA_TM__003_____HANDLE_HA_RIGHT____B-RELEASE___20260528.stp", B_REL),
-    "206.883.607": ("206_883_607____PCA_TM__002_____BELT_EXIT_COVER____B-RELEASE___20260528.stp", B_REL),
-    "206.885.219": ("206_885_219____PCA_TM__002_____BACKPANEL_REAR_____B-RELEASE___20260528.stp", B_REL),
-    "206.885.967": ("206_885_967____PCA_TM__003_____LATCH_COVER_40_____B-RELEASE_2026-05-28.stp", B_REL),
-    "206.885.968": ("206_885_968____PCA_TM__003_____LATCH_COVER_60_____B-RELEASE_2026-05-28.stp", B_REL),
-    "206.886.197": ("206_886_197____PCA_TM__003_000_CTR_BEARING_COVER__B_RELEASE___20260528.stp", B_REL),
-    "206.887.233": ("206_887_233____PCA_TM__001_____ISOFIX_COVER_______B-RELEASE_2026-05-28.stp", B_REL),
-    "85H.886.747": ("3G0_886_747____PCA_TM__006_____BLENDE_TT_______________ADS_BY_22072021.stp",
+    ("206.881.479", "206_881_479____PCA_TM__003_____INNER_SIDE_COVER___B-RELEASE___20260528.stp", B_REL),
+    ("206.881.793", "206_881_793____PCA_TM__002_____DECOR_COVER________B-RELEASE___20260528.stp", B_REL),
+    ("206.881.799", "206_881_799____PCA_TM__003_____A-BRKT_OUTER_TRIM__B-RELEASE___20260528.stp", B_REL),
+    ("206.881.800", "206_881_800____PCA_TM__003_____A-BRKT_INNER_TRIM__B-RELEASE___20260528.stp", B_REL),
+    ("206.882.251", "206_882_251____PCA_TM__003_____HANDLE_HA_LEFT_____B-RELEASE___20260528.stp", B_REL),
+    ("206.882.252", "206_882_252____PCA_TM__003_____HANDLE_HA_RIGHT____B-RELEASE___20260528.stp", B_REL),
+    ("206.883.607", "206_883_607____PCA_TM__002_____BELT_EXIT_COVER____B-RELEASE___20260528.stp", B_REL),
+    ("206.885.219", "206_885_219____PCA_TM__002_____BACKPANEL_REAR_____B-RELEASE___20260528.stp", B_REL),
+    ("206.885.967", "206_885_967____PCA_TM__003_____LATCH_COVER_40_____B-RELEASE_2026-05-28.stp", B_REL),
+    ("206.885.968", "206_885_968____PCA_TM__003_____LATCH_COVER_60_____B-RELEASE_2026-05-28.stp", B_REL),
+    ("206.886.197", "206_886_197____PCA_TM__003_000_CTR_BEARING_COVER__B_RELEASE___20260528.stp", B_REL),
+    ("206.887.233", "206_887_233____PCA_TM__001_____ISOFIX_COVER_______B-RELEASE_2026-05-28.stp", B_REL),
+    ("85H.886.747", "3G0_886_747____PCA_TM__006_____BLENDE_TT_______________ADS_BY_22072021.stp",
                     "Quoted reference 3G0.886.747, ADS 2021-07-22. No 85H.886.747 data received yet."),
     # 1994A Backpanel
-    "206.881.971": ("206_881_971____PCA_TM__003_____SEAT_BACK_PANEL____CP3_________20260220.stp",
+    ("206.881.971", "206_881_971____PCA_TM__003_____SEAT_BACK_PANEL____CP3_________20260220.stp",
                     "CP3 2026-02-20 STEP. B-RELEASE 2026-05-28 exists as CATPart only (U:\\RFQ\\RFQ25\\Loop_09\\02_CAD), not attached."),
-    "206.881.971_G02": ("206_881_971____G02_TM__004_003_MAP_POCKET_________B-RELEASE___20260528.stp", B_REL),
-    "206.881.971_G03": ("206_881_971____G03_TM__004_006_SPRING_____________B-RELEASE___20260528.stp", B_REL),
-    "206.881.971_G04": ("206_881_971____G04_TM__004_005_RUBBER_BUMPER______B-RELEASE___20260528.stp", B_REL),
-    "206.881.971_G05": ("206_881_971____G05_TM__004_004_PIVOT_AXIS_________B-RELEASE___20260528.stp", B_REL),
-    "206.881.971_G06": ("206_881_971____G06_TM__001_007_STRAP_SUB_ASSY_____B-RELEASE___20260528.stp", B_REL),
-    "206.881.971_G07": ("206_881_971____G07_TM__001_008_ROSSETTE___________B-RELEASE___20260528.stp", B_REL),
-}
+    ("206.881.971_G02", "206_881_971____G02_TM__004_003_MAP_POCKET_________B-RELEASE___20260528.stp", B_REL),
+    ("206.881.971_G03", "206_881_971____G03_TM__004_006_SPRING_____________B-RELEASE___20260528.stp", B_REL),
+    ("206.881.971_G04", "206_881_971____G04_TM__004_005_RUBBER_BUMPER______B-RELEASE___20260528.stp", B_REL),
+    ("206.881.971_G05", "206_881_971____G05_TM__004_004_PIVOT_AXIS_________B-RELEASE___20260528.stp", B_REL),
+    ("206.881.971_G06", "206_881_971____G06_TM__001_007_STRAP_SUB_ASSY_____B-RELEASE___20260528.stp", B_REL),
+    ("206.881.971_G07", "206_881_971____G07_TM__001_008_ROSSETTE___________B-RELEASE___20260528.stp", B_REL),
+    # second batch, from U: (2026-09-02 evening)
+    ("206.881.971", "206_881_971____PCA_TM__003_001_SEAT_BACK_PANEL____B-RELEASE___20260528.stp", B_REL + " - supersedes the CP3 file"),
+    ("206.881.971.B", "206_881_971_B__PCA_TM__001_____SEAT_BACK_PANEL____B-RELEASE___20260528.stp", B_REL),
+    ("206.881.972.A", "206_881_972_A__PCA_TM__003_____SEAT_BACK_PANEL____B-RELEASE___20260528.stp", B_REL),
+    ("206.881.480", "206_881_480____PCA_TM__004_____INNER_COVER_DRV____B-RELEASE___20260528.stp", B_REL),
+    ("5NA.881.253", "206_881_253____DMU_EN__001_____GRIFF_SLV______________________20240906.CATPart",
+                    "DMU 2024-09-06 CATPart (206.881.253 Griff SLV), no STEP received, no viewer."),
+    ("4M0.881.547", "4M0_881_547____DMU_TM__005_____HALTER_LEUCHTE_____CONCEPT______AUDI___.stp",
+                    "Concept STEP (Audi DMU_TM 005) from Brose data 2026-05-04; no B-release for this part."),
+]
 
 
 def sha256(path):
@@ -67,7 +76,7 @@ async def main():
     engine = create_async_engine(os.environ["DATABASE_URL"])
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as s:
-        for cpn, (fname, note) in FILES.items():
+        for cpn, fname, note in FILES:
             src = os.path.join(STAGE, fname)
             if not os.path.exists(src):
                 print(f"MISSING {cpn}: {fname}")
@@ -86,12 +95,17 @@ async def main():
 
             rev_dir = os.path.join(UPLOADS, str(rev.id))
             os.makedirs(rev_dir, exist_ok=True)
-            stp_path = os.path.join(rev_dir, f"{uuid.uuid4().hex}.stp")
+            ext = os.path.splitext(fname)[1].lower()
+            is_step = ext in (".stp", ".step")
+            stp_path = os.path.join(rev_dir, f"{uuid.uuid4().hex}{ext}")
             shutil.copy2(src, stp_path)
 
             glb_path = os.path.join(rev_dir, f"{uuid.uuid4().hex}.glb")
             pre = src + ".fine.glb"
-            if os.path.exists(pre):
+            if not is_step:
+                glb_path = None
+                viewer = "no viewer (not STEP)"
+            elif os.path.exists(pre):
                 shutil.copy2(pre, glb_path)
                 viewer = "reused RFQ2 glb"
             else:
@@ -101,8 +115,10 @@ async def main():
                 viewer = "converted" if ok else "NO VIEWER (conversion failed)"
 
             rf = RevisionFile(
-                revision_id=rev.id, filename=fname, file_type="cad", mime_type="application/step",
-                file_size=os.path.getsize(stp_path), file_path=stp_path, cad_format="step",
+                revision_id=rev.id, filename=fname, file_type="cad",
+                mime_type="application/step" if is_step else "application/octet-stream",
+                file_size=os.path.getsize(stp_path), file_path=stp_path,
+                cad_format="step" if is_step else "catia",
                 cad_data={"cad_revision": note, "source": "Brose Sitech customer data via RFQ2"},
                 file_hash=digest, viewer_file_path=glb_path, has_viewer=glb_path is not None,
                 uploaded_by=CREATED_BY,
