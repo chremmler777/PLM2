@@ -13,6 +13,10 @@ RUN conda config --add channels conda-forge && \
     libgomp \
     postgresql \
     && conda clean -afy
+# conda-forge's libgomp ships libgomp.so.1.0.0 but the .so.1 symlink OCC links
+# against can be missing; without it STEP import fails and the converter
+# silently writes placeholder cubes (prod, 2026-09-02).
+RUN [ -e /opt/conda/lib/libgomp.so.1 ] || ln -s /opt/conda/lib/libgomp.so.1.0.0 /opt/conda/lib/libgomp.so.1
 
 # Install pip requirements (excluding pythonocc-core)
 COPY requirements.txt .
