@@ -1,5 +1,6 @@
 # PLM2 Project Memory
 
+- [Brose award import 2026-09-02](brose-award-import-2026-09-02.md) — RFQ 25/26 Brose Sitech loaded as projects 8888/9999 (18 articles, 14 tools) via backend/scripts/import_brose.py; open mismatches to confirm with Brose
 - [Scoping concerns & settle rights 2026-08-12](scoping-concerns-2026-08-12.md) — scoping team concerns (question/cancel vote) restored, risk raises are assessment-only; mark-solved = asker or PM, never Sales (attribution grants nothing, acts-as drops authorship); asker roles on cards; spec in docs/superpowers/specs/2026-08-12-…-settle-rights-design.md; pushed as c07cccb1
 - [Morning summary overnight run](morning-summary-2026-08-13.md) — READ FIRST: build order 1-6 DONE on feature/ecr-target-state (10 commits, not pushed), E2E-walked 54/55 on the live app; 9 parked business decisions listed
 - [ECR costing/quoting 2026-08-12](ecr-costing-quoting-2026-08-12.md) — costing positions/vendor favorites/hours-as-money, quoting stage, process-flow chart shipped; gate semantics; open items incl. no-accept question for wf tasks
@@ -20,3 +21,6 @@
 - [Equipment numbering + gauge inventory](equipment-numbering-2026-07-24.md) — `<tool#>-<op code>` scheme live (153 gauges, 14 equipment, 175 serves); process-flow view shipped; NEXT: impacted-parts picker visualisation + equipment-usage visualisation (skip the 926/3431-3439 tools and the material/process picker)
 - [Live DB is Postgres, not plm.db](live-db-is-postgres-2026-08-06.md) — running app = docker `claude-plm2-backend-1` on Postgres; `main.py` auto-runs alembic on every `--reload` restart, so draft migration files get applied within seconds (never leave one on disk)
 - [Part-number families](part-number-families-2026-08-06.md) — 40 = resin/material, 65 = returnables/dunnage (a code comment had these backwards); taxonomy now in `frontend/src/lib/itemCategory.ts`
+- [RFQ33 moved to RFQ2](rfq33-tropmann-mails-2026-08-13.md) - the RFQ33 DEMO-transfer tool-check work was run here by mistake; authoritative memory + generators now in the RFQ2 project
+- [No em-dashes](no-em-dashes.md) - never use em-dashes in any output or deliverable; hyphen/comma/semicolon instead
+- [Ask before placeholders](deliverables-ask-before-placeholders.md) - list missing info to Christoph BEFORE building/pushing any deliverable; no unprompted "TBC" in shipped files

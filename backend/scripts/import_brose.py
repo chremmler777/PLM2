@@ -1,0 +1,213 @@
+"""Brose Sitech award (RFQ 25 Backpanel, RFQ 26 Seat Trim) -> PLM projects, articles, tools.
+
+Data leans on the RFQ2 database (rfqs 25/26, REV8 tool set, current loop).
+Award list = "KTX 17 parts" sheet from Brose, 2026-09-02. Numbers follow the
+award list where it differs from the RFQ (799 named Outer, top tether 85H).
+
+Idempotent + re-runnable (match on project code / part_number; skip existing).
+Runs in the PLM backend container:
+    docker exec -e PYTHONPATH=/app claude-plm2-backend-1 python scripts/import_brose.py
+"""
+import asyncio
+import os
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+from app.models.entities import Plant, Project
+from app.models.part import Part, PartRevision, PartRelation
+
+CREATED_BY = 3            # chris
+PLANT_CODE = "usa-toccoa"
+BASELINE_REV = "RFQ1"     # awarded quote baseline
+CUSTOMER = "Brose Sitech"
+
+# project code -> (name, RFQ2 id)
+PROJECTS = {
+    "8888": ("Brose Backpanel", 25),
+    "9999": ("Brose Seat Trim", 26),
+}
+
+# (project, seq, customer_pn, name, brose_pn, material, color, box, weight_g,
+#  peak_year_pcs, lifetime_pcs, rfq_bom_id, note)
+ARTICLES = [
+    # --- 8888 Backpanel (RFQ 25) ---
+    ("8888", 1, "206.881.971", "Seat Back Panel MIC (Lehnenabdeckung)", "S00FKH-001",
+     "PP-TD20", "Forge Black", "529 x 525.7 x 137.3", 1127, 253336, 2127194, 313, None),
+    ("8888", 2, "206.881.971.B", "Seat Back Panel DS", "S00FZU-000",
+     "PP-TD20", "Forge Black", "495 x 455 x 188.1", 1132, 10401, 87186, 314, None),
+    ("8888", 3, "206.881.972.A", "Seat Back Panel PS", "S00FXC-001",
+     "PP-TD20", "Forge Black", "495 x 455 x 188.1", 1132, 10401, 87186, 315, None),
+    # --- 9999 Seat Trim (RFQ 26) ---
+    ("9999", 1, "206.882.251", "Handle, manual lift, passenger", "S00G2Q-000",
+     "PA6GF15", "Forge Black", "152 x 82 x 29", 48.79, 55280, 463612, 317, None),
+    ("9999", 2, "206.882.252", "Handle, manual lift, driver", "S00DF9-001",
+     "PA6GF15", "Forge Black", "152 x 82 x 29", 48.79, 55280, 463612, 318, None),
+    ("9999", 3, "206.885.967", "Bracket, seat back latch cover 40", "S00GOD-000",
+     "PP-TD20", "Forge Black", "98 x 93 x 118", 40.17, 122000, 1019000, 321, None),
+    ("9999", 4, "206.885.968", "Bracket, seat back latch cover 60", "S00GOE-000",
+     "PP-TD20", "Forge Black", "98 x 93 x 118", 40.17, 122000, 1019000, 376, None),
+    ("9999", 5, "206.887.233", "ISOFIX Cover", "S00G77-000",
+     "PA6GF15", "MIC 3 colors", "67 x 115 x 34", 40.36, 488000, 4076000, 324, None),
+    ("9999", 6, "206.881.800", "A-Bracket Inner Trim", "S00FX6-001",
+     "PP-TD20", "Forge Black", "139 x 153 x 31.5", 101.02, 19423, 163017, 319, None),
+    ("9999", 7, "206.885.219", "Cover Trim", "S00G1E-000",
+     "PP-TD20", "MIC 1 color", "315 x 35 x 25.83", 47.55, 89154, 744654, 325, None),
+    ("9999", 8, "206.886.197", "Cover, center bearing", "S00G0A-000",
+     "PP-TD20", "Forge Black", "40 x 108 x 105", 47.76, 122000, 1019000, 326, None),
+    ("9999", 9, "206.883.607", "Seat Belt Exit Cover", "S00FXB-001",
+     "ASA", "MIC 3 colors", "90 x 81 x 50", 40.15, 141423, 1182017, 320, "Paint required per RFQ."),
+    ("9999", 10, "206.881.479", "Cover, side shield inner LH", "S00FX2-001",
+     "PP-TD20", "forge black / cracked earth", "230 x 152 x 61", 124, 25000, 143000, 337, None),
+    ("9999", 11, "206.881.480", "Cover, side shield inner RH", "S00FX2-001",
+     "PP-TD20", "forge black / cracked earth", "230 x 152 x 61", 124, 25000, 143000, 400,
+     "NOT ON AWARD LIST (KTX 17 parts). Added because it shares the 1+1 tool with 206.881.479 LH. Confirm with Brose."),
+    ("9999", 12, "206.881.793", "Trim, seat back upper center", "S00FX8-001",
+     "PC/ABS", "Skyscraper TBD", "265 x 36 x 28", 46.59, 203000, 1663000, 334, "Paint required per RFQ."),
+    ("9999", 13, "206.881.799", "A-Bracket Outer Cover", "S00FX7-001",
+     "PP-TD20", "Forge Black", "138 x 120 x 20", 50.8, 16000, 143000, 338,
+     "Award list name (RFQ called it A-Bracket Inner Cover)."),
+    ("9999", 14, "4M0.881.547", "Bracket, light fixture mount cover", "S001V9-110",
+     "PP", None, "118 x 34 x 27", 10, 192000, 1600000, 370, None),
+    ("9999", 15, "85H.886.747", "Trim Top Tether", "S000VJ-110",
+     "PA6", None, "85.52 x 53.23 x 34.56", 24.81, 300000, 2900000, 375,
+     "Award list number 85H.886.747; RFQ quoted 3G0.886.747."),
+]
+
+# (project, tool_seq, name, [(customer_pn, cavities)], mold_type, rfq_tool_id)
+TOOLS = [
+    ("8888", 1, "Seat Back Panel MIC", [("206.881.971", 2)], "fixed side ejector", 202),
+    ("8888", 2, "Seat Back Panel DS/PS", [("206.881.971.B", 1), ("206.881.972.A", 1)], "fixed side ejector", 203),
+    ("9999", 1, "Handle, manual lift LH/RH", [("206.882.251", 2), ("206.882.252", 2)], "2-plate", 204),
+    ("9999", 2, "Seat back latch cover 40/60", [("206.885.967", 2), ("206.885.968", 2)], "2-plate", 205),
+    ("9999", 3, "ISOFIX Cover", [("206.887.233", 2)], "2-plate", 206),
+    ("9999", 4, "A-Bracket Inner Trim", [("206.881.800", 2)], "2-plate", 207),
+    ("9999", 5, "Cover Trim", [("206.885.219", 2)], "2-plate", 208),
+    ("9999", 6, "Center Bearing Cover", [("206.886.197", 2)], "2-plate", 209),
+    ("9999", 7, "Seat Belt Exit Cover", [("206.883.607", 2)], "2-plate", 210),
+    ("9999", 8, "Side Shield Inner LH/RH", [("206.881.479", 1), ("206.881.480", 1)], "2-plate", 211),
+    ("9999", 9, "Seat back upper trim center", [("206.881.793", 8)], "2-plate", 212),
+    ("9999", 10, "A-Bracket Outer Cover", [("206.881.799", 2)], "2-plate", 213),
+    ("9999", 11, "Light Fixture Mount Cover", [("4M0.881.547", 2)], "2-plate", 215),
+    ("9999", 12, "Trim Top Tether", [("85H.886.747", 1)], "2-plate", 217),
+]
+
+
+def article_pn(project: str, seq: int) -> str:
+    return f"20-{project}-{seq:03d}-0"
+
+
+def article_desc(a) -> str:
+    proj, _, cpn, _, brose, mat, color, box, wt, peak, life, bom_id, note = a
+    rfq_id = PROJECTS[proj][1]
+    lines = [
+        f"Customer {CUSTOMER}, program {PROJECTS[proj][0]}. Awarded 2026-09-02 (RFQ {rfq_id}, KTX 17 parts list).",
+        f"Customer number {cpn}; Brose number {brose}.",
+        f"Material {mat}" + (f", color {color}" if color else "") + f". Box {box} mm, weight {wt} g.",
+        f"Peak year {peak:,} pcs, lifetime {life:,} pcs. RFQ2 bom_item {bom_id}.",
+    ]
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+def tool_desc(t) -> str:
+    proj, _, name, cavs, mold, rfq_tool = t
+    rfq_id = PROJECTS[proj][1]
+    cav_txt = ", ".join(f"{pn} x{n}" for pn, n in cavs)
+    total = sum(n for _, n in cavs)
+    return (f"Injection mold, {mold}, {total} cavities: {cav_txt}. "
+            f"Customer {CUSTOMER}. Awarded 2026-09-02 (RFQ {rfq_id} REV8, tooling_calc {rfq_tool}).")
+
+
+async def main():
+    engine = create_async_engine(os.environ["DATABASE_URL"])
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    async with Session() as s:
+        plant = (await s.execute(select(Plant).where(Plant.code == PLANT_CODE))).scalar_one()
+
+        projects = {}
+        for code, (name, rfq_id) in PROJECTS.items():
+            proj = (await s.execute(select(Project).where(Project.code == code))).scalar_one_or_none()
+            if proj is None:
+                proj = Project(plant_id=plant.id, name=name, code=code, status="active",
+                               description=f"Customer {CUSTOMER}. Awarded 2026-09-02 from RFQ2 rfq {rfq_id}.")
+                s.add(proj)
+                await s.flush()
+                print(f"Created project {code} {name} (id {proj.id})")
+            else:
+                print(f"Project {code} exists (id {proj.id})")
+            projects[code] = proj
+        await s.commit()
+
+        async def get_part(pn):
+            return (await s.execute(select(Part).where(Part.part_number == pn))).scalar_one_or_none()
+
+        by_customer_pn = {}
+        created = 0
+        for a in ARTICLES:
+            proj, seq, cpn, name = a[0], a[1], a[2], a[3]
+            pn = article_pn(proj, seq)
+            part = await get_part(pn)
+            if part is None:
+                part = Part(project_id=projects[proj].id, part_number=pn, customer_part_number=cpn,
+                            name=name, description=article_desc(a), part_type="internal_mfg",
+                            item_category="article", data_classification="confidential",
+                            created_by=CREATED_BY)
+                s.add(part)
+                await s.flush()
+                created += 1
+            by_customer_pn[cpn] = part
+        print(f"Articles created={created} (of {len(ARTICLES)})")
+
+        created = 0
+        tools = {}
+        for t in TOOLS:
+            proj, seq, name = t[0], t[1], t[2]
+            pn = f"{proj}-{seq}"
+            part = await get_part(pn)
+            if part is None:
+                part = Part(project_id=projects[proj].id, part_number=pn, name=f"{proj} TOOL {name}",
+                            description=tool_desc(t), part_type="purchased", item_category="tool",
+                            data_classification="confidential", created_by=CREATED_BY)
+                s.add(part)
+                await s.flush()
+                created += 1
+            tools[pn] = part
+        print(f"Tools created={created} (of {len(TOOLS)})")
+        await s.commit()
+
+        created = 0
+        for part in list(by_customer_pn.values()) + list(tools.values()):
+            rev = (await s.execute(select(PartRevision).where(
+                PartRevision.part_id == part.id, PartRevision.revision_name == BASELINE_REV))).scalar_one_or_none()
+            if rev is None:
+                rev = PartRevision(part_id=part.id, revision_name=BASELINE_REV, phase="rfq_phase",
+                                   status="approved", created_by=CREATED_BY,
+                                   summary="Awarded quote baseline (RFQ2 REV8).")
+                s.add(rev)
+                await s.flush()
+                part.active_revision_id = rev.id
+                created += 1
+        print(f"Baseline revisions created={created}")
+        await s.commit()
+
+        created = 0
+        for t in TOOLS:
+            tool = tools[f"{t[0]}-{t[1]}"]
+            for cpn, n in t[3]:
+                art = by_customer_pn[cpn]
+                ex = (await s.execute(select(PartRelation).where(
+                    PartRelation.from_part_id == tool.id, PartRelation.to_part_id == art.id,
+                    PartRelation.relation_type == "produces"))).scalar_one_or_none()
+                if ex is None:
+                    s.add(PartRelation(from_part_id=tool.id, to_part_id=art.id, relation_type="produces",
+                                       notes=f"{n} cavities", created_by=CREATED_BY))
+                    created += 1
+        print(f"Produces relations created={created}")
+        await s.commit()
+    await engine.dispose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
