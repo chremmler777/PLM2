@@ -22,7 +22,7 @@ from app.services.part_service import ChangelogService
 from app.utils.cad_converter import convert_step_to_gltf
 
 CREATED_BY = 3
-STAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brose_cad_stage")
+STAGE = os.environ.get("BROSE_CAD_STAGE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "brose_cad_stage")
 UPLOADS = os.path.join(os.getcwd(), "uploads", "revisions")
 B_REL = "B-RELEASE 2026-05-28 (customer STEP, PCA_TM)"
 
