@@ -34,7 +34,7 @@ has no own versions on Q.wiki; the global set applies.
 
 ## 2. Data model
 
-Three new tables (Alembic migration `019_sep_forms`).
+Three new tables (Alembic migration `065_sep_forms`, revises `064`).
 
 ### form_definitions
 
@@ -88,7 +88,10 @@ definition's `signatures` list has a `signed` event.
 
 ### SEP link
 
-On `submitted`: every `SepWorkItem` in the project whose `item_no` is in the
+SEP item numbers restart at 1 in every gate, so `sep_items` entries are
+`"<gate code>:<item_no>"`, e.g. `"K0/RG1:2"`.
+
+On `submitted`: every `SepWorkItem` in the project matched by the
 definition's `sep_items` and whose status is `open` flips to `done`, with a
 `SepItemAudit` row (`field="status"`, `old="open"`, `new="done"`,
 `user_id=submitting user`) and the remark set to `via form <title>` if the
@@ -96,12 +99,17 @@ remark is empty. On `reopened`: items set done by this form flip back to
 `open` with a matching audit row. Items on a closed gate are not touched (gate
 lock wins). Items set `not_applicable` are not touched.
 
-### Risk migration
+### Risk migration and gate logic
 
 The migration creates one `risk_assessment` instance per project that has SEP
 gates, and copies each `SepRisk` into the `risks` table section (see section
-4). `sep_risks` and its three endpoints stay until production has been
-verified; removal is a follow-up commit.
+4). The risk table has a `gate` column (gate code) so a risk stays attached
+to the gate it was raised in. Gate colour (red when a high or very high risk
+is unfinished) and yellow-gate sign-off (open items need risks with complete
+action plans due within 14 days) read the risk rows of the project's
+risk-assessment instance instead of `sep_risks`. `sep_risks` and its three
+endpoints stay as dead data until production has been verified; removal is a
+follow-up commit.
 
 ## 3. Definition format
 
@@ -115,7 +123,7 @@ One file per form under `backend/app/data/forms/<key>.json`.
   "implements": "F-DVS-CORP-005 rev 01",
   "cardinality": "single",
   "gate_items": false,
-  "sep_items": [2, 45, 88],
+  "sep_items": ["K0/RG1:2"],
   "signatures": [],
   "required_for_submit": ["header.project_manager", "risks"],
   "sections": [ ... ]
@@ -132,7 +140,7 @@ Two kinds.
 {"id": "header", "title": "Project", "kind": "fields",
  "fields": [
    {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
-   {"id": "sop", "label": "SOP", "type": "date", "prefill": "rfq.sop"},
+   {"id": "sop", "label": "SOP", "type": "date"},
    {"id": "classification", "label": "Classification", "type": "choice",
     "options": ["Strictly confidential", "Confidential", "Internal", "Public"]}
  ]}
@@ -173,10 +181,14 @@ shared test vector file.
 `prefill` is a dotted path resolved on instance creation only; the value is
 then ordinary data. Supported roots for the first batch:
 
-- `project.` — `code`, `name`, `customer_name`, `plant`, `manager` (user id), `sop`
-- `rfq.` — fields of the RFQ the project was created from, where present
-- `user.` — `me` (current user id)
-- `team.` — for the contact list: `members` expands to table rows from project members
+- `project.` — `code`, `name`, `plant` (plant name)
+- `user.` — `me` (current user id), `me_name`
+- `date.` — `today`
+- `team.` — for the contact list: `members` expands to one table row per
+  distinct user assigned as responsible on any SEP item of the project
+
+RFQ data lives in a separate database and the project model has no customer,
+manager or SOP fields, so those header fields are typed by hand in this batch.
 
 Unknown paths fail the definition validation test, not the runtime.
 
@@ -209,15 +221,14 @@ keyed by SEP item number, rendered the same way on the work item row.
 
 | key | implements | cardinality | signatures | sep items (K0/RG1, K/RG2) | notes |
 |---|---|---|---|---|---|
-| risk_assessment | F-DVS-CORP-005 rev 01 | single | — | risk items in every gate | header + risks table (Q/C/S/PoC, RI, priority, countermeasure, responsible, due, status, post-measure Q/C/S/PoC/RI) + ISMS table (C/I/V) + environment table (ND/D/HD). Replaces risk tab. |
-| sales_pm_handover | F-DVS-CORP-001 | single | — | handover / kick-off items | customer & scope, volumes, pricing & one-time payments, tooling amortization, milestones, checks done (feasibility, capacity, risk, lessons learned) |
-| project_legitimization | F-DVS-CORP-013 | single | md, pm | legitimization item | header, budget table (development, tooling, gauge, gripper, packaging, assembly equipment, CTM transport, BARA, other), savings block, remark |
-| contact_list | F-DVS-CORP-004 | single | — | team / contact item | table: name, department, position, phone, email; prefilled from project members |
-| lop | F-DVS-CORP-010 | single | — | LOP items | table: pos, entry date, process, task, description, internal/external, responsible, due, status, comments; footer counts complete / on track / at risk / overdue |
-| deviation_agreement | F-DVS-CORP-011 | multi | md, dt, pm | budget deviation item | header, reason, budget / deviation table, remark |
+| risk_assessment | F-DVS-CORP-005 rev 01 | single | — | K0/RG1:2 | header + risks table (Q/C/S/PoC, RI, priority, countermeasure, responsible, due, status, post-measure Q/C/S/PoC/RI) + ISMS table (C/I/V) + environment table (ND/D/HD). Replaces risk tab. |
+| sales_pm_handover | F-DVS-CORP-001 | single | — | K/RG2:10 | customer & scope, volumes, pricing & one-time payments, tooling amortization, milestones, checks done (feasibility, capacity, risk, lessons learned) |
+| project_legitimization | F-DVS-CORP-013 | single | md, pm | K0/RG1:39, K/RG2:7 | header, budget table (development, tooling, gauge, gripper, packaging, assembly equipment, CTM transport, BARA, other), savings block, remark |
+| contact_list | F-DVS-CORP-004 | single | — | K/RG2:8 | table: name, department, position, phone, email; prefilled from project members |
+| lop | F-DVS-CORP-010 | single | — | none (reachable from the Forms tab) | table: pos, entry date, process, task, description, internal/external, responsible, due, status, comments; footer counts complete / on track / at risk / overdue |
+| deviation_agreement | F-DVS-CORP-011 | multi | md, dt, pm | none (reachable from the Forms tab) | header, reason, budget / deviation table, remark |
 
-Exact SEP item numbers are resolved from `sep_template.json` while writing
-each definition and checked by the definition test.
+Item references are checked against `sep_template.json` by the definition test.
 
 ## 5. API
 
@@ -259,7 +270,7 @@ landscape for table-heavy forms. No Excel export in this batch.
 
 ## 8. Migration and rollout
 
-1. Alembic `019_sep_forms`: create the three tables; data step creates a
+1. Alembic `065_sep_forms`: create the three tables; data step creates a
    `risk_assessment` instance for each project with SEP gates and copies
    `sep_risks` rows into `data.risks` (mapping: effect→risk, q/c/s/probability
    →q/c/s/p, countermeasure, due_date, responsible_id, status; rkz and priority
