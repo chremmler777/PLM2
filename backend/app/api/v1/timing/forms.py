@@ -124,6 +124,19 @@ async def get_instance(instance_id: int, current_user: User = Depends(get_curren
     return await _inst_dict(db, inst, full=True)
 
 
+@router.get("/instances/{instance_id}/export.pdf")
+async def export_pdf(instance_id: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.forms.pdf import render_pdf
+    try:
+        inst = await svc.load_instance(db, instance_id)
+    except FormError as e:
+        _raise(e)
+    payload = await _inst_dict(db, inst, full=True)
+    pdf = render_pdf(payload)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{payload["key"]}-{payload["project_id"]}-{inst.id}.pdf"'})
+
+
 async def _mutate(db, instance_id, fn, *args):
     try:
         inst = await svc.load_instance(db, instance_id)

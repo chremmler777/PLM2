@@ -338,3 +338,12 @@ async def test_copy_sep_risks_to_forms(session_factory, seed, client, eng_auth):
         assert r["status"] == "started" and r["responsible"] == seed["admin_id"]
         # idempotent
         assert await copy_sep_risks_to_forms(s) == 0
+
+
+async def test_pdf_export(client, eng_auth, seed, session_factory):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    inst = (await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances", json={"key": "lop"}, headers=eng_auth)).json()
+    res = await client.get(f"/api/v1/forms/instances/{inst['id']}/export.pdf", headers=eng_auth)
+    assert res.status_code == 200 and res.headers["content-type"].startswith("application/pdf")
+    assert res.content[:4] == b"%PDF"
