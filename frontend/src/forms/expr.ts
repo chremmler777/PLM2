@@ -66,6 +66,9 @@ function ev(n: Node, scope: Record<string, unknown>): unknown {
       const a = ev(n[2], scope), b = ev(n[3], scope);
       if (n[1] === '==') return (a ?? null) === (b ?? null);
       if (n[1] === '!=') return (a ?? null) !== (b ?? null);
+      if (typeof a === 'string' && typeof b === 'string') {
+        return n[1] === '<' ? a < b : n[1] === '<=' ? a <= b : n[1] === '>' ? a > b : a >= b;
+      }
       const x = num(a), y = num(b);
       return n[1] === '<' ? x < y : n[1] === '<=' ? x <= y : n[1] === '>' ? x > y : x >= y;
     }
@@ -87,7 +90,13 @@ function ev(n: Node, scope: Record<string, unknown>): unknown {
         for (const band of vals.slice(1, -1) as [unknown, unknown][]) if (x <= num(band[0])) return band[1];
         return def;
       }
-      if (name === 'today') return new Date().toISOString().slice(0, 10);
+      if (name === 'today') {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+      }
       if (name === 'days_between') {
         const a = new Date(String(vals[0]).slice(0, 10)), b = new Date(String(vals[1]).slice(0, 10));
         return Math.round((b.getTime() - a.getTime()) / 86400000);

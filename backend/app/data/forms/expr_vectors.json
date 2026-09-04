@@ -12,5 +12,6 @@
   {"expr": "x == null", "scope": {"x": null}, "expected": true},
   {"expr": "-x + 3", "scope": {"x": 1}, "expected": 2},
   {"expr": "unknown + 1", "scope": {}, "error": true},
-  {"expr": "1 +", "scope": {}, "error": true}
+  {"expr": "1 +", "scope": {}, "error": true},
+  {"expr": "a < b", "scope": {"a": "2026-01-01", "b": "2026-02-01"}, "expected": true}
 ]
