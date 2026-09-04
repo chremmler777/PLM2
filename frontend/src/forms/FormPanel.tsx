@@ -112,7 +112,7 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={inst?.title ?? 'Form'}>
       <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-[2px] form-panel-fade" onClick={onClose} aria-hidden />
-      <aside className="relative flex h-full w-full flex-col bg-slate-800 border-l border-slate-700 shadow-lift md:w-[50rem] form-panel-slide">
+      <aside className="relative flex h-full w-full flex-col bg-slate-800 border-l border-slate-700 shadow-lift md:w-[min(84rem,calc(100vw-3rem))] form-panel-slide">
         {!inst || !draft ? (
           <div className="flex flex-1 flex-col">
             <div className="px-5 py-4 border-b border-slate-700 space-y-2">

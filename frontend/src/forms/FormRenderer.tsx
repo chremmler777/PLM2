@@ -79,7 +79,6 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
   { s: TableSection; rows: Row[]; footer: Record<string, unknown> | undefined; onRows: (rows: Row[]) => void; readOnly: boolean; users: UserOption[] }) {
   const setCell = (i: number, id: string, v: unknown) => onRows(rows.map((r, j) => (j === i ? { ...r, [id]: v } : r)));
   const explained = s.columns.filter((c) => c.help);
-  const span = s.columns.length + 1 + (readOnly ? 0 : 1);
   return (
     <div>
       <div className="overflow-x-auto -mx-4 px-4 pb-1">
@@ -98,12 +97,6 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={span} className="rounded-lg border border-dashed border-slate-700 px-3 py-4 text-center text-sm text-slate-500">
-                  {readOnly ? 'No entries.' : 'No entries yet. Add the first row below.'}
-                </td>
-              </tr>)}
             {rows.map((r, i) => (
               <tr key={i} className="group align-top">
                 <td className="sticky left-0 z-[1] bg-slate-800 px-2 py-1 font-mono text-xs text-slate-500 leading-[2.125rem]">{i + 1}</td>
@@ -122,11 +115,15 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
           </tbody>
         </table>
       </div>
+      {rows.length === 0 && (
+        <div className="rounded-lg border border-dashed border-slate-700 px-3 py-3 text-center text-sm text-slate-500">
+          {readOnly ? 'No entries.' : 'No entries yet. Add the first row below.'}
+        </div>)}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {!readOnly && (
           <button type="button"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700/60 hover:border-slate-500 active:scale-[0.98] transition-all duration-150"
-            onClick={() => onRows([...rows, {}])}>
+            onClick={() => onRows([...rows, Object.fromEntries(s.columns.map((c) => [c.id, null]))])}>
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
             Add row
           </button>)}
