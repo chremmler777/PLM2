@@ -14,7 +14,7 @@ const body: FormDefinitionBody = {
       { id: 'u', label: 'User', type: 'user' }, { id: 'dbl', label: 'Double', type: 'computed', expr: 'n * 2', help: 'twice n' },
     ] },
     { id: 'rows', title: 'Rows', kind: 'table', columns: [
-      { id: 'q', label: 'Q', type: 'number' }, { id: 'r', label: 'R', type: 'computed', expr: 'q * 2' },
+      { id: 'q', label: 'Q', type: 'number' }, { id: 'r', label: 'R', type: 'computed', expr: 'q * 2', help: 'twice q' },
     ], footer: [{ label: 'Sum R', expr: 'sum(r)' }] },
   ],
 };
@@ -31,6 +31,7 @@ describe('FormRenderer', () => {
     expect(screen.getByLabelText('User')).toBeTruthy();
     expect(screen.getByText('twice n')).toBeTruthy();
     expect(screen.getByText('4')).toBeTruthy(); // computed double shown
+    expect(screen.getByText('R = twice q')).toBeTruthy(); // column legend
     fireEvent.change(screen.getByLabelText('Num'), { target: { value: '5' } });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ h: expect.objectContaining({ n: 5, dbl: 10 }) }));
     fireEvent.click(screen.getByRole('button', { name: /add row/i }));

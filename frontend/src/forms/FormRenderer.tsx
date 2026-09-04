@@ -50,7 +50,10 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
       <table className="min-w-full text-xs">
         <thead><tr className="text-slate-400">
           <th className="px-1 text-left w-6">#</th>
-          {s.columns.map((c) => <th key={c.id} className="px-1 text-left font-medium" style={{ minWidth: `${(c.width ?? 1) * 6}rem` }}>{c.label}</th>)}
+          {s.columns.map((c) => (
+            <th key={c.id} className="px-1 text-left font-medium" style={{ minWidth: `${(c.width ?? 1) * 6}rem` }} title={c.help}>
+              {c.help ? <abbr title={c.help} className="cursor-help decoration-dotted underline-offset-2">{c.label}</abbr> : c.label}
+            </th>))}
           {!readOnly && <th className="w-8" />}
         </tr></thead>
         <tbody>
@@ -64,6 +67,10 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
             </tr>))}
         </tbody>
       </table>
+      {s.columns.some((c) => c.help) && (
+        <p className="text-[11px] text-slate-500 mt-1">
+          {s.columns.filter((c) => c.help).map((c) => `${c.label} = ${c.help}`).join(' · ')}
+        </p>)}
       <div className="flex items-center gap-3 mt-2">
         {!readOnly && <button type="button" className="text-xs px-2 py-1 rounded border border-slate-600 text-slate-300 hover:border-slate-400" onClick={() => onRows([...rows, {}])}>+ Add row</button>}
         {footer && Object.entries(footer).map(([k, v]) => <span key={k} className="text-xs px-2 py-0.5 rounded bg-slate-700/60 text-slate-300">{k}: {display({ id: k, label: k, type: 'text' }, v, users)}</span>)}
