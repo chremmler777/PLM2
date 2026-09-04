@@ -183,3 +183,81 @@ async def test_signatures_four_eyes(session_factory, seed, client, eng_auth):
         # reopen invalidates signatures
         inst = await reopen_instance(s, inst, eng)
         assert signatures_state(inst) == {"md": None, "pm": None}
+
+
+async def _seed_defs(session_factory):
+    async with session_factory() as s:
+        await load_definitions(s); await s.commit()
+
+
+async def test_api_lifecycle(client, eng_auth, admin_auth, seed, session_factory):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    res = await client.get("/api/v1/forms/definitions", headers=eng_auth)
+    assert res.status_code == 200 and {d["key"] for d in res.json()} >= {"risk_assessment", "lop"}
+
+    res = await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances", json={"key": "project_legitimization"}, headers=eng_auth)
+    assert res.status_code == 201, res.text
+    inst = res.json()
+    assert inst["status"] == "draft" and inst["data"]["header"]["project_no"] == "proj"
+    res = await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances", json={"key": "project_legitimization"}, headers=eng_auth)
+    assert res.status_code == 409
+
+    res = await client.get(f"/api/v1/forms/instances/{inst['id']}", headers=eng_auth)
+    assert res.status_code == 200 and res.json()["definition"]["key"] == "project_legitimization"
+    assert [e["event"] for e in res.json()["events"]] == ["created"]
+
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/submit", headers=eng_auth)
+    assert res.status_code == 422 and "budget" in res.json()["detail"]["missing"]
+
+    data = inst["data"]; data["header"]["project_title"] = "P"; data["budget"] = [{"item": "Tooling", "budget": 5}]
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200 and res.json()["data"]["budget_footer"]["Total budget"] == 5
+
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/submit", headers=eng_auth)
+    assert res.status_code == 200 and res.json()["status"] == "submitted"
+    assert res.json()["signatures"] == {"md": None, "pm": None}
+
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/sign", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 200 and res.json()["signatures"]["pm"]["user_name"] == "Engineer"
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/sign", json={"role": "md"}, headers=eng_auth)
+    assert res.status_code == 409
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/sign", json={"role": "md"}, headers=admin_auth)
+    assert res.status_code == 200
+
+    # SEP payload shows the form on its items
+    sep = (await client.get(f"/api/v1/sep/projects/{seed['project_id']}", headers=eng_auth)).json()
+    k0 = next(g for g in sep["gates"] if g["code"] == "K0/RG1")
+    item39 = next(i for i in k0["items"] if i["item_no"] == 39)
+    assert item39["form"] == {"key": "project_legitimization", "title": "Project Legitimization",
+                              "instance_id": inst["id"], "status": "submitted"}
+    assert item39["status"] == "done"
+    item2 = next(i for i in k0["items"] if i["item_no"] == 2)
+    assert item2["form"]["key"] == "risk_assessment" and item2["form"]["instance_id"] is None
+
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/reopen", headers=admin_auth)
+    assert res.status_code == 200 and res.json()["status"] == "reopened"
+
+    res = await client.get(f"/api/v1/forms/projects/{seed['project_id']}", headers=eng_auth)
+    assert res.status_code == 200
+    groups = {g["key"]: g for g in res.json()}
+    assert groups["project_legitimization"]["instances"][0]["status"] == "reopened"
+    assert groups["lop"]["instances"] == [] and groups["lop"]["cardinality"] == "single"
+
+
+async def test_my_forms(client, eng_auth, admin_auth, seed, session_factory):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    res = await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances", json={"key": "lop"}, headers=eng_auth)
+    assert res.status_code == 201
+    mine = (await client.get("/api/v1/forms/my-forms", headers=eng_auth)).json()
+    assert [m["key"] for m in mine] == ["lop"] and mine[0]["reason"] == "draft"
+    assert (await client.get("/api/v1/forms/my-forms", headers=admin_auth)).json() == []
+
+
+async def test_sep_references_on_items(client, eng_auth, seed):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    sep = (await client.get(f"/api/v1/sep/projects/{seed['project_id']}", headers=eng_auth)).json()
+    k2 = next(g for g in sep["gates"] if g["code"] == "K/RG2")
+    item10 = next(i for i in k2["items"] if i["item_no"] == 10)
+    assert any(r["title"].startswith("Process description") for r in item10["references"])

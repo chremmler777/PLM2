@@ -433,6 +433,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Warning seeding test data: {e}")
 
+    from app.models import AsyncSessionLocal
+    from app.forms.loader import load_definitions
+    async with AsyncSessionLocal() as session:
+        try:
+            await load_definitions(session)
+            await session.commit()
+        except Exception as e:  # never block startup on a bad definition file
+            logger.error(f"Form definitions not loaded: {e}")
+            await session.rollback()
+
     # Periodic overdue lesson-action reminders (every 6h, deduped to 1/24h per action)
     import asyncio
 

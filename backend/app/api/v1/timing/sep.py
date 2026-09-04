@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sep", tags=["sep"])
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[3] / "data" / "sep_template.json"
+REFERENCES_PATH = Path(__file__).resolve().parents[3] / "data" / "sep_references.json"
+_REFERENCES: dict[str, list[dict]] = json.loads(REFERENCES_PATH.read_text()) if REFERENCES_PATH.exists() else {}
 ACTION_PLAN_MAX_DAYS = 14
 SIGN_OFF_ROLES = {"pm", "quality"}
 
@@ -121,7 +123,7 @@ def _risk_dict(r: SepRisk, names: dict[int, str]) -> dict:
     }
 
 
-def _item_dict(i: SepWorkItem, names: dict[int, str]) -> dict:
+def _item_dict(i: SepWorkItem, names: dict[int, str], gate_code: str | None = None, forms: dict | None = None) -> dict:
     return {
         "id": i.id,
         "gate_id": i.gate_id,
@@ -136,10 +138,12 @@ def _item_dict(i: SepWorkItem, names: dict[int, str]) -> dict:
         "responsible_name": names.get(i.responsible_id),
         "completed_at": i.completed_at.isoformat() if i.completed_at else None,
         "lessons_link": _is_lessons_item(i),
+        "form": (forms or {}).get(f"{gate_code}:{i.item_no}"),
+        "references": _REFERENCES.get(f"{gate_code}:{i.item_no}", []),
     }
 
 
-def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True) -> dict:
+def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True, forms: dict | None = None) -> dict:
     d = {
         "id": g.id,
         "project_id": g.project_id,
@@ -162,7 +166,7 @@ def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True) -> 
         "open_risks": sum(1 for r in g.risks if r.status != "finished"),
     }
     if with_details:
-        d["items"] = [_item_dict(i, names) for i in g.items]
+        d["items"] = [_item_dict(i, names, g.code, forms) for i in g.items]
         d["risks"] = [_risk_dict(r, names) for r in g.risks]
     return d
 
@@ -273,11 +277,13 @@ async def get_project_sep(
     if not gates:
         return {"project_id": project_id, "active": False, "gates": []}
     names = await _user_names(db, _names_in_gates(gates))
+    from app.forms.service import form_info_by_ref
+    forms = await form_info_by_ref(db, project_id)
     total_items = [i for g in gates for i in g.items]
     return {
         "project_id": project_id,
         "active": True,
-        "gates": [_gate_dict(g, names) for g in gates],
+        "gates": [_gate_dict(g, names, forms=forms) for g in gates],
         "rollup": {"total": _gate_progress(total_items)},
     }
 

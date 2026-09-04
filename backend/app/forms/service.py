@@ -181,3 +181,28 @@ async def sign_instance(db: AsyncSession, inst: FormInstance, role: str, user: U
     inst.events.append(FormEvent(user_id=user.id, event="signed", role=role))
     await db.flush()
     return await load_instance(db, inst.id)
+
+
+async def instances_for_project(db: AsyncSession, project_id: int) -> list[FormInstance]:
+    return list((await db.execute(
+        select(FormInstance).options(selectinload(FormInstance.definition), selectinload(FormInstance.events))
+        .where(FormInstance.project_id == project_id).order_by(FormInstance.id))).scalars().all())
+
+
+async def form_info_by_ref(db: AsyncSession, project_id: int) -> dict[str, dict]:
+    """'K0/RG1:2' -> {key, title, instance_id, status} using the latest definition per key
+    and the newest instance per key (single forms have at most one)."""
+    from app.forms.loader import latest_definitions
+    latest = await latest_definitions(db)
+    insts = await instances_for_project(db, project_id)
+    newest: dict[str, FormInstance] = {}
+    for i in insts:
+        newest[i.definition.key] = i
+    out: dict[str, dict] = {}
+    for d in latest:
+        inst = newest.get(d.key)
+        for ref in d.body.get("sep_items", []):
+            out[ref] = {"key": d.key, "title": d.title,
+                        "instance_id": inst.id if inst else None,
+                        "status": inst.status if inst else None}
+    return out
