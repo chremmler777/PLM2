@@ -49,11 +49,12 @@ def _def_dict(d) -> dict:
             "sep_items": d.body.get("sep_items", []), "signatures": d.body.get("signatures", [])}
 
 
-async def _inst_dict(db: AsyncSession, inst, full: bool = False) -> dict:
+async def _inst_dict(db: AsyncSession, inst, full: bool = False, names: dict[int, str] | None = None) -> dict:
     d = inst.definition
     sigs = svc.signatures_state(inst)
-    names = await _names(db, {inst.owner_id, inst.submitted_by, inst.updated_by}
-                         | {s["user_id"] for s in sigs.values() if s} | {e.user_id for e in inst.events})
+    if names is None:
+        names = await _names(db, {inst.owner_id, inst.submitted_by, inst.updated_by}
+                             | {s["user_id"] for s in sigs.values() if s} | {e.user_id for e in inst.events})
     out = {
         "id": inst.id, "project_id": inst.project_id, "key": d.key, "title": d.title, "version": d.version,
         "implements": d.implements, "cardinality": d.cardinality, "status": inst.status, "data": inst.data,
@@ -90,9 +91,15 @@ async def project_forms(project_id: int, current_user: User = Depends(get_curren
     if not await db.get(Project, project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     insts = await svc.instances_for_project(db, project_id)
+    ids: set[int | None] = set()
+    for i in insts:
+        ids |= {i.owner_id, i.submitted_by, i.updated_by}
+        ids |= {s["user_id"] for s in svc.signatures_state(i).values() if s}
+        ids |= {e.user_id for e in i.events}
+    names = await _names(db, ids)
     groups = []
     for d in await latest_definitions(db):
-        mine = [await _inst_dict(db, i) for i in insts if i.definition.key == d.key]
+        mine = [await _inst_dict(db, i, names=names) for i in insts if i.definition.key == d.key]
         groups.append({**_def_dict(d), "instances": mine})
     return groups
 
@@ -153,7 +160,9 @@ async def sign(instance_id: int, body: SignBody,
 
 @router.get("/my-forms", response_model=list[dict])
 async def my_forms(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Drafts I own, plus submitted forms still missing a signature (anyone can sign, so shown to all)."""
+    """Forms I own that are not yet submitted (draft/reopened). There is no role model, so we
+    cannot tell who a missing signature belongs to; without that, submitted-but-unsigned forms
+    can't be attributed to a specific user and are intentionally left out of this list."""
     from sqlalchemy.orm import selectinload
     from app.models.forms import FormInstance
     rows = (await db.execute(
