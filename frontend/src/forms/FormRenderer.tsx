@@ -146,10 +146,10 @@ export default function FormRenderer({ body, data, onChange, readOnly = false, u
   const computed = recompute(body, data);
   const update = (next: FormData) => onChange(recompute(body, next));
   return (
-    <div className="space-y-4">
+    <div className="space-y-7">
       {body.sections.map((s, idx) => (
         <section key={s.id} className="rounded-lg border border-slate-700/70 bg-slate-800 p-4 shadow-panel">
-          <header className="mb-3 flex items-baseline gap-2">
+          <header className="mb-4 flex items-baseline gap-2">
             <span className="font-mono text-[11px] text-slate-600">{String(idx + 1).padStart(2, '0')}</span>
             <h4 className="text-sm font-semibold tracking-tight text-slate-100">{s.title}</h4>
             {s.kind === 'table' && (

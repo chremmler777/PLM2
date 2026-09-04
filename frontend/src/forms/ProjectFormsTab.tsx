@@ -51,7 +51,7 @@ export default function ProjectFormsTab({ projectId }: { projectId: number }) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {sorted.map((g) => {
         const gates = gatesOf(g);
         const canCreate = g.cardinality === 'multi' || g.instances.length === 0;

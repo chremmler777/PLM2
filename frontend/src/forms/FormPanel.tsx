@@ -163,13 +163,13 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto bg-slate-900/40 px-5 py-4">
+            <div className="flex-1 overflow-y-auto bg-slate-900/40 px-5 py-5">
               {inst.definition && (
                 <FormRenderer body={inst.definition} data={draft} onChange={setDraft} readOnly={!editable} users={users} />
               )}
 
               {Object.keys(inst.signatures).length > 0 && (
-                <section className="mt-4 rounded-lg border border-slate-700/70 bg-slate-800 p-4 shadow-panel">
+                <section className="mt-7 rounded-lg border border-slate-700/70 bg-slate-800 p-4 shadow-panel">
                   <h4 className="mb-3 text-sm font-semibold tracking-tight text-slate-100">Signatures</h4>
                   <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {Object.entries(inst.signatures).map(([role, s]) => (
@@ -190,7 +190,7 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
                 </section>)}
 
               {inst.events && inst.events.length > 0 && (
-                <details className="group mt-4 rounded-lg border border-slate-700/70 bg-slate-800 shadow-panel">
+                <details className="group mt-7 rounded-lg border border-slate-700/70 bg-slate-800 shadow-panel">
                   <summary className="flex cursor-pointer select-none items-center gap-2 px-4 py-3 text-sm font-semibold tracking-tight text-slate-100">
                     <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-slate-500 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4" /></svg>
                     History
