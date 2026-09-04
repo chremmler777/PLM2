@@ -1,6 +1,7 @@
 """SEP forms engine endpoints (/v1/forms)."""
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -13,6 +14,8 @@ from app.models import get_db, User, Project
 from app.forms.loader import latest_definitions, latest_definition
 from app.forms import service as svc
 from app.forms.service import FormError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/forms", tags=["forms"])
 
@@ -132,7 +135,11 @@ async def export_pdf(instance_id: int, current_user: User = Depends(get_current_
     except FormError as e:
         _raise(e)
     payload = await _inst_dict(db, inst, full=True)
-    pdf = render_pdf(payload)
+    try:
+        pdf = render_pdf(payload)
+    except Exception:
+        logger.exception("PDF export failed for form instance %s", instance_id)
+        raise HTTPException(status_code=500, detail="PDF export failed")
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="{payload["key"]}-{payload["project_id"]}-{inst.id}.pdf"'})
 

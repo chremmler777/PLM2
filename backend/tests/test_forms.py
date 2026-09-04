@@ -347,3 +347,43 @@ async def test_pdf_export(client, eng_auth, seed, session_factory):
     res = await client.get(f"/api/v1/forms/instances/{inst['id']}/export.pdf", headers=eng_auth)
     assert res.status_code == 200 and res.headers["content-type"].startswith("application/pdf")
     assert res.content[:4] == b"%PDF"
+
+
+async def test_pdf_export_escapes_special_chars_list_and_computed_column(client, eng_auth, seed, session_factory):
+    """Text with '<', '&', '>' must not break reportlab's Paragraph parser, a list-shaped
+    (multichoice-style) value must render as a joined string, and a computed table column
+    (rkz, filled by recompute() on save) must be present in the export."""
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    inst = (await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances",
+                              json={"key": "risk_assessment"}, headers=eng_auth)).json()
+    data = inst["data"]
+    data["header"]["project_title"] = "A & B <script>alert(1)</script>"
+    data["header"]["classification"] = ["Confidential", "Internal"]
+    data["risks"] = [{"gate": "K0/RG1", "risk": "R < 1 & C > 2", "impact": "high", "q": 0.5, "c": 0.5, "s": 0.5,
+                      "p": 1, "countermeasure": "mitigate", "responsible": seed["engineer_id"], "status": "open"}]
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200
+    assert res.json()["data"]["risks"][0]["rkz"] == pytest.approx(1.5)  # computed column landed in the saved row
+    res = await client.get(f"/api/v1/forms/instances/{inst['id']}/export.pdf", headers=eng_auth)
+    assert res.status_code == 200 and res.headers["content-type"].startswith("application/pdf")
+    assert res.content[:4] == b"%PDF"
+
+
+async def test_pdf_export_submitted_with_signatures_and_history(client, eng_auth, admin_auth, seed, session_factory):
+    """A submitted, partially signed instance must render both the signatures block and the
+    event-history table."""
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    inst = (await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances",
+                              json={"key": "project_legitimization"}, headers=eng_auth)).json()
+    data = inst["data"]; data["header"]["project_title"] = "P"; data["budget"] = [{"item": "Tooling", "budget": 5}]
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/submit", headers=eng_auth)
+    assert res.status_code == 200
+    res = await client.post(f"/api/v1/forms/instances/{inst['id']}/sign", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 200
+    res = await client.get(f"/api/v1/forms/instances/{inst['id']}/export.pdf", headers=eng_auth)
+    assert res.status_code == 200 and res.headers["content-type"].startswith("application/pdf")
+    assert res.content[:4] == b"%PDF"
