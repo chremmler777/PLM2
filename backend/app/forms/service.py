@@ -32,7 +32,7 @@ def sep_refs(body: dict) -> list[tuple[str, int]]:
 
 async def load_instance(db: AsyncSession, instance_id: int) -> FormInstance:
     inst = (await db.execute(
-        select(FormInstance).execution_options(populate_existing=True)
+        select(FormInstance)
         .options(selectinload(FormInstance.events), selectinload(FormInstance.definition))
         .where(FormInstance.id == instance_id))).scalar_one_or_none()
     if not inst:
@@ -90,7 +90,7 @@ async def save_instance(db: AsyncSession, inst: FormInstance, data: dict, user: 
     inst.data = new
     inst.updated_by = user.id
     inst.updated_at = datetime.utcnow()
-    db.add(FormEvent(instance_id=inst.id, user_id=user.id, event="saved", diff=diff))
+    inst.events.append(FormEvent(user_id=user.id, event="saved", diff=diff))
     await db.flush()
     return await load_instance(db, inst.id)
 
@@ -127,7 +127,7 @@ async def submit_instance(db: AsyncSession, inst: FormInstance, user: User) -> F
     inst.status = "submitted"
     inst.submitted_by = user.id
     inst.submitted_at = datetime.utcnow()
-    db.add(FormEvent(instance_id=inst.id, user_id=user.id, event="submitted"))
+    inst.events.append(FormEvent(user_id=user.id, event="submitted"))
     await db.flush()
     return await load_instance(db, inst.id)
 
@@ -143,7 +143,7 @@ async def reopen_instance(db: AsyncSession, inst: FormInstance, user: User) -> F
         item.status = "open"
         item.completed_at = None
     inst.status = "reopened"
-    db.add(FormEvent(instance_id=inst.id, user_id=user.id, event="reopened"))
+    inst.events.append(FormEvent(user_id=user.id, event="reopened"))
     await db.flush()
     return await load_instance(db, inst.id)
 
@@ -178,6 +178,6 @@ async def sign_instance(db: AsyncSession, inst: FormInstance, role: str, user: U
         raise FormError(409, f"{role.upper()} has already signed")
     if any(s and s["user_id"] == user.id for s in state.values()):
         raise FormError(409, "Each role must be signed by a different user")
-    db.add(FormEvent(instance_id=inst.id, user_id=user.id, event="signed", role=role))
+    inst.events.append(FormEvent(user_id=user.id, event="signed", role=role))
     await db.flush()
     return await load_instance(db, inst.id)
