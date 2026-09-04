@@ -290,6 +290,35 @@ async def test_gate_color_and_signoff_use_form_risks(client, eng_auth, admin_aut
     assert res.status_code == 200, res.text
 
 
+
+async def test_ungated_risk_row_blocks_every_sign_off(client, eng_auth, seed, session_factory):
+    """A row whose gate was never picked colours no gate; it must still block sign-off."""
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    from datetime import date, timedelta
+    due = (date.today() + timedelta(days=3)).isoformat()
+    res = await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances",
+                            json={"key": "risk_assessment"}, headers=eng_auth)
+    inst = res.json()
+    data = inst["data"]
+    data["risks"] = [{"gate": "", "risk": "no gate picked", "q": 1, "c": 1, "s": 1, "p": 1,
+                      "status": "open", "countermeasure": "fix", "responsible": seed["admin_id"], "due": due}]
+    await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+
+    sep = (await client.get(f"/api/v1/sep/projects/{seed['project_id']}", headers=eng_auth)).json()
+    k0 = sep["gates"][0]
+    # the row belongs to no gate, so it colours none of them
+    assert all(g["open_risks"] == 0 for g in sep["gates"])
+    res = await client.post(f"/api/v1/sep/gates/{k0['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 409 and "no gate" in res.json()["detail"]
+
+    # assigning the gate clears the blind spot; the plan is already complete
+    data["risks"][0]["gate"] = "K0/RG1"
+    await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    res = await client.post(f"/api/v1/sep/gates/{k0['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+
 async def test_copy_sep_risks_to_forms(session_factory, seed, client, eng_auth):
     await _activate_sep(client, eng_auth, seed["project_id"])
     await _seed_defs(session_factory)

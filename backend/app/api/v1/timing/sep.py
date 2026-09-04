@@ -321,7 +321,7 @@ async def sep_overview(
     """Dashboard widget: gate colors + progress for every project with SEP."""
     result = await db.execute(
         select(SepGate)
-        .options(selectinload(SepGate.items), selectinload(SepGate.risks))
+        .options(selectinload(SepGate.items))
         .order_by(SepGate.project_id, SepGate.seq)
     )
     gates = list(result.scalars())
@@ -494,7 +494,8 @@ async def sign_off_gate(
     Gates close strictly in sequence. A gate with open items (yellow) needs at
     least one risk row for this gate in the project's risk assessment form, and
     every unfinished row a complete action plan: countermeasure, responsible,
-    due date within 14 days.
+    due date within 14 days. Unfinished rows with no gate assigned block every
+    sign-off in the project, since they belong to no gate's checks.
     """
     gate = await _load_gate(db, gate_id)
     role = body.role.lower().strip()
@@ -514,7 +515,16 @@ async def sign_off_gate(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail=f"Previous gate {prev.code} must be closed first")
 
-    rows = (await risk_rows_by_gate(db, gate.project_id)).get(gate.code, [])
+    rows_by_gate = await risk_rows_by_gate(db, gate.project_id)
+    rows = rows_by_gate.get(gate.code, [])
+    # A row whose gate dropdown was never filled belongs to no gate, so it colours
+    # nothing and no sign-off would ever see it. Refuse to close over that blind spot.
+    ungated = [r for r in rows_by_gate.get("", []) if r.get("status") != "finished"]
+    if ungated:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{len(ungated)} risk entries have no gate assigned; assign a gate or finish them before sign-off",
+        )
     open_items = [i for i in gate.items if i.status == "open"]
     unfinished = [r for r in rows if r.get("status") != "finished"]
     if open_items and not rows:
@@ -569,8 +579,7 @@ async def sign_off_gate(
     await db.commit()
     gate = await _load_gate(db, gate_id)
     names = await _user_names(db, _names_in_gates([gate]))
-    rows = await risk_rows_by_gate(db, gate.project_id)
-    return _gate_dict(gate, names, risk_rows=rows.get(gate.code, []))
+    return _gate_dict(gate, names, risk_rows=rows)
 
 
 @router.post("/gates/{gate_id}/risks", response_model=dict, status_code=status.HTTP_201_CREATED)
