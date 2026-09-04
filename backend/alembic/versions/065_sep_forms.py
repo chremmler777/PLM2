@@ -1,7 +1,8 @@
 """SEP forms engine: form_definitions, form_instances, form_events.
 
 Also seeds the form definitions. The legacy sep_risks rows are copied into the
-risk_assessment form by scripts/migrate_sep_risks.py, run after this upgrade.
+risk_assessment form by app startup (app/main.py lifespan), with
+scripts/migrate_sep_risks.py as the manual fallback.
 
 Revision ID: 065
 Revises: 064
@@ -78,9 +79,9 @@ def upgrade() -> None:
                                               gate_items=bool(body.get("gate_items", False)), body=body))
 
     # The legacy sep_risks -> risk_assessment row copy needs ORM sessions, and a
-    # second (async) connection cannot see this migration's uncommitted DDL.
-    # Run it after the upgrade as a deploy step:
-    #     python scripts/migrate_sep_risks.py
+    # second (async) connection cannot see this migration's uncommitted DDL, so
+    # it cannot run here. App startup does it (app/main.py lifespan, idempotent);
+    # scripts/migrate_sep_risks.py is the manual fallback.
 
 
 def downgrade() -> None:

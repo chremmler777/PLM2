@@ -443,6 +443,20 @@ async def lifespan(app: FastAPI):
             logger.error(f"Form definitions not loaded: {e}")
             await session.rollback()
 
+    # Copy legacy sep_risks rows into each project's risk_assessment form. Gate
+    # colour and sign-off read the form, not sep_risks, so a skipped copy would
+    # silently drop legacy risks. Idempotent, so this is a cheap no-op once done.
+    from app.forms.risks import copy_sep_risks_to_forms
+    async with AsyncSessionLocal() as session:
+        try:
+            copied = await copy_sep_risks_to_forms(session)
+            await session.commit()
+            if copied:
+                logger.info("Copied %d legacy sep_risks row(s) into risk_assessment forms", copied)
+        except Exception as e:  # never block startup on the legacy copy
+            logger.error(f"Legacy sep_risks not copied into risk_assessment forms: {e}")
+            await session.rollback()
+
     # Periodic overdue lesson-action reminders (every 6h, deduped to 1/24h per action)
     import asyncio
 

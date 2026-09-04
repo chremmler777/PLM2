@@ -1,8 +1,9 @@
 """Copy legacy sep_risks rows into each project's risk_assessment form.
 
-Deploy step, run after `alembic upgrade` reaches revision 065 (run_backend.sh
-does this automatically). Idempotent: rows already copied are skipped, marked
-migrated_from_sep_risk. Exits non-zero on failure so the log shows it.
+App startup does this automatically (app/main.py lifespan); this script is the
+manual fallback, e.g. after restoring a dump without restarting the app.
+Idempotent: rows already copied are skipped, marked migrated_from_sep_risk.
+Exits non-zero on failure so the log shows it.
 """
 import asyncio
 import sys
