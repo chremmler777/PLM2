@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.forms.compute import recompute
 from app.forms.loader import latest_definition
 from app.forms.prefill import build_prefill
-from app.forms.validate import missing_for_submit
+from app.forms.validate import missing_for_submit, validate_data
 from app.models import User, Project
 from app.models.forms import FormInstance, FormEvent, FormDefinition
 from app.models.sep import SepWorkItem, SepGate, SepItemAudit
@@ -82,6 +82,9 @@ async def save_instance(db: AsyncSession, inst: FormInstance, data: dict, user: 
                         owner_id: int | None = None) -> FormInstance:
     if inst.status == "submitted":
         raise FormError(409, "Form is submitted; reopen it to edit")
+    problems = validate_data(inst.definition.body, data)
+    if problems:
+        raise FormError(422, "Invalid form data", {"problems": problems})
     new = recompute(inst.definition.body, data)
     diff = _diff(inst.data or {}, new)
     if owner_id is not None and owner_id != inst.owner_id:
@@ -116,6 +119,7 @@ async def submit_instance(db: AsyncSession, inst: FormInstance, user: User) -> F
     if missing:
         raise FormError(422, "Form is incomplete", {"missing": missing})
     title = inst.definition.title
+    flipped: list[int] = []
     for item, gate in await _linked_items(db, inst):
         if gate.status == "closed" or item.status != "open":
             continue
@@ -124,20 +128,29 @@ async def submit_instance(db: AsyncSession, inst: FormInstance, user: User) -> F
         item.completed_at = datetime.utcnow()
         if not item.remark:
             item.remark = f"via form {title}"
+        flipped.append(item.id)
     inst.status = "submitted"
     inst.submitted_by = user.id
     inst.submitted_at = datetime.utcnow()
-    inst.events.append(FormEvent(user_id=user.id, event="submitted"))
+    inst.events.append(FormEvent(user_id=user.id, event="submitted", diff={"items": flipped}))
     await db.flush()
     return await load_instance(db, inst.id)
+
+
+def _last_submitted_items(inst: FormInstance) -> set[int]:
+    """Ids of the SEP items the most recent submission of this instance flipped to done."""
+    for e in reversed(inst.events):
+        if e.event == "submitted":
+            return {int(i) for i in (e.diff or {}).get("items") or []}
+    return set()
 
 
 async def reopen_instance(db: AsyncSession, inst: FormInstance, user: User) -> FormInstance:
     if inst.status != "submitted":
         raise FormError(409, "Only submitted forms can be reopened")
-    title = inst.definition.title
+    flipped = _last_submitted_items(inst)
     for item, gate in await _linked_items(db, inst):
-        if gate.status == "closed" or item.status != "done" or item.remark != f"via form {title}":
+        if item.id not in flipped or gate.status == "closed" or item.status != "done":
             continue
         db.add(_audit(item, user.id, "done", "open"))
         item.status = "open"

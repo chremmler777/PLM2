@@ -73,9 +73,6 @@ section 7/8 for the full text):
   production against the new risk_assessment form.
 - No signer role model yet for sign-off attribution or a real My Tasks
   "awaiting your signature" view — same gap noted above for `/my-forms`.
-- No test yet for the yellow-gate 409 path when unfinished risk rows have no
-  gate assigned (`tests/test_sep.py`/`tests/test_forms.py` cover the rest of
-  submit/reopen/sign/PDF/migration).
 
 **Why:** user wants forms adapted on the fly during first project 1994A/B.
 **How to apply:** production rollout is a separate step (user runs, not

@@ -95,12 +95,13 @@ On `submitted`: every `SepWorkItem` in the project matched by the
 definition's `sep_items` and whose status is `open` flips to `done`, with a
 `SepItemAudit` row (`field="status"`, `old="open"`, `new="done"`,
 `user_id=submitting user`) and the remark set to `via form <title>` if the
-remark is empty. On `reopened`: only items whose remark still reads exactly
-`via form <title>` flip back to `open`, with a matching audit row; an item
-someone has since ticked done by hand (remark changed or cleared) is left
-alone, since the form can no longer tell its own edit from the user's. Items
-on a closed gate are not touched (gate lock wins). Items set `not_applicable`
-are not touched.
+remark is empty (the remark is display only -- nothing keys off it). The ids
+of the items this submission flipped are recorded in the `submitted` event's
+`diff` as `{"items": [...]}`. On `reopened`: exactly those items flip back to
+`open`, with a matching audit row; an item someone has since ticked `done` by
+hand was never in that list, so it stays `done`, and an item whose status has
+moved on since the submission is skipped. Items on a closed gate are not
+touched (gate lock wins). Items set `not_applicable` are not touched.
 
 An empty `sep_items` list (`lop`, `deviation_agreement`) means the form has
 no work item to drive; it is only reachable from the project's Forms tab, not
@@ -260,8 +261,9 @@ New router `backend/app/api/v1/timing/forms.py`, prefix `/v1/forms`.
 
 SEP endpoints: `GET /v1/sep/projects/{id}` gains per item `form: {key, title, instance_id|null, status|null}` and `references: [...]`. The three `/risks` endpoints remain until the follow-up removal.
 
-Permissions follow the SEP module: any project member can create, save and
-submit; sign follows the four-eyes rule above. Reopen is open to any
+Permissions follow the SEP module: any authenticated user can create, save and
+submit; sign follows the four-eyes rule above. Restricting these to members of
+the project is a follow-up, blocked until a project membership model exists. Reopen is open to any
 authenticated user, not restricted to the project manager or the instance
 owner: the project model has no manager field to check against, so there is
 nobody to restrict it to. Revisit once projects carry a manager field.

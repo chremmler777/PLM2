@@ -1,6 +1,7 @@
 """SEP forms engine endpoints (/v1/forms)."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -27,6 +28,9 @@ class CreateBody(BaseModel):
 class SaveBody(BaseModel):
     data: dict
     owner_id: Optional[int] = None
+
+
+MAX_DATA_BYTES = 1024 * 1024
 
 
 class SignBody(BaseModel):
@@ -157,6 +161,8 @@ async def _mutate(db, instance_id, fn, *args):
 @router.patch("/instances/{instance_id}", response_model=dict)
 async def save_instance(instance_id: int, body: SaveBody,
                         current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if len(json.dumps(body.data, default=str).encode()) > MAX_DATA_BYTES:
+        raise HTTPException(status_code=413, detail="Form data is too large (limit 1 MB)")
     return await _mutate(db, instance_id, lambda d, i, data, user: svc.save_instance(d, i, data, user, body.owner_id),
                          body.data, current_user)
 

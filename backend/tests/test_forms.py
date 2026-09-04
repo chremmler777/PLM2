@@ -387,3 +387,141 @@ async def test_pdf_export_submitted_with_signatures_and_history(client, eng_auth
     res = await client.get(f"/api/v1/forms/instances/{inst['id']}/export.pdf", headers=eng_auth)
     assert res.status_code == 200 and res.headers["content-type"].startswith("application/pdf")
     assert res.content[:4] == b"%PDF"
+
+
+async def test_reopen_reverts_items_it_flipped_and_leaves_remarks_alone(session_factory, seed, client, eng_auth):
+    """Reopen keys off the ids recorded in the submitted event, not off the display remark:
+    an item that already carried a remark is still flipped on submit and reverted on reopen,
+    and its remark is never rewritten. An item ticked done by hand in between stays done."""
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    async with session_factory() as s:
+        await load_definitions(s)
+        item = (await s.execute(select(SepWorkItem).join(SepGate).where(
+            SepWorkItem.project_id == seed["project_id"], SepGate.code == "K0/RG1",
+            SepWorkItem.item_no == 2))).scalar_one()
+        item.remark = "handled by Bob"
+        await s.commit()
+    user = await _user(session_factory, seed["engineer_id"])
+    async with session_factory() as s:
+        inst = await create_instance(s, seed["project_id"], "risk_assessment", user)
+        inst = await submit_instance(s, inst, user)
+        await s.commit()
+        k0 = (await s.execute(select(SepWorkItem).join(SepGate).where(
+            SepWorkItem.project_id == seed["project_id"], SepGate.code == "K0/RG1",
+            SepWorkItem.item_no == 2))).scalar_one()
+        assert k0.status == "done" and k0.remark == "handled by Bob"
+        ev = [e for e in inst.events if e.event == "submitted"][-1]
+        assert ev.diff == {"items": [k0.id]}
+
+        inst = await reopen_instance(s, inst, user)
+        await s.commit()
+        await s.refresh(k0)
+        assert k0.status == "open" and k0.remark == "handled by Bob" and k0.completed_at is None
+        audits = (await s.execute(select(SepItemAudit).where(SepItemAudit.item_id == k0.id))).scalars().all()
+        assert [(a.old_value, a.new_value) for a in audits] == [("open", "done"), ("done", "open")]
+
+
+async def test_reopen_leaves_items_this_submission_did_not_flip(session_factory, seed, client, eng_auth):
+    """An item already done before the submission is not in the event's item list, so reopen
+    must leave it done."""
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    async with session_factory() as s:
+        await load_definitions(s)
+        item = (await s.execute(select(SepWorkItem).join(SepGate).where(
+            SepWorkItem.project_id == seed["project_id"], SepGate.code == "K0/RG1",
+            SepWorkItem.item_no == 2))).scalar_one()
+        item.status = "done"
+        item.completed_at = datetime.utcnow()
+        await s.commit()
+    user = await _user(session_factory, seed["engineer_id"])
+    async with session_factory() as s:
+        inst = await create_instance(s, seed["project_id"], "risk_assessment", user)
+        inst = await submit_instance(s, inst, user)
+        assert [e for e in inst.events if e.event == "submitted"][-1].diff == {"items": []}
+        inst = await reopen_instance(s, inst, user)
+        await s.commit()
+        k0 = (await s.execute(select(SepWorkItem).join(SepGate).where(
+            SepWorkItem.project_id == seed["project_id"], SepGate.code == "K0/RG1",
+            SepWorkItem.item_no == 2))).scalar_one()
+        assert k0.status == "done"
+        assert (await s.execute(select(SepItemAudit).where(SepItemAudit.item_id == k0.id))).scalars().all() == []
+
+
+async def test_save_rejects_malformed_data(session_factory, seed, client, eng_auth):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    async with session_factory() as s:
+        await load_definitions(s); await s.commit()
+    user = await _user(session_factory, seed["engineer_id"])
+    async with session_factory() as s:
+        inst = await create_instance(s, seed["project_id"], "risk_assessment", user)
+        await s.commit()
+        base = dict(inst.data)
+
+        for bad in ({**base, "risks": "oops"}, {**base, "risks": [1]},
+                    {**base, "risks": [{"gate": "K0/RG1", "q": "0.5"}]},
+                    {**base, "risks": [{"gate": "K0/RG1", "q": True}]},
+                    {**base, "header": "oops"}):
+            with pytest.raises(FormError) as ei:
+                await save_instance(s, inst, bad, user)
+            assert ei.value.status == 422 and ei.value.extra["problems"]
+
+        # the valid shipped data still saves
+        good = {**base, "risks": [{"gate": "K0/RG1", "risk": "r", "q": 0.5, "c": 0.5, "s": 1, "p": 1,
+                                   "status": "open", "responsible": seed["engineer_id"]}]}
+        inst = await save_instance(s, inst, good, user)
+        await s.commit()
+        assert inst.data["risks"][0]["rkz"] == pytest.approx(2.0)
+
+
+async def test_all_shipped_definitions_accept_their_prefilled_data(session_factory, seed, client, eng_auth):
+    """validate_data must not reject what create_instance itself produced."""
+    from app.forms.validate import validate_data
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    async with session_factory() as s:
+        await load_definitions(s); await s.commit()
+    user = await _user(session_factory, seed["engineer_id"])
+    async with session_factory() as s:
+        for key in ("risk_assessment", "project_legitimization", "contact_list", "lop",
+                    "deviation_agreement", "sales_pm_handover"):
+            inst = await create_instance(s, seed["project_id"], key, user)
+            assert validate_data(inst.definition.body, inst.data) == [], key
+        await s.commit()
+
+
+async def test_api_rejects_malformed_and_oversized_payloads(client, eng_auth, seed, session_factory):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    inst = (await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances",
+                              json={"key": "risk_assessment"}, headers=eng_auth)).json()
+    data = dict(inst["data"])
+
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}",
+                             json={"data": {**data, "risks": "oops"}}, headers=eng_auth)
+    assert res.status_code == 422 and res.json()["detail"]["problems"]
+
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}",
+                             json={"data": {**data, "risks": [{"gate": "K0/RG1", "q": "0.5"}]}}, headers=eng_auth)
+    assert res.status_code == 422 and res.json()["detail"]["problems"]
+
+    huge = {**data, "risks": [{"gate": "K0/RG1", "risk": "x" * 2000} for _ in range(700)]}
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": huge}, headers=eng_auth)
+    assert res.status_code == 413
+
+
+def test_recompute_degrades_bad_cells_to_none():
+    """A wrong-typed cell or a misused function must yield None, never an exception."""
+    from app.forms.compute import recompute
+    body = {"sections": [
+        {"id": "t", "kind": "table", "columns": [
+            {"id": "q", "type": "number"},
+            {"id": "rkz", "type": "computed", "expr": "q + 1"},
+            {"id": "oops", "type": "computed", "expr": "band(q)"},
+        ]},
+        {"id": "f", "kind": "fields", "fields": [
+            {"id": "a", "type": "number"},
+            {"id": "b", "type": "computed", "expr": "band(a)"},
+        ]},
+    ]}
+    out = recompute(body, {"t": [{"q": "abc"}], "f": {"a": 1}})
+    assert out["t"][0]["rkz"] is None and out["t"][0]["oops"] is None
+    assert out["f"]["b"] is None

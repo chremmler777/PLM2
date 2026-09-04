@@ -97,3 +97,62 @@ def missing_for_submit(body: dict, data: dict) -> list[str]:
                     if path not in missing:
                         missing.append(path)
     return missing
+
+
+def _cell_problems(member: dict, value, where: str, p: list[str]) -> None:
+    if value is None:
+        return
+    t = member.get("type")
+    if t == "number":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            p.append(f"{where}: expected a number")
+    elif t == "checkbox":
+        if not isinstance(value, bool):
+            p.append(f"{where}: expected true or false")
+    elif t == "multichoice":
+        if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
+            p.append(f"{where}: expected a list of strings")
+
+
+def validate_data(body: dict, data) -> list[str]:
+    """Shape-check submitted instance data against its definition.
+
+    Returns human-readable problems; an empty list means the payload is safe to
+    recompute. Unknown section keys and `<section>_footer` keys are ignored
+    (footers are recomputed), as are unknown keys inside a known section.
+    """
+    p: list[str] = []
+    if not isinstance(data, dict):
+        return ["data must be an object"]
+    sections = {s["id"]: s for s in body.get("sections", []) if s.get("id")}
+    for key, value in data.items():
+        if key.endswith("_footer"):
+            continue
+        section = sections.get(key)
+        if section is None:
+            continue
+        if section.get("kind") == "table":
+            if not isinstance(value, list):
+                p.append(f"section {key}: expected a list of rows")
+                continue
+            columns = {c["id"]: c for c in section.get("columns", []) if c.get("id")}
+            for n, row in enumerate(value):
+                if not isinstance(row, dict):
+                    p.append(f"section {key} row {n + 1}: expected an object")
+                    continue
+                for cid, cell in row.items():
+                    col = columns.get(cid)
+                    if col:
+                        _cell_problems(col, cell, f"section {key} row {n + 1}.{cid}", p)
+        else:
+            if value is None:
+                continue
+            if not isinstance(value, dict):
+                p.append(f"section {key}: expected an object")
+                continue
+            fields = {f["id"]: f for f in section.get("fields", []) if f.get("id")}
+            for fid, cell in value.items():
+                field = fields.get(fid)
+                if field:
+                    _cell_problems(field, cell, f"section {key}.{fid}", p)
+    return p
