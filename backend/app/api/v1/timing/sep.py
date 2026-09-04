@@ -4,8 +4,9 @@ Lifecycle: activate copies the seeded template (7 gates, 232 work items) into
 project-owned rows; gate 1 opens. Work items are tri-state (open/done/
 not_applicable) and audited. A gate closes via dual sign-off (PM + Quality,
 different users) and only when the previous gate is closed; a yellow gate
-(open items) additionally requires risk entries with complete action plans
-(countermeasure, responsible, due date within 14 days). Closing locks items
+(open items) additionally requires risk rows for that gate in the project's
+risk assessment form, each with a complete action plan (countermeasure,
+responsible, due date within 14 days). Closing locks items
 and opens the next gate.
 """
 import json
@@ -26,6 +27,7 @@ from app.models.sep import (
     SepGate, SepWorkItem, SepItemAudit, SepRisk,
     SEP_ITEM_STATUSES, SEP_RISK_STATUSES,
 )
+from app.forms.risks import risk_rows_by_gate
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +95,11 @@ def _gate_progress(items: list[SepWorkItem]) -> dict:
     return {"done": done, "open": open_, "not_applicable": na, "total": len(items), "pct": pct}
 
 
-def _gate_color(gate: SepGate) -> str:
-    """GREEN = no open items; YELLOW = open items; RED = high/very-high risk live."""
+def _gate_color(gate: SepGate, risk_rows: list[dict] | None = None) -> str:
+    """GREEN = no open items; YELLOW = open items; RED = high/very-high risk live (from the risk form)."""
     if gate.status == "closed":
         return "green"
-    if any(r.status != "finished" and r.priority in ("high", "very_high") for r in gate.risks):
+    if any(r.get("status") != "finished" and r.get("priority") in ("high", "very_high") for r in (risk_rows or [])):
         return "red"
     if any(i.status == "open" for i in gate.items):
         return "yellow"
@@ -143,7 +145,8 @@ def _item_dict(i: SepWorkItem, names: dict[int, str], gate_code: str | None = No
     }
 
 
-def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True, forms: dict | None = None) -> dict:
+def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True,
+               forms: dict | None = None, risk_rows: list[dict] | None = None) -> dict:
     d = {
         "id": g.id,
         "project_id": g.project_id,
@@ -152,7 +155,7 @@ def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True, for
         "phase_de": g.phase_de,
         "phase_en": g.phase_en,
         "status": g.status,
-        "color": _gate_color(g),
+        "color": _gate_color(g, risk_rows),
         "target_date": g.target_date.isoformat() if g.target_date else None,
         "milestone_id": g.milestone_id,
         "pm_signed_by": g.pm_signed_by,
@@ -163,7 +166,7 @@ def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True, for
         "quality_signed_at": g.quality_signed_at.isoformat() if g.quality_signed_at else None,
         "closed_at": g.closed_at.isoformat() if g.closed_at else None,
         "progress": _gate_progress(g.items),
-        "open_risks": sum(1 for r in g.risks if r.status != "finished"),
+        "open_risks": sum(1 for r in (risk_rows or []) if r.get("status") != "finished"),
     }
     if with_details:
         d["items"] = [_item_dict(i, names, g.code, forms) for i in g.items]
@@ -262,8 +265,10 @@ async def activate_sep(
     await db.commit()
 
     gates = await _load_gates(db, project_id)
+    rows = await risk_rows_by_gate(db, project_id)
     logger.info("SEP activated for project %s by user %s", project_id, current_user.id)
-    return {"project_id": project_id, "gates": [_gate_dict(g, {}, with_details=False) for g in gates]}
+    return {"project_id": project_id,
+            "gates": [_gate_dict(g, {}, with_details=False, risk_rows=rows.get(g.code, [])) for g in gates]}
 
 
 @router.get("/projects/{project_id}", response_model=dict)
@@ -279,11 +284,12 @@ async def get_project_sep(
     names = await _user_names(db, _names_in_gates(gates))
     from app.forms.service import form_info_by_ref
     forms = await form_info_by_ref(db, project_id)
+    rows = await risk_rows_by_gate(db, project_id)
     total_items = [i for g in gates for i in g.items]
     return {
         "project_id": project_id,
         "active": True,
-        "gates": [_gate_dict(g, names, forms=forms) for g in gates],
+        "gates": [_gate_dict(g, names, forms=forms, risk_rows=rows.get(g.code, [])) for g in gates],
         "rollup": {"total": _gate_progress(total_items)},
     }
 
@@ -299,9 +305,10 @@ async def get_rollup(
     if not gates:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SEP not activated for this project")
     total_items = [i for g in gates for i in g.items]
+    rows = await risk_rows_by_gate(db, project_id)
     return {
         "project_id": project_id,
-        "gates": [_gate_dict(g, {}, with_details=False) for g in gates],
+        "gates": [_gate_dict(g, {}, with_details=False, risk_rows=rows.get(g.code, [])) for g in gates],
         "total": _gate_progress(total_items),
     }
 
@@ -324,6 +331,8 @@ async def sep_overview(
     projects = (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars()
     project_names = {p.id: p.name for p in projects}
 
+    rows_by_project = {pid: await risk_rows_by_gate(db, pid) for pid in project_ids}
+
     out: dict[int, dict] = {}
     for g in gates:
         entry = out.setdefault(g.project_id, {
@@ -334,7 +343,8 @@ async def sep_overview(
         })
         entry["gates"].append({
             "id": g.id, "code": g.code, "seq": g.seq, "status": g.status,
-            "color": _gate_color(g), "pct": _gate_progress(g.items)["pct"],
+            "color": _gate_color(g, rows_by_project[g.project_id].get(g.code, [])),
+            "pct": _gate_progress(g.items)["pct"],
         })
         entry["_items"].extend(g.items)
     for entry in out.values():
@@ -468,7 +478,8 @@ async def update_gate(
     await db.commit()
     gate = await _load_gate(db, gate_id)
     names = await _user_names(db, _names_in_gates([gate]))
-    return _gate_dict(gate, names)
+    rows = await risk_rows_by_gate(db, gate.project_id)
+    return _gate_dict(gate, names, risk_rows=rows.get(gate.code, []))
 
 
 @router.post("/gates/{gate_id}/sign-off", response_model=dict)
@@ -481,8 +492,9 @@ async def sign_off_gate(
     """Sign a gate as PM or Quality. Both signatures (different users) close it.
 
     Gates close strictly in sequence. A gate with open items (yellow) needs at
-    least one risk entry, and every unfinished risk a complete action plan:
-    countermeasure, responsible, due date within 14 days.
+    least one risk row for this gate in the project's risk assessment form, and
+    every unfinished row a complete action plan: countermeasure, responsible,
+    due date within 14 days.
     """
     gate = await _load_gate(db, gate_id)
     role = body.role.lower().strip()
@@ -502,26 +514,24 @@ async def sign_off_gate(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail=f"Previous gate {prev.code} must be closed first")
 
+    rows = (await risk_rows_by_gate(db, gate.project_id)).get(gate.code, [])
     open_items = [i for i in gate.items if i.status == "open"]
-    unfinished_risks = [r for r in gate.risks if r.status != "finished"]
-    if open_items:
-        if not gate.risks:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"{len(open_items)} open work items: a risk assessment with action plan is required (yellow gate)",
-            )
-    deadline = datetime.utcnow() + timedelta(days=ACTION_PLAN_MAX_DAYS)
-    if open_items or unfinished_risks:
-        incomplete = [
-            r.id for r in unfinished_risks
-            if not (r.countermeasure and r.countermeasure.strip()) or not r.due_date or not r.responsible_id
-        ]
+    unfinished = [r for r in rows if r.get("status") != "finished"]
+    if open_items and not rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{len(open_items)} open work items: a risk assessment entry for {gate.code} with action plan is required (yellow gate)",
+        )
+    deadline = (datetime.utcnow() + timedelta(days=ACTION_PLAN_MAX_DAYS)).date().isoformat()
+    if open_items or unfinished:
+        incomplete = [i + 1 for i, r in enumerate(unfinished)
+                      if not (r.get("countermeasure") or "").strip() or not r.get("due") or not r.get("responsible")]
         if incomplete:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Risk entries {incomplete} need countermeasure, responsible and due date before sign-off",
             )
-        overdue = [r.id for r in unfinished_risks if r.due_date > deadline]
+        overdue = [i + 1 for i, r in enumerate(unfinished) if str(r.get("due"))[:10] > deadline]
         if overdue:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -559,7 +569,8 @@ async def sign_off_gate(
     await db.commit()
     gate = await _load_gate(db, gate_id)
     names = await _user_names(db, _names_in_gates([gate]))
-    return _gate_dict(gate, names)
+    rows = await risk_rows_by_gate(db, gate.project_id)
+    return _gate_dict(gate, names, risk_rows=rows.get(gate.code, []))
 
 
 @router.post("/gates/{gate_id}/risks", response_model=dict, status_code=status.HTTP_201_CREATED)

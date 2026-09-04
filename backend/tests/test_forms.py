@@ -261,3 +261,51 @@ async def test_sep_references_on_items(client, eng_auth, seed):
     k2 = next(g for g in sep["gates"] if g["code"] == "K/RG2")
     item10 = next(i for i in k2["items"] if i["item_no"] == 10)
     assert any(r["title"].startswith("Process description") for r in item10["references"])
+
+
+from app.forms.risks import risk_rows_by_gate, copy_sep_risks_to_forms
+from app.models.sep import SepRisk
+
+
+async def test_gate_color_and_signoff_use_form_risks(client, eng_auth, admin_auth, seed, session_factory):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    res = await client.post(f"/api/v1/forms/projects/{seed['project_id']}/instances", json={"key": "risk_assessment"}, headers=eng_auth)
+    inst = res.json()
+    data = inst["data"]
+    data["risks"] = [{"gate": "K0/RG1", "risk": "x", "q": 1, "c": 1, "s": 1, "p": 1, "status": "open"}]
+    await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    sep = (await client.get(f"/api/v1/sep/projects/{seed['project_id']}", headers=eng_auth)).json()
+    k0 = sep["gates"][0]
+    assert k0["color"] == "red" and k0["open_risks"] == 1
+    # sign-off blocked: incomplete action plan
+    res = await client.post(f"/api/v1/sep/gates/{k0['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 409 and "countermeasure" in res.text
+    # complete the plan within 14 days, then PM sign-off passes
+    from datetime import date, timedelta
+    data["risks"][0].update({"countermeasure": "fix", "responsible": seed["admin_id"],
+                             "due": (date.today() + timedelta(days=3)).isoformat()})
+    await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    res = await client.post(f"/api/v1/sep/gates/{k0['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_copy_sep_risks_to_forms(session_factory, seed, client, eng_auth):
+    await _activate_sep(client, eng_auth, seed["project_id"])
+    await _seed_defs(session_factory)
+    async with session_factory() as s:
+        gate = (await s.execute(select(SepGate).where(SepGate.project_id == seed["project_id"], SepGate.seq == 1))).scalar_one()
+        s.add(SepRisk(gate_id=gate.id, project_id=seed["project_id"], effect="Old risk", q_impact=0.5, c_impact=0.5,
+                      s_impact=0, probability=1, countermeasure="do it", responsible_id=seed["admin_id"],
+                      status="started", created_by=seed["admin_id"]))
+        await s.commit()
+    async with session_factory() as s:
+        n = await copy_sep_risks_to_forms(s)
+        await s.commit()
+        assert n == 1
+        rows = await risk_rows_by_gate(s, seed["project_id"])
+        r = rows["K0/RG1"][0]
+        assert r["risk"] == "Old risk" and r["rkz"] == pytest.approx(1.0) and r["priority"] == "high"
+        assert r["status"] == "started" and r["responsible"] == seed["admin_id"]
+        # idempotent
+        assert await copy_sep_risks_to_forms(s) == 0
