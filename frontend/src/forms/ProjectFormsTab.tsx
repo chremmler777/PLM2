@@ -24,7 +24,12 @@ export default function ProjectFormsTab({ projectId }: { projectId: number }) {
   const create = useMutation({
     mutationFn: async (key: string) =>
       (await client.post(`/v1/forms/projects/${projectId}/instances`, { key })).data as FormInstance,
-    onSuccess: (inst) => { qc.invalidateQueries({ queryKey: ['forms', projectId] }); setOpen(inst.id); },
+    onSuccess: (inst) => {
+      qc.invalidateQueries({ queryKey: ['sep'] });
+      qc.invalidateQueries({ queryKey: ['forms'] });
+      qc.invalidateQueries({ queryKey: ['my-forms'] });
+      setOpen(inst.id);
+    },
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       const existing = (d as { instance_id?: number } | undefined)?.instance_id;
@@ -50,7 +55,7 @@ export default function ProjectFormsTab({ projectId }: { projectId: number }) {
               <span>#{i.id} · {i.owner_name ?? '—'} · {i.updated_at.slice(0, 10)}</span>
             </button>))}
         </div>))}
-      {open !== null && <FormPanel instanceId={open} onClose={() => setOpen(null)} />}
+      {open !== null && <FormPanel key={open} instanceId={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

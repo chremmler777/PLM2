@@ -246,7 +246,7 @@ function FormsSection() {
           </tbody>
         </table>
       </div>
-      {open !== null && <FormPanel instanceId={open} onClose={() => setOpen(null)} />}
+      {open !== null && <FormPanel key={open} instanceId={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

@@ -16,11 +16,21 @@ const STATUS_STYLE: Record<string, string> = {
   submitted: 'bg-emerald-600/20 text-emerald-300',
 };
 
+const detailOf = (e: unknown) => (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+
 const errDetail = (e: unknown): string => {
-  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  const d = detailOf(e);
   if (typeof d === 'string') return d;
   const msg = (d as { message?: string } | undefined)?.message;
   return msg ?? 'Request failed';
+};
+
+// Submit answers a 422 with the paths that are still empty; naming them saves
+// the user hunting through the form for what the message only counts.
+const submitError = (e: unknown): string => {
+  const missing = (detailOf(e) as { missing?: unknown[] } | undefined)?.missing;
+  const base = errDetail(e);
+  return Array.isArray(missing) && missing.length > 0 ? `${base}: ${missing.join(', ')}` : base;
 };
 
 export default function FormPanel({ instanceId, onClose }: { instanceId: number; onClose: () => void }) {
@@ -36,6 +46,9 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
     queryFn: async () => (await client.get('/v1/lessons/assignable-users')).data as { id: number; name: string }[],
   });
 
+  // Reset the working copy only when a different instance or a newer server
+  // revision arrives — depending on `inst` itself would clobber every keystroke.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (inst) setDraft(inst.data); }, [inst?.id, inst?.updated_at]);
 
   const refresh = () => {
@@ -56,7 +69,7 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
       await client.patch(`/v1/forms/instances/${instanceId}`, { data: draft });
       return client.post(`/v1/forms/instances/${instanceId}/submit`);
     },
-    onSuccess: done('Submitted'), onError: fail,
+    onSuccess: done('Submitted'), onError: (e: unknown) => toast.error(submitError(e)),
   });
   const reopen = useMutation({
     mutationFn: async () => client.post(`/v1/forms/instances/${instanceId}/reopen`),

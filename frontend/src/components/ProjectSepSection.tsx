@@ -109,13 +109,17 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
   // instance that won, so open that one instead of erroring.
   const openForm = useMutation({
     mutationFn: async () => {
-      if (item.form?.instance_id) return item.form.instance_id;
+      if (item.form?.instance_id) return { id: item.form.instance_id, created: false };
       const res = await client.post(`/v1/forms/projects/${projectId}/instances`, { key: item.form?.key });
-      return (res.data as { id: number }).id;
+      return { id: (res.data as { id: number }).id, created: true };
     },
-    onSuccess: (id: number) => {
-      queryClient.invalidateQueries({ queryKey: ['sep'] });
-      queryClient.invalidateQueries({ queryKey: ['forms'] });
+    onSuccess: ({ id, created }) => {
+      // Nothing changed server-side when the instance already existed.
+      if (created) {
+        queryClient.invalidateQueries({ queryKey: ['sep'] });
+        queryClient.invalidateQueries({ queryKey: ['forms'] });
+        queryClient.invalidateQueries({ queryKey: ['my-forms'] });
+      }
       onOpenForm(id);
     },
     onError: (e: unknown) => {
@@ -298,7 +302,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
         <ProjectFormsTab projectId={gate.project_id} />
       )}
 
-      {openForm !== null && <FormPanel instanceId={openForm} onClose={() => setOpenForm(null)} />}
+      {openForm !== null && <FormPanel key={openForm} instanceId={openForm} onClose={() => setOpenForm(null)} />}
     </div>
   );
 }
