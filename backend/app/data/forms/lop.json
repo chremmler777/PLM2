@@ -1,0 +1,28 @@
+{
+  "key": "lop", "version": 1, "title": "Open Points List (LOP)",
+  "implements": "F-DVS-CORP-010", "cardinality": "single", "gate_items": false,
+  "sep_items": [], "signatures": [], "required_for_submit": [],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project", "type": "text", "prefill": "project.name"},
+      {"id": "owner", "label": "List owner", "type": "user", "prefill": "user.me"}
+    ]},
+    {"id": "points", "title": "Open points", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "entry_date", "label": "Entry", "type": "date"},
+      {"id": "process", "label": "Process", "type": "text"},
+      {"id": "task", "label": "Task", "type": "text", "width": 2},
+      {"id": "description", "label": "Description", "type": "multiline", "width": 3},
+      {"id": "scope", "label": "Int/Ext", "type": "choice", "options": ["internal", "external"]},
+      {"id": "responsible", "label": "Responsible", "type": "user"},
+      {"id": "due", "label": "Due", "type": "date"},
+      {"id": "status", "label": "Status", "type": "choice", "options": ["on track", "at risk", "overdue", "complete"]},
+      {"id": "comments", "label": "Comments / questions", "type": "multiline", "width": 2}
+    ], "footer": [
+      {"label": "Complete", "expr": "count(status == 'complete')"},
+      {"label": "On track", "expr": "count(status == 'on track')"},
+      {"label": "At risk", "expr": "count(status == 'at risk')"},
+      {"label": "Overdue", "expr": "count(status == 'overdue')"}
+    ]}
+  ]
+}

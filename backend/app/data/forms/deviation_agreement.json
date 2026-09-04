@@ -1,0 +1,32 @@
+{
+  "key": "deviation_agreement", "version": 1, "title": "Project Deviation Agreement",
+  "implements": "F-DVS-CORP-011", "cardinality": "multi", "gate_items": false,
+  "sep_items": [], "signatures": ["md", "dt", "pm"],
+  "required_for_submit": ["reason.reason", "budget"],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project title", "type": "text", "prefill": "project.name"},
+      {"id": "plant", "label": "Production location", "type": "text", "prefill": "project.plant", "readonly": true},
+      {"id": "prepared_by", "label": "Prepared by", "type": "user", "prefill": "user.me"},
+      {"id": "date", "label": "Date", "type": "date", "prefill": "date.today"},
+      {"id": "sop", "label": "SOP", "type": "date"},
+      {"id": "classification", "label": "Project classification", "type": "choice",
+       "options": ["Strictly confidential", "Confidential", "Internal", "Public"]},
+      {"id": "currency", "label": "Currency", "type": "choice", "options": ["USD", "EUR"]}
+    ]},
+    {"id": "reason", "title": "Reason", "kind": "fields", "fields": [
+      {"id": "reason", "label": "Why is more budget needed", "type": "multiline", "help": "e.g. strategic project"}
+    ]},
+    {"id": "budget", "title": "Budget deviation", "kind": "table", "min_rows": 1, "columns": [
+      {"id": "item", "label": "Description", "type": "text", "width": 2},
+      {"id": "budget", "label": "Approved budget", "type": "number", "step": 0.01},
+      {"id": "deviation", "label": "Deviation", "type": "number", "step": 0.01},
+      {"id": "new_total", "label": "New total", "type": "computed", "expr": "budget + deviation"},
+      {"id": "remark", "label": "Remark", "type": "text", "width": 2}
+    ], "footer": [{"label": "Total deviation", "expr": "sum(deviation)"}]},
+    {"id": "approval", "title": "Approval", "kind": "fields", "fields": [
+      {"id": "approved", "label": "Budget increase approved", "type": "checkbox"}
+    ]}
+  ]
+}

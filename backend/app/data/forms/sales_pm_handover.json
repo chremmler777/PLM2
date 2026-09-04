@@ -1,0 +1,59 @@
+{
+  "key": "sales_pm_handover", "version": 1, "title": "Project Handover Sales to PM",
+  "implements": "F-DVS-CORP-001", "cardinality": "single", "gate_items": false,
+  "sep_items": ["K/RG2:10"], "signatures": [],
+  "required_for_submit": ["header.project_title", "customer.customer", "checks.feasibility"],
+  "references": [
+    {"title": "Process description: Sales handover and kick-off", "path": "Documents/SEP/global-forms/Manual_1_Process-description_Sales_Handover_KICK-OFF.pdf"},
+    {"title": "Example handover 1750 HSK", "path": "Documents/SEP/global-forms/Example_Project_Handover_from_EDD&PM_1750__HSK_GH.pdf"}
+  ],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project title", "type": "text", "prefill": "project.name"},
+      {"id": "plant", "label": "Production location", "type": "text", "prefill": "project.plant", "readonly": true},
+      {"id": "prepared_by", "label": "Prepared by", "type": "user", "prefill": "user.me"},
+      {"id": "date", "label": "Date", "type": "date", "prefill": "date.today"},
+      {"id": "sop", "label": "SOP", "type": "date"},
+      {"id": "classification", "label": "Project classification", "type": "choice",
+       "options": ["Strictly confidential", "Confidential", "Internal", "Public"]},
+      {"id": "currency", "label": "Currency", "type": "choice", "options": ["USD", "EUR"]}
+    ]},
+    {"id": "customer", "title": "Customer and scope", "kind": "fields", "fields": [
+      {"id": "customer", "label": "Customer", "type": "text"},
+      {"id": "customer_contact", "label": "Customer contact", "type": "text"},
+      {"id": "platform", "label": "Platform / vehicle", "type": "text"},
+      {"id": "nomination_date", "label": "Nomination date", "type": "date"},
+      {"id": "pre_series", "label": "Pre-series (home line production)", "type": "checkbox"},
+      {"id": "description", "label": "Description", "type": "multiline"}
+    ]},
+    {"id": "parts", "title": "Parts", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "part_no", "label": "Customer part no.", "type": "text"},
+      {"id": "name", "label": "Name", "type": "text", "width": 2},
+      {"id": "material", "label": "Material", "type": "text"},
+      {"id": "peak_volume", "label": "Peak volume / year", "type": "number"},
+      {"id": "lifetime_volume", "label": "Lifetime volume", "type": "number"},
+      {"id": "price", "label": "Piece price", "type": "number", "step": 0.01}
+    ]},
+    {"id": "commercial", "title": "Commercial", "kind": "fields", "fields": [
+      {"id": "one_time_payment", "label": "One-time payment", "type": "number", "step": 0.01},
+      {"id": "amortization_per_piece", "label": "Amortization / piece", "type": "number", "step": 0.01},
+      {"id": "development_cost", "label": "Development", "type": "number", "step": 0.01},
+      {"id": "project_budget", "label": "Project budget", "type": "number", "step": 0.01},
+      {"id": "logistic_requirements", "label": "Logistic requirements", "type": "multiline"},
+      {"id": "calculation_ref", "label": "Calculation reference", "type": "text"}
+    ]},
+    {"id": "milestones", "title": "Customer milestones", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "milestone", "label": "Milestone", "type": "text", "width": 2},
+      {"id": "date", "label": "Date", "type": "date"},
+      {"id": "comment", "label": "Comment", "type": "text", "width": 2}
+    ]},
+    {"id": "checks", "title": "Checks done before handover", "kind": "fields", "fields": [
+      {"id": "feasibility", "label": "Feasibility check", "type": "checkbox"},
+      {"id": "capacity", "label": "Capacity check", "type": "checkbox"},
+      {"id": "risk", "label": "Risk assessment", "type": "checkbox"},
+      {"id": "lessons", "label": "Lessons learned reviewed", "type": "checkbox"},
+      {"id": "remarks", "label": "Remarks", "type": "multiline"}
+    ]}
+  ]
+}
