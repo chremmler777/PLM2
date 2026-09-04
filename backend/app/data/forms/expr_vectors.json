@@ -1,0 +1,16 @@
+[
+  {"expr": "(q + c + s) * p", "scope": {"q": 0.5, "c": 1, "s": 0, "p": 0.5}, "expected": 0.75},
+  {"expr": "(q + c + s) * p", "scope": {"q": null, "c": 1, "s": 0, "p": 0.5}, "expected": 0.5},
+  {"expr": "band(rkz, [0.4,'low'],[0.8,'medium'],[1.0,'high'],'very high')", "scope": {"rkz": 0.3}, "expected": "low"},
+  {"expr": "band(rkz, [0.4,'low'],[0.8,'medium'],[1.0,'high'],'very high')", "scope": {"rkz": 0.8}, "expected": "medium"},
+  {"expr": "band(rkz, [0.4,'low'],[0.8,'medium'],[1.0,'high'],'very high')", "scope": {"rkz": 1.5}, "expected": "very high"},
+  {"expr": "count(status == 'open')", "scope": {"_rows": [{"status": "open"}, {"status": "done"}, {"status": "open"}]}, "expected": 2},
+  {"expr": "sum(budget)", "scope": {"_rows": [{"budget": 10}, {"budget": 5.5}, {"budget": null}]}, "expected": 15.5},
+  {"expr": "a / b", "scope": {"a": 1, "b": 0}, "expected": 0},
+  {"expr": "not done and x > 1", "scope": {"done": false, "x": 2}, "expected": true},
+  {"expr": "days_between('2026-01-01', '2026-01-11')", "scope": {}, "expected": 10},
+  {"expr": "x == null", "scope": {"x": null}, "expected": true},
+  {"expr": "-x + 3", "scope": {"x": 1}, "expected": 2},
+  {"expr": "unknown + 1", "scope": {}, "error": true},
+  {"expr": "1 +", "scope": {}, "error": true}
+]
