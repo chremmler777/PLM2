@@ -152,10 +152,15 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
             <button
               type="button"
               onClick={() => openForm.mutate()}
-              className={`ml-1.5 text-xs ${item.form.status === 'submitted' ? 'text-emerald-300' : 'text-blue-400 hover:text-blue-300'}`}
+              className={`ml-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-150 ${
+                item.form.status === 'submitted'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                  : 'border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20'
+              }`}
               title={item.form.title}
             >
-              📝 {item.form.status ?? 'open form'}
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h5.5L13 6v7.5H4z M9.5 2.5V6H13 M6 9h4M6 11h4" /></svg>
+              {item.form.status ?? 'open form'}
             </button>
           )}
           {item.references.map((r) => (

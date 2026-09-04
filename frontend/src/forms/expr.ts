@@ -1,7 +1,7 @@
 export class ExprError extends Error {}
 
 type Tok = { k: 'num' | 'str' | 'op' | 'id' | 'eof'; v: string | number | null };
-const RE = /\s*(?:(\d+\.\d+|\d+)|('(?:[^'\\]|\\.)*')|(==|!=|<=|>=|[-+*/()<>,\[\]])|([A-Za-z_][A-Za-z0-9_]*))/y;
+const RE = /\s*(?:(\d+\.\d+|\d+)|('(?:[^'\\]|\\.)*')|(==|!=|<=|>=|[-+*/()<>,[\]])|([A-Za-z_][A-Za-z0-9_]*))/y;
 
 function tokenize(src: string): Tok[] {
   const out: Tok[] = []; let pos = 0;
