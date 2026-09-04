@@ -25,3 +25,4 @@
 - [RFQ33 moved to RFQ2](rfq33-tropmann-mails-2026-08-13.md) - the RFQ33 DEMO-transfer tool-check work was run here by mistake; authoritative memory + generators now in the RFQ2 project
 - [No em-dashes](no-em-dashes.md) - never use em-dashes in any output or deliverable; hyphen/comma/semicolon instead
 - [Ask before placeholders](deliverables-ask-before-placeholders.md) - list missing info to Christoph BEFORE building/pushing any deliverable; no unprompted "TBC" in shipped files
+- [SEP forms engine](sep-forms-engine.md) — spec+plan done 2026-09-03, implementation pending; source docs in Documents/SEP/
