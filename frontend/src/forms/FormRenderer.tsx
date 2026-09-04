@@ -29,7 +29,7 @@ function ReadOnlyValue({ f, value, users, id, cell }:
   const base = cell ? 'min-h-[2.125rem] px-2 py-1.5 rounded-md' : 'min-h-[2.375rem] px-3 py-2 rounded-lg';
   const tone = empty ? 'text-slate-600' : computed ? 'font-mono text-sky-200' : 'text-slate-100';
   return (
-    <div id={id} className={`${base} ${tone} text-sm bg-slate-800/40 border border-transparent tabular-nums`}>
+    <div id={id} className={`${base} ${tone} text-sm bg-slate-800/40 border border-transparent tabular-nums whitespace-pre-wrap break-words`}>
       {empty ? '—' : text}
     </div>
   );
@@ -41,8 +41,14 @@ function FieldInput({ f, value, onChange, readOnly, users, id, cell = false }:
   if (ro) return <ReadOnlyValue f={f} value={value} users={users} id={id} cell={cell} />;
   const cls = cell ? CELL_INPUT : INPUT;
   switch (f.type) {
-    case 'multiline': return <textarea id={id} className={`${cls} min-h-[2.375rem] resize-y leading-snug`} rows={cell ? 1 : 3}
-      value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value)} />;
+    case 'multiline': {
+      // Grow with the content so nothing is hidden; field-sizing handles it
+      // natively where supported, the rows estimate covers the rest.
+      const text = (value as string) ?? '';
+      const rows = Math.max(cell ? 1 : 3, text.split('\n').length, Math.ceil(text.length / (cell ? 32 : 90)));
+      return <textarea id={id} className={`${cls} min-h-[2.375rem] resize-y leading-snug [field-sizing:content]`} rows={rows}
+        value={text} onChange={(e) => onChange(e.target.value)} />;
+    }
     case 'number': return <input id={id} type="number" inputMode="decimal" className={`${cls} font-mono tabular-nums`} min={f.min} max={f.max} step={f.step ?? 'any'}
       value={value === null || value === undefined ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))} />;
     case 'date': return <input id={id} type="date" className={cls} value={(value as string) ?? ''} onChange={(e) => onChange(e.target.value || null)} />;
@@ -87,7 +93,7 @@ function TableEditor({ s, rows, footer, onRows, readOnly, users }:
             <tr>
               <th className="sticky left-0 z-[1] bg-slate-800 px-2 pb-2 text-left text-[11px] font-medium uppercase tracking-wider text-slate-500 w-8">#</th>
               {s.columns.map((c) => (
-                <th key={c.id} className="px-2 pb-2 text-left text-[11px] font-medium uppercase tracking-wider text-slate-400 whitespace-nowrap align-bottom"
+                <th key={c.id} className="px-2 pb-2 text-left text-[11px] font-medium uppercase tracking-wider text-slate-400 leading-tight align-bottom"
                   style={{ minWidth: colWidth(c) }}>
                   {c.help
                     ? <abbr title={c.help} className="cursor-help no-underline border-b border-dotted border-slate-500">{c.label}</abbr>

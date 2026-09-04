@@ -181,7 +181,7 @@ export default function FormPanel({ instanceId, onClose }: { instanceId: number;
                         </span>
                         <div className="min-w-0">
                           <div className="text-xs font-medium uppercase tracking-wider text-slate-400">{role}</div>
-                          <div className={`truncate text-sm ${s ? 'text-slate-100' : 'text-slate-500'}`}>
+                          <div className={`break-words text-sm ${s ? 'text-slate-100' : 'text-slate-500'}`}>
                             {s ? `${s.user_name ?? 'unknown'} · ${fmtDate(s.at)}` : 'pending'}
                           </div>
                         </div>
