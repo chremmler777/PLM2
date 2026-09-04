@@ -1,10 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import rawVectors from '../../../backend/app/data/forms/expr_vectors.json';
 import { evaluate, ExprError } from './expr';
 
-const vectors = JSON.parse(readFileSync(resolve(__dirname, '../../../backend/app/data/forms/expr_vectors.json'), 'utf8')) as
-  { expr: string; scope: Record<string, unknown>; expected?: unknown; error?: boolean }[];
+type Vector = { expr: string; scope: Record<string, unknown>; expected?: unknown; error?: boolean };
+const vectors = rawVectors as Vector[];
 
 describe('expr vectors', () => {
   for (const v of vectors) {
