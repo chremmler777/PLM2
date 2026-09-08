@@ -115,9 +115,13 @@ Rules:
   from the group's current revision's `part_bom_items` that reference a
   project part (`child_part_id`); catalog and free-text items are listed as
   rows with `part_id: null` and only `name`, `quantity`, `unit` filled.
-- "Current revision" is the part's latest revision by creation, which is how
-  the part page picks it today; the row reports whether it is frozen
-  (`revision_status == "frozen"`).
+- "Current revision" follows the part page's rule (`getActiveRevisionLevel`
+  in `frontend/src/pages/PartDetail.tsx`): the latest non-rejected major
+  revision (no `parent_revision_id`, highest number in `revision_name`) in the
+  most advanced phase present, priority freeze, then engineering, then RFQ. The
+  backend implements this once in `RevisionService.active_revision(part)` and
+  both new endpoints use it. The row reports `frozen` when that revision's
+  status is `frozen`.
 - The `Unassigned` group lists articles of the project that appear in no
   sub-assembly BOM. Tools, gauges and assembly equipment are never rows.
 - `filled` counts rows whose six attributes are all non-empty; `total` counts
