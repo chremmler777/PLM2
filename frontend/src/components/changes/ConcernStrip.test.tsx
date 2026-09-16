@@ -601,6 +601,12 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     const select = await screen.findByTestId('risk-type-select') as HTMLSelectElement
     await waitFor(() => expect([...select.options].map((o) => o.text)).toContain(t('risk.addType')))
     fireEvent.change(select, { target: { value: '__add_type__' } })
+    expect(select.value).toBe('__add_type__')
+    // Picking a real type again closes the name field.
+    fireEvent.change(select, { target: { value: 'other' } })
+    expect(screen.queryByTestId('risk-new-type')).toBeNull()
+    expect(select.value).toBe('other')
+    fireEvent.change(select, { target: { value: '__add_type__' } })
     fireEvent.change(screen.getByTestId('risk-new-type'), { target: { value: 'Hot runner' } })
     // Once created, the reference serves it back with its id: selectable, removable.
     vi.mocked(changesApi.riskTypes).mockResolvedValue({ items: [

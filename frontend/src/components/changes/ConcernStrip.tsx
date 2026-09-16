@@ -556,9 +556,13 @@ export default function ConcernStrip({
             </div>
           )}
           <div className="flex gap-2 items-center flex-wrap">
-            <select value={riskType} aria-label={t('risk.type')} data-testid="risk-type-select"
+            <select value={newType !== null ? ADD_TYPE : riskType}
+              aria-label={t('risk.type')} data-testid="risk-type-select"
               onChange={(e) => {
+                // While the name field is open the dropdown reads "add own
+                // type"; choosing anything else closes the field again.
                 if (e.target.value === ADD_TYPE) { setNewType(''); return }
+                setNewType(null)
                 setRiskType(e.target.value as RiskType | '')
               }}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
