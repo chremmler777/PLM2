@@ -135,6 +135,8 @@ export const changesApi = {
 
   approveDeviation: (id: number) =>
     client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/approve`).then((r) => r.data),
+  rejectDeviation: (id: number, reason: string) =>
+    client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/reject`, { reason }).then((r) => r.data),
 
   getCostLines: (id: number, aid: number) =>
     client.get<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`).then((r) => r.data),

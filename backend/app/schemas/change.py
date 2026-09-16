@@ -1,7 +1,7 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
 
@@ -372,6 +372,10 @@ class RoutingResponse(BaseModel):
     template_version: Optional[int] = None
     has_deviation: bool = False
     deviation_status: str = "none"
+    # Why the pending/last deviation was proposed and by whom, so the lead can
+    # decide from the routing view alone.
+    deviation_note: Optional[str] = None
+    deviation_proposed_by: Optional[int] = None
     stages: List[RoutingStage] = []
 
 
@@ -380,6 +384,30 @@ class DeviationRequest(BaseModel):
     department_id: int
     rasic_letter: Optional[str] = None
     stage_order: Optional[int] = None
+    # Required for op "add" (enforced in the service): the audit reason.
+    reason: Optional[str] = None
+
+
+class RoutingDeviationDecision(BaseModel):
+    reason: str
+
+
+class RiskTemplateCreate(BaseModel):
+    department_id: int
+    risk_type: str
+    severity: int = 2
+    note: str
+
+
+class RiskTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    risk_type: str
+    severity: int
+    note: str
+    created_by: int
+    created_at: datetime
 
 
 class RoutingStandardUpsert(BaseModel):

@@ -538,7 +538,9 @@ export default function ChangeDetailPage() {
           <AssessmentBuckets change={change} departments={departments}
             myDepartmentIds={myActions?.memberships ?? []}
             editable={change.status === 'in_assessment'} isPm={isPmMember}
-            canSeeAll={canSeeCosts} />
+            canSeeAll={canSeeCosts}
+            canAddDepartment={isAdmin || isChangeLead || isPmMember}
+            userId={userId ?? null} isChangeLead={isChangeLead} />
         </div>
       )}
 

@@ -91,7 +91,10 @@ export interface ChangeRouting {
   template_id: number | null;
   template_version: number | null;
   has_deviation: boolean;
-  deviation_status: 'none' | 'pending_approval' | 'approved';
+  deviation_status: 'none' | 'pending_approval' | 'approved' | 'rejected';
+  /** Why the pending (or last) deviation was proposed, and by whom. */
+  deviation_note?: string | null;
+  deviation_proposed_by?: number | null;
   stages: RoutingStage[];
 }
 
@@ -100,6 +103,8 @@ export interface DeviationRequest {
   department_id: number;
   rasic_letter?: 'R' | 'A' | 'S' | 'C';
   stage_order?: number;
+  /** Required for op 'add': the audit reason the lead decides on. */
+  reason?: string;
 }
 
 export type AttachmentKind =
@@ -434,7 +439,8 @@ export interface ActivityRef { id: number; department_id: number; label: string;
 // --- Task 19: "Your actions" cockpit panel ---
 
 export type MyActionKind =
-  | 'assessment' | 'wf_task' | 'deviation_decision' | 'gate' | 'impact_confirm' | 'transition';
+  | 'assessment' | 'wf_task' | 'deviation_decision' | 'routing_deviation_decision'
+  | 'gate' | 'impact_confirm' | 'transition';
 
 export interface MyAction {
   kind: MyActionKind;

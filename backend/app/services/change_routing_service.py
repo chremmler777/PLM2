@@ -292,9 +292,15 @@ class ChangeRoutingService:
     @staticmethod
     async def apply_deviation(session: AsyncSession, change: ChangeRequest, user_id: int, *,
                               op: str, department_id: int, rasic_letter: Optional[str] = None,
-                              stage_order: Optional[int] = None) -> ChangeRouting:
+                              stage_order: Optional[int] = None,
+                              reason: Optional[str] = None) -> ChangeRouting:
         from app.services.change_service import ChangeService  # local import avoids cycle
         routing = await ChangeRoutingService._routing(session, change)
+        # Adding a department mid-assessment is an audit event: somebody was
+        # forgotten, or something turned out to be impacted after all. The
+        # reason is the record of which, and the lead reads it to decide.
+        if op == "add" and not (reason and reason.strip()):
+            raise ValueError("A reason is required to add a department")
         existing = (await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)
@@ -397,9 +403,22 @@ class ChangeRoutingService:
         routing.has_deviation = True
         routing.deviation_status = "pending_approval"
         routing.deviation_proposed_by = user_id
+        if reason and reason.strip():
+            routing.deviation_note = reason.strip()
         await session.flush()
         await ChangeService.append_changelog(
-            session, change, "routing_deviation", f"Routing deviation: {desc}", user_id)
+            session, change, "routing_deviation", f"Routing deviation: {desc}", user_id,
+            notes=(reason.strip() if reason else None))
+        # The decision sits with the lead (4-eyes: the proposer cannot take
+        # it). Tell them, once per pending deviation.
+        if change.lead_id is not None and change.lead_id != user_id:
+            await NotificationService.notify_once(
+                session, [change.lead_id], kind="routing_deviation_pending",
+                subject_key=f"routing-dev:{change.id}:{routing.deviation_proposed_by}:{desc}",
+                title=f"Routing change pending: {change.change_number}",
+                body=f"{desc.capitalize()} — needs your approval.",
+                link=f"/changes/{change.id}?tab=assessments",
+            )
         return routing
 
     @staticmethod
@@ -411,19 +430,101 @@ class ChangeRoutingService:
         return max(active) if active else 1
 
     @staticmethod
-    async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int) -> ChangeRouting:
-        from app.services.change_service import ChangeService
-        routing = await ChangeRoutingService._routing(session, change)
+    def user_can_decide_deviation(change: ChangeRequest, routing: ChangeRouting,
+                                  user_id: int) -> bool:
+        """Who may approve or reject a pending routing deviation. No
+        self-decision. If a non-lead proposed it, only the lead decides. If the
+        lead proposed it, anyone-but-the-proposer (i.e. the PM) decides. Shared
+        by the endpoints and my_actions so the plate and the gate agree."""
         if routing.deviation_status != "pending_approval":
-            raise ValueError("No deviation pending approval")
-        # No self-approval. If a non-lead proposed it, only the lead may approve. If the
-        # lead proposed it, anyone-but-the-proposer (i.e. the PM) may approve.
+            return False
         if routing.deviation_proposed_by == user_id:
-            raise ValueError("Cannot approve your own routing deviation")
+            return False
         if (change.lead_id is not None
                 and routing.deviation_proposed_by != change.lead_id
                 and user_id != change.lead_id):
-            raise ValueError("Only the change lead may approve this deviation")
+            return False
+        return True
+
+    @staticmethod
+    def _check_decide(change: ChangeRequest, routing: ChangeRouting, user_id: int,
+                      verb: str) -> None:
+        if routing.deviation_status != "pending_approval":
+            raise ValueError("No deviation pending approval")
+        if routing.deviation_proposed_by == user_id:
+            raise ValueError(f"Cannot {verb} your own routing deviation")
+        if not ChangeRoutingService.user_can_decide_deviation(change, routing, user_id):
+            raise ValueError(f"Only the change lead may {verb} this deviation")
+
+    @staticmethod
+    async def reject_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
+                               reason: str) -> ChangeRouting:
+        """Reject the pending deviation and undo what it added.
+
+        Undo covers the 'add' op, the only one the UI offers: every assessment
+        row outside the standard snapshot that has not been answered is dropped
+        together with its engine task, so the department is off the hook again.
+        A row that was already answered is NOT erased — the rejection is refused
+        instead; by then the department's work is a fact of the record."""
+        from app.services.change_service import ChangeService
+        routing = await ChangeRoutingService._routing(session, change)
+        ChangeRoutingService._check_decide(change, routing, user_id, "reject")
+        if not (reason and reason.strip()):
+            raise ValueError("A reason is required to reject a routing deviation")
+        standard = {(d["department_id"], st["stage_order"])
+                    for st in routing.standard_snapshot.get("stages", [])
+                    for d in st["departments"]}
+        rows = (await session.execute(
+            select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
+        )).scalars().all()
+        added = [a for a in rows if (a.department_id, a.stage_order) not in standard]
+        answered = [a for a in added
+                    if a.submitted_at is not None or (a.verdict and a.verdict != "pending")]
+        if answered:
+            raise ValueError(
+                "The added department has already submitted its assessment; "
+                "its answer stays on the record and cannot be rejected away")
+        inst = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change.id,
+                WfInstance.status == "active")
+        )).scalar_one_or_none()
+        removed = []
+        for a in added:
+            if a.wf_instance_task_id is not None:
+                task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+                a.wf_instance_task_id = None
+                await session.flush()
+                if task is not None:
+                    await session.delete(task)
+            removed.append(a.department_id)
+            await session.delete(a)
+        await session.flush()
+        if inst is not None and removed:
+            await WorkflowService._maybe_advance_stage(session, inst)
+        routing.deviation_status = "rejected"
+        routing.has_deviation = False
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "routing_deviation_rejected",
+            f"Routing deviation rejected: {reason.strip()}", user_id,
+            notes=reason.strip(),
+            new_value={"removed_department_ids": removed})
+        if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
+            await NotificationService.notify_once(
+                session, [routing.deviation_proposed_by], kind="routing_deviation_rejected",
+                subject_key=f"routing-dev-rejected:{change.id}:{datetime.utcnow().isoformat()}",
+                title=f"Routing change rejected: {change.change_number}",
+                body=reason.strip(),
+                link=f"/changes/{change.id}?tab=assessments",
+            )
+        return routing
+
+    @staticmethod
+    async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int) -> ChangeRouting:
+        from app.services.change_service import ChangeService
+        routing = await ChangeRoutingService._routing(session, change)
+        ChangeRoutingService._check_decide(change, routing, user_id, "approve")
         routing.deviation_status = "approved"
         routing.deviation_approved_by = user_id
         routing.deviation_approved_at = datetime.utcnow()

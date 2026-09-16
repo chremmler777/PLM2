@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
+import RoutingDeviationPanel from './RoutingDeviationPanel'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
@@ -116,6 +117,7 @@ function ObjectList({ objects }: { objects: AssessmentObject[] }) {
 
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
+  canAddDepartment = false, userId = null, isChangeLead = false,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -126,6 +128,11 @@ export default function AssessmentBuckets({
   isPm?: boolean
   /** PM, Sales, the change lead and admins may read any department's work. */
   canSeeAll?: boolean
+  /** Lead, PM or admin may put a forgotten department on the hook mid-assessment. */
+  canAddDepartment?: boolean
+  /** For the 4-eyes rule on a pending routing change (see canDecideDeviation). */
+  userId?: number | null
+  isChangeLead?: boolean
 }) {
   const changeId = change.id
   // `undefined` means the user has not touched a row yet, so their own bucket
@@ -194,8 +201,27 @@ export default function AssessmentBuckets({
     }
   }).sort((x, y) => x.stage - y.stage || deptName(x.id).localeCompare(deptName(y.id)))
 
+  // Mirrors ChangeRoutingService.user_can_decide_deviation: never the
+  // proposer; a non-lead's proposal is the lead's call, the lead's proposal
+  // is anyone else's (the PM's). With no lead, anyone but the proposer.
+  const proposedBy = routing?.deviation_proposed_by ?? null
+  const canDecideDeviation = routing?.deviation_status === 'pending_approval'
+    && userId != null && proposedBy !== userId
+    && (change.lead_id == null || isChangeLead || proposedBy === change.lead_id)
+  const deviationPanel = (
+    <RoutingDeviationPanel changeId={changeId} routing={routing}
+      departments={departments} routedIds={ids}
+      stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
+      canAdd={canAddDepartment && editable} canDecide={!!canDecideDeviation} />
+  )
+
   if (rows.length === 0) {
-    return <p className="text-sm text-slate-400">{t('bucket.none')}</p>
+    return (
+      <div className="space-y-2">
+        {deviationPanel}
+        <p className="text-sm text-slate-400">{t('bucket.none')}</p>
+      </div>
+    )
   }
 
   // An ordinary member gets their own workplace, not the whole board: their
@@ -216,6 +242,7 @@ export default function AssessmentBuckets({
 
   return (
     <div className="space-y-2">
+      {deviationPanel}
       {visible.map((row) => {
         const a = row.assessment
         const state = stateOf(a, row.onHold)

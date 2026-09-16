@@ -1585,6 +1585,23 @@ class ChangeService:
                 "deviation_id": dev.id,
             })
 
+        # kind "routing_deviation_decision": somebody added a department to
+        # the assessment (or otherwise changed the routing) and the decision
+        # is this user's. Mirrors ChangeRoutingService.user_can_decide_deviation.
+        if change.status == "in_assessment":
+            from app.models.change import ChangeRouting
+            from app.services.change_routing_service import ChangeRoutingService
+            routing = (await session.execute(
+                select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+            )).scalar_one_or_none()
+            if (routing is not None
+                    and ChangeRoutingService.user_can_decide_deviation(change, routing, user.id)):
+                actions.append({
+                    "kind": "routing_deviation_decision",
+                    "label": "Decide added department",
+                    "target_tab": "assessments",
+                })
+
         # kind "impact_confirm": defining and locking the impacted set is the
         # first step INSIDE scoping — capture is Sales writing the request
         # down, the impacted set is the project team's call. So it is offered

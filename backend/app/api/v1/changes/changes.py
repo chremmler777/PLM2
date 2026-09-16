@@ -31,7 +31,9 @@ from app.schemas.change import (
     AssessmentSubmit, AssessmentResponse, AssessmentAssignIn, AssessmentDueDateIn,
     CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
-    RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
+    RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingDeviationDecision,
+    RiskTemplateCreate, RiskTemplateResponse,
+    RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
@@ -716,6 +718,8 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
         template_version=(routing.template_version if routing else None),
         has_deviation=(routing.has_deviation if routing else False),
         deviation_status=(routing.deviation_status if routing else "none"),
+        deviation_note=(routing.deviation_note if routing else None),
+        deviation_proposed_by=(routing.deviation_proposed_by if routing else None),
         stages=stages)
 
 
@@ -730,7 +734,24 @@ async def post_deviation(change_id: int, body: DeviationRequest,
     try:
         await ChangeRoutingService.apply_deviation(
             db, change, current_user.id, op=body.op, department_id=body.department_id,
-            rasic_letter=body.rasic_letter, stage_order=body.stage_order)
+            rasic_letter=body.rasic_letter, stage_order=body.stage_order,
+            reason=body.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return await get_routing(change_id, db, current_user)
+
+
+@router.post("/{change_id}/routing/deviation/reject", response_model=RoutingResponse)
+async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
+                           db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    from app.services.change_routing_service import ChangeRoutingService
+    try:
+        await ChangeRoutingService.reject_deviation(db, change, current_user.id, body.reason)
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()

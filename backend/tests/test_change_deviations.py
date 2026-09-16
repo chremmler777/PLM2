@@ -262,7 +262,7 @@ async def test_deviation_add_creates_task_in_running_instance(
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
             department_id=dev_departments["Manufacturing Engineer"],
-            rasic_letter="R", stage_order=1)
+            rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
 
     async with session_factory() as s:
@@ -390,7 +390,7 @@ async def test_deviation_add_to_passed_stage_task_active_still_blocks(
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
             department_id=dev_departments["Manufacturing Engineer"],
-            rasic_letter="R", stage_order=1)
+            rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
 
     async with session_factory() as s:
@@ -497,7 +497,7 @@ async def test_completing_passed_stage_task_emits_single_completion(
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
             department_id=dev_departments["Manufacturing Engineer"],
-            rasic_letter="R", stage_order=1)
+            rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
 
     # Submit stage-2 A -> stage 2 completes, instance completes (1st completion).
@@ -545,7 +545,7 @@ async def test_deviation_add_existing_row_updates_task(
         change = await s.get(ChangeRequest, cid)
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
-            department_id=dev_departments["Quality"], rasic_letter="R", stage_order=1)
+            department_id=dev_departments["Quality"], rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
 
     async with session_factory() as s:

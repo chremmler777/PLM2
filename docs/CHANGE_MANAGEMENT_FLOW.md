@@ -276,6 +276,30 @@ Three typed containers, three responsibilities:
 - The **lead item pins here** — departments are routed against it. Editable in
   `captured`/`scoping` only.
 
+### Adding a department during `in_assessment`
+Somebody was forgotten, or something turns out to be impacted after all. This
+is NOT a recall to scoping (that tears down everyone's work and is refused once
+anything is submitted). It is a **routing deviation** (`op: add`):
+- **Who proposes:** change lead, PM or admin, from the assessment tab
+  ("Add department"). Department, RASIC letter (R default) and a **mandatory
+  reason** (the audit record of why they were missed).
+- **Effect at once:** the department gets its assessment row and engine task on
+  the assessment stage, with the standard due date. It is on the hook
+  immediately; a blocking letter (R/A) gates costing like any first-stage row.
+- **4-eyes decision:** the proposer never decides. A non-lead's proposal is the
+  lead's call; the lead's proposal is anyone else's (the PM's). While pending,
+  `in_assessment → costing` is refused ("Routing deviation is pending
+  approval") and no further add is offered. The lead sees it under my-actions
+  (`routing_deviation_decision`) and is notified.
+- **Reject** needs a reason and undoes the add: row and task removed, the
+  department off the hook. If the added department already answered, the
+  rejection is refused — the answer is a fact of the record.
+- **Approve** keeps it; on release the deviation is **promoted into the
+  standard routing** for that change type (`promote_to_standard`), so the next
+  change routes the department without anyone remembering.
+Code: `change_routing_service.py::apply_deviation / reject_deviation /
+approve_deviation`; UI `RoutingDeviationPanel.tsx`.
+
 ### Rejecting at capture
 A request can go straight `captured → rejected` without passing through
 scoping, via the **direct transition endpoint** with a `rejection_reason` —
