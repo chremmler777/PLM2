@@ -399,6 +399,21 @@ class RiskTemplateCreate(BaseModel):
     note: str
 
 
+class CostCategoryCreate(BaseModel):
+    department_id: int
+    label: str
+    entry_type: str = "money"   # money | time
+
+
+class CostCategoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    key: str
+    label: str
+    entry_type: str
+
+
 class RiskTypeCreate(BaseModel):
     department_id: int
     label: str
@@ -705,7 +720,7 @@ class VendorChoiceIn(BaseModel):
 class CostingPositionCreate(BaseModel):
     department_id: int
     label: str
-    kind: str = "external"          # internal_effort|support_effort|external
+    kind: str = "external"          # internal_effort|support_effort|own_time|external
     tag: Optional[str] = None       # free text; the reference list only suggests
     pricing: str = "estimate"       # estimate|quote — external positions only
     est_cost: Optional[float] = None

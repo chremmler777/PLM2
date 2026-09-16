@@ -6,7 +6,7 @@ import type {
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
-  RiskTemplate, RiskTemplateIn, RasicLetter,
+  RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
@@ -189,9 +189,16 @@ export const changesApi = {
 
   // The tag vocabulary a department may file a position under.
   costingTags: (departmentId?: number) =>
-    client.get<{ items: { key: string }[] }>('/v1/changes/reference/costing-tags',
+    client.get<{ items: CostCategory[] }>('/v1/changes/reference/costing-tags',
       { params: departmentId != null ? { department_id: departmentId } : undefined })
       .then((r) => r.data),
+  // A department's own additions to its costing categories, typed money or time.
+  createCostCategory: (departmentId: number, label: string, entryType: CostEntryType) =>
+    client.post<{ id: number; department_id: number; key: string; label: string; entry_type: CostEntryType }>(
+      '/v1/changes/reference/costing-tags',
+      { department_id: departmentId, label, entry_type: entryType }).then((r) => r.data),
+  deleteCostCategory: (id: number) =>
+    client.delete<{ id: number }>(`/v1/changes/reference/costing-tags/${id}`).then((r) => r.data),
 
   getSummation: (id: number) =>
     client.get<Summation>(`/v1/changes/${id}/summation`).then((r) => r.data),

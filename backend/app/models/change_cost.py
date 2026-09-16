@@ -17,7 +17,10 @@ COST_KINDS = ("one_time", "lifecycle")
 #   internal_effort  the time this department spent on the assessment itself
 #   support_effort   the time it expects to spend supporting implementation
 #   external         work that leaves the house, priced by a supplier
-COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "external")
+# internal_effort / support_effort: the two standing answers every department
+# owes. own_time: any further line of the department's hours (valued at its
+# rate). external: money spent outside, estimated or quoted.
+COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "own_time", "external")
 # How an EXTERNAL position gets its number: a house estimate, or real vendor
 # offers. Effort positions are always estimates — the field is stored uniformly
 # so the column never has to be read conditionally, but only external positions
@@ -243,6 +246,29 @@ class CostingPosition(Base):
         and reports, so business and calendar quotes can share one max."""
         days, unit = self._lead_time_source
         return to_calendar_days(days, unit)
+
+
+class DepartmentCostCategory(Base):
+    """A cost category a department added to its own list.
+
+    The coded categories (app/services/costing_tags.py) are the reviewed
+    baseline; this is the department's extension — added from the costing
+    table, typed money or time so the line under it knows what to ask for.
+    Keys are namespaced per department. Soft-deleted: off the dropdown, rows
+    filed under it keep their key.
+    """
+    __tablename__ = "department_cost_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    key: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(120))
+    entry_type: Mapped[str] = mapped_column(String(10), default="money")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class CostingOffer(Base):

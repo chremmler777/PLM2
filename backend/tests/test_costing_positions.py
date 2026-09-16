@@ -434,19 +434,85 @@ async def test_a_stranger_cannot_document_another_departments_offer(
 
 async def test_costing_tags_offer_common_plus_department_extras(
         client, admin_auth, costing):
+    """No department: the legacy words plus the two common ones. A department:
+    its own list, each category saying whether it is money or own time."""
     res = await client.get("/api/v1/changes/reference/costing-tags",
                            headers=admin_auth)
     assert res.status_code == 200, res.text
-    common = [i["key"] for i in res.json()["items"]]
-    assert "tool_change" in common and "other" in common
-    assert all(i["extra"] is False for i in res.json()["items"])
+    items = res.json()["items"]
+    keys = [i["key"] for i in items]
+    assert "tool_change" in keys and keys[-2:] == ["other_money", "other_time"]
+    assert all(i["entry_type"] in ("money", "time") for i in items)
 
     res = await client.get(
         f"/api/v1/changes/reference/costing-tags?department_id={costing['tool']}",
         headers=admin_auth)
-    keys = [i["key"] for i in res.json()["items"]]
-    assert "tool_change" in keys              # common set is still there
-    assert "hot_runner" in keys               # and the department's own
+    items = res.json()["items"]
+    by_key = {i["key"]: i for i in items}
+    assert by_key["hot_runner"]["entry_type"] == "money" and by_key["hot_runner"]["extra"]
+    assert by_key["sampling"]["entry_type"] == "time"
+    assert by_key["hot_runner"]["label_en"] == "Hot runner"
+    assert "other_money" in by_key and "other_time" in by_key
+    assert "robot_program" not in by_key      # Manufacturing's, not Tooling's
+
+
+async def test_a_department_adds_its_own_category_typed_money_or_time(
+        client, admin_auth, costing):
+    d = costing["tool"]
+    res = await client.post("/api/v1/changes/reference/costing-tags",
+                            json={"department_id": d, "label": "Laser texturing",
+                                  "entry_type": "money"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    key = res.json()["key"]
+    assert key.startswith(f"d{d}_laser_texturing")
+    items = (await client.get(f"/api/v1/changes/reference/costing-tags?department_id={d}",
+                              headers=admin_auth)).json()["items"]
+    mine = next(i for i in items if i["key"] == key)
+    assert mine["entry_type"] == "money" and mine["label_en"] == "Laser texturing"
+    assert "custom_id" in mine
+    # It sits between the coded own list and the common two.
+    keys = [i["key"] for i in items]
+    assert keys.index(key) < keys.index("other_money")
+    # A position files under it like any category.
+    res = await _add_position(client, admin_auth, costing, tag=key, est_cost=900.0)
+    assert res.status_code == 201, res.text
+    # Bad type refused; empty name refused.
+    assert (await client.post("/api/v1/changes/reference/costing-tags",
+                              json={"department_id": d, "label": "x", "entry_type": "vibes"},
+                              headers=admin_auth)).status_code == 400
+    assert (await client.post("/api/v1/changes/reference/costing-tags",
+                              json={"department_id": d, "label": " "},
+                              headers=admin_auth)).status_code == 400
+    # Removed: off the list; same name again revives the same row.
+    res = await client.delete(f"/api/v1/changes/reference/costing-tags/{mine['custom_id']}",
+                              headers=admin_auth)
+    assert res.status_code == 200, res.text
+    keys = [i["key"] for i in (await client.get(
+        f"/api/v1/changes/reference/costing-tags?department_id={d}",
+        headers=admin_auth)).json()["items"]]
+    assert key not in keys
+    again = (await client.post("/api/v1/changes/reference/costing-tags",
+                               json={"department_id": d, "label": "laser texturing"},
+                               headers=admin_auth)).json()
+    assert again["id"] == mine["custom_id"]
+
+
+async def test_an_own_time_line_is_a_position_of_hours(client, admin_auth, costing):
+    """A further line of the department's own hours: no money, valued at the
+    rate in the summation like the standing effort answers."""
+    res = await _add_position(client, admin_auth, costing, label="Sampling support",
+                              kind="own_time", tag="sampling", hours=8.0,
+                              pricing="quote")   # nobody quotes our hours
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["kind"] == "own_time" and body["pricing"] == "estimate"
+    assert body["hours"] == 8.0 and body["effective_cost"] is None
+    res = await client.get(f"/api/v1/changes/{costing['change_id']}/summation",
+                           headers=admin_auth)
+    assert res.status_code == 200, res.text
+    dep = next(d for d in res.json()["positions_by_department"]
+               if d["department_id"] == costing["tool"])
+    assert dep["hours"] == 8.0 and dep["hours_cost"] == 8.0 * 65.0
 
 
 async def test_a_free_text_tag_is_accepted(client, admin_auth, costing):

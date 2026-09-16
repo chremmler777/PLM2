@@ -515,7 +515,21 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
  * Three kinds, because the three are answered by different people and read
  * differently in the summation.
  */
-export type CostPositionKind = 'internal_effort' | 'support_effort' | 'external';
+export type CostPositionKind = 'internal_effort' | 'support_effort' | 'own_time' | 'external';
+
+/** What a line under a category is: money bought, or the department's own hours. */
+export type CostEntryType = 'money' | 'time';
+
+/** One entry of the department's costing category list, coded or its own. */
+export interface CostCategory {
+  key: string;
+  label_de?: string;
+  label_en?: string;
+  extra?: boolean;
+  entry_type?: CostEntryType;
+  /** Present on a department-defined category: the id to remove it by. */
+  custom_id?: number;
+}
 
 /**
  * Lead time means different things in different departments: a shop floor

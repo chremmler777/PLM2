@@ -9,6 +9,8 @@ vi.mock('../../api/changes', () => ({
   changesApi: {
     listCostPositions: vi.fn(),
     createCostPosition: vi.fn().mockResolvedValue({}),
+    createCostCategory: vi.fn().mockResolvedValue({ id: 5, department_id: 2, key: 'd2_laser', label: 'Laser', entry_type: 'money' }),
+    deleteCostCategory: vi.fn().mockResolvedValue({ id: 5 }),
     updateCostPosition: vi.fn().mockResolvedValue({}),
     deleteCostPosition: vi.fn().mockResolvedValue({}),
     addCostingOffer: vi.fn().mockResolvedValue({}),
@@ -21,7 +23,12 @@ vi.mock('../../api/changes', () => ({
 }))
 
 const TAGS = {
-  items: [{ key: 'tool_change' }, { key: 'equipment_change' }, { key: 'other' }],
+  items: [
+    { key: 'tool_change', entry_type: 'money', extra: true },
+    { key: 'equipment_change', entry_type: 'money', extra: true },
+    { key: 'sampling', entry_type: 'time', extra: true },
+    { key: 'other', entry_type: 'money', extra: false },
+  ],
 }
 
 const external = {
@@ -144,15 +151,51 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
   })
 
-  it('takes a free-text tag when the list does not have the word', async () => {
+  it('makes a time category an own-time line: hours only, no money', async () => {
     positions()
     await screen.findByTestId('costpos-new-2')
-    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Sonderfall' } })
-    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: '__free' } })
-    fireEvent.change(screen.getByTestId('costpos-new-tag-free-2'), { target: { value: 'Kalibrierung' } })
-    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(screen.getByTestId('costpos-new-tag-2').textContent)
+      .toContain(t('costtag.sampling')))
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'sampling' } })
+    // No pricing and no money field for hours; the amount is the hours.
+    expect(screen.queryByTestId('costpos-new-pricing-2')).toBeNull()
+    expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
+    expect(screen.getByTestId('costpos-new-hours-2').getAttribute('aria-label')).toBe(t('costpos.hours'))
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: '2 trial runs' } })
+    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '8' } })
+    fireEvent.keyDown(screen.getByTestId('costpos-new-hours-2'), { key: 'Enter' })
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
-      expect.objectContaining({ tag: 'Kalibrierung', kind: 'external' })))
+      expect.objectContaining({
+        tag: 'sampling', kind: 'own_time', pricing: 'estimate', hours: 8, est_cost: null,
+        label: '2 trial runs',
+      })))
+  })
+
+  it('lets the department add its own category, typed, and remove it again', async () => {
+    positions()
+    await screen.findByTestId('costpos-new-2')
+    const select = screen.getByTestId('costpos-new-tag-2') as HTMLSelectElement
+    await waitFor(() => expect([...select.options].map((o) => o.value)).toContain('__add_category'))
+    fireEvent.change(select, { target: { value: '__add_category' } })
+    fireEvent.change(screen.getByTestId('costpos-new-category-2'), { target: { value: 'Laser texturing' } })
+    fireEvent.change(screen.getByTestId('costpos-new-category-type-2'), { target: { value: 'money' } })
+    // Once created, the reference serves it back with its id: selected, removable.
+    vi.mocked(changesApi.costingTags).mockResolvedValue({ items: [
+      ...TAGS.items,
+      { key: 'd2_laser', label_en: 'Laser texturing', entry_type: 'money', extra: true, custom_id: 5 },
+    ] } as never)
+    fireEvent.click(screen.getByTestId('costpos-new-category-save-2'))
+    await waitFor(() => expect(changesApi.createCostCategory).toHaveBeenCalledWith(2, 'Laser texturing', 'money'))
+    await waitFor(() => expect(select.value).toBe('d2_laser'))
+    fireEvent.click(await screen.findByTestId('costpos-category-delete-2'))
+    await waitFor(() => expect(changesApi.deleteCostCategory).toHaveBeenCalledWith(5))
+  })
+
+  it('sums the department’s money and hours at the foot of the table', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    // 5200 from the favourite offer; 12 h standing + 6 h around the vendor.
+    expect(screen.getByTestId('costpos-total-2').textContent).toBe('5200.00 + 18 h')
   })
 
   it('draws a quoted position as one row per vendor, shipping included or separate', async () => {
@@ -187,6 +230,18 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-lead-11').textContent)
       .toBe(`20 ${t('costpos.unitShort.calendar_days')}`)
     expect(screen.queryByTestId('costpos-needs-favorite-11')).toBeNull()
+  })
+
+  it('prices a single offer without a vote and reads its lead time', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external, effective_cost: 5200,
+      offers: [{ ...external.offers[0], favorite: false }],
+    }] as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    expect(screen.queryByTestId('costpos-needs-favorite-11')).toBeNull()
+    expect(screen.getByTestId('costpos-lead-11').textContent)
+      .toBe(`30 ${t('costpos.unitShort.business_days')}`)
   })
 
   it('nags for a vote while a quoted position has none', async () => {

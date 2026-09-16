@@ -298,6 +298,25 @@ meeting record (`ChangeMeeting.department_rasic`, `{department_id: letter}`):
   has answered.
 Every routing deviation now carries a reason (`apply_deviation`).
 
+### The costing table (2026-09-16)
+One table per department at `costing`, line by line. Rows 1–2 are standing
+(assessment effort, implementation support, both own time); Tool Engineer has
+a third (part weight, an estimate). Every further line is a **category from
+the department's list**, and the category says what the line is:
+- **own time** — hours (`kind=own_time`), valued at the department rate in the
+  summation like the standing rows;
+- **money, estimate** — a house number (`kind=external, pricing=estimate`);
+- **money, vendor quote** — read from the favourite of the offers under the
+  line (`pricing=quote`); one offer prices the line without a vote, several
+  need the star. Sales' later choice is shown on the line, never edited here.
+Categories: coded per department in `app/services/costing_tags.py` (each with
+`entry_type` money|time, "other" in both types for everyone) plus the
+department's own (`department_cost_categories`, migration 069, added from the
+table's category dropdown with its type; soft delete). The free-text tag is
+gone from the UI; the API still accepts any tag string.
+The per-plant workbook grid (cycle-time delta, hours × rate) stays under the
+table, collapsible. A department routed on several stages has one table.
+
 ### Risk vocabulary: coded baseline + the department's own additions
 - Coded per department in `app/services/risk_types.py` (own types, then the
   common timing/cost/other). Legacy moulding keys stay valid for everyone.

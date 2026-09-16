@@ -33,6 +33,7 @@ from app.schemas.change import (
     ChangelogResponse,
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingDeviationDecision,
     RiskTemplateCreate, RiskTemplateResponse, RiskTypeCreate, RiskTypeResponse,
+    CostCategoryCreate, CostCategoryResponse,
     RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
@@ -709,11 +710,76 @@ async def reference_costing_tags(
     edited per department in the database.
     """
     from app.services import costing_tags
-    name = None
-    if department_id is not None:
-        dept = await db.get(Department, department_id)
-        name = dept.name if dept is not None else None
-    return {"items": costing_tags.tags_for(name)}
+    dept = await db.get(Department, department_id) if department_id is not None else None
+    return {"items": await costing_tags.resolved_tags(db, dept)}
+
+
+@router.post("/reference/costing-tags", response_model=CostCategoryResponse)
+async def create_cost_category(
+    body: CostCategoryCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department adds a category to its own costing list, typed money or
+    time. Same writers as its risk lists: members, Project Management, admin."""
+    from app.models.change_cost import DepartmentCostCategory
+    from app.services import costing_tags
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may add its cost categories")
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "A cost category needs a name")
+    if body.entry_type not in costing_tags.ENTRY_TYPES:
+        raise HTTPException(400, "entry_type must be 'money' or 'time'")
+    key = costing_tags.custom_key(body.department_id, label)
+    existing = (await db.execute(
+        select(DepartmentCostCategory).where(
+            DepartmentCostCategory.department_id == body.department_id,
+            DepartmentCostCategory.key == key)
+        .order_by(DepartmentCostCategory.id))).scalars().first()
+    if existing is not None:
+        # Same name again hands back the one row, revived if it was removed.
+        existing.deleted_at = None
+        existing.deleted_by = None
+        existing.label = label
+        existing.entry_type = body.entry_type
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    if key in {i["key"] for i in costing_tags.tags_for(dept.name)}:
+        raise HTTPException(400, f"'{label}' is already a standard category")
+    row = DepartmentCostCategory(
+        department_id=body.department_id, key=key, label=label,
+        entry_type=body.entry_type, created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/costing-tags/{category_id}", response_model=CostCategoryResponse)
+async def delete_cost_category(
+    category_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: off the list, positions filed under it keep their key."""
+    from app.models.change_cost import DepartmentCostCategory
+    row = await db.get(DepartmentCostCategory, category_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Cost category not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its cost categories")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 @router.get("/reference/activities")

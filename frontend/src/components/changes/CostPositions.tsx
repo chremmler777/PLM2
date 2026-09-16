@@ -1,23 +1,23 @@
 /**
- * Cost positions — what a department actually books against a change.
+ * The costing table — what a department books against a change, line by line.
  *
- * Two questions every department owes are always the same — how long the
- * assessment took, and how much support the implementation will need — so they
- * stand in the block as two labelled fields. Nobody should have to know that
- * "spent time" hides behind an add-form's kind picker; the first time a field is
- * filled it creates its position, and after that it edits it.
+ * One table per department. The first rows are standing: the two answers every
+ * department owes (assessment effort, implementation support) and, for
+ * Tooling, the part weight. Every further line is a category from the
+ * department's own list, and the category says what the line is:
  *
- * Everything else is an external position: money the department has to spend
- * outside, plus the own time it costs to run the vendor.
+ *   own time     — hours, valued at the department's rate in the summation
+ *   estimate     — money, a house number
+ *   vendor quote — money, read from the favourite of the offers under the line
  *
- * External money is either a house number or real vendor offers, and then the
- * department picks its favourite. The favourite is not decoration: it is the
- * offer the position's price and lead time are read from, so a position without
- * one is a position nobody has costed yet, and it says so.
+ * A quoted line carries its vendors as sub-rows with one star among them. The
+ * favourite is not decoration: it is the offer the line's price and lead time
+ * are read from, so a line without one is a line nobody has costed yet, and it
+ * says so.
  *
- * The department writes its own positions during costing. PM, Sales, the lead
- * and admins read them; Sales especially has nothing to fill in here — they get
- * the picture and put a price on it later.
+ * The department writes its own lines during costing; PM may fix them. Sales,
+ * the lead and admins read. Sales has nothing to fill in here — they get the
+ * picture and put a price on it later.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -28,7 +28,8 @@ import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
 import type {
-  CostPosition, CostPositionKind, CostPositionPricing, CostingOffer, LeadTimeUnit,
+  CostCategory, CostEntryType, CostPosition, CostPositionKind, CostPositionPricing,
+  CostingOffer, LeadTimeUnit,
 } from '../../types/change'
 
 const UNITS: LeadTimeUnit[] = ['calendar_days', 'business_days']
@@ -41,8 +42,11 @@ const errDetail = (e: unknown): string | undefined =>
 
 const num = (s: string): number | null => (s.trim() === '' ? null : Number(s))
 
-/** The tag reads as a label when it is one of the known keys, else as itself. */
-export const tagLabel = (tag: string): string => {
+/** The tag reads as a label: the served one when the list is at hand, the
+    coded one for known keys, else the key itself. */
+export const tagLabel = (tag: string, items?: CostCategory[]): string => {
+  const served = items?.find((i) => i.key === tag)?.label_en
+  if (served) return served
   const label = t(`costtag.${tag}`)
   return label === `costtag.${tag}` ? tag : label
 }
@@ -97,10 +101,18 @@ export function salesEffectiveOf(p: CostPosition): number | null {
   return effectiveOf(p)
 }
 
-/** The same rule for time: the favourite offer's lead time is the position's. */
+/** The offer a quoted position is read from: the favourite, or a lone offer
+    (which needs no vote to be the answer). Several offers without a vote
+    give nothing — the department has not finished the job. */
+const pricedOffer = (p: CostPosition): CostingOffer | undefined => {
+  const offers = p.offers ?? []
+  return offers.find((o) => o.favorite) ?? (offers.length === 1 ? offers[0] : undefined)
+}
+
+/** The same rule for time: the priced offer's lead time is the position's. */
 export function leadTimeOf(p: CostPosition): { days: number; unit: LeadTimeUnit } | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
-    const fav = (p.offers ?? []).find((o) => o.favorite)
+    const fav = pricedOffer(p)
     if (fav?.lead_time_days != null) {
       return { days: fav.lead_time_days, unit: fav.lead_time_unit ?? DEFAULT_UNIT }
     }
@@ -330,8 +342,19 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
   )
 }
 
-function PositionRow({ changeId, position, editable, onChanged }: {
-  changeId: number; position: CostPosition; editable: boolean; onChanged: () => void
+
+const cellCls = 'px-2 py-1.5 align-top'
+const numCls = 'tabular-nums text-right'
+const money = (v: number) => v.toFixed(2)
+
+type LineType = 'time' | 'estimate' | 'quote'
+const lineTypeOf = (p: CostPosition): LineType =>
+  p.kind === 'external' ? (p.pricing === 'quote' ? 'quote' : 'estimate') : 'time'
+
+/** A position row: reads as one line; edits in place; a quoted line opens its vendors. */
+function PositionRow({ changeId, position, editable, index, categories, onChanged }: {
+  changeId: number; position: CostPosition; editable: boolean; index: number
+  categories: CostCategory[]; onChanged: () => void
 }) {
   const p = position
   const [editing, setEditing] = useState(false)
@@ -342,21 +365,23 @@ function PositionRow({ changeId, position, editable, onChanged }: {
   const [unit, setUnit] = useState<LeadTimeUnit>(p.lead_time_unit ?? DEFAULT_UNIT)
   const [notes, setNotes] = useState(p.notes ?? '')
 
+  const type = lineTypeOf(p)
   const isExternal = p.kind === 'external'
-  const isQuote = isExternal && p.pricing === 'quote'
+  const isQuote = type === 'quote'
   const cost = effectiveOf(p)
   const time = leadTimeOf(p)
-  // A quoted position with nobody's vote on it has no price and no date — the
-  // department has collected offers and not finished the job.
-  const needsFavorite = isQuote && !(p.offers ?? []).some((o) => o.favorite)
-  // Sales' decision, once it exists — shown, never edited from this block.
+  // With several offers and no vote the line has no price; a single offer
+  // is the answer by itself (the backend prices it the same way).
+  const needsFavorite = isQuote && (p.offers ?? []).length > 1
+    && !(p.offers ?? []).some((o) => o.favorite)
   const chosen = chosenOf(p)
   const diverges = decisionDivergesOf(p)
+  const offerCount = (p.offers ?? []).length
 
   const save = useMutation({
     mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
       label: label.trim(), hours: num(hours),
-      est_cost: isQuote ? null : num(est),
+      est_cost: type === 'estimate' ? num(est) : null,
       lead_time_days: num(lead), lead_time_unit: unit,
       notes: notes.trim() || null,
     }),
@@ -369,149 +394,179 @@ function PositionRow({ changeId, position, editable, onChanged }: {
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the position'),
   })
 
+  const amount = (
+    <span data-testid={`costpos-cost-${p.id}`} className="text-slate-200 tabular-nums">
+      {type === 'time'
+        ? (p.hours != null ? `${p.hours} h` : '—')
+        : <>
+            {cost != null ? money(cost) : '—'}
+            {p.hours != null && ` + ${p.hours} h`}
+          </>}
+    </span>
+  )
+
   return (
-    <li data-testid={`costpos-row-${p.id}`}
-      className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5 space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <span data-testid={`costpos-label-${p.id}`} className="text-slate-100 text-sm">
-          {p.label}
-        </span>
-        {p.tag && (
-          <span data-testid={`costpos-tag-${p.id}`}
-            className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[10px] leading-tight">
-            {tagLabel(p.tag)}
+    <>
+      <tr data-testid={`costpos-row-${p.id}`}
+        className={`border-t border-slate-700/70 ${editing ? 'bg-slate-800/60' : ''}`}>
+        <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
+        <td className={cellCls}>
+          {p.tag ? (
+            <span data-testid={`costpos-tag-${p.id}`} className="text-slate-200">
+              {tagLabel(p.tag, categories)}
+            </span>
+          ) : <span className="text-slate-600">—</span>}
+        </td>
+        <td className={`${cellCls} min-w-[12rem]`}>
+          {editing ? (
+            <input data-testid={`costpos-edit-label-${p.id}`} value={label}
+              aria-label={t('costpos.label')} autoFocus
+              onChange={(e) => setLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false) }}
+              className={`${fieldCls} w-full`} />
+          ) : (
+            <>
+              <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
+              {p.notes && <span className="block text-xs text-slate-500 whitespace-pre-wrap">{p.notes}</span>}
+              {chosen && (
+                <span data-testid={`costpos-chosen-${p.id}`}
+                  className={`block text-xs ${diverges ? 'text-amber-300' : 'text-slate-400'}`}>
+                  {t('vendor.salesChose')}: {chosen.vendor_name}
+                  {diverges && ` (${t('vendor.againstRecommendation')})`}
+                  {chosen.chosen_reason && (
+                    <span className="block text-slate-500">{chosen.chosen_reason}</span>
+                  )}
+                </span>
+              )}
+            </>
+          )}
+        </td>
+        <td className={`${cellCls} whitespace-nowrap`}>
+          <span data-testid={`costpos-kind-${p.id}`} className="text-xs text-slate-400">
+            {t(`costpos.type.${type}`)}
+            <span className="sr-only"> · {t(`costpos.kind.${p.kind}`)}{isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}</span>
           </span>
-        )}
-        <span data-testid={`costpos-kind-${p.id}`} className="text-[11px] text-slate-500">
-          {t(`costpos.kind.${p.kind}`)}
-          {isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}
-        </span>
-        <span className="ml-auto flex items-center gap-3 text-xs">
-          {time && (
-            <span data-testid={`costpos-lead-${p.id}`} className="text-slate-400">
-              {leadTimeText(time.days, time.unit)}
+          {isQuote && offerCount > 0 && (
+            <span className="block text-[11px] text-slate-500">
+              {offerCount === 1 ? t('costpos.offerCount1') : t('costpos.offersCount').replace('{n}', String(offerCount))}
             </span>
           )}
-          {/* Money and own time read as one figure: what it costs to buy and
-              what it costs us to run. */}
-          <span data-testid={`costpos-cost-${p.id}`} className="text-slate-300 tabular-nums">
-            {cost != null ? cost.toFixed(2) : '—'}
-            {p.hours != null && ` + ${p.hours} h`}
-          </span>
-          {editable && (
+        </td>
+        <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
+          {editing ? (
+            <span className="inline-flex flex-col gap-1 items-end">
+              {type === 'estimate' && (
+                <input data-testid={`costpos-edit-est-${p.id}`} type="number" step="0.01" value={est}
+                  aria-label={t('costpos.estCost')} placeholder={t('costpos.estCost')}
+                  onChange={(e) => setEst(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
+              )}
+              <input data-testid={`costpos-edit-hours-${p.id}`} type="number" step="0.5" value={hours}
+                aria-label={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
+                placeholder={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
+                onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
+            </span>
+          ) : (
             <>
-              <button type="button" data-testid={`costpos-edit-${p.id}`}
-                onClick={() => setEditing((v) => !v)}
-                className="text-slate-400 hover:text-slate-200">
-                {t('costpos.edit')}
+              {amount}
+              {needsFavorite && (
+                <span data-testid={`costpos-needs-favorite-${p.id}`}
+                  className="block text-xs text-amber-300">★ {t('costpos.pickFavorite')}</span>
+              )}
+            </>
+          )}
+        </td>
+        <td className={`${cellCls} whitespace-nowrap`}>
+          {editing && !isQuote ? (
+            <span className="inline-flex items-center gap-1">
+              <input data-testid={`costpos-edit-lead-${p.id}`} type="number" min={0} value={lead}
+                aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
+                onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-16 tabular-nums`} />
+              <UnitSelect testId={`costpos-edit-unit-${p.id}`} value={unit} onChange={setUnit} />
+            </span>
+          ) : time ? (
+            <span data-testid={`costpos-lead-${p.id}`} className="text-xs text-slate-400">
+              {leadTimeText(time.days, time.unit)}
+            </span>
+          ) : null}
+        </td>
+        <td className={`${cellCls} whitespace-nowrap text-right`}>
+          {editable && (editing ? (
+            <span className="inline-flex items-center gap-2">
+              <button type="button" data-testid={`costpos-save-${p.id}`}
+                disabled={label.trim() === '' || save.isPending} onClick={() => save.mutate()}
+                className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50 active:scale-[0.98]">
+                {t('common.save')}
               </button>
+              <button type="button" className="text-xs text-slate-400 hover:text-slate-200"
+                onClick={() => setEditing(false)}>{t('costpos.cancelEdit')}</button>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2 text-xs">
+              <button type="button" data-testid={`costpos-edit-${p.id}`}
+                onClick={() => setEditing(true)}
+                className="text-slate-400 hover:text-slate-200">{t('costpos.edit')}</button>
               <button type="button" data-testid={`costpos-delete-${p.id}`}
                 onClick={() => remove.mutate()} title={t('costpos.delete')}
                 className="text-slate-500 hover:text-red-300">✕</button>
-            </>
-          )}
-        </span>
-      </div>
-
-      {needsFavorite && (
-        <p data-testid={`costpos-needs-favorite-${p.id}`}
-          className="text-xs text-amber-300">
-          ★ {t('costpos.pickFavorite')}
-        </p>
+            </span>
+          ))}
+        </td>
+      </tr>
+      {editing && (
+        <tr className="bg-slate-800/60">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0`}>
+            <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
+              aria-label={t('costpos.notes')} placeholder={t('costpos.notes')}
+              onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} w-full`} />
+          </td>
+        </tr>
       )}
-
-      {/* What became of the department's vote. Read-only here: the decision is
-          Sales' to make, but the engineer who voted gets to see the outcome. */}
-      {chosen && (
-        <p data-testid={`costpos-chosen-${p.id}`}
-          className={`text-xs ${diverges ? 'text-amber-300' : 'text-slate-400'}`}>
-          {t('vendor.salesChose')}: {chosen.vendor_name}
-          {diverges && ` (${t('vendor.againstRecommendation')})`}
-          {chosen.chosen_reason && (
-            <span className="block text-slate-500">{chosen.chosen_reason}</span>
-          )}
-        </p>
-      )}
-
-      {p.notes && !editing && (
-        <p className="text-xs text-slate-500 whitespace-pre-wrap">{p.notes}</p>
-      )}
-
-      {editable && editing && (
-        <div data-testid={`costpos-editor-${p.id}`} className="flex flex-wrap items-center gap-2">
-          <input data-testid={`costpos-edit-label-${p.id}`} value={label}
-            aria-label={t('costpos.label')}
-            onChange={(e) => setLabel(e.target.value)} className={`${fieldCls} w-48`} />
-          {/* External work costs the department time too — coordination, trials. */}
-          <input data-testid={`costpos-edit-hours-${p.id}`} type="number" step="0.5" value={hours}
-            aria-label={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
-            placeholder={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
-            onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
-          {!isQuote && (
-            <input data-testid={`costpos-edit-est-${p.id}`} type="number" step="0.01" value={est}
-              aria-label={t('costpos.estCost')} placeholder={t('costpos.estCost')}
-              onChange={(e) => setEst(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
-          )}
-          <input data-testid={`costpos-edit-lead-${p.id}`} type="number" min={0} value={lead}
-            aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
-            onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
-          <UnitSelect testId={`costpos-edit-unit-${p.id}`} value={unit} onChange={setUnit} />
-          <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
-            aria-label={t('costpos.notes')} placeholder={t('costpos.notes')}
-            onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} flex-1 min-w-[8rem]`} />
-          <button type="button" data-testid={`costpos-save-${p.id}`}
-            disabled={label.trim() === '' || save.isPending} onClick={() => save.mutate()}
-            className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
-            {t('common.save')}
-          </button>
-        </div>
-      )}
-
-      {/* Quoted external work carries its vendors with it — one row per offer,
-          one star among them. */}
+      {/* Quoted work carries its vendors with it — one row per offer, one star
+          among them. */}
       {isQuote && (
-        <div data-testid={`costpos-offers-${p.id}`} className="pl-2">
-          <p className="text-[11px] uppercase tracking-wide text-slate-500">
-            {t('costpos.offers')}
-          </p>
-          {(p.offers ?? []).length === 0 ? (
-            <p className="text-xs text-slate-600">{t('costpos.noOffers')}</p>
-          ) : (
-            <ul>
-              {(p.offers ?? []).map((o) => (
-                <OfferRow key={o.id} changeId={changeId} positionId={p.id} offer={o}
-                  editable={editable} onChanged={onChanged} />
-              ))}
-            </ul>
-          )}
-          {editable && (
-            <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged} />
-          )}
-        </div>
+        <tr data-testid={`costpos-offers-${p.id}`} className="bg-slate-900/40">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0 pb-2`}>
+            <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('costpos.offers')}</p>
+            {offerCount === 0 ? (
+              <p className="text-xs text-slate-600">{t('costpos.noOffers')}</p>
+            ) : (
+              <ul>
+                {(p.offers ?? []).map((o) => (
+                  <OfferRow key={o.id} changeId={changeId} positionId={p.id} offer={o}
+                    editable={editable} onChanged={onChanged} />
+                ))}
+              </ul>
+            )}
+            {editable && <NewOfferForm changeId={changeId} positionId={p.id} onAdded={onChanged} />}
+          </td>
+        </tr>
       )}
-    </li>
+    </>
   )
 }
 
 /** The two standing effort answers, and the title each one files itself under. */
-const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string }[] = [
-  { kind: 'internal_effort', labelKey: 'costpos.internalEffortField' },
-  { kind: 'support_effort', labelKey: 'costpos.supportEffortField' },
+const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string; rowKey: string; descKey: string }[] = [
+  { kind: 'internal_effort', labelKey: 'costpos.internalEffortField',
+    rowKey: 'costpos.internalEffortRow', descKey: 'costpos.internalEffortDesc' },
+  { kind: 'support_effort', labelKey: 'costpos.supportEffortField',
+    rowKey: 'costpos.supportEffortRow', descKey: 'costpos.supportEffortDesc' },
 ]
 
 /**
- * One standing effort field. It is a field, not a position anybody has to think
- * about adding: filling it the first time creates the position behind it (with
- * the fixed title as its label), and every save after that edits that one.
+ * A standing row. It is a row, not a line anybody has to think about adding:
+ * filling it the first time creates the position behind it (with the fixed
+ * title as its label), and every save after that edits that one.
  */
-function EffortField({
-  changeId, departmentId, kind, labelKey, position, editable, onChanged,
+function EffortRow({
+  changeId, departmentId, kind, labelKey, rowKey, descKey, position, editable, index, onChanged,
 }: {
   changeId: number; departmentId: number
-  kind: CostPositionKind; labelKey: string
-  /** The department's position of this kind, once there is one. */
+  kind: CostPositionKind; labelKey: string; rowKey: string; descKey: string
   position?: CostPosition
-  editable: boolean; onChanged: () => void
+  editable: boolean; index: number; onChanged: () => void
 }) {
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
   const save = useMutation({
@@ -525,52 +580,53 @@ function EffortField({
   })
   const dirty = num(hours) !== (position?.hours ?? null)
   const commit = () => { if (dirty && !save.isPending) save.mutate() }
-
-  if (!editable) {
-    return (
-      <div className="flex items-baseline gap-2 text-sm">
-        <span className="text-slate-400">{t(labelKey)}</span>
-        <span data-testid={`costpos-effort-value-${kind}-${departmentId}`}
-          className="tabular-nums text-slate-200">
-          {position?.hours != null ? position.hours : '—'}
-        </span>
-      </div>
-    )
-  }
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={`effort-${kind}-${departmentId}`} className="text-sm text-slate-300">
-        {t(labelKey)}
-      </label>
-      <input id={`effort-${kind}-${departmentId}`}
-        data-testid={`costpos-effort-${kind}-${departmentId}`}
-        type="number" step="0.5" min={0} value={hours}
-        onChange={(e) => setHours(e.target.value)}
-        // Leaving the field is the ordinary way to save it; the button is for
-        // people who want to see something happen.
-        onBlur={commit}
-        className={`${fieldCls} w-24 tabular-nums`} />
-      <button type="button" data-testid={`costpos-effort-save-${kind}-${departmentId}`}
-        disabled={!dirty || save.isPending} onClick={commit}
-        className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
-        {t('common.save')}
-      </button>
-    </div>
+    <tr className="border-t border-slate-700/70">
+      <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
+      <td className={cellCls}>
+        <span className="text-slate-200">{t(rowKey)}</span>
+        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[10px]">
+          {t('costpos.standing')}
+        </span>
+      </td>
+      <td className={`${cellCls} text-slate-400 text-xs`}>{t(descKey)}</td>
+      <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.time')}</td>
+      <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
+        {editable ? (
+          <span className="inline-flex items-center gap-1.5">
+            <label htmlFor={`effort-${kind}-${departmentId}`} className="sr-only">{t(labelKey)}</label>
+            <input id={`effort-${kind}-${departmentId}`}
+              data-testid={`costpos-effort-${kind}-${departmentId}`}
+              type="number" step="0.5" min={0} value={hours}
+              onChange={(e) => setHours(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => { if (e.key === 'Enter') commit() }}
+              className={`${fieldCls} w-20 tabular-nums text-right`} />
+            <span className="text-xs text-slate-500">h</span>
+            <button type="button" data-testid={`costpos-effort-save-${kind}-${departmentId}`}
+              disabled={!dirty || save.isPending} onClick={commit}
+              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+              {t('common.save')}
+            </button>
+          </span>
+        ) : (
+          <span data-testid={`costpos-effort-value-${kind}-${departmentId}`}
+            className="tabular-nums text-slate-200">
+            {position?.hours != null ? position.hours : '—'}
+          </span>
+        )}
+      </td>
+      <td className={cellCls} />
+      <td className={cellCls} />
+    </tr>
   )
 }
 
-/**
- * What the part will weigh, quoted by Tooling while they cost the change.
- *
- * It stands next to the effort answers because it is the same kind of thing: a
- * question the department owes every time, not a position anybody adds. It is
- * an estimate and the label says so — the validated figure comes later from
- * somewhere else entirely, and this field never writes it.
- */
-function PartWeightField({ changeId, departmentId, weightG, editable, onSaved }: {
+/** Tooling's standing row: what the part will weigh. An estimate, and it says so. */
+function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSaved }: {
   changeId: number; departmentId: number
   weightG: number | null | undefined
-  editable: boolean; onSaved: () => void
+  editable: boolean; index: number; onSaved: () => void
 }) {
   const [grams, setGrams] = useState(weightG != null ? String(weightG) : '')
   const save = useMutation({
@@ -580,131 +636,228 @@ function PartWeightField({ changeId, departmentId, weightG, editable, onSaved }:
   })
   const dirty = num(grams) !== (weightG ?? null)
   const commit = () => { if (dirty && !save.isPending) save.mutate() }
-
-  if (!editable) {
-    return (
-      <div className="flex items-baseline gap-2 text-sm">
-        <span className="text-slate-400">{t('costpos.partWeightField')}</span>
-        <span data-testid={`costpos-weight-value-${departmentId}`}
-          className="tabular-nums text-slate-200">
-          {weightG != null ? weightG : '—'}
-        </span>
-      </div>
-    )
-  }
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor={`part-weight-${departmentId}`} className="text-sm text-slate-300">
-        {t('costpos.partWeightField')}
-      </label>
-      <input id={`part-weight-${departmentId}`}
-        data-testid={`costpos-weight-${departmentId}`}
-        type="number" step="1" min={0} value={grams}
-        onChange={(e) => setGrams(e.target.value)}
-        // Same habit as the effort fields: leaving the box is what saves it.
-        onBlur={commit}
-        className={`${fieldCls} w-28 tabular-nums`} />
-      <button type="button" data-testid={`costpos-weight-save-${departmentId}`}
-        disabled={!dirty || save.isPending} onClick={commit}
-        className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
-        {t('common.save')}
-      </button>
-    </div>
+    <tr className="border-t border-slate-700/70">
+      <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
+      <td className={cellCls}>
+        <span className="text-slate-200">{t('costpos.partWeightRow')}</span>
+        <span className="ml-1.5 rounded bg-slate-700/70 text-slate-400 px-1 py-0 text-[10px]">
+          {t('costpos.standing')}
+        </span>
+      </td>
+      <td className={`${cellCls} text-slate-400 text-xs`}>{t('costpos.partWeightDesc')}</td>
+      <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.weight')}</td>
+      <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
+        {editable ? (
+          <span className="inline-flex items-center gap-1.5">
+            <label htmlFor={`part-weight-${departmentId}`} className="sr-only">{t('costpos.partWeightField')}</label>
+            <input id={`part-weight-${departmentId}`}
+              data-testid={`costpos-weight-${departmentId}`}
+              type="number" step="1" min={0} value={grams}
+              onChange={(e) => setGrams(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => { if (e.key === 'Enter') commit() }}
+              className={`${fieldCls} w-20 tabular-nums text-right`} />
+            <span className="text-xs text-slate-500">g</span>
+            <button type="button" data-testid={`costpos-weight-save-${departmentId}`}
+              disabled={!dirty || save.isPending} onClick={commit}
+              className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+              {t('common.save')}
+            </button>
+          </span>
+        ) : (
+          <span data-testid={`costpos-weight-value-${departmentId}`} className="tabular-nums text-slate-200">
+            {weightG != null ? weightG : '—'}
+          </span>
+        )}
+      </td>
+      <td className={cellCls} />
+      <td className={cellCls} />
+    </tr>
   )
 }
 
+const ADD_CATEGORY = '__add_category'
+
 /**
- * Adding a position means adding an external one — the two effort answers have
- * their own standing fields above, so the kind is not a question any more.
+ * The add line at the foot of the table. Step by step: the category decides
+ * what the line is (own hours, or money as estimate or vendor quote), then the
+ * description, then the amount. Enter saves and clears for the next line.
  */
-function NewPositionForm({ changeId, departmentId, onAdded }: {
-  changeId: number; departmentId: number; onAdded: () => void
+function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged }: {
+  changeId: number; departmentId: number; categories: CostCategory[]
+  onAdded: () => void; onCategoriesChanged: () => void
 }) {
-  const [label, setLabel] = useState('')
   const [tag, setTag] = useState('')
-  const [freeTag, setFreeTag] = useState('')
+  const [label, setLabel] = useState('')
   const [pricing, setPricing] = useState<CostPositionPricing>('estimate')
   const [hours, setHours] = useState('')
   const [est, setEst] = useState('')
   const [lead, setLead] = useState('')
   const [unit, setUnit] = useState<LeadTimeUnit>(DEFAULT_UNIT)
+  // "+ Add own category…" opens a two-field line: name and what it is.
+  const [newCat, setNewCat] = useState<{ label: string; type: CostEntryType } | null>(null)
 
-  const { data: tags } = useQuery({
-    queryKey: ['costing-tags', departmentId],
-    queryFn: () => changesApi.costingTags(departmentId),
-  })
+  const category = categories.find((c) => c.key === tag)
+  const entryType: CostEntryType = category?.entry_type ?? 'money'
+  const isTime = entryType === 'time'
+  const isQuote = !isTime && pricing === 'quote'
+  const lineType: LineType = isTime ? 'time' : pricing
 
-  const isQuote = pricing === 'quote'
-
+  const reset = () => { setLabel(''); setHours(''); setEst(''); setLead('') }
   const add = useMutation({
     mutationFn: () => changesApi.createCostPosition(changeId, {
       department_id: departmentId,
       label: label.trim(),
-      tag: (tag === '__free' ? freeTag.trim() : tag) || null,
-      kind: 'external',
-      pricing,
+      tag: tag || null,
+      kind: isTime ? 'own_time' : 'external',
+      pricing: isTime ? 'estimate' : pricing,
       hours: num(hours),
-      est_cost: isQuote ? null : num(est),
+      est_cost: lineType === 'estimate' ? num(est) : null,
       lead_time_days: num(lead), lead_time_unit: unit,
     }),
-    onSuccess: () => {
-      setLabel(''); setTag(''); setFreeTag(''); setHours(''); setEst(''); setLead('')
-      onAdded()
-    },
+    onSuccess: () => { reset(); onAdded() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the position'),
   })
+  const createCategory = useMutation({
+    mutationFn: (c: { label: string; type: CostEntryType }) =>
+      changesApi.createCostCategory(departmentId, c.label.trim(), c.type),
+    onSuccess: (row) => { onCategoriesChanged(); setTag(row.key); setNewCat(null); toast.success(t('costpos.categoryAdded')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the category'),
+  })
+  const deleteCategory = useMutation({
+    mutationFn: (id: number) => changesApi.deleteCostCategory(id),
+    onSuccess: () => { onCategoriesChanged(); setTag(''); toast.success(t('costpos.categoryDeleted')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not remove the category'),
+  })
+
+  const ready = label.trim() !== '' && !add.isPending
+  const submitOnEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter' && ready) add.mutate() }
+  const own = categories.filter((c) => c.extra && c.custom_id == null)
+  const custom = categories.filter((c) => c.custom_id != null)
+  const common = categories.filter((c) => !c.extra)
+  const option = (c: CostCategory) => (
+    <option key={c.key} value={c.key}>
+      {tagLabel(c.key, categories)}{c.entry_type === 'time' ? ' · h' : ''}
+    </option>
+  )
 
   return (
-    <div data-testid={`costpos-new-${departmentId}`}
-      className="flex flex-wrap items-center gap-2 rounded border border-slate-700 bg-slate-900/30 px-2 py-2">
-      <input data-testid={`costpos-new-label-${departmentId}`} value={label}
-        aria-label={t('costpos.label')} placeholder={t('costpos.labelPlaceholder')}
-        onChange={(e) => setLabel(e.target.value)} className={`${fieldCls} w-48`} />
-
-      <select data-testid={`costpos-new-tag-${departmentId}`} value={tag}
-        aria-label={t('costpos.tag')}
-        onChange={(e) => setTag(e.target.value)} className={`${fieldCls} w-40`}>
-        <option value="">{t('costpos.tagNone')}</option>
-        {(tags?.items ?? []).map((item) => (
-          <option key={item.key} value={item.key}>{tagLabel(item.key)}</option>
-        ))}
-        {/* The list never covers everything — a department may name its own. */}
-        <option value="__free">{t('costpos.tagFree')}</option>
-      </select>
-      {tag === '__free' && (
-        <input data-testid={`costpos-new-tag-free-${departmentId}`} value={freeTag}
-          aria-label={t('costpos.tag')} placeholder={t('costpos.tagFree')}
-          onChange={(e) => setFreeTag(e.target.value)} className={`${fieldCls} w-40`} />
+    <>
+      <tr data-testid={`costpos-new-${departmentId}`} className="border-t border-slate-600 bg-slate-800/40">
+        <td className={`${cellCls} text-slate-500`}>+</td>
+        <td className={cellCls}>
+          <select data-testid={`costpos-new-tag-${departmentId}`}
+            value={newCat !== null ? ADD_CATEGORY : tag} aria-label={t('costpos.tag')}
+            onChange={(e) => {
+              if (e.target.value === ADD_CATEGORY) { setNewCat({ label: '', type: 'money' }); return }
+              setNewCat(null); setTag(e.target.value)
+            }}
+            className={`${fieldCls} w-44`}>
+            <option value="">{t('costpos.pickCategory')}</option>
+            {own.length > 0 && <optgroup label={t('costpos.tag')}>{own.map(option)}</optgroup>}
+            {custom.length > 0 && <optgroup label={t('costpos.categoryHint').split(':')[0]}>{custom.map(option)}</optgroup>}
+            {common.map(option)}
+            <option value={ADD_CATEGORY}>{t('costpos.addCategory')}</option>
+          </select>
+          {category?.custom_id != null && (
+            <button type="button" data-testid={`costpos-category-delete-${departmentId}`}
+              title={t('costpos.categoryHint')} disabled={deleteCategory.isPending}
+              onClick={() => deleteCategory.mutate(category.custom_id as number)}
+              className="block mt-1 text-[11px] text-red-300 hover:text-red-200 underline decoration-dotted">
+              {t('costpos.deleteCategory')}
+            </button>
+          )}
+        </td>
+        <td className={`${cellCls} min-w-[12rem]`}>
+          <input data-testid={`costpos-new-label-${departmentId}`} value={label}
+            aria-label={t('costpos.label')} placeholder={t('costpos.descPlaceholder')}
+            onChange={(e) => setLabel(e.target.value)} onKeyDown={submitOnEnter}
+            className={`${fieldCls} w-full`} />
+        </td>
+        <td className={`${cellCls} whitespace-nowrap`}>
+          {isTime ? (
+            <span className="text-xs text-slate-400">{t('costpos.type.time')}</span>
+          ) : (
+            <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
+              aria-label={t('costpos.pricing')}
+              onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
+              className={`${fieldCls} w-40`}>
+              <option value="estimate">{t('costpos.type.estimate')}</option>
+              <option value="quote">{t('costpos.type.quote')}</option>
+            </select>
+          )}
+        </td>
+        <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
+          <span className="inline-flex flex-col gap-1 items-end">
+            {lineType === 'estimate' && (
+              <input data-testid={`costpos-new-est-${departmentId}`} type="number" step="0.01"
+                value={est} aria-label={t('costpos.estCost')} placeholder={t('costpos.cost')}
+                onChange={(e) => setEst(e.target.value)} onKeyDown={submitOnEnter}
+                className={`${fieldCls} w-28 tabular-nums text-right`} />
+            )}
+            {/* Money lines take the department's own time around the vendor too;
+                a time line IS the hours. */}
+            <input data-testid={`costpos-new-hours-${departmentId}`} type="number" step="0.5"
+              value={hours} aria-label={isTime ? t('costpos.hours') : t('costpos.ownTime')}
+              placeholder={isTime ? t('costpos.hours') : t('costpos.ownTime')}
+              onChange={(e) => setHours(e.target.value)} onKeyDown={submitOnEnter}
+              className={`${fieldCls} w-28 tabular-nums text-right`} />
+          </span>
+        </td>
+        <td className={`${cellCls} whitespace-nowrap`}>
+          {!isQuote && (
+            <span className="inline-flex items-center gap-1">
+              <input data-testid={`costpos-new-lead-${departmentId}`} type="number" min={0} value={lead}
+                aria-label={t('costpos.leadTime')} placeholder={t('summation.days')}
+                onChange={(e) => setLead(e.target.value)} onKeyDown={submitOnEnter}
+                className={`${fieldCls} w-16 tabular-nums`} />
+              <UnitSelect testId={`costpos-new-unit-${departmentId}`} value={unit} onChange={setUnit} />
+            </span>
+          )}
+        </td>
+        <td className={`${cellCls} text-right whitespace-nowrap`}>
+          <button type="button" data-testid={`costpos-add-${departmentId}`}
+            disabled={!ready} onClick={() => add.mutate()}
+            className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 active:scale-[0.98]">
+            {t('costpos.addLine')}
+          </button>
+        </td>
+      </tr>
+      {newCat !== null && (
+        <tr className="bg-slate-800/40">
+          <td />
+          <td colSpan={6} className={`${cellCls} pt-0`}>
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <input data-testid={`costpos-new-category-${departmentId}`} value={newCat.label} autoFocus
+                aria-label={t('costpos.newCategoryLabel')} placeholder={t('costpos.newCategoryLabel')}
+                onChange={(e) => setNewCat({ ...newCat, label: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newCat.label.trim()) createCategory.mutate(newCat)
+                  if (e.key === 'Escape') setNewCat(null)
+                }}
+                className={`${fieldCls} w-48`} />
+              <select data-testid={`costpos-new-category-type-${departmentId}`} value={newCat.type}
+                aria-label={t('costpos.categoryType')}
+                onChange={(e) => setNewCat({ ...newCat, type: e.target.value as CostEntryType })}
+                className={`${fieldCls} w-40`}>
+                <option value="money">{t('costpos.type.estimate')} / {t('costpos.type.quote')}</option>
+                <option value="time">{t('costpos.type.time')}</option>
+              </select>
+              <button type="button" data-testid={`costpos-new-category-save-${departmentId}`}
+                disabled={!newCat.label.trim() || createCategory.isPending}
+                onClick={() => createCategory.mutate(newCat)}
+                className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
+                {t('costpos.saveCategory')}
+              </button>
+              <button type="button" className="text-xs text-slate-400 hover:text-slate-200"
+                onClick={() => setNewCat(null)}>{t('common.cancel')}</button>
+              <span className="text-[11px] text-slate-500">{t('costpos.categoryHint')}</span>
+            </span>
+          </td>
+        </tr>
       )}
-
-      {/* External work takes the department's own time around the vendor —
-          coordination, trials — and that is not the vendor's price. */}
-      <input data-testid={`costpos-new-hours-${departmentId}`} type="number" step="0.5"
-        value={hours} aria-label={t('costpos.ownTime')} placeholder={t('costpos.ownTime')}
-        onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
-      <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
-        aria-label={t('costpos.pricing')}
-        onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
-        className={`${fieldCls} w-32`}>
-        <option value="estimate">{t('costpos.pricing.estimate')}</option>
-        <option value="quote">{t('costpos.pricing.quote')}</option>
-      </select>
-      {!isQuote && (
-        <input data-testid={`costpos-new-est-${departmentId}`} type="number" step="0.01"
-          value={est} aria-label={t('costpos.estCost')} placeholder={t('costpos.estCost')}
-          onChange={(e) => setEst(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
-      )}
-      <input data-testid={`costpos-new-lead-${departmentId}`} type="number" min={0} value={lead}
-        aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
-        onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
-      <UnitSelect testId={`costpos-new-unit-${departmentId}`} value={unit} onChange={setUnit} />
-
-      <button type="button" data-testid={`costpos-add-${departmentId}`}
-        disabled={label.trim() === '' || add.isPending} onClick={() => add.mutate()}
-        className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
-        {t('costpos.addExternal')}
-      </button>
-    </div>
+    </>
   )
 }
 
@@ -725,78 +878,104 @@ export default function CostPositions({
     queryKey: ['costing-positions', changeId],
     queryFn: () => changesApi.listCostPositions(changeId),
   })
+  const { data: tags } = useQuery({
+    queryKey: ['costing-tags', departmentId],
+    queryFn: () => changesApi.costingTags(departmentId),
+  })
+  const categories = tags?.items ?? []
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['costing-positions', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
   const mine = (positions ?? []).filter((p) => p.department_id === departmentId)
-  // Each standing field binds to THE position of its kind. A department that
+  // Each standing row binds to THE position of its kind. A department that
   // somehow has two keeps the extras in the list below rather than losing them.
   const boundIds = new Set(
     EFFORT_FIELDS.map(({ kind }) => mine.find((p) => p.kind === kind)?.id)
       .filter((id): id is number => id != null))
   const listed = mine.filter((p) => !boundIds.has(p.id))
-  // The weight lives on the change, not on a position, so saving it refreshes
-  // the change and the wrap-up that reads it — the positions are untouched.
   const isToolEngineer = departmentName === TOOL_ENGINEER_DEPARTMENT
   const weightSaved = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
+  const standingCount = EFFORT_FIELDS.length + (isToolEngineer ? 1 : 0)
+  const totalMoney = listed.reduce((s, p) => s + (lineTypeOf(p) === 'time' ? 0 : (effectiveOf(p) ?? 0)), 0)
+  const totalHours = mine.reduce((s, p) => s + (p.hours ?? 0), 0)
 
   return (
-    <div data-testid={`costpos-section-${departmentId}`} className="space-y-3">
-      {/* The two answers every department owes, in front of them from the
-          moment the block opens. */}
-      <div data-testid={`costpos-effort-${departmentId}`} className="space-y-1.5">
-        <p className="text-[11px] uppercase tracking-wide text-slate-500">
-          {t('costpos.effortTitle')}
-        </p>
-        {EFFORT_FIELDS.map(({ kind, labelKey }) => {
-          const bound = mine.find((p) => p.kind === kind)
-          return (
-            // Keyed on the position it binds to, so the field remounts once that
-            // position arrives and shows the saved number instead of the empty
-            // box it started as.
-            <EffortField key={`${kind}-${bound?.id ?? 'new'}`}
-              changeId={changeId} departmentId={departmentId}
-              kind={kind} labelKey={labelKey} position={bound}
-              editable={editable} onChanged={invalidate} />
-          )
-        })}
-        {/* Tooling is the department that can answer this one, so it is asked
-            here and nowhere else. */}
-        {isToolEngineer && (
-          <PartWeightField key={`weight-${partWeightG ?? 'new'}`}
-            changeId={changeId} departmentId={departmentId}
-            weightG={partWeightG} editable={editable} onSaved={weightSaved} />
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-[11px] uppercase tracking-wide text-slate-500">
-          {t('costpos.externalTitle')}
-        </p>
-        {listed.length === 0 ? (
-          <p className="text-xs text-slate-600" data-testid={`costpos-empty-${departmentId}`}>
-            {t('costpos.noExternal')}
-          </p>
-        ) : (
-          <ul className="space-y-1.5" data-testid={`costpos-list-${departmentId}`}>
-            {listed.map((p) => (
-              <PositionRow key={p.id} changeId={changeId} position={p}
-                editable={editable} onChanged={invalidate} />
+    <div data-testid={`costpos-section-${departmentId}`} className="space-y-1">
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${cellCls} text-left font-normal w-8`}>{t('costpos.col.n')}</th>
+              <th className={`${cellCls} text-left font-normal`}>{t('costpos.col.category')}</th>
+              <th className={`${cellCls} text-left font-normal`}>{t('costpos.col.description')}</th>
+              <th className={`${cellCls} text-left font-normal`}>{t('costpos.col.type')}</th>
+              <th className={`${cellCls} text-right font-normal`}>{t('costpos.col.amount')}</th>
+              <th className={`${cellCls} text-left font-normal whitespace-nowrap`}>{t('costpos.col.leadTime')}</th>
+              <th className={cellCls} />
+            </tr>
+          </thead>
+          <tbody data-testid={`costpos-effort-${departmentId}`}>
+            {EFFORT_FIELDS.map(({ kind, labelKey, rowKey, descKey }, i) => {
+              const bound = mine.find((p) => p.kind === kind)
+              return (
+                // Keyed on the position it binds to, so the row remounts once
+                // that position arrives and shows the saved number.
+                <EffortRow key={`${kind}-${bound?.id ?? 'new'}`}
+                  changeId={changeId} departmentId={departmentId}
+                  kind={kind} labelKey={labelKey} rowKey={rowKey} descKey={descKey}
+                  position={bound} editable={editable} index={i + 1} onChanged={invalidate} />
+              )
+            })}
+            {isToolEngineer && (
+              <PartWeightRow key={`weight-${partWeightG ?? 'new'}`}
+                changeId={changeId} departmentId={departmentId}
+                weightG={partWeightG} editable={editable} index={standingCount}
+                onSaved={weightSaved} />
+            )}
+          </tbody>
+          <tbody data-testid={`costpos-list-${departmentId}`}>
+            {listed.length === 0 ? (
+              <tr className="border-t border-slate-700/70">
+                <td />
+                <td colSpan={6} className={`${cellCls} text-xs text-slate-600`}
+                  data-testid={`costpos-empty-${departmentId}`}>
+                  {t('costpos.noExternal')}
+                </td>
+              </tr>
+            ) : listed.map((p, i) => (
+              <PositionRow key={p.id} changeId={changeId} position={p} categories={categories}
+                editable={editable} index={standingCount + i + 1} onChanged={invalidate} />
             ))}
-          </ul>
-        )}
-        {editable ? (
-          <NewPositionForm changeId={changeId} departmentId={departmentId} onAdded={invalidate} />
-        ) : (
-          <p className="text-xs text-slate-600" data-testid={`costpos-readonly-${departmentId}`}>
-            {t('costpos.readOnly')}
-          </p>
-        )}
+          </tbody>
+          <tfoot>
+            {editable && (
+              <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
+                onAdded={invalidate}
+                onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
+            )}
+            <tr className="border-t border-slate-600">
+              <td />
+              <td colSpan={3} className={`${cellCls} text-xs uppercase tracking-wide text-slate-500`}>
+                {t('costpos.total')}
+              </td>
+              <td className={`${cellCls} ${numCls} text-slate-100 whitespace-nowrap`}
+                data-testid={`costpos-total-${departmentId}`}>
+                {money(totalMoney)}{totalHours > 0 && ` + ${totalHours} h`}
+              </td>
+              <td colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
       </div>
+      {!editable && (
+        <p className="text-xs text-slate-600" data-testid={`costpos-readonly-${departmentId}`}>
+          {t('costpos.readOnly')}
+        </p>
+      )}
     </div>
   )
 }
