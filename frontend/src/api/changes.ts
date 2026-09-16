@@ -6,6 +6,7 @@ import type {
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
+  RiskTemplate, RiskTemplateIn,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
@@ -239,9 +240,20 @@ export const changesApi = {
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
 
   // The risk vocabulary is the backend's list, not a hard-coded one here.
-  riskTypes: () =>
-    client.get<{ items: { key: string }[] }>('/v1/changes/reference/risk-types')
+  riskTypes: (departmentId?: number) =>
+    client.get<{ items: { key: string; label_de?: string; label_en?: string; extra?: boolean }[] }>(
+      '/v1/changes/reference/risk-types',
+      { params: departmentId != null ? { department_id: departmentId } : {} })
       .then((r) => r.data),
+  // A department's pre-written risks: picked in the risk form, saved from it,
+  // deleted when one was written down by accident.
+  riskTemplates: (departmentId: number) =>
+    client.get<RiskTemplate[]>('/v1/changes/reference/risk-templates',
+      { params: { department_id: departmentId } }).then((r) => r.data),
+  createRiskTemplate: (body: RiskTemplateIn) =>
+    client.post<RiskTemplate>('/v1/changes/reference/risk-templates', body).then((r) => r.data),
+  deleteRiskTemplate: (id: number) =>
+    client.delete<RiskTemplate>(`/v1/changes/reference/risk-templates/${id}`).then((r) => r.data),
   // Answering records what the customer said; it does not close the question —
   // the asking side (or PM) still decides whether it is settled.
   answerConcern: (id: number, concernId: number, note: string) =>

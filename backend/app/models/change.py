@@ -683,6 +683,30 @@ RISK_TYPES = ("fill_issue", "dimensional_issue", "visual_surface",
 RISK_SEVERITIES = (1, 2, 3)
 
 
+class DepartmentRiskTemplate(Base):
+    """A risk a department wrote down once to raise again.
+
+    "Gauge not capable for this feature" comes up on every third change; the
+    department keeps it here, typed and rated, and picks it in the risk form
+    instead of retyping it. It is the department's own list: its members, the
+    PM and admins write to it. Deleting is soft — a template added by accident
+    disappears from the list, the row stays so the register can still explain
+    where a risk's wording came from.
+    """
+    __tablename__ = "department_risk_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    risk_type: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[int] = mapped_column(Integer, default=2)
+    note: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class ChangeConcern(Base):
     """A team member's flag against a change, raised outside the meeting.
 

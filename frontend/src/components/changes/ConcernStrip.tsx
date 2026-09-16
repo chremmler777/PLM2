@@ -9,7 +9,7 @@ import { preferredDepartmentId } from '../../lib/departments'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import type {
-  Attachment, ChangeConcern, ConcernKind, RiskSeverity, RiskType,
+  Attachment, ChangeConcern, ConcernKind, RiskSeverity, RiskType, RiskTemplateIn,
 } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -130,17 +130,54 @@ export default function ConcernStrip({
 
   // Fetched only once the risk form is open — an unopened strip asks for
   // nothing, and the scoping form never needs the vocabulary.
+  // The vocabulary is the department's own (backend: risk_types.py), so it is
+  // re-fetched when the department changes.
   const { data: riskTypeData } = useQuery({
-    queryKey: ['risk-types'],
-    queryFn: () => changesApi.riskTypes(),
+    queryKey: ['risk-types', effectiveDept ?? null],
+    queryFn: () => changesApi.riskTypes(effectiveDept),
     enabled: adding && scoped,
     retry: false,
   })
   const riskTypeOptions: string[] = riskTypeData?.items?.length
     ? riskTypeData.items.map((i) => i.key)
     : RISK_TYPES
+  // Served labels first (they cover every department's keys); the local table
+  // only for the legacy keys when the reference is unreachable.
+  const servedLabel = (k: string) => riskTypeData?.items?.find((i) => i.key === k)?.label_en
   const riskTypeLabel = (k?: string | null) =>
-    k ? t(`risktype.${k}`) : t('risk.kind')
+    k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : k))
+      : t('risk.kind')
+
+  // The department's pre-written risks. Picking one fills the form; the user
+  // may still edit before raising. Saving writes the current form to the list.
+  const { data: templates = [] } = useQuery({
+    queryKey: ['risk-templates', effectiveDept ?? null],
+    queryFn: () => changesApi.riskTemplates(effectiveDept as number),
+    enabled: adding && scoped && effectiveDept !== undefined,
+    retry: false,
+  })
+  const [templateId, setTemplateId] = useState<number | ''>('')
+  const [saveTemplate, setSaveTemplate] = useState(false)
+  const applyTemplate = (id: number | '') => {
+    setTemplateId(id)
+    const tpl = templates.find((x) => x.id === id)
+    if (!tpl) return
+    setRiskType(tpl.risk_type); setSeverity(tpl.severity); setNote(tpl.note)
+  }
+  const invalidateTemplates = () =>
+    qc.invalidateQueries({ queryKey: ['risk-templates', effectiveDept ?? null] })
+  const deleteTemplate = useMutation({
+    mutationFn: (id: number) => changesApi.deleteRiskTemplate(id),
+    onSuccess: () => { setTemplateId(''); invalidateTemplates(); toast.success(t('risk.templateDeleted')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the template'),
+  })
+  const saveTemplateNow = useMutation({
+    // The payload is handed over, not read from state: the form is cleared in
+    // the same tick the raise succeeds.
+    mutationFn: (body: RiskTemplateIn) => changesApi.createRiskTemplate(body),
+    onSuccess: () => { invalidateTemplates(); toast.success(t('risk.templateSaved')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the template'),
+  })
 
   // Scoping raises a concern (question / cancel vote); assessment raises a
   // risk. The backend enforces the same split.
@@ -153,7 +190,16 @@ export default function ConcernStrip({
         : { kind }),
       ...(effectiveDept !== undefined ? { department_id: effectiveDept } : {}),
     }),
-    onSuccess: () => { setNote(''); setAdding(false); setFailure(null); invalidate() },
+    onSuccess: () => {
+      // The tick means "keep this wording for next time": saved after the
+      // raise went through, so a refused risk never becomes a template.
+      if (scoped && saveTemplate && riskType && effectiveDept !== undefined) {
+        saveTemplateNow.mutate({ department_id: effectiveDept, risk_type: riskType,
+          severity, note: note.trim() })
+      }
+      setNote(''); setAdding(false); setFailure(null); setSaveTemplate(false); setTemplateId('')
+      invalidate()
+    },
     onError: (e: unknown) => {
       const detail = errDetail(e) ?? 'Could not raise the flag'
       setFailure(detail)
@@ -467,6 +513,29 @@ export default function ConcernStrip({
       )}
       {adding && scoped && (
         <div className="space-y-2" data-testid="risk-form">
+          {effectiveDept !== undefined && templates.length > 0 && (
+            <div className="flex gap-2 items-center flex-wrap">
+              <select value={templateId} aria-label={t('risk.template')} data-testid="risk-template-select"
+                onChange={(e) => applyTemplate(e.target.value === '' ? '' : Number(e.target.value))}
+                className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 max-w-[24rem]">
+                <option value="">{t('risk.pickTemplate')}</option>
+                {templates.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {`[${x.severity}] ${riskTypeLabel(x.risk_type)} — ${x.note}`}
+                  </option>
+                ))}
+              </select>
+              {templateId !== '' && (
+                <button type="button" data-testid="risk-template-delete"
+                  className="text-xs text-red-300 hover:text-red-200 underline decoration-dotted disabled:opacity-50"
+                  title={t('risk.templateHint')}
+                  disabled={deleteTemplate.isPending}
+                  onClick={() => deleteTemplate.mutate(templateId as number)}>
+                  {t('risk.deleteTemplate')}
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex gap-2 items-center flex-wrap">
             <select value={riskType} aria-label={t('risk.type')} data-testid="risk-type-select"
               onChange={(e) => setRiskType(e.target.value as RiskType | '')}
@@ -512,9 +581,17 @@ export default function ConcernStrip({
                 || effectiveDept === undefined}
               onClick={() => raise.mutate()}>{w.raise}</button>
             <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
-              onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
+              onClick={() => { setAdding(false); setNote(''); setFailure(null); setSaveTemplate(false); setTemplateId('') }}>
               {t('common.cancel')}
             </button>
+            {effectiveDept !== undefined && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer ml-auto"
+                title={t('risk.templateHint')}>
+                <input type="checkbox" data-testid="risk-save-template"
+                  checked={saveTemplate} onChange={(e) => setSaveTemplate(e.target.checked)} />
+                {t('risk.saveAsTemplate')}
+              </label>
+            )}
           </div>
         </div>
       )}

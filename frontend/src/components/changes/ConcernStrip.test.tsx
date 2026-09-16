@@ -9,6 +9,9 @@ vi.mock('../../api/changes', () => ({
   changesApi: {
     listConcerns: vi.fn(),
     riskTypes: vi.fn().mockResolvedValue({ items: [] }),
+    riskTemplates: vi.fn().mockResolvedValue([]),
+    createRiskTemplate: vi.fn().mockResolvedValue({}),
+    deleteRiskTemplate: vi.fn().mockResolvedValue({}),
     raiseConcern: vi.fn().mockResolvedValue({}),
     withdrawConcern: vi.fn().mockResolvedValue({}),
     answerConcern: vi.fn().mockResolvedValue({}),
@@ -532,5 +535,74 @@ describe('ConcernStrip risk rows', () => {
     expect(screen.queryByTestId('risk-severity-9')).toBeNull()
     expect(screen.getByText(t('risk.kind'))).toBeTruthy()
     expect((screen.getByTestId('concern-close-9') as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+
+describe('ConcernStrip — department risk templates and vocabulary', () => {
+  const depts = [{ id: 2, name: 'Quality' }, { id: 4, name: 'Tool Engineer' }]
+  afterEach(cleanup)
+  beforeEach(() => {
+    authState.current = { userId: 5, isAdmin: false }
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    // An earlier block leaves the raise rejecting; these raises must succeed.
+    vi.mocked(changesApi.raiseConcern).mockReset().mockResolvedValue({} as never)
+    vi.mocked(changesApi.createRiskTemplate).mockClear()
+    vi.mocked(changesApi.deleteRiskTemplate).mockClear()
+    vi.mocked(changesApi.riskTypes).mockResolvedValue({ items: [
+      { key: 'not_steel_safe', label_en: 'Not steel-safe', extra: true },
+      { key: 'other', label_en: 'Other', extra: false },
+    ] })
+    vi.mocked(changesApi.riskTemplates).mockResolvedValue([
+      { id: 31, department_id: 4, risk_type: 'not_steel_safe', severity: 3,
+        note: 'Rib cannot be added without welding', created_by: 1, created_at: '' },
+    ])
+  })
+
+  it('asks for the vocabulary of the department and labels it from the server', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[4]} onlyDepartmentId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    await waitFor(() => expect(changesApi.riskTypes).toHaveBeenCalledWith(4))
+    const select = await screen.findByTestId('risk-type-select') as HTMLSelectElement
+    await waitFor(() => expect([...select.options].map((o) => o.text)).toContain('Not steel-safe'))
+  })
+
+  it('fills the form from a template, still lets the user edit, and can delete an accidental one', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[4]} onlyDepartmentId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    const picker = await screen.findByTestId('risk-template-select')
+    fireEvent.change(picker, { target: { value: '31' } })
+    expect((screen.getByTestId('risk-type-select') as HTMLSelectElement).value).toBe('not_steel_safe')
+    expect((screen.getByTestId('risk-note') as HTMLTextAreaElement).value)
+      .toBe('Rib cannot be added without welding')
+    expect(screen.getByTestId('risk-severity-pick-3').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'Rib needs welding on both halves' } })
+    fireEvent.click(screen.getByTestId('risk-submit'))
+    await waitFor(() => expect(changesApi.raiseConcern).toHaveBeenCalledWith(7, {
+      kind: 'risk', note: 'Rib needs welding on both halves', risk_type: 'not_steel_safe',
+      severity: 3, department_id: 4,
+    }))
+    // Not ticked: nothing written to the department's list.
+    expect(changesApi.createRiskTemplate).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.change(await screen.findByTestId('risk-template-select'), { target: { value: '31' } })
+    fireEvent.click(screen.getByTestId('risk-template-delete'))
+    await waitFor(() => expect(changesApi.deleteRiskTemplate).toHaveBeenCalledWith(31))
+  })
+
+  it('saves the raised risk as a template when ticked', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[4]} onlyDepartmentId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    await screen.findByTestId('risk-form')
+    fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
+    fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'keep this one' } })
+    fireEvent.click(screen.getByTestId('risk-save-template'))
+    fireEvent.click(screen.getByTestId('risk-submit'))
+    await waitFor(() => expect(changesApi.createRiskTemplate).toHaveBeenCalledWith({
+      department_id: 4, risk_type: 'other', severity: 2, note: 'keep this one',
+    }))
   })
 })

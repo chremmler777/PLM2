@@ -527,18 +527,104 @@ async def reference_assessment_checklist(
 
 @router.get("/reference/risk-types")
 async def reference_risk_types(
+    department_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """The vocabulary a risk concern is typed with.
+    """The vocabulary a risk concern is typed with, resolved per department.
 
     Same reasoning as the checklist above: the list lives in
-    app/models/change.py because that is what the raise endpoint validates
-    against, so the frontend is served it rather than keeping its own copy.
-    Shaped as objects so a label can be added later without a breaking change.
+    app/services/risk_types.py because that is what the raise endpoint
+    validates against, so the frontend is served it rather than keeping its
+    own copy. Without a department: the legacy moulding list plus the common
+    types.
     """
-    from app.models.change import RISK_TYPES
-    return {"items": [{"key": k} for k in RISK_TYPES]}
+    from app.services.risk_types import types_for
+    name = None
+    if department_id is not None:
+        dept = await db.get(Department, department_id)
+        name = dept.name if dept is not None else None
+    return {"items": types_for(name)}
+
+
+async def _may_edit_risk_templates(db: AsyncSession, user: User, department_id: int) -> bool:
+    """The department's own list: its members, Project Management and admins
+    (an admin acting as a department counts as that department only)."""
+    from app.services.workflow_service import WorkflowService
+    if getattr(user, "acts_as_department_id", None) is None and user.role == "admin":
+        return True
+    ids = await WorkflowService.effective_department_ids(db, user)
+    if department_id in ids:
+        return True
+    pm = (await db.execute(
+        select(Department.id).where(Department.name == "Project Manager"))).scalar_one_or_none()
+    return pm is not None and pm in ids
+
+
+@router.get("/reference/risk-templates", response_model=List[RiskTemplateResponse])
+async def list_risk_templates(
+    department_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department's pre-written risks, live ones only, newest last."""
+    from app.models.change import DepartmentRiskTemplate
+    rows = (await db.execute(
+        select(DepartmentRiskTemplate)
+        .where(DepartmentRiskTemplate.department_id == department_id,
+               DepartmentRiskTemplate.deleted_at.is_(None))
+        .order_by(DepartmentRiskTemplate.id))).scalars().all()
+    return rows
+
+
+@router.post("/reference/risk-templates", response_model=RiskTemplateResponse)
+async def create_risk_template(
+    body: RiskTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.change import DepartmentRiskTemplate, RISK_SEVERITIES
+    from app.services.risk_types import keys_for
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may write its risk templates")
+    if body.risk_type not in keys_for(dept.name):
+        raise HTTPException(400, f"Invalid risk type '{body.risk_type}' for {dept.name}")
+    if body.severity not in RISK_SEVERITIES:
+        raise HTTPException(400, "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
+    if not body.note.strip():
+        raise HTTPException(400, "A risk template needs the wording of the risk")
+    row = DepartmentRiskTemplate(
+        department_id=body.department_id, risk_type=body.risk_type,
+        severity=body.severity, note=body.note.strip(), created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/risk-templates/{template_id}", response_model=RiskTemplateResponse)
+async def delete_risk_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: gone from the list, kept on the record."""
+    from app.models.change import DepartmentRiskTemplate
+    row = await db.get(DepartmentRiskTemplate, template_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Risk template not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its risk templates")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 @router.get("/reference/costing-tags")

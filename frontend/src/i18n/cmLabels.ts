@@ -284,6 +284,17 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risktype.visual_surface': { de: 'Oberfläche/Optik', en: 'Visual/surface' },
   'risktype.process_capability': { de: 'Prozessfähigkeit', en: 'Process capability' },
   'risktype.other': { de: 'Sonstiges', en: 'Other' },
+  // Department risk templates (pre-written risks).
+  'risk.template': { de: 'Vorlage', en: 'Template' },
+  'risk.pickTemplate': { de: 'Aus Vorlage …', en: 'From template…' },
+  'risk.saveAsTemplate': { de: 'Als Vorlage für die Abteilung speichern', en: 'Save as a template for the department' },
+  'risk.deleteTemplate': { de: 'Vorlage löschen', en: 'Delete template' },
+  'risk.templateDeleted': { de: 'Vorlage gelöscht', en: 'Template deleted' },
+  'risk.templateSaved': { de: 'Vorlage gespeichert', en: 'Template saved' },
+  'risk.templateHint': {
+    de: 'Vorlagen gehören der Abteilung: Mitglieder, PM und Admin pflegen die Liste.',
+    en: 'Templates belong to the department: its members, PM and admin keep the list.',
+  },
   'concern.proposal': { de: 'Lösungsvorschlag', en: 'Proposal' },
   'concern.proposalPlaceholder': {
     de: 'Wie lässt sich der Punkt lösen?',

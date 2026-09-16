@@ -591,9 +591,29 @@ export interface CostingOfferIn {
   lead_time_unit?: LeadTimeUnit | null;
 }
 
+/** The vocabulary is the backend's per-department list
+    (app/services/risk_types.py); these are only the legacy keys kept for
+    typing older rows. Any string the backend serves is valid. */
 export type RiskType =
   | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
-  | 'process_capability' | 'other';
+  | 'process_capability' | 'other' | (string & {});
+
+/** A risk a department wrote down once to raise again. */
+export interface RiskTemplate {
+  id: number;
+  department_id: number;
+  risk_type: RiskType;
+  severity: RiskSeverity;
+  note: string;
+  created_by: number;
+  created_at: string;
+}
+export interface RiskTemplateIn {
+  department_id: number;
+  risk_type: RiskType;
+  severity: RiskSeverity;
+  note: string;
+}
 
 /** 1 low … 3 highest. A number, so it sorts and compares without a lookup. */
 export type RiskSeverity = 1 | 2 | 3;
