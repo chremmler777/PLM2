@@ -84,9 +84,9 @@ describe('ScopingPanel', () => {
   it('pre-selects the recommended assessor departments', async () => {
     render(wrap(<ScopingPanel change={change()} />))
     // "Quality" is recommended → button pre-selected (sky bg), no star marker.
-    const qualityBtn = await screen.findByRole('button', { name: /Quality/ })
+    const qualityBtn = await screen.findByRole('button', { name: /^Quality$/ })
     // The recommendation arrives with its query, then seeds the selection.
-    await waitFor(() => expect(qualityBtn.className).toContain('bg-sky-600'))
+    await waitFor(() => expect(qualityBtn.getAttribute('aria-pressed')).toBe('true'))
     expect(qualityBtn.textContent).toBe('Quality')
   })
   it('adds a picked contact as a removable chip', async () => {
@@ -173,9 +173,14 @@ describe('ScopingPanel department picker', () => {
     const c = await screen.findByTestId('rasic-2-C')
     await waitFor(() => expect(c.getAttribute('aria-pressed')).toBe('true'))
     // Tool Engineer was not in the standard: picking it makes it Responsible.
-    expect(screen.queryByTestId('rasic-4-R')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /Tool Engineer/ }))
+    expect(screen.getByTestId('rasic-4-none').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: /^Tool Engineer$/ }))
     expect(screen.getByTestId('rasic-4-R').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('rasic-summary').textContent).toBe('1 assess · 2 involved')
+    // The dash takes a department out again; the row goes muted.
+    fireEvent.click(screen.getByTestId('rasic-4-none'))
+    expect(screen.getByTestId('rasic-row-4').className).toContain('opacity-60')
+    fireEvent.click(screen.getByRole('button', { name: /^Tool Engineer$/ }))
     // The room overrules the standard: Quality becomes Accountable.
     fireEvent.click(screen.getByTestId('rasic-2-A'))
     expect(screen.getByTestId('rasic-2-A').getAttribute('aria-pressed')).toBe('true')
@@ -203,7 +208,7 @@ describe('ScopingPanel department picker', () => {
 
   it('offers only active departments', async () => {
     render(wrap(<ScopingPanel change={change()} />))
-    expect(await screen.findByRole('button', { name: /Quality/ })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /^Quality$/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Logistics/ })).toBeNull()
   })
 })
@@ -539,14 +544,14 @@ describe('ScopingPanel meeting routing selection', () => {
     render(wrap(<ScopingPanel change={change()} />))
     // All five arrive ticked …
     const chips = await Promise.all(FIVE.map((d) =>
-      screen.findByRole('button', { name: d.name })))
+      screen.findByRole('button', { name: new RegExp(`^${d.name}$`) })))
     // The recommendation seeds the selection once it arrives.
     await waitFor(() => chips.forEach((chip) =>
-      expect(chip.className).toContain('bg-sky-600')))
+      expect(chip.getAttribute('aria-pressed')).toBe('true')))
 
     // … and dropping one is respected, not re-seeded.
     fireEvent.click(chips[4])
-    expect(chips[4].className).not.toContain('bg-sky-600')
+    expect(chips[4].getAttribute('aria-pressed')).toBe('false')
 
     fireEvent.click(screen.getByRole('button', { name: t('meeting.save') }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())

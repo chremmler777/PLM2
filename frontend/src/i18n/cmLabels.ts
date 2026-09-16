@@ -1021,8 +1021,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'meeting.notes': { de: 'Protokoll', en: 'Meeting notes' },
   'meeting.departments': { de: 'Betroffene Abteilungen', en: 'Impacted departments' },
   'meeting.rasicHint': {
-    de: 'Wer ist verantwortlich? Anwesenheit macht niemanden verantwortlich, Abwesenheit nimmt es nicht weg — der PM legt es mit dem Team fest.',
-    en: 'Who is on the hook? Attendance makes nobody responsible and absence takes nothing away — the PM sets this with the team.',
+    de: 'Der PM legt mit dem Team fest, wer diese Änderung bewertet. Anwesenheit allein macht niemanden verantwortlich.',
+    en: 'The PM sets with the team who assesses this change. Attendance alone makes nobody responsible.',
   },
   'meeting.attendanceHint': { de: 'Nur Anwesenheit — keine Zuständigkeit.', en: 'Attendance only — not responsibility.' },
   'rasic.R': { de: 'Verantwortlich (bewertet)', en: 'Responsible (assesses)' },
@@ -1030,6 +1030,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'rasic.S': { de: 'Unterstützt', en: 'Supports' },
   'rasic.C': { de: 'Wird konsultiert/informiert', en: 'Consulted / informed' },
   'rasic.none': { de: 'Nicht beteiligt', en: 'Not involved' },
+  'rasic.assessNote': {
+    de: 'bewerten und halten die Kalkulation auf; S/C werden eingebunden, schulden aber keine Bewertung.',
+    en: 'assess and gate costing; S/C are looped in but owe no assessment.',
+  },
+  'meeting.rasicSummary': { de: '{a} bewerten · {n} beteiligt', en: '{a} assess · {n} involved' },
   'notResp.button': { de: 'Nicht unsere Zuständigkeit', en: 'Not our responsibility' },
   'notResp.title': { de: 'Zuständigkeit ablehnen', en: 'Decline responsibility' },
   'notResp.reason': { de: 'Warum ist diese Änderung nicht Sache Ihrer Abteilung?', en: 'Why is this change not your department’s to assess?' },

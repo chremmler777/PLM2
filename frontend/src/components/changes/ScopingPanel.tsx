@@ -499,48 +499,70 @@ export default function ScopingPanel(
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">
-              {t('meeting.departments')}
-              {recommendedIds.length > 0 && (
-                <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
-              )}
-            </label>
-            <p className="text-[11px] text-slate-500 mb-1.5">{t('meeting.rasicHint')}</p>
-            <div className="flex flex-wrap gap-2">
-              {/* Retired departments stay resolvable by name on old records but
-                  are never offered for new work. A picked department shows its
-                  letter buttons next to the chip: the room says not only who is
-                  in, but what they are in as. */}
+            <div className="flex items-baseline justify-between gap-4 mb-1">
+              <label className="text-xs text-slate-500">
+                {t('meeting.departments')}
+                {recommendedIds.length > 0 && (
+                  <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
+                )}
+              </label>
+              <span className="text-[11px] text-slate-500 tabular-nums" data-testid="rasic-summary">
+                {t('meeting.rasicSummary')
+                  .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
+                  .replace('{n}', String(deptIds.length))}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            {/* One row per department: name left, its letter right. A row
+                without a letter is not involved and reads muted. Retired
+                departments stay resolvable by name on old records but are
+                never offered for new work. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 border-t border-slate-700/70">
               {departments.filter((d) => d.is_active).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
                 const letter = deptRasic[d.id]
                 return (
-                  <span key={d.id} className="inline-flex items-center gap-0.5">
+                  <div key={d.id} data-testid={`rasic-row-${d.id}`}
+                    className={`flex items-center justify-between gap-3 py-1.5 border-b border-slate-700/70 ${
+                      letter ? '' : 'opacity-60'}`}>
                     <button type="button" onClick={() => toggleDept(d.id)}
+                      aria-pressed={!!letter}
                       title={isRec ? t('meeting.recommended') : undefined}
-                      className={`px-2.5 py-1 rounded-full text-xs border ${letter
-                        ? 'bg-sky-600 text-white border-sky-500'
-                        : 'bg-slate-900 text-slate-300 border-slate-600'}`}>
+                      className={`min-w-0 truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
+                        letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
                       {d.name}
                     </button>
-                    {letter && (
-                      <span className="inline-flex rounded-full border border-sky-700 overflow-hidden"
-                        role="group" aria-label={`${d.name} RASIC`}>
-                        {(['R', 'A', 'S', 'C'] as RasicLetter[]).map((l) => (
-                          <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
-                            aria-pressed={letter === l} title={t(`rasic.${l}`)}
-                            onClick={() => setLetter(d.id, l)}
-                            className={`px-1.5 py-0.5 text-[10px] font-semibold ${letter === l
-                              ? 'bg-sky-500 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
-                            {l}
-                          </button>
-                        ))}
-                      </span>
-                    )}
-                  </span>
+                    <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
+                      role="group" aria-label={`${d.name} RASIC`}>
+                      {(['R', 'A', 'S', 'C'] as RasicLetter[]).map((l) => (
+                        <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
+                          aria-pressed={letter === l} title={t(`rasic.${l}`)}
+                          onClick={() => setLetter(d.id, l)}
+                          className={`w-7 h-6 text-[11px] font-semibold transition-colors active:scale-[0.97] ${
+                            letter === l
+                              ? (l === 'R' || l === 'A'
+                                ? 'bg-sky-600 text-white'
+                                : 'bg-slate-600 text-slate-100')
+                              : 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}>
+                          {l}
+                        </button>
+                      ))}
+                      <button type="button" data-testid={`rasic-${d.id}-none`}
+                        aria-pressed={!letter} title={t('rasic.none')}
+                        onClick={() => { if (letter) toggleDept(d.id) }}
+                        className={`w-7 h-6 text-[11px] transition-colors ${
+                          letter ? 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'
+                            : 'bg-slate-800 text-slate-300'}`}>
+                        &ndash;
+                      </button>
+                    </span>
+                  </div>
                 )
               })}
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
+            </p>
           </div>
           <button
             className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"
