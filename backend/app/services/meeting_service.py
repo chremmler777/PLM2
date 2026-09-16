@@ -216,10 +216,10 @@ class MeetingService:
             # The vocabulary is per department (app/services/risk_types.py):
             # a Tool Engineer's "not steel-safe" is not a Sales risk. The
             # legacy moulding keys stay valid for everyone.
-            from app.services.risk_types import keys_for
+            from app.services.risk_types import allowed_keys
             dept_for_vocab = (await session.get(Department, department_id)
                               if department_id is not None else None)
-            allowed = keys_for(dept_for_vocab.name if dept_for_vocab else None)
+            allowed = await allowed_keys(session, dept_for_vocab)
             if risk_type not in allowed:
                 raise ChangeError(
                     f"Invalid risk type '{risk_type}' for this department — one of: "

@@ -32,7 +32,7 @@ from app.schemas.change import (
     CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
     RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingDeviationDecision,
-    RiskTemplateCreate, RiskTemplateResponse,
+    RiskTemplateCreate, RiskTemplateResponse, RiskTypeCreate, RiskTypeResponse,
     RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
@@ -539,12 +539,79 @@ async def reference_risk_types(
     own copy. Without a department: the legacy moulding list plus the common
     types.
     """
-    from app.services.risk_types import types_for
-    name = None
-    if department_id is not None:
-        dept = await db.get(Department, department_id)
-        name = dept.name if dept is not None else None
-    return {"items": types_for(name)}
+    from app.services.risk_types import resolved_types
+    dept = await db.get(Department, department_id) if department_id is not None else None
+    return {"items": await resolved_types(db, dept)}
+
+
+@router.post("/reference/risk-types", response_model=RiskTypeResponse)
+async def create_risk_type(
+    body: RiskTypeCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department adds a type to its own dropdown. Same writers as the
+    templates: members, Project Management, admin."""
+    from app.models.change import DepartmentRiskType
+    from app.services.risk_types import custom_key, allowed_keys
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may add its risk types")
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "A risk type needs a name")
+    key = custom_key(body.department_id, label)
+    live = (await db.execute(
+        select(DepartmentRiskType).where(
+            DepartmentRiskType.department_id == body.department_id,
+            DepartmentRiskType.key == key,
+            DepartmentRiskType.deleted_at.is_(None)))).scalar_one_or_none()
+    if live is not None:
+        return live  # same name again: hand back the existing one
+    if key in await allowed_keys(db, dept):
+        # A deleted custom type with this name comes back to life.
+        old = (await db.execute(
+            select(DepartmentRiskType).where(
+                DepartmentRiskType.department_id == body.department_id,
+                DepartmentRiskType.key == key))).scalars().first()
+        if old is not None:
+            old.deleted_at = None
+            old.deleted_by = None
+            old.label = label
+            await db.commit()
+            await db.refresh(old)
+            return old
+        raise HTTPException(400, f"'{label}' is already a standard risk type")
+    row = DepartmentRiskType(department_id=body.department_id, key=key, label=label,
+                             created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/risk-types/{type_id}", response_model=RiskTypeResponse)
+async def delete_risk_type(
+    type_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: off the dropdown, rows raised under it keep their key."""
+    from app.models.change import DepartmentRiskType
+    row = await db.get(DepartmentRiskType, type_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Risk type not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its risk types")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 async def _may_edit_risk_templates(db: AsyncSession, user: User, department_id: int) -> bool:
@@ -584,14 +651,14 @@ async def create_risk_template(
     current_user: User = Depends(get_current_user),
 ):
     from app.models.change import DepartmentRiskTemplate, RISK_SEVERITIES
-    from app.services.risk_types import keys_for
+    from app.services.risk_types import allowed_keys
     dept = await db.get(Department, body.department_id)
     if dept is None:
         raise HTTPException(404, "Department not found")
     if not await _may_edit_risk_templates(db, current_user, body.department_id):
         raise HTTPException(403, "Only members of this department, Project Management "
                                  "or an admin may write its risk templates")
-    if body.risk_type not in keys_for(dept.name):
+    if body.risk_type not in await allowed_keys(db, dept):
         raise HTTPException(400, f"Invalid risk type '{body.risk_type}' for {dept.name}")
     if body.severity not in RISK_SEVERITIES:
         raise HTTPException(400, "Risk severity must be 1 (low), 2 (medium) or 3 (high)")

@@ -286,6 +286,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risktype.other': { de: 'Sonstiges', en: 'Other' },
   // Department risk templates (pre-written risks).
   'risk.template': { de: 'Vorlage', en: 'Template' },
+  'risk.addType': { de: '+ Eigene Risikoart …', en: '+ Add own risk type…' },
+  'risk.newTypeLabel': { de: 'Name der neuen Risikoart', en: 'Name of the new risk type' },
+  'risk.saveType': { de: 'Anlegen', en: 'Add' },
+  'risk.deleteType': { de: 'Risikoart entfernen', en: 'Remove risk type' },
+  'risk.typeAdded': { de: 'Risikoart angelegt', en: 'Risk type added' },
+  'risk.typeDeleted': { de: 'Risikoart entfernt', en: 'Risk type removed' },
   'risk.pickTemplate': { de: 'Aus Vorlage …', en: 'From template…' },
   'risk.saveAsTemplate': { de: 'Als Vorlage für die Abteilung speichern', en: 'Save as a template for the department' },
   'risk.deleteTemplate': { de: 'Vorlage löschen', en: 'Delete template' },

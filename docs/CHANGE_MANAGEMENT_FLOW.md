@@ -298,6 +298,17 @@ meeting record (`ChangeMeeting.department_rasic`, `{department_id: letter}`):
   has answered.
 Every routing deviation now carries a reason (`apply_deviation`).
 
+### Risk vocabulary: coded baseline + the department's own additions
+- Coded per department in `app/services/risk_types.py` (own types, then the
+  common timing/cost/other). Legacy moulding keys stay valid for everyone.
+- A department **adds its own types** from the risk form ("+ Add own risk
+  type…", `department_risk_types`, keys namespaced `d<dept>_<slug>`); members,
+  PM and admin may add or remove. Removal is soft: off the dropdown, rows raised
+  under it keep their key and stay valid; adding the same name revives it.
+- **Risk templates** (`department_risk_templates`): pre-written type + severity
+  + wording, picked in the form to prefill, saved from it with a tick, soft
+  deleted. Same writers.
+
 ### Adding a department during `in_assessment`
 Somebody was forgotten, or something turns out to be impacted after all. This
 is NOT a recall to scoping (that tears down everyone's work and is refused once

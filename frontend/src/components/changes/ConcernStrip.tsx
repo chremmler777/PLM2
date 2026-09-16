@@ -148,6 +148,25 @@ export default function ConcernStrip({
     k ? (servedLabel(k) ?? (t(`risktype.${k}`) !== `risktype.${k}` ? t(`risktype.${k}`) : k))
       : t('risk.kind')
 
+  // The department's own additions to the dropdown: "+ Add own risk type…"
+  // opens a one-line input; the new type is created, selected, and can be
+  // removed again from the same spot.
+  const ADD_TYPE = '__add_type__'
+  const [newType, setNewType] = useState<string | null>(null)
+  const invalidateTypes = () =>
+    qc.invalidateQueries({ queryKey: ['risk-types', effectiveDept ?? null] })
+  const createType = useMutation({
+    mutationFn: (label: string) => changesApi.createRiskType(effectiveDept as number, label),
+    onSuccess: (row) => { invalidateTypes(); setRiskType(row.key); setNewType(null); toast.success(t('risk.typeAdded')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the risk type'),
+  })
+  const deleteType = useMutation({
+    mutationFn: (id: number) => changesApi.deleteRiskType(id),
+    onSuccess: () => { invalidateTypes(); setRiskType(''); toast.success(t('risk.typeDeleted')) },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not remove the risk type'),
+  })
+  const customIdOf = (k: string) => riskTypeData?.items?.find((i) => i.key === k)?.custom_id
+
   // The department's pre-written risks. Picking one fills the form; the user
   // may still edit before raising. Saving writes the current form to the list.
   const { data: templates = [] } = useQuery({
@@ -538,13 +557,45 @@ export default function ConcernStrip({
           )}
           <div className="flex gap-2 items-center flex-wrap">
             <select value={riskType} aria-label={t('risk.type')} data-testid="risk-type-select"
-              onChange={(e) => setRiskType(e.target.value as RiskType | '')}
+              onChange={(e) => {
+                if (e.target.value === ADD_TYPE) { setNewType(''); return }
+                setRiskType(e.target.value as RiskType | '')
+              }}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
               <option value="">{t('risk.pickType')}</option>
               {riskTypeOptions.map((k) => (
                 <option key={k} value={k}>{riskTypeLabel(k)}</option>
               ))}
+              {effectiveDept !== undefined && (
+                <option value={ADD_TYPE}>{t('risk.addType')}</option>
+              )}
             </select>
+            {riskType && customIdOf(riskType) != null && (
+              <button type="button" data-testid="risk-type-delete"
+                className="text-[11px] text-red-300 hover:text-red-200 underline decoration-dotted disabled:opacity-50"
+                title={t('risk.templateHint')} disabled={deleteType.isPending}
+                onClick={() => deleteType.mutate(customIdOf(riskType) as number)}>
+                {t('risk.deleteType')}
+              </button>
+            )}
+            {newType !== null && (
+              <span className="flex items-center gap-1">
+                <input value={newType} autoFocus data-testid="risk-new-type"
+                  aria-label={t('risk.newTypeLabel')} placeholder={t('risk.newTypeLabel')}
+                  onChange={(e) => setNewType(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newType.trim()) createType.mutate(newType.trim())
+                    if (e.key === 'Escape') setNewType(null)
+                  }}
+                  className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-44" />
+                <button type="button" data-testid="risk-new-type-save"
+                  className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50"
+                  disabled={!newType.trim() || createType.isPending}
+                  onClick={() => createType.mutate(newType.trim())}>{t('risk.saveType')}</button>
+                <button type="button" className="text-xs text-slate-400 hover:text-slate-200 px-1"
+                  onClick={() => setNewType(null)}>{t('common.cancel')}</button>
+              </span>
+            )}
             {onlyDepartmentId === undefined && (
               <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
                 onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}

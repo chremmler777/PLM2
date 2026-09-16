@@ -10,6 +10,8 @@ vi.mock('../../api/changes', () => ({
     listConcerns: vi.fn(),
     riskTypes: vi.fn().mockResolvedValue({ items: [] }),
     riskTemplates: vi.fn().mockResolvedValue([]),
+    createRiskType: vi.fn().mockResolvedValue({ id: 77, department_id: 4, key: 'd4_hot_runner', label: 'Hot runner' }),
+    deleteRiskType: vi.fn().mockResolvedValue({ id: 77 }),
     createRiskTemplate: vi.fn().mockResolvedValue({}),
     deleteRiskTemplate: vi.fn().mockResolvedValue({}),
     raiseConcern: vi.fn().mockResolvedValue({}),
@@ -590,6 +592,26 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     fireEvent.change(await screen.findByTestId('risk-template-select'), { target: { value: '31' } })
     fireEvent.click(screen.getByTestId('risk-template-delete'))
     await waitFor(() => expect(changesApi.deleteRiskTemplate).toHaveBeenCalledWith(31))
+  })
+
+  it('lets the department add its own type to the dropdown and remove it again', async () => {
+    wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
+      myDepartmentIds={[4]} onlyDepartmentId={4} />)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    const select = await screen.findByTestId('risk-type-select') as HTMLSelectElement
+    await waitFor(() => expect([...select.options].map((o) => o.text)).toContain(t('risk.addType')))
+    fireEvent.change(select, { target: { value: '__add_type__' } })
+    fireEvent.change(screen.getByTestId('risk-new-type'), { target: { value: 'Hot runner' } })
+    // Once created, the reference serves it back with its id: selectable, removable.
+    vi.mocked(changesApi.riskTypes).mockResolvedValue({ items: [
+      { key: 'd4_hot_runner', label_en: 'Hot runner', extra: true, custom_id: 77 },
+      { key: 'other', label_en: 'Other', extra: false },
+    ] })
+    fireEvent.click(screen.getByTestId('risk-new-type-save'))
+    await waitFor(() => expect(changesApi.createRiskType).toHaveBeenCalledWith(4, 'Hot runner'))
+    await waitFor(() => expect(select.value).toBe('d4_hot_runner'))
+    fireEvent.click(await screen.findByTestId('risk-type-delete'))
+    await waitFor(() => expect(changesApi.deleteRiskType).toHaveBeenCalledWith(77))
   })
 
   it('saves the raised risk as a template when ticked', async () => {

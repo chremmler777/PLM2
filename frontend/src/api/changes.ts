@@ -244,10 +244,16 @@ export const changesApi = {
 
   // The risk vocabulary is the backend's list, not a hard-coded one here.
   riskTypes: (departmentId?: number) =>
-    client.get<{ items: { key: string; label_de?: string; label_en?: string; extra?: boolean }[] }>(
+    client.get<{ items: { key: string; label_de?: string; label_en?: string; extra?: boolean; custom_id?: number }[] }>(
       '/v1/changes/reference/risk-types',
       { params: departmentId != null ? { department_id: departmentId } : {} })
       .then((r) => r.data),
+  // A department's own additions to its risk dropdown.
+  createRiskType: (departmentId: number, label: string) =>
+    client.post<{ id: number; department_id: number; key: string; label: string }>(
+      '/v1/changes/reference/risk-types', { department_id: departmentId, label }).then((r) => r.data),
+  deleteRiskType: (id: number) =>
+    client.delete<{ id: number }>(`/v1/changes/reference/risk-types/${id}`).then((r) => r.data),
   // A department's pre-written risks: picked in the risk form, saved from it,
   // deleted when one was written down by accident.
   riskTemplates: (departmentId: number) =>

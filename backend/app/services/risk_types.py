@@ -118,3 +118,55 @@ def all_keys() -> set:
     for items in DEPARTMENT_TYPES.values():
         keys |= {k for k, _, _ in items}
     return keys
+
+
+# ---- department-defined types (DB) -----------------------------------------
+
+import re as _re
+
+
+def custom_key(department_id: int, label: str) -> str:
+    """A stable, namespaced key for a department's own type: 'd<id>_<slug>'.
+    Namespacing keeps two departments' identical labels apart in the register."""
+    slug = _re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")[:28]
+    return f"d{department_id}_{slug or 'type'}"
+
+
+async def custom_types_for(session, department_id: int | None) -> list[dict]:
+    """The department's live self-defined types, in the dropdown's shape."""
+    if department_id is None:
+        return []
+    from sqlalchemy import select
+    from app.models.change import DepartmentRiskType
+    rows = (await session.execute(
+        select(DepartmentRiskType)
+        .where(DepartmentRiskType.department_id == department_id,
+               DepartmentRiskType.deleted_at.is_(None))
+        .order_by(DepartmentRiskType.id))).scalars().all()
+    return [{"key": r.key, "label_de": r.label, "label_en": r.label,
+             "extra": True, "custom_id": r.id} for r in rows]
+
+
+async def resolved_types(session, department) -> list[dict]:
+    """Own coded types, then the department's self-defined ones, then the
+    common set with 'other' last."""
+    base = types_for(department.name if department is not None else None)
+    own = [t for t in base if t["extra"]]
+    common = [t for t in base if not t["extra"]]
+    custom = await custom_types_for(session, department.id if department is not None else None)
+    return own + custom + common
+
+
+async def allowed_keys(session, department) -> set:
+    """What a raise or a template for this department is validated against."""
+    keys = keys_for(department.name if department is not None else None)
+    if department is not None:
+        # Deleted custom types stay valid: rows raised under them are history,
+        # and re-saving such a row must not turn into a refusal.
+        from sqlalchemy import select
+        from app.models.change import DepartmentRiskType
+        rows = (await session.execute(
+            select(DepartmentRiskType.key)
+            .where(DepartmentRiskType.department_id == department.id))).all()
+        keys |= {k for (k,) in rows}
+    return keys

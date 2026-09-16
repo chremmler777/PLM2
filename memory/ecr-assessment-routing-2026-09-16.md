@@ -9,8 +9,8 @@ metadata:
 
 Commits: `215ca64f` cancel teardown, `64033f4c` add department mid-assessment,
 `c487f777` risk types + templates; RASIC picker + not-responsible committed after
-(see git log). Migrations 066 (department_risk_templates) and 067
-(change_meetings.department_rasic) applied on the local dev DB; **prod still at
+(see git log). Migrations 066 (department_risk_templates), 067
+(change_meetings.department_rasic) and 068 (department_risk_types) applied on the local dev DB; **prod still at
 064 — run alembic upgrade head after the deploy**.
 
 ## Rules that now exist (all in docs/CHANGE_MANAGEMENT_FLOW.md)
@@ -25,6 +25,9 @@ Commits: `215ca64f` cancel teardown, `64033f4c` add department mid-assessment,
   Served with labels; validated per raising department.
 - **Department risk templates** (`DepartmentRiskTemplate`): members/PM/admin
   write, soft delete, picked in the risk form, "save as template" tick.
+- **Department-defined risk types** (`DepartmentRiskType`, mig 068): "+ Add own
+  risk type…" in the dropdown, namespaced keys `d<dept>_<slug>`, soft delete
+  keeps raised rows valid. Christoph's original ask ("define one on my own").
 - **RASIC at scoping**: meeting stores `{dept: R|A|S|C}` ("I" → C); routing
   stage 1 follows the room's letters; proceed needs one R/A. Attendance ≠
   responsibility (UI says so).

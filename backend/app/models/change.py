@@ -718,6 +718,29 @@ class DepartmentRiskTemplate(Base):
     deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
+class DepartmentRiskType(Base):
+    """A risk type a department added to its own dropdown.
+
+    The coded vocabulary (app/services/risk_types.py) is the reviewed
+    baseline; this is the department's extension of it — "hot runner
+    rebalancing" is a type Tool Engineering wants to count, and nobody should
+    have to file a code change to get it. Keys are namespaced per department
+    so two departments' "other tooling" never collide. Soft-deleted: a type
+    goes off the dropdown, rows raised under it keep their key.
+    """
+    __tablename__ = "department_risk_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    key: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(120))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class ChangeConcern(Base):
     """A team member's flag against a change, raised outside the meeting.
 

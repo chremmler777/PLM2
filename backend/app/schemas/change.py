@@ -399,6 +399,19 @@ class RiskTemplateCreate(BaseModel):
     note: str
 
 
+class RiskTypeCreate(BaseModel):
+    department_id: int
+    label: str
+
+
+class RiskTypeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    key: str
+    label: str
+
+
 class RiskTemplateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
