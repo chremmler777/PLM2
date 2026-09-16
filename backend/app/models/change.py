@@ -611,6 +611,12 @@ class ChangeMeeting(Base):
     # allowed to be a bare button press. 'proceed' needs no justification.
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_department_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # The room's RASIC call, {department_id: letter}: who is Responsible,
+    # Accountable, Supports or is Consulted on THIS change. Attendance does
+    # not make anyone responsible and absence does not take it away — the PM
+    # decides this with the team, and routing builds stage 1 from it. Empty
+    # on older meetings: then the standard template's letters apply.
+    department_rasic: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -618,6 +624,11 @@ class ChangeMeeting(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
+
+    @property
+    def rasic_map(self) -> dict[int, str]:
+        """department_rasic with int keys (JSON stores them as strings)."""
+        return {int(k): v for k, v in (self.department_rasic or {}).items()}
 
 
 class ChangeNegotiation(Base):

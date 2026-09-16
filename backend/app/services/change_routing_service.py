@@ -150,14 +150,20 @@ class ChangeRoutingService:
             # department the room deliberately pulled in got no task at all.
             # Later stages are process roles (summation, quote) and stay as the
             # template defines them.
-            allowed = set(proceed.selected_department_ids)
+            # With letters on the meeting, the room's letter wins over the
+            # template's for every stage-1 department; without them the
+            # template letter stands and an extra department is Responsible.
+            room = proceed.rasic_map
+            allowed = set(proceed.selected_department_ids) | set(room)
             for stage in stages:
                 if stage["stage_order"] == 1:
-                    kept = [d for d in stage["departments"]
+                    kept = [{**d, "rasic_letter": room.get(d["department_id"], d["rasic_letter"])}
+                            for d in stage["departments"]
                             if d["department_id"] in allowed]
                     known = {d["department_id"] for d in stage["departments"]}
                     for dept_id in sorted(allowed - known):
-                        kept.append({"department_id": dept_id, "rasic_letter": "R"})
+                        kept.append({"department_id": dept_id,
+                                     "rasic_letter": room.get(dept_id, "R")})
                     # An all-informational selection (only S/C/I letters) leaves
                     # stage 1 with no gate — the engine would stall forever. Require
                     # at least one responsible/accountable (R/A) department so the
@@ -299,8 +305,8 @@ class ChangeRoutingService:
         # Adding a department mid-assessment is an audit event: somebody was
         # forgotten, or something turned out to be impacted after all. The
         # reason is the record of which, and the lead reads it to decide.
-        if op == "add" and not (reason and reason.strip()):
-            raise ValueError("A reason is required to add a department")
+        if not (reason and reason.strip()):
+            raise ValueError("A reason is required to change the routing")
         existing = (await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)
@@ -471,19 +477,30 @@ class ChangeRoutingService:
         ChangeRoutingService._check_decide(change, routing, user_id, "reject")
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to reject a routing deviation")
-        standard = {(d["department_id"], st["stage_order"])
+        standard = {(d["department_id"], st["stage_order"]): d["rasic_letter"]
                     for st in routing.standard_snapshot.get("stages", [])
                     for d in st["departments"]}
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
         added = [a for a in rows if (a.department_id, a.stage_order) not in standard]
-        answered = [a for a in added
+        # A re-lettered standard row ("not our responsibility" -> C) goes back
+        # to the letter the routing gave it.
+        relettered = [a for a in rows
+                      if (a.department_id, a.stage_order) in standard
+                      and a.rasic_letter != standard[(a.department_id, a.stage_order)]]
+        answered = [a for a in added + relettered
                     if a.submitted_at is not None or (a.verdict and a.verdict != "pending")]
         if answered:
             raise ValueError(
-                "The added department has already submitted its assessment; "
+                "The department has already submitted its assessment; "
                 "its answer stays on the record and cannot be rejected away")
+        for a in relettered:
+            a.rasic_letter = standard[(a.department_id, a.stage_order)]
+            if a.wf_instance_task_id is not None:
+                task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+                if task is not None:
+                    _retarget_task(task, a.rasic_letter)
         inst = (await session.execute(
             select(WfInstance).where(
                 WfInstance.change_id == change.id,
@@ -500,7 +517,7 @@ class ChangeRoutingService:
             removed.append(a.department_id)
             await session.delete(a)
         await session.flush()
-        if inst is not None and removed:
+        if inst is not None and (removed or relettered):
             await WorkflowService._maybe_advance_stage(session, inst)
         routing.deviation_status = "rejected"
         routing.has_deviation = False
@@ -509,7 +526,8 @@ class ChangeRoutingService:
             session, change, "routing_deviation_rejected",
             f"Routing deviation rejected: {reason.strip()}", user_id,
             notes=reason.strip(),
-            new_value={"removed_department_ids": removed})
+            new_value={"removed_department_ids": removed,
+                       "restored_department_ids": [a.department_id for a in relettered]})
         if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
             await NotificationService.notify_once(
                 session, [routing.deviation_proposed_by], kind="routing_deviation_rejected",

@@ -276,6 +276,28 @@ Three typed containers, three responsibilities:
 - The **lead item pins here** — departments are routed against it. Editable in
   `captured`/`scoping` only.
 
+### Who is on the hook: the room's RASIC call at scoping
+Attendance at the scoping meeting makes nobody responsible, and absence takes
+nothing away. The PM sets responsibility WITH the team, per department, on the
+meeting record (`ChangeMeeting.department_rasic`, `{department_id: letter}`):
+- **Letters:** R (Responsible, assesses), A (Accountable, assesses), S
+  (Supports), C (Consulted/informed — no answer owed). "I" is accepted and
+  stored as C. The picker starts from the change type's standard routing
+  (every stage-1 department with its standard letter, served by
+  `recommended-departments`); the room overrules it.
+- **Routing follows the room:** on `proceed`, stage 1 is built from the map —
+  the room's letter wins over the template's; a department the room added
+  gets the letter it chose. Older meetings without letters keep the old rule
+  (template letter, extras are R). Proceeding needs at least one R/A.
+- **The department may still say no.** In assessment, a routed R/A department
+  clicks "Not our responsibility" in its own bucket: reason required,
+  optionally naming who should own it. That is the routing deviation
+  `reletter → C` (plus `add` for the named department), decided by the change
+  lead through the same 4-eyes panel. Rejecting restores the letter the routing
+  gave; approving leaves the department consulted. Refused once the department
+  has answered.
+Every routing deviation now carries a reason (`apply_deviation`).
+
 ### Adding a department during `in_assessment`
 Somebody was forgotten, or something turns out to be impacted after all. This
 is NOT a recall to scoping (that tears down everyone's work and is refused once

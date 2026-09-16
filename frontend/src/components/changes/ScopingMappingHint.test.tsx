@@ -49,6 +49,16 @@ describe('ScopingMappingHint', () => {
     expect(screen.getByText(/Tool Engineer has no blocking role in the routing template — no assessment task/)).toBeDefined()
   })
 
+  it('reads the room\'s letter next to the name when the meeting recorded one', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting({
+      selected_department_ids: [1, 3], department_rasic: { '1': 'R', '3': 'C' },
+    })])
+    render(wrap(<ScopingMappingHint changeId={7}
+      assessments={[assessment(1), assessment(3)]} departments={departments} />))
+    expect(await screen.findByText(/Development R ✓/)).toBeDefined()
+    expect(screen.getByText(/Tool Engineer C ✓/)).toBeDefined()
+  })
+
   it('renders nothing when there is no proceed meeting', () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting({ decision: null })])
     render(wrap(<ScopingMappingHint changeId={7} assessments={[]} departments={departments} />))

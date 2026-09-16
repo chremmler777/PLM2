@@ -750,3 +750,53 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
     expect(await screen.findByTestId('routing-deviation-approve')).toBeTruthy()
   })
 })
+
+
+describe('AssessmentBuckets — declining responsibility', () => {
+  const routing = (over: Record<string, unknown> = {}) => ({
+    change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+    deviation_status: 'none', deviation_note: null, deviation_proposed_by: null,
+    stages: [{ stage_order: 1, departments: [
+      { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+    ] }],
+    ...over,
+  })
+  beforeEach(() => {
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.postDeviation).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('lets the routed department decline with a reason and name who should own it', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routing() as never)
+    buckets({ myDepartmentIds: [2] })
+    fireEvent.click(await screen.findByTestId('not-responsible-2'))
+    const submit = screen.getByTestId('not-responsible-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('not-responsible-reason'),
+      { target: { value: 'No tool is touched, this is a packaging change' } })
+    // Development (2) is routed and not offered; the others are.
+    const instead = screen.getByTestId('not-responsible-instead') as HTMLSelectElement
+    expect([...instead.options].map((o) => o.value).filter(Boolean)).toEqual(['6', '4'])
+    fireEvent.change(instead, { target: { value: '6' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(changesApi.postDeviation).toHaveBeenCalledTimes(2))
+    expect(changesApi.postDeviation).toHaveBeenNthCalledWith(1, 7, {
+      op: 'reletter', department_id: 2, rasic_letter: 'C',
+      reason: 'No tool is touched, this is a packaging change',
+    })
+    expect(changesApi.postDeviation).toHaveBeenNthCalledWith(2, 7, {
+      op: 'add', department_id: 6, rasic_letter: 'R', stage_order: 1,
+      reason: 'No tool is touched, this is a packaging change',
+    })
+  })
+
+  it('hides the decline while a routing change is already waiting on the lead', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routing({
+      has_deviation: true, deviation_status: 'pending_approval', deviation_note: 'x', deviation_proposed_by: 9,
+    }) as never)
+    buckets({ myDepartmentIds: [2] })
+    await screen.findByTestId('routing-deviation-pending')
+    expect(screen.queryByTestId('not-responsible-2')).toBeNull()
+  })
+})

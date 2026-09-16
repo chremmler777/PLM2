@@ -17,7 +17,7 @@ vi.mock('../../api/changes', () => ({
     createMeeting: vi.fn(), decideMeeting: vi.fn(), update: vi.fn(),
     listConcerns: vi.fn().mockResolvedValue([]), withdrawConcern: vi.fn(),
     markRejectionSent: vi.fn().mockResolvedValue({}),
-    recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality' }]),
+    recommendedDepartments: vi.fn().mockResolvedValue([{ id: 2, name: 'Quality', rasic_letter: 'C' }]),
   },
 }))
 const deptState = vi.hoisted(() => ({
@@ -161,6 +161,45 @@ describe('ScopingPanel keeps the discussion out of the record', () => {
 
 describe('ScopingPanel department picker', () => {
   afterEach(cleanup)
+
+  it('seeds the standard letter and lets the room overrule it; the letters go out with the meeting', async () => {
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 4, name: 'Tool Engineer', is_active: true },
+    ]
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    // Quality is recommended as Consulted: picked, with C pressed.
+    const c = await screen.findByTestId('rasic-2-C')
+    await waitFor(() => expect(c.getAttribute('aria-pressed')).toBe('true'))
+    // Tool Engineer was not in the standard: picking it makes it Responsible.
+    expect(screen.queryByTestId('rasic-4-R')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Tool Engineer/ }))
+    expect(screen.getByTestId('rasic-4-R').getAttribute('aria-pressed')).toBe('true')
+    // The room overrules the standard: Quality becomes Accountable.
+    fireEvent.click(screen.getByTestId('rasic-2-A'))
+    expect(screen.getByTestId('rasic-2-A').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
+    expect(body.department_rasic).toEqual({ 2: 'A', 4: 'R' })
+    expect(body.selected_department_ids.sort()).toEqual([2, 4])
+    deptState.current = [
+      { id: 2, name: 'Quality', is_active: true },
+      { id: 8, name: 'Logistics', is_active: false },
+    ]
+  })
+
+  it('reads a recorded meeting with its letters', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValueOnce([{
+      id: 1, change_id: 7, meeting_date: '2026-07-04T10:00:00Z', channel: 'meeting',
+      participants: [], notes: null, decision: 'proceed',
+      selected_department_ids: [2], department_rasic: { '2': 'S' },
+      created_by: 1, created_at: '2026-07-04T10:00:00Z', decided_by: 1, decided_at: '2026-07-04T11:00:00Z',
+    }] as never)
+    render(wrap(<ScopingPanel change={change({ status: 'in_assessment' })} />))
+    expect((await screen.findByTestId('meeting-depts-1')).textContent).toContain('Quality (S)')
+  })
 
   it('offers only active departments', async () => {
     render(wrap(<ScopingPanel change={change()} />))

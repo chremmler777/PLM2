@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import RoutingDeviationPanel from './RoutingDeviationPanel'
+import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
@@ -141,6 +142,8 @@ export default function AssessmentBuckets({
   // What each open form currently says, so the evidence block can shout when the
   // verdict turns the explanation into a requirement.
   const [verdictOf, setVerdictOf] = useState<Record<number, string>>({})
+  // Which department is declining responsibility right now (dialog open).
+  const [declining, setDeclining] = useState<number | null>(null)
   const qc = useQueryClient()
   const evidenceOf = (assessmentId?: number) =>
     assessmentId == null ? []
@@ -345,14 +348,38 @@ export default function AssessmentBuckets({
                     {a!.notes && <p className="text-slate-400 whitespace-pre-wrap">{a!.notes}</p>}
                   </div>
                 ) : canSubmit ? (
-                  <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
-                    departmentName={deptName(row.id)} showEffort={false}
-                    changePptCount={changePptOf(a?.id).length
-                      + (a?.has_change_ppt ? 1 : 0)}
-                    assessmentId={a?.id} evidence={evidenceOf(a?.id)}
-                    onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })}
-                    onVerdictChange={(v) => setVerdictOf((m) => ({ ...m, [row.id]: v }))}
-                    onDone={() => setOpenDept(null)} />
+                  <>
+                    <AssessmentSubmitForm changeId={changeId} departmentId={row.id}
+                      departmentName={deptName(row.id)} showEffort={false}
+                      changePptCount={changePptOf(a?.id).length
+                        + (a?.has_change_ppt ? 1 : 0)}
+                      assessmentId={a?.id} evidence={evidenceOf(a?.id)}
+                      onUploaded={() => qc.invalidateQueries({ queryKey: ['change', changeId] })}
+                      onVerdictChange={(v) => setVerdictOf((m) => ({ ...m, [row.id]: v }))}
+                      onDone={() => setOpenDept(null)} />
+                    {/* The room said this department is on the hook; the
+                        department, looking at the change, may say it is not.
+                        Only while a blocking letter is theirs and no routing
+                        change is already waiting on the lead. */}
+                    {(row.rasic === 'R' || row.rasic === 'A')
+                      && routing?.deviation_status !== 'pending_approval' && (
+                      <div className="flex justify-end">
+                        <button type="button" data-testid={`not-responsible-${row.id}`}
+                          className="text-xs text-slate-400 hover:text-red-300 underline decoration-dotted"
+                          onClick={() => setDeclining(row.id)}>
+                          {t('notResp.button')}
+                        </button>
+                      </div>
+                    )}
+                    {declining === row.id && (
+                      <NotResponsibleDialog changeId={changeId} departmentId={row.id}
+                        stageOrder={Number.isFinite(assessStage) ? assessStage : 1}
+                        candidates={departments
+                          .filter((d) => d.is_active !== false && !ids.includes(d.id))
+                          .sort((x, y) => x.name.localeCompare(y.name))}
+                        onClose={() => setDeclining(null)} />
+                    )}
+                  </>
                 ) : (
                   <p className="text-xs text-slate-500" data-testid={`bucket-readonly-${row.id}`}>
                     {/* A member with no open form is not locked out — their step

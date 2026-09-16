@@ -658,11 +658,15 @@ export interface ChangeMeeting {
   decision: 'proceed' | 'reject' | 'needs_info' | null;
   decision_reason?: string | null;
   selected_department_ids: number[];
+  /** The room's RASIC call, {department_id: letter}; absent on older meetings. */
+  department_rasic?: Record<string, RasicLetter> | null;
   created_by: number;
   created_at: string;
   decided_by: number | null;
   decided_at: string | null;
 }
+
+export type RasicLetter = 'R' | 'A' | 'S' | 'C';
 
 export interface TransitionDeviation {
   id: number;

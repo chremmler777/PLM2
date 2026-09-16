@@ -25,13 +25,18 @@ export function ScopingMappingHint({ changeId, assessments, departments }: {
   if (!proceedMeeting || proceedMeeting.selected_department_ids.length === 0) return null
 
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
+  // The room's letter, when the meeting recorded one, reads next to the name.
+  const labelOf = (id: number) => {
+    const letter = proceedMeeting.department_rasic?.[String(id)]
+    return letter ? `${deptName(id)} ${letter}` : deptName(id)
+  }
   const hasAssessment = (id: number) => assessments.some((a) => a.department_id === id)
   const matched = proceedMeeting.selected_department_ids.filter(hasAssessment)
   const missing = proceedMeeting.selected_department_ids.filter((id) => !hasAssessment(id))
 
   return (
     <p className="text-xs text-slate-400 bg-slate-800/60 border border-slate-700 rounded-lg p-3">
-      From scoping: {matched.map((id) => `${deptName(id)} ✓`).join(', ')}
+      From scoping: {matched.map((id) => `${labelOf(id)} ✓`).join(', ')}
       {matched.length > 0 && missing.length > 0 && ' · '}
       {missing
         .map((id) => `${deptName(id)} has no blocking role in the routing template — no assessment task`)

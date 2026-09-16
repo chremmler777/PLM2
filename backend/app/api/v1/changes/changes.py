@@ -745,15 +745,16 @@ async def recommended_departments(
     stage1 = next((s for s in stages if s["stage_order"] == 1), None)
     if not stage1:
         return []
-    rec = {d["department_id"] for d in stage1["departments"]
-           if d["rasic_letter"] in BLOCKING_LETTERS}
-    if not rec:
+    # Every stage-1 department with the letter the standard gives it: the
+    # picker starts from the template's opinion, the room overrules it.
+    letters = {d["department_id"]: d["rasic_letter"] for d in stage1["departments"]}
+    if not letters:
         return []
     rows = (await db.execute(
         select(Department.id, Department.name)
-        .where(Department.id.in_(rec), Department.is_active.is_(True))
+        .where(Department.id.in_(letters), Department.is_active.is_(True))
         .order_by(Department.sort_order, Department.name))).all()
-    return [{"id": i, "name": n} for i, n in rows]
+    return [{"id": i, "name": n, "rasic_letter": letters[i]} for i, n in rows]
 
 
 @router.get("/{change_id}/assessment-objects")
@@ -1854,7 +1855,7 @@ async def create_meeting(
             db, change, current_user, meeting_date=body.meeting_date,
             participants=[p.model_dump() for p in body.participants],
             notes=body.notes, selected_department_ids=body.selected_department_ids,
-            channel=body.channel)
+            channel=body.channel, department_rasic=body.department_rasic)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

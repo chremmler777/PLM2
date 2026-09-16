@@ -133,3 +133,82 @@ async def test_meeting_authz_pm_or_lead_or_admin(client, admin_auth, seed):
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await post_meeting(client, eng_auth, change["id"])
     assert res.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_the_room_assigns_rasic_letters_and_routing_follows_them(
+        client, admin_auth, seed, part, session_factory):
+    """The meeting records a letter per department; stage 1 is built from it.
+    Attendance is irrelevant: nobody in the participants list is routed for
+    being there, and a department nobody attended for is routed all the same."""
+    from app.models.workflow import Department
+    from app.models.change import ChangeAssessment
+    change = await create_change(client, admin_auth, seed["project_id"],
+                                 lead_id=seed["admin_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        dev = Department(name="Development", flow_type="action", is_active=True)
+        te = Department(name="Tool Engineer", flow_type="action", is_active=True)
+        q = Department(name="Quality", flow_type="action", is_active=True)
+        s.add_all([dev, te, q]); await s.commit()
+        ids = {"dev": dev.id, "te": te.id, "q": q.id}
+    await to_scoping(client, admin_auth, change["id"])
+    # "I" is accepted and stored as C; a bad letter is refused.
+    res = await post_meeting(client, admin_auth, change["id"],
+                             department_rasic={ids["dev"]: "X"})
+    assert res.status_code == 400 and "RASIC" in res.text
+    res = await post_meeting(client, admin_auth, change["id"],
+                             participants=[{"name": "Only Quality attended"}],
+                             department_rasic={ids["dev"]: "R", ids["te"]: "A", ids["q"]: "I"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["department_rasic"] == {str(ids["dev"]): "R", str(ids["te"]): "A", str(ids["q"]): "C"}
+    assert sorted(body["selected_department_ids"]) == sorted(ids.values())
+    mid = body["id"]
+    # Editing the letters keeps the id list in step.
+    res = await client.patch(f"/api/v1/changes/{change['id']}/meetings/{mid}",
+                             json={"department_rasic": {ids["dev"]: "R", ids["q"]: "S"}},
+                             headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert sorted(res.json()["selected_department_ids"]) == sorted([ids["dev"], ids["q"]])
+    await lock_impact(session_factory, change["id"])
+    res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
+                            json={"decision": "proceed"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == change["id"],
+            ChangeAssessment.stage_order == 1))).scalars().all()
+        letters = {r.department_id: r.rasic_letter for r in rows}
+    assert letters == {ids["dev"]: "R", ids["q"]: "S"}
+
+
+@pytest.mark.asyncio
+async def test_proceed_needs_somebody_responsible_when_letters_are_given(
+        client, admin_auth, seed, part, session_factory):
+    from app.models.workflow import Department
+    change = await create_change(client, admin_auth, seed["project_id"])
+    await add_item_and_lead(client, admin_auth, change["id"], part["part_id"])
+    async with session_factory() as s:
+        q = Department(name="Quality", flow_type="action", is_active=True)
+        s.add(q); await s.commit(); qid = q.id
+    await to_scoping(client, admin_auth, change["id"])
+    res = await post_meeting(client, admin_auth, change["id"], department_rasic={qid: "C"})
+    mid = res.json()["id"]
+    await lock_impact(session_factory, change["id"])
+    res = await client.post(f"/api/v1/changes/{change['id']}/meetings/{mid}/decide",
+                            json={"decision": "proceed"}, headers=admin_auth)
+    assert res.status_code == 400 and "Responsible or Accountable" in res.text
+
+
+@pytest.mark.asyncio
+async def test_recommended_departments_carry_the_standard_letter(
+        client, admin_auth, seed, session_factory):
+    """The picker starts from the template's opinion, letter included."""
+    from tests.test_change_routing import departments as _d, ecr_template as _t  # noqa: F401
+    change = await create_change(client, admin_auth, seed["project_id"])
+    res = await client.get(f"/api/v1/changes/{change['id']}/recommended-departments",
+                           headers=admin_auth)
+    assert res.status_code == 200, res.text
+    for row in res.json():
+        assert row["rasic_letter"] in ("R", "A", "S", "C")

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import (
     ChangeRequest, ChangeMeeting, ChangeConcern, CONCERN_KINDS,
-    RISK_TYPES, RISK_SEVERITIES,
+    RISK_TYPES, RISK_SEVERITIES, TASK_LETTERS, BLOCKING_LETTERS,
     MEETING_DECISIONS, MEETING_CHANNELS, SCOPING_STATUSES)
 from app.models.entities import User
 from app.models.workflow import Department
@@ -71,12 +71,34 @@ class MeetingService:
         return dept_ids
 
     @staticmethod
+    async def _validate_rasic(session: AsyncSession,
+                              rasic: Optional[dict]) -> tuple[Optional[dict], list[int]]:
+        """Normalise the room's RASIC call: int keys, upper-case letters out of
+        R/A/S/C ("I" for Informed is taken as Consulted — the engine owes an
+        informed department nothing more than it owes a consulted one), known
+        departments only. Returns (map with str keys for JSON, ordered ids)."""
+        if rasic is None:
+            return None, []
+        out: dict[str, str] = {}
+        for k, v in rasic.items():
+            letter = (v or "").strip().upper()
+            if letter == "I":
+                letter = "C"
+            if letter not in TASK_LETTERS:
+                raise ChangeError(
+                    f"Invalid RASIC letter '{v}' for department {k} — one of R, A, S, C")
+            out[str(int(k))] = letter
+        ids = await MeetingService._validate_departments(session, [int(k) for k in out])
+        return out, ids
+
+    @staticmethod
     async def create_meeting(
         session: AsyncSession, change: ChangeRequest, user: User, *,
         meeting_date: Optional[datetime] = None,
         participants: Optional[list] = None, notes: Optional[str] = None,
         selected_department_ids: Optional[list[int]] = None,
         channel: str = "meeting",
+        department_rasic: Optional[dict] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         # Meetings belong to scoping: capture is Sales writing the request
@@ -88,12 +110,15 @@ class MeetingService:
                 "Scoping decisions can only be recorded while the change is in scoping")
         if channel not in MEETING_CHANNELS:
             raise ChangeError(f"Invalid channel '{channel}'")
-        dept_ids = await MeetingService._validate_departments(
-            session, selected_department_ids or [])
+        rasic, rasic_ids = await MeetingService._validate_rasic(session, department_rasic)
+        # The letter map is authoritative when given: the id list follows it.
+        dept_ids = rasic_ids if rasic is not None else \
+            await MeetingService._validate_departments(session, selected_department_ids or [])
         meeting = ChangeMeeting(
             change_id=change.id, meeting_date=meeting_date or datetime.utcnow(),
             channel=channel, participants=participants or [], notes=notes,
-            selected_department_ids=dept_ids, created_by=user.id)
+            selected_department_ids=dept_ids, department_rasic=rasic,
+            created_by=user.id)
         session.add(meeting)
         await session.flush()
         await ChangeService.append_changelog(
@@ -119,10 +144,20 @@ class MeetingService:
         meeting = await MeetingService._get_meeting(session, change, meeting_id)
         if meeting.decision is not None:
             raise ChangeError("A decided meeting can no longer be edited")
-        if "selected_department_ids" in fields and fields["selected_department_ids"] is not None:
+        if fields.get("department_rasic") is not None:
+            rasic, ids = await MeetingService._validate_rasic(session, fields["department_rasic"])
+            fields["department_rasic"] = rasic
+            fields["selected_department_ids"] = ids
+        elif "selected_department_ids" in fields and fields["selected_department_ids"] is not None:
             fields["selected_department_ids"] = await MeetingService._validate_departments(
                 session, fields["selected_department_ids"])
-        for k in ("meeting_date", "participants", "notes", "selected_department_ids"):
+            # An id-only edit drops letters for departments no longer picked.
+            if meeting.department_rasic:
+                keep = {str(i) for i in fields["selected_department_ids"]}
+                fields["department_rasic"] = {k: v for k, v in meeting.department_rasic.items()
+                                              if k in keep}
+        for k in ("meeting_date", "participants", "notes", "selected_department_ids",
+                  "department_rasic"):
             if k in fields and fields[k] is not None:
                 setattr(meeting, k, fields[k])
         await session.flush()
@@ -443,6 +478,13 @@ class MeetingService:
         if decision == "proceed" and not meeting.selected_department_ids:
             raise ChangeError(
                 "Select at least one impacted department before proceeding")
+        # With letters on the record, somebody has to own the assessment:
+        # a room of Supports and Consulteds leaves stage 1 with no gate.
+        if (decision == "proceed" and meeting.department_rasic
+                and not any(v in BLOCKING_LETTERS for v in meeting.department_rasic.values())):
+            raise ChangeError(
+                "At least one department must be Responsible or Accountable (R/A) "
+                "before proceeding")
         # Proceeding over an unanswered objection is the failure this exists to
         # stop. Either its author withdraws it, or the decision answers it.
         open_concerns = MeetingService.open_concerns(change)

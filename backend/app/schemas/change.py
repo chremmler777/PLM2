@@ -1,6 +1,6 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
@@ -790,6 +790,9 @@ class MeetingCreate(BaseModel):
     participants: List[MeetingParticipant] = []
     notes: Optional[str] = None
     selected_department_ids: List[int] = []
+    # {department_id: "R"|"A"|"S"|"C"} — the room's call. When given, it is
+    # authoritative and selected_department_ids follows its keys.
+    department_rasic: Optional[Dict[int, str]] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -797,6 +800,7 @@ class MeetingUpdate(BaseModel):
     participants: Optional[List[MeetingParticipant]] = None
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None
+    department_rasic: Optional[Dict[int, str]] = None
 
 
 class NegotiationCreate(BaseModel):
@@ -938,6 +942,7 @@ class MeetingResponse(BaseModel):
     notes: Optional[str] = None
     decision: Optional[str] = None
     selected_department_ids: List[int] = []
+    department_rasic: Optional[Dict[int, str]] = None
     created_by: int
     created_at: datetime
     decided_by: Optional[int] = None

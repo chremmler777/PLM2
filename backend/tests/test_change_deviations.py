@@ -305,7 +305,7 @@ async def test_deviation_remove_deletes_task(
         change = await s.get(ChangeRequest, cid)
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="remove",
-            department_id=dev_departments["Tool Engineer"])
+            department_id=dev_departments["Tool Engineer"], reason="test op")
         await s.commit()
 
     async with session_factory() as s:
@@ -337,7 +337,7 @@ async def test_deviation_reletter_updates_task(
         change = await s.get(ChangeRequest, cid)
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="reletter",
-            department_id=dev_departments["Tool Engineer"], rasic_letter="S")
+            department_id=dev_departments["Tool Engineer"], rasic_letter="S", reason="test op")
         await s.commit()
 
     async with session_factory() as s:
@@ -578,7 +578,7 @@ async def test_deviation_reletter_noted_to_blocking(
         change = await s.get(ChangeRequest, cid)
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="reletter",
-            department_id=dev_departments["Quality"], rasic_letter="R")
+            department_id=dev_departments["Quality"], rasic_letter="R", reason="test op")
         await s.commit()
 
     async with session_factory() as s:

@@ -653,3 +653,45 @@ async def test_lead_with_pending_routing_deviation_gets_decision_action(
     out = await client.get(f"/api/v1/changes/{c['id']}/my-actions", headers=admin_auth)
     kinds = [a["kind"] for a in out.json()["actions"]]
     assert "routing_deviation_decision" not in kinds
+
+
+async def test_recommended_departments_include_consulted_with_their_letter(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    auth = await _login(client)
+    body = {"project_id": seed["project_id"], "title": "Wall +0.2", "change_type": "physical_part",
+            "reason": "sink", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    res = await client.get(f"/api/v1/changes/{c['id']}/recommended-departments", headers=auth)
+    assert res.status_code == 200, res.text
+    by_id = {r["id"]: r["rasic_letter"] for r in res.json()}
+    assert by_id[departments["Tool Engineer"]] == "R"
+    assert by_id[departments["Quality"]] == "C"   # consulted, but offered with its letter
+
+
+async def test_reject_restores_a_relettered_department(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """"Not our responsibility" is a reletter to C; the lead's rejection puts
+    the department back on the hook with the letter the routing gave it."""
+    from app.models.change import ChangeAssessment
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C",
+        "reason": "Not our responsibility: no tool change"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
+            ChangeAssessment.stage_order == 1))).scalar_one()
+        assert row.rasic_letter == "C"
+    admin_auth = await _login_admin(client)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "It is yours: the insert moves"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
+            ChangeAssessment.stage_order == 1))).scalar_one()
+        assert row.rasic_letter == "R"
+        assert row.task is None or row.task.is_actionable
