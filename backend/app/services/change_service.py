@@ -644,6 +644,37 @@ class ChangeService:
         return None
 
     @staticmethod
+    async def _cancel_engine_work(session: AsyncSession, change: ChangeRequest,
+                                  user_id: int) -> None:
+        """Cancel every active workflow instance this change spawned.
+
+        Two producers: the change-scoped assessment/costing flow
+        (WfInstance.change_id) and the ECN flows on part revisions the change
+        originated. Each instance is canceled with its open tasks waived (see
+        WorkflowService.cancel_workflow) — otherwise the tasks outlive the
+        change on everyone's list, which is exactly the leak this closes."""
+        from app.models.workflow import WfInstance
+        from app.services.workflow_service import WorkflowService
+        instances = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.status == "active",
+                (WfInstance.change_id == change.id)
+                | WfInstance.part_revision_id.in_(
+                    select(PartRevision.id).where(
+                        PartRevision.originating_change_id == change.id)),
+            ))).scalars().all()
+        for inst in instances:
+            await WorkflowService.cancel_workflow(
+                session, inst.id, user_id,
+                reason=f"Change {change.change_number} cancelled")
+        if instances:
+            await ChangeService.append_changelog(
+                session, change, "engine_work_cancelled",
+                f"{len(instances)} workflow instance(s) canceled with the "
+                "change; open tasks waived", user_id,
+                new_value={"instance_ids": [i.id for i in instances]})
+
+    @staticmethod
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
         user_id: int, *, cancellation_reason: Optional[str] = None,
@@ -707,6 +738,12 @@ class ChangeService:
                 raise ChangeError("cancellation_reason is required to cancel")
             change.cancellation_reason = cancellation_reason
             change.cancelled_at = datetime.utcnow()
+            # Cancelling kills the references: every active engine instance
+            # this change spawned — its change-scoped assessment flow and the
+            # ECN flows on its part revisions — is canceled with its open
+            # tasks waived, so no task list keeps pointing at work nobody
+            # will ever do.
+            await ChangeService._cancel_engine_work(session, change, user_id)
 
         # Rejecting stops the flow dead: routing and assessments stay as they
         # are, and nothing downstream will run again unless someone reopens it.
