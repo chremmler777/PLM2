@@ -18,6 +18,8 @@ vi.mock('../../api/changes', () => ({
     deleteCostingOffer: vi.fn().mockResolvedValue({}),
     setWeightEstimate: vi.fn().mockResolvedValue({}),
     costingTags: vi.fn(),
+    listSuppliers: vi.fn().mockResolvedValue([{ id: 1, name: 'Hasco', is_active: true }]),
+    createSupplier: vi.fn().mockResolvedValue({ id: 2, name: 'Meusburger' }),
     uploadAttachment: vi.fn().mockResolvedValue({}),
   },
 }))
@@ -189,6 +191,25 @@ describe('CostPositions', () => {
     await waitFor(() => expect(select.value).toBe('d2_laser'))
     fireEvent.click(await screen.findByTestId('costpos-category-delete-2'))
     await waitFor(() => expect(changesApi.deleteCostCategory).toHaveBeenCalledWith(5))
+  })
+
+  it('offers the Suppliers list under the vendor field and stores a new name on save', async () => {
+    positions()
+    await screen.findByTestId('costpos-new-2')
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'tool_change' } })
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'insert' } })
+    // Known suppliers are offered; a new one typed here is created on add.
+    const vendor = await screen.findByTestId('costpos-new-vendor-2') as HTMLInputElement
+    await waitFor(() => expect(document.querySelector(`#${vendor.getAttribute('list')} option[value="Hasco"]`)).toBeTruthy())
+    fireEvent.change(vendor, { target: { value: 'Meusburger' } })
+    fireEvent.change(screen.getByTestId('costpos-new-est-2'), { target: { value: '300' } })
+    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(changesApi.createSupplier).toHaveBeenCalledWith('Meusburger'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({ vendor_name: 'Meusburger', est_cost: 300, pricing: 'estimate' })))
+    // A quoted line carries no vendor of its own — the offers do.
+    fireEvent.click(screen.getByTestId('costpos-new-pricing-2-quote'))
+    expect(screen.queryByTestId('costpos-new-vendor-2')).toBeNull()
   })
 
   it('sums the department’s money and hours at the foot of the table', async () => {

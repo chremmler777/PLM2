@@ -724,6 +724,9 @@ class CostingPositionCreate(BaseModel):
     tag: Optional[str] = None       # free text; the reference list only suggests
     pricing: str = "estimate"       # estimate|quote — external positions only
     est_cost: Optional[float] = None
+    # Who gave the house number on an estimated line; quoted lines name their
+    # vendors on the offers.
+    vendor_name: Optional[str] = None
     # Accepted on every kind, external included: the department's own time
     # around a supplier's work is effort too.
     hours: Optional[float] = None
@@ -740,6 +743,7 @@ class CostingPositionUpdate(BaseModel):
     tag: Optional[str] = None
     pricing: Optional[str] = None
     est_cost: Optional[float] = None
+    vendor_name: Optional[str] = None
     hours: Optional[float] = None
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
@@ -755,6 +759,7 @@ class CostingPositionResponse(BaseModel):
     kind: str
     pricing: str
     est_cost: Optional[float] = None
+    vendor_name: Optional[str] = None
     hours: Optional[float] = None
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"

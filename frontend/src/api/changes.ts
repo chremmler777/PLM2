@@ -192,6 +192,12 @@ export const changesApi = {
     client.get<{ items: CostCategory[] }>('/v1/changes/reference/costing-tags',
       { params: departmentId != null ? { department_id: departmentId } : undefined })
       .then((r) => r.data),
+  // Vendors are the Suppliers master data: the vendor field offers them and
+  // a new name typed there becomes a supplier on save.
+  listSuppliers: () =>
+    client.get<{ id: number; name: string; is_active?: boolean }[]>('/v1/suppliers').then((r) => r.data),
+  createSupplier: (name: string) =>
+    client.post<{ id: number; name: string }>('/v1/suppliers', { name }).then((r) => r.data),
   // A department's own additions to its costing categories, typed money or time.
   createCostCategory: (departmentId: number, label: string, entryType: CostEntryType) =>
     client.post<{ id: number; department_id: number; key: string; label: string; entry_type: CostEntryType }>(

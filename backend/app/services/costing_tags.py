@@ -20,7 +20,7 @@ ENTRY_TYPES = ("money", "time")
 
 # key -> (label_de, label_en, entry_type)
 COMMON_CATEGORIES = [
-    ("other_money", "Sonstiges (Kosten)", "Other (cost)", "money"),
+    ("other_money", "Sonstiges (extern)", "Other (external)", "money"),
     ("other_time", "Sonstiges (Eigenzeit)", "Other (own time)", "time"),
 ]
 

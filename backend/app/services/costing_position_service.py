@@ -33,8 +33,8 @@ class CostingPositionError(ValueError):
 # Fields a PUT may change. department_id is not among them: moving a position
 # to another department would move money out of one budget into another with
 # no record of it — delete and re-add instead.
-_POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "hours",
-                    "lead_time_days", "lead_time_unit", "notes")
+_POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
+                    "hours", "lead_time_days", "lead_time_unit", "notes")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite")
 
@@ -165,7 +165,7 @@ class CostingPositionService:
                 "id": p.id, "change_id": p.change_id,
                 "department_id": p.department_id, "label": p.label,
                 "tag": p.tag, "kind": p.kind, "pricing": p.pricing,
-                "est_cost": p.est_cost, "hours": p.hours,
+                "est_cost": p.est_cost, "vendor_name": p.vendor_name, "hours": p.hours,
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
                 "created_by": p.created_by, "created_at": p.created_at,
@@ -308,6 +308,7 @@ class CostingPositionService:
             kind=spec.get("kind") or "external",
             pricing=spec.get("pricing") or "estimate",
             est_cost=spec.get("est_cost"), hours=spec.get("hours"),
+            vendor_name=((spec.get("vendor_name") or "").strip() or None),
             lead_time_days=spec.get("lead_time_days"),
             lead_time_unit=spec.get("lead_time_unit") or "calendar_days",
             notes=spec.get("notes"), created_by=actor.id,

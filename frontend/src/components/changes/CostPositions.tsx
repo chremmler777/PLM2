@@ -124,6 +124,59 @@ export function leadTimeOf(p: CostPosition): { days: number; unit: LeadTimeUnit 
 const fieldCls =
   'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100'
 
+/** The Suppliers master data, offered under every vendor field. */
+function useSuppliers() {
+  return useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => changesApi.listSuppliers(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+}
+
+/**
+ * Vendor name with the Suppliers list behind it. A name that is not in the
+ * list yet becomes a supplier the moment the row is saved, so the next person
+ * finds it in the dropdown — the same habit as the department's own
+ * categories, but on the master data everyone shares.
+ */
+function VendorField({ testId, value, onChange, placeholder, className }: {
+  testId: string; value: string; onChange: (v: string) => void
+  placeholder?: string; className?: string
+}) {
+  const { data: suppliers = [] } = useSuppliers()
+  const listId = `${testId}-list`
+  return (
+    <>
+      <input data-testid={testId} value={value} list={listId}
+        aria-label={t('costpos.vendor')} placeholder={placeholder ?? t('costpos.vendor')}
+        title={t('costpos.vendorHint')} autoComplete="off"
+        onChange={(e) => onChange(e.target.value)}
+        className={className ?? `${fieldCls} w-36`} />
+      <datalist id={listId}>
+        {suppliers.filter((s) => s.is_active !== false).map((s) => (
+          <option key={s.id} value={s.name} />
+        ))}
+      </datalist>
+    </>
+  )
+}
+
+/** Store a vendor name the Suppliers list does not know yet. Best effort: a
+    failure (name too short, no rights) must never block the row's save. */
+async function ensureVendor(qc: ReturnType<typeof useQueryClient>, name: string) {
+  const n = name.trim()
+  if (n.length < 2) return
+  const known = qc.getQueryData<{ id: number; name: string }[]>(['suppliers']) ?? []
+  if (known.some((s) => s.name.toLowerCase() === n.toLowerCase())) return
+  try {
+    await changesApi.createSupplier(n)
+    qc.invalidateQueries({ queryKey: ['suppliers'] })
+  } catch {
+    /* already there under another spelling, or not ours to add — the row is saved either way */
+  }
+}
+
 /** The unit belongs to the number, so it is drawn as part of the same field. */
 function UnitSelect({ testId, value, onChange }: {
   testId: string; value: LeadTimeUnit; onChange: (u: LeadTimeUnit) => void
@@ -154,12 +207,15 @@ function OfferRow({
   const [unit, setUnit] = useState<LeadTimeUnit>(offer.lead_time_unit ?? DEFAULT_UNIT)
 
   const save = useMutation({
-    mutationFn: () => changesApi.updateCostingOffer(changeId, offer.id, {
-      vendor_name: vendor, cost: Number(cost) || 0,
-      shipping_included: included,
-      shipping_cost: included ? null : num(ship),
-      lead_time_days: num(lead), lead_time_unit: unit,
-    }),
+    mutationFn: async () => {
+      await ensureVendor(qc, vendor)
+      return changesApi.updateCostingOffer(changeId, offer.id, {
+        vendor_name: vendor, cost: Number(cost) || 0,
+        shipping_included: included,
+        shipping_cost: included ? null : num(ship),
+        lead_time_days: num(lead), lead_time_unit: unit,
+      })
+    },
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the offer'),
   })
@@ -217,9 +273,7 @@ function OfferRow({
 
       {editable ? (
         <>
-          <input data-testid={`offer-vendor-${offer.id}`} value={vendor}
-            aria-label={t('costpos.vendor')} placeholder={t('costpos.vendor')}
-            onChange={(e) => setVendor(e.target.value)} className={`${fieldCls} w-36`} />
+          <VendorField testId={`offer-vendor-${offer.id}`} value={vendor} onChange={setVendor} />
           <input data-testid={`offer-cost-${offer.id}`} type="number" step="0.01" value={cost}
             aria-label={t('costpos.cost')}
             onChange={(e) => setCost(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
@@ -298,12 +352,16 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
   const [ship, setShip] = useState('')
   const [lead, setLead] = useState('')
   const [unit, setUnit] = useState<LeadTimeUnit>(DEFAULT_UNIT)
+  const qc = useQueryClient()
   const add = useMutation({
-    mutationFn: () => changesApi.addCostingOffer(changeId, positionId, {
-      vendor_name: vendor.trim(), cost: Number(cost) || 0,
-      shipping_included: included, shipping_cost: included ? null : num(ship),
-      lead_time_days: num(lead), lead_time_unit: unit,
-    }),
+    mutationFn: async () => {
+      await ensureVendor(qc, vendor)
+      return changesApi.addCostingOffer(changeId, positionId, {
+        vendor_name: vendor.trim(), cost: Number(cost) || 0,
+        shipping_included: included, shipping_cost: included ? null : num(ship),
+        lead_time_days: num(lead), lead_time_unit: unit,
+      })
+    },
     onSuccess: () => {
       setVendor(''); setCost(''); setShip(''); setLead(''); setIncluded(false)
       onAdded()
@@ -313,9 +371,7 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
   return (
     <div data-testid={`offer-new-${positionId}`}
       className="flex flex-wrap items-center gap-2 pt-1.5 border-t border-slate-700/60">
-      <input data-testid={`offer-new-vendor-${positionId}`} value={vendor}
-        aria-label={t('costpos.vendor')} placeholder={t('costpos.vendor')}
-        onChange={(e) => setVendor(e.target.value)} className={`${fieldCls} w-36`} />
+      <VendorField testId={`offer-new-vendor-${positionId}`} value={vendor} onChange={setVendor} />
       <input data-testid={`offer-new-cost-${positionId}`} type="number" step="0.01" value={cost}
         aria-label={t('costpos.cost')} placeholder={t('costpos.cost')}
         onChange={(e) => setCost(e.target.value)} className={`${fieldCls} w-24 tabular-nums`} />
@@ -361,9 +417,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const [label, setLabel] = useState(p.label)
   const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
   const [est, setEst] = useState(p.est_cost != null ? String(p.est_cost) : '')
+  const [vendor, setVendor] = useState(p.vendor_name ?? '')
   const [lead, setLead] = useState(p.lead_time_days != null ? String(p.lead_time_days) : '')
   const [unit, setUnit] = useState<LeadTimeUnit>(p.lead_time_unit ?? DEFAULT_UNIT)
   const [notes, setNotes] = useState(p.notes ?? '')
+  const qc = useQueryClient()
 
   const type = lineTypeOf(p)
   const isExternal = p.kind === 'external'
@@ -379,12 +437,16 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const offerCount = (p.offers ?? []).length
 
   const save = useMutation({
-    mutationFn: () => changesApi.updateCostPosition(changeId, p.id, {
-      label: label.trim(), hours: num(hours),
-      est_cost: type === 'estimate' ? num(est) : null,
-      lead_time_days: num(lead), lead_time_unit: unit,
-      notes: notes.trim() || null,
-    }),
+    mutationFn: async () => {
+      if (type === 'estimate') await ensureVendor(qc, vendor)
+      return changesApi.updateCostPosition(changeId, p.id, {
+        label: label.trim(), hours: num(hours),
+        est_cost: type === 'estimate' ? num(est) : null,
+        vendor_name: type === 'estimate' ? (vendor.trim() || null) : null,
+        lead_time_days: num(lead), lead_time_unit: unit,
+        notes: notes.trim() || null,
+      })
+    },
     onSuccess: () => { toast.success(t('costpos.saved')); setEditing(false); onChanged() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the position'),
   })
@@ -427,6 +489,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           ) : (
             <>
               <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
+              {type === 'estimate' && p.vendor_name && (
+                <span data-testid={`costpos-vendor-${p.id}`} className="block text-xs text-slate-400">
+                  {t('costpos.vendor')}: {p.vendor_name}
+                </span>
+              )}
               {p.notes && <span className="block text-xs text-slate-500 whitespace-pre-wrap">{p.notes}</span>}
               {chosen && (
                 <span data-testid={`costpos-chosen-${p.id}`}
@@ -515,10 +582,14 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
       {editing && (
         <tr className="bg-slate-800/60">
           <td />
-          <td colSpan={6} className={`${cellCls} pt-0`}>
+          <td colSpan={6} className={`${cellCls} pt-0 flex flex-wrap gap-2`}>
+            {type === 'estimate' && (
+              <VendorField testId={`costpos-edit-vendor-${p.id}`} value={vendor} onChange={setVendor}
+                placeholder={t('costpos.vendorOptional')} />
+            )}
             <input data-testid={`costpos-edit-notes-${p.id}`} value={notes}
               aria-label={t('costpos.notes')} placeholder={t('costpos.notes')}
-              onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} w-full`} />
+              onChange={(e) => setNotes(e.target.value)} className={`${fieldCls} flex-1 min-w-[10rem]`} />
           </td>
         </tr>
       )}
@@ -693,8 +764,10 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   const [pricing, setPricing] = useState<CostPositionPricing>('estimate')
   const [hours, setHours] = useState('')
   const [est, setEst] = useState('')
+  const [vendor, setVendor] = useState('')
   const [lead, setLead] = useState('')
   const [unit, setUnit] = useState<LeadTimeUnit>(DEFAULT_UNIT)
+  const qc = useQueryClient()
   // "+ Add own category…" opens a two-field line: name and what it is.
   const [newCat, setNewCat] = useState<{ label: string; type: CostEntryType } | null>(null)
 
@@ -704,18 +777,22 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   const isQuote = !isTime && pricing === 'quote'
   const lineType: LineType = isTime ? 'time' : pricing
 
-  const reset = () => { setLabel(''); setHours(''); setEst(''); setLead('') }
+  const reset = () => { setLabel(''); setHours(''); setEst(''); setVendor(''); setLead('') }
   const add = useMutation({
-    mutationFn: () => changesApi.createCostPosition(changeId, {
-      department_id: departmentId,
-      label: label.trim(),
-      tag: tag || null,
-      kind: isTime ? 'own_time' : 'external',
-      pricing: isTime ? 'estimate' : pricing,
-      hours: num(hours),
-      est_cost: lineType === 'estimate' ? num(est) : null,
-      lead_time_days: num(lead), lead_time_unit: unit,
-    }),
+    mutationFn: async () => {
+      if (lineType === 'estimate') await ensureVendor(qc, vendor)
+      return changesApi.createCostPosition(changeId, {
+        department_id: departmentId,
+        label: label.trim(),
+        tag: tag || null,
+        kind: isTime ? 'own_time' : 'external',
+        pricing: isTime ? 'estimate' : pricing,
+        hours: num(hours),
+        est_cost: lineType === 'estimate' ? num(est) : null,
+        vendor_name: lineType === 'estimate' ? (vendor.trim() || null) : null,
+        lead_time_days: num(lead), lead_time_unit: unit,
+      })
+    },
     onSuccess: () => { reset(); onAdded() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the position'),
   })
@@ -770,10 +847,19 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
           )}
         </td>
         <td className={`${cellCls} min-w-[9rem]`}>
-          <input data-testid={`costpos-new-label-${departmentId}`} value={label}
-            aria-label={t('costpos.label')} placeholder={t('costpos.descPlaceholder')}
-            onChange={(e) => setLabel(e.target.value)} onKeyDown={submitOnEnter}
-            className={`${fieldCls} w-full`} />
+          <span className="inline-flex flex-col gap-1 w-full">
+            <input data-testid={`costpos-new-label-${departmentId}`} value={label}
+              aria-label={t('costpos.label')} placeholder={t('costpos.descPlaceholder')}
+              onChange={(e) => setLabel(e.target.value)} onKeyDown={submitOnEnter}
+              className={`${fieldCls} w-full`} />
+            {/* An estimated external line says who gave the number; a quoted
+                one names its vendors on the offers below it. */}
+            {lineType === 'estimate' && (
+              <VendorField testId={`costpos-new-vendor-${departmentId}`} value={vendor}
+                onChange={setVendor} placeholder={t('costpos.vendorOptional')}
+                className={`${fieldCls} w-full`} />
+            )}
+          </span>
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
           {isTime ? (
@@ -790,7 +876,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
                   aria-pressed={pricing === v} onClick={() => setPricing(v)}
                   className={`px-2.5 h-7 text-xs whitespace-nowrap transition-colors ${
                     pricing === v ? 'bg-sky-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
-                  {t(`costpos.type.${v}`)}
+                  {t(`costpos.pricingShort.${v}`)}
                 </button>
               ))}
             </span>

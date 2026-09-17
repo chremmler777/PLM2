@@ -10,7 +10,7 @@ metadata:
 Commits: `215ca64f` cancel teardown, `64033f4c` add department mid-assessment,
 `c487f777` risk types + templates; RASIC picker + not-responsible committed after
 (see git log). Migrations 066 (department_risk_templates), 067
-(change_meetings.department_rasic) 068 (department_risk_types) and 069 (department_cost_categories) applied on the local dev DB; **prod still at
+(change_meetings.department_rasic) 068 (department_risk_types), 069 (department_cost_categories) and 070 (costing_positions.vendor_name) applied on the local dev DB; **prod still at
 064 — run alembic upgrade head after the deploy**.
 
 ## Rules that now exist (all in docs/CHANGE_MANAGEMENT_FLOW.md)
@@ -42,6 +42,8 @@ Commits: `215ca64f` cancel teardown, `64033f4c` add department mid-assessment,
   Plant grid collapsible under the table. Matrix of what each department can
   enter lives in `costing_tags.py`.
 
+- **Vendors = Suppliers master data**: vendor fields (offers + estimated
+  lines) are datalists over `/v1/suppliers`; a new name is POSTed on save.
 - **Costing close/reopen**: PM may close costing (costing → quoting) besides
   Sales/lead/admin; reopen (quoting → costing) needs a reason, logged
   `costing_reopened`, button on the commercial tab. Send stays Sales-only.

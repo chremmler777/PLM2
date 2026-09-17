@@ -574,6 +574,8 @@ export interface CostPosition {
   kind: CostPositionKind;
   pricing?: CostPositionPricing | null;
   est_cost?: number | null;
+  /** Who gave the house number on an estimated line. */
+  vendor_name?: string | null;
   hours?: number | null;
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
@@ -590,6 +592,7 @@ export interface CostPositionIn {
   kind: CostPositionKind;
   pricing?: CostPositionPricing | null;
   est_cost?: number | null;
+  vendor_name?: string | null;
   hours?: number | null;
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;

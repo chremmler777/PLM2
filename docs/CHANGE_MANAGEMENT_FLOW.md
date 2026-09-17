@@ -317,6 +317,14 @@ gone from the UI; the API still accepts any tag string.
 The per-plant workbook grid (cycle-time delta, hours × rate) stays under the
 table, collapsible. A department routed on several stages has one table.
 
+**Vendors.** External lines are labelled "External · estimate" / "External ·
+vendor quote". An estimated line may name who gave the number
+(`CostingPosition.vendor_name`, migration 070); a quoted line names its
+vendors on the offers. Every vendor field offers the **Suppliers master
+data** and a new name typed there is stored as a supplier on save (best
+effort), so the list grows the way the department categories do. Suppliers
+are managed (renamed, deactivated) on the Suppliers page.
+
 **Closing and reopening costing.** Departments enter lines while the change
 is in `costing`. Costing closes when it moves to `quoting` — **Project
 Management, Sales, the change lead or admin** may close it (PM runs costing

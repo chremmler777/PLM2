@@ -127,6 +127,9 @@ class CostingPosition(Base):
     # TypeErrors.
     est_cost: Mapped[float | None] = mapped_column(
         Numeric(14, 2, asdecimal=False), nullable=True)
+    # Who the house number came from, on an estimated external line ("Hasco,
+    # by phone"). A quoted line names its vendors on the offers instead.
+    vendor_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     hours: Mapped[float | None] = mapped_column(
         Numeric(10, 2, asdecimal=False), nullable=True)
     lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

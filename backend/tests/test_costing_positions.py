@@ -905,3 +905,14 @@ async def test_with_no_vote_cast_any_offer_may_be_chosen_without_a_reason(
     chosen = [e for e in entries if e["action"] == "vendor_chosen"]
     assert "against the department recommendation" not in \
         chosen[0]["action_description"]
+
+
+async def test_an_estimated_line_names_its_vendor(client, admin_auth, costing):
+    res = await _add_position(client, admin_auth, costing, est_cost=900.0,
+                              vendor_name="  Hasco ")
+    assert res.status_code == 201, res.text
+    assert res.json()["vendor_name"] == "Hasco"
+    pid = res.json()["id"]
+    res = await client.put(f"{_positions_url(costing)}/{pid}",
+                           json={"vendor_name": "Meusburger"}, headers=admin_auth)
+    assert res.status_code == 200 and res.json()["vendor_name"] == "Meusburger"
