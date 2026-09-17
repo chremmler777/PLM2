@@ -68,7 +68,8 @@ export default function CostingBuckets({
   /** PM, Sales, the change lead and admins see every figure. */
   canSeeAll: boolean
   editable: boolean
-  /** Project Management maintains any department's positions. */
+  /** Project Management (and an admin not acting as a department) maintains
+      any department's positions — the backend allows both. */
   isPm?: boolean
 }) {
   const changeId = change.id

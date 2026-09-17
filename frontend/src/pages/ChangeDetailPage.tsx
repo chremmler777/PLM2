@@ -560,7 +560,7 @@ export default function ChangeDetailPage() {
                 .map((p) => ({ id: p.id, name: p.name, is_active: p.is_active }))}
               projectPlantId={projectPlantId}
               canSeeAll={canSeeCosts} editable={change.status === 'costing'}
-              isPm={isPmMember} />
+              isPm={isPmMember || isAdmin} />
           )}
           {/* The whole picture, for the people who answer for it — and, at
               quoting, the basis the price is judged against. */}
