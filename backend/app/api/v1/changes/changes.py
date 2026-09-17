@@ -1010,11 +1010,22 @@ async def transition_change(
     # transitions internally.
     if ((change.status, body.to_status) in ChangeService.QUOTE_STAGE_TRANSITIONS
             and not await ChangeService.user_can_run_quote_stage(
-                db, current_user, change)):
+                db, current_user, change, to_status=body.to_status)):
         raise HTTPException(
             status_code=403,
-            detail="Only a Sales department member, the change lead or an "
-                   "admin may create and send the quote")
+            detail=("Only Project Management, a Sales department member, the "
+                    "change lead or an admin may close costing"
+                    if body.to_status == "quoting" else
+                    "Only a Sales department member, the change lead or an "
+                    "admin may create and send the quote"))
+    # Pulling the change back into costing reopens numbers that were declared
+    # complete: the same people who may close costing may reopen it.
+    if ((change.status, body.to_status) == ChangeService.COSTING_REOPEN
+            and not await ChangeService.user_can_reopen_costing(db, current_user, change)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Project Management, a Sales department member, the "
+                   "change lead or an admin may reopen costing")
     # Sending a change back out of validation replans the timing and reopens
     # the commercial terms — PM owns the first, Sales the second. A department
     # whose own check failed says so on the check; it does not get to move the

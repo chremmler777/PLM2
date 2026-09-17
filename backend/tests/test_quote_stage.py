@@ -138,7 +138,10 @@ async def test_quoting_can_step_back_to_costing(client, session_factory, sales_w
     sales = await _sales(client)
     cid = sales_world["change_id"]
     assert (await _transition(client, sales, cid, "quoting")).status_code == 200
-    res = await _transition(client, sales, cid, "costing")
+    # Going back reopens numbers declared complete: it needs a reason.
+    assert (await _transition(client, sales, cid, "costing")).status_code == 400
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "costing", "reason": "vendor revised"}, headers=sales)
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "costing"
 
@@ -216,3 +219,64 @@ async def test_the_task_is_not_addressed_to_other_departments(
                               "quoting")).status_code == 200
     res = await client.get("/api/v1/changes/my-tasks", headers=outsider)
     assert [t for t in res.json() if t["kind"] == "create_quote"] == []
+
+
+@pytest.mark.asyncio
+async def test_pm_may_close_costing_but_not_send_the_quote(
+        client, session_factory, seed, sales_world):
+    """Project Management runs costing and says when it is done; sending the
+    offer stays Sales' own."""
+    from app.auth.security import get_password_hash
+    from app.models.entities import User
+    async with session_factory() as s:
+        from sqlalchemy import select as _select
+        pm_dept = (await s.execute(
+            _select(Department).where(Department.name == "Project Manager")
+        )).scalar_one_or_none()
+        if pm_dept is None:
+            pm_dept = Department(name="Project Manager", flow_type="action", is_active=True)
+            s.add(pm_dept); await s.flush()
+        pm = User(organization_id=seed["org_id"], username="pm_close", email="pm_close@test.io",
+                  full_name="PM", role="engineer", is_active=True, mfa_enabled=False,
+                  hashed_password=get_password_hash(ENGINEER_PASSWORD))
+        s.add(pm); await s.flush()
+        s.add(UserDepartment(user_id=pm.id, department_id=pm_dept.id))
+        await s.commit()
+    pm_auth = await login(client, "pm_close@test.io", ENGINEER_PASSWORD)
+    cid = sales_world["change_id"]
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "quoting"}, headers=pm_auth)
+    assert res.status_code == 200, res.text
+    # Reopening needs a reason, and it is recorded under its own action.
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "costing"}, headers=pm_auth)
+    assert res.status_code == 400 and "reason" in res.text.lower()
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "costing", "reason": "Tool shop revised the offer"},
+                            headers=pm_auth)
+    assert res.status_code == 200, res.text
+    from app.models.change import ChangeChangelog
+    from sqlalchemy import select
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeChangelog).where(
+            ChangeChangelog.change_id == cid,
+            ChangeChangelog.action == "costing_reopened"))).scalar_one()
+        assert "Tool shop revised" in row.action_description
+    # Closed again by PM; the send itself is refused to them.
+    await _set(session_factory, cid, quoted_price=100.0)
+    assert (await client.post(f"/api/v1/changes/{cid}/transition",
+                              json={"to_status": "quoting"}, headers=pm_auth)).status_code == 200
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "quoted"}, headers=pm_auth)
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_bystander_may_not_reopen_costing(client, session_factory, sales_world):
+    cid = sales_world["change_id"]
+    sales = await _sales(client)
+    assert (await _transition(client, sales, cid, "quoting")).status_code == 200
+    outsider = await _outsider(client)
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "costing", "reason": "x"}, headers=outsider)
+    assert res.status_code == 403, res.text

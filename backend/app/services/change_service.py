@@ -732,6 +732,12 @@ class ChangeService:
                 "A reason is required to send a change back from "
                 "validation to implementation — say what failed and what has "
                 "to be replanned or renegotiated")
+        # Reopening costing from quoting is the same kind of act: the numbers
+        # were declared complete and now are not. Say why.
+        if (change.status, to_status) == ChangeService.COSTING_REOPEN and not escalation_note:
+            raise ChangeError(
+                "A reason is required to reopen costing — say which numbers "
+                "have to change")
 
         if to_status == "cancelled":
             if not cancellation_reason:
@@ -843,6 +849,11 @@ class ChangeService:
                 old_value={"status": "in_validation"},
                 new_value={"status": "in_implementation",
                            "reason": escalation_note})
+        if (old, to_status) == ChangeService.COSTING_REOPEN:
+            await ChangeService.append_changelog(
+                session, change, "costing_reopened",
+                f"Costing reopened: {escalation_note}", user_id, notes=escalation_note,
+                old_value={"status": "quoting"}, new_value={"status": "costing"})
         if reopening:
             prior = change.rejection_reason
             change.rejected_at = None
@@ -1257,20 +1268,38 @@ class ChangeService:
             return True
         return await ChangeService._user_in_department(session, user, "Sales")
 
-    # Which hops belong to the quote stage — the ones only Sales may drive.
+    # Which hops belong to the quote stage. Sending the quote is Sales' own;
+    # closing costing (into quoting) is shared with Project Management, who
+    # run the costing phase and decide when the numbers are complete.
     QUOTE_STAGE_TRANSITIONS = {("costing", "quoting"), ("quoting", "quoted")}
+    # The correction path: costing reopened from quoting, with a reason.
+    COSTING_REOPEN = ("quoting", "costing")
 
     @staticmethod
     async def user_can_run_quote_stage(
         session: AsyncSession, user: User, change: ChangeRequest,
+        to_status: str = "quoted",
     ) -> bool:
         """Who may start the offer and who may declare it sent.
 
-        The same people who may set the price, for the obvious reason: opening
-        the quote stage and writing the number in it are one job. Admin, the
+        Sending (-> quoted) is the people who may set the price: admin, the
         change lead, or a Sales member (acts-as aware through
-        _user_in_department)."""
-        return await ChangeService.user_can_set_quoted_price(session, user, change)
+        _user_in_department). Closing costing (-> quoting) is those plus
+        Project Management: the PM runs costing and says when it is done."""
+        if await ChangeService.user_can_set_quoted_price(session, user, change):
+            return True
+        if to_status == "quoting":
+            return await ChangeService._user_in_department(session, user, "Project Manager")
+        return False
+
+    @staticmethod
+    async def user_can_reopen_costing(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Who may pull a change from quoting back into costing: the same
+        people who may close it — PM, Sales, the change lead, admin."""
+        return await ChangeService.user_can_run_quote_stage(
+            session, user, change, to_status="quoting")
 
     @staticmethod
     async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:

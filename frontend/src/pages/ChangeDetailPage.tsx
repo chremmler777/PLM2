@@ -111,6 +111,9 @@ export default function ChangeDetailPage() {
   // a memo dialog rather than a bare button.
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reopenOpen, setReopenOpen] = useState(false);
+  // Pulling a change from quote creation back into costing: same people who
+  // may close costing (PM, Sales, lead, admin), always with a reason.
+  const [reopenCostingOpen, setReopenCostingOpen] = useState(false);
   // Customer acceptance and internal approval both start the release phase, so
   // both collect a mandatory release deadline through an inline confirm row.
   const [acceptOpen, setAcceptOpen] = useState(false);
@@ -247,7 +250,7 @@ export default function ChangeDetailPage() {
   const transition = useMutation({
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
-      rejection_reason?: string; reopen_reason?: string;
+      rejection_reason?: string; reopen_reason?: string; reason?: string;
     }) =>
       changesApi.transition(changeId, vars.to, vars),
     onSuccess: () => {
@@ -258,7 +261,7 @@ export default function ChangeDetailPage() {
       const detail = errDetail(e) ?? 'Transition failed';
       // The memo-dialog transitions report inline; only the ordinary forward
       // moves offer the deviation banner.
-      const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason;
+      const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason || vars.reason;
       if (!viaDialog) setBlocked({ to: vars.to, reason: detail });
       else toast.error(detail);
     },
@@ -398,6 +401,15 @@ export default function ChangeDetailPage() {
         submitLabel="Reopen change"
         onSubmit={(reason) => { setReopenOpen(false); transition.mutate({ to: 'scoping', reopen_reason: reason }); }}
         onClose={() => setReopenOpen(false)}
+      />
+      <ReasonDialog
+        open={reopenCostingOpen}
+        title={t('costing.reopenTitle')}
+        warning={t('costing.reopenWarning')}
+        label={t('costing.reopenLabel')}
+        submitLabel={t('costing.reopen')}
+        onSubmit={(reason) => { setReopenCostingOpen(false); transition.mutate({ to: 'costing', reason }); }}
+        onClose={() => setReopenCostingOpen(false)}
       />
       <ReasonDialog
         open={cancelOpen}
@@ -561,6 +573,22 @@ export default function ChangeDetailPage() {
               projectPlantId={projectPlantId}
               canSeeAll={canSeeCosts} editable={change.status === 'costing'}
               isPm={isPmMember || isAdmin} />
+          )}
+          {/* Costing closed: departments read only; whoever may close it may
+              reopen it — with a reason on the record. */}
+          {change.status === 'quoting' && (
+            <div data-testid="costing-closed"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+              <span>{t('costing.closedHint')}</span>
+              {(isAdmin || isChangeLead || isSalesMember || isPmMember) && (
+                <button type="button" data-testid="costing-reopen"
+                  className="border border-slate-600 text-slate-200 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-xs"
+                  disabled={transition.isPending}
+                  onClick={() => setReopenCostingOpen(true)}>
+                  {t('costing.reopen')}
+                </button>
+              )}
+            </div>
           )}
           {/* The whole picture, for the people who answer for it — and, at
               quoting, the basis the price is judged against. */}

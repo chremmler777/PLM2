@@ -42,6 +42,10 @@ Commits: `215ca64f` cancel teardown, `64033f4c` add department mid-assessment,
   Plant grid collapsible under the table. Matrix of what each department can
   enter lives in `costing_tags.py`.
 
+- **Costing close/reopen**: PM may close costing (costing → quoting) besides
+  Sales/lead/admin; reopen (quoting → costing) needs a reason, logged
+  `costing_reopened`, button on the commercial tab. Send stays Sales-only.
+
 ## Open / decided-by-default (flag to Christoph if it bites)
 - Templates are per department, not per project.
 - Decline is applied immediately (department off the hook until the lead

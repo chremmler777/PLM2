@@ -669,6 +669,17 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costpos.offerCount1': { de: '1 Angebot', en: '1 offer' },
   'costpos.plantLines': { de: 'Zeilen je Werk (Zykluszeit-Delta, Stunden × Satz)', en: 'Per-plant lines (cycle-time delta, hours × rate)' },
   'costpos.cancelEdit': { de: 'Abbrechen', en: 'Cancel' },
+  'costing.reopen': { de: 'Kalkulation wieder öffnen', en: 'Reopen costing' },
+  'costing.reopenTitle': { de: 'Kalkulation wieder öffnen', en: 'Reopen costing' },
+  'costing.reopenLabel': { de: 'Welche Zahlen müssen sich ändern? (Pflicht, wird protokolliert)', en: 'Which numbers have to change? (required, audited)' },
+  'costing.reopenWarning': {
+    de: 'Die Änderung geht von der Angebotserstellung zurück in die Kalkulation. Die Fachbereiche können ihre Zeilen wieder bearbeiten, bis die Kalkulation erneut geschlossen wird.',
+    en: 'The change goes from quote creation back to costing. Departments can edit their lines again until costing is closed once more.',
+  },
+  'costing.closedHint': {
+    de: 'Kalkulation geschlossen — Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
+    en: 'Costing is closed — departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
+  },
   'quote.timeline': { de: 'Umsetzungs-Zeitplan', en: 'Implementation timeline' },
   'quote.timelineBody': {
     de: 'Planungstool folgt — Reihenfolge und Parallelität entscheidet der Vertrieb später.',

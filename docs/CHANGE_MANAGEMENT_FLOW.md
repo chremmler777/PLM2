@@ -317,6 +317,15 @@ gone from the UI; the API still accepts any tag string.
 The per-plant workbook grid (cycle-time delta, hours × rate) stays under the
 table, collapsible. A department routed on several stages has one table.
 
+**Closing and reopening costing.** Departments enter lines while the change
+is in `costing`. Costing closes when it moves to `quoting` — **Project
+Management, Sales, the change lead or admin** may close it (PM runs costing
+and says when the numbers are complete). Sending the quote (`quoting →
+quoted`) stays Sales/lead/admin. While in `quoting` the commercial tab says
+costing is closed and offers **Reopen costing** to the same people who may
+close it; the reason is mandatory and recorded as `costing_reopened`. PM and
+admin may still fix any department's lines at any time (`may_write`).
+
 ### Risk vocabulary: coded baseline + the department's own additions
 - Coded per department in `app/services/risk_types.py` (own types, then the
   common timing/cost/other). Legacy moulding keys stay valid for everyone.
