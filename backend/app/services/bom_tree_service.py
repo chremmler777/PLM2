@@ -128,3 +128,40 @@ class BomTreeService:
             }
             out.append(entry)
         return out
+
+    @staticmethod
+    async def project_assemblies(session: AsyncSession, project_id: int) -> list[dict]:
+        """Top-level assemblies of a project: parts whose display revision has
+        BOM lines and which sit on nobody's display-revision BOM."""
+        parts = (await session.execute(
+            select(Part).where(Part.project_id == project_id).order_by(Part.part_number))).scalars().all()
+        display: dict[int, PartRevision] = {}
+        for p in parts:
+            rev = await BomTreeService._display_revision(session, p)
+            if rev is not None:
+                display[p.id] = rev
+        if not display:
+            return []
+        rev_ids = [r.id for r in display.values()]
+        rows = (await session.execute(
+            select(PartBOMItem.revision_id, PartBOMItem.child_part_id)
+            .where(PartBOMItem.revision_id.in_(rev_ids)))).all()
+        line_count: dict[int, int] = {}
+        used: set[int] = set()
+        for rev_id, child_id in rows:
+            line_count[rev_id] = line_count.get(rev_id, 0) + 1
+            if child_id is not None:
+                used.add(child_id)
+        out = []
+        for p in parts:
+            rev = display.get(p.id)
+            if rev is None or line_count.get(rev.id, 0) == 0 or p.id in used:
+                continue
+            out.append({
+                "part_id": p.id, "part_number": p.part_number, "name": p.name,
+                "part_type": p.part_type, "item_category": p.item_category,
+                "revision_id": rev.id, "revision_name": rev.revision_name,
+                "revision_phase": rev.phase, "line_count": line_count[rev.id],
+            })
+        return out
+

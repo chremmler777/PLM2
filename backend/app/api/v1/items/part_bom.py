@@ -98,6 +98,17 @@ async def bom_tree(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
+@router.get("/project/{project_id}/assemblies", response_model=List[dict])
+async def project_assemblies(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Top-level assemblies of a project (have BOM lines, used nowhere)."""
+    from app.services.bom_tree_service import BomTreeService
+    return await BomTreeService.project_assemblies(db, project_id)
+
+
 @router.get("/{part_id}/where-used", response_model=List[dict])
 async def where_used(
     part_id: int,

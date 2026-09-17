@@ -20,6 +20,7 @@ import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
+import AssemblyTreeList from '../components/parts/AssemblyTreeList';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
 
@@ -1135,7 +1136,7 @@ export default function ProjectDetailPage() {
           </h2>
           <p className="text-xs text-slate-500 mb-2">Drag a part onto a ★ sub-assembly to restructure</p>
           <div className="flex flex-wrap gap-1 mb-3">
-            {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`])].map(
+            {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`]), ['assemblies', '🧩 Assemblies']].map(
               ([key, label]) => (
                 <button
                   key={key}
@@ -1151,7 +1152,10 @@ export default function ProjectDetailPage() {
               )
             )}
           </div>
-          {partsLoading ? (
+          {categoryFilter === 'assemblies' ? (
+            <AssemblyTreeList projectId={Number(id)} selectedPartId={selectedPartId}
+              onSelect={(pid) => { setSelectedPartId(pid); setViewingFileId(null); }} />
+          ) : partsLoading ? (
             <p className="text-slate-500 text-sm">Loading...</p>
           ) : (parts?.length ?? 0) === 0 ? (
             <p className="text-slate-500 text-sm">No parts yet</p>

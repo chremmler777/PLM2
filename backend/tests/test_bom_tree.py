@@ -119,3 +119,18 @@ async def test_tree_uses_a_given_revision(client, eng_auth, seed, session_factor
     assert r.json()["revision_id"] == e1
     r = await client.get(f"/api/v1/parts/{top}/bom-tree", headers=eng_auth)
     assert r.json()["revision_id"] == e2_id  # active = newest customer major
+
+
+async def test_project_assemblies_lists_only_roots_with_lines(client, eng_auth, seed):
+    top, top_rev = await _mk_part(client, eng_auth, seed, "TOP")
+    sub, sub_rev = await _mk_part(client, eng_auth, seed, "SUB")
+    lone, _ = await _mk_part(client, eng_auth, seed, "LONE")          # has E1, no lines
+    bolt, _ = await _mk_part(client, eng_auth, seed, "BOLT", "purchased", with_e1=False)
+    await _add(client, eng_auth, top, top_rev, child_id=sub, qty=2)
+    await _add(client, eng_auth, sub, sub_rev, child_id=bolt, qty=3)
+
+    r = await client.get(f"/api/v1/parts/project/{seed['project_id']}/assemblies", headers=eng_auth)
+    assert r.status_code == 200, r.text
+    roots = r.json()
+    assert [x["part_number"] for x in roots] == ["TOP"]
+    assert roots[0]["revision_name"] == "E1" and roots[0]["line_count"] == 1
