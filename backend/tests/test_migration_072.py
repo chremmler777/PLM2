@@ -39,6 +39,19 @@ async def test_rename_legacy_revisions(session_factory, seed):
             ids[name] = r.id
         await s.commit()
 
+        wc_part = Part(project_id=seed["project_id"], part_number="P-WC", name="WinCarat",
+                       part_type="internal_mfg", created_by=seed["admin_id"])
+        s.add(wc_part)
+        await s.flush()
+        wc = PartRevision(part_id=wc_part.id, revision_name="WC-IMP", phase="engineering",
+                          status="approved", created_by=seed["admin_id"],
+                          created_at=datetime(2026, 1, 1))
+        s.add(wc)
+        await s.flush()
+        ids["WC-IMP"] = wc.id
+        wc_part_id = wc_part.id
+        await s.commit()
+
     async with session_factory() as s:
         conn = await s.connection()
         await conn.run_sync(mod.rename_legacy_revisions)
@@ -53,3 +66,10 @@ async def test_rename_legacy_revisions(session_factory, seed):
     # the old change engine spawned ECR proposals with no parent; the
     # migration links the orphan minor to its official major
     assert got[ids["ECR1.1"]] == ("1.1", "official", "internal", ids["IND1"])
+    # WinCarat baseline: official 1, source import, part already in series
+    assert got[ids["WC-IMP"]] == ("1", "official", "import", None)
+    async with session_factory() as s:
+        wc_part = await s.get(Part, wc_part_id)
+        legacy_part = await s.get(Part, part.id)
+    assert wc_part.lifecycle_phase == "series"
+    assert legacy_part.lifecycle_phase == "rfq"

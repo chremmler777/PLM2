@@ -98,3 +98,10 @@ def test_legacy_rename_orphan_ecr_with_nothing_else_becomes_official_one():
 def test_legacy_rename_leaves_new_style_names_alone():
     rows = [_row(1, "E1", "review"), _row(2, "E1.1", "review", parent=1, day=2), _row(3, "1", "official", day=3)]
     assert legacy_rename(rows) == {1: ("E1", "review"), 2: ("E1.1", "review"), 3: ("1", "official")}
+
+
+def test_legacy_rename_wincarat_baseline_is_official_one():
+    # WinCarat bulk import gave every part a WC-IMP baseline: released series
+    # data, so it becomes official 1; a later ECR hangs off it as 1.1.
+    rows = [_row(1, "WC-IMP", "engineering"), _row(2, "ECR1.1", "ecn", day=2)]
+    assert legacy_rename(rows) == {1: ("1", "official"), 2: ("1.1", "official")}

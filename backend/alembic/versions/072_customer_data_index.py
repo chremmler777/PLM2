@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-from app.services.revision_naming import legacy_rename
+from app.services.revision_naming import WINCARAT_BASELINE, legacy_rename
 
 revision = "072"
 down_revision = "071"
@@ -29,13 +29,22 @@ def rename_legacy_revisions(conn) -> None:
         by_part.setdefault(part_id, []).append((rid, name, phase, parent_id, created_at))
     for part_id, part_rows in by_part.items():
         renamed = legacy_rename(part_rows)
+        old_names = {rid: name for rid, name, _, _, _ in part_rows}
         for rid, (new_name, new_phase) in renamed.items():
             is_minor = "." in new_name
+            if old_names[rid] == WINCARAT_BASELINE:
+                source = "import"
+            else:
+                source = "internal" if is_minor else "customer"
             conn.execute(sa.text(
                 "UPDATE part_revisions SET revision_name = :n, phase = :p, source = :s "
                 "WHERE id = :id"),
-                {"n": new_name, "p": new_phase, "id": rid,
-                 "s": "internal" if is_minor else "customer"})
+                {"n": new_name, "p": new_phase, "id": rid, "s": source})
+        # A part whose data came in as a WinCarat baseline is already running
+        # series production.
+        if any(name == WINCARAT_BASELINE for name in old_names.values()):
+            conn.execute(sa.text(
+                "UPDATE parts SET lifecycle_phase = 'series' WHERE id = :pid"), {"pid": part_id})
         # The old change engine spawned ECR proposals without a parent link.
         # Point every orphan minor at the major it now belongs to, if that
         # major exists on the part.

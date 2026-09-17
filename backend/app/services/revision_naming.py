@@ -13,6 +13,8 @@ from datetime import datetime
 NAME_RE = re.compile(r"^(E?)([1-9]\d*)(?:\.([1-9]\d*))?$")
 LEGACY_RE = re.compile(r"^(RFQ|ENG|IND|ECR)([1-9]\d*)(?:\.([1-9]\d*))?$")
 
+WINCARAT_BASELINE = "WC-IMP"  # baseline revision written by scripts/import_wincarat.py
+
 STATEMENT_REVIEW = "review"
 STATEMENT_OFFICIAL = "official"
 STATEMENTS = (STATEMENT_REVIEW, STATEMENT_OFFICIAL)
@@ -75,7 +77,8 @@ def legacy_rename(
     """Map one part's legacy revisions to the new scheme.
 
     RFQ and ENG majors become E1..Ek in creation order; their proposals keep
-    the parent's new major. IND majors become 1..k. ECR<n>.<m> proposals hang
+    the parent's new major. IND majors and the WinCarat WC-IMP baseline become
+    1..k in creation order. ECR<n>.<m> proposals hang
     off official major <n> if it exists, else the latest official major, else
     the latest review major (E<k>.<m>), else a name-only official major 1.
     Orphans get consecutive minors. Rows that already carry new-style names
@@ -100,6 +103,14 @@ def legacy_rename(
             else:
                 key = format_name(is_official, major)
                 minors_under[key] = max(minors_under.get(key, 0), minor)
+            continue
+        if name == WINCARAT_BASELINE:
+            # Bulk import of running series parts: released data, so it is
+            # the first official major. Later ECRs hang off it as 1.1, 1.2.
+            official_count += 1
+            new = format_name(True, official_count)
+            legacy_major_to_new[WINCARAT_BASELINE] = new
+            result[rid] = (new, "official")
             continue
         m = LEGACY_RE.match(name)
         if not m:
