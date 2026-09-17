@@ -80,9 +80,19 @@ def test_legacy_rename_maps_rfq_eng_ind_ecr():
     }
 
 
-def test_legacy_rename_orphan_ecr_without_freeze_hangs_off_first_official():
-    rows = [_row(1, "E1", "review"), _row(2, "ECR1.1", "ecn", day=2), _row(3, "ECR2.1", "ecn", day=3)]
-    assert legacy_rename(rows) == {1: ("E1", "review"), 2: ("1.1", "official"), 3: ("1.2", "official")}
+def test_legacy_rename_orphan_ecr_hangs_off_latest_review_major_when_no_official():
+    rows = [_row(1, "RFQ1", "rfq_phase"), _row(2, "ECR1.1", "ecn", day=2), _row(3, "ECR2.1", "ecn", day=3)]
+    assert legacy_rename(rows) == {1: ("E1", "review"), 2: ("E1.1", "review"), 3: ("E1.2", "review")}
+
+
+def test_legacy_rename_orphan_ecr_prefers_official_major():
+    rows = [_row(1, "RFQ1", "rfq_phase"), _row(2, "IND1", "freeze", day=2), _row(3, "ECR3.1", "ecn", day=3)]
+    assert legacy_rename(rows) == {1: ("E1", "review"), 2: ("1", "official"), 3: ("1.1", "official")}
+
+
+def test_legacy_rename_orphan_ecr_with_nothing_else_becomes_official_one():
+    rows = [_row(1, "ECR1.1", "ecn")]
+    assert legacy_rename(rows) == {1: ("1.1", "official")}
 
 
 def test_legacy_rename_leaves_new_style_names_alone():

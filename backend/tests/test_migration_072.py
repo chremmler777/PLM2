@@ -45,9 +45,11 @@ async def test_rename_legacy_revisions(session_factory, seed):
         await s.commit()
 
     async with session_factory() as s:
-        got = {r.id: (r.revision_name, r.phase, r.source) for r in
+        got = {r.id: (r.revision_name, r.phase, r.source, r.parent_revision_id) for r in
                (await s.execute(select(PartRevision))).scalars().all()}
-    assert got[ids["RFQ1"]] == ("E1", "review", "customer")
-    assert got[ids["ENG1"]] == ("E2", "review", "customer")
-    assert got[ids["IND1"]] == ("1", "official", "customer")
-    assert got[ids["ECR1.1"]] == ("1.1", "official", "customer")
+    assert got[ids["RFQ1"]] == ("E1", "review", "customer", None)
+    assert got[ids["ENG1"]] == ("E2", "review", "customer", None)
+    assert got[ids["IND1"]] == ("1", "official", "customer", None)
+    # the old change engine spawned ECR proposals with no parent; the
+    # migration links the orphan minor to its official major
+    assert got[ids["ECR1.1"]] == ("1.1", "official", "internal", ids["IND1"])

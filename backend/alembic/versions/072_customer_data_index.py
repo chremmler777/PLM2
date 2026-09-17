@@ -27,12 +27,27 @@ def rename_legacy_revisions(conn) -> None:
     by_part: dict[int, list] = {}
     for rid, part_id, name, phase, parent_id, created_at in rows:
         by_part.setdefault(part_id, []).append((rid, name, phase, parent_id, created_at))
-    for part_rows in by_part.values():
-        for rid, (new_name, new_phase) in legacy_rename(part_rows).items():
+    for part_id, part_rows in by_part.items():
+        renamed = legacy_rename(part_rows)
+        for rid, (new_name, new_phase) in renamed.items():
+            is_minor = "." in new_name
             conn.execute(sa.text(
-                "UPDATE part_revisions SET revision_name = :n, phase = :p, "
-                "source = CASE WHEN parent_revision_id IS NULL THEN 'customer' ELSE 'internal' END "
-                "WHERE id = :id"), {"n": new_name, "p": new_phase, "id": rid})
+                "UPDATE part_revisions SET revision_name = :n, phase = :p, source = :s "
+                "WHERE id = :id"),
+                {"n": new_name, "p": new_phase, "id": rid,
+                 "s": "internal" if is_minor else "customer"})
+        # The old change engine spawned ECR proposals without a parent link.
+        # Point every orphan minor at the major it now belongs to, if that
+        # major exists on the part.
+        major_ids = {name: rid for rid, (name, _) in renamed.items() if "." not in name}
+        for rid, name, _phase, parent_id, _ in part_rows:
+            new_name = renamed[rid][0]
+            if "." in new_name and parent_id is None:
+                major_id = major_ids.get(new_name.split(".")[0])
+                if major_id is not None:
+                    conn.execute(sa.text(
+                        "UPDATE part_revisions SET parent_revision_id = :pid WHERE id = :id"),
+                        {"pid": major_id, "id": rid})
 
 
 def upgrade() -> None:

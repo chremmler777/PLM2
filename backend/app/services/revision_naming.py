@@ -75,10 +75,11 @@ def legacy_rename(
     """Map one part's legacy revisions to the new scheme.
 
     RFQ and ENG majors become E1..Ek in creation order; their proposals keep
-    the parent's new major. IND majors become 1..k; ECR<n>.<m> proposals hang
-    off the official major <n> if it exists, otherwise off official major 1
-    (a name only — no row is added; such orphans get consecutive minors).
-    Rows that already carry new-style names pass through unchanged.
+    the parent's new major. IND majors become 1..k. ECR<n>.<m> proposals hang
+    off official major <n> if it exists, else the latest official major, else
+    the latest review major (E<k>.<m>), else a name-only official major 1.
+    Orphans get consecutive minors. Rows that already carry new-style names
+    pass through unchanged.
     """
     ordered = sorted(rows, key=lambda r: (r[4], r[0]))
     result: dict[int, tuple[str, str]] = {}
@@ -118,10 +119,20 @@ def legacy_rename(
             if prefix == "ECR":
                 target = legacy_major_to_new.get(f"IND{major_s}")
                 if target is None:
-                    if official_count == 0:
+                    # Orphan ECR (old change engine spawned it without a
+                    # parent). Hang it off the latest official major; if the
+                    # part never had official data, off the latest review
+                    # major so the name does not claim a release that never
+                    # happened.
+                    if official_count > 0:
+                        target = format_name(True, min(int(major_s), official_count))
+                    elif review_count > 0:
+                        target = format_name(False, review_count)
+                    else:
                         official_count = 1
-                    target = format_name(True, min(int(major_s), official_count))
-                new_phase = "official"
+                        target = format_name(True, 1)
+                is_off_t, _, _ = parse_name(target)
+                new_phase = "official" if is_off_t else "review"
             else:
                 target = legacy_major_to_new.get(legacy_major)
                 if target is None:
