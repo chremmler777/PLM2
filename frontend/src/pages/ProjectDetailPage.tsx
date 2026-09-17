@@ -18,6 +18,7 @@ import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
+import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
 
@@ -56,10 +57,12 @@ interface PartRevision {
   id: number;
   part_id: number;
   revision_name: string;
-  phase: string;
+  phase: 'review' | 'official';
   status: string;
   created_at: string;
   summary?: string;
+  part_phase_at_receipt?: string;
+  customer_index?: string | null;
 }
 
 interface ContextMenu {
@@ -226,13 +229,7 @@ function typeColor(partType: string): string {
 }
 
 function phaseColor(phase: string): string {
-  const colors: Record<string, string> = {
-    rfq_phase: 'bg-blue-900/30 text-blue-300',
-    engineering: 'bg-yellow-900/30 text-yellow-300',
-    freeze: 'bg-green-900/30 text-green-300',
-    ecn: 'bg-purple-900/30 text-purple-300',
-  };
-  return colors[phase] || 'bg-slate-700/30 text-slate-300';
+  return phase === 'official' ? 'bg-amber-900/30 text-amber-300' : 'bg-blue-900/30 text-blue-300';
 }
 
 function statusColor(status: string): string {
@@ -985,20 +982,20 @@ export default function ProjectDetailPage() {
 
   const invalidDropIds = draggingPartId !== null && parts ? getDescendantIds(parts, draggingPartId) : new Set<number>();
 
-  const createRfqMutation = useMutation({
-    mutationFn: async () => {
-      const res = await client.post(`/v1/parts/${selectedPartId}/revisions/rfq`, {
-        summary: 'Initial revision',
-      });
+  const [showCustomerData, setShowCustomerData] = useState(false);
+  const customerDataMutation = useMutation({
+    mutationFn: async (v: CustomerDataInput) => {
+      const res = await client.post(`/v1/parts/${selectedPartId}/revisions/customer-data`, v);
       return res.data;
     },
-    onSuccess: () => {
-      toast.success('Initial RFQ revision created');
+    onSuccess: (data) => {
+      toast.success(`Recorded ${data.revision_name}`);
+      setShowCustomerData(false);
       queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
       queryClient.invalidateQueries({ queryKey: ['parts', id] });
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || 'Failed to create revision');
+    onError: (error: unknown) => {
+      toast.error((error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to record customer data');
     },
   });
 
@@ -1257,15 +1254,19 @@ export default function ProjectDetailPage() {
                 {!partRevisions || partRevisions.length === 0 ? (
                   <div className="p-6 text-center">
                     <p className="text-slate-400 text-sm mb-3">
-                      Files are managed per revision. Create the first revision to upload files.
+                      Files are managed per revision. Record the first customer data to upload files.
                     </p>
                     <button
-                      onClick={() => createRfqMutation.mutate()}
-                      disabled={createRfqMutation.isPending}
-                      className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white text-sm font-medium"
+                      onClick={() => setShowCustomerData(true)}
+                      className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
                     >
-                      {createRfqMutation.isPending ? 'Creating...' : '+ Create RFQ Revision'}
+                      + Customer data
                     </button>
+                    {showCustomerData && (
+                      <CustomerDataDialog open title="Customer data received"
+                        pending={customerDataMutation.isPending} onClose={() => setShowCustomerData(false)}
+                        onSubmit={(v) => customerDataMutation.mutate(v)} />
+                    )}
                   </div>
                 ) : (
                   <>
@@ -1384,7 +1385,7 @@ export default function ProjectDetailPage() {
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-mono font-semibold text-slate-100 text-sm">{rev.revision_name}</span>
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${phaseColor(rev.phase)}`}>
-                            {rev.phase.replace(/_/g, ' ')}
+                            {rev.phase}{rev.part_phase_at_receipt ? ` · ${rev.part_phase_at_receipt}` : ''}
                           </span>
                         </div>
                         <div className="flex items-center justify-between text-xs">
