@@ -33,8 +33,9 @@ Numbering rule: the next major of a review revision is `E<n+1>`; the next
 major of an official revision is `<n+1>`; the first official revision after
 any number of E revisions is `1`. E and numeric counters are independent.
 
-Promotion keeps the current behaviour: promoting proposal `1.2` renames it in
-place to the next major (`2`) and the changelog keeps the history. Promotion
+Promotion keeps the current behaviour: promoting proposal `1.2` creates the
+next major (`2`) as a new record, marks `1.2` approved, rejects its sibling
+proposals, and the changelog keeps the history. Promotion
 requires the same customer evidence as a new major (index, statement, date),
 because a promoted proposal is by definition a customer-adopted state.
 
