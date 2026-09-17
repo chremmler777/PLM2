@@ -121,16 +121,24 @@ async def test_tree_uses_a_given_revision(client, eng_auth, seed, session_factor
     assert r.json()["revision_id"] == e2_id  # active = newest customer major
 
 
-async def test_project_assemblies_lists_only_roots_with_lines(client, eng_auth, seed):
+async def test_project_assemblies_lists_self_made_roots_even_without_lines(client, eng_auth, seed):
     top, top_rev = await _mk_part(client, eng_auth, seed, "TOP")
     sub, sub_rev = await _mk_part(client, eng_auth, seed, "SUB")
-    lone, _ = await _mk_part(client, eng_auth, seed, "LONE")          # has E1, no lines
+    await _mk_part(client, eng_auth, seed, "LONE")                         # E1, no lines yet
+    await _mk_part(client, eng_auth, seed, "NEW", with_e1=False)           # no data at all
     bolt, _ = await _mk_part(client, eng_auth, seed, "BOLT", "purchased", with_e1=False)
     await _add(client, eng_auth, top, top_rev, child_id=sub, qty=2)
     await _add(client, eng_auth, sub, sub_rev, child_id=bolt, qty=3)
+    r = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": "T-1", "name": "Die",
+        "part_type": "purchased", "item_category": "tool"}, headers=eng_auth)
+    assert r.status_code in (200, 201), r.text
 
     r = await client.get(f"/api/v1/parts/project/{seed['project_id']}/assemblies", headers=eng_auth)
     assert r.status_code == 200, r.text
-    roots = r.json()
-    assert [x["part_number"] for x in roots] == ["TOP"]
-    assert roots[0]["revision_name"] == "E1" and roots[0]["line_count"] == 1
+    roots = {x["part_number"]: x for x in r.json()}
+    # SUB is used by TOP, BOLT is purchased, T-1 is a tool: none are roots
+    assert sorted(roots) == ["LONE", "NEW", "TOP"]
+    assert roots["TOP"]["revision_name"] == "E1" and roots["TOP"]["line_count"] == 1
+    assert roots["LONE"]["line_count"] == 0
+    assert roots["NEW"]["revision_name"] is None

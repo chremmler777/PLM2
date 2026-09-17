@@ -131,8 +131,9 @@ class BomTreeService:
 
     @staticmethod
     async def project_assemblies(session: AsyncSession, project_id: int) -> list[dict]:
-        """Top-level assemblies of a project: parts whose display revision has
-        BOM lines and which sit on nobody's display-revision BOM."""
+        """Top-level assemblies of a project: articles we make ourselves that
+        sit on nobody's display-revision BOM. Lines are not required, so a
+        freshly nominated panel shows up before its BOM is filled."""
         parts = (await session.execute(
             select(Part).where(Part.project_id == project_id).order_by(Part.part_number))).scalars().all()
         display: dict[int, PartRevision] = {}
@@ -140,12 +141,10 @@ class BomTreeService:
             rev = await BomTreeService._display_revision(session, p)
             if rev is not None:
                 display[p.id] = rev
-        if not display:
-            return []
         rev_ids = [r.id for r in display.values()]
         rows = (await session.execute(
             select(PartBOMItem.revision_id, PartBOMItem.child_part_id)
-            .where(PartBOMItem.revision_id.in_(rev_ids)))).all()
+            .where(PartBOMItem.revision_id.in_(rev_ids)))).all() if rev_ids else []
         line_count: dict[int, int] = {}
         used: set[int] = set()
         for rev_id, child_id in rows:
@@ -154,14 +153,16 @@ class BomTreeService:
                 used.add(child_id)
         out = []
         for p in parts:
-            rev = display.get(p.id)
-            if rev is None or line_count.get(rev.id, 0) == 0 or p.id in used:
+            if p.item_category != "article" or p.part_type == "purchased" or p.id in used:
                 continue
+            rev = display.get(p.id)
             out.append({
                 "part_id": p.id, "part_number": p.part_number, "name": p.name,
                 "part_type": p.part_type, "item_category": p.item_category,
-                "revision_id": rev.id, "revision_name": rev.revision_name,
-                "revision_phase": rev.phase, "line_count": line_count[rev.id],
+                "revision_id": rev.id if rev else None,
+                "revision_name": rev.revision_name if rev else None,
+                "revision_phase": rev.phase if rev else None,
+                "line_count": line_count.get(rev.id, 0) if rev else 0,
             })
         return out
 

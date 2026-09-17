@@ -14,9 +14,9 @@ export interface AssemblyRoot {
   name: string;
   part_type: string;
   item_category: string;
-  revision_id: number;
-  revision_name: string;
-  revision_phase: 'review' | 'official';
+  revision_id: number | null;
+  revision_name: string | null;
+  revision_phase: 'review' | 'official' | null;
   line_count: number;
 }
 
@@ -73,19 +73,22 @@ function AssemblyRootRow({ root, selectedPartId, onSelect }: { root: AssemblyRoo
   const [open, setOpen] = useState(false);
   const { data: tree } = useQuery({
     queryKey: ['bom-tree', root.part_id, root.revision_id],
-    queryFn: async () => (await client.get(`/v1/parts/${root.part_id}/bom-tree`, { params: { revision_id: root.revision_id } })).data as BomNode,
-    enabled: open,
+    queryFn: async () => (await client.get(`/v1/parts/${root.part_id}/bom-tree`,
+      { params: root.revision_id ? { revision_id: root.revision_id } : {} })).data as BomNode,
+    enabled: open && root.line_count > 0,
   });
   return (
     <div className="border border-slate-700 rounded-lg p-1 bg-slate-800/60">
       <div data-testid={`asm-root-${root.part_id}`}
         className={`flex items-center gap-1.5 py-1 px-1 rounded text-sm cursor-pointer ${selectedPartId === root.part_id ? 'bg-blue-900/40' : 'hover:bg-slate-700/50'}`}
         onClick={() => onSelect(root.part_id)}>
-        <button data-testid={`asm-root-toggle-${root.part_id}`} onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
-          className="w-4 text-slate-400 hover:text-slate-100">{open ? '▾' : '▸'}</button>
+        {root.line_count > 0 ? (
+          <button data-testid={`asm-root-toggle-${root.part_id}`} onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+            className="w-4 text-slate-400 hover:text-slate-100">{open ? '▾' : '▸'}</button>
+        ) : <span className="w-4" />}
         <span className="font-mono text-slate-100 truncate">{root.part_number}</span>
         <span className="text-slate-400 truncate flex-1">{root.name}</span>
-        <span className="text-xs text-slate-500">{root.line_count} lines</span>
+        <span className="text-xs text-slate-500">{root.line_count > 0 ? `${root.line_count} lines` : 'no BOM yet'}</span>
         <RevBadge name={root.revision_name} phase={root.revision_phase} />
       </div>
       {open && (tree ? tree.lines.map((l) => l.child ? (
