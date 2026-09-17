@@ -779,13 +779,21 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
           {isTime ? (
             <span className="text-xs text-slate-400">{t('costpos.type.time')}</span>
           ) : (
-            <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
+            // Two buttons, not a dropdown: a house number or a vendor's written
+            // offer is the one choice on a money line, and it should be seen.
+            <span data-testid={`costpos-new-pricing-${departmentId}`} role="group"
               aria-label={t('costpos.pricing')}
-              onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
-              className={`${fieldCls} w-36`}>
-              <option value="estimate">{t('costpos.type.estimate')}</option>
-              <option value="quote">{t('costpos.type.quote')}</option>
-            </select>
+              className="inline-flex rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600">
+              {(['estimate', 'quote'] as CostPositionPricing[]).map((v) => (
+                <button key={v} type="button"
+                  data-testid={`costpos-new-pricing-${departmentId}-${v}`}
+                  aria-pressed={pricing === v} onClick={() => setPricing(v)}
+                  className={`px-2.5 h-7 text-xs whitespace-nowrap transition-colors ${
+                    pricing === v ? 'bg-sky-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                  {t(`costpos.type.${v}`)}
+                </button>
+              ))}
+            </span>
           )}
         </td>
         <td className={`${cellCls} ${numCls} whitespace-nowrap`}>

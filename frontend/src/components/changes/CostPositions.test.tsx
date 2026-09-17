@@ -145,7 +145,7 @@ describe('CostPositions', () => {
     positions()
     await screen.findByTestId('costpos-new-2')
     expect(screen.getByTestId('costpos-new-est-2')).toBeTruthy()
-    fireEvent.change(screen.getByTestId('costpos-new-pricing-2'), { target: { value: 'quote' } })
+    fireEvent.click(screen.getByTestId('costpos-new-pricing-2-quote'))
     expect(screen.queryByTestId('costpos-new-est-2')).toBeNull()
     // Own time survives the switch — somebody still runs the vendor.
     expect(screen.getByTestId('costpos-new-hours-2')).toBeTruthy()
