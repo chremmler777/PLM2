@@ -6,6 +6,7 @@ import type {
   TransitionDeviation, ImpactTreeResponse, ImplementationProgress, MyActionsResponse,
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
+  RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
@@ -123,9 +124,11 @@ export const changesApi = {
   deleteAttachment: (id: number, attachmentId: number) =>
     client.delete(`/v1/changes/${id}/attachments/${attachmentId}`).then((r) => r.data),
 
+  // Stage-1 departments of the change type's standard routing, each with the
+  // letter the standard gives it — the picker's starting point.
   recommendedDepartments: (id: number) =>
-    client.get<{ id: number; name: string }[]>(`/v1/changes/${id}/recommended-departments`)
-      .then((r) => r.data),
+    client.get<{ id: number; name: string; rasic_letter?: RasicLetter }[]>(
+      `/v1/changes/${id}/recommended-departments`).then((r) => r.data),
 
   getRouting: (id: number) =>
     client.get<ChangeRouting>(`/v1/changes/${id}/routing`).then((r) => r.data),
@@ -135,6 +138,8 @@ export const changesApi = {
 
   approveDeviation: (id: number) =>
     client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/approve`).then((r) => r.data),
+  rejectDeviation: (id: number, reason: string) =>
+    client.post<ChangeRouting>(`/v1/changes/${id}/routing/deviation/reject`, { reason }).then((r) => r.data),
 
   getCostLines: (id: number, aid: number) =>
     client.get<CostLine[]>(`/v1/changes/${id}/assessments/${aid}/cost-lines`).then((r) => r.data),
@@ -184,9 +189,22 @@ export const changesApi = {
 
   // The tag vocabulary a department may file a position under.
   costingTags: (departmentId?: number) =>
-    client.get<{ items: { key: string }[] }>('/v1/changes/reference/costing-tags',
+    client.get<{ items: CostCategory[] }>('/v1/changes/reference/costing-tags',
       { params: departmentId != null ? { department_id: departmentId } : undefined })
       .then((r) => r.data),
+  // Vendors are the Suppliers master data: the vendor field offers them and
+  // a new name typed there becomes a supplier on save.
+  listSuppliers: () =>
+    client.get<{ id: number; name: string; is_active?: boolean }[]>('/v1/suppliers').then((r) => r.data),
+  createSupplier: (name: string) =>
+    client.post<{ id: number; name: string }>('/v1/suppliers', { name }).then((r) => r.data),
+  // A department's own additions to its costing categories, typed money or time.
+  createCostCategory: (departmentId: number, label: string, entryType: CostEntryType) =>
+    client.post<{ id: number; department_id: number; key: string; label: string; entry_type: CostEntryType }>(
+      '/v1/changes/reference/costing-tags',
+      { department_id: departmentId, label, entry_type: entryType }).then((r) => r.data),
+  deleteCostCategory: (id: number) =>
+    client.delete<{ id: number }>(`/v1/changes/reference/costing-tags/${id}`).then((r) => r.data),
 
   getSummation: (id: number) =>
     client.get<Summation>(`/v1/changes/${id}/summation`).then((r) => r.data),
@@ -224,6 +242,7 @@ export const changesApi = {
     meeting_date?: string; channel?: 'meeting' | 'chat' | 'email';
     participants: MeetingParticipant[];
     notes?: string; selected_department_ids: number[];
+    department_rasic?: Record<number, RasicLetter>;
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
@@ -237,9 +256,26 @@ export const changesApi = {
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
 
   // The risk vocabulary is the backend's list, not a hard-coded one here.
-  riskTypes: () =>
-    client.get<{ items: { key: string }[] }>('/v1/changes/reference/risk-types')
+  riskTypes: (departmentId?: number) =>
+    client.get<{ items: { key: string; label_de?: string; label_en?: string; extra?: boolean; custom_id?: number }[] }>(
+      '/v1/changes/reference/risk-types',
+      { params: departmentId != null ? { department_id: departmentId } : {} })
       .then((r) => r.data),
+  // A department's own additions to its risk dropdown.
+  createRiskType: (departmentId: number, label: string) =>
+    client.post<{ id: number; department_id: number; key: string; label: string }>(
+      '/v1/changes/reference/risk-types', { department_id: departmentId, label }).then((r) => r.data),
+  deleteRiskType: (id: number) =>
+    client.delete<{ id: number }>(`/v1/changes/reference/risk-types/${id}`).then((r) => r.data),
+  // A department's pre-written risks: picked in the risk form, saved from it,
+  // deleted when one was written down by accident.
+  riskTemplates: (departmentId: number) =>
+    client.get<RiskTemplate[]>('/v1/changes/reference/risk-templates',
+      { params: { department_id: departmentId } }).then((r) => r.data),
+  createRiskTemplate: (body: RiskTemplateIn) =>
+    client.post<RiskTemplate>('/v1/changes/reference/risk-templates', body).then((r) => r.data),
+  deleteRiskTemplate: (id: number) =>
+    client.delete<RiskTemplate>(`/v1/changes/reference/risk-templates/${id}`).then((r) => r.data),
   // Answering records what the customer said; it does not close the question —
   // the asking side (or PM) still decides whether it is settled.
   answerConcern: (id: number, concernId: number, note: string) =>

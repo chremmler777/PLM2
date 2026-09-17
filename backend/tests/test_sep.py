@@ -1,5 +1,26 @@
 """SEP Q-Gate module tests: activation, tri-state items with audit, strict
 gate sequencing, dual sign-off with yellow-gate risk gating, lessons hook."""
+import pytest
+
+
+async def _add_form_risk(client, auth, project_id, gate_code, **row):
+    """Add a row to the project's risk_assessment form (creating it if needed).
+
+    Gate colour and sign-off read their risks from this form, not from sep_risks.
+    Returns the saved instance so callers can patch the row afterwards."""
+    res = await client.get(f"/api/v1/forms/projects/{project_id}", headers=auth)
+    group = next(g for g in res.json() if g["key"] == "risk_assessment")
+    if group["instances"]:
+        inst = (await client.get(f"/api/v1/forms/instances/{group['instances'][0]['id']}", headers=auth)).json()
+    else:
+        inst = (await client.post(f"/api/v1/forms/projects/{project_id}/instances",
+                                  json={"key": "risk_assessment"}, headers=auth)).json()
+    data = inst["data"]
+    data["risks"] = list(data.get("risks") or []) + [
+        {"gate": gate_code, "risk": "r", "q": 0.1, "c": 0.1, "s": 0.1, "p": 0.5, "status": "open", **row}]
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=auth)
+    assert res.status_code == 200, res.text
+    return res.json()
 
 
 async def _activate(client, auth, project_id):
@@ -118,7 +139,7 @@ async def test_strict_gate_sequencing_and_dual_sign_off(client, eng_auth, admin_
     assert full["gates"][1]["status"] == "in_progress"
 
 
-async def test_yellow_gate_requires_complete_action_plan(client, eng_auth, admin_auth, seed):
+async def test_yellow_gate_requires_complete_action_plan(client, eng_auth, admin_auth, seed, seed_forms):
     await _activate(client, eng_auth, seed["project_id"])
     full = await _get_sep(client, eng_auth, seed["project_id"])
     gate1 = full["gates"][0]
@@ -130,43 +151,39 @@ async def test_yellow_gate_requires_complete_action_plan(client, eng_auth, admin
     assert res.status_code == 409
     assert "risk" in res.json()["detail"].lower()
 
-    # risk without countermeasure still blocks
-    res = await client.post(
-        f"/api/v1/sep/gates/{gate1['id']}/risks",
-        json={"effect": "Supplier samples late", "q_impact": 0.2, "s_impact": 0.4, "probability": 0.5},
-        headers=eng_auth,
-    )
-    assert res.status_code == 201, res.text
-    risk = res.json()
-    assert risk["priority"] == "low"  # (0.2+0+0.4)*0.5 = 0.3
+    # risk row without countermeasure still blocks
+    inst = await _add_form_risk(client, eng_auth, seed["project_id"], "K0/RG1",
+                                risk="Supplier samples late", q=0.2, c=0, s=0.4, p=0.5)
+    assert inst["data"]["risks"][0]["priority"] == "low"  # (0.2+0+0.4)*0.5 = 0.3
     res = await client.post(f"/api/v1/sep/gates/{gate1['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
     assert res.status_code == 409
+    assert "countermeasure" in res.json()["detail"]
 
     # action plan due date beyond 14 days blocks
-    res = await client.patch(
-        f"/api/v1/sep/risks/{risk['id']}",
-        json={"countermeasure": "Expedite via air freight", "due_date": "2030-01-01T00:00:00",
-              "responsible_id": seed["engineer_id"]},
-        headers=eng_auth,
-    )
-    assert res.status_code == 200
+    data = inst["data"]
+    data["risks"][0].update({"countermeasure": "Expedite via air freight", "due": "2030-01-01",
+                             "responsible": seed["engineer_id"]})
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200, res.text
     res = await client.post(f"/api/v1/sep/gates/{gate1['id']}/sign-off", json={"role": "pm"}, headers=eng_auth)
     assert res.status_code == 409
     assert "14" in res.json()["detail"]
 
     # complete plan within 14 days -> sign-off passes, dual signature closes
-    from datetime import datetime, timedelta
-    due = (datetime.utcnow() + timedelta(days=7)).isoformat()
-    await client.patch(f"/api/v1/sep/risks/{risk['id']}", json={"due_date": due}, headers=eng_auth)
+    from datetime import date, timedelta
+    data["risks"][0]["due"] = (date.today() + timedelta(days=7)).isoformat()
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200, res.text
     closed = await _close_gate(client, eng_auth, admin_auth, gate1)
     assert closed["status"] == "closed"
 
 
-async def test_risk_priority_thresholds(client, eng_auth, seed):
+async def test_risk_priority_thresholds(client, eng_auth, seed, seed_forms):
     await _activate(client, eng_auth, seed["project_id"])
     full = await _get_sep(client, eng_auth, seed["project_id"])
     gate1 = full["gates"][0]
 
+    # the legacy sep_risks endpoint still scores rows...
     res = await client.post(
         f"/api/v1/sep/gates/{gate1['id']}/risks",
         json={"effect": "Tooling capacity conflict", "q_impact": 1.0, "c_impact": 1.0,
@@ -177,15 +194,29 @@ async def test_risk_priority_thresholds(client, eng_auth, seed):
     assert risk["rkz"] == 2.7
     assert risk["priority"] == "very_high"
 
+    # ...but no longer colours the gate: only the risk assessment form does
+    full = await _get_sep(client, eng_auth, seed["project_id"])
+    assert full["gates"][0]["color"] == "yellow"
+    assert full["gates"][0]["open_risks"] == 0
+
+    inst = await _add_form_risk(client, eng_auth, seed["project_id"], "K0/RG1",
+                                risk="Tooling capacity conflict", q=1.0, c=1.0, s=1.0, p=0.9)
+    assert inst["data"]["risks"][0]["rkz"] == pytest.approx(2.7)
+    assert inst["data"]["risks"][0]["priority"] == "very_high"
+
     # live high risk turns the gate red
     full = await _get_sep(client, eng_auth, seed["project_id"])
     assert full["gates"][0]["color"] == "red"
+    assert full["gates"][0]["open_risks"] == 1
 
     # finished risk no longer colors the gate
-    res = await client.patch(f"/api/v1/sep/risks/{risk['id']}", json={"status": "finished"}, headers=eng_auth)
-    assert res.status_code == 200
+    data = inst["data"]
+    data["risks"][0]["status"] = "finished"
+    res = await client.patch(f"/api/v1/forms/instances/{inst['id']}", json={"data": data}, headers=eng_auth)
+    assert res.status_code == 200, res.text
     full = await _get_sep(client, eng_auth, seed["project_id"])
     assert full["gates"][0]["color"] == "yellow"
+    assert full["gates"][0]["open_risks"] == 0
 
 
 async def test_my_items_queue(client, eng_auth, admin_auth, seed):

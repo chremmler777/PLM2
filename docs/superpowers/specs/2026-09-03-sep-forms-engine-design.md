@@ -95,21 +95,32 @@ On `submitted`: every `SepWorkItem` in the project matched by the
 definition's `sep_items` and whose status is `open` flips to `done`, with a
 `SepItemAudit` row (`field="status"`, `old="open"`, `new="done"`,
 `user_id=submitting user`) and the remark set to `via form <title>` if the
-remark is empty. On `reopened`: items set done by this form flip back to
-`open` with a matching audit row. Items on a closed gate are not touched (gate
-lock wins). Items set `not_applicable` are not touched.
+remark is empty (the remark is display only -- nothing keys off it). The ids
+of the items this submission flipped are recorded in the `submitted` event's
+`diff` as `{"items": [...]}`. On `reopened`: exactly those items flip back to
+`open`, with a matching audit row; an item someone has since ticked `done` by
+hand was never in that list, so it stays `done`, and an item whose status has
+moved on since the submission is skipped. Items on a closed gate are not
+touched (gate lock wins). Items set `not_applicable` are not touched.
+
+An empty `sep_items` list (`lop`, `deviation_agreement`) means the form has
+no work item to drive; it is only reachable from the project's Forms tab, not
+from any SEP item row.
 
 ### Risk migration and gate logic
 
-The migration creates one `risk_assessment` instance per project that has SEP
-gates, and copies each `SepRisk` into the `risks` table section (see section
-4). The risk table has a `gate` column (gate code) so a risk stays attached
-to the gate it was raised in. Gate colour (red when a high or very high risk
-is unfinished) and yellow-gate sign-off (open items need risks with complete
-action plans due within 14 days) read the risk rows of the project's
-risk-assessment instance instead of `sep_risks`. `sep_risks` and its three
-endpoints stay as dead data until production has been verified; removal is a
-follow-up commit.
+Legacy rows copy each `SepRisk` into the `risks` table section (see section
+4) of the project's `risk_assessment` instance. The risk table has a `gate`
+column (gate code) so a risk stays attached to the gate it was raised in.
+Gate colour (red when a high or very high risk is unfinished) reads only the
+risk rows assigned to that gate; it does not consider rows with no gate set.
+Yellow-gate sign-off is refused with 409 while the project has unfinished
+risk rows with no gate assigned at all (there is nowhere to attribute them),
+and — as before — while gated unfinished rows lack a complete action plan
+(countermeasure, responsible, due date within 14 days). Gate colour and
+sign-off both read the risk rows of the project's risk-assessment instance
+instead of `sep_risks`. `sep_risks` and its three endpoints stay as dead data
+until production has been verified; removal is a follow-up commit.
 
 ## 3. Definition format
 
@@ -243,14 +254,25 @@ New router `backend/app/api/v1/timing/forms.py`, prefix `/v1/forms`.
 | GET | `/instances/{id}` | instance + its definition body + events |
 | PATCH | `/instances/{id}` | save draft: `{data, owner_id?}`; recomputes computed fields; writes `saved` event with diff; 409 if submitted and not reopened |
 | POST | `/instances/{id}/submit` | validates, recomputes, flips linked SEP items, `submitted` event |
-| POST | `/instances/{id}/reopen` | PM or owner; flips items back, `reopened` event |
+| POST | `/instances/{id}/reopen` | any authenticated user; flips items back, `reopened` event |
 | POST | `/instances/{id}/sign` | body `{role}`; role must be in the definition, not yet signed since last submit, and by a user who has not signed another role on it; `signed` event |
 | GET | `/instances/{id}/export.pdf` | PDF (section 7) |
-| GET | `/my-forms` | drafts owned by me + submitted instances awaiting my signature role |
+| GET | `/my-forms` | drafts and reopened instances I own |
 
 SEP endpoints: `GET /v1/sep/projects/{id}` gains per item `form: {key, title, instance_id|null, status|null}` and `references: [...]`. The three `/risks` endpoints remain until the follow-up removal.
 
-Permissions follow the SEP module: any project member can create, save and submit; reopen is the project manager or the instance owner; sign follows the four-eyes rule above.
+Permissions follow the SEP module: any authenticated user can create, save and
+submit; sign follows the four-eyes rule above. Restricting these to members of
+the project is a follow-up, blocked until a project membership model exists. Reopen is open to any
+authenticated user, not restricted to the project manager or the instance
+owner: the project model has no manager field to check against, so there is
+nobody to restrict it to. Revisit once projects carry a manager field.
+
+`GET /my-forms` lists only draft/reopened instances owned by the caller. It
+does not also surface submitted instances awaiting the caller's signature,
+because signature roles (`md`, `pm`, `quality`, `dt`) are self-declared at
+sign time (section 3, Signatures) — with no role model behind them, the
+endpoint cannot know in advance which signatures are "mine" to give.
 
 ## 6. Frontend
 
@@ -266,18 +288,31 @@ Permissions follow the SEP module: any project member can create, save and submi
 PDF per submitted instance: title, project header, version and `implements`,
 sections and tables in definition order, then an event history page. Rendered
 server-side with `reportlab` (new dependency in `backend/requirements.txt`),
-landscape for table-heavy forms. No Excel export in this batch.
+landscape for table-heavy forms. No Excel export in this batch. Every value
+placed on the page (field values, user names, timestamps) is XML-escaped
+(`xml.sax.saxutils.escape`) before it reaches a `Paragraph`, since form data
+is free text a project member typed. The frontend's export link points at
+the app's own API base (`API_BASE_URL`, e.g. `/plm2/api` in production), not
+a hardcoded host, so it works unchanged behind the production path prefix.
 
 ## 8. Migration and rollout
 
-1. Alembic `065_sep_forms`: create the three tables; data step creates a
-   `risk_assessment` instance for each project with SEP gates and copies
-   `sep_risks` rows into `data.risks` (mapping: effect→risk, q/c/s/probability
-   →q/c/s/p, countermeasure, due_date, responsible_id, status; rkz and priority
-   recomputed).
-2. Definition loader runs at app startup and via
+1. Alembic `065_sep_forms`: creates the three tables and seeds the
+   form-definition rows itself. It does **not** copy `sep_risks`: the copy
+   creates a `risk_assessment` instance per project via the ORM, and a second
+   connection opened mid-migration cannot see migration `065`'s own
+   uncommitted DDL, so that step cannot live inside Alembic.
+2. The `sep_risks` → `risk_assessment` copy (mapping: effect→risk,
+   q/c/s/probability→q/c/s/p, countermeasure, due_date, responsible_id,
+   status; rkz and priority recomputed) instead runs in the app's `lifespan`
+   at startup, idempotent via a `migrated_from_sep_risk` marker on each copied
+   row (`backend/app/forms/risks.py:copy_sep_risks_to_forms`, called from
+   `app/main.py`). `backend/scripts/migrate_sep_risks.py` runs the same
+   function standalone as a manual fallback (e.g. against a stack that was
+   never restarted after the migration).
+3. Definition loader runs at app startup and via
    `backend/scripts/load_form_definitions.py`.
-3. Production deploy as usual; verify 1994A/1994B risk instances, then remove
+4. Production deploy as usual; verify 1994A/1994B risk instances, then remove
    `sep_risks` and the risk tab in a follow-up.
 
 ## 9. Testing

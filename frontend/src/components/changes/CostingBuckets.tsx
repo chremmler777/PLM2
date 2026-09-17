@@ -68,7 +68,8 @@ export default function CostingBuckets({
   /** PM, Sales, the change lead and admins see every figure. */
   canSeeAll: boolean
   editable: boolean
-  /** Project Management maintains any department's positions. */
+  /** Project Management (and an admin not acting as a department) maintains
+      any department's positions — the backend allows both. */
   isPm?: boolean
 }) {
   const changeId = change.id
@@ -94,9 +95,12 @@ export default function CostingBuckets({
       ?? change.assessments.find((a) => a.department_id === id)?.lead_time_impact_days
       ?? null
 
+  // One bucket per department: a department routed on several stages (or
+  // re-routed) still has one costing table, bound to its earliest row.
   const rows = [...change.assessments]
     .sort((a, b) => a.stage_order - b.stage_order
       || deptName(a.department_id).localeCompare(deptName(b.department_id)))
+    .filter((a, i, all) => all.findIndex((x) => x.department_id === a.department_id) === i)
 
   if (rows.length === 0) {
     return <p className="text-sm text-slate-400">{t('costing.none')}</p>
@@ -168,8 +172,20 @@ export default function CostingBuckets({
                       departmentName={deptName(id)}
                       partWeightG={change.estimated_part_weight_g}
                       editable={editable && (isMine || isPm)} />
-                    <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={id}
-                      plants={plants} projectPlantId={projectPlantId} />
+                    {/* The per-plant workbook matrix: lifecycle cycle-time
+                        deltas and hours × rate per plant. Kept under the
+                        table, one click away, for the departments that
+                        still think in it. */}
+                    <details open className="rounded border border-slate-700/70 bg-slate-900/30 px-2 py-1.5"
+                      data-testid={`costing-plant-lines-${id}`}>
+                      <summary className="cursor-pointer text-[11px] uppercase tracking-wide text-slate-500 select-none">
+                        {t('costpos.plantLines')}
+                      </summary>
+                      <div className="pt-2">
+                        <CostLineGrid changeId={changeId} assessmentId={a.id} departmentId={id}
+                          plants={plants} projectPlantId={projectPlantId} />
+                      </div>
+                    </details>
                     {editable && (
                       <LeadTimeField changeId={changeId} departmentId={id}
                         initial={leadTimeOf(id)} />

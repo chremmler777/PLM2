@@ -15,6 +15,7 @@ import { t } from '../i18n/cmLabels';
 import type { ChangeTask } from '../types/change';
 import { projectLabel } from '../lib/project';
 import { toast } from 'sonner';
+import FormPanel from '../forms/FormPanel';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -189,6 +190,63 @@ function SepItemsSection() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+
+interface MyForm {
+  id: number;
+  key: string;
+  title: string;
+  status: string;
+  reason: string;
+  project_id: number;
+  project_name: string;
+  updated_at: string;
+}
+
+function FormsSection() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState<number | null>(null);
+
+  const { data: forms = [] } = useQuery({
+    queryKey: ['my-forms'],
+    queryFn: async () => (await client.get('/v1/forms/my-forms')).data as MyForm[],
+    refetchInterval: 60_000,
+  });
+
+  if (forms.length === 0) return null;
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
+        📝 SEP Forms ({forms.length})
+      </h2>
+      <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <tbody>
+            {forms.map((f) => (
+              <tr key={f.id} className="border-b border-slate-700 last:border-0">
+                <td className="px-4 py-3 text-slate-100">
+                  <button onClick={() => setOpen(f.id)} className="hover:underline text-left">{f.title}</button>
+                  <span className="text-xs text-slate-500 ml-2">{f.status}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => navigate(`/projects/${f.project_id}`)}
+                    className="text-blue-400 hover:text-blue-300 underline"
+                  >
+                    {f.project_name}
+                  </button>
+                </td>
+                <td className="px-4 py-3 text-xs text-slate-400">{f.updated_at.slice(0, 10)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {open !== null && <FormPanel key={open} instanceId={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -387,6 +445,8 @@ export default function MyTasksPage() {
       <EscalationsCard />
 
       <SepItemsSection />
+
+      <FormsSection />
 
       <ChangeTasksSection />
 

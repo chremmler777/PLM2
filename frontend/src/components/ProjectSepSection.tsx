@@ -1,12 +1,15 @@
 /**
  * ProjectSepSection - SEP Q-Gate panel (GB-DP-0001 stage-gate process).
  * Gate stepper with green/yellow/red status, per-gate checklist grouped by
- * department (tri-state items), risk tab, and PM+Quality dual sign-off.
+ * department (tri-state items), forms tab, and PM+Quality dual sign-off.
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import FormPanel from '../forms/FormPanel';
+import ProjectFormsTab from '../forms/ProjectFormsTab';
+import type { ItemFormInfo } from '../forms/types';
 
 interface SepItem {
   id: number;
@@ -21,26 +24,13 @@ interface SepItem {
   responsible_name: string | null;
   completed_at: string | null;
   lessons_link: boolean;
-}
-
-interface SepRisk {
-  id: number;
-  effect: string;
-  q_impact: number;
-  c_impact: number;
-  s_impact: number;
-  probability: number;
-  rkz: number;
-  priority: string;
-  countermeasure: string | null;
-  due_date: string | null;
-  responsible_id: number | null;
-  responsible_name: string | null;
-  status: 'open' | 'started' | 'finished';
+  form: ItemFormInfo | null;
+  references: { title: string; path: string }[];
 }
 
 interface SepGate {
   id: number;
+  project_id: number;
   code: string;
   seq: number;
   phase_de: string;
@@ -55,7 +45,6 @@ interface SepGate {
   progress: { done: number; open: number; not_applicable: number; total: number; pct: number };
   open_risks: number;
   items: SepItem[];
-  risks: SepRisk[];
 }
 
 interface SepState {
@@ -70,12 +59,6 @@ const COLOR_BG: Record<string, string> = {
   green: 'bg-emerald-500',
   yellow: 'bg-amber-400',
   red: 'bg-red-500',
-};
-const PRIORITY_STYLE: Record<string, string> = {
-  low: 'bg-slate-600/40 text-slate-300',
-  medium: 'bg-amber-600/30 text-amber-300',
-  high: 'bg-orange-600/30 text-orange-300',
-  very_high: 'bg-red-600/30 text-red-300',
 };
 const ITEM_STATES: Array<{ value: SepItem['status']; label: string; active: string }> = [
   { value: 'open', label: 'open', active: 'bg-amber-500 text-slate-900' },
@@ -115,9 +98,37 @@ function GateStepper({ gates, selected, onSelect }: {
   );
 }
 
-function ItemRow({ item, locked, users }: { item: SepItem; locked: boolean; users: UserOption[] }) {
+function ItemRow({ item, locked, users, projectId, onOpenForm }: {
+  item: SepItem; locked: boolean; users: UserOption[]; projectId: number; onOpenForm: (id: number) => void;
+}) {
   const queryClient = useQueryClient();
   const [remark, setRemark] = useState(item.remark ?? '');
+
+  // The form behind a work package may not exist yet — first click creates it.
+  // A racing second creation of a `single` form comes back as 409 with the
+  // instance that won, so open that one instead of erroring.
+  const openForm = useMutation({
+    mutationFn: async () => {
+      if (item.form?.instance_id) return { id: item.form.instance_id, created: false };
+      const res = await client.post(`/v1/forms/projects/${projectId}/instances`, { key: item.form?.key });
+      return { id: (res.data as { id: number }).id, created: true };
+    },
+    onSuccess: ({ id, created }) => {
+      // Nothing changed server-side when the instance already existed.
+      if (created) {
+        queryClient.invalidateQueries({ queryKey: ['sep'] });
+        queryClient.invalidateQueries({ queryKey: ['forms'] });
+        queryClient.invalidateQueries({ queryKey: ['my-forms'] });
+      }
+      onOpenForm(id);
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const existing = (d as { instance_id?: number } | undefined)?.instance_id;
+      if (existing) onOpenForm(existing);
+      else toast.error(typeof d === 'string' ? d : 'Could not open form');
+    },
+  });
 
   const update = useMutation({
     mutationFn: async (patch: Record<string, unknown>) =>
@@ -137,6 +148,24 @@ function ItemRow({ item, locked, users }: { item: SepItem; locked: boolean; user
               📘 lessons
             </a>
           )}
+          {item.form && (
+            <button
+              type="button"
+              onClick={() => openForm.mutate()}
+              className={`ml-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-150 ${
+                item.form.status === 'submitted'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                  : 'border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20'
+              }`}
+              title={item.form.title}
+            >
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h5.5L13 6v7.5H4z M9.5 2.5V6H13 M6 9h4M6 11h4" /></svg>
+              {item.form.status ?? 'open form'}
+            </button>
+          )}
+          {item.references.map((r) => (
+            <span key={r.path} className="ml-1.5 text-xs text-slate-500" title={r.path}>📎 {r.title}</span>
+          ))}
         </div>
         {(item.remark || !locked) && (
           <input
@@ -178,112 +207,10 @@ function ItemRow({ item, locked, users }: { item: SepItem; locked: boolean; user
   );
 }
 
-function RiskTab({ gate, locked, users }: { gate: SepGate; locked: boolean; users: UserOption[] }) {
-  const queryClient = useQueryClient();
-  const [effect, setEffect] = useState('');
-  const [scores, setScores] = useState({ q_impact: 0, c_impact: 0, s_impact: 0, probability: 0.5 });
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sep'] });
-  const onError = (e: any) => toast.error(e.response?.data?.detail || 'Request failed');
-
-  const addRisk = useMutation({
-    mutationFn: async () => client.post(`/v1/sep/gates/${gate.id}/risks`, { effect, ...scores }),
-    onSuccess: () => { setEffect(''); invalidate(); toast.success('Risk added'); },
-    onError,
-  });
-  const patchRisk = useMutation({
-    mutationFn: async ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
-      client.patch(`/v1/sep/risks/${id}`, patch),
-    onSuccess: invalidate,
-    onError,
-  });
-
-  return (
-    <div className="space-y-2">
-      {gate.risks.map((r) => (
-        <div key={r.id} className="bg-slate-900/40 rounded px-3 py-2 text-sm space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-200 flex-1">{r.effect}</span>
-            <span className={`text-[11px] px-2 py-0.5 rounded ${PRIORITY_STYLE[r.priority]}`}>
-              RKZ {r.rkz.toFixed(2)} · {r.priority.replace('_', ' ')}
-            </span>
-            <select
-              value={r.status}
-              disabled={locked}
-              onChange={(e) => patchRisk.mutate({ id: r.id, status: e.target.value })}
-              className="bg-slate-700 border border-slate-600 rounded text-xs text-slate-300 px-1 py-0.5"
-            >
-              <option value="open">open</option>
-              <option value="started">started</option>
-              <option value="finished">finished</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span>Q {r.q_impact} · C {r.c_impact} · S {r.s_impact} · P {r.probability}</span>
-            <input
-              defaultValue={r.countermeasure ?? ''}
-              disabled={locked}
-              placeholder="Countermeasure (required for sign-off)…"
-              onBlur={(e) => e.target.value !== (r.countermeasure ?? '') && patchRisk.mutate({ id: r.id, countermeasure: e.target.value })}
-              className="flex-1 bg-transparent border-b border-slate-700/60 focus:border-slate-500 outline-none text-slate-300 placeholder-slate-600"
-            />
-            <input
-              type="date"
-              defaultValue={r.due_date ? r.due_date.slice(0, 10) : ''}
-              disabled={locked}
-              onChange={(e) => e.target.value && patchRisk.mutate({ id: r.id, due_date: `${e.target.value}T00:00:00` })}
-              className="bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-300"
-            />
-            <select
-              value={r.responsible_id ?? ''}
-              disabled={locked}
-              onChange={(e) => e.target.value && patchRisk.mutate({ id: r.id, responsible_id: Number(e.target.value) })}
-              className="bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-300 max-w-[110px]"
-            >
-              <option value="">responsible…</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          </div>
-        </div>
-      ))}
-      {gate.risks.length === 0 && (
-        <div className="text-xs text-slate-500 py-2">No risk entries. Required before signing off a gate with open items.</div>
-      )}
-      {!locked && (
-        <div className="flex items-center gap-2 pt-1">
-          <input
-            value={effect}
-            onChange={(e) => setEffect(e.target.value)}
-            placeholder="New risk: effect on project…"
-            className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100"
-          />
-          {(['q_impact', 'c_impact', 's_impact', 'probability'] as const).map((k) => (
-            <label key={k} className="text-[11px] text-slate-400 flex items-center gap-1">
-              {k === 'probability' ? 'P' : k[0].toUpperCase()}
-              <input
-                type="number" min={0} max={1} step={0.1}
-                value={scores[k]}
-                onChange={(e) => setScores({ ...scores, [k]: Number(e.target.value) })}
-                className="w-14 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
-              />
-            </label>
-          ))}
-          <button
-            onClick={() => addRisk.mutate()}
-            disabled={effect.trim().length < 3 || addRisk.isPending}
-            className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40"
-          >
-            Add risk
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'checklist' | 'risks'>('checklist');
+  const [tab, setTab] = useState<'checklist' | 'forms'>('checklist');
+  const [openForm, setOpenForm] = useState<number | null>(null);
   const locked = gate.status === 'closed';
 
   const signOff = useMutation({
@@ -342,12 +269,12 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
           <span className="text-amber-300">⚠ open items — sign-off needs a risk entry with action plan (≤14 days)</span>
         )}
         {gate.color === 'red' && !locked && (
-          <span className="text-red-300">⛔ high risk live — see risk tab</span>
+          <span className="text-red-300">⛔ high risk live — see risk assessment form</span>
         )}
       </div>
 
       <div className="flex gap-2 border-b border-slate-700 text-xs">
-        {(['checklist', 'risks'] as const).map((t) => (
+        {(['checklist', 'forms'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -355,7 +282,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
               tab === t ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
-            {t === 'checklist' ? `Checklist (${gate.progress.total})` : `Risks (${gate.risks.length})`}
+            {t === 'checklist' ? `Checklist (${gate.progress.total})` : 'Forms'}
           </button>
         ))}
       </div>
@@ -368,14 +295,19 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
                 {dept} ({items.filter((i) => i.status === 'done').length}/{items.length})
               </div>
               <div className="space-y-1">
-                {items.map((i) => <ItemRow key={i.id} item={i} locked={locked} users={users} />)}
+                {items.map((i) => (
+                  <ItemRow key={i.id} item={i} locked={locked} users={users}
+                           projectId={gate.project_id} onOpenForm={setOpenForm} />
+                ))}
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <RiskTab gate={gate} locked={locked} users={users} />
+        <ProjectFormsTab projectId={gate.project_id} />
       )}
+
+      {openForm !== null && <FormPanel key={openForm} instanceId={openForm} onClose={() => setOpenForm(null)} />}
     </div>
   );
 }

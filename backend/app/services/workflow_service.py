@@ -706,6 +706,10 @@ class WorkflowService:
                 # Change-scoped tasks surface via /changes/my-tasks (Task 7),
                 # not here — exclude them to avoid double-appearing.
                 WfInstance.change_id.is_(None),
+                # A dead instance owes nobody anything: without this, tasks of
+                # a canceled workflow (e.g. its change was cancelled) sit in
+                # the list forever — the reference never gets killed.
+                WfInstance.status == "active",
             )
             .options(
                 selectinload(WfInstanceTask.instance)
@@ -775,5 +779,14 @@ class WorkflowService:
         instance.canceled_at = datetime.utcnow()
         instance.canceled_by = canceled_by_id
         instance.cancel_reason = reason
+        # The instance's open tasks die with it — waived, not deleted, so the
+        # record shows they existed and were never done. Leaving them 'active'
+        # kept dead work on task lists indefinitely.
+        for task in (await db.execute(
+                select(WfInstanceTask).where(
+                    WfInstanceTask.instance_id == instance.id,
+                    WfInstanceTask.status.in_(("pending", "active", "noted"))
+                ))).scalars():
+            task.status = "waived"
         await db.flush()
         return instance

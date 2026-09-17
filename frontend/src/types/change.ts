@@ -91,7 +91,10 @@ export interface ChangeRouting {
   template_id: number | null;
   template_version: number | null;
   has_deviation: boolean;
-  deviation_status: 'none' | 'pending_approval' | 'approved';
+  deviation_status: 'none' | 'pending_approval' | 'approved' | 'rejected';
+  /** Why the pending (or last) deviation was proposed, and by whom. */
+  deviation_note?: string | null;
+  deviation_proposed_by?: number | null;
   stages: RoutingStage[];
 }
 
@@ -100,6 +103,8 @@ export interface DeviationRequest {
   department_id: number;
   rasic_letter?: 'R' | 'A' | 'S' | 'C';
   stage_order?: number;
+  /** Required for op 'add': the audit reason the lead decides on. */
+  reason?: string;
 }
 
 export type AttachmentKind =
@@ -434,7 +439,8 @@ export interface ActivityRef { id: number; department_id: number; label: string;
 // --- Task 19: "Your actions" cockpit panel ---
 
 export type MyActionKind =
-  | 'assessment' | 'wf_task' | 'deviation_decision' | 'gate' | 'impact_confirm' | 'transition';
+  | 'assessment' | 'wf_task' | 'deviation_decision' | 'routing_deviation_decision'
+  | 'gate' | 'impact_confirm' | 'transition';
 
 export interface MyAction {
   kind: MyActionKind;
@@ -509,7 +515,21 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
  * Three kinds, because the three are answered by different people and read
  * differently in the summation.
  */
-export type CostPositionKind = 'internal_effort' | 'support_effort' | 'external';
+export type CostPositionKind = 'internal_effort' | 'support_effort' | 'own_time' | 'external';
+
+/** What a line under a category is: money bought, or the department's own hours. */
+export type CostEntryType = 'money' | 'time';
+
+/** One entry of the department's costing category list, coded or its own. */
+export interface CostCategory {
+  key: string;
+  label_de?: string;
+  label_en?: string;
+  extra?: boolean;
+  entry_type?: CostEntryType;
+  /** Present on a department-defined category: the id to remove it by. */
+  custom_id?: number;
+}
 
 /**
  * Lead time means different things in different departments: a shop floor
@@ -533,6 +553,8 @@ export interface CostingOffer {
   lead_time_unit?: LeadTimeUnit | null;
   /** The department's vote — exactly one favourite per position. */
   favorite?: boolean;
+  /** A partial quote: part of the line, always counted. Default full quote = alternative. */
+  is_partial?: boolean;
   /**
    * Sales' binding decision — exactly one chosen offer per position. The
    * favourite is only the recommendation; this is the offer that is bought.
@@ -554,12 +576,16 @@ export interface CostPosition {
   kind: CostPositionKind;
   pricing?: CostPositionPricing | null;
   est_cost?: number | null;
+  /** Who gave the house number on an estimated line. */
+  vendor_name?: string | null;
   hours?: number | null;
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
   notes?: string | null;
   /** What the backend counts: the estimate, or the favourite offer's price. */
   effective_cost?: number | null;
+  /** The summed partial quotes on a quoted line. */
+  parts_cost?: number;
   offers: CostingOffer[];
 }
 
@@ -570,6 +596,7 @@ export interface CostPositionIn {
   kind: CostPositionKind;
   pricing?: CostPositionPricing | null;
   est_cost?: number | null;
+  vendor_name?: string | null;
   hours?: number | null;
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
@@ -579,15 +606,36 @@ export interface CostPositionIn {
 export interface CostingOfferIn {
   vendor_name: string;
   cost: number;
+  is_partial?: boolean;
   shipping_cost?: number | null;
   shipping_included?: boolean;
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
 }
 
+/** The vocabulary is the backend's per-department list
+    (app/services/risk_types.py); these are only the legacy keys kept for
+    typing older rows. Any string the backend serves is valid. */
 export type RiskType =
   | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
-  | 'process_capability' | 'other';
+  | 'process_capability' | 'other' | (string & {});
+
+/** A risk a department wrote down once to raise again. */
+export interface RiskTemplate {
+  id: number;
+  department_id: number;
+  risk_type: RiskType;
+  severity: RiskSeverity;
+  note: string;
+  created_by: number;
+  created_at: string;
+}
+export interface RiskTemplateIn {
+  department_id: number;
+  risk_type: RiskType;
+  severity: RiskSeverity;
+  note: string;
+}
 
 /** 1 low … 3 highest. A number, so it sorts and compares without a lookup. */
 export type RiskSeverity = 1 | 2 | 3;
@@ -632,11 +680,15 @@ export interface ChangeMeeting {
   decision: 'proceed' | 'reject' | 'needs_info' | null;
   decision_reason?: string | null;
   selected_department_ids: number[];
+  /** The room's RASIC call, {department_id: letter}; absent on older meetings. */
+  department_rasic?: Record<string, RasicLetter> | null;
   created_by: number;
   created_at: string;
   decided_by: number | null;
   decided_at: string | null;
 }
+
+export type RasicLetter = 'R' | 'A' | 'S' | 'C';
 
 export interface TransitionDeviation {
   id: number;

@@ -45,6 +45,17 @@ What the production stack does differently from dev:
   file cannot crash the API.
 - **Tests:** `cd backend && python -m pytest tests/ -q` (57 tests, isolated
   SQLite per test — safe to run anywhere).
+- **SEP forms engine:** migration `065_sep_forms` creates the `form_definitions`,
+  `form_instances` and `form_events` tables and seeds the definition rows
+  itself. The legacy `sep_risks` → `risk_assessment` copy is not part of that
+  migration (a second connection can't see its uncommitted DDL); it runs
+  idempotently in the backend's `lifespan` at every startup, and also via
+  `python backend/scripts/migrate_sep_risks.py` as a manual fallback if a
+  stack is never restarted after the migration. New or updated form
+  definitions are picked up the same way, at startup or via
+  `python scripts/load_form_definitions.py`. `reportlab==4.2.5` (PDF export)
+  is a new backend dependency, so the backend image must be rebuilt, not just
+  restarted, when deploying this change.
 
 ### First-run checklist
 

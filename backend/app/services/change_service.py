@@ -644,6 +644,37 @@ class ChangeService:
         return None
 
     @staticmethod
+    async def _cancel_engine_work(session: AsyncSession, change: ChangeRequest,
+                                  user_id: int) -> None:
+        """Cancel every active workflow instance this change spawned.
+
+        Two producers: the change-scoped assessment/costing flow
+        (WfInstance.change_id) and the ECN flows on part revisions the change
+        originated. Each instance is canceled with its open tasks waived (see
+        WorkflowService.cancel_workflow) — otherwise the tasks outlive the
+        change on everyone's list, which is exactly the leak this closes."""
+        from app.models.workflow import WfInstance
+        from app.services.workflow_service import WorkflowService
+        instances = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.status == "active",
+                (WfInstance.change_id == change.id)
+                | WfInstance.part_revision_id.in_(
+                    select(PartRevision.id).where(
+                        PartRevision.originating_change_id == change.id)),
+            ))).scalars().all()
+        for inst in instances:
+            await WorkflowService.cancel_workflow(
+                session, inst.id, user_id,
+                reason=f"Change {change.change_number} cancelled")
+        if instances:
+            await ChangeService.append_changelog(
+                session, change, "engine_work_cancelled",
+                f"{len(instances)} workflow instance(s) canceled with the "
+                "change; open tasks waived", user_id,
+                new_value={"instance_ids": [i.id for i in instances]})
+
+    @staticmethod
     async def transition(
         session: AsyncSession, change: ChangeRequest, to_status: str,
         user_id: int, *, cancellation_reason: Optional[str] = None,
@@ -701,12 +732,24 @@ class ChangeService:
                 "A reason is required to send a change back from "
                 "validation to implementation — say what failed and what has "
                 "to be replanned or renegotiated")
+        # Reopening costing from quoting is the same kind of act: the numbers
+        # were declared complete and now are not. Say why.
+        if (change.status, to_status) == ChangeService.COSTING_REOPEN and not escalation_note:
+            raise ChangeError(
+                "A reason is required to reopen costing — say which numbers "
+                "have to change")
 
         if to_status == "cancelled":
             if not cancellation_reason:
                 raise ChangeError("cancellation_reason is required to cancel")
             change.cancellation_reason = cancellation_reason
             change.cancelled_at = datetime.utcnow()
+            # Cancelling kills the references: every active engine instance
+            # this change spawned — its change-scoped assessment flow and the
+            # ECN flows on its part revisions — is canceled with its open
+            # tasks waived, so no task list keeps pointing at work nobody
+            # will ever do.
+            await ChangeService._cancel_engine_work(session, change, user_id)
 
         # Rejecting stops the flow dead: routing and assessments stay as they
         # are, and nothing downstream will run again unless someone reopens it.
@@ -806,6 +849,11 @@ class ChangeService:
                 old_value={"status": "in_validation"},
                 new_value={"status": "in_implementation",
                            "reason": escalation_note})
+        if (old, to_status) == ChangeService.COSTING_REOPEN:
+            await ChangeService.append_changelog(
+                session, change, "costing_reopened",
+                f"Costing reopened: {escalation_note}", user_id, notes=escalation_note,
+                old_value={"status": "quoting"}, new_value={"status": "costing"})
         if reopening:
             prior = change.rejection_reason
             change.rejected_at = None
@@ -1220,20 +1268,38 @@ class ChangeService:
             return True
         return await ChangeService._user_in_department(session, user, "Sales")
 
-    # Which hops belong to the quote stage — the ones only Sales may drive.
+    # Which hops belong to the quote stage. Sending the quote is Sales' own;
+    # closing costing (into quoting) is shared with Project Management, who
+    # run the costing phase and decide when the numbers are complete.
     QUOTE_STAGE_TRANSITIONS = {("costing", "quoting"), ("quoting", "quoted")}
+    # The correction path: costing reopened from quoting, with a reason.
+    COSTING_REOPEN = ("quoting", "costing")
 
     @staticmethod
     async def user_can_run_quote_stage(
         session: AsyncSession, user: User, change: ChangeRequest,
+        to_status: str = "quoted",
     ) -> bool:
         """Who may start the offer and who may declare it sent.
 
-        The same people who may set the price, for the obvious reason: opening
-        the quote stage and writing the number in it are one job. Admin, the
+        Sending (-> quoted) is the people who may set the price: admin, the
         change lead, or a Sales member (acts-as aware through
-        _user_in_department)."""
-        return await ChangeService.user_can_set_quoted_price(session, user, change)
+        _user_in_department). Closing costing (-> quoting) is those plus
+        Project Management: the PM runs costing and says when it is done."""
+        if await ChangeService.user_can_set_quoted_price(session, user, change):
+            return True
+        if to_status == "quoting":
+            return await ChangeService._user_in_department(session, user, "Project Manager")
+        return False
+
+    @staticmethod
+    async def user_can_reopen_costing(
+        session: AsyncSession, user: User, change: ChangeRequest,
+    ) -> bool:
+        """Who may pull a change from quoting back into costing: the same
+        people who may close it — PM, Sales, the change lead, admin."""
+        return await ChangeService.user_can_run_quote_stage(
+            session, user, change, to_status="quoting")
 
     @staticmethod
     async def user_can_approve_internal_costs(session: AsyncSession, user: User) -> bool:
@@ -1547,6 +1613,23 @@ class ChangeService:
                 "target_tab": "overview",
                 "deviation_id": dev.id,
             })
+
+        # kind "routing_deviation_decision": somebody added a department to
+        # the assessment (or otherwise changed the routing) and the decision
+        # is this user's. Mirrors ChangeRoutingService.user_can_decide_deviation.
+        if change.status == "in_assessment":
+            from app.models.change import ChangeRouting
+            from app.services.change_routing_service import ChangeRoutingService
+            routing = (await session.execute(
+                select(ChangeRouting).where(ChangeRouting.change_id == change.id)
+            )).scalar_one_or_none()
+            if (routing is not None
+                    and ChangeRoutingService.user_can_decide_deviation(change, routing, user.id)):
+                actions.append({
+                    "kind": "routing_deviation_decision",
+                    "label": "Decide added department",
+                    "target_tab": "assessments",
+                })
 
         # kind "impact_confirm": defining and locking the impacted set is the
         # first step INSIDE scoping — capture is Sales writing the request

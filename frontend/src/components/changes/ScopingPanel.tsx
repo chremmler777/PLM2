@@ -12,7 +12,7 @@ import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
-import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest } from '../../types/change'
+import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, RasicLetter } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -52,7 +52,11 @@ export default function ScopingPanel(
   const [channel, setChannel] = useState<'meeting' | 'chat' | 'email'>('meeting')
   const [participants, setParticipants] = useState('')
   const [addName, setAddName] = useState('')
-  const [deptIds, setDeptIds] = useState<number[]>([])
+  // The room's RASIC call per department. A department in the map is on the
+  // hook with that letter; one outside it is not involved. Seeded from the
+  // standard routing's letters, overruled by the people in the room.
+  const [deptRasic, setDeptRasic] = useState<Record<number, RasicLetter>>({})
+  const deptIds = Object.keys(deptRasic).map(Number)
   const [deptTouched, setDeptTouched] = useState(false)
 
   // Recommended assessors for this change type (stage-1 Responsible depts): the
@@ -64,10 +68,14 @@ export default function ScopingPanel(
     enabled: status === 'captured' || status === 'scoping',
   })
   const recommendedIds = recommended.map((d) => d.id)
+  const recommendedRasic = (): Record<number, RasicLetter> =>
+    Object.fromEntries(recommended.map((d) => [d.id, d.rasic_letter ?? 'R']))
+  const recommendedLetter = (id: number): RasicLetter =>
+    recommended.find((d) => d.id === id)?.rasic_letter ?? 'R'
   useEffect(() => {
     // Seed the selection from the recommendation once, until the user edits it.
     if (!deptTouched && recommendedIds.length > 0 && deptIds.length === 0) {
-      setDeptIds(recommendedIds)
+      setDeptRasic(recommendedRasic())
     }
   }, [recommended]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -116,10 +124,11 @@ export default function ScopingPanel(
       participants: participants.split(',').map((n) => n.trim())
         .filter(Boolean).map((name) => ({ name })),
       selected_department_ids: deptIds,
+      department_rasic: deptRasic,
     }),
     onSuccess: () => {
       setParticipants(''); setAddName('')
-      setDeptTouched(false); setDeptIds(recommendedIds); invalidate()
+      setDeptTouched(false); setDeptRasic(recommendedRasic()); invalidate()
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
   })
@@ -211,9 +220,17 @@ export default function ScopingPanel(
     ?? null
   const toggleDept = (id: number) => {
     setDeptTouched(true)
-    setDeptIds((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id])
+    setDeptRasic((prev) => {
+      if (id in prev) { const next = { ...prev }; delete next[id]; return next }
+      return { ...prev, [id]: recommendedLetter(id) }
+    })
   }
+  const setLetter = (id: number, letter: RasicLetter) => {
+    setDeptTouched(true)
+    setDeptRasic((prev) => ({ ...prev, [id]: letter }))
+  }
+  const letterOf = (m: ChangeMeeting, id: number): string | null =>
+    m.department_rasic?.[String(id)] ?? null
 
   const meetingRow = (m: ChangeMeeting) => (
     <li key={m.id} className="p-3 space-y-1">
@@ -265,9 +282,12 @@ export default function ScopingPanel(
         </div>
       )}
       {m.selected_department_ids.length > 0 && (
-        <p className="text-xs text-slate-500">
-          {t('meeting.departments')}: {m.selected_department_ids.map((id) =>
-            departments.find((d) => d.id === id)?.name ?? `#${id}`).join(', ')}
+        <p className="text-xs text-slate-500" data-testid={`meeting-depts-${m.id}`}>
+          {t('meeting.departments')}: {m.selected_department_ids.map((id) => {
+            const name = departments.find((d) => d.id === id)?.name ?? `#${id}`
+            const letter = letterOf(m, id)
+            return letter ? `${name} (${letter})` : name
+          }).join(', ')}
         </p>
       )}
     </li>
@@ -435,6 +455,7 @@ export default function ScopingPanel(
             <div className="flex-1 min-w-[14rem]">
               <label className="block text-xs text-slate-500 mb-1">
                 {t('meeting.participants')}
+                <span className="ml-2 opacity-70">{t('meeting.attendanceHint')}</span>
               </label>
               {/* Picked names live as removable chips — grouped, contained, not
                   free-editable text that can be accidentally mangled. */}
@@ -478,28 +499,70 @@ export default function ScopingPanel(
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-500 mb-1">
-              {t('meeting.departments')}
-              {recommendedIds.length > 0 && (
-                <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
-              )}
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {/* Retired departments stay resolvable by name on old records but
-                  are never offered for new work. */}
+            <div className="flex items-baseline justify-between gap-4 mb-1">
+              <label className="text-xs text-slate-500">
+                {t('meeting.departments')}
+                {recommendedIds.length > 0 && (
+                  <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
+                )}
+              </label>
+              <span className="text-[11px] text-slate-500 tabular-nums" data-testid="rasic-summary">
+                {t('meeting.rasicSummary')
+                  .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
+                  .replace('{n}', String(deptIds.length))}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-2 max-w-[65ch]">{t('meeting.rasicHint')}</p>
+            {/* One row per department: name left, its letter right. A row
+                without a letter is not involved and reads muted. Retired
+                departments stay resolvable by name on old records but are
+                never offered for new work. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 border-t border-slate-700/70">
               {departments.filter((d) => d.is_active).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
+                const letter = deptRasic[d.id]
                 return (
-                  <button key={d.id} type="button" onClick={() => toggleDept(d.id)}
-                    title={isRec ? t('meeting.recommended') : undefined}
-                    className={`px-2.5 py-1 rounded-full text-xs border ${deptIds.includes(d.id)
-                      ? 'bg-sky-600 text-white border-sky-500'
-                      : 'bg-slate-900 text-slate-300 border-slate-600'}`}>
-                    {d.name}
-                  </button>
+                  <div key={d.id} data-testid={`rasic-row-${d.id}`}
+                    className={`flex items-center justify-between gap-3 py-1.5 border-b border-slate-700/70 ${
+                      letter ? '' : 'opacity-60'}`}>
+                    <button type="button" onClick={() => toggleDept(d.id)}
+                      aria-pressed={!!letter}
+                      title={isRec ? t('meeting.recommended') : undefined}
+                      className={`min-w-0 truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
+                        letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                      {d.name}
+                    </button>
+                    <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
+                      role="group" aria-label={`${d.name} RASIC`}>
+                      {(['R', 'A', 'S', 'C'] as RasicLetter[]).map((l) => (
+                        <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
+                          aria-pressed={letter === l} title={t(`rasic.${l}`)}
+                          onClick={() => setLetter(d.id, l)}
+                          className={`w-7 h-6 text-[11px] font-semibold transition-colors active:scale-[0.97] ${
+                            letter === l
+                              ? (l === 'R' || l === 'A'
+                                ? 'bg-sky-600 text-white'
+                                : 'bg-slate-600 text-slate-100')
+                              : 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}>
+                          {l}
+                        </button>
+                      ))}
+                      <button type="button" data-testid={`rasic-${d.id}-none`}
+                        aria-pressed={!letter} title={t('rasic.none')}
+                        onClick={() => { if (letter) toggleDept(d.id) }}
+                        className={`w-7 h-6 text-[11px] transition-colors ${
+                          letter ? 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'
+                            : 'bg-slate-800 text-slate-300'}`}>
+                        &ndash;
+                      </button>
+                    </span>
+                  </div>
                 )
               })}
             </div>
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              <span className="text-slate-400">R/A</span> {t('rasic.assessNote')}
+            </p>
           </div>
           <button
             className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50"

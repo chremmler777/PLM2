@@ -1,7 +1,7 @@
 """Pydantic schemas for Change Management."""
 from datetime import datetime
-from typing import Optional, List, Any
-from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Optional, List, Any, Dict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import NaiveUtcDatetime
 
@@ -372,6 +372,10 @@ class RoutingResponse(BaseModel):
     template_version: Optional[int] = None
     has_deviation: bool = False
     deviation_status: str = "none"
+    # Why the pending/last deviation was proposed and by whom, so the lead can
+    # decide from the routing view alone.
+    deviation_note: Optional[str] = None
+    deviation_proposed_by: Optional[int] = None
     stages: List[RoutingStage] = []
 
 
@@ -380,6 +384,58 @@ class DeviationRequest(BaseModel):
     department_id: int
     rasic_letter: Optional[str] = None
     stage_order: Optional[int] = None
+    # Required for op "add" (enforced in the service): the audit reason.
+    reason: Optional[str] = None
+
+
+class RoutingDeviationDecision(BaseModel):
+    reason: str
+
+
+class RiskTemplateCreate(BaseModel):
+    department_id: int
+    risk_type: str
+    severity: int = 2
+    note: str
+
+
+class CostCategoryCreate(BaseModel):
+    department_id: int
+    label: str
+    entry_type: str = "money"   # money | time
+
+
+class CostCategoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    key: str
+    label: str
+    entry_type: str
+
+
+class RiskTypeCreate(BaseModel):
+    department_id: int
+    label: str
+
+
+class RiskTypeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    key: str
+    label: str
+
+
+class RiskTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    department_id: int
+    risk_type: str
+    severity: int
+    note: str
+    created_by: int
+    created_at: datetime
 
 
 class RoutingStandardUpsert(BaseModel):
@@ -602,6 +658,9 @@ class CostingOfferCreate(BaseModel):
     # runs on the calendar. Roll-ups convert before comparing.
     lead_time_unit: str = "calendar_days"
     favorite: bool = False
+    # Partial quote: part of the line, always counted. Default: a full quote,
+    # one alternative among others.
+    is_partial: bool = False
 
 
 class CostingOfferUpdate(BaseModel):
@@ -614,6 +673,7 @@ class CostingOfferUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
     favorite: Optional[bool] = None
+    is_partial: Optional[bool] = None
 
 
 class CostingOfferAttachment(BaseModel):
@@ -640,6 +700,7 @@ class CostingOfferResponse(BaseModel):
     lead_time_calendar_days: Optional[int] = None
     # The DEPARTMENT's recommendation.
     favorite: bool = False
+    is_partial: bool = False
     # cost plus shipping, unless the vendor already included it.
     total_cost: float = 0.0
     # SALES' decision, with the accountability on it. chosen_reason is
@@ -664,10 +725,13 @@ class VendorChoiceIn(BaseModel):
 class CostingPositionCreate(BaseModel):
     department_id: int
     label: str
-    kind: str = "external"          # internal_effort|support_effort|external
+    kind: str = "external"          # internal_effort|support_effort|own_time|external
     tag: Optional[str] = None       # free text; the reference list only suggests
     pricing: str = "estimate"       # estimate|quote — external positions only
     est_cost: Optional[float] = None
+    # Who gave the house number on an estimated line; quoted lines name their
+    # vendors on the offers.
+    vendor_name: Optional[str] = None
     # Accepted on every kind, external included: the department's own time
     # around a supplier's work is effort too.
     hours: Optional[float] = None
@@ -684,6 +748,7 @@ class CostingPositionUpdate(BaseModel):
     tag: Optional[str] = None
     pricing: Optional[str] = None
     est_cost: Optional[float] = None
+    vendor_name: Optional[str] = None
     hours: Optional[float] = None
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
@@ -699,6 +764,7 @@ class CostingPositionResponse(BaseModel):
     kind: str
     pricing: str
     est_cost: Optional[float] = None
+    vendor_name: Optional[str] = None
     hours: Optional[float] = None
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"
@@ -710,6 +776,8 @@ class CostingPositionResponse(BaseModel):
     # (plus shipping when stated separately) for a quoted external position,
     # the estimate otherwise. None means nobody has said yet.
     effective_cost: Optional[float] = None
+    # The summed partial quotes on a quoted line (0 when none).
+    parts_cost: float = 0.0
     # The favorite offer's dates when a supplier set them, this position's
     # own otherwise — in its own unit, and converted for the roll-ups.
     effective_lead_time_days: Optional[int] = None
@@ -762,6 +830,9 @@ class MeetingCreate(BaseModel):
     participants: List[MeetingParticipant] = []
     notes: Optional[str] = None
     selected_department_ids: List[int] = []
+    # {department_id: "R"|"A"|"S"|"C"} — the room's call. When given, it is
+    # authoritative and selected_department_ids follows its keys.
+    department_rasic: Optional[Dict[int, str]] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -769,6 +840,7 @@ class MeetingUpdate(BaseModel):
     participants: Optional[List[MeetingParticipant]] = None
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None
+    department_rasic: Optional[Dict[int, str]] = None
 
 
 class NegotiationCreate(BaseModel):
@@ -910,6 +982,7 @@ class MeetingResponse(BaseModel):
     notes: Optional[str] = None
     decision: Optional[str] = None
     selected_department_ids: List[int] = []
+    department_rasic: Optional[Dict[int, str]] = None
     created_by: int
     created_at: datetime
     decided_by: Optional[int] = None

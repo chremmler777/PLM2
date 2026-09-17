@@ -305,7 +305,7 @@ async def test_scoped_change_does_not_promote_standard(
     async with session_factory() as s:
         c = await s.get(ChangeRequest, change["id"])
         await ChangeRoutingService.apply_deviation(
-            s, c, seed["engineer_id"], op="remove", department_id=picked[0])
+            s, c, seed["engineer_id"], op="remove", department_id=picked[0], reason="test op")
         await ChangeRoutingService.approve_deviation(s, c, seed["admin_id"])
         await ChangeRoutingService.promote_to_standard(s, c, seed["admin_id"])
         await s.commit()

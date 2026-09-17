@@ -1,0 +1,64 @@
+{
+  "key": "risk_assessment", "version": 2, "title": "Risk Assessment",
+  "implements": "F-DVS-CORP-005 rev 01", "cardinality": "single", "gate_items": false,
+  "sep_items": ["K0/RG1:2"], "signatures": [], "required_for_submit": ["header.project_manager"],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project title", "type": "text", "prefill": "project.name"},
+      {"id": "project_manager", "label": "Project manager", "type": "user", "prefill": "user.me"},
+      {"id": "date", "label": "Date", "type": "date", "prefill": "date.today"},
+      {"id": "review_date", "label": "Last review", "type": "date"},
+      {"id": "classification", "label": "ISMS classification", "type": "choice", "options": ["Strictly confidential", "Confidential", "Internal", "Public"]}
+    ]},
+    {"id": "risks", "title": "Project risks", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "gate", "label": "Gate", "type": "choice", "options": ["K0/RG1", "K/RG2", "E/RG3", "D/RG4", "C/RG5", "B/RG6", "A/RG7"]},
+      {"id": "risk", "label": "Risk", "type": "multiline", "width": 3},
+      {"id": "impact", "label": "Impact", "type": "multiline", "width": 2},
+      {"id": "q", "label": "Q", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on quality (0–1)"},
+      {"id": "c", "label": "C", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on cost (0–1)"},
+      {"id": "s", "label": "T", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on time / schedule (0–1)"},
+      {"id": "p", "label": "PoC", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Probability of occurrence (0–1)"},
+      {"id": "rkz", "label": "RI", "type": "computed", "expr": "(q + c + s) * p", "help": "Risk index = (Q + C + T) × PoC"},
+      {"id": "priority", "label": "Priority", "type": "computed", "expr": "band(rkz, [0.4,'low'],[0.8,'medium'],[1.0,'high'],'very_high')", "help": "low ≤ 0.4, medium ≤ 0.8, high ≤ 1.0, very high > 1.0"},
+      {"id": "countermeasure", "label": "Countermeasures", "type": "multiline", "width": 3},
+      {"id": "responsible", "label": "Responsible", "type": "user"},
+      {"id": "due", "label": "Due", "type": "date"},
+      {"id": "q2", "label": "Q after", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on quality after countermeasures (0–1)"},
+      {"id": "c2", "label": "C after", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on cost after countermeasures (0–1)"},
+      {"id": "s2", "label": "T after", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on time / schedule after countermeasures (0–1)"},
+      {"id": "p2", "label": "PoC after", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Probability of occurrence after countermeasures (0–1)"},
+      {"id": "rkz2", "label": "RI after", "type": "computed", "expr": "(q2 + c2 + s2) * p2", "help": "Risk index after countermeasures = (Q + C + T) × PoC"},
+      {"id": "status", "label": "Status", "type": "choice", "options": ["open", "started", "finished"]}
+    ], "footer": [
+      {"label": "Open", "expr": "count(status != 'finished')"},
+      {"label": "High or very high", "expr": "count(status != 'finished' and rkz > 0.8)"}
+    ]},
+    {"id": "isms", "title": "Information security (ISMS)", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "risk", "label": "Risk", "type": "multiline", "width": 3},
+      {"id": "impact", "label": "Impact", "type": "multiline", "width": 2},
+      {"id": "c", "label": "C", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on confidentiality (0–1)"},
+      {"id": "i", "label": "I", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on integrity (0–1)"},
+      {"id": "v", "label": "V", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Impact on availability (0–1)"},
+      {"id": "p", "label": "PoC", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Probability of occurrence (0–1)"},
+      {"id": "rkz", "label": "RI", "type": "computed", "expr": "(c + i + v) * p", "help": "Risk index = (C + I + V) × PoC"},
+      {"id": "countermeasure", "label": "Countermeasures", "type": "multiline", "width": 3},
+      {"id": "responsible", "label": "Responsible", "type": "user"},
+      {"id": "due", "label": "Due", "type": "date"},
+      {"id": "status", "label": "Status", "type": "choice", "options": ["open", "started", "finished"]}
+    ]},
+    {"id": "environment", "title": "Environment and energy", "kind": "table", "min_rows": 0, "columns": [
+      {"id": "risk", "label": "Risk", "type": "multiline", "width": 3},
+      {"id": "impact", "label": "Impact", "type": "multiline", "width": 2},
+      {"id": "nd", "label": "ND", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "No hazard: impact on environment / energy (0–1)"},
+      {"id": "d", "label": "D", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Hazard: impact on environment / energy (0–1)"},
+      {"id": "hd", "label": "HD", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "High hazard: impact on environment / energy (0–1)"},
+      {"id": "p", "label": "PoC", "type": "number", "min": 0, "max": 1, "step": 0.1, "help": "Probability of occurrence (0–1)"},
+      {"id": "rkz", "label": "RI", "type": "computed", "expr": "(nd + d + hd) * p", "help": "Risk index = (ND + D + HD) × PoC"},
+      {"id": "countermeasure", "label": "Countermeasures", "type": "multiline", "width": 3},
+      {"id": "responsible", "label": "Responsible", "type": "user"},
+      {"id": "due", "label": "Due", "type": "date"},
+      {"id": "status", "label": "Status", "type": "choice", "options": ["open", "started", "finished"]}
+    ]}
+  ]
+}

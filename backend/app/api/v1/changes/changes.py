@@ -31,7 +31,10 @@ from app.schemas.change import (
     AssessmentSubmit, AssessmentResponse, AssessmentAssignIn, AssessmentDueDateIn,
     CustomerResponseRequest, SignOffRequest,
     ChangelogResponse,
-    RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingStandardUpsert,
+    RoutingResponse, RoutingStage, RoutingDepartment, DeviationRequest, RoutingDeviationDecision,
+    RiskTemplateCreate, RiskTemplateResponse, RiskTypeCreate, RiskTypeResponse,
+    CostCategoryCreate, CostCategoryResponse,
+    RoutingStandardUpsert,
     CostLineReplace, CostLineResponse, SummationResponse,
     GateDecisionIn, GateResponse,
     DeviationProposeIn, DeviationDecideIn, TransitionDeviationResponse,
@@ -525,18 +528,171 @@ async def reference_assessment_checklist(
 
 @router.get("/reference/risk-types")
 async def reference_risk_types(
+    department_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """The vocabulary a risk concern is typed with.
+    """The vocabulary a risk concern is typed with, resolved per department.
 
     Same reasoning as the checklist above: the list lives in
-    app/models/change.py because that is what the raise endpoint validates
-    against, so the frontend is served it rather than keeping its own copy.
-    Shaped as objects so a label can be added later without a breaking change.
+    app/services/risk_types.py because that is what the raise endpoint
+    validates against, so the frontend is served it rather than keeping its
+    own copy. Without a department: the legacy moulding list plus the common
+    types.
     """
-    from app.models.change import RISK_TYPES
-    return {"items": [{"key": k} for k in RISK_TYPES]}
+    from app.services.risk_types import resolved_types
+    dept = await db.get(Department, department_id) if department_id is not None else None
+    return {"items": await resolved_types(db, dept)}
+
+
+@router.post("/reference/risk-types", response_model=RiskTypeResponse)
+async def create_risk_type(
+    body: RiskTypeCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department adds a type to its own dropdown. Same writers as the
+    templates: members, Project Management, admin."""
+    from app.models.change import DepartmentRiskType
+    from app.services.risk_types import custom_key, allowed_keys
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may add its risk types")
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "A risk type needs a name")
+    key = custom_key(body.department_id, label)
+    live = (await db.execute(
+        select(DepartmentRiskType).where(
+            DepartmentRiskType.department_id == body.department_id,
+            DepartmentRiskType.key == key,
+            DepartmentRiskType.deleted_at.is_(None)))).scalar_one_or_none()
+    if live is not None:
+        return live  # same name again: hand back the existing one
+    if key in await allowed_keys(db, dept):
+        # A deleted custom type with this name comes back to life.
+        old = (await db.execute(
+            select(DepartmentRiskType).where(
+                DepartmentRiskType.department_id == body.department_id,
+                DepartmentRiskType.key == key))).scalars().first()
+        if old is not None:
+            old.deleted_at = None
+            old.deleted_by = None
+            old.label = label
+            await db.commit()
+            await db.refresh(old)
+            return old
+        raise HTTPException(400, f"'{label}' is already a standard risk type")
+    row = DepartmentRiskType(department_id=body.department_id, key=key, label=label,
+                             created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/risk-types/{type_id}", response_model=RiskTypeResponse)
+async def delete_risk_type(
+    type_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: off the dropdown, rows raised under it keep their key."""
+    from app.models.change import DepartmentRiskType
+    row = await db.get(DepartmentRiskType, type_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Risk type not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its risk types")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+async def _may_edit_risk_templates(db: AsyncSession, user: User, department_id: int) -> bool:
+    """The department's own list: its members, Project Management and admins
+    (an admin acting as a department counts as that department only)."""
+    from app.services.workflow_service import WorkflowService
+    if getattr(user, "acts_as_department_id", None) is None and user.role == "admin":
+        return True
+    ids = await WorkflowService.effective_department_ids(db, user)
+    if department_id in ids:
+        return True
+    pm = (await db.execute(
+        select(Department.id).where(Department.name == "Project Manager"))).scalar_one_or_none()
+    return pm is not None and pm in ids
+
+
+@router.get("/reference/risk-templates", response_model=List[RiskTemplateResponse])
+async def list_risk_templates(
+    department_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department's pre-written risks, live ones only, newest last."""
+    from app.models.change import DepartmentRiskTemplate
+    rows = (await db.execute(
+        select(DepartmentRiskTemplate)
+        .where(DepartmentRiskTemplate.department_id == department_id,
+               DepartmentRiskTemplate.deleted_at.is_(None))
+        .order_by(DepartmentRiskTemplate.id))).scalars().all()
+    return rows
+
+
+@router.post("/reference/risk-templates", response_model=RiskTemplateResponse)
+async def create_risk_template(
+    body: RiskTemplateCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.change import DepartmentRiskTemplate, RISK_SEVERITIES
+    from app.services.risk_types import allowed_keys
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may write its risk templates")
+    if body.risk_type not in await allowed_keys(db, dept):
+        raise HTTPException(400, f"Invalid risk type '{body.risk_type}' for {dept.name}")
+    if body.severity not in RISK_SEVERITIES:
+        raise HTTPException(400, "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
+    if not body.note.strip():
+        raise HTTPException(400, "A risk template needs the wording of the risk")
+    row = DepartmentRiskTemplate(
+        department_id=body.department_id, risk_type=body.risk_type,
+        severity=body.severity, note=body.note.strip(), created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/risk-templates/{template_id}", response_model=RiskTemplateResponse)
+async def delete_risk_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: gone from the list, kept on the record."""
+    from app.models.change import DepartmentRiskTemplate
+    row = await db.get(DepartmentRiskTemplate, template_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Risk template not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its risk templates")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 @router.get("/reference/costing-tags")
@@ -554,11 +710,76 @@ async def reference_costing_tags(
     edited per department in the database.
     """
     from app.services import costing_tags
-    name = None
-    if department_id is not None:
-        dept = await db.get(Department, department_id)
-        name = dept.name if dept is not None else None
-    return {"items": costing_tags.tags_for(name)}
+    dept = await db.get(Department, department_id) if department_id is not None else None
+    return {"items": await costing_tags.resolved_tags(db, dept)}
+
+
+@router.post("/reference/costing-tags", response_model=CostCategoryResponse)
+async def create_cost_category(
+    body: CostCategoryCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A department adds a category to its own costing list, typed money or
+    time. Same writers as its risk lists: members, Project Management, admin."""
+    from app.models.change_cost import DepartmentCostCategory
+    from app.services import costing_tags
+    dept = await db.get(Department, body.department_id)
+    if dept is None:
+        raise HTTPException(404, "Department not found")
+    if not await _may_edit_risk_templates(db, current_user, body.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may add its cost categories")
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "A cost category needs a name")
+    if body.entry_type not in costing_tags.ENTRY_TYPES:
+        raise HTTPException(400, "entry_type must be 'money' or 'time'")
+    key = costing_tags.custom_key(body.department_id, label)
+    existing = (await db.execute(
+        select(DepartmentCostCategory).where(
+            DepartmentCostCategory.department_id == body.department_id,
+            DepartmentCostCategory.key == key)
+        .order_by(DepartmentCostCategory.id))).scalars().first()
+    if existing is not None:
+        # Same name again hands back the one row, revived if it was removed.
+        existing.deleted_at = None
+        existing.deleted_by = None
+        existing.label = label
+        existing.entry_type = body.entry_type
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    if key in {i["key"] for i in costing_tags.tags_for(dept.name)}:
+        raise HTTPException(400, f"'{label}' is already a standard category")
+    row = DepartmentCostCategory(
+        department_id=body.department_id, key=key, label=label,
+        entry_type=body.entry_type, created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete("/reference/costing-tags/{category_id}", response_model=CostCategoryResponse)
+async def delete_cost_category(
+    category_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft delete: off the list, positions filed under it keep their key."""
+    from app.models.change_cost import DepartmentCostCategory
+    row = await db.get(DepartmentCostCategory, category_id)
+    if row is None or row.deleted_at is not None:
+        raise HTTPException(404, "Cost category not found")
+    if not await _may_edit_risk_templates(db, current_user, row.department_id):
+        raise HTTPException(403, "Only members of this department, Project Management "
+                                 "or an admin may delete its cost categories")
+    row.deleted_at = datetime.utcnow()
+    row.deleted_by = current_user.id
+    await db.commit()
+    await db.refresh(row)
+    return row
 
 
 @router.get("/reference/activities")
@@ -657,15 +878,16 @@ async def recommended_departments(
     stage1 = next((s for s in stages if s["stage_order"] == 1), None)
     if not stage1:
         return []
-    rec = {d["department_id"] for d in stage1["departments"]
-           if d["rasic_letter"] in BLOCKING_LETTERS}
-    if not rec:
+    # Every stage-1 department with the letter the standard gives it: the
+    # picker starts from the template's opinion, the room overrules it.
+    letters = {d["department_id"]: d["rasic_letter"] for d in stage1["departments"]}
+    if not letters:
         return []
     rows = (await db.execute(
         select(Department.id, Department.name)
-        .where(Department.id.in_(rec), Department.is_active.is_(True))
+        .where(Department.id.in_(letters), Department.is_active.is_(True))
         .order_by(Department.sort_order, Department.name))).all()
-    return [{"id": i, "name": n} for i, n in rows]
+    return [{"id": i, "name": n, "rasic_letter": letters[i]} for i, n in rows]
 
 
 @router.get("/{change_id}/assessment-objects")
@@ -716,6 +938,8 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
         template_version=(routing.template_version if routing else None),
         has_deviation=(routing.has_deviation if routing else False),
         deviation_status=(routing.deviation_status if routing else "none"),
+        deviation_note=(routing.deviation_note if routing else None),
+        deviation_proposed_by=(routing.deviation_proposed_by if routing else None),
         stages=stages)
 
 
@@ -730,7 +954,24 @@ async def post_deviation(change_id: int, body: DeviationRequest,
     try:
         await ChangeRoutingService.apply_deviation(
             db, change, current_user.id, op=body.op, department_id=body.department_id,
-            rasic_letter=body.rasic_letter, stage_order=body.stage_order)
+            rasic_letter=body.rasic_letter, stage_order=body.stage_order,
+            reason=body.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return await get_routing(change_id, db, current_user)
+
+
+@router.post("/{change_id}/routing/deviation/reject", response_model=RoutingResponse)
+async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
+                           db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    change = await ChangeService.get_change(db, change_id)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    from app.services.change_routing_service import ChangeRoutingService
+    try:
+        await ChangeRoutingService.reject_deviation(db, change, current_user.id, body.reason)
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
@@ -769,11 +1010,22 @@ async def transition_change(
     # transitions internally.
     if ((change.status, body.to_status) in ChangeService.QUOTE_STAGE_TRANSITIONS
             and not await ChangeService.user_can_run_quote_stage(
-                db, current_user, change)):
+                db, current_user, change, to_status=body.to_status)):
         raise HTTPException(
             status_code=403,
-            detail="Only a Sales department member, the change lead or an "
-                   "admin may create and send the quote")
+            detail=("Only Project Management, a Sales department member, the "
+                    "change lead or an admin may close costing"
+                    if body.to_status == "quoting" else
+                    "Only a Sales department member, the change lead or an "
+                    "admin may create and send the quote"))
+    # Pulling the change back into costing reopens numbers that were declared
+    # complete: the same people who may close costing may reopen it.
+    if ((change.status, body.to_status) == ChangeService.COSTING_REOPEN
+            and not await ChangeService.user_can_reopen_costing(db, current_user, change)):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Project Management, a Sales department member, the "
+                   "change lead or an admin may reopen costing")
     # Sending a change back out of validation replans the timing and reopens
     # the commercial terms — PM owns the first, Sales the second. A department
     # whose own check failed says so on the check; it does not get to move the
@@ -1747,7 +1999,7 @@ async def create_meeting(
             db, change, current_user, meeting_date=body.meeting_date,
             participants=[p.model_dump() for p in body.participants],
             notes=body.notes, selected_department_ids=body.selected_department_ids,
-            channel=body.channel)
+            channel=body.channel, department_rasic=body.department_rasic)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

@@ -17,7 +17,10 @@ COST_KINDS = ("one_time", "lifecycle")
 #   internal_effort  the time this department spent on the assessment itself
 #   support_effort   the time it expects to spend supporting implementation
 #   external         work that leaves the house, priced by a supplier
-COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "external")
+# internal_effort / support_effort: the two standing answers every department
+# owes. own_time: any further line of the department's hours (valued at its
+# rate). external: money spent outside, estimated or quoted.
+COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "own_time", "external")
 # How an EXTERNAL position gets its number: a house estimate, or real vendor
 # offers. Effort positions are always estimates — the field is stored uniformly
 # so the column never has to be read conditionally, but only external positions
@@ -124,6 +127,9 @@ class CostingPosition(Base):
     # TypeErrors.
     est_cost: Mapped[float | None] = mapped_column(
         Numeric(14, 2, asdecimal=False), nullable=True)
+    # Who the house number came from, on an estimated external line ("Hasco,
+    # by phone"). A quoted line names its vendors on the offers instead.
+    vendor_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     hours: Mapped[float | None] = mapped_column(
         Numeric(10, 2, asdecimal=False), nullable=True)
     lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -142,17 +148,35 @@ class CostingPosition(Base):
         lazy="selectin", order_by="CostingOffer.id",
     )
 
+    # An offer is either an ALTERNATIVE (a full quote: one of them is bought,
+    # the star says which the department recommends) or a PART (a partial
+    # quote: always counted, summed with the other parts). A line may carry
+    # both: parts that add up plus alternatives for the remainder.
+    @property
+    def alternatives(self) -> list["CostingOffer"]:
+        return [o for o in self.offers if not o.is_partial]
+
+    @property
+    def parts(self) -> list["CostingOffer"]:
+        return [o for o in self.offers if o.is_partial]
+
+    @property
+    def parts_cost(self) -> float:
+        return float(sum(o.total_cost for o in self.parts))
+
     @property
     def favorite_offer(self) -> "CostingOffer | None":
-        """The offer this position is priced from: the department's favorite,
-        or — when nobody has voted yet — the first one that came in. A single
-        offer needs no vote to be the answer."""
-        if not self.offers:
+        """The alternative this position is priced from: the department's
+        favorite, or — with exactly one alternative — that one; a single offer
+        needs no vote to be the answer. Several alternatives without a vote
+        give None: the department has not finished the job."""
+        alts = self.alternatives
+        if not alts:
             return None
-        for offer in self.offers:
+        for offer in alts:
             if offer.favorite:
                 return offer
-        return min(self.offers, key=lambda o: o.id)
+        return alts[0] if len(alts) == 1 else None
 
     @property
     def recommended_offer(self) -> "CostingOffer | None":
@@ -190,14 +214,21 @@ class CostingPosition(Base):
         means nobody has said yet, which is not the same as zero.
         """
         if self.kind == "external" and self.pricing == "quote":
-            offer = self.favorite_offer
-            if offer is None:
-                return None
-            total = float(offer.cost or 0.0)
-            if not offer.shipping_included:
-                total += float(offer.shipping_cost or 0.0)
-            return total
+            return self._quoted_total(self.favorite_offer)
         return None if self.est_cost is None else float(self.est_cost)
+
+    def _quoted_total(self, alternative: "CostingOffer | None") -> float | None:
+        """Parts always add up; the alternative that counts is added on top.
+        None when nothing has been quoted, or when alternatives exist and
+        none of them counts yet."""
+        if not self.offers:
+            return None
+        if self.alternatives and alternative is None:
+            return None
+        return self.parts_cost + (alternative.total_cost if alternative else 0.0)
+
+    def counted_offers(self, alternative: "CostingOffer | None") -> list["CostingOffer"]:
+        return self.parts + ([alternative] if alternative else [])
 
     @property
     def quoted_cost(self) -> float | None:
@@ -212,8 +243,8 @@ class CostingPosition(Base):
         to see that the buyer moved the price.
         """
         chosen = self.chosen_offer
-        if chosen is not None:
-            return chosen.total_cost
+        if chosen is not None and self.kind == "external" and self.pricing == "quote":
+            return self._quoted_total(chosen)
         return self.effective_cost
 
     @property
@@ -223,9 +254,13 @@ class CostingPosition(Base):
         effective_cost: on a quoted position the chosen offer IS the answer,
         and the offer's own dates beat a stale estimate typed above it."""
         if self.kind == "external" and self.pricing == "quote":
-            offer = self.favorite_offer
-            if offer is not None and offer.lead_time_days is not None:
-                return offer.lead_time_days, offer.lead_time_unit
+            # The slowest of what is counted: parts wait in parallel, the
+            # line is done when the last of them lands.
+            dated = [o for o in self.counted_offers(self.favorite_offer)
+                     if o.lead_time_days is not None]
+            if dated:
+                slowest = max(dated, key=lambda o: o.lead_time_calendar_days or 0)
+                return slowest.lead_time_days, slowest.lead_time_unit
         return self.lead_time_days, self.lead_time_unit
 
     @property
@@ -243,6 +278,29 @@ class CostingPosition(Base):
         and reports, so business and calendar quotes can share one max."""
         days, unit = self._lead_time_source
         return to_calendar_days(days, unit)
+
+
+class DepartmentCostCategory(Base):
+    """A cost category a department added to its own list.
+
+    The coded categories (app/services/costing_tags.py) are the reviewed
+    baseline; this is the department's extension — added from the costing
+    table, typed money or time so the line under it knows what to ask for.
+    Keys are namespaced per department. Soft-deleted: off the dropdown, rows
+    filed under it keep their key.
+    """
+    __tablename__ = "department_cost_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    key: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(120))
+    entry_type: Mapped[str] = mapped_column(String(10), default="money")
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class CostingOffer(Base):
@@ -270,6 +328,11 @@ class CostingOffer(Base):
     lead_time_unit: Mapped[str] = mapped_column(
         String(20), default="calendar_days", server_default="calendar_days")
     favorite: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false())
+    # A PARTIAL quote covers part of the line and is always counted, summed
+    # with the other parts. A full quote (the default) is an alternative:
+    # one of them is bought, the star recommends which.
+    is_partial: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=sa_false())
     # Sales' DECISION, as against `favorite` above, which is the department's
     # recommendation. Two facts, two columns: which supplier the engineers

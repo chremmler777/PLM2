@@ -219,7 +219,7 @@ async def test_deviation_requires_approval_then_clears(
     c = await _api_change_in_assessment(client, auth, seed, session_factory)
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
         "op": "add", "department_id": departments["Manufacturing Engineer"],
-        "rasic_letter": "R", "stage_order": 1}, headers=auth)
+        "rasic_letter": "R", "stage_order": 1, "reason": "forgot MfgEng"}, headers=auth)
     assert res.status_code == 200, res.text
     routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
     assert routing["deviation_status"] == "pending_approval"
@@ -250,7 +250,7 @@ async def test_apply_deviation_service(session_factory, seed, ecr_template, depa
         change = await s.get(ChangeRequest, cid)
         r = await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
-            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
         assert r.deviation_status == "pending_approval" and r.has_deviation is True
         rows = (await s.execute(select(ChangeAssessment).where(
@@ -277,7 +277,7 @@ async def test_apply_deviation_add_to_active_stage_stamps_due_date(
         # stage_order=1 is the currently-active stage, so the new row must land "active".
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
-            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1, reason="test add")
         await s.commit()
         row = (await s.execute(select(ChangeAssessment).where(
             (ChangeAssessment.change_id == cid)
@@ -298,7 +298,7 @@ async def test_promotion_bumps_template_and_repoints_standard(
         await ChangeRoutingService.build_routing(s, change, seed["engineer_id"])
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="add",
-            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1)
+            department_id=departments["Manufacturing Engineer"], rasic_letter="R", stage_order=1, reason="test add")
         await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
         await s.commit()
     async with session_factory() as s:
@@ -547,3 +547,151 @@ async def test_routing_view_reports_per_stage_status_for_multistage_dept(
     assert by_stage[1]["status"] == "active"
     assert by_stage[2]["status"] == "pending"
     assert by_stage[1]["assessment_id"] != by_stage[2]["assessment_id"]
+
+
+async def test_deviation_add_requires_and_records_reason(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Adding a department mid-assessment is an audit event: no reason, no add;
+    with one, the routing view shows who proposed it and why."""
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1}, headers=auth)
+    assert res.status_code in (400, 422), res.text
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1,
+        "reason": "Forgot MfgEng: the cell layout changes"}, headers=auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["deviation_status"] == "pending_approval"
+    assert body["deviation_note"] == "Forgot MfgEng: the cell layout changes"
+    assert body["deviation_proposed_by"] == seed["engineer_id"]
+
+
+async def test_reject_deviation_undoes_the_added_department(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Rejecting a pending 'add' removes the row and its engine task again, so
+    the department is off the hook and costing is no longer blocked by it."""
+    from app.models.change import ChangeAssessment, ChangeChangelog
+    from app.models.workflow import WfInstanceTask
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1, "reason": "maybe"}, headers=auth)
+    assert res.status_code == 200, res.text
+    # Proposer cannot reject their own deviation either (4-eyes both ways).
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "no"}, headers=auth)
+    assert res.status_code == 400, res.text
+    admin_auth = await _login_admin(client)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "MfgEng is not touched by this"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert res.json()["deviation_status"] == "rejected"
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == c["id"])
+            & (ChangeAssessment.department_id == departments["Manufacturing Engineer"])))).scalars().all()
+        assert rows == []
+        tasks = (await s.execute(select(WfInstanceTask).where(
+            WfInstanceTask.department_id == departments["Manufacturing Engineer"]))).scalars().all()
+        assert tasks == []
+        log = (await s.execute(select(ChangeChangelog).where(
+            (ChangeChangelog.change_id == c["id"])
+            & (ChangeChangelog.action == "routing_deviation_rejected")))).scalars().all()
+        assert len(log) == 1 and "not touched" in log[0].action_description
+    # The standard rows alone now carry the change to costing.
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    for a in detail["assessments"]:
+        if a["rasic_letter"] in ("R", "A"):
+            await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                              json={"department_id": a["department_id"], "verdict": "feasible"}, headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_reject_deviation_keeps_a_submitted_added_row(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """An added department that already answered is not silently erased by a
+    late rejection: the answer stays, the deviation is closed as rejected."""
+    from app.models.change import ChangeAssessment
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1, "reason": "maybe"}, headers=auth)
+    await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                      json={"department_id": departments["Manufacturing Engineer"], "verdict": "feasible"}, headers=auth)
+    admin_auth = await _login_admin(client)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "too late"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == c["id"])
+            & (ChangeAssessment.department_id == departments["Manufacturing Engineer"])))).scalar_one()
+        assert row.verdict == "feasible"
+
+
+async def test_lead_with_pending_routing_deviation_gets_decision_action(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Someone else added a department mid-assessment: the change lead gets the
+    decision on their plate, the proposer does not."""
+    eng_auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, eng_auth, seed, session_factory)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": departments["Manufacturing Engineer"],
+        "rasic_letter": "R", "stage_order": 1, "reason": "forgot"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    out = await client.get(f"/api/v1/changes/{c['id']}/my-actions", headers=eng_auth)
+    kinds = [a["kind"] for a in out.json()["actions"]]
+    assert "routing_deviation_decision" in kinds
+    out = await client.get(f"/api/v1/changes/{c['id']}/my-actions", headers=admin_auth)
+    kinds = [a["kind"] for a in out.json()["actions"]]
+    assert "routing_deviation_decision" not in kinds
+
+
+async def test_recommended_departments_include_consulted_with_their_letter(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    auth = await _login(client)
+    body = {"project_id": seed["project_id"], "title": "Wall +0.2", "change_type": "physical_part",
+            "reason": "sink", "lead_id": seed["engineer_id"]}
+    c = (await client.post("/api/v1/changes", json=body, headers=auth)).json()
+    res = await client.get(f"/api/v1/changes/{c['id']}/recommended-departments", headers=auth)
+    assert res.status_code == 200, res.text
+    by_id = {r["id"]: r["rasic_letter"] for r in res.json()}
+    assert by_id[departments["Tool Engineer"]] == "R"
+    assert by_id[departments["Quality"]] == "C"   # consulted, but offered with its letter
+
+
+async def test_reject_restores_a_relettered_department(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """"Not our responsibility" is a reletter to C; the lead's rejection puts
+    the department back on the hook with the letter the routing gave it."""
+    from app.models.change import ChangeAssessment
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C",
+        "reason": "Not our responsibility: no tool change"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
+            ChangeAssessment.stage_order == 1))).scalar_one()
+        assert row.rasic_letter == "C"
+    admin_auth = await _login_admin(client)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "It is yours: the insert moves"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
+            ChangeAssessment.stage_order == 1))).scalar_one()
+        assert row.rasic_letter == "R"
+        assert row.task is None or row.task.is_actionable

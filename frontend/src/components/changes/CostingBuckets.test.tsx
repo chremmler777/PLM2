@@ -128,6 +128,14 @@ describe('CostingBuckets', () => {
     expect(screen.queryByTestId('costpos-new-4')).toBeNull()
   })
 
+  it('gives a department routed on two stages one bucket, not two', () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [
+      { id: 1, department_id: 2, stage_order: 1, rasic_letter: 'R', status: 'active', verdict: 'feasible' },
+      { id: 9, department_id: 2, stage_order: 2, rasic_letter: 'R', status: 'pending', verdict: 'pending' },
+    ] }) })
+    expect(screen.getAllByTestId('costing-bucket-2')).toHaveLength(1)
+  })
+
   it('says so plainly when nobody is costing yet', () => {
     buckets({ change: change({ assessments: [] }) })
     expect(screen.getByText(t('costing.none'))).toBeTruthy()

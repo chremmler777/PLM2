@@ -1,0 +1,41 @@
+{
+  "key": "project_legitimization", "version": 1, "title": "Project Legitimization",
+  "implements": "F-DVS-CORP-013", "cardinality": "single", "gate_items": false,
+  "sep_items": ["K0/RG1:39", "K/RG2:7"], "signatures": ["md", "pm"],
+  "required_for_submit": ["header.project_title", "budget"],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project title", "type": "text", "prefill": "project.name"},
+      {"id": "plant", "label": "Production location", "type": "text", "prefill": "project.plant", "readonly": true},
+      {"id": "prepared_by", "label": "Prepared by", "type": "user", "prefill": "user.me"},
+      {"id": "date", "label": "Date", "type": "date", "prefill": "date.today"},
+      {"id": "sop", "label": "SOP", "type": "date"},
+      {"id": "classification", "label": "Project classification", "type": "choice",
+       "options": ["Strictly confidential", "Confidential", "Internal", "Public"]},
+      {"id": "currency", "label": "Currency", "type": "choice", "options": ["USD", "EUR"]}
+    ]},
+    {"id": "order", "title": "Project order", "kind": "fields", "fields": [
+      {"id": "statement", "label": "Statement", "type": "multiline",
+       "help": "By signing this, the Managing Director(s) and Head of Project Management officially commission the implementation of the project."}
+    ]},
+    {"id": "budget", "title": "Project budget", "kind": "table", "min_rows": 1, "columns": [
+      {"id": "item", "label": "Description", "type": "choice", "width": 2,
+       "options": ["Development", "Tooling", "Control gauge", "Gripper (FOTP)", "Packaging", "Assembly equipment", "CTM part transport", "BARA", "Other"]},
+      {"id": "budget", "label": "Budget", "type": "number", "step": 0.01},
+      {"id": "one_time_payment", "label": "One-time payment", "type": "number", "step": 0.01},
+      {"id": "amortisation", "label": "Amortisation", "type": "number", "step": 0.01},
+      {"id": "remark", "label": "Remark", "type": "text", "width": 2}
+    ], "footer": [
+      {"label": "Total budget", "expr": "sum(budget)"},
+      {"label": "Total one-time payment", "expr": "sum(one_time_payment)"}
+    ]},
+    {"id": "savings", "title": "Savings", "kind": "fields", "fields": [
+      {"id": "included_in", "label": "Savings included in", "type": "text"},
+      {"id": "value_without", "label": "Value without savings", "type": "number", "step": 0.01},
+      {"id": "value_with", "label": "Value with savings", "type": "number", "step": 0.01},
+      {"id": "comment", "label": "Comment", "type": "multiline",
+       "help": "If BARA and savings are hidden in the internal calculation (e.g. in cycle time), say so here."}
+    ]}
+  ]
+}

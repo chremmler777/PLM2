@@ -1,0 +1,20 @@
+{
+  "key": "contact_list", "version": 1, "title": "Project Contact List",
+  "implements": "F-DVS-CORP-004", "cardinality": "single", "gate_items": false,
+  "sep_items": ["K/RG2:8"], "signatures": [], "required_for_submit": ["contacts"],
+  "sections": [
+    {"id": "header", "title": "Project", "kind": "fields", "fields": [
+      {"id": "project_no", "label": "Project No.", "type": "text", "prefill": "project.code", "readonly": true},
+      {"id": "project_title", "label": "Project", "type": "text", "prefill": "project.name"},
+      {"id": "description", "label": "Description", "type": "multiline"}
+    ]},
+    {"id": "contacts", "title": "Contacts", "kind": "table", "min_rows": 1, "prefill": "team.members", "columns": [
+      {"id": "name", "label": "Name", "type": "text", "width": 2},
+      {"id": "department", "label": "Department", "type": "text"},
+      {"id": "position", "label": "Position", "type": "text"},
+      {"id": "phone", "label": "Phone", "type": "text"},
+      {"id": "email", "label": "Email", "type": "text", "width": 2},
+      {"id": "external", "label": "External", "type": "checkbox"}
+    ]}
+  ]
+}

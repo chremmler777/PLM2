@@ -276,6 +276,107 @@ Three typed containers, three responsibilities:
 - The **lead item pins here** — departments are routed against it. Editable in
   `captured`/`scoping` only.
 
+### Who is on the hook: the room's RASIC call at scoping
+Attendance at the scoping meeting makes nobody responsible, and absence takes
+nothing away. The PM sets responsibility WITH the team, per department, on the
+meeting record (`ChangeMeeting.department_rasic`, `{department_id: letter}`):
+- **Letters:** R (Responsible, assesses), A (Accountable, assesses), S
+  (Supports), C (Consulted/informed — no answer owed). "I" is accepted and
+  stored as C. The picker starts from the change type's standard routing
+  (every stage-1 department with its standard letter, served by
+  `recommended-departments`); the room overrules it.
+- **Routing follows the room:** on `proceed`, stage 1 is built from the map —
+  the room's letter wins over the template's; a department the room added
+  gets the letter it chose. Older meetings without letters keep the old rule
+  (template letter, extras are R). Proceeding needs at least one R/A.
+- **The department may still say no.** In assessment, a routed R/A department
+  clicks "Not our responsibility" in its own bucket: reason required,
+  optionally naming who should own it. That is the routing deviation
+  `reletter → C` (plus `add` for the named department), decided by the change
+  lead through the same 4-eyes panel. Rejecting restores the letter the routing
+  gave; approving leaves the department consulted. Refused once the department
+  has answered.
+Every routing deviation now carries a reason (`apply_deviation`).
+
+### The costing table (2026-09-16)
+One table per department at `costing`, line by line. Rows 1–2 are standing
+(assessment effort, implementation support, both own time); Tool Engineer has
+a third (part weight, an estimate). Every further line is a **category from
+the department's list**, and the category says what the line is:
+- **own time** — hours (`kind=own_time`), valued at the department rate in the
+  summation like the standing rows;
+- **money, estimate** — a house number (`kind=external, pricing=estimate`);
+- **money, vendor quote** — read from the favourite of the offers under the
+  line (`pricing=quote`); one offer prices the line without a vote, several
+  need the star. Sales' later choice is shown on the line, never edited here.
+Categories: coded per department in `app/services/costing_tags.py` (each with
+`entry_type` money|time, "other" in both types for everyone) plus the
+department's own (`department_cost_categories`, migration 069, added from the
+table's category dropdown with its type; soft delete). The free-text tag is
+gone from the UI; the API still accepts any tag string.
+The per-plant workbook grid (cycle-time delta, hours × rate) stays under the
+table, collapsible. A department routed on several stages has one table.
+
+**Full and partial quotes.** On a quoted line each offer is a **full quote**
+(an alternative: one is bought, the star recommends which; several without a
+star leave the line unpriced) or a **partial quote** (`is_partial`, migration
+071: a part of the line, always counted). Line amount = sum of the parts +
+the counted alternative; lead time = the slowest of those (calendar-day
+compared). A part carries no star and cannot be Sales' choice; Sales decides
+among the alternatives only.
+
+**Vendors.** External lines are labelled "External · estimate" / "External ·
+vendor quote". An estimated line may name who gave the number
+(`CostingPosition.vendor_name`, migration 070); a quoted line names its
+vendors on the offers. Every vendor field offers the **Suppliers master
+data** and a new name typed there is stored as a supplier on save (best
+effort), so the list grows the way the department categories do. Suppliers
+are managed (renamed, deactivated) on the Suppliers page.
+
+**Closing and reopening costing.** Departments enter lines while the change
+is in `costing`. Costing closes when it moves to `quoting` — **Project
+Management, Sales, the change lead or admin** may close it (PM runs costing
+and says when the numbers are complete). Sending the quote (`quoting →
+quoted`) stays Sales/lead/admin. While in `quoting` the commercial tab says
+costing is closed and offers **Reopen costing** to the same people who may
+close it; the reason is mandatory and recorded as `costing_reopened`. PM and
+admin may still fix any department's lines at any time (`may_write`).
+
+### Risk vocabulary: coded baseline + the department's own additions
+- Coded per department in `app/services/risk_types.py` (own types, then the
+  common timing/cost/other). Legacy moulding keys stay valid for everyone.
+- A department **adds its own types** from the risk form ("+ Add own risk
+  type…", `department_risk_types`, keys namespaced `d<dept>_<slug>`); members,
+  PM and admin may add or remove. Removal is soft: off the dropdown, rows raised
+  under it keep their key and stay valid; adding the same name revives it.
+- **Risk templates** (`department_risk_templates`): pre-written type + severity
+  + wording, picked in the form to prefill, saved from it with a tick, soft
+  deleted. Same writers.
+
+### Adding a department during `in_assessment`
+Somebody was forgotten, or something turns out to be impacted after all. This
+is NOT a recall to scoping (that tears down everyone's work and is refused once
+anything is submitted). It is a **routing deviation** (`op: add`):
+- **Who proposes:** change lead, PM or admin, from the assessment tab
+  ("Add department"). Department, RASIC letter (R default) and a **mandatory
+  reason** (the audit record of why they were missed).
+- **Effect at once:** the department gets its assessment row and engine task on
+  the assessment stage, with the standard due date. It is on the hook
+  immediately; a blocking letter (R/A) gates costing like any first-stage row.
+- **4-eyes decision:** the proposer never decides. A non-lead's proposal is the
+  lead's call; the lead's proposal is anyone else's (the PM's). While pending,
+  `in_assessment → costing` is refused ("Routing deviation is pending
+  approval") and no further add is offered. The lead sees it under my-actions
+  (`routing_deviation_decision`) and is notified.
+- **Reject** needs a reason and undoes the add: row and task removed, the
+  department off the hook. If the added department already answered, the
+  rejection is refused — the answer is a fact of the record.
+- **Approve** keeps it; on release the deviation is **promoted into the
+  standard routing** for that change type (`promote_to_standard`), so the next
+  change routes the department without anyone remembering.
+Code: `change_routing_service.py::apply_deviation / reject_deviation /
+approve_deviation`; UI `RoutingDeviationPanel.tsx`.
+
 ### Rejecting at capture
 A request can go straight `captured → rejected` without passing through
 scoping, via the **direct transition endpoint** with a `rejection_reason` —

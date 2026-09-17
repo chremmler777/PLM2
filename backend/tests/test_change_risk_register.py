@@ -111,11 +111,100 @@ async def test_a_direct_raise_can_only_be_a_risk(client, admin_auth, assessing):
 
 
 async def test_the_risk_vocabulary_is_served(client, admin_auth):
+    """No department: the legacy moulding list, then the common types."""
     res = await client.get("/api/v1/changes/reference/risk-types", headers=admin_auth)
     assert res.status_code == 200, res.text
     assert [i["key"] for i in res.json()["items"]] == [
         "fill_issue", "dimensional_issue", "visual_surface",
-        "process_capability", "other"]
+        "process_capability", "timing", "cost", "other"]
+    assert res.json()["items"][0]["label_en"] == "Fill issue"
+
+
+async def test_the_risk_vocabulary_is_per_department(client, admin_auth, assessing, session_factory):
+    """Tool Engineer talks steel safety; Sales talks customer acceptance; both
+    get the common set with "other" last."""
+    res = await client.get(
+        f"/api/v1/changes/reference/risk-types?department_id={assessing['department_id']}",
+        headers=admin_auth)
+    keys = [i["key"] for i in res.json()["items"]]
+    assert "not_steel_safe" in keys and "fill_issue" in keys
+    assert keys[-1] == "other" and "timing" in keys
+    assert "customer_acceptance" not in keys
+    async with session_factory() as s:
+        sales = Department(name="Sales", flow_type="action", is_active=True)
+        s.add(sales); await s.commit(); sales_id = sales.id
+    res = await client.get(f"/api/v1/changes/reference/risk-types?department_id={sales_id}",
+                           headers=admin_auth)
+    keys = [i["key"] for i in res.json()["items"]]
+    assert "customer_acceptance" in keys and "not_steel_safe" not in keys
+
+
+async def test_a_risk_type_is_validated_against_the_departments_list(
+        client, admin_auth, assessing):
+    # Tool Engineer: its own key passes, a Sales key is refused, legacy always passes.
+    assert (await _raise(client, admin_auth, assessing, risk_type="not_steel_safe")).status_code == 200
+    res = await _raise(client, admin_auth, assessing, risk_type="customer_acceptance")
+    assert res.status_code == 400 and "not_steel_safe" in res.text
+    assert (await _raise(client, admin_auth, assessing, risk_type="process_capability")).status_code == 200
+    assert (await _raise(client, admin_auth, assessing, risk_type="other")).status_code == 200
+
+
+# --- department risk templates --------------------------------------------
+
+async def _template(client, auth, dept_id, **over):
+    body = {"department_id": dept_id, "risk_type": "fill_issue", "severity": 3,
+            "note": "Thin wall at the gate will short-shot"}
+    body.update(over)
+    return await client.post("/api/v1/changes/reference/risk-templates", json=body, headers=auth)
+
+
+async def test_a_department_writes_its_risks_down_and_reads_them_back(
+        client, admin_auth, assessing):
+    d = assessing["department_id"]
+    res = await _template(client, admin_auth, d)
+    assert res.status_code == 200, res.text
+    assert res.json()["severity"] == 3 and res.json()["risk_type"] == "fill_issue"
+    res = await client.get(f"/api/v1/changes/reference/risk-templates?department_id={d}",
+                           headers=admin_auth)
+    assert [r["note"] for r in res.json()] == ["Thin wall at the gate will short-shot"]
+    # Validated like a raise: the department's vocabulary, 1..3, a wording.
+    assert (await _template(client, admin_auth, d, risk_type="customer_acceptance")).status_code == 400
+    assert (await _template(client, admin_auth, d, severity=5)).status_code == 400
+    assert (await _template(client, admin_auth, d, note="  ")).status_code == 400
+
+
+async def test_an_accidental_template_is_deleted_softly(client, admin_auth, assessing, session_factory):
+    from app.models.change import DepartmentRiskTemplate
+    from sqlalchemy import select
+    d = assessing["department_id"]
+    tid = (await _template(client, admin_auth, d, note="oops")).json()["id"]
+    res = await client.delete(f"/api/v1/changes/reference/risk-templates/{tid}", headers=admin_auth)
+    assert res.status_code == 200, res.text
+    res = await client.get(f"/api/v1/changes/reference/risk-templates?department_id={d}",
+                           headers=admin_auth)
+    assert res.json() == []
+    # Gone from the list, still on the record; deleting twice is a 404.
+    async with session_factory() as s:
+        row = (await s.execute(select(DepartmentRiskTemplate).where(
+            DepartmentRiskTemplate.id == tid))).scalar_one()
+        assert row.deleted_at is not None and row.note == "oops"
+    assert (await client.delete(f"/api/v1/changes/reference/risk-templates/{tid}",
+                                headers=admin_auth)).status_code == 404
+
+
+async def test_only_the_department_pm_or_admin_write_templates(
+        client, admin_auth, eng_auth, assessing, seed, session_factory):
+    from app.models.workflow import UserDepartment
+    d = assessing["department_id"]
+    # The engineer is in no department: refused.
+    assert (await _template(client, eng_auth, d)).status_code == 403
+    # Made a member: allowed, and may delete too.
+    async with session_factory() as s:
+        s.add(UserDepartment(user_id=seed["engineer_id"], department_id=d)); await s.commit()
+    res = await _template(client, eng_auth, d)
+    assert res.status_code == 200, res.text
+    assert (await client.delete(f"/api/v1/changes/reference/risk-templates/{res.json()['id']}",
+                                headers=eng_auth)).status_code == 200
 
 
 async def test_the_risk_reference_needs_a_login(client):
@@ -225,3 +314,66 @@ async def test_evidence_still_belongs_to_the_assessed_department(
                         assessment_id=assessing["assessment_id"])
     assert res.status_code == 400, res.text
     assert "assessed department" in res.json()["detail"]
+
+
+# --- department-defined risk types ----------------------------------------
+
+async def test_a_department_adds_its_own_type_to_the_dropdown_and_raises_under_it(
+        client, admin_auth, assessing):
+    d = assessing["department_id"]
+    res = await client.post("/api/v1/changes/reference/risk-types",
+                            json={"department_id": d, "label": "Hot runner rebalancing"},
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    key = res.json()["key"]
+    assert key.startswith(f"d{d}_hot_runner")
+    items = (await client.get(f"/api/v1/changes/reference/risk-types?department_id={d}",
+                              headers=admin_auth)).json()["items"]
+    mine = next(i for i in items if i["key"] == key)
+    assert mine["label_en"] == "Hot runner rebalancing" and mine["extra"] is True
+    assert "custom_id" in mine
+    # It sits before the common types, "other" still last.
+    assert [i["key"] for i in items][-1] == "other"
+    assert [i["key"] for i in items].index(key) < [i["key"] for i in items].index("timing")
+    # Raising under it works; a template may use it; another department cannot.
+    assert (await _raise(client, admin_auth, assessing, risk_type=key)).status_code == 200
+    assert (await _template(client, admin_auth, d, risk_type=key)).status_code == 200
+    # Same name again hands back the same type, no duplicate.
+    again = await client.post("/api/v1/changes/reference/risk-types",
+                              json={"department_id": d, "label": "hot runner rebalancing"},
+                              headers=admin_auth)
+    assert again.json()["id"] == res.json()["id"]
+    # A standard name is refused.
+    res = await client.post("/api/v1/changes/reference/risk-types",
+                            json={"department_id": d, "label": "  "}, headers=admin_auth)
+    assert res.status_code == 400
+
+
+async def test_a_deleted_custom_type_leaves_the_dropdown_but_stays_valid(
+        client, admin_auth, assessing):
+    d = assessing["department_id"]
+    created = (await client.post("/api/v1/changes/reference/risk-types",
+                                 json={"department_id": d, "label": "Oops type"},
+                                 headers=admin_auth)).json()
+    res = await client.delete(f"/api/v1/changes/reference/risk-types/{created['id']}",
+                              headers=admin_auth)
+    assert res.status_code == 200, res.text
+    keys = [i["key"] for i in (await client.get(
+        f"/api/v1/changes/reference/risk-types?department_id={d}",
+        headers=admin_auth)).json()["items"]]
+    assert created["key"] not in keys
+    # History raised under it is still accepted (the key is not a refusal).
+    assert (await _raise(client, admin_auth, assessing, risk_type=created["key"])).status_code == 200
+    # Adding the same name again revives it rather than making a second row.
+    revived = (await client.post("/api/v1/changes/reference/risk-types",
+                                 json={"department_id": d, "label": "Oops type"},
+                                 headers=admin_auth)).json()
+    assert revived["id"] == created["id"]
+
+
+async def test_only_the_department_pm_or_admin_add_types(
+        client, eng_auth, assessing):
+    res = await client.post("/api/v1/changes/reference/risk-types",
+                            json={"department_id": assessing["department_id"], "label": "x"},
+                            headers=eng_auth)
+    assert res.status_code == 403

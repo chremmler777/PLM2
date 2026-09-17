@@ -17,8 +17,12 @@ vi.mock('../../api/changes', () => ({
     assessmentChecklist: vi.fn().mockResolvedValue([]),
     withdrawConcern: vi.fn(),
     raiseConcern: vi.fn(),
+    postDeviation: vi.fn().mockResolvedValue({}),
+    approveDeviation: vi.fn().mockResolvedValue({}),
+    rejectDeviation: vi.fn().mockResolvedValue({}),
   },
 }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ userId: 5, isAdmin: false }) }))
 vi.mock('./AttachmentDropzone', () => ({
   default: (p: { assessmentId?: number; kind?: string }) => (
@@ -645,5 +649,154 @@ describe('AssessmentBuckets evidence', () => {
     fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
     expect(screen.getByTestId('bucket-evidence-2').textContent).toContain('measurement.pdf')
     expect(screen.queryByTestId('dropzone')).toBeNull()
+  })
+})
+
+
+describe('AssessmentBuckets — adding a forgotten department', () => {
+  const routingWith = (over: Record<string, unknown> = {}) => ({
+    change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+    deviation_status: 'none', deviation_note: null, deviation_proposed_by: null,
+    stages: [{ stage_order: 1, departments: [
+      { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+    ] }],
+    ...over,
+  })
+  beforeEach(() => {
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.postDeviation).mockClear()
+    vi.mocked(changesApi.approveDeviation).mockClear()
+    vi.mocked(changesApi.rejectDeviation).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('offers the button to the lead only, and only in assessment', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith() as never)
+    buckets({ canSeeAll: true })
+    await screen.findByTestId('bucket-2')
+    expect(screen.queryByTestId('add-department-button')).toBeNull()
+    cleanup()
+    buckets({ canSeeAll: true, canAddDepartment: true, editable: false })
+    await screen.findByTestId('bucket-2')
+    expect(screen.queryByTestId('add-department-button')).toBeNull()
+    cleanup()
+    buckets({ canSeeAll: true, canAddDepartment: true })
+    expect(await screen.findByTestId('add-department-button')).toBeTruthy()
+  })
+
+  it('proposes the add with letter, the assessment stage and a reason; routed departments are not offered', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith() as never)
+    buckets({ canSeeAll: true, canAddDepartment: true, userId: 5, isChangeLead: true })
+    fireEvent.click(await screen.findByTestId('add-department-button'))
+    const select = screen.getByTestId('add-department-select') as HTMLSelectElement
+    const offered = [...select.options].map((o) => o.value).filter(Boolean)
+    expect(offered).toEqual(['6', '4'])  // alphabetical; Development (2) is already routed
+    const submit = screen.getByTestId('add-department-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(select, { target: { value: '4' } })
+    fireEvent.click(screen.getByLabelText(t('routingDev.letter.S')))
+    expect(submit.disabled).toBe(true)  // still no reason
+    fireEvent.change(screen.getByTestId('add-department-reason'), { target: { value: 'forgot the tool' } })
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    await waitFor(() => expect(changesApi.postDeviation).toHaveBeenCalledWith(7, {
+      op: 'add', stage_order: 1, department_id: 4, rasic_letter: 'S', reason: 'forgot the tool',
+    }))
+  })
+
+  it('shows the pending change with its reason; the lead decides, a reject needs a reason', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
+      has_deviation: true, deviation_status: 'pending_approval',
+      deviation_note: 'Packaging changes with the new clip', deviation_proposed_by: 9,
+    }) as never)
+    buckets({ canSeeAll: true, canAddDepartment: true, userId: 5, isChangeLead: true,
+      change: change({ lead_id: 5 }) })
+    expect((await screen.findByTestId('routing-deviation-note')).textContent)
+      .toBe('Packaging changes with the new clip')
+    // No stacking while one is pending: the button waits for the decision.
+    expect((screen.getByTestId('add-department-button') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('routing-deviation-reject'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'not impacted' } })
+    fireEvent.click(screen.getByText(t('routingDev.reject'), { selector: 'button.bg-red-700' }))
+    await waitFor(() => expect(changesApi.rejectDeviation).toHaveBeenCalledWith(7, 'not impacted'))
+    fireEvent.click(screen.getByTestId('routing-deviation-approve'))
+    await waitFor(() => expect(changesApi.approveDeviation).toHaveBeenCalledWith(7))
+  })
+
+  it('keeps the decision away from the proposer and from non-leads', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
+      has_deviation: true, deviation_status: 'pending_approval',
+      deviation_note: 'x', deviation_proposed_by: 5,
+    }) as never)
+    // The proposer (user 5) is the lead — 4-eyes: they may not decide.
+    buckets({ canSeeAll: true, userId: 5, isChangeLead: true, change: change({ lead_id: 5 }) })
+    expect(await screen.findByTestId('routing-deviation-waiting')).toBeTruthy()
+    expect(screen.queryByTestId('routing-deviation-approve')).toBeNull()
+    cleanup()
+    // A member who is neither lead nor proposer, on a change with a lead: not theirs.
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
+      has_deviation: true, deviation_status: 'pending_approval',
+      deviation_note: 'x', deviation_proposed_by: 9,
+    }) as never)
+    buckets({ canSeeAll: true, userId: 5, isChangeLead: false, change: change({ lead_id: 8 }) })
+    expect(await screen.findByTestId('routing-deviation-waiting')).toBeTruthy()
+    cleanup()
+    // ...but when the LEAD proposed it, anyone else (the PM) decides.
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routingWith({
+      has_deviation: true, deviation_status: 'pending_approval',
+      deviation_note: 'x', deviation_proposed_by: 8,
+    }) as never)
+    buckets({ canSeeAll: true, userId: 5, isChangeLead: false, change: change({ lead_id: 8 }) })
+    expect(await screen.findByTestId('routing-deviation-approve')).toBeTruthy()
+  })
+})
+
+
+describe('AssessmentBuckets — declining responsibility', () => {
+  const routing = (over: Record<string, unknown> = {}) => ({
+    change_id: 7, template_id: 1, template_version: 1, has_deviation: false,
+    deviation_status: 'none', deviation_note: null, deviation_proposed_by: null,
+    stages: [{ stage_order: 1, departments: [
+      { department_id: 2, rasic_letter: 'R', tier: 'blocking', status: 'active', verdict: 'pending' },
+    ] }],
+    ...over,
+  })
+  beforeEach(() => {
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.postDeviation).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('lets the routed department decline with a reason and name who should own it', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routing() as never)
+    buckets({ myDepartmentIds: [2] })
+    fireEvent.click(await screen.findByTestId('not-responsible-2'))
+    const submit = screen.getByTestId('not-responsible-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('not-responsible-reason'),
+      { target: { value: 'No tool is touched, this is a packaging change' } })
+    // Development (2) is routed and not offered; the others are.
+    const instead = screen.getByTestId('not-responsible-instead') as HTMLSelectElement
+    expect([...instead.options].map((o) => o.value).filter(Boolean)).toEqual(['6', '4'])
+    fireEvent.change(instead, { target: { value: '6' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(changesApi.postDeviation).toHaveBeenCalledTimes(2))
+    expect(changesApi.postDeviation).toHaveBeenNthCalledWith(1, 7, {
+      op: 'reletter', department_id: 2, rasic_letter: 'C',
+      reason: 'No tool is touched, this is a packaging change',
+    })
+    expect(changesApi.postDeviation).toHaveBeenNthCalledWith(2, 7, {
+      op: 'add', department_id: 6, rasic_letter: 'R', stage_order: 1,
+      reason: 'No tool is touched, this is a packaging change',
+    })
+  })
+
+  it('hides the decline while a routing change is already waiting on the lead', async () => {
+    vi.mocked(changesApi.getRouting).mockResolvedValue(routing({
+      has_deviation: true, deviation_status: 'pending_approval', deviation_note: 'x', deviation_proposed_by: 9,
+    }) as never)
+    buckets({ myDepartmentIds: [2] })
+    await screen.findByTestId('routing-deviation-pending')
+    expect(screen.queryByTestId('not-responsible-2')).toBeNull()
   })
 })

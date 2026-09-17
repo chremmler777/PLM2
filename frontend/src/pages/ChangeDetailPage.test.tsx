@@ -493,6 +493,24 @@ describe('ChangeDetailPage quote preparation (commercial tab)', () => {
     expect(screen.queryByTestId('quote-timeline-placeholder')).toBeNull()
   })
 
+  it('offers PM, Sales, the lead and admin the reopen of costing while quoting, with a reason', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'quoting' as ChangeDetail['status']
+    change.customer_relevant = true
+    wrap('/changes/1?tab=commercial')
+    expect((await screen.findByTestId('costing-closed')).textContent).toContain(t('costing.closedHint'))
+    // The reason dialog is mocked here; the button opening it is the contract.
+    expect(screen.getByTestId('costing-reopen').textContent).toBe(t('costing.reopen'))
+  })
+
+  it('tells a bystander costing is closed without offering the reopen', async () => {
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoting' as ChangeDetail['status']
+    wrap('/changes/1?tab=commercial')
+    await screen.findByTestId('costing-closed')
+    expect(screen.queryByTestId('costing-reopen')).toBeNull()
+  })
+
   it('opens the commercial tab at quote creation', async () => {
     change.status = 'quoting' as ChangeDetail['status']
     wrap('/changes/1?tab=commercial')

@@ -611,6 +611,12 @@ class ChangeMeeting(Base):
     # allowed to be a bare button press. 'proceed' needs no justification.
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_department_ids: Mapped[list] = mapped_column(JSON, default=list)
+    # The room's RASIC call, {department_id: letter}: who is Responsible,
+    # Accountable, Supports or is Consulted on THIS change. Attendance does
+    # not make anyone responsible and absence does not take it away — the PM
+    # decides this with the team, and routing builds stage 1 from it. Empty
+    # on older meetings: then the standard template's letters apply.
+    department_rasic: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -618,6 +624,11 @@ class ChangeMeeting(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     change: Mapped["ChangeRequest"] = relationship(back_populates="meetings", foreign_keys=[change_id])
+
+    @property
+    def rasic_map(self) -> dict[int, str]:
+        """department_rasic with int keys (JSON stores them as strings)."""
+        return {int(k): v for k, v in (self.department_rasic or {}).items()}
 
 
 class ChangeNegotiation(Base):
@@ -681,6 +692,53 @@ RISK_TYPES = ("fill_issue", "dimensional_issue", "visual_surface",
 # 1 low / 2 medium / 3 high. Deliberately three steps: a finer scale invites an
 # argument about the scale instead of about the risk.
 RISK_SEVERITIES = (1, 2, 3)
+
+
+class DepartmentRiskTemplate(Base):
+    """A risk a department wrote down once to raise again.
+
+    "Gauge not capable for this feature" comes up on every third change; the
+    department keeps it here, typed and rated, and picks it in the risk form
+    instead of retyping it. It is the department's own list: its members, the
+    PM and admins write to it. Deleting is soft — a template added by accident
+    disappears from the list, the row stays so the register can still explain
+    where a risk's wording came from.
+    """
+    __tablename__ = "department_risk_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    risk_type: Mapped[str] = mapped_column(String(40))
+    severity: Mapped[int] = mapped_column(Integer, default=2)
+    note: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class DepartmentRiskType(Base):
+    """A risk type a department added to its own dropdown.
+
+    The coded vocabulary (app/services/risk_types.py) is the reviewed
+    baseline; this is the department's extension of it — "hot runner
+    rebalancing" is a type Tool Engineering wants to count, and nobody should
+    have to file a code change to get it. Keys are namespaced per department
+    so two departments' "other tooling" never collide. Soft-deleted: a type
+    goes off the dropdown, rows raised under it keep their key.
+    """
+    __tablename__ = "department_risk_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("wf_departments.id"), index=True)
+    key: Mapped[str] = mapped_column(String(40))
+    label: Mapped[str] = mapped_column(String(120))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
 class ChangeConcern(Base):

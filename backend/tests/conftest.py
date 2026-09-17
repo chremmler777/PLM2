@@ -260,6 +260,15 @@ async def eng_auth(client):
 
 
 @pytest_asyncio.fixture
+async def seed_forms(session_factory, seed):
+    """Load the JSON form definitions into the test DB."""
+    from app.forms.loader import load_definitions
+    async with session_factory() as s:
+        await load_definitions(s)
+        await s.commit()
+
+
+@pytest_asyncio.fixture
 async def part(client, eng_auth, seed):
     """A part with one RFQ revision; returns {'part_id', 'revision_id'}."""
     res = await client.post(

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { useDepartments } from '../../hooks/queries/useWorkflows';
 import {
-  chosenOf, decisionDivergesOf, favoriteOf, salesEffectiveOf, tagLabel,
+  alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, salesEffectiveOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
 import type { CostPosition } from '../../types/change';
@@ -88,8 +88,13 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
       )}
 
       {/* Re-choosing stays open while the change is being quoted. */}
+      {partsOf(p).length > 0 && (
+        <div data-testid={`vendor-parts-${p.id}`} className="text-xs text-slate-400">
+          {t('costpos.partsSum')}: {partsOf(p).map((o) => `${o.vendor_name} ${(o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0)).toFixed(2)}`).join(' + ')}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
-        {(p.offers ?? []).map((o) => (
+        {alternativesOf(p).map((o) => (
           <button key={o.id} type="button" data-testid={`vendor-choose-${o.id}`}
             disabled={choose.isPending || !!o.chosen}
             onClick={() => pick(o.id)}
