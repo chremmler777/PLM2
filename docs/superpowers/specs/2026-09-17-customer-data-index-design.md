@@ -19,9 +19,6 @@ binding. The customer, not us, decides that.
    We record that statement; we never decide it.
 3. **Counters never reset.** Nomination is a part phase, not a new counter.
 4. **RFQ stays visible as a phase, not as a name prefix.**
-5. **No server-side U-drive mirror.** Prod cannot reach the U share. Until
-   the PLM store is trusted, the uploader copies files by hand to
-   `U:\Projects\<project code>\<part number>\<revision name>\`.
 
 ## 1. Revision naming
 
@@ -123,5 +120,5 @@ revision through the existing file endpoint.
 
 ## Out of scope
 
-- Any automated copy to the U drive (manual for now).
+- Any copy of uploaded files outside the server store.
 - Automatic parsing of the customer index from filenames.
