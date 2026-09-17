@@ -1,4 +1,4 @@
-# Customer data index (E1 / 1) and U-drive mirror — design
+# Customer data index (E1 / 1) — design
 
 Date: 2026-09-17
 Status: approved in chat, pending spec review
@@ -8,8 +8,7 @@ Status: approved in chat, pending spec review
 Parts for nominated projects (1994, 2077 backpanel) arrive as customer data
 before anything is released. The current revision names (RFQ1, ENG1, IND1,
 ECR1.1) encode an internal phase choice; they do not say whether the data is
-binding. The customer, not us, decides that. We also need a plain folder copy
-of every uploaded file on the U drive until the PLM store is trusted.
+binding. The customer, not us, decides that.
 
 ## Decisions
 
@@ -20,8 +19,9 @@ of every uploaded file on the U drive until the PLM store is trusted.
    We record that statement; we never decide it.
 3. **Counters never reset.** Nomination is a part phase, not a new counter.
 4. **RFQ stays visible as a phase, not as a name prefix.**
-5. **Every upload is mirrored to the U drive** under a human-readable path,
-   switchable off by config.
+5. **No server-side U-drive mirror.** Prod cannot reach the U share. Until
+   the PLM store is trusted, the uploader copies files by hand to
+   `U:\Projects\<project code>\<part number>\<revision name>\`.
 
 ## 1. Revision naming
 
@@ -103,59 +103,25 @@ part. Guard: `official` on a part whose latest major is official is fine
 the customer cannot un-release data. Files are then uploaded to the new
 revision through the existing file endpoint.
 
-## 4. U-drive mirror
-
-Settings: `MIRROR_DIR: str = ""` (empty = off). On prod this is the bind
-mount of `U:\Projects` inside the backend container, e.g. `/mnt/u/Projects`.
-
-Path for every mirrored file:
-
-```
-<MIRROR_DIR>/<project.code>/<customer_part_number or part_number>/<revision_name>/<original filename>
-```
-
-Example: `U:\Projects\1994\3CR.807.425\E1\3CR807425_B_Unterfahrschutz.stp`.
-Filename collisions inside one revision folder get a ` (2)` suffix; nothing is
-overwritten.
-
-Behaviour:
-
-- Internal write happens first, exactly as now. Only then the mirror copy.
-- Mirror failure never fails the upload. The file row stores
-  `mirror_path: str | None` and `mirror_error: str | None`; the UI shows a
-  "not mirrored" badge on the file when `mirror_error` is set.
-- Applies to revision files (`revision_files.py`) and part files
-  (`parts.py` upload). Lesson and change attachments are out of scope.
-- One helper `mirror_service.mirror_file(src_path, project, part, revision_name, original_name) -> (path | None, error | None)`.
-- Prod: `docker-compose.prod.yml` gets an optional bind mount
-  `${MIRROR_HOST_DIR}:/mnt/u/Projects` and `MIRROR_DIR` env; the host must
-  have the SMB share mounted at `MIRROR_HOST_DIR`.
-
-Single uploader for now, so no locking on the share.
-
-## 5. Frontend
+## 4. Frontend
 
 - Revision list shows `E2 (rfq)` style badges: name, phase-at-receipt,
   customer index, "official" tag for numeric majors.
 - "Customer data received" dialog on the part page: statement radio,
   customer index, date, summary.
 - Part header shows lifecycle phase with a change button (PM/admin).
-- File rows show the mirror badge.
 - RFQ/ENG specific buttons ("create RFQ revision", "award to engineering")
   go away.
 
-## 6. Testing
+## 5. Testing
 
 - Naming: E1 → E1.1 → E2; E2 → 1 on official; 1 → 1.1 → 2 via promote;
   review-after-official rejected; counters independent.
 - Migration: fixture with RFQ1, RFQ1.1, ENG1, IND1, ECR1.1 maps to E1, E1.1,
   E2, 1, 1.1.
-- Mirror: file lands at the expected path; unreachable dir leaves upload OK
-  and sets `mirror_error`; collision gets suffix.
 - Change engine: ECN release still creates `n.m` on the impacted part.
 
 ## Out of scope
 
-- Multi-user locking on the U share.
-- Mirroring lessons and change attachments.
+- Any automated copy to the U drive (manual for now).
 - Automatic parsing of the customer index from filenames.
