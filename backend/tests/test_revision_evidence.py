@@ -75,11 +75,11 @@ async def test_sign_404_on_unknown_or_mismatched_revision(client, eng_auth, part
     other_part_id = res2.json()["id"]
 
     res3 = await client.post(
-        f"/api/v1/parts/{other_part_id}/revisions/rfq",
-        json={"summary": "initial"},
+        f"/api/v1/parts/{other_part_id}/revisions/customer-data",
+        json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"},
         headers=eng_auth,
     )
-    assert res3.status_code == 200, res3.text
+    assert res3.status_code == 201, res3.text
 
     res4 = await client.post(
         f"/api/v1/parts/{other_part_id}/revisions/{part['revision_id']}/no-geometry-change",

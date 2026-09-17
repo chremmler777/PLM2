@@ -33,7 +33,7 @@ async def test_new_model_columns_exist(session_factory, seed):
         assert std.template_version == 1
 
     async with session_factory() as s:
-        rev = PartRevision(part_id=None, revision_name="X1", phase="ecn",
+        rev = PartRevision(part_id=None, revision_name="E1", phase="review",
                            status="draft")
         # column presence check only — no flush needed
         assert rev.no_geometry_change in (False, None)

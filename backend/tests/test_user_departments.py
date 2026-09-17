@@ -174,8 +174,8 @@ async def guard_part(client, eng_auth, seed):
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
     res = await client.post(
-        f"/api/v1/parts/{part_id}/revisions/rfq", json={"summary": "initial"}, headers=eng_auth)
-    assert res.status_code == 200, res.text
+        f"/api/v1/parts/{part_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"}, headers=eng_auth)
+    assert res.status_code == 201, res.text
     return {"part_id": part_id, "revision_id": res.json()["id"]}
 
 

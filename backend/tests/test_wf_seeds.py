@@ -96,7 +96,7 @@ async def test_repair_inflight_backfills_check_workflow(session_factory, seed, p
         item = (await s.execute(select(ChangeImpactedItem).where(
             ChangeImpactedItem.change_id == cid))).scalar_one()
         rev = PartRevision(
-            part_id=part["part_id"], revision_name="ECR1.1", phase="ecn",
+            part_id=part["part_id"], revision_name="E1.1", phase="review",
             status="draft", originating_change_id=cid,
             created_by=seed["engineer_id"])
         s.add(rev)

@@ -110,7 +110,12 @@ async def _make_part(client, auth, project_id, number, category="article"):
         "part_type": "internal_mfg", "item_category": category,
     }, headers=auth)
     assert res.status_code in (200, 201), res.text
-    return res.json()["id"]
+    part_id = res.json()["id"]
+    # a change needs customer data to hang its ECN proposal off
+    res = await client.post(f"/api/v1/parts/{part_id}/revisions/customer-data",
+                            json={"statement": "review", "received_at": "2026-09-01"}, headers=auth)
+    assert res.status_code == 201, res.text
+    return part_id
 
 
 async def test_add_and_remove_impacted_item(client, eng_auth, seed):

@@ -63,7 +63,7 @@ async def test_tool_inherits_revision_machinery(client, eng_auth, seed):
     tool_id = res.json()["id"]
 
     res = await client.post(
-        f"/api/v1/parts/{tool_id}/revisions/rfq", json={"summary": "tool rev"}, headers=eng_auth
+        f"/api/v1/parts/{tool_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "tool rev"}, headers=eng_auth
     )
-    assert res.status_code == 200
-    assert res.json()["revision_name"] == "RFQ1"
+    assert res.status_code == 201
+    assert res.json()["revision_name"] == "E1"

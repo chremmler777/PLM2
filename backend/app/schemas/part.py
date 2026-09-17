@@ -1,6 +1,6 @@
 """Pydantic schemas for parts and revisions."""
-from datetime import datetime
-from typing import Optional, List
+from datetime import date, datetime
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field
 
 from app.schemas.common import NaiveUtcDatetime
@@ -55,6 +55,9 @@ class PartResponse(PartBase):
     id: int
     project_id: int
     active_revision_id: Optional[int] = None
+    lifecycle_phase: str = "rfq"
+    nominated_at: Optional[date] = None
+    sop_at: Optional[date] = None
     created_by: int
     updated_by: Optional[int] = None
     created_at: datetime
@@ -72,8 +75,8 @@ class PartDetailResponse(PartResponse):
 # Revision Schemas
 class PartRevisionBase(BaseModel):
     """Base revision information."""
-    revision_name: str = Field(..., description="RFQ1, ENG1, ENG1.1, IND1, ECR1.1, etc")
-    phase: str = Field(..., description="rfq_phase, engineering, freeze, ecn")
+    revision_name: str = Field(..., description="E1, E1.1 (review) or 1, 1.1 (official)")
+    phase: str = Field(..., description="review, official")
     status: str = Field(default="draft", description="draft, in_progress, in_review, approved, rejected, archived, frozen, cancelled")
     summary: Optional[str] = None
     change_reason: Optional[str] = None
@@ -93,6 +96,11 @@ class PartRevisionResponse(PartRevisionBase):
     part_id: int
     parent_revision_id: Optional[int] = None
     supersedes_revision_id: Optional[int] = None
+    customer_index: Optional[str] = None
+    customer_statement: Optional[str] = None
+    customer_received_at: Optional[date] = None
+    source: str = "internal"
+    part_phase_at_receipt: str = "rfq"
     test_data_status: Optional[str] = None
     frozen_at: Optional[datetime] = None
     frozen_by: Optional[int] = None
@@ -169,64 +177,36 @@ class RevisionTreeNode(BaseModel):
     children: List["RevisionTreeNode"] = []
 
 
-# Bulk Operation Schemas
-class CreateRFQRequest(BaseModel):
-    """Request to create RFQ revision (auto-increments to next major version)."""
+# Revision action schemas
+class CustomerDataReceivedRequest(BaseModel):
+    """The customer sent data and stated whether it is review or official."""
+    statement: Literal["review", "official"]
+    received_at: date
+    customer_index: Optional[str] = Field(None, max_length=20, description="Customer's own index, e.g. B")
     summary: Optional[str] = None
-    reject_drafts: bool = Field(False, description="If true, reject existing draft proposals before creating new major version")
 
 
-class CreateRFQProposalRequest(BaseModel):
-    """Request to create RFQ proposal (minor iteration like RFQ1.1, RFQ1.2)."""
-    parent_revision_id: int = Field(..., description="Parent RFQ revision ID (e.g., RFQ1)")
+class CreateProposalRequest(BaseModel):
+    """Our internal iteration under a customer major (E1 → E1.1, 1 → 1.1)."""
+    parent_revision_id: int
     summary: Optional[str] = None
 
 
 class PromoteRevisionRequest(BaseModel):
-    """Request to promote a revision to next major version."""
-    notes: Optional[str] = Field(None, description="Notes about the promotion")
+    """The customer adopted this proposal as their next data state."""
+    statement: Literal["review", "official"]
+    received_at: date
+    customer_index: Optional[str] = Field(None, max_length=20)
 
 
 class RejectMajorRevisionRequest(BaseModel):
-    """Request to reject a major revision."""
+    """Request to reject a revision."""
     reason: Optional[str] = Field(None, description="Reason for rejection")
 
 
-class TransitionToEngineeringRequest(BaseModel):
-    """Request to transition RFQ to Engineering (award and start ENG1)."""
-    summary: Optional[str] = None
-
-
-class CreateEngineeringProposalRequest(BaseModel):
-    """Request to create engineering proposal."""
-    major_version: int = Field(..., ge=1, description="Base version (1 for ENG1.x, 2 for ENG2.x)")
-    proposal_number: int = Field(..., ge=1, description="Proposal number (1 for x.1, 2 for x.2)")
-    summary: Optional[str] = None
-    change_reason: Optional[str] = None
-
-
-class ApproveProposalRequest(BaseModel):
-    """Request to approve a proposal."""
-    next_major_version: int = Field(..., ge=2, description="Next major version")
-    approval_notes: Optional[str] = None
-
-
-class RejectProposalRequest(BaseModel):
-    """Request to reject a proposal."""
-    reason: Optional[str] = None
-
-
-class CreateDesignFreezeRequest(BaseModel):
-    """Request to create design freeze (IND1, IND2, etc)."""
-    summary: Optional[str] = None
-
-
-class CreateECRRequest(BaseModel):
-    """Request to create ECR proposal."""
-    freeze_major_version: int = Field(..., ge=1, description="Freeze version (1 for IND1.x, 2 for IND2.x)")
-    proposal_number: int = Field(..., ge=1, description="Proposal number")
-    summary: Optional[str] = None
-    change_reason: Optional[str] = None
+class SetLifecyclePhaseRequest(BaseModel):
+    phase: Literal["nominated", "series"]
+    effective: date
 
 
 # Update forward references

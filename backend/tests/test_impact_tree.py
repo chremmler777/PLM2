@@ -14,9 +14,9 @@ async def _make_part(client, eng_auth, seed, number, name, parent_id=None,
     res = await client.post("/api/v1/parts", json=body, headers=eng_auth)
     assert res.status_code in (200, 201), res.text
     pid = res.json()["id"]
-    res = await client.post(f"/api/v1/parts/{pid}/revisions/rfq",
-                            json={"summary": "init"}, headers=eng_auth)
-    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data",
+                            json={"statement": "review", "received_at": "2026-09-01", "summary": "init"}, headers=eng_auth)
+    assert res.status_code == 201, res.text
     return {"part_id": pid, "revision_id": res.json()["id"]}
 
 

@@ -1,6 +1,6 @@
-"""Service for managing parts and revisions with RFQ/ENG/FREEZE/ECR workflow."""
+"""Service for managing parts and revisions (customer data index E<n> / <n>)."""
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, List
 from sqlalchemy import select, cast, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,8 @@ from app.models import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, User
 )
+from app.models.part import CUSTOMER_STATEMENTS
+from app.services.revision_naming import next_major_name, next_minor_name
 
 logger = logging.getLogger(__name__)
 
@@ -178,282 +180,160 @@ class PartService:
 
 
 class RevisionService:
-    """Service for managing part revisions and their lifecycle."""
+    """Service for managing part revisions.
+
+    A major (E1, E2, 1, 2) exists only because the customer sent data and
+    said whether it is review or official. A minor (E1.1, 1.1) is our own
+    iteration on top of it. Counters never reset.
+    """
 
     @staticmethod
-    async def get_latest_revision_in_phase(
-        session: AsyncSession,
-        part_id: int,
-        phase: str,
-    ) -> Optional[PartRevision]:
-        """Get the latest major version in a phase (e.g., RFQ1, ENG1, IND1)."""
+    async def _majors(session: AsyncSession, part_id: int) -> list[PartRevision]:
         result = await session.execute(
             select(PartRevision)
-            .where(
-                (PartRevision.part_id == part_id)
-                & (PartRevision.phase == phase)
-                & (PartRevision.parent_revision_id.is_(None))  # Major versions have no parent
-            )
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
+            .where((PartRevision.part_id == part_id) & (PartRevision.parent_revision_id.is_(None)))
+            .order_by(PartRevision.created_at))
+        return list(result.scalars().all())
 
     @staticmethod
-    async def get_next_major_version_name(
+    async def receive_customer_data(
         session: AsyncSession,
         part_id: int,
-        phase: str,
-        phase_prefix: str,  # "RFQ", "ENG", "IND", "ECR"
-    ) -> str:
-        """Calculate the next major version name (RFQ1 → RFQ2, ENG1 → ENG2, etc)."""
-        latest = await RevisionService.get_latest_revision_in_phase(session, part_id, phase)
-        if not latest:
-            return f"{phase_prefix}1"
-
-        # Extract number from revision_name (e.g., "RFQ1" → 1)
-        current_num = int(latest.revision_name[len(phase_prefix):].split('.')[0])
-        return f"{phase_prefix}{current_num + 1}"
-
-    @staticmethod
-    async def has_draft_proposals(
-        session: AsyncSession,
-        part_id: int,
-    ) -> tuple[bool, Optional[PartRevision]]:
-        """Check if there are draft proposals under the latest major RFQ. Returns (has_drafts, latest_major_rfq)."""
-        latest = await RevisionService.get_latest_revision_in_phase(
-            session, part_id, RevisionPhase.RFQ_PHASE.value
-        )
-        if not latest:
-            return False, None
-
-        # Check if there are any draft proposals under this major version
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.parent_revision_id == latest.id)
-                & (PartRevision.status == RevisionStatus.DRAFT.value)
-            )
-            .limit(1)
-        )
-        has_drafts = result.scalar_one_or_none() is not None
-        return has_drafts, latest
-
-    @staticmethod
-    async def create_rfq_revision(
-        session: AsyncSession,
-        part_id: int,
+        statement: str,
+        received_at: date,
+        customer_index: Optional[str] = None,
         summary: Optional[str] = None,
         created_by: int = None,
-        reject_drafts: bool = False,
     ) -> PartRevision:
-        """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
-        # Check if there are draft proposals that should be promoted first
-        has_drafts, latest = await RevisionService.has_draft_proposals(session, part_id)
-        if has_drafts:
-            if reject_drafts:
-                # Reject all draft proposals under the latest major version
-                result = await session.execute(
-                    select(PartRevision).where(
-                        (PartRevision.part_id == part_id)
-                        & (PartRevision.parent_revision_id == latest.id)
-                        & (PartRevision.status == RevisionStatus.DRAFT.value)
-                    )
-                )
-                drafts = result.scalars().all()
-
-                for draft in drafts:
-                    draft.status = RevisionStatus.ARCHIVED.value
-                    await ChangelogService.log_action(
-                        session=session,
-                        part_id=part_id,
-                        revision_id=draft.id,
-                        action="status_changed",
-                        action_description=f"Automatically archived {draft.revision_name} when creating new major version",
-                        field_name="status",
-                        old_value=RevisionStatus.DRAFT.value,
-                        new_value=RevisionStatus.ARCHIVED.value,
-                        performed_by=created_by,
-                    )
-            else:
-                raise ValueError(
-                    f"Cannot create new RFQ while {latest.revision_name} has draft proposals. "
-                    f"Promote one of them first or reject {latest.revision_name}."
-                )
-
-        # Calculate next major RFQ version
-        revision_name = await RevisionService.get_next_major_version_name(
-            session, part_id, RevisionPhase.RFQ_PHASE.value, "RFQ"
-        )
-
+        """Create the next major from a customer statement. This — and
+        promote_revision, which delegates here — is the only way a major
+        revision comes into existence."""
+        if statement not in CUSTOMER_STATEMENTS:
+            raise ValueError(f"statement must be one of {CUSTOMER_STATEMENTS}")
+        part = await session.get(Part, part_id)
+        if part is None:
+            raise ValueError("Part not found")
+        majors = await RevisionService._majors(session, part_id)
+        name = next_major_name([m.revision_name for m in majors], statement)
         revision = PartRevision(
             part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.RFQ_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,  # Use IN_PROGRESS instead of DRAFT for major versions
+            revision_name=name,
+            phase=statement,
+            status=RevisionStatus.APPROVED.value,
+            source="customer",
+            customer_statement=statement,
+            customer_index=customer_index,
+            customer_received_at=received_at,
+            part_phase_at_receipt=part.lifecycle_phase,
             summary=summary,
             created_by=created_by,
         )
         session.add(revision)
         await session.flush()
-
-        # Log the creation
+        part.active_revision_id = revision.id
         await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=revision.id,
-            action="created",
-            action_description=f"Created {revision_name}",
+            session=session, part_id=part_id, revision_id=revision.id, action="created",
+            action_description=(f"Customer {statement} data received as {name}"
+                                + (f" (customer index {customer_index})" if customer_index else "")),
             performed_by=created_by,
         )
-
-        logger.info(f"Created RFQ revision {revision_name} for part {part_id}")
+        logger.info(f"Customer {statement} data {name} on part {part_id}")
         return revision
 
     @staticmethod
-    async def create_rfq_proposal(
+    async def create_proposal(
         session: AsyncSession,
         part_id: int,
-        parent_revision_id: int,  # Parent RFQ1, RFQ2, etc
+        parent_revision_id: int,
         summary: Optional[str] = None,
         created_by: int = None,
     ) -> PartRevision:
-        """Create a minor RFQ proposal (RFQ1.1, RFQ1.2, etc)."""
+        """Our internal iteration on a customer major: E1 → E1.1, 1 → 1.1."""
         parent = await session.get(PartRevision, parent_revision_id)
-        if not parent or parent.phase != RevisionPhase.RFQ_PHASE.value:
-            raise ValueError("Parent must be an RFQ revision")
-
-        # Find next minor version under this parent
-        result = await session.execute(
-            select(PartRevision)
-            .where(PartRevision.parent_revision_id == parent_revision_id)
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_proposal = result.scalar_one_or_none()
-
-        if last_proposal:
-            # Extract minor version (e.g., "RFQ1.2" → 2)
-            minor_num = int(last_proposal.revision_name.split('.')[-1])
-            new_minor = minor_num + 1
-        else:
-            new_minor = 1
-
-        revision_name = f"{parent.revision_name}.{new_minor}"
-
+        if parent is None or parent.part_id != part_id:
+            raise ValueError("Parent revision not found on this part")
+        if parent.parent_revision_id is not None:
+            raise ValueError(f"{parent.revision_name} is a proposal; proposals hang off majors only")
+        siblings = (await session.execute(
+            select(PartRevision.revision_name).where(PartRevision.parent_revision_id == parent.id))).scalars().all()
+        name = next_minor_name(parent.revision_name, list(siblings))
         proposal = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.RFQ_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            parent_revision_id=parent_revision_id,
-            summary=summary,
-            created_by=created_by,
+            part_id=part_id, revision_name=name, phase=parent.phase,
+            status=RevisionStatus.DRAFT.value, parent_revision_id=parent.id,
+            source="internal", part_phase_at_receipt=parent.part_phase_at_receipt,
+            summary=summary, created_by=created_by,
         )
         session.add(proposal)
         await session.flush()
-
-        # Log the creation
         await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=proposal.id,
-            action="created",
-            action_description=f"Created {revision_name} as proposal to {parent.revision_name}",
+            session=session, part_id=part_id, revision_id=proposal.id, action="created",
+            action_description=f"Created {name} as proposal to {parent.revision_name}",
             performed_by=created_by,
         )
-
-        logger.info(f"Created RFQ proposal {revision_name} for part {part_id}")
         return proposal
 
     @staticmethod
     async def promote_revision(
         session: AsyncSession,
         revision_id: int,
+        statement: str,
+        received_at: date,
+        customer_index: Optional[str] = None,
         created_by: int = None,
     ) -> PartRevision:
-        """Promote a revision to the next major version (e.g., RFQ1.2 → RFQ2)."""
+        """The customer adopted one of our proposals as their next data state.
+        Creates the next major (per statement), marks the proposal approved
+        and its siblings rejected."""
         revision = await session.get(PartRevision, revision_id)
-        if not revision:
+        if revision is None:
             raise ValueError("Revision not found")
-
-        # Determine which major version to promote from
-        if revision.parent_revision_id:
-            # This is a proposal (RFQ1.1, RFQ1.2, etc) - promote from its parent's phase
-            parent = await session.get(PartRevision, revision.parent_revision_id)
-            if not parent:
-                raise ValueError("Parent revision not found")
-            phase = parent.phase
-            # Extract prefix (RFQ, ENG, IND, ECR) from revision_name like "RFQ2"
-            major_name = parent.revision_name.split('.')[0]  # "RFQ2"
-            phase_prefix = ''.join([c for c in major_name if not c.isdigit()])  # "RFQ"
-            parent_major = major_name
-        else:
-            # This is a major version - promote directly from it
-            phase = revision.phase
-            major_name = revision.revision_name.split('.')[0]  # "RFQ2"
-            phase_prefix = ''.join([c for c in major_name if not c.isdigit()])  # "RFQ"
-            parent_major = major_name
-
-        # Calculate next major version
-        next_major_name = await RevisionService.get_next_major_version_name(
-            session, revision.part_id, phase, phase_prefix
-        )
-
-        # Create the new major version (copy of the promoted revision)
         summary = f"Promoted from {revision.revision_name}"
         if revision.summary:
             summary = f"{revision.summary} (promoted from {revision.revision_name})"
-
-        new_revision = PartRevision(
-            part_id=revision.part_id,
-            revision_name=next_major_name,
-            phase=phase,
-            status=RevisionStatus.IN_PROGRESS.value,  # Active status for major versions
-            parent_revision_id=None,  # New major version has no parent
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(new_revision)
-        await session.flush()
-
-        # Mark the promoted revision with status "promoted" for audit trail
-        revision.status = RevisionStatus.APPROVED.value  # Use APPROVED to indicate it was chosen/promoted
-
-        # Tag the promoted revision
+        new_revision = await RevisionService.receive_customer_data(
+            session, revision.part_id, statement, received_at,
+            customer_index=customer_index, summary=summary, created_by=created_by)
+        revision.status = RevisionStatus.APPROVED.value
         await ChangelogService.log_action(
-            session=session,
-            part_id=revision.part_id,
-            revision_id=revision.id,
-            action="promoted",
-            action_description=f"Promoted to {next_major_name}",
-            performed_by=created_by,
-        )
-
-        # Mark all sibling proposals as rejected (if promoting a proposal)
+            session=session, part_id=revision.part_id, revision_id=revision.id, action="promoted",
+            action_description=f"Promoted to {new_revision.revision_name}", performed_by=created_by)
         if revision.parent_revision_id:
-            siblings = (
-                await session.execute(
-                    select(PartRevision).where(
-                        (PartRevision.parent_revision_id == revision.parent_revision_id)
-                        & (PartRevision.id != revision.id)
-                    )
-                )
-            ).scalars().all()
-
+            siblings = (await session.execute(
+                select(PartRevision).where(
+                    (PartRevision.parent_revision_id == revision.parent_revision_id)
+                    & (PartRevision.id != revision.id)))).scalars().all()
             for sibling in siblings:
                 sibling.status = RevisionStatus.REJECTED.value
                 await ChangelogService.log_action(
-                    session=session,
-                    part_id=revision.part_id,
-                    revision_id=sibling.id,
-                    action="rejected",
+                    session=session, part_id=revision.part_id, revision_id=sibling.id, action="rejected",
                     action_description=f"Rejected due to promotion of {revision.revision_name}",
-                    performed_by=created_by,
-                )
-
-        logger.info(f"Promoted {revision.revision_name} to {next_major_name}")
+                    performed_by=created_by)
         return new_revision
+
+    @staticmethod
+    async def set_lifecycle_phase(
+        session: AsyncSession, part_id: int, phase: str, effective: date, created_by: int = None,
+    ) -> Part:
+        """rfq → nominated (sets nominated_at) → series (sets sop_at)."""
+        part = await session.get(Part, part_id)
+        if part is None:
+            raise ValueError("Part not found")
+        allowed = {"rfq": "nominated", "nominated": "series"}
+        if allowed.get(part.lifecycle_phase) != phase:
+            raise ValueError(f"Cannot move part from {part.lifecycle_phase} to {phase}")
+        old = part.lifecycle_phase
+        part.lifecycle_phase = phase
+        if phase == "nominated":
+            part.nominated_at = effective
+        else:
+            part.sop_at = effective
+        await ChangelogService.log_action(
+            session=session, part_id=part_id, revision_id=None, action="lifecycle_phase",
+            action_description=f"Part moved from {old} to {phase} effective {effective.isoformat()}",
+            field_name="lifecycle_phase", old_value=old, new_value=phase, performed_by=created_by,
+        )
+        await session.flush()
+        return part
 
     @staticmethod
     async def reject_revision(
@@ -517,878 +397,6 @@ class RevisionService:
         logger.info(f"Restored revision {revision.revision_name} from {old_status} to {revision.status}")
         return revision
 
-    @staticmethod
-    async def transition_rfq_to_engineering(
-        session: AsyncSession,
-        rfq_revision_id: int,
-        summary: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Transition from RFQ to Engineering phase (RFQ → ENG1, ENG2, etc)."""
-        rfq_rev = await session.get(PartRevision, rfq_revision_id)
-        if not rfq_rev or rfq_rev.phase != RevisionPhase.RFQ_PHASE.value:
-            raise ValueError("Revision is not in RFQ phase")
-
-        # Archive the RFQ major version (awarded, no longer active)
-        rfq_rev.status = RevisionStatus.ARCHIVED.value
-        await ChangelogService.log_action(
-            session=session,
-            part_id=rfq_rev.part_id,
-            revision_id=rfq_rev.id,
-            action="status_changed",
-            action_description=f"Archived {rfq_rev.revision_name} (awarded to engineering)",
-            field_name="status",
-            old_value=RevisionStatus.IN_PROGRESS.value,
-            new_value=RevisionStatus.ARCHIVED.value,
-            performed_by=created_by,
-        )
-
-        # Calculate next major ENG version (not hardcoded)
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.part_id == rfq_rev.part_id)
-                & (PartRevision.phase == RevisionPhase.ENGINEERING_PHASE.value)
-                & (PartRevision.parent_revision_id.is_(None))
-            )
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_eng = result.scalar_one_or_none()
-
-        if last_eng:
-            last_num = int(last_eng.revision_name.replace("ENG", ""))
-            next_num = last_num + 1
-        else:
-            next_num = 1
-
-        eng_name = f"ENG{next_num}"
-
-        # Create ENG major with IN_PROGRESS status (major version, not draft, no parent)
-        eng_revision = PartRevision(
-            part_id=rfq_rev.part_id,
-            revision_name=eng_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=None,  # ENG major is standalone, not a child of RFQ
-            summary=summary or f"Engineering from {rfq_rev.revision_name}",
-            created_by=created_by,
-        )
-        session.add(eng_revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=rfq_rev.part_id,
-            revision_id=eng_revision.id,
-            action="created",
-            action_description=f"Transitioned from {rfq_rev.revision_name} to ENG1 (awarded)",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created ENG1 from {rfq_rev.revision_name} for part {rfq_rev.part_id}")
-        return eng_revision
-
-    @staticmethod
-    async def create_engineering_proposal_simple(
-        session: AsyncSession,
-        part_id: int,
-        parent_revision_id: int,  # Parent ENG1, ENG2, etc
-        summary: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create a minor engineering proposal (ENG1.1, ENG1.2, etc) - auto-calculates minor version."""
-        parent = await session.get(PartRevision, parent_revision_id)
-        if not parent or parent.phase != RevisionPhase.ENGINEERING_PHASE.value:
-            raise ValueError("Parent must be an ENG revision")
-
-        # Find next minor version under this parent
-        result = await session.execute(
-            select(PartRevision)
-            .where(PartRevision.parent_revision_id == parent_revision_id)
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_proposal = result.scalar_one_or_none()
-
-        if last_proposal:
-            minor_num = int(last_proposal.revision_name.split('.')[-1])
-            new_minor = minor_num + 1
-        else:
-            new_minor = 1
-
-        revision_name = f"{parent.revision_name}.{new_minor}"
-
-        proposal = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            parent_revision_id=parent_revision_id,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(proposal)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=proposal.id,
-            action="created",
-            action_description=f"Created {revision_name} as proposal to {parent.revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created ENG proposal {revision_name} for part {part_id}")
-        return proposal
-
-    @staticmethod
-    async def advance_engineering_proposal(
-        session: AsyncSession,
-        part_id: int,
-        proposal_revision_id: int,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Advance (promote) an engineering proposal to next major version (ENG1.2 → ENG2)."""
-        proposal = await session.get(PartRevision, proposal_revision_id)
-        if not proposal or proposal.phase != RevisionPhase.ENGINEERING_PHASE.value:
-            raise ValueError("Revision is not in engineering phase")
-        if not proposal.parent_revision_id:
-            raise ValueError("Cannot advance a major version - only proposals can be advanced")
-
-        parent = await session.get(PartRevision, proposal.parent_revision_id)
-        if not parent:
-            raise ValueError("Parent revision not found")
-
-        # Extract major version number (e.g., "ENG1" → 1)
-        parent_major_num = int(parent.revision_name.replace("ENG", ""))
-        next_major_num = parent_major_num + 1
-        next_major_name = f"ENG{next_major_num}"
-
-        # Create new major version
-        summary = f"Promoted from {proposal.revision_name}"
-        if proposal.summary:
-            summary = f"{proposal.summary} (promoted from {proposal.revision_name})"
-
-        new_revision = PartRevision(
-            part_id=proposal.part_id,
-            revision_name=next_major_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=None,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(new_revision)
-        await session.flush()
-
-        # Mark promoted proposal as APPROVED
-        proposal.status = RevisionStatus.APPROVED.value
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=proposal.id,
-            action="status_changed",
-            action_description=f"Advanced {proposal.revision_name} to {next_major_name}",
-            field_name="status",
-            old_value=RevisionStatus.DRAFT.value,
-            new_value=RevisionStatus.APPROVED.value,
-            performed_by=created_by,
-        )
-
-        # Archive sibling proposals
-        result = await session.execute(
-            select(PartRevision).where(
-                (PartRevision.parent_revision_id == proposal.parent_revision_id)
-                & (PartRevision.id != proposal.id)
-                & (PartRevision.status == RevisionStatus.DRAFT.value)
-            )
-        )
-        siblings = result.scalars().all()
-
-        for sibling in siblings:
-            sibling.status = RevisionStatus.ARCHIVED.value
-            await ChangelogService.log_action(
-                session=session,
-                part_id=part_id,
-                revision_id=sibling.id,
-                action="status_changed",
-                action_description=f"Automatically archived {sibling.revision_name} when advancing {proposal.revision_name}",
-                field_name="status",
-                old_value=RevisionStatus.DRAFT.value,
-                new_value=RevisionStatus.ARCHIVED.value,
-                performed_by=created_by,
-            )
-
-        # Log the new major version creation
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=new_revision.id,
-            action="created",
-            action_description=f"Created {next_major_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Advanced ENG proposal {proposal.revision_name} to {next_major_name}")
-        return new_revision
-
-    @staticmethod
-    async def create_engineering_major_version(
-        session: AsyncSession,
-        part_id: int,
-        summary: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create a new major ENG revision (ENG2, ENG3, etc) - auto-increments."""
-        # Get the latest ENG major version
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.part_id == part_id)
-                & (PartRevision.phase == RevisionPhase.ENGINEERING_PHASE.value)
-                & (PartRevision.parent_revision_id.is_(None))
-            )
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_eng = result.scalar_one_or_none()
-
-        if last_eng:
-            last_num = int(last_eng.revision_name.replace("ENG", ""))
-            next_num = last_num + 1
-        else:
-            next_num = 1
-
-        revision_name = f"ENG{next_num}"
-
-        eng_revision = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(eng_revision)
-        await session.flush()
-
-        # Log the creation
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=eng_revision.id,
-            action="created",
-            action_description=f"Created {revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created ENG major version {revision_name} for part {part_id}")
-        return eng_revision
-
-    @staticmethod
-    async def transition_engineering_to_freeze(
-        session: AsyncSession,
-        eng_revision_id: int,
-        summary: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Transition from Engineering to Design Freeze (IND) phase."""
-        eng_rev = await session.get(PartRevision, eng_revision_id)
-        if not eng_rev or eng_rev.phase != RevisionPhase.ENGINEERING_PHASE.value:
-            raise ValueError("Revision is not in engineering phase")
-
-        # Create IND1, IND2, etc based on existing freeze majors (not proposals) for THIS part
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.part_id == eng_rev.part_id)
-                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
-                & (PartRevision.parent_revision_id.is_(None))
-            )
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_freeze = result.scalar_one_or_none()
-
-        if last_freeze:
-            freeze_num = int(last_freeze.revision_name.replace("IND", ""))
-            next_freeze_num = freeze_num + 1
-        else:
-            next_freeze_num = 1
-
-        freeze_name = f"IND{next_freeze_num}"
-
-        # Archive the ENG major version (frozen, no longer active in engineering)
-        eng_rev.status = RevisionStatus.ARCHIVED.value
-        await ChangelogService.log_action(
-            session=session,
-            part_id=eng_rev.part_id,
-            revision_id=eng_rev.id,
-            action="status_changed",
-            action_description=f"Archived {eng_rev.revision_name} (frozen in design freeze)",
-            field_name="status",
-            old_value=RevisionStatus.IN_PROGRESS.value,
-            new_value=RevisionStatus.ARCHIVED.value,
-            performed_by=created_by,
-        )
-
-        freeze_revision = PartRevision(
-            part_id=eng_rev.part_id,
-            revision_name=freeze_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=None,  # IND major is standalone, not a child of ENG
-            summary=summary or f"Design freeze from {eng_rev.revision_name}",
-            created_by=created_by,
-        )
-        session.add(freeze_revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=eng_rev.part_id,
-            revision_id=freeze_revision.id,
-            action="created",
-            action_description=f"Transitioned from {eng_rev.revision_name} to {freeze_name} (design freeze)",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created {freeze_name} from {eng_rev.revision_name} for part {eng_rev.part_id}")
-        return freeze_revision
-
-    @staticmethod
-    async def create_freeze_major_version(
-        session: AsyncSession,
-        part_id: int,
-        summary: Optional[str] = None,
-        created_by: int = None,
-        reject_drafts: bool = False,
-    ) -> PartRevision:
-        """Create a new major freeze revision (IND2, IND3, etc) - auto-increments."""
-        # Get the latest freeze major version
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.part_id == part_id)
-                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
-                & (PartRevision.parent_revision_id.is_(None))
-            )
-            .order_by(PartRevision.revision_name.desc())
-            .limit(1)
-        )
-        last_freeze = result.scalar_one_or_none()
-
-        # Check if there are draft proposals under the latest freeze major
-        if last_freeze:
-            draft_result = await session.execute(
-                select(PartRevision).where(
-                    (PartRevision.parent_revision_id == last_freeze.id)
-                    & (PartRevision.status == RevisionStatus.DRAFT.value)
-                )
-                .limit(1)
-            )
-            has_drafts = draft_result.scalar_one_or_none() is not None
-
-            if has_drafts:
-                if reject_drafts:
-                    # Reject all draft proposals under the latest major version
-                    drafts_result = await session.execute(
-                        select(PartRevision).where(
-                            (PartRevision.parent_revision_id == last_freeze.id)
-                            & (PartRevision.status == RevisionStatus.DRAFT.value)
-                        )
-                    )
-                    drafts = drafts_result.scalars().all()
-
-                    for draft in drafts:
-                        draft.status = RevisionStatus.ARCHIVED.value
-                        await ChangelogService.log_action(
-                            session=session,
-                            part_id=part_id,
-                            revision_id=draft.id,
-                            action="status_changed",
-                            action_description=f"Automatically archived {draft.revision_name} when creating new major version",
-                            field_name="status",
-                            old_value=RevisionStatus.DRAFT.value,
-                            new_value=RevisionStatus.ARCHIVED.value,
-                            performed_by=created_by,
-                        )
-                else:
-                    raise ValueError(
-                        f"Cannot create new IND while {last_freeze.revision_name} has draft proposals. "
-                        f"Promote one of them first or reject {last_freeze.revision_name}."
-                    )
-
-        if last_freeze:
-            last_num = int(last_freeze.revision_name.replace("IND", ""))
-            next_num = last_num + 1
-        else:
-            next_num = 1
-
-        revision_name = f"IND{next_num}"
-
-        freeze_revision = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(freeze_revision)
-        await session.flush()
-
-        # Log the creation
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=freeze_revision.id,
-            action="created",
-            action_description=f"Created {revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created freeze major version {revision_name} for part {part_id}")
-        return freeze_revision
-
-    @staticmethod
-    async def create_freeze_proposal_simple(
-        session: AsyncSession,
-        part_id: int,
-        parent_revision_id: int,  # Parent IND1, IND2, etc
-        summary: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create a minor freeze proposal (IND1.1, IND1.2, etc) - auto-calculates minor version."""
-        parent = await session.get(PartRevision, parent_revision_id)
-        if not parent or parent.phase != RevisionPhase.DESIGN_FREEZE_PHASE.value:
-            raise ValueError("Parent must be an IND revision")
-
-        # Get existing sub-revisions to find next minor version
-        result = await session.execute(
-            select(PartRevision).where(
-                (PartRevision.parent_revision_id == parent_revision_id)
-                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
-            )
-        )
-        subs = result.scalars().all()
-
-        # Calculate next minor version number
-        max_minor = 0
-        for sub in subs:
-            # Extract minor version from names like "IND1.1", "IND1.2", etc
-            if "." in sub.revision_name:
-                parts = sub.revision_name.split(".")
-                if len(parts) == 2 and parts[1].isdigit():
-                    minor = int(parts[1])
-                    max_minor = max(max_minor, minor)
-
-        next_minor = max_minor + 1
-        revision_name = f"{parent.revision_name}.{next_minor}"
-
-        proposal = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            parent_revision_id=parent_revision_id,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(proposal)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=proposal.id,
-            action="created",
-            action_description=f"Created {revision_name} as proposal to {parent.revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created freeze proposal {revision_name} for part {part_id}")
-        return proposal
-
-    @staticmethod
-    async def advance_freeze_proposal(
-        session: AsyncSession,
-        part_id: int,
-        proposal_revision_id: int,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Advance (promote) a freeze proposal to next major version (IND1.2 → IND2)."""
-        proposal = await session.get(PartRevision, proposal_revision_id)
-        if not proposal or proposal.phase != RevisionPhase.DESIGN_FREEZE_PHASE.value:
-            raise ValueError("Revision is not in freeze phase")
-        if not proposal.parent_revision_id:
-            raise ValueError("Cannot advance a major version - only proposals can be advanced")
-
-        parent = await session.get(PartRevision, proposal.parent_revision_id)
-        if not parent:
-            raise ValueError("Parent revision not found")
-
-        # Extract major version number (e.g., "IND1" → 1)
-        parent_major_num = int(parent.revision_name.replace("IND", ""))
-        next_major_num = parent_major_num + 1
-        next_major_name = f"IND{next_major_num}"
-
-        # Create new major version
-        summary = f"Promoted from {proposal.revision_name}"
-        if proposal.summary:
-            summary = f"{proposal.summary} (promoted from {proposal.revision_name})"
-
-        new_revision = PartRevision(
-            part_id=proposal.part_id,
-            revision_name=next_major_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.IN_PROGRESS.value,
-            parent_revision_id=None,
-            summary=summary,
-            created_by=created_by,
-        )
-        session.add(new_revision)
-        await session.flush()
-
-        # Mark promoted proposal as APPROVED
-        proposal.status = RevisionStatus.APPROVED.value
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=proposal.id,
-            action="status_changed",
-            action_description=f"Advanced {proposal.revision_name} to {next_major_name}",
-            field_name="status",
-            old_value=RevisionStatus.DRAFT.value,
-            new_value=RevisionStatus.APPROVED.value,
-            performed_by=created_by,
-        )
-
-        # Archive sibling proposals
-        result = await session.execute(
-            select(PartRevision).where(
-                (PartRevision.parent_revision_id == proposal.parent_revision_id)
-                & (PartRevision.id != proposal.id)
-                & (PartRevision.status == RevisionStatus.DRAFT.value)
-            )
-        )
-        siblings = result.scalars().all()
-
-        for sibling in siblings:
-            sibling.status = RevisionStatus.ARCHIVED.value
-            await ChangelogService.log_action(
-                session=session,
-                part_id=part_id,
-                revision_id=sibling.id,
-                action="status_changed",
-                action_description=f"Automatically archived {sibling.revision_name} when advancing {proposal.revision_name}",
-                field_name="status",
-                old_value=RevisionStatus.DRAFT.value,
-                new_value=RevisionStatus.ARCHIVED.value,
-                performed_by=created_by,
-            )
-
-        # Log the new major version creation
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=new_revision.id,
-            action="created",
-            action_description=f"Created {next_major_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Advanced freeze proposal {proposal.revision_name} to {next_major_name}")
-        return new_revision
-
-    @staticmethod
-    async def create_engineering_proposal(
-        session: AsyncSession,
-        part_id: int,
-        parent_revision_id: int,  # Link to official version (ENG1, ENG2, etc)
-        major_version: int,  # Major version (1 for ENG1.x, 2 for ENG2.x)
-        proposal_number: int,  # 1 for first proposal, 2 for second, etc (ENG1.1, ENG1.2)
-        summary: Optional[str] = None,
-        change_reason: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create a proposal for engineering revision (ENG1.1, ENG1.2, ENG2.1, etc)."""
-        revision_name = f"ENG{major_version}.{proposal_number}"
-
-        revision = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            test_data_status=TestDataStatus.UNCONFIRMED,
-            parent_revision_id=parent_revision_id,
-            summary=summary,
-            change_reason=change_reason,
-            created_by=created_by,
-        )
-        session.add(revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=revision.id,
-            action="created",
-            action_description=f"Created proposal {revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created engineering proposal {revision_name} for part {part_id}")
-        return revision
-
-    @staticmethod
-    async def approve_engineering_proposal(
-        session: AsyncSession,
-        proposal_revision_id: int,
-        next_major_version: int,  # 2 for ENG1.1→ENG2, 3 for ENG2.1→ENG3, etc
-        approved_by: int = None,
-        approval_notes: Optional[str] = None,
-    ) -> PartRevision:
-        """Approve an engineering proposal, creating the next major version."""
-        proposal = await session.get(PartRevision, proposal_revision_id)
-        if not proposal or proposal.phase != RevisionPhase.ENGINEERING_PHASE.value:
-            raise ValueError("Revision is not in Engineering phase")
-        if proposal.test_data_status == TestDataStatus.APPROVED:
-            raise ValueError("Revision is already approved")
-
-        # Mark proposal as approved
-        proposal.status = RevisionStatus.APPROVED.value
-        proposal.test_data_status = TestDataStatus.APPROVED
-        proposal.approved_at = datetime.utcnow()
-        proposal.approved_by = approved_by
-        proposal.approval_notes = approval_notes
-        await session.flush()
-
-        # Create next major version (ENG1.1 → ENG2, ENG2.1 → ENG3, etc)
-        new_revision_name = f"ENG{next_major_version}"
-        new_revision = PartRevision(
-            part_id=proposal.part_id,
-            revision_name=new_revision_name,
-            phase=RevisionPhase.ENGINEERING_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            parent_revision_id=proposal_revision_id,
-            supersedes_revision_id=proposal_revision_id,
-            summary=f"Official release from {proposal.revision_name}",
-            created_by=approved_by,
-        )
-        session.add(new_revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=proposal.part_id,
-            revision_id=proposal_revision_id,
-            action="approved",
-            action_description=f"Approved {proposal.revision_name}, created {new_revision_name}",
-            performed_by=approved_by,
-        )
-
-        logger.info(f"Approved {proposal.revision_name}, created {new_revision_name}")
-        return new_revision
-
-    @staticmethod
-    async def reject_engineering_proposal(
-        session: AsyncSession,
-        proposal_revision_id: int,
-        rejected_by: int = None,
-    ) -> PartRevision:
-        """Reject an engineering proposal (remains visible as rejected)."""
-        proposal = await session.get(PartRevision, proposal_revision_id)
-        if not proposal:
-            raise ValueError("Revision not found")
-
-        proposal.status = RevisionStatus.REJECTED.value
-        proposal.test_data_status = TestDataStatus.REJECTED
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=proposal.part_id,
-            revision_id=proposal_revision_id,
-            action="rejected",
-            action_description=f"Rejected proposal {proposal.revision_name}",
-            performed_by=rejected_by,
-        )
-
-        logger.info(f"Rejected {proposal.revision_name} for part {proposal.part_id}")
-        return proposal
-
-    @staticmethod
-    async def create_design_freeze(
-        session: AsyncSession,
-        part_id: int,
-        parent_revision_id: int,  # Link to official ENG version
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create a design freeze revision (IND1, IND2, IND3, etc)."""
-        # Determine the next IND number
-        result = await session.execute(
-            select(PartRevision)
-            .where(
-                (PartRevision.part_id == part_id)
-                & (PartRevision.phase == RevisionPhase.DESIGN_FREEZE_PHASE.value)
-            )
-            .order_by(PartRevision.revision_name.desc())
-        )
-        last_freeze = result.scalars().first()
-        next_ind_num = 1
-        if last_freeze and last_freeze.revision_name.startswith("IND"):
-            try:
-                next_ind_num = int(last_freeze.revision_name[3:]) + 1
-            except ValueError:
-                pass
-
-        revision_name = f"IND{next_ind_num}"
-
-        revision = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.FROZEN.value,
-            parent_revision_id=parent_revision_id,
-            summary="Design freeze - locked for production",
-            frozen_at=datetime.utcnow(),
-            frozen_by=created_by,
-            created_by=created_by,
-        )
-        session.add(revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=revision.id,
-            action="frozen",
-            action_description=f"Created design freeze {revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created design freeze {revision_name} for part {part_id}")
-        return revision
-
-    @staticmethod
-    async def create_ecr_proposal(
-        session: AsyncSession,
-        part_id: int,
-        parent_freeze_id: int,  # Link to IND1, IND2, etc
-        freeze_major_version: int,  # 1 for IND1.x, 2 for IND2.x
-        proposal_number: int,  # 1 for first proposal, 2 for second, etc (ECR1.1, ECR1.2)
-        summary: Optional[str] = None,
-        change_reason: Optional[str] = None,
-        created_by: int = None,
-    ) -> PartRevision:
-        """Create an ECR (Engineering Change Request) proposal after design freeze."""
-        revision_name = f"ECR{freeze_major_version}.{proposal_number}"
-
-        revision = PartRevision(
-            part_id=part_id,
-            revision_name=revision_name,
-            phase=RevisionPhase.ECN_PHASE.value,
-            status=RevisionStatus.DRAFT.value,
-            test_data_status=TestDataStatus.UNCONFIRMED,
-            parent_revision_id=parent_freeze_id,
-            summary=summary,
-            change_reason=change_reason,
-            created_by=created_by,
-        )
-        session.add(revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=part_id,
-            revision_id=revision.id,
-            action="created",
-            action_description=f"Created ECR proposal {revision_name}",
-            performed_by=created_by,
-        )
-
-        logger.info(f"Created ECR proposal {revision_name} for part {part_id}")
-        return revision
-
-    @staticmethod
-    async def approve_ecr_proposal(
-        session: AsyncSession,
-        ecr_revision_id: int,
-        next_freeze_major_version: int,  # 2 for IND1.1→IND2, 3 for IND2.1→IND3, etc
-        approved_by: int = None,
-        approval_notes: Optional[str] = None,
-    ) -> PartRevision:
-        """Approve an ECR proposal, creating the next design freeze level."""
-        ecr = await session.get(PartRevision, ecr_revision_id)
-        if not ecr or ecr.phase != RevisionPhase.ECN_PHASE.value:
-            raise ValueError("Revision is not in ECN phase")
-
-        # Mark ECR as approved
-        ecr.status = RevisionStatus.APPROVED.value
-        ecr.test_data_status = TestDataStatus.APPROVED
-        ecr.approved_at = datetime.utcnow()
-        ecr.approved_by = approved_by
-        ecr.approval_notes = approval_notes
-        await session.flush()
-
-        # Create next freeze level (ECR1.1 → IND2, ECR2.1 → IND3, etc)
-        new_revision_name = f"IND{next_freeze_major_version}"
-        new_revision = PartRevision(
-            part_id=ecr.part_id,
-            revision_name=new_revision_name,
-            phase=RevisionPhase.DESIGN_FREEZE_PHASE.value,
-            status=RevisionStatus.FROZEN.value,
-            parent_revision_id=ecr_revision_id,
-            supersedes_revision_id=ecr_revision_id,
-            summary=f"Design freeze from {ecr.revision_name}",
-            frozen_at=datetime.utcnow(),
-            frozen_by=approved_by,
-            created_by=approved_by,
-        )
-        session.add(new_revision)
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=ecr.part_id,
-            revision_id=ecr_revision_id,
-            action="approved",
-            action_description=f"Approved {ecr.revision_name}, created {new_revision_name}",
-            performed_by=approved_by,
-        )
-
-        logger.info(f"Approved {ecr.revision_name}, created {new_revision_name}")
-        return new_revision
-
-    @staticmethod
-    async def reject_ecr_proposal(
-        session: AsyncSession,
-        ecr_revision_id: int,
-        rejected_by: int = None,
-    ) -> PartRevision:
-        """Reject an ECR proposal (remains visible as rejected)."""
-        ecr = await session.get(PartRevision, ecr_revision_id)
-        if not ecr:
-            raise ValueError("Revision not found")
-
-        ecr.status = RevisionStatus.REJECTED.value
-        ecr.test_data_status = TestDataStatus.REJECTED
-        await session.flush()
-
-        await ChangelogService.log_action(
-            session=session,
-            part_id=ecr.part_id,
-            revision_id=ecr_revision_id,
-            action="rejected",
-            action_description=f"Rejected ECR proposal {ecr.revision_name}",
-            performed_by=rejected_by,
-        )
-
-        logger.info(f"Rejected {ecr.revision_name} for part {ecr.part_id}")
-        return ecr
 
     @staticmethod
     async def get_revision(

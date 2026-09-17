@@ -37,8 +37,8 @@ async def _seed_change_with_engine_work(session_factory, seed):
                     created_by=seed["admin_id"])
         s.add(part)
         await s.flush()
-        rev = PartRevision(part_id=part.id, revision_name="ECR1.1",
-                           phase="ecr", status="draft",
+        rev = PartRevision(part_id=part.id, revision_name="E1.1",
+                           phase="review", status="draft",
                            originating_change_id=chg.id,
                            created_by=seed["admin_id"])
         s.add(rev)

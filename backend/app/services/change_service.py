@@ -868,20 +868,34 @@ class ChangeService:
 
     @staticmethod
     async def spawn_ecn_revisions(session: AsyncSession, change: ChangeRequest, user_id: int):
+        """One internal proposal (minor) per impacted part, under the part's
+        active major — or its newest major when nothing is active yet."""
+        from app.services.revision_naming import next_minor_name
         for item in change.impacted_items:
             if item.resulting_revision_id is None:
-                # count existing ECN revisions on this part for a simple unique name
-                result = await session.execute(
-                    select(func.count()).select_from(PartRevision).where(
-                        (PartRevision.part_id == item.part_id) & (PartRevision.phase == "ecn")
-                    )
-                )
-                n = (result.scalar() or 0) + 1
+                part = await session.get(Part, item.part_id)
+                parent = None
+                if part is not None and part.active_revision_id:
+                    parent = await session.get(PartRevision, part.active_revision_id)
+                if parent is None or parent.parent_revision_id is not None:
+                    parent = (await session.execute(
+                        select(PartRevision)
+                        .where((PartRevision.part_id == item.part_id)
+                               & (PartRevision.parent_revision_id.is_(None)))
+                        .order_by(PartRevision.created_at.desc()).limit(1))).scalar_one_or_none()
+                if parent is None:
+                    raise ValueError(f"Part {item.part_id} has no revision to change")
+                siblings = (await session.execute(
+                    select(PartRevision.revision_name)
+                    .where(PartRevision.parent_revision_id == parent.id))).scalars().all()
                 rev = PartRevision(
                     part_id=item.part_id,
-                    revision_name=f"ECR{n}.1",
-                    phase="ecn",
+                    revision_name=next_minor_name(parent.revision_name, list(siblings)),
+                    phase=parent.phase,
                     status="draft",
+                    parent_revision_id=parent.id,
+                    source="internal",
+                    part_phase_at_receipt=part.lifecycle_phase if part else "rfq",
                     change_reason=f"{change.change_number}: {change.title}",
                     created_by=user_id,
                     originating_change_id=change.id,

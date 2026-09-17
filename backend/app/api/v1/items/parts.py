@@ -18,12 +18,10 @@ from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
     PartRevisionResponse, PartRevisionDetailResponse,
     ChangelogEntryResponse, RevisionTreeNode,
-    CreateRFQRequest, CreateRFQProposalRequest, PromoteRevisionRequest,
-    RejectMajorRevisionRequest,
-    TransitionToEngineeringRequest, CreateEngineeringProposalRequest,
-    ApproveProposalRequest, RejectProposalRequest, CreateDesignFreezeRequest,
-    CreateECRRequest
+    CustomerDataReceivedRequest, CreateProposalRequest, PromoteRevisionRequest,
+    RejectMajorRevisionRequest, SetLifecyclePhaseRequest,
 )
+from app.services.revision_naming import RevisionRuleViolation
 
 logger = logging.getLogger(__name__)
 
@@ -165,52 +163,46 @@ async def get_revision(
     return revision
 
 
-# RFQ Phase Endpoints
-@router.post("/{part_id}/revisions/rfq", response_model=PartRevisionResponse)
-async def create_rfq_revision(
+# Customer data (the only way a major revision is created)
+@router.post("/{part_id}/revisions/customer-data", response_model=PartRevisionResponse,
+             status_code=status.HTTP_201_CREATED)
+async def receive_customer_data(
     part_id: int,
-    body: CreateRFQRequest,
+    body: CustomerDataReceivedRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new major RFQ revision (RFQ1, RFQ2, etc) - auto-increments."""
+    """Record customer data as the next major: E<n> for review, <n> for official."""
     try:
-        revision = await RevisionService.create_rfq_revision(
-            session=db,
-            part_id=part_id,
-            summary=body.summary,
-            created_by=current_user.id,
-            reject_drafts=body.reject_drafts,
-        )
+        revision = await RevisionService.receive_customer_data(
+            db, part_id, body.statement, body.received_at,
+            customer_index=body.customer_index, summary=body.summary, created_by=current_user.id)
         await db.commit()
         return revision
-    except Exception as e:
+    except RevisionRuleViolation as e:
         await db.rollback()
-        logger.error(f"Failed to create RFQ revision: {e}")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/{part_id}/revisions/rfq-proposal", response_model=PartRevisionResponse)
-async def create_rfq_proposal(
+@router.post("/{part_id}/revisions/proposals", response_model=PartRevisionResponse,
+             status_code=status.HTTP_201_CREATED)
+async def create_proposal(
     part_id: int,
-    body: CreateRFQProposalRequest,
+    body: CreateProposalRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create an RFQ proposal (minor iteration like RFQ1.1, RFQ1.2)."""
+    """Our internal iteration under a customer major (E1 → E1.1, 1 → 1.1)."""
     try:
-        proposal = await RevisionService.create_rfq_proposal(
-            session=db,
-            part_id=part_id,
-            parent_revision_id=body.parent_revision_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
+        proposal = await RevisionService.create_proposal(
+            db, part_id, body.parent_revision_id, summary=body.summary, created_by=current_user.id)
         await db.commit()
         return proposal
-    except Exception as e:
+    except ValueError as e:
         await db.rollback()
-        logger.error(f"Failed to create RFQ proposal: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -222,18 +214,38 @@ async def promote_revision(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Promote a revision to the next major version (e.g., RFQ1.2 → RFQ2)."""
+    """The customer adopted this proposal as their next data state."""
     try:
         new_revision = await RevisionService.promote_revision(
-            session=db,
-            revision_id=revision_id,
-            created_by=current_user.id,
-        )
+            db, revision_id, body.statement, body.received_at,
+            customer_index=body.customer_index, created_by=current_user.id)
         await db.commit()
         return new_revision
-    except Exception as e:
+    except RevisionRuleViolation as e:
         await db.rollback()
-        logger.error(f"Failed to promote revision: {e}")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ValueError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/{part_id}/lifecycle-phase", response_model=PartResponse)
+async def set_lifecycle_phase(
+    part_id: int,
+    body: SetLifecyclePhaseRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """rfq → nominated (sets nominated_at) → series (sets sop_at). Admin only."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    try:
+        part = await RevisionService.set_lifecycle_phase(
+            db, part_id, body.phase, body.effective, created_by=current_user.id)
+        await db.commit()
+        return part
+    except ValueError as e:
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -283,382 +295,6 @@ async def unreject_revision(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/{part_id}/revisions/{rfq_revision_id}/to-engineering", response_model=PartRevisionResponse)
-async def transition_rfq_to_engineering(
-    part_id: int,
-    rfq_revision_id: int,
-    body: TransitionToEngineeringRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Transition from RFQ to Engineering (award and start ENG1)."""
-    try:
-        revision = await RevisionService.transition_rfq_to_engineering(
-            session=db,
-            rfq_revision_id=rfq_revision_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to transition to engineering: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/engineering-proposal", response_model=PartRevisionResponse)
-async def create_engineering_proposal_endpoint(
-    part_id: int,
-    body: CreateRFQProposalRequest,  # Reuse RFQ proposal schema structure
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create an engineering proposal (ENG1.1, ENG1.2, etc) - auto-increments minor version."""
-    try:
-        revision = await RevisionService.create_engineering_proposal_simple(
-            session=db,
-            part_id=part_id,
-            parent_revision_id=body.parent_revision_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create engineering proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/{revision_id}/advance-engineering", response_model=PartRevisionResponse)
-async def advance_engineering_proposal(
-    part_id: int,
-    revision_id: int,
-    body: PromoteRevisionRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Advance (promote) an engineering proposal to next major version (ENG1.2 → ENG2)."""
-    try:
-        revision = await RevisionService.advance_engineering_proposal(
-            session=db,
-            part_id=part_id,
-            proposal_revision_id=revision_id,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to advance engineering proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/{revision_id}/to-freeze", response_model=PartRevisionResponse)
-async def transition_engineering_to_freeze(
-    part_id: int,
-    revision_id: int,
-    body: CreateDesignFreezeRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Transition from Engineering to Design Freeze (IND1, IND2, etc)."""
-    try:
-        revision = await RevisionService.transition_engineering_to_freeze(
-            session=db,
-            eng_revision_id=revision_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to transition to freeze: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/freeze-proposal", response_model=PartRevisionResponse)
-async def create_freeze_proposal_endpoint(
-    part_id: int,
-    body: CreateRFQProposalRequest,  # Reuse RFQ proposal schema structure
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a freeze phase proposal (IND1.1, IND1.2, etc)."""
-    try:
-        revision = await RevisionService.create_freeze_proposal_simple(
-            session=db,
-            part_id=part_id,
-            parent_revision_id=body.parent_revision_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create freeze proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/{revision_id}/advance-freeze", response_model=PartRevisionResponse)
-async def advance_freeze_proposal(
-    part_id: int,
-    revision_id: int,
-    body: PromoteRevisionRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Advance a freeze proposal to next major version (IND1.2 → IND2)."""
-    try:
-        revision = await RevisionService.advance_freeze_proposal(
-            session=db,
-            part_id=part_id,
-            proposal_revision_id=revision_id,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to advance freeze proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/engineering", response_model=PartRevisionResponse)
-async def create_engineering_major(
-    part_id: int,
-    body: CreateRFQRequest,  # Reuse RFQ schema structure
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a new major ENG revision (ENG2, ENG3, etc) - auto-increments."""
-    try:
-        revision = await RevisionService.create_engineering_major_version(
-            session=db,
-            part_id=part_id,
-            summary=body.summary,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create engineering major: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/{part_id}/revisions/freeze", response_model=PartRevisionResponse)
-async def create_freeze_major(
-    part_id: int,
-    body: CreateRFQRequest,  # Reuse RFQ schema structure (includes reject_drafts)
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a new major freeze revision (IND2, IND3, etc) - auto-increments."""
-    try:
-        revision = await RevisionService.create_freeze_major_version(
-            session=db,
-            part_id=part_id,
-            summary=body.summary,
-            created_by=current_user.id,
-            reject_drafts=getattr(body, 'reject_drafts', False),
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create freeze major: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-# Engineering Phase Endpoints (legacy)
-@router.post("/revisions/{parent_revision_id}/propose-engineering", response_model=PartRevisionResponse)
-async def create_engineering_proposal(
-    parent_revision_id: int,
-    body: CreateEngineeringProposalRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create an engineering proposal (ENG1.1, ENG1.2, ENG2.1, etc)."""
-    try:
-        parent = await RevisionService.get_revision(db, parent_revision_id)
-        if not parent:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent revision not found")
-
-        revision = await RevisionService.create_engineering_proposal(
-            session=db,
-            part_id=parent.part_id,
-            parent_revision_id=parent_revision_id,
-            major_version=body.major_version,
-            proposal_number=body.proposal_number,
-            summary=body.summary,
-            change_reason=body.change_reason,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create engineering proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/revisions/{proposal_revision_id}/approve", response_model=PartRevisionResponse)
-async def approve_engineering_proposal(
-    proposal_revision_id: int,
-    body: ApproveProposalRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Approve an engineering proposal."""
-    try:
-        revision = await RevisionService.approve_engineering_proposal(
-            session=db,
-            proposal_revision_id=proposal_revision_id,
-            next_major_version=body.next_major_version,
-            approved_by=current_user.id,
-            approval_notes=body.approval_notes,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to approve proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/revisions/{proposal_revision_id}/reject", response_model=PartRevisionResponse)
-async def reject_engineering_proposal(
-    proposal_revision_id: int,
-    body: RejectProposalRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Reject an engineering proposal."""
-    try:
-        revision = await RevisionService.reject_engineering_proposal(
-            session=db,
-            proposal_revision_id=proposal_revision_id,
-            rejected_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to reject proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-# Design Freeze Endpoints
-@router.post("/revisions/{parent_revision_id}/freeze", response_model=PartRevisionResponse)
-async def create_design_freeze(
-    parent_revision_id: int,
-    body: CreateDesignFreezeRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a design freeze (IND1, IND2, etc)."""
-    try:
-        parent = await RevisionService.get_revision(db, parent_revision_id)
-        if not parent:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent revision not found")
-
-        revision = await RevisionService.create_design_freeze(
-            session=db,
-            part_id=parent.part_id,
-            parent_revision_id=parent_revision_id,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create design freeze: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-# ECR Phase Endpoints
-@router.post("/revisions/{parent_revision_id}/propose-ecr", response_model=PartRevisionResponse)
-async def create_ecr_proposal(
-    parent_revision_id: int,
-    body: CreateECRRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create an ECR proposal (ECR1.1, ECR1.2, ECR2.1, etc)."""
-    try:
-        parent = await RevisionService.get_revision(db, parent_revision_id)
-        if not parent:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent revision not found")
-
-        revision = await RevisionService.create_ecr_proposal(
-            session=db,
-            part_id=parent.part_id,
-            parent_freeze_id=parent_revision_id,
-            freeze_major_version=body.freeze_major_version,
-            proposal_number=body.proposal_number,
-            summary=body.summary,
-            change_reason=body.change_reason,
-            created_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create ECR proposal: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/revisions/{ecr_revision_id}/approve-ecr", response_model=PartRevisionResponse)
-async def approve_ecr_proposal(
-    ecr_revision_id: int,
-    body: ApproveProposalRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Approve an ECR proposal."""
-    try:
-        revision = await RevisionService.approve_ecr_proposal(
-            session=db,
-            ecr_revision_id=ecr_revision_id,
-            next_freeze_major_version=body.next_major_version,
-            approved_by=current_user.id,
-            approval_notes=body.approval_notes,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to approve ECR: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/revisions/{ecr_revision_id}/reject-ecr", response_model=PartRevisionResponse)
-async def reject_ecr_proposal(
-    ecr_revision_id: int,
-    body: RejectProposalRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Reject an ECR proposal."""
-    try:
-        revision = await RevisionService.reject_ecr_proposal(
-            session=db,
-            ecr_revision_id=ecr_revision_id,
-            rejected_by=current_user.id,
-        )
-        await db.commit()
-        return revision
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to reject ECR: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-# Changelog Endpoints
 @router.get("/{part_id}/changelog", response_model=List[ChangelogEntryResponse])
 async def get_part_changelog(
     part_id: int,

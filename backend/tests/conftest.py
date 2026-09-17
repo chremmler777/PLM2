@@ -270,7 +270,7 @@ async def seed_forms(session_factory, seed):
 
 @pytest_asyncio.fixture
 async def part(client, eng_auth, seed):
-    """A part with one RFQ revision; returns {'part_id', 'revision_id'}."""
+    """A part with one customer review revision E1; returns {'part_id', 'revision_id'}."""
     res = await client.post(
         "/api/v1/parts",
         json={
@@ -286,11 +286,11 @@ async def part(client, eng_auth, seed):
     part_id = res.json()["id"]
 
     res = await client.post(
-        f"/api/v1/parts/{part_id}/revisions/rfq",
-        json={"summary": "initial"},
+        f"/api/v1/parts/{part_id}/revisions/customer-data",
+        json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"},
         headers=eng_auth,
     )
-    assert res.status_code == 200, res.text
+    assert res.status_code == 201, res.text
     return {"part_id": part_id, "revision_id": res.json()["id"]}
 
 

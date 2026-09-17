@@ -275,6 +275,9 @@ async def test_add_impacted_item_after_confirmation_clears_it(
         "part_type": "internal_mfg", "data_classification": "confidential",
     }, headers=eng_auth)
     assert part2.status_code in (200, 201), part2.text
+    e1 = await client.post(f"/api/v1/parts/{part2.json()['id']}/revisions/customer-data",
+                           json={"statement": "review", "received_at": "2026-09-01"}, headers=eng_auth)
+    assert e1.status_code == 201, e1.text
     added = await client.post(f"/api/v1/changes/{cid}/impacted-items",
                               json={"part_id": part2.json()["id"]}, headers=eng_auth)
     assert added.status_code in (200, 201), added.text

@@ -1,17 +1,20 @@
-"""Part and revision models - core PLM entities with RFQ/ENG/FREEZE/ECR phases."""
-from datetime import datetime
-from sqlalchemy import String, Text, DateTime, ForeignKey, Integer, Boolean, Float, JSON, Enum
+"""Part and revision models - customer data index (E<n> review, <n> official)."""
+from datetime import date, datetime
+from sqlalchemy import String, Text, Date, DateTime, ForeignKey, Integer, Boolean, Float, JSON, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 import enum
 
 
 class RevisionPhase(str, enum.Enum):
-    """Revision phase in the product lifecycle."""
-    RFQ_PHASE = "rfq_phase"           # RFQ1, RFQ2, etc
-    ENGINEERING_PHASE = "engineering"  # ENG1, ENG1.1, ENG2, etc
-    DESIGN_FREEZE_PHASE = "freeze"    # IND1, IND2, etc
-    ECN_PHASE = "ecn"                 # ECR1.1, ECR2.1, etc
+    """Whether the customer stated this data is review or official."""
+    REVIEW = "review"        # E1, E1.1 — customer review data, nothing binding
+    OFFICIAL = "official"    # 1, 1.1  — customer-released, binding
+
+
+LIFECYCLE_PHASES = ("rfq", "nominated", "series")
+CUSTOMER_STATEMENTS = ("review", "official")
+REVISION_SOURCES = ("customer", "internal")
 
 
 class RevisionStatus(str, enum.Enum):
@@ -73,6 +76,12 @@ class Part(Base):
     # Current active revision (denormalized for quick access)
     active_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
+    # Where the part is in its life: rfq → nominated → series. A milestone,
+    # not a counter; revision numbering never resets on nomination.
+    lifecycle_phase: Mapped[str] = mapped_column(String(20), default="rfq", server_default="rfq", index=True)
+    nominated_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    sop_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -115,27 +124,36 @@ class Part(Base):
 
 
 class PartRevision(Base):
-    """Revision of a part with RFQ/ENG/FREEZE/ECR lifecycle."""
+    """Revision of a part. Major = customer-stated data state, minor = ours."""
     __tablename__ = "part_revisions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"))
 
-    # Revision Identity - human-friendly names: RFQ1, ENG1, ENG1.1, IND1, ECR1.1, IND2, etc
-    revision_name: Mapped[str] = mapped_column(String(20), index=True)  # RFQ1, ENG1, ENG1.1, IND1, ECR1.1, IND2
+    # Revision Identity: E<n>[.<m>] for review data, <n>[.<m>] for official data.
+    revision_name: Mapped[str] = mapped_column(String(20), index=True)
 
-    # Phase tracking
-    phase: Mapped[str] = mapped_column(Enum(RevisionPhase, values_callable=lambda x: [e.value for e in x], native_enum=False), index=True)
+    # review | official — mirrors the customer's statement of the major
+    phase: Mapped[str] = mapped_column(Enum(RevisionPhase, values_callable=lambda x: [e.value for e in x], native_enum=False, validate_strings=False), index=True)
     status: Mapped[str] = mapped_column(Enum(RevisionStatus, values_callable=lambda x: [e.value for e in x], native_enum=False), default=RevisionStatus.DRAFT.value)
+
+    # What the customer said about this data. Set on majors (source=customer),
+    # null on our internal proposals.
+    customer_index: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customer_statement: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customer_received_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source: Mapped[str] = mapped_column(String(20), default="internal", server_default="internal")
+    # Part lifecycle phase when this revision was created ("E2 (rfq)").
+    part_phase_at_receipt: Mapped[str] = mapped_column(String(20), default="rfq", server_default="rfq")
 
     # Test data status (for engineering iterations and ECN proposals)
     test_data_status: Mapped[str | None] = mapped_column(Enum(TestDataStatus, values_callable=lambda x: [e.value for e in x], native_enum=False), nullable=True)
 
-    # Hierarchy - link to parent revision (for ENG1.1→ENG1, IND2→IND1, ECR1.1→IND1, etc)
+    # Hierarchy - a proposal (E1.1, 1.1) points at its customer major (E1, 1)
     parent_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
     # For proposals: which revision does this replace when approved
-    # e.g., ENG1.1 approved becomes ENG2 (supersedes ENG1)
+    # e.g., on ECN release 1.1 supersedes 1 as the active revision
     supersedes_revision_id: Mapped[int | None] = mapped_column(ForeignKey("part_revisions.id"), nullable=True)
 
     # Phase B: bidirectional change link + 3D-evidence sign-off
