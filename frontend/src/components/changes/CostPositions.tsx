@@ -131,7 +131,7 @@ function UnitSelect({ testId, value, onChange }: {
   return (
     <select data-testid={testId} value={value} aria-label={t('costpos.unit')}
       onChange={(e) => onChange(e.target.value as LeadTimeUnit)}
-      className={`${fieldCls} w-32`}>
+      className={`${fieldCls} w-28`}>
       {UNITS.map((u) => (
         <option key={u} value={u}>{t(`costpos.unit.${u}`)}</option>
       ))}
@@ -489,7 +489,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             </span>
           ) : null}
         </td>
-        <td className={`${cellCls} whitespace-nowrap text-right`}>
+        <td className={`${cellCls} whitespace-nowrap text-right sticky right-0 bg-slate-800`}>
           {editable && (editing ? (
             <span className="inline-flex items-center gap-2">
               <button type="button" data-testid={`costpos-save-${p.id}`}
@@ -753,7 +753,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               if (e.target.value === ADD_CATEGORY) { setNewCat({ label: '', type: 'money' }); return }
               setNewCat(null); setTag(e.target.value)
             }}
-            className={`${fieldCls} w-44`}>
+            className={`${fieldCls} w-40`}>
             <option value="">{t('costpos.pickCategory')}</option>
             {own.length > 0 && <optgroup label={t('costpos.tag')}>{own.map(option)}</optgroup>}
             {custom.length > 0 && <optgroup label={t('costpos.categoryHint').split(':')[0]}>{custom.map(option)}</optgroup>}
@@ -769,7 +769,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
             </button>
           )}
         </td>
-        <td className={`${cellCls} min-w-[12rem]`}>
+        <td className={`${cellCls} min-w-[9rem]`}>
           <input data-testid={`costpos-new-label-${departmentId}`} value={label}
             aria-label={t('costpos.label')} placeholder={t('costpos.descPlaceholder')}
             onChange={(e) => setLabel(e.target.value)} onKeyDown={submitOnEnter}
@@ -782,7 +782,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
             <select data-testid={`costpos-new-pricing-${departmentId}`} value={pricing}
               aria-label={t('costpos.pricing')}
               onChange={(e) => setPricing(e.target.value as CostPositionPricing)}
-              className={`${fieldCls} w-40`}>
+              className={`${fieldCls} w-36`}>
               <option value="estimate">{t('costpos.type.estimate')}</option>
               <option value="quote">{t('costpos.type.quote')}</option>
             </select>
@@ -794,7 +794,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               <input data-testid={`costpos-new-est-${departmentId}`} type="number" step="0.01"
                 value={est} aria-label={t('costpos.estCost')} placeholder={t('costpos.cost')}
                 onChange={(e) => setEst(e.target.value)} onKeyDown={submitOnEnter}
-                className={`${fieldCls} w-28 tabular-nums text-right`} />
+                className={`${fieldCls} w-24 tabular-nums text-right`} />
             )}
             {/* Money lines take the department's own time around the vendor too;
                 a time line IS the hours. */}
@@ -802,7 +802,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               value={hours} aria-label={isTime ? t('costpos.hours') : t('costpos.ownTime')}
               placeholder={isTime ? t('costpos.hours') : t('costpos.ownTime')}
               onChange={(e) => setHours(e.target.value)} onKeyDown={submitOnEnter}
-              className={`${fieldCls} w-28 tabular-nums text-right`} />
+              className={`${fieldCls} w-24 tabular-nums text-right`} />
           </span>
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
@@ -811,12 +811,12 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
               <input data-testid={`costpos-new-lead-${departmentId}`} type="number" min={0} value={lead}
                 aria-label={t('costpos.leadTime')} placeholder={t('summation.days')}
                 onChange={(e) => setLead(e.target.value)} onKeyDown={submitOnEnter}
-                className={`${fieldCls} w-16 tabular-nums`} />
+                className={`${fieldCls} w-14 tabular-nums`} />
               <UnitSelect testId={`costpos-new-unit-${departmentId}`} value={unit} onChange={setUnit} />
             </span>
           )}
         </td>
-        <td className={`${cellCls} text-right whitespace-nowrap`}>
+        <td className={`${cellCls} text-right whitespace-nowrap sticky right-0 bg-slate-800`}>
           <button type="button" data-testid={`costpos-add-${departmentId}`}
             disabled={!ready} onClick={() => add.mutate()}
             className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 active:scale-[0.98]">
