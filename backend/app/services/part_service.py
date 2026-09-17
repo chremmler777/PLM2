@@ -204,10 +204,12 @@ class RevisionService:
         customer_index: Optional[str] = None,
         summary: Optional[str] = None,
         created_by: int = None,
+        copy_bom_from: Optional[int] = None,
     ) -> PartRevision:
         """Create the next major from a customer statement. This — and
         promote_revision, which delegates here — is the only way a major
-        revision comes into existence."""
+        revision comes into existence. The BOM is copied forward from
+        ``copy_bom_from`` (a revision id) or, by default, the previous major."""
         if statement not in CUSTOMER_STATEMENTS:
             raise ValueError(f"statement must be one of {CUSTOMER_STATEMENTS}")
         part = await session.get(Part, part_id)
@@ -231,6 +233,10 @@ class RevisionService:
         session.add(revision)
         await session.flush()
         part.active_revision_id = revision.id
+        from app.services.bom_tree_service import BomTreeService
+        source_rev_id = copy_bom_from if copy_bom_from is not None else (majors[-1].id if majors else None)
+        if source_rev_id is not None:
+            await BomTreeService.copy_lines(session, source_rev_id, revision.id, created_by)
         await ChangelogService.log_action(
             session=session, part_id=part_id, revision_id=revision.id, action="created",
             action_description=(f"Customer {statement} data received as {name}"
@@ -265,6 +271,8 @@ class RevisionService:
         )
         session.add(proposal)
         await session.flush()
+        from app.services.bom_tree_service import BomTreeService
+        await BomTreeService.copy_lines(session, parent.id, proposal.id, created_by)
         await ChangelogService.log_action(
             session=session, part_id=part_id, revision_id=proposal.id, action="created",
             action_description=f"Created {name} as proposal to {parent.revision_name}",
@@ -292,7 +300,8 @@ class RevisionService:
             summary = f"{revision.summary} (promoted from {revision.revision_name})"
         new_revision = await RevisionService.receive_customer_data(
             session, revision.part_id, statement, received_at,
-            customer_index=customer_index, summary=summary, created_by=created_by)
+            customer_index=customer_index, summary=summary, created_by=created_by,
+            copy_bom_from=revision.id)
         revision.status = RevisionStatus.APPROVED.value
         await ChangelogService.log_action(
             session=session, part_id=revision.part_id, revision_id=revision.id, action="promoted",

@@ -82,6 +82,35 @@ async def _get_unlocked_revision(db: AsyncSession, revision_id: int):
     return revision
 
 
+@router.get("/{part_id}/bom-tree", response_model=dict)
+async def bom_tree(
+    part_id: int,
+    revision_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Multi-level explosion from the part's active revision (or the given
+    one). Children resolve to their active revision; quantities multiply."""
+    from app.services.bom_tree_service import BomTreeService
+    try:
+        return await BomTreeService.tree(db, part_id, revision_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{part_id}/where-used", response_model=List[dict])
+async def where_used(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Parents whose active revision lists this part, recursively upward."""
+    from app.services.bom_tree_service import BomTreeService
+    if await db.get(Part, part_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    return await BomTreeService.where_used(db, part_id)
+
+
 @router.get("/revisions/{revision_id}/bom", response_model=List[dict])
 async def list_bom_items(
     revision_id: int,

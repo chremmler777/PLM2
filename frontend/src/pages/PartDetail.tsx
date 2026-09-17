@@ -5,13 +5,14 @@
  */
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import RevisionTimeline, { type Revision } from '../components/parts/RevisionTimeline';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
+import BomTree, { type BomNode } from '../components/parts/BomTree';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Part {
@@ -28,6 +29,24 @@ interface Part {
   nominated_at?: string | null;
   sop_at?: string | null;
   revisions: Revision[];
+}
+
+interface WhereUsed {
+  part_id: number;
+  part_number: string;
+  name: string;
+  revision_name: string;
+  quantity: number;
+  unit: string;
+  parents: WhereUsed[];
+}
+
+function flattenUsedIn(list: WhereUsed[], acc: WhereUsed[] = []): WhereUsed[] {
+  for (const u of list) {
+    if (!acc.some((a) => a.part_id === u.part_id)) acc.push(u);
+    flattenUsedIn(u.parents, acc);
+  }
+  return acc;
 }
 
 const NEXT_PHASE: Record<Part['lifecycle_phase'], 'nominated' | 'series' | null> = {
@@ -48,9 +67,24 @@ export default function PartDetail() {
   const [proposalParent, setProposalParent] = useState<number | null>(null);
   const [proposalSummary, setProposalSummary] = useState('');
 
-  const { data: part, isLoading, error: partError, refetch } = useQuery({
+  const { data: part, isLoading, error: partError, refetch: refetchPart } = useQuery({
     queryKey: ['part', partId],
     queryFn: async () => (await client.get(`/v1/parts/${partId}`)).data as Part,
+  });
+  const { data: bomTree } = useQuery({
+    queryKey: ['bom-tree', partId],
+    queryFn: async () => (await client.get(`/v1/parts/${partId}/bom-tree`)).data as BomNode,
+    enabled: !!partId,
+  });
+  const queryClient = useQueryClient();
+  const refetch = () => {
+    refetchPart();
+    queryClient.invalidateQueries({ queryKey: ['bom-tree', partId] });
+  };
+  const { data: usedIn } = useQuery({
+    queryKey: ['where-used', partId],
+    queryFn: async () => (await client.get(`/v1/parts/${partId}/where-used`)).data as WhereUsed[],
+    enabled: !!partId,
   });
 
   const customerData = useMutation({
@@ -159,6 +193,25 @@ export default function PartDetail() {
             <div><div className="text-sm text-slate-400">Type</div><div className="font-medium text-slate-100 capitalize">{part.part_type}</div></div>
             <div><div className="text-sm text-slate-400">Classification</div><div className="font-medium text-slate-100 capitalize">{part.data_classification}</div></div>
           </div>
+        </div>
+
+        {usedIn && usedIn.length > 0 && (
+          <div data-testid="used-in" className="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-8 flex items-center gap-2 flex-wrap text-sm">
+            <span className="text-slate-400">Used in</span>
+            {flattenUsedIn(usedIn).map((u) => (
+              <button key={u.part_id} onClick={() => navigate(`/parts/${u.part_id}`)}
+                className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600 font-mono">
+                {u.part_number} <span className="text-slate-400 font-sans">{u.revision_name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
+          <h2 className="text-xl font-bold text-slate-100 mb-4">
+            Bill of materials{bomTree?.revision_name ? <span className="text-slate-400 font-normal text-base"> · {bomTree.revision_name}</span> : null}
+          </h2>
+          {bomTree ? <BomTree tree={bomTree} onOpenPart={(id) => navigate(`/parts/${id}`)} /> : <p className="text-slate-400 text-sm">Loading…</p>}
         </div>
 
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
