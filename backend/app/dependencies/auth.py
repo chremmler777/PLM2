@@ -1,4 +1,13 @@
-"""Authentication dependencies for FastAPI route protection (shared-cookie SSO)."""
+"""Authentication dependencies for FastAPI route protection.
+
+Two principals:
+- browsers: the shared AdminPanel JWT cookie, bridged to a local User row.
+- machines: `Authorization: Bearer <PLM2_SERVICE_TOKEN>`, bridged to one
+  read-only service User (plm2_Viewer semantics). Same pattern TWOS uses
+  for PDB.
+"""
+import hmac
+
 from fastapi import Depends, HTTPException, Request, status
 from jose import jwt, JWTError
 from sqlalchemy import select
@@ -13,6 +22,9 @@ from app.models.workflow import Department
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _HUB_MANAGED = "!"  # sentinel hashed_password for auto-provisioned hub users
+_BEARER = "Bearer "
+SERVICE_USERNAME = "plm2-service"
+SERVICE_EMAIL = "plm2-service@service.local"
 
 
 def plm2_roles(payload: dict) -> list[str]:
@@ -41,8 +53,16 @@ async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Validate the shared AdminPanel JWT cookie and bridge to a local User row."""
+    """Validate the shared AdminPanel JWT cookie and bridge to a local User row.
+
+    A bearer Authorization header takes the service-token path instead —
+    browsers never send one, machine callers never have the cookie.
+    """
     settings = get_settings()
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.startswith(_BEARER):
+        return await _service_principal(request, db, auth_header[len(_BEARER):].strip())
+
     token = request.cookies.get(settings.jwt_cookie_name)
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing access_token cookie")
@@ -114,6 +134,57 @@ async def get_current_user(
 
     request.state.hub_payload = payload
     await _apply_acts_as(request, db, user)
+    return user
+
+
+async def _service_principal(request: Request, db: AsyncSession, provided: str) -> User:
+    """Bearer token -> the one read-only service user.
+
+    503 when no token is configured (a deploy problem, not a caller problem),
+    401 on mismatch, 403 on anything but a safe method. The user row is
+    auto-provisioned like hub users so audit and org scoping have a real id.
+    """
+    expected = get_settings().plm2_service_token
+    if not expected:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Service token is not configured")
+    # compare_digest, not ==: equality short-circuits on the first differing
+    # byte and leaks the token's prefix to a timing attack.
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid service token")
+    if request.method not in SAFE_METHODS:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Service token is read-only")
+
+    user = (await db.execute(
+        select(User).where(User.email == SERVICE_EMAIL))).scalar_one_or_none()
+    if user is None:
+        user = User(
+            organization_id=await _default_org_id(db),
+            email=SERVICE_EMAIL,
+            username=SERVICE_USERNAME,
+            full_name="PLM2 service token",
+            hashed_password=_HUB_MANAGED,
+            role="viewer",
+            is_active=True,
+            mfa_enabled=False,
+        )
+        db.add(user)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            user = (await db.execute(
+                select(User).where(User.email == SERVICE_EMAIL))).scalar_one()
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Service user is inactive")
+
+    # Shape /auth/me and anything else reading the hub payload the way a
+    # plm2_Viewer cookie would.
+    request.state.hub_payload = {
+        "sub": "service", "username": SERVICE_USERNAME,
+        "roles": [{"name": "plm2_Viewer", "system": get_settings().role_system}],
+    }
+    await _apply_acts_as(request, db, user)   # never an admin -> header is refused
     return user
 
 

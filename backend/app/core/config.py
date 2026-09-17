@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     jwt_cookie_name: str = "access_token"
     role_system: str = "plm2"
 
+    # Service-to-service bearer token (env PLM2_SERVICE_TOKEN). A machine
+    # caller sending `Authorization: Bearer <token>` is bridged to a read-only
+    # principal — the same pattern TWOS exposes to PDB. Empty = disabled.
+    plm2_service_token: str = ""
+
     # AdminPanel hub API base for server-to-server calls (e.g. the contacts
     # directory backed by the user's Entra/Graph token). Empty in dev, where the
     # /contacts endpoint falls back to local PLM2 users.
