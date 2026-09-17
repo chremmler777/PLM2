@@ -57,6 +57,14 @@ What the production stack does differently from dev:
   is a new backend dependency, so the backend image must be rebuilt, not just
   restarted, when deploying this change.
 
+- **Customer data index (migration 072):** revision names change from
+  RFQ/ENG/IND/ECR to `E<n>` (customer review data) and `<n>` (customer
+  official data); minors `.<m>` are internal proposals. The migration renames
+  existing rows in place per part in creation order; ids are unchanged. After
+  deploy, set the lifecycle phase of nominated parts by hand on the part page
+  (admin: "Mark nominated"). No image rebuild needed; a restart applies the
+  migration.
+
 ### First-run checklist
 
 1. Log in as `admin@example.com / admin1234` → change the password immediately.
