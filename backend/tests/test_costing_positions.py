@@ -916,3 +916,37 @@ async def test_an_estimated_line_names_its_vendor(client, admin_auth, costing):
     res = await client.put(f"{_positions_url(costing)}/{pid}",
                            json={"vendor_name": "Meusburger"}, headers=admin_auth)
     assert res.status_code == 200 and res.json()["vendor_name"] == "Meusburger"
+
+
+async def test_partial_quotes_add_up_and_the_alternative_comes_on_top(
+        client, admin_auth, costing):
+    """Two vendors each quote a part; a third and fourth quote the rest as
+    alternatives. The line is the parts plus the recommended alternative,
+    and its lead time is the slowest of what is counted."""
+    pid = (await _add_position(client, admin_auth, costing, pricing="quote")).json()["id"]
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Steel", cost=1000.0,
+                     is_partial=True, lead_time_days=10, lead_time_unit="business_days")
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Coating", cost=250.0,
+                     is_partial=True, lead_time_days=5)
+    # Parts only: they simply add up, no vote needed.
+    pos = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert pos["effective_cost"] == 1250.0 and pos["parts_cost"] == 1250.0
+    assert pos["effective_lead_time_days"] == 10   # 10 business days > 5 calendar days
+    # Two alternatives for the remainder: unfinished until one is starred.
+    a = (await _add_offer(client, admin_auth, costing, pid, vendor_name="Alt A", cost=600.0,
+                          lead_time_days=30)).json()
+    await _add_offer(client, admin_auth, costing, pid, vendor_name="Alt B", cost=700.0)
+    pos = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert pos["effective_cost"] is None
+    res = await client.put(f"/api/v1/changes/{costing['change_id']}/costing/offers/{a['id']}",
+                           json={"favorite": True}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    pos = (await client.get(_positions_url(costing), headers=admin_auth)).json()[0]
+    assert pos["effective_cost"] == 1850.0
+    assert pos["effective_lead_time_days"] == 30
+    # A part cannot carry the star, nor be Sales' choice.
+    part = next(o for o in pos["offers"] if o["vendor_name"] == "Steel")
+    res = await client.put(f"/api/v1/changes/{costing['change_id']}/costing/offers/{part['id']}",
+                           json={"favorite": True}, headers=admin_auth)
+    assert res.status_code == 200 and res.json()["favorite"] is False
+    assert pos["effective_cost"] == 1850.0

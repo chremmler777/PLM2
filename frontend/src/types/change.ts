@@ -553,6 +553,8 @@ export interface CostingOffer {
   lead_time_unit?: LeadTimeUnit | null;
   /** The department's vote — exactly one favourite per position. */
   favorite?: boolean;
+  /** A partial quote: part of the line, always counted. Default full quote = alternative. */
+  is_partial?: boolean;
   /**
    * Sales' binding decision — exactly one chosen offer per position. The
    * favourite is only the recommendation; this is the offer that is bought.
@@ -582,6 +584,8 @@ export interface CostPosition {
   notes?: string | null;
   /** What the backend counts: the estimate, or the favourite offer's price. */
   effective_cost?: number | null;
+  /** The summed partial quotes on a quoted line. */
+  parts_cost?: number;
   offers: CostingOffer[];
 }
 
@@ -602,6 +606,7 @@ export interface CostPositionIn {
 export interface CostingOfferIn {
   vendor_name: string;
   cost: number;
+  is_partial?: boolean;
   shipping_cost?: number | null;
   shipping_included?: boolean;
   lead_time_days?: number | null;

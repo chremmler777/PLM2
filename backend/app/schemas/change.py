@@ -658,6 +658,9 @@ class CostingOfferCreate(BaseModel):
     # runs on the calendar. Roll-ups convert before comparing.
     lead_time_unit: str = "calendar_days"
     favorite: bool = False
+    # Partial quote: part of the line, always counted. Default: a full quote,
+    # one alternative among others.
+    is_partial: bool = False
 
 
 class CostingOfferUpdate(BaseModel):
@@ -670,6 +673,7 @@ class CostingOfferUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
     favorite: Optional[bool] = None
+    is_partial: Optional[bool] = None
 
 
 class CostingOfferAttachment(BaseModel):
@@ -696,6 +700,7 @@ class CostingOfferResponse(BaseModel):
     lead_time_calendar_days: Optional[int] = None
     # The DEPARTMENT's recommendation.
     favorite: bool = False
+    is_partial: bool = False
     # cost plus shipping, unless the vendor already included it.
     total_cost: float = 0.0
     # SALES' decision, with the accountability on it. chosen_reason is
@@ -771,6 +776,8 @@ class CostingPositionResponse(BaseModel):
     # (plus shipping when stated separately) for a quoted external position,
     # the estimate otherwise. None means nobody has said yet.
     effective_cost: Optional[float] = None
+    # The summed partial quotes on a quoted line (0 when none).
+    parts_cost: float = 0.0
     # The favorite offer's dates when a supplier set them, this position's
     # own otherwise — in its own unit, and converted for the roll-ups.
     effective_lead_time_days: Optional[int] = None

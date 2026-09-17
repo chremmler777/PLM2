@@ -566,6 +566,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Read only — the department maintains its own positions.',
   },
   'costpos.offers': { de: 'Angebote', en: 'Offers' },
+  'costpos.scope.full': { de: 'Komplett', en: 'Full' },
+  'costpos.scope.partial': { de: 'Teil', en: 'Partial' },
+  'costpos.scopeHint': {
+    de: 'Komplettangebot = Alternative (eines wird gekauft, der Stern empfiehlt). Teilangebot = Teil der Zeile, wird immer mitgezählt.',
+    en: 'Full quote = alternative (one is bought, the star recommends). Partial quote = part of the line, always counted.',
+  },
+  'costpos.partBadge': { de: 'Teil', en: 'part' },
+  'costpos.partsSum': { de: 'Teile', en: 'parts' },
+  'costpos.altSum': { de: 'Alternative', en: 'alternative' },
   'costpos.addOffer': { de: '+ Angebot', en: '+ offer' },
   'costpos.noOffers': {
     de: 'Noch kein Angebot eingeholt.',

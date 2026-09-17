@@ -62,12 +62,29 @@ export const leadTimeText = (days: number, unit?: LeadTimeUnit | null): string =
  */
 export function effectiveOf(p: CostPosition): number | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
-    const fav = (p.offers ?? []).find((o) => o.favorite)
-    if (fav) return fav.cost + (fav.shipping_included ? 0 : fav.shipping_cost ?? 0)
-    return p.effective_cost ?? null
+    return quotedTotal(p, pricedOffer(p))
   }
   if (p.effective_cost != null) return p.effective_cost
   return p.est_cost ?? null
+}
+
+/** Partial quotes on the line: always counted, summed. */
+export const partsOf = (p: CostPosition): CostingOffer[] =>
+  (p.offers ?? []).filter((o) => o.is_partial)
+/** Full quotes on the line: alternatives, one of them counts. */
+export const alternativesOf = (p: CostPosition): CostingOffer[] =>
+  (p.offers ?? []).filter((o) => !o.is_partial)
+
+const offerCost = (o: CostingOffer): number =>
+  o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0)
+
+/** Parts add up; the alternative that counts comes on top. Null when nothing
+    is quoted, or when alternatives exist and none counts yet. */
+function quotedTotal(p: CostPosition, alternative: CostingOffer | undefined): number | null {
+  const offers = p.offers ?? []
+  if (offers.length === 0) return null
+  if (alternativesOf(p).length > 0 && !alternative) return null
+  return partsOf(p).reduce((s, o) => s + offerCost(o), 0) + (alternative ? offerCost(alternative) : 0)
 }
 
 /** Sales' binding pick, once there is one. */
@@ -85,9 +102,6 @@ export function decisionDivergesOf(p: CostPosition): boolean {
   return !!chosen && !!fav && chosen.id !== fav.id
 }
 
-const offerCost = (o: CostingOffer): number =>
-  o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0)
-
 /**
  * What the position is worth once Sales has decided. The department's own block
  * keeps reading its favourite (that is its vote, and it stays visible); the
@@ -96,25 +110,32 @@ const offerCost = (o: CostingOffer): number =>
 export function salesEffectiveOf(p: CostPosition): number | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
     const chosen = chosenOf(p)
-    if (chosen) return offerCost(chosen)
+    if (chosen) return quotedTotal(p, chosen)
   }
   return effectiveOf(p)
 }
 
-/** The offer a quoted position is read from: the favourite, or a lone offer
-    (which needs no vote to be the answer). Several offers without a vote
-    give nothing — the department has not finished the job. */
+/** The alternative a quoted position is read from: the favourite, or a lone
+    alternative (which needs no vote to be the answer). Several alternatives
+    without a vote give nothing — the department has not finished the job. */
 const pricedOffer = (p: CostPosition): CostingOffer | undefined => {
-  const offers = p.offers ?? []
-  return offers.find((o) => o.favorite) ?? (offers.length === 1 ? offers[0] : undefined)
+  const alts = alternativesOf(p)
+  return alts.find((o) => o.favorite) ?? (alts.length === 1 ? alts[0] : undefined)
 }
 
-/** The same rule for time: the priced offer's lead time is the position's. */
+const calendarDays = (o: CostingOffer): number =>
+  o.lead_time_days == null ? 0
+    : (o.lead_time_unit ?? DEFAULT_UNIT) === 'business_days' ? Math.ceil(o.lead_time_days * 7 / 5) : o.lead_time_days
+
+/** The same rule for time: the slowest of what is counted (parts plus the
+    priced alternative) is the position's lead time. */
 export function leadTimeOf(p: CostPosition): { days: number; unit: LeadTimeUnit } | null {
   if (p.kind === 'external' && p.pricing === 'quote') {
-    const fav = pricedOffer(p)
-    if (fav?.lead_time_days != null) {
-      return { days: fav.lead_time_days, unit: fav.lead_time_unit ?? DEFAULT_UNIT }
+    const alt = pricedOffer(p)
+    const dated = [...partsOf(p), ...(alt ? [alt] : [])].filter((o) => o.lead_time_days != null)
+    if (dated.length > 0) {
+      const slowest = dated.reduce((a, b) => (calendarDays(b) > calendarDays(a) ? b : a))
+      return { days: slowest.lead_time_days as number, unit: slowest.lead_time_unit ?? DEFAULT_UNIT }
     }
   }
   if (p.lead_time_days == null) return null
@@ -192,6 +213,26 @@ function UnitSelect({ testId, value, onChange }: {
   )
 }
 
+/** Full quote (alternative) or partial quote (part): the one fact that decides
+    whether the offer competes or adds up. */
+function ScopeToggle({ testId, partial, onChange }: {
+  testId: string; partial: boolean; onChange: (partial: boolean) => void
+}) {
+  return (
+    <span data-testid={testId} role="group" aria-label={t('costpos.scopeHint')} title={t('costpos.scopeHint')}
+      className="inline-flex rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600">
+      {([false, true] as const).map((v) => (
+        <button key={String(v)} type="button" data-testid={`${testId}-${v ? 'partial' : 'full'}`}
+          aria-pressed={partial === v} onClick={() => onChange(v)}
+          className={`px-2 h-6 text-[11px] whitespace-nowrap ${
+            partial === v ? 'bg-slate-600 text-slate-100' : 'bg-slate-900 text-slate-500 hover:text-slate-200'}`}>
+          {t(v ? 'costpos.scope.partial' : 'costpos.scope.full')}
+        </button>
+      ))}
+    </span>
+  )
+}
+
 function OfferRow({
   changeId, positionId, offer, editable, onChanged,
 }: {
@@ -205,6 +246,7 @@ function OfferRow({
   const [ship, setShip] = useState(offer.shipping_cost != null ? String(offer.shipping_cost) : '')
   const [lead, setLead] = useState(offer.lead_time_days != null ? String(offer.lead_time_days) : '')
   const [unit, setUnit] = useState<LeadTimeUnit>(offer.lead_time_unit ?? DEFAULT_UNIT)
+  const [partial, setPartial] = useState(!!offer.is_partial)
 
   const save = useMutation({
     mutationFn: async () => {
@@ -214,6 +256,7 @@ function OfferRow({
         shipping_included: included,
         shipping_cost: included ? null : num(ship),
         lead_time_days: num(lead), lead_time_unit: unit,
+        is_partial: partial,
       })
     },
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
@@ -250,14 +293,22 @@ function OfferRow({
     || (!included && num(ship) !== (offer.shipping_cost ?? null))
     || num(lead) !== (offer.lead_time_days ?? null)
     || unit !== (offer.lead_time_unit ?? DEFAULT_UNIT)
+    || partial !== !!offer.is_partial
 
+  const counted = !!offer.is_partial || !!offer.favorite
   return (
     <li data-testid={`offer-row-${offer.id}`}
-      // The chosen offer is the one the position's figures come from, so it is
-      // lit rather than merely starred.
+      // What is counted is lit: a part always, an alternative when starred.
       className={`flex flex-wrap items-center gap-2 py-1.5 border-t border-slate-700/60 first:border-t-0 ${
-        offer.favorite ? 'bg-amber-950/20 border-l-2 border-l-amber-500 pl-2' : ''}`}>
-      {editable ? (
+        counted ? 'bg-amber-950/20 border-l-2 border-l-amber-500 pl-2' : ''}`}>
+      {/* A part is always counted, so it carries no star — the star is the
+          choice among alternatives. */}
+      {offer.is_partial ? (
+        <span data-testid={`offer-part-${offer.id}`} title={t('costpos.scopeHint')}
+          className="rounded bg-slate-700 text-slate-300 px-1 py-0 text-[10px] leading-tight">
+          {t('costpos.partBadge')}
+        </span>
+      ) : editable ? (
         <button type="button" data-testid={`offer-fav-${offer.id}`}
           title={t('costpos.favoriteHint')} aria-pressed={!!offer.favorite}
           onClick={() => { if (!offer.favorite) favorite.mutate() }}
@@ -294,6 +345,7 @@ function OfferRow({
             aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
             onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-20 tabular-nums`} />
           <UnitSelect testId={`offer-unit-${offer.id}`} value={unit} onChange={setUnit} />
+          <ScopeToggle testId={`offer-scope-${offer.id}`} partial={partial} onChange={setPartial} />
           <button type="button" data-testid={`offer-save-${offer.id}`}
             disabled={!dirty || save.isPending} onClick={() => save.mutate()}
             className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
@@ -352,6 +404,7 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
   const [ship, setShip] = useState('')
   const [lead, setLead] = useState('')
   const [unit, setUnit] = useState<LeadTimeUnit>(DEFAULT_UNIT)
+  const [partial, setPartial] = useState(false)
   const qc = useQueryClient()
   const add = useMutation({
     mutationFn: async () => {
@@ -360,10 +413,11 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
         vendor_name: vendor.trim(), cost: Number(cost) || 0,
         shipping_included: included, shipping_cost: included ? null : num(ship),
         lead_time_days: num(lead), lead_time_unit: unit,
+        is_partial: partial,
       })
     },
     onSuccess: () => {
-      setVendor(''); setCost(''); setShip(''); setLead(''); setIncluded(false)
+      setVendor(''); setCost(''); setShip(''); setLead(''); setIncluded(false); setPartial(false)
       onAdded()
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not add the offer'),
@@ -389,6 +443,7 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
         aria-label={t('costpos.leadTime')} placeholder={t('costpos.leadTime')}
         onChange={(e) => setLead(e.target.value)} className={`${fieldCls} w-20 tabular-nums`} />
       <UnitSelect testId={`offer-new-unit-${positionId}`} value={unit} onChange={setUnit} />
+      <ScopeToggle testId={`offer-new-scope-${positionId}`} partial={partial} onChange={setPartial} />
       <button type="button" data-testid={`offer-add-${positionId}`}
         disabled={vendor.trim() === '' || add.isPending} onClick={() => add.mutate()}
         className="bg-sky-600 hover:bg-sky-500 text-white px-2 py-1 rounded text-xs disabled:opacity-50">
@@ -430,8 +485,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const time = leadTimeOf(p)
   // With several offers and no vote the line has no price; a single offer
   // is the answer by itself (the backend prices it the same way).
-  const needsFavorite = isQuote && (p.offers ?? []).length > 1
-    && !(p.offers ?? []).some((o) => o.favorite)
+  const needsFavorite = isQuote && alternativesOf(p).length > 1
+    && !alternativesOf(p).some((o) => o.favorite)
   const chosen = chosenOf(p)
   const diverges = decisionDivergesOf(p)
   const offerCount = (p.offers ?? []).length
@@ -514,8 +569,11 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <span className="sr-only"> · {t(`costpos.kind.${p.kind}`)}{isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}</span>
           </span>
           {isQuote && offerCount > 0 && (
-            <span className="block text-[11px] text-slate-500">
-              {offerCount === 1 ? t('costpos.offerCount1') : t('costpos.offersCount').replace('{n}', String(offerCount))}
+            <span className="block text-[11px] text-slate-500" data-testid={`costpos-offer-summary-${p.id}`}>
+              {partsOf(p).length > 0
+                ? `${partsOf(p).length} ${t('costpos.partsSum')}${alternativesOf(p).length > 0
+                  ? ` + ${alternativesOf(p).length} ${t('costpos.altSum')}` : ''}`
+                : offerCount === 1 ? t('costpos.offerCount1') : t('costpos.offersCount').replace('{n}', String(offerCount))}
             </span>
           )}
         </td>

@@ -317,6 +317,14 @@ gone from the UI; the API still accepts any tag string.
 The per-plant workbook grid (cycle-time delta, hours × rate) stays under the
 table, collapsible. A department routed on several stages has one table.
 
+**Full and partial quotes.** On a quoted line each offer is a **full quote**
+(an alternative: one is bought, the star recommends which; several without a
+star leave the line unpriced) or a **partial quote** (`is_partial`, migration
+071: a part of the line, always counted). Line amount = sum of the parts +
+the counted alternative; lead time = the slowest of those (calendar-day
+compared). A part carries no star and cannot be Sales' choice; Sales decides
+among the alternatives only.
+
 **Vendors.** External lines are labelled "External · estimate" / "External ·
 vendor quote". An estimated line may name who gave the number
 (`CostingPosition.vendor_name`, migration 070); a quoted line names its

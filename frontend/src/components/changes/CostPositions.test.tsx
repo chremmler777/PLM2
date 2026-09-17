@@ -212,6 +212,39 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('costpos-new-vendor-2')).toBeNull()
   })
 
+  it('adds partial quotes up and puts the starred alternative on top; parts carry no star', async () => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue([{
+      ...external, effective_cost: null,
+      offers: [
+        { id: 81, vendor_name: 'Steel', cost: 1000, shipping_cost: null, shipping_included: true,
+          lead_time_days: 10, lead_time_unit: 'business_days', favorite: false, is_partial: true },
+        { id: 82, vendor_name: 'Coating', cost: 250, shipping_cost: null, shipping_included: true,
+          lead_time_days: 5, lead_time_unit: 'calendar_days', favorite: false, is_partial: true },
+        { id: 83, vendor_name: 'Alt A', cost: 600, shipping_cost: null, shipping_included: true,
+          lead_time_days: 30, lead_time_unit: 'calendar_days', favorite: true, is_partial: false },
+        { id: 84, vendor_name: 'Alt B', cost: 700, shipping_cost: null, shipping_included: true,
+          lead_time_days: null, lead_time_unit: null, favorite: false, is_partial: false },
+      ],
+    }] as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('1850.00')
+    expect(screen.getByTestId('costpos-lead-11').textContent)
+      .toBe(`30 ${t('costpos.unitShort.calendar_days')}`)
+    expect(screen.getByTestId('costpos-offer-summary-11').textContent)
+      .toBe(`2 ${t('costpos.partsSum')} + 2 ${t('costpos.altSum')}`)
+    expect(screen.getByTestId('offer-part-81')).toBeTruthy()
+    expect(screen.queryByTestId('offer-fav-81')).toBeNull()
+    expect(screen.getByTestId('offer-fav-83').textContent).toBe('★')
+    // The new-offer form asks which kind it is and sends it along.
+    fireEvent.change(screen.getByTestId('offer-new-vendor-11'), { target: { value: 'Vendor P' } })
+    fireEvent.change(screen.getByTestId('offer-new-cost-11'), { target: { value: '100' } })
+    fireEvent.click(screen.getByTestId('offer-new-scope-11-partial'))
+    fireEvent.click(screen.getByTestId('offer-add-11'))
+    await waitFor(() => expect(changesApi.addCostingOffer).toHaveBeenCalledWith(7, 11,
+      expect.objectContaining({ vendor_name: 'Vendor P', is_partial: true })))
+  })
+
   it('sums the department’s money and hours at the foot of the table', async () => {
     positions()
     await screen.findByTestId('costpos-row-11')

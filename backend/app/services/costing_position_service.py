@@ -36,7 +36,7 @@ class CostingPositionError(ValueError):
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
                     "hours", "lead_time_days", "lead_time_unit", "notes")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
-                 "lead_time_days", "lead_time_unit", "favorite")
+                 "lead_time_days", "lead_time_unit", "favorite", "is_partial")
 
 
 class CostingPositionService:
@@ -176,6 +176,7 @@ class CostingPositionService:
                 "effective_lead_time_calendar_days":
                     p.effective_lead_time_calendar_days,
                 "favorite_offer_id": priced_from.id if priced_from else None,
+                "parts_cost": p.parts_cost,
                 # The department RECOMMENDS, Sales DECIDES. Both sides ride on
                 # the position so a wrap-up line reads "recommended: A ·
                 # chosen: B (reason)" without joining anything.
@@ -204,7 +205,8 @@ class CostingPositionService:
                     "lead_time_days": o.lead_time_days,
                     "lead_time_unit": o.lead_time_unit,
                     "lead_time_calendar_days": o.lead_time_calendar_days,
-                    "favorite": o.favorite, "total_cost": o.total_cost,
+                    "favorite": o.favorite, "is_partial": o.is_partial,
+                    "total_cost": o.total_cost,
                     "chosen": o.chosen, "chosen_reason": o.chosen_reason,
                     "chosen_by": o.chosen_by,
                     "chosen_by_name": choosers.get(o.chosen_by),
@@ -282,6 +284,11 @@ class CostingPositionService:
         if offer.lead_time_unit not in LEAD_TIME_UNITS:
             raise CostingPositionError(
                 f"Invalid lead time unit '{offer.lead_time_unit}'")
+        # A part is always counted; the star and Sales' choice are for
+        # alternatives. Normalised rather than refused: switching a starred
+        # offer to 'part' simply drops the star.
+        if offer.is_partial:
+            offer.favorite = False
 
     # ------------------------------------------------------------------
     # Writes
@@ -378,6 +385,7 @@ class CostingPositionService:
             lead_time_days=spec.get("lead_time_days"),
             lead_time_unit=spec.get("lead_time_unit") or "calendar_days",
             favorite=bool(spec.get("favorite") or False),
+            is_partial=bool(spec.get("is_partial") or False),
             created_by=actor.id,
         )
         CostingPositionService._validate_offer(offer, position)
@@ -467,6 +475,10 @@ class CostingPositionService:
         if position.kind != "external":
             raise CostingPositionError(
                 "Only an external position has a vendor to choose")
+        if offer.is_partial:
+            raise CostingPositionError(
+                "A partial quote is always counted — the decision is between "
+                "the full quotes (alternatives)")
         # The department's VOTE, not the pricing fallback: a position nobody
         # voted on carries no recommendation to diverge from, so choosing any
         # of its offers needs no defence.
