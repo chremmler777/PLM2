@@ -79,3 +79,14 @@ Visualisation, not more data plumbing:
    serves, where it is used. The `serves`/`feeds` data now exists to drive it.
 
 Both need brainstorming before building. See [[change-flow-rework-2026-07-23]].
+
+
+## Service API (2026-09-16)
+
+Merged to main `0f7270d8` and DEPLOYED 2026-09-16, verified from PDB (env `PLM2_SERVICE_TOKEN` on
+plm2-backend + image rebuild): bearer-token read-only principal `plm2-service`
+and `GET /api/v1/equipment?tool_number=N[&include_gauges=true]`. Doc:
+docs/handoff/service-api-equipment.md. Next step once deployed: build the
+import client. Christoph may change the op-code format later (e.g. `3450-030`);
+only the three parser functions in equipment_numbering.py would change, the
+tool always keeps its bare number and linkage is via `serves` rows.

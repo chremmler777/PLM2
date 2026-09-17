@@ -1,8 +1,8 @@
 # Service API: bearer token + `GET /api/v1/equipment` by tool number
 
-> **STATUS 2026-09-16: MERGED to main (`0f7270d8`), not yet deployed.**
-> Deploy needs one env var on `plm2-backend` and an image rebuild. No
-> migration. Consumer: the equipment/gauge import client, built after deploy.
+> **STATUS 2026-09-16: DEPLOYED and verified from PDB with the bearer token.**
+> Env `PLM2_SERVICE_TOKEN` is set on `plm2-backend`, image rebuilt. No
+> migration was needed. Consumer: the equipment/gauge import client, next.
 
 **Context.** Machine callers (the import client, later Maintenance sync) have
 no hub cookie and know tool numbers, not PLM part ids. This adds a read-only
