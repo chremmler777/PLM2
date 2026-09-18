@@ -47,7 +47,9 @@ On the part page, or on the project page with the part selected:
 1. **+ Customer data**.
 2. Pick **review** or **official**, exactly as the customer stated it.
 3. Enter the received date and, if there is one, the customer index letter
-   (the `.B` in `3CR.807.425.B`). Summary is optional.
+   (the `.B` in `3CR.807.425.B`). Summary is optional. Optionally type the
+   revision number if the customer's numbering is ahead of ours (a part may
+   start at E2). It must be above every existing revision of that kind.
 4. Save. The new major becomes the part's active revision. Upload the files
    to it as usual.
 
@@ -60,6 +62,34 @@ starts with an empty bill of materials.
 with a copy of the major's BOM. Edit files and lines there. When the customer
 adopts it, use **Customer adopted** on the proposal: this creates the next
 major from it, marks the proposal approved and rejects its siblings.
+
+## Receiving a package
+
+A delivery is usually the assembly file plus one file per part, and not
+every part changed. On the assembly, **+ Customer package**:
+
+1. Pick review or official, the received date, and (optionally) the index
+   the whole package carries. Drop all files.
+2. **Check package.** Every file is matched to a part by the customer part
+   number (or our number) in the filename — the customer part number is set
+   and edited on the part itself. The index is read from the filename
+   (`3CR807425B_…` → `B`), else the package index applies.
+3. Per file the table says what will happen:
+   - **new major**: the index differs from the part's active revision → the
+     part gets its next major with this file.
+   - **unchanged**: same index as the active revision → nothing is stored,
+     the E stays. *If the data did not change, the E does not change.*
+   - **unmatched**: pick the part yourself, or leave it and the file is
+     skipped. A file the system cannot match to any part is skipped no
+     matter its type.
+   Part, index, action and revision number can be corrected per row.
+4. **Store package.** Children first, then the assembly, whose new major
+   copies its BOM forward so lines point at the children's active
+   revisions. Any row error (unsupported file, revision number not above
+   the existing one, review after official) stops the whole package;
+   nothing is stored until every row is fixed.
+
+Revision names show the customer index everywhere as `E2 · B`.
 
 ## Bill of materials
 
@@ -111,7 +141,9 @@ PLM.
 
 | Call | Purpose |
 |---|---|
-| `POST /api/v1/parts/{id}/revisions/customer-data` | Next major from a customer statement |
+| `POST /api/v1/parts/{id}/revisions/customer-data` | Next major from a customer statement (accepts `major` to pin the revision number) |
+| `POST /api/v1/parts/{id}/revisions/customer-package/preview` | Match files to parts, decide new/unchanged |
+| `POST /api/v1/parts/{id}/revisions/customer-package` | Store the confirmed package |
 | `POST /api/v1/parts/{id}/revisions/proposals` | Next minor under a major |
 | `POST /api/v1/parts/{id}/revisions/{rev}/promote` | Customer adopted a proposal |
 | `POST /api/v1/parts/{id}/lifecycle-phase` | `rfq → nominated → series`, admin only |

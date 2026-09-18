@@ -7,7 +7,7 @@ proposal to react to, not implemented work.
 
 | Module | Backend | Frontend | State |
 |---|---|---|---|
-| **Items & Revisions** | `api/v1/parts.py`, `part_service.py`, `revision_naming.py` | ProjectDetailPage, PartDetail, RevisionTimeline | Complete: customer data index (`E<n>` review / `<n>` official, minors are ours), part lifecycle phase rfq→nominated→series, categories, calibration. See `docs/CUSTOMER_DATA_INDEX.md` |
+| **Items & Revisions** | `api/v1/parts.py`, `part_service.py`, `revision_naming.py` | ProjectDetailPage, PartDetail, RevisionTimeline | Complete: customer data index (`E<n>` review / `<n>` official, minors are ours), part lifecycle phase rfq→nominated→series, categories, calibration, customer package receive, chosen major number, customer index shown next to every revision name. See `docs/CUSTOMER_DATA_INDEX.md` |
 | **Files & 3D** | `revision_files.py`, `cad_converter.py` | Viewer3D, CADUploader | Complete: revision-scoped, STEP→glTF (crash-isolated), assembly + exploded view |
 | **BOM** | `part_bom.py`, `bom_tree_service.py` | PartBOMSection, BomTree, AssemblyTreeList | Complete: revision-owned, copied forward on new majors/proposals, multi-level tree, where-used, project Assemblies view, xlsx export |
 | **Item Relations** | `part_relations.py` | PartRelationsSection | Complete: produces/checks/assembles |
