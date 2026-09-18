@@ -49,11 +49,14 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
   };
 
   const confirm = async () => {
-    if (!rows) return;
+    // Never drop a row on the way out: the backend's all-or-nothing rule only
+    // covers the rows it is given, so an errored row has to keep the package
+    // from being stored instead of quietly staying behind.
+    if (!rows || rows.some((r) => r.action === 'error')) return;
     setBusy(true); setError(null);
     try {
       const fd = base();
-      fd.append('rows', JSON.stringify(rows.filter((r) => r.action !== 'error').map((r) => ({
+      fd.append('rows', JSON.stringify(rows.map((r) => ({
         filename: r.filename, part_id: r.part_id, customer_index: r.customer_index, action: r.action, major: r.major }))));
       const res = await client.post(`/v1/parts/${assemblyId}/revisions/customer-package`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       onDone(res.data);
@@ -76,7 +79,13 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
       return merged;
     }) : rs);
 
-  const canStore = !!rows && rows.some((r) => r.action === 'new_major') && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
+  // A delivery where nothing changed is still a delivery: storing it writes
+  // the "kept" changelog lines. What blocks storing is an errored row, or a
+  // new major with no part to put it on.
+  const canStore = !!rows
+    && !rows.some((r) => r.action === 'error')
+    && rows.some((r) => r.part_id != null && (r.action === 'new_major' || r.action === 'unchanged'))
+    && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ProjectDetailPage, { RevisionFileRow } from './ProjectDetailPage'
@@ -83,5 +83,59 @@ describe('ProjectDetailPage customer package entry point', () => {
     expect(screen.getAllByText('+ Customer package').length).toBe(1)
     fireEvent.click(screen.getByText('+ Customer package'))
     expect(screen.getByText('Customer package received')).toBeTruthy()
+  })
+})
+
+describe('ProjectDetailPage add part form', () => {
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.post.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects')
+        return Promise.resolve({ data: [{ id: 2, name: 'Atlas', code: 'ATL', status: 'active' }] })
+      if (url === '/v1/parts/project/2') return Promise.resolve({ data: [] })
+      return Promise.resolve({ data: [] })
+    })
+    clientMocks.post.mockResolvedValue({ data: { id: 11 } })
+  })
+  afterEach(cleanup)
+
+  it('sends the customer part number when a part is created', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/projects/2']}>
+          <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>)
+
+    fireEvent.click(await screen.findByText('+ Add Part'))
+    fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-100' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Top' } })
+    fireEvent.change(screen.getByTestId('add-part-customer-number'), { target: { value: '3CR.807.425' } })
+    fireEvent.click(screen.getByText('Add Part'))
+
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+    const [url, payload] = clientMocks.post.mock.calls[0]
+    expect(url).toBe('/v1/parts')
+    expect(payload).toMatchObject({ part_number: '1994-100', customer_part_number: '3CR.807.425' })
+  })
+
+  it('sends no customer part number when the field is left empty', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/projects/2']}>
+          <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>)
+
+    fireEvent.click(await screen.findByText('+ Add Part'))
+    fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-110' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Sub' } })
+    fireEvent.click(screen.getByText('Add Part'))
+
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+    expect(clientMocks.post.mock.calls[0][1].customer_part_number).toBe(null)
   })
 })

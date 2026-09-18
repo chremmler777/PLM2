@@ -98,4 +98,41 @@ describe('CustomerPackageDialog', () => {
     const rows = JSON.parse((post.mock.calls[2][1] as FormData).get('rows') as string)
     expect(rows).toContainEqual(expect.objectContaining({ filename: 'top.stp', action: 'new_major', part_id: 7 }))
   })
+
+  it('keeps an errored row in the table and blocks storing the rest', async () => {
+    const twoRows = [previewRows[0], previewRows[1]]
+    post.mockResolvedValueOnce({ data: { rows: twoRows } })
+    post.mockRejectedValueOnce({ response: { status: 409, data: { detail: 'Some rows cannot be stored', rows: [
+      { ...twoRows[0], action: 'error', error: 'Revision number must be above E1' }, twoRows[1]] } } })
+    render(<CustomerPackageDialog open assemblyId={1} projectParts={[]} onClose={() => {}} onDone={() => {}} />)
+    fireEvent.change(screen.getByTestId('package-files'), { target: { files: [new File(['x'], 'top.stp')] } })
+    fireEvent.click(screen.getByText('Check package'))
+    await waitFor(() => screen.getByTestId('row-top.stp'))
+    fireEvent.click(screen.getByText('Store package'))
+
+    await waitFor(() => expect(screen.getByTestId('row-top.stp').textContent).toContain('above E1'))
+    // the good row is still on screen, and the bad one holds the whole package
+    expect(screen.getByTestId('row-clamp.stp')).toBeTruthy()
+    expect((screen.getByText('Store package') as HTMLButtonElement).disabled).toBe(true)
+    // pressing again cannot quietly store the good row without the bad one
+    fireEvent.click(screen.getByText('Store package'))
+    expect(post).toHaveBeenCalledTimes(2)
+  })
+
+  it('stores a delivery where nothing changed', async () => {
+    const unchanged = [previewRows[1], { ...previewRows[0], action: 'unchanged', customer_index: 'A', suggested_name: null }]
+    post.mockResolvedValueOnce({ data: { rows: unchanged } })
+    post.mockResolvedValueOnce({ data: { created: [], kept: [{}, {}], skipped: [] } })
+    const onDone = vi.fn()
+    render(<CustomerPackageDialog open assemblyId={1} projectParts={[]} onClose={() => {}} onDone={onDone} />)
+    fireEvent.change(screen.getByTestId('package-files'), { target: { files: [new File(['x'], 'clamp.stp')] } })
+    fireEvent.click(screen.getByText('Check package'))
+    await waitFor(() => screen.getByTestId('row-clamp.stp'))
+
+    expect((screen.getByText('Store package') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByText('Store package'))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const rows = JSON.parse((post.mock.calls[1][1] as FormData).get('rows') as string)
+    expect(rows.map((r: { action: string }) => r.action)).toEqual(['unchanged', 'unchanged'])
+  })
 })

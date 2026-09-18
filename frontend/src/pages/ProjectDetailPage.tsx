@@ -621,6 +621,7 @@ function AddPartModal({
   const { data: suppliers } = useSuppliers();
   const [formData, setFormData] = useState({
     part_number: '',
+    customer_part_number: '',
     name: '',
     part_type: 'purchased',
     supplier: '',
@@ -637,6 +638,7 @@ function AddPartModal({
       const payload: any = {
         project_id: projectId,
         part_number: data.part_number,
+        customer_part_number: data.customer_part_number || null,
         name: data.name,
         part_type: data.part_type,
         supplier: data.supplier || null,
@@ -660,6 +662,7 @@ function AddPartModal({
       queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
       setFormData({
         part_number: '',
+        customer_part_number: '',
         name: '',
         part_type: 'purchased',
         supplier: '',
@@ -720,6 +723,18 @@ function AddPartModal({
               onChange={(e) => setFormData({ ...formData, part_number: e.target.value })}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
               placeholder="e.g., P-001"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Customer Part Number</label>
+            <input
+              type="text"
+              data-testid="add-part-customer-number"
+              value={formData.customer_part_number}
+              onChange={(e) => setFormData({ ...formData, customer_part_number: e.target.value })}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+              placeholder="e.g., 3CR.807.425"
             />
           </div>
 
@@ -1424,7 +1439,7 @@ export default function ProjectDetailPage() {
               {selectedRevisionId && (
                 <RevisionWorkflowSection
                   revisionId={selectedRevisionId}
-                  revisionName={selectedRevision?.revision_name}
+                  revisionName={revisionLabel(selectedRevision?.revision_name, selectedRevision?.customer_index)}
                 />
               )}
 
@@ -1432,7 +1447,7 @@ export default function ProjectDetailPage() {
               {selectedRevisionId && selectedPart.item_category === 'article' && (
                 <PPAPSection
                   revisionId={selectedRevisionId}
-                  revisionName={selectedRevision?.revision_name}
+                  revisionName={revisionLabel(selectedRevision?.revision_name, selectedRevision?.customer_index)}
                   revisionFiles={(revisionFiles ?? []).map((f) => ({ id: f.id, filename: f.filename }))}
                 />
               )}
@@ -1440,7 +1455,7 @@ export default function ProjectDetailPage() {
               {/* Multi-level BOM tree from the selected revision, plus where this part is used */}
               {selectedRevisionId && (
                 <BomTreeSection partId={selectedPart.id} revisionId={selectedRevisionId}
-                  revisionName={selectedRevision?.revision_name}
+                  revisionName={revisionLabel(selectedRevision?.revision_name, selectedRevision?.customer_index)}
                   onOpenPart={(id) => { setSelectedPartId(id); setViewingFileId(null); }} />
               )}
 
@@ -1449,7 +1464,7 @@ export default function ProjectDetailPage() {
                 <PartBOMSection
                   partId={selectedPart.id}
                   revisionId={selectedRevisionId}
-                  revisionName={selectedRevision?.revision_name}
+                  revisionName={revisionLabel(selectedRevision?.revision_name, selectedRevision?.customer_index)}
                   locked={revisionLocked}
                   projectParts={parts ?? []}
                 />

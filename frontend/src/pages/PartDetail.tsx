@@ -70,6 +70,8 @@ export default function PartDetail() {
   const [promoting, setPromoting] = useState<Revision | null>(null);
   const [proposalParent, setProposalParent] = useState<number | null>(null);
   const [proposalSummary, setProposalSummary] = useState('');
+  // null = not editing; '' = editing an empty value
+  const [editingCustomerNumber, setEditingCustomerNumber] = useState<string | null>(null);
 
   const { data: part, isLoading, error: partError, refetch: refetchPart } = useQuery({
     queryKey: ['part', partId],
@@ -100,6 +102,11 @@ export default function PartDetail() {
     mutationFn: (v: CustomerDataInput) => client.post(`/v1/parts/${partId}/revisions/customer-data`, v),
     onSuccess: (res) => { toast.success(`Recorded ${res.data.revision_name}`); setShowCustomerData(false); refetch(); },
     onError: (e) => toast.error(errMsg(e, 'Could not record customer data')),
+  });
+  const saveCustomerNumber = useMutation({
+    mutationFn: (v: string) => client.put(`/v1/parts/${partId}`, { customer_part_number: v.trim() || null }),
+    onSuccess: () => { toast.success('Customer part number saved'); setEditingCustomerNumber(null); refetch(); },
+    onError: (e) => toast.error(errMsg(e, 'Could not save the customer part number')),
   });
   const promote = useMutation({
     mutationFn: ({ id, v }: { id: number; v: CustomerDataInput }) =>
@@ -158,7 +165,29 @@ export default function PartDetail() {
           <div className="flex justify-between items-start gap-4">
             <div>
               <h1 className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}</h1>
-              {part.customer_part_number && <p className="text-slate-400 font-mono text-sm mb-1">{part.customer_part_number}</p>}
+              {editingCustomerNumber === null ? (
+                <button data-testid="edit-customer-part-number" title="Edit the customer part number"
+                  onClick={() => setEditingCustomerNumber(part.customer_part_number ?? '')}
+                  className="block text-slate-400 font-mono text-sm mb-1 hover:text-slate-200">
+                  {part.customer_part_number || '+ customer part number'}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 mb-1">
+                  <input data-testid="customer-part-number-input" autoFocus value={editingCustomerNumber}
+                    onChange={(e) => setEditingCustomerNumber(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveCustomerNumber.mutate(editingCustomerNumber);
+                      if (e.key === 'Escape') setEditingCustomerNumber(null);
+                    }}
+                    placeholder="customer part number"
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-100 font-mono text-sm" />
+                  <button data-testid="save-customer-part-number" disabled={saveCustomerNumber.isPending}
+                    onClick={() => saveCustomerNumber.mutate(editingCustomerNumber)}
+                    className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
+                  <button onClick={() => setEditingCustomerNumber(null)}
+                    className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
+                </div>
+              )}
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
