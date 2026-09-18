@@ -64,8 +64,11 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
     } finally { setBusy(false); }
   };
 
+  /** Any edit repairs the row: the message goes, and an errored row becomes a new major again. */
   const patch = (filename: string, p: Partial<PackageRow>) =>
-    setRows((rs) => rs ? rs.map((r) => r.filename === filename ? { ...r, ...p, ...(p.action && p.action !== 'error' ? { error: null } : {}) } : r) : rs);
+    setRows((rs) => rs ? rs.map((r) => r.filename === filename
+      ? { ...r, ...(r.action === 'error' ? { action: 'new_major' as const } : {}), ...p, error: null }
+      : r) : rs);
 
   const canStore = !!rows && rows.some((r) => r.action === 'new_major') && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
 
@@ -121,7 +124,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                     </select>
                   </td>
                   <td className="font-mono text-slate-300">{revisionLabel(r.current_revision, r.current_index) || '—'}</td>
-                  <td><input value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
+                  <td><input data-testid={`index-${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100" /></td>
                   <td>
                     <select data-testid={`action-${r.filename}`} value={r.action === 'error' ? 'new_major' : r.action}
@@ -130,8 +133,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                       {ACTIONS.map((a) => <option key={a} value={a}>{a === 'new_major' ? 'new major' : a}</option>)}
                     </select>
                   </td>
-                  <td><input type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
-                    disabled={r.action !== 'new_major'} onChange={(e) => patch(r.filename, { major: e.target.value ? parseInt(e.target.value, 10) : null })}
+                  <td><input data-testid={`major-${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
+                    disabled={r.action !== 'new_major' && r.action !== 'error'} onChange={(e) => patch(r.filename, { major: e.target.value ? parseInt(e.target.value, 10) : null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100 disabled:opacity-40" /></td>
                   <td className="text-xs">
                     {r.action === 'error' && <span className="text-red-300">{r.error}</span>}

@@ -51,5 +51,29 @@ describe('CustomerPackageDialog', () => {
     await waitFor(() => screen.getByTestId('row-top.stp'))
     fireEvent.click(screen.getByText('Store package'))
     await waitFor(() => expect(screen.getByTestId('row-top.stp').textContent).toContain('above E1'))
+    expect((screen.getByText('Store package') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('repairs an errored row in one edit and stores it', async () => {
+    post.mockResolvedValueOnce({ data: { rows: previewRows } })
+    post.mockRejectedValueOnce({ response: { status: 409, data: { detail: 'x', rows: [{ ...previewRows[0], action: 'error', error: 'Revision number must be above E1' }] } } })
+    post.mockResolvedValueOnce({ data: { created: [{ revision_name: 'E2' }], kept: [], skipped: [] } })
+    render(<CustomerPackageDialog open assemblyId={1} projectParts={[]} onClose={() => {}} onDone={() => {}} />)
+    fireEvent.change(screen.getByTestId('package-files'), { target: { files: [new File(['x'], 'top.stp')] } })
+    fireEvent.click(screen.getByText('Check package'))
+    await waitFor(() => screen.getByTestId('row-top.stp'))
+    fireEvent.click(screen.getByText('Store package'))
+    await waitFor(() => expect(screen.getByTestId('row-top.stp').textContent).toContain('above E1'))
+
+    const major = screen.getByTestId('major-top.stp') as HTMLInputElement
+    expect(major.disabled).toBe(false)
+    fireEvent.change(major, { target: { value: '2' } })
+    expect(screen.getByTestId('row-top.stp').textContent).not.toContain('above E1')
+    expect((screen.getByText('Store package') as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByText('Store package'))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(3))
+    const rows = JSON.parse((post.mock.calls[2][1] as FormData).get('rows') as string)
+    expect(rows).toContainEqual(expect.objectContaining({ filename: 'top.stp', action: 'new_major', major: 2 }))
   })
 })

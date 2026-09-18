@@ -1317,6 +1317,7 @@ export default function ProjectDetailPage() {
                 {showPackage && selectedPartId && (
                   <CustomerPackageDialog open assemblyId={selectedPartId}
                     projectParts={(parts ?? []).map((p) => ({ id: p.id, part_number: p.part_number, name: p.name }))}
+                    officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
                     onClose={() => setShowPackage(false)}
                     onDone={(r) => {
                       toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
