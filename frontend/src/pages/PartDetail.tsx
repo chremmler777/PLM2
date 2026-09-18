@@ -94,7 +94,7 @@ export default function PartDetail() {
   });
   const promote = useMutation({
     mutationFn: ({ id, v }: { id: number; v: CustomerDataInput }) =>
-      client.post(`/v1/parts/${partId}/revisions/${id}/promote`, { statement: v.statement, received_at: v.received_at, customer_index: v.customer_index }),
+      client.post(`/v1/parts/${partId}/revisions/${id}/promote`, { statement: v.statement, received_at: v.received_at, customer_index: v.customer_index, major: v.major }),
     onSuccess: (res) => { toast.success(`Now ${res.data.revision_name}`); setPromoting(null); refetch(); },
     onError: (e) => toast.error(errMsg(e, 'Could not promote')),
   });
@@ -134,6 +134,11 @@ export default function PartDetail() {
   const hasOfficial = part.revisions.some((r) => r.phase === 'official' && !r.parent_revision_id);
   const active = part.revisions.find((r) => r.id === part.active_revision_id);
   const nextPhase = NEXT_PHASE[part.lifecycle_phase];
+  const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
+  const nextMajor = {
+    review: Math.max(0, ...majorsOf(part.revisions).filter((r) => r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name.slice(1), 10))) + 1,
+    official: Math.max(0, ...majorsOf(part.revisions).filter((r) => !r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name, 10))) + 1,
+  };
 
   return (
     <div className="min-h-screen bg-slate-900 p-8">
@@ -178,12 +183,12 @@ export default function PartDetail() {
         )}
 
         {showCustomerData && (
-          <CustomerDataDialog open title="Customer data received" officialOnly={hasOfficial}
+          <CustomerDataDialog open title="Customer data received" officialOnly={hasOfficial} nextMajor={nextMajor}
             pending={customerData.isPending} onClose={() => setShowCustomerData(false)} onSubmit={(v) => customerData.mutate(v)} />
         )}
 
         {promoting && (
-          <CustomerDataDialog open title={`Customer adopted ${promoting.revision_name} as…`} officialOnly={hasOfficial}
+          <CustomerDataDialog open title={`Customer adopted ${promoting.revision_name} as…`} officialOnly={hasOfficial} nextMajor={nextMajor}
             pending={promote.isPending} onClose={() => setPromoting(null)} onSubmit={(v) => promote.mutate({ id: promoting.id, v })} />
         )}
 

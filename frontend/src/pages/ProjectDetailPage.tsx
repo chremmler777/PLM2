@@ -1317,11 +1317,19 @@ export default function ProjectDetailPage() {
                     >
                       + Customer data
                     </button>
-                    {showCustomerData && (
-                      <CustomerDataDialog open title="Customer data received"
-                        pending={customerDataMutation.isPending} onClose={() => setShowCustomerData(false)}
-                        onSubmit={(v) => customerDataMutation.mutate(v)} />
-                    )}
+                    {showCustomerData && (() => {
+                      const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
+                      const revs = partRevisions || [];
+                      const nextMajor = {
+                        review: Math.max(0, ...majorsOf(revs).filter((r) => r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name.slice(1), 10))) + 1,
+                        official: Math.max(0, ...majorsOf(revs).filter((r) => !r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name, 10))) + 1,
+                      };
+                      return (
+                        <CustomerDataDialog open title="Customer data received" nextMajor={nextMajor}
+                          pending={customerDataMutation.isPending} onClose={() => setShowCustomerData(false)}
+                          onSubmit={(v) => customerDataMutation.mutate(v)} />
+                      );
+                    })()}
                   </div>
                 ) : (
                   <>
