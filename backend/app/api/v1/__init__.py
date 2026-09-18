@@ -12,6 +12,7 @@ from app.api.v1.accounts.contacts import router as contacts_router
 # Module: items (parts, revisions, files, BOM, relations)
 from app.api.v1.items.parts import router as parts_router
 from app.api.v1.items.revision_files import router as revision_files_router
+from app.api.v1.items.customer_package import router as customer_package_router
 from app.api.v1.items.part_bom import router as part_bom_router
 from app.api.v1.items.part_relations import router as part_relations_router
 from app.api.v1.items.process_flow import router as process_flow_router
@@ -52,6 +53,7 @@ api_router.include_router(contacts_router)
 api_router.include_router(health_router)
 api_router.include_router(parts_router)
 api_router.include_router(revision_files_router)
+api_router.include_router(customer_package_router)
 api_router.include_router(part_bom_router)
 api_router.include_router(part_relations_router)
 api_router.include_router(process_flow_router)

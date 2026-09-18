@@ -215,3 +215,29 @@ class SetLifecyclePhaseRequest(BaseModel):
 PartDetailResponse.model_rebuild()
 PartRevisionDetailResponse.model_rebuild()
 RevisionTreeNode.model_rebuild()
+
+
+class PackageRowOut(BaseModel):
+    filename: str
+    part_id: Optional[int] = None
+    part_number: Optional[str] = None
+    customer_part_number: Optional[str] = None
+    customer_index: Optional[str] = None
+    current_revision: Optional[str] = None
+    current_index: Optional[str] = None
+    action: Literal["new_major", "unchanged", "unmatched", "error"]
+    suggested_name: Optional[str] = None
+    major: Optional[int] = None
+    error: Optional[str] = None
+
+
+class PackageRowIn(BaseModel):
+    filename: str
+    part_id: Optional[int] = None
+    customer_index: Optional[str] = Field(None, max_length=20)
+    action: Literal["new_major", "unchanged", "unmatched"]
+    major: Optional[int] = Field(None, ge=1)
+
+
+class PackagePreviewResponse(BaseModel):
+    rows: List[PackageRowOut]
