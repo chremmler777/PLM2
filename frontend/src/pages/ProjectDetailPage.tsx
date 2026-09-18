@@ -1287,28 +1287,46 @@ export default function ProjectDetailPage() {
                 {/* Revision selector header */}
                 <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 bg-slate-700/30">
                   <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Files & 3D Model</h3>
-                  {partRevisions && partRevisions.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      {revisionLocked && (
-                        <span className="text-xs text-amber-400" title="This revision is locked; files are read-only">🔒 {selectedRevision?.status}</span>
-                      )}
-                      <select
-                        value={selectedRevisionId ?? ''}
-                        onChange={(e) => {
-                          setSelectedRevisionId(parseInt(e.target.value, 10));
-                          setViewingFileId(null);
-                        }}
-                        className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
-                      >
-                        {partRevisions.map((rev) => (
-                          <option key={rev.id} value={rev.id}>
-                            {revisionLabel(rev.revision_name, rev.customer_index)} ({rev.status.replace(/_/g, ' ')})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {partRevisions && partRevisions.length > 0 && (
+                      <>
+                        {revisionLocked && (
+                          <span className="text-xs text-amber-400" title="This revision is locked; files are read-only">🔒 {selectedRevision?.status}</span>
+                        )}
+                        <select
+                          value={selectedRevisionId ?? ''}
+                          onChange={(e) => {
+                            setSelectedRevisionId(parseInt(e.target.value, 10));
+                            setViewingFileId(null);
+                          }}
+                          className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
+                        >
+                          {partRevisions.map((rev) => (
+                            <option key={rev.id} value={rev.id}>
+                              {revisionLabel(rev.revision_name, rev.customer_index)} ({rev.status.replace(/_/g, ' ')})
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                    <button onClick={() => setShowPackage(true)}
+                      className="bg-blue-700 hover:bg-blue-600 border border-blue-600 rounded px-2 py-1 text-white text-xs font-medium">+ Customer package</button>
+                  </div>
                 </div>
+
+                {showPackage && selectedPartId && (
+                  <CustomerPackageDialog open assemblyId={selectedPartId}
+                    projectParts={(parts ?? []).map((p) => ({ id: p.id, part_number: p.part_number, name: p.name }))}
+                    onClose={() => setShowPackage(false)}
+                    onDone={(r) => {
+                      toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
+                      setShowPackage(false);
+                      queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
+                      queryClient.invalidateQueries({ queryKey: ['parts', id] });
+                      queryClient.invalidateQueries({ queryKey: ['bom-tree'] });
+                      queryClient.invalidateQueries({ queryKey: ['project-assemblies', id] });
+                    }} />
+                )}
 
                 {!partRevisions || partRevisions.length === 0 ? (
                   <div className="p-6 text-center">
@@ -1321,21 +1339,6 @@ export default function ProjectDetailPage() {
                     >
                       + Customer data
                     </button>
-                    <button onClick={() => setShowPackage(true)}
-                      className="ml-2 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium">+ Customer package</button>
-                    {showPackage && selectedPartId && (
-                      <CustomerPackageDialog open assemblyId={selectedPartId}
-                        projectParts={(parts ?? []).map((p) => ({ id: p.id, part_number: p.part_number, name: p.name }))}
-                        onClose={() => setShowPackage(false)}
-                        onDone={(r) => {
-                          toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
-                          setShowPackage(false);
-                          queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
-                          queryClient.invalidateQueries({ queryKey: ['parts', id] });
-                          queryClient.invalidateQueries({ queryKey: ['bom-tree'] });
-                          queryClient.invalidateQueries({ queryKey: ['project-assemblies', id] });
-                        }} />
-                    )}
                     {showCustomerData && (() => {
                       const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
                       const revs = partRevisions || [];
