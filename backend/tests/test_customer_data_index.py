@@ -80,3 +80,24 @@ async def test_customer_data_with_chosen_major(client, eng_auth, seed):
                           json={"statement": "review", "received_at": "2026-09-02", "major": 2})
     assert r.status_code == 409
     assert "above E2" in r.json()["detail"]
+
+
+async def test_customer_part_number_settable_on_create_and_update(client, eng_auth, seed):
+    r = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": "P-CPN", "name": "Panel",
+        "part_type": "internal_mfg", "data_classification": "confidential",
+        "customer_part_number": "3CR.807.425"}, headers=eng_auth)
+    assert r.status_code in (200, 201), r.text
+    pid = r.json()["id"]
+
+    part = (await client.get(f"/api/v1/parts/{pid}", headers=eng_auth)).json()
+    assert part["customer_part_number"] == "3CR.807.425"
+
+    r = await client.put(f"/api/v1/parts/{pid}", headers=eng_auth,
+                          json={"customer_part_number": "3CR.807.425.B"})
+    assert r.status_code == 200, r.text
+    assert r.json()["customer_part_number"] == "3CR.807.425.B"
+
+    r = await client.put(f"/api/v1/parts/{pid}", headers=eng_auth, json={"name": "x"})
+    assert r.status_code == 200, r.text
+    assert r.json()["customer_part_number"] == "3CR.807.425.B"
