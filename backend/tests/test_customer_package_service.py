@@ -204,3 +204,41 @@ async def test_confirm_leaves_no_file_behind_when_a_later_row_fails(session_fact
         assert (await s.execute(select(RevisionFile))).scalars().all() == []
         names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == sub_id))).scalars().all()
         assert names == ["E1"]
+
+
+async def test_confirm_removes_the_files_when_the_commit_fails(session_factory, seed, tmp_path, monkeypatch):
+    """The commit happens inside the cleanup scope: if it blows up, the bytes
+    already written go with it instead of becoming orphans on disk."""
+    monkeypatch.chdir(tmp_path)
+    ids = await _setup(session_factory, seed)
+    top_id = ids["1994-100"][0]
+    async with session_factory() as s:
+        async def boom():
+            raise RuntimeError("commit failed")
+
+        monkeypatch.setattr(s, "commit", boom)
+        with pytest.raises(RuntimeError, match="commit failed"):
+            await CustomerPackageService.confirm(
+                s, top_id, "review", date(2026, 9, 10),
+                [PackageRow(filename="top.stp", part_id=top_id, customer_index="B", action="new_major")],
+                {"top.stp": (b"ISO-10303-21;", "model/step")}, seed["admin_id"])
+        await s.rollback()
+    assert _uploaded_files(tmp_path) == []
+    async with session_factory() as s:
+        names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == top_id))).scalars().all()
+        assert names == ["E1"]
+
+
+async def test_confirm_can_leave_the_commit_to_the_caller(session_factory, seed, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ids = await _setup(session_factory, seed)
+    top_id = ids["1994-100"][0]
+    async with session_factory() as s:
+        await CustomerPackageService.confirm(
+            s, top_id, "review", date(2026, 9, 10),
+            [PackageRow(filename="top.stp", part_id=top_id, customer_index="B", action="new_major")],
+            {"top.stp": (b"ISO-10303-21;", "model/step")}, seed["admin_id"], commit=False)
+        await s.rollback()
+    async with session_factory() as s:
+        names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == top_id))).scalars().all()
+        assert names == ["E1"]

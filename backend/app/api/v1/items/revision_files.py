@@ -20,15 +20,7 @@ from app.models import get_db
 from app.models import User
 from app.models.part import RevisionFile, RevisionStatus
 from app.services.part_service import PartService, RevisionService, ChangelogService
-from app.services.revision_file_service import (
-    EXTENSION_MAP,
-    VALID_FILE_TYPES,
-    MIME_MAP,
-    MAX_FILE_SIZE,
-    UnsupportedFile,
-    store_revision_file,
-    uploads_dir as _uploads_dir,
-)
+from app.services.revision_file_service import UnsupportedFile, store_revision_file
 
 logger = logging.getLogger(__name__)
 

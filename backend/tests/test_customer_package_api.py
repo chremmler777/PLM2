@@ -82,3 +82,25 @@ async def test_duplicate_filenames_in_package_are_rejected(client, eng_auth, see
 
     part = (await client.get(f"/api/v1/parts/{top}", headers=eng_auth)).json()
     assert [x["revision_name"] for x in part["revisions"]] == ["E1"]
+
+
+async def test_oversized_file_is_refused_and_nothing_is_stored(client, eng_auth, seed, tmp_path, monkeypatch,
+                                                              session_factory):
+    """A body bigger than the limit is refused while it is read, before any
+    revision or file is written."""
+    monkeypatch.chdir(tmp_path)
+    from app.api.v1.items import customer_package as endpoint
+
+    monkeypatch.setattr(endpoint, "MAX_FILE_SIZE", 8)
+    top, _ = await _mk_part(client, eng_auth, seed, "1994-400", "3CR.807.800", session_factory=session_factory)
+    rows = [{"filename": "top.stp", "part_id": top, "customer_index": "B", "action": "new_major", "major": None}]
+    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-package", headers=eng_auth,
+                          data={"statement": "review", "received_at": "2026-09-10", "rows": json.dumps(rows)},
+                          files=[("files", ("top.stp", b"ISO-10303-21;" * 10, "model/step"))])
+    assert r.status_code == 413, r.text
+    assert r.json()["detail"] == "File top.stp exceeds 100MB"
+
+    part = (await client.get(f"/api/v1/parts/{top}", headers=eng_auth)).json()
+    assert [x["revision_name"] for x in part["revisions"]] == ["E1"]
+    uploads = tmp_path / "uploads"
+    assert [p for p in uploads.rglob("*") if p.is_file()] == [] if uploads.exists() else True

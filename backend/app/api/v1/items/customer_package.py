@@ -15,14 +15,19 @@ from app.models import get_db
 from app.models import User
 from app.schemas.part import PackagePreviewResponse, PackageRowIn, PackageRowOut
 from app.services.customer_package_service import CustomerPackageService, PackageError, PackageRow
+from app.services.revision_file_service import MAX_FILE_SIZE
 from app.services.revision_naming import STATEMENTS, RevisionRuleViolation
 
 router = APIRouter(prefix="/parts", tags=["customer-package"])
 
+# Starlette renamed the 422 constant; keep working on both spellings.
+HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
+HTTP_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
+
 
 def _statement(value: str) -> str:
     if value not in STATEMENTS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"statement must be one of {STATEMENTS}")
+        raise HTTPException(status_code=HTTP_422, detail=f"statement must be one of {STATEMENTS}")
     return value
 
 
@@ -31,7 +36,7 @@ def _reject_duplicate_filenames(files: List[UploadFile]) -> None:
     for f in files:
         name = f.filename or ""
         if name in seen:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            raise HTTPException(status_code=HTTP_422,
                                 detail=f"Duplicate filename in package: {name}")
         seen.add(name)
 
@@ -70,16 +75,21 @@ async def confirm_customer_package(
     try:
         parsed = TypeAdapter(List[PackageRowIn]).validate_python(json.loads(rows))
     except (ValueError, ValidationError) as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"rows: {e}")
+        raise HTTPException(status_code=HTTP_422, detail=f"rows: {e}")
     blobs = {}
     for f in files:
-        blobs[f.filename or ""] = (await f.read(), f.content_type)
+        # size is checked as each body arrives, so an oversized package is
+        # refused before anything is written
+        contents = await f.read()
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=HTTP_413,
+                                detail=f"File {f.filename or ''} exceeds 100MB")
+        blobs[f.filename or ""] = (contents, f.content_type)
     package_rows = [PackageRow(filename=r.filename, part_id=r.part_id, customer_index=r.customer_index,
                                action=r.action, major=r.major) for r in parsed]
     try:
         out = await CustomerPackageService.confirm(
             db, assembly_id, _statement(statement), received_at, package_rows, blobs, current_user.id)
-        await db.commit()
         return out
     except PackageError as e:
         await db.rollback()

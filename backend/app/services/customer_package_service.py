@@ -111,7 +111,7 @@ class CustomerPackageService:
     @staticmethod
     async def confirm(session: AsyncSession, assembly_id: int, statement: str, received_at: date,
                       rows: list[PackageRow], files: dict[str, tuple[bytes, Optional[str]]],
-                      created_by: int) -> dict:
+                      created_by: int, commit: bool = True) -> dict:
         assembly = await session.get(Part, assembly_id)
         if assembly is None:
             raise ValueError("Assembly not found")
@@ -179,6 +179,10 @@ class CustomerPackageService:
                                  "revision_name": current.revision_name if current else None, "filename": row.filename})
                 elif row.action == ACTION_UNMATCHED:
                     skipped.append(row.filename)
+            # the commit belongs inside the cleanup scope: a failing commit must
+            # also take the bytes we already wrote with it
+            if commit:
+                await session.commit()
         except Exception:
             for path in written:
                 try:
