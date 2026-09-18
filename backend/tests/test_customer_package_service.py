@@ -1,5 +1,6 @@
 """Package receive: only changed parts get a new major, files land on it,
 the assembly BOM is copied forward, nothing is stored on error."""
+import os
 from datetime import date
 
 import pytest
@@ -50,6 +51,20 @@ async def test_preview_matches_and_decides(session_factory, seed):
     assert by["stranger.stp"].action == "unmatched" and by["stranger.stp"].part_id is None
 
 
+async def test_preview_skips_unmatched_files_of_any_type(session_factory, seed):
+    """A readme or a Thumbs.db in the delivery is skipped, not an error that
+    would block the whole package."""
+    ids = await _setup(session_factory, seed)
+    async with session_factory() as s:
+        rows = await CustomerPackageService.preview(
+            s, ids["1994-100"][0], "review", date(2026, 9, 10), "B",
+            ["setup.exe", "Thumbs.db", "3CR807425B_top.stp"])
+    by = {r.filename: r for r in rows}
+    assert by["setup.exe"].action == "unmatched" and by["setup.exe"].error is None
+    assert by["Thumbs.db"].action == "unmatched" and by["Thumbs.db"].error is None
+    assert by["3CR807425B_top.stp"].action == "new_major"
+
+
 async def test_confirm_creates_only_changed_majors_and_copies_bom(session_factory, seed, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     ids = await _setup(session_factory, seed)
@@ -73,6 +88,7 @@ async def test_confirm_creates_only_changed_majors_and_copies_bom(session_factor
         assert e2.revision_name == "E2" and e2.customer_index == "B"
         files_on_e2 = (await s.execute(select(RevisionFile).where(RevisionFile.revision_id == e2.id))).scalars().all()
         assert [f.filename for f in files_on_e2] == ["top.stp"]
+        assert os.path.isfile(files_on_e2[0].file_path)
         sub = await s.get(Part, sub_id)
         assert sub.active_revision_id == ids["1994-110"][1]  # untouched
         tree = await BomTreeService.tree(s, top_id)
@@ -104,3 +120,87 @@ async def test_confirm_with_chosen_major_and_error_row(session_factory, seed, tm
     async with session_factory() as s:
         names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == top_id))).scalars().all()
         assert sorted(names) == ["E1", "E4"]
+
+
+def _uploaded_files(tmp_path):
+    root = tmp_path / "uploads"
+    return [str(p) for p in root.rglob("*") if p.is_file()]
+
+
+async def test_confirm_refuses_a_part_from_another_project(session_factory, seed, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ids = await _setup(session_factory, seed)
+    top_id = ids["1994-100"][0]
+    async with session_factory() as s:
+        from app.models.entities import Project
+        home = await s.get(Project, seed["project_id"])
+        other = Project(plant_id=home.plant_id, name="Other", code="other", status="active")
+        s.add(other)
+        await s.flush()
+        stranger = await PartService.create_part(s, project_id=other.id, part_number="2994-100", name="Stranger",
+                                                 part_type="internal_mfg", created_by=seed["admin_id"])
+        stranger_id = stranger.id
+        await s.commit()
+    async with session_factory() as s:
+        with pytest.raises(PackageError) as ei:
+            await CustomerPackageService.confirm(
+                s, top_id, "review", date(2026, 9, 10),
+                [PackageRow(filename="foreign.stp", part_id=stranger_id, customer_index="B", action="new_major")],
+                {"foreign.stp": (b"x", None)}, seed["admin_id"])
+        assert ei.value.rows[0].error == "Part is not in this project"
+        await s.rollback()
+    async with session_factory() as s:
+        assert (await s.execute(select(PartRevision).where(PartRevision.part_id == stranger_id))).scalars().all() == []
+    assert _uploaded_files(tmp_path) == []
+
+
+async def test_confirm_refuses_the_same_part_twice(session_factory, seed, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ids = await _setup(session_factory, seed)
+    top_id = ids["1994-100"][0]
+    async with session_factory() as s:
+        with pytest.raises(PackageError) as ei:
+            await CustomerPackageService.confirm(
+                s, top_id, "review", date(2026, 9, 10),
+                [PackageRow(filename="top.stp", part_id=top_id, customer_index="B", action="new_major"),
+                 PackageRow(filename="top_again.stp", part_id=top_id, customer_index="B", action="new_major")],
+                {"top.stp": (b"x", None), "top_again.stp": (b"y", None)}, seed["admin_id"])
+        errors = {r.filename: r.error for r in ei.value.rows if r.action == "error"}
+        assert errors == {"top_again.stp": "Part appears twice in this package"}
+        await s.rollback()
+    async with session_factory() as s:
+        names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == top_id))).scalars().all()
+        assert names == ["E1"]
+    assert _uploaded_files(tmp_path) == []
+
+
+async def test_confirm_leaves_no_file_behind_when_a_later_row_fails(session_factory, seed, tmp_path, monkeypatch):
+    """The first row is written, the second blows up: the exception propagates
+    and the bytes already on disk are gone."""
+    monkeypatch.chdir(tmp_path)
+    ids = await _setup(session_factory, seed)
+    top_id, sub_id = ids["1994-100"][0], ids["1994-110"][0]
+    real = RevisionService.receive_customer_data
+    calls = []
+
+    async def flaky(session, part_id, *a, **kw):
+        calls.append(part_id)
+        if len(calls) > 1:
+            raise RuntimeError("customer data write failed")
+        return await real(session, part_id, *a, **kw)
+
+    monkeypatch.setattr(RevisionService, "receive_customer_data", staticmethod(flaky))
+    async with session_factory() as s:
+        with pytest.raises(RuntimeError, match="customer data write failed"):
+            await CustomerPackageService.confirm(
+                s, top_id, "review", date(2026, 9, 10),
+                [PackageRow(filename="top.stp", part_id=top_id, customer_index="B", action="new_major"),
+                 PackageRow(filename="sub.stp", part_id=sub_id, customer_index="B", action="new_major")],
+                {"top.stp": (b"x", None), "sub.stp": (b"y", None)}, seed["admin_id"])
+        await s.rollback()
+    assert calls == [sub_id, top_id]  # children first, the assembly last
+    assert _uploaded_files(tmp_path) == []
+    async with session_factory() as s:
+        assert (await s.execute(select(RevisionFile))).scalars().all() == []
+        names = (await s.execute(select(PartRevision.revision_name).where(PartRevision.part_id == sub_id))).scalars().all()
+        assert names == ["E1"]

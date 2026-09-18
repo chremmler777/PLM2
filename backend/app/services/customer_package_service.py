@@ -96,10 +96,8 @@ class CustomerPackageService:
             row = PackageRow(filename=name)
             c = match_file(name, cands)
             if c is None:
-                try:
-                    classify(name)
-                except UnsupportedFile as e:
-                    row.action, row.error = ACTION_ERROR, str(e)
+                # a readme, a signature sheet, a Thumbs.db: skipped, never an
+                # error, so one stray file cannot block the whole package
                 rows.append(row)
                 continue
             row.part_id = c.part_id
@@ -119,20 +117,42 @@ class CustomerPackageService:
             raise ValueError("Assembly not found")
         # validate every row first; nothing is written while any row errs
         for row in rows:
-            if row.action == ACTION_NEW:
-                if row.part_id is None:
+            if row.action not in (ACTION_NEW, ACTION_UNCHANGED):
+                continue
+            if row.part_id is None:
+                if row.action == ACTION_NEW:
                     row.action, row.error = ACTION_ERROR, "No part chosen"
-                elif row.filename not in files:
-                    row.action, row.error = ACTION_ERROR, "File missing from upload"
-                else:
-                    await CustomerPackageService._fill_row(session, row, statement)
+                continue
+            part = await session.get(Part, row.part_id)
+            if part is None:
+                row.action, row.error = ACTION_ERROR, "Part not found"
+                continue
+            if part.project_id != assembly.project_id:
+                row.action, row.error = ACTION_ERROR, "Part is not in this project"
+                continue
+            if row.action != ACTION_NEW:
+                continue
+            if row.filename not in files:
+                row.action, row.error = ACTION_ERROR, "File missing from upload"
+            else:
+                await CustomerPackageService._fill_row(session, row, statement)
+        # one delivery holds one file per part; a second file for the same part
+        # would silently create two majors, so it is the package that is wrong
+        seen_parts: set[int] = set()
+        for row in rows:
+            if row.action != ACTION_NEW:
+                continue
+            if row.part_id in seen_parts:
+                row.action, row.error = ACTION_ERROR, "Part appears twice in this package"
+            seen_parts.add(row.part_id)
         if any(r.action == ACTION_ERROR for r in rows):
             raise PackageError(rows)
 
         created, kept, skipped = [], [], []
         written: list[str] = []
         try:
-            # children first, the assembly last, so its new BOM copy sees the children active
+            # children first, the assembly last; harmless today, matters if BOM
+            # copies ever snapshot child revisions instead of child part ids
             ordered = sorted((r for r in rows if r.action == ACTION_NEW), key=lambda r: r.part_id == assembly_id)
             for row in ordered:
                 rev = await RevisionService.receive_customer_data(
