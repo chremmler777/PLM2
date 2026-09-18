@@ -60,3 +60,25 @@ async def test_confirm_reports_row_errors(client, eng_auth, seed, tmp_path, monk
                           files=[("files", ("top.stp", b"x", "model/step"))])
     assert r.status_code == 409, r.text
     assert r.json()["rows"][0]["action"] == "error" and "above E1" in r.json()["rows"][0]["error"]
+
+
+async def test_duplicate_filenames_in_package_are_rejected(client, eng_auth, seed, tmp_path, monkeypatch, session_factory):
+    monkeypatch.chdir(tmp_path)
+    top, top_rev = await _mk_part(client, eng_auth, seed, "1994-300", "3CR.807.700", session_factory=session_factory)
+    dup_files = [("files", ("top.stp", b"one", "model/step")),
+                 ("files", ("top.stp", b"two", "model/step"))]
+
+    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-package/preview", headers=eng_auth,
+                          data={"statement": "review", "received_at": "2026-09-10"}, files=dup_files)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Duplicate filename in package: top.stp"
+
+    rows = [{"filename": "top.stp", "part_id": top, "customer_index": "B", "action": "new_major", "major": None}]
+    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-package", headers=eng_auth,
+                          data={"statement": "review", "received_at": "2026-09-10", "rows": json.dumps(rows)},
+                          files=dup_files)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "Duplicate filename in package: top.stp"
+
+    part = (await client.get(f"/api/v1/parts/{top}", headers=eng_auth)).json()
+    assert [x["revision_name"] for x in part["revisions"]] == ["E1"]

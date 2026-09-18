@@ -1,7 +1,6 @@
 """Customer package receive: the assembly file plus one file per part, in
 one step. Preview matches and decides; confirm stores."""
 import json
-import logging
 from dataclasses import asdict
 from datetime import date
 from typing import List, Optional
@@ -18,7 +17,6 @@ from app.schemas.part import PackagePreviewResponse, PackageRowIn, PackageRowOut
 from app.services.customer_package_service import CustomerPackageService, PackageError, PackageRow
 from app.services.revision_naming import STATEMENTS, RevisionRuleViolation
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/parts", tags=["customer-package"])
 
 
@@ -26,6 +24,16 @@ def _statement(value: str) -> str:
     if value not in STATEMENTS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"statement must be one of {STATEMENTS}")
     return value
+
+
+def _reject_duplicate_filenames(files: List[UploadFile]) -> None:
+    seen: set[str] = set()
+    for f in files:
+        name = f.filename or ""
+        if name in seen:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=f"Duplicate filename in package: {name}")
+        seen.add(name)
 
 
 @router.post("/{assembly_id}/revisions/customer-package/preview", response_model=PackagePreviewResponse)
@@ -38,6 +46,7 @@ async def preview_customer_package(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _reject_duplicate_filenames(files)
     try:
         rows = await CustomerPackageService.preview(
             db, assembly_id, _statement(statement), received_at, (package_index or "").strip() or None,
@@ -57,6 +66,7 @@ async def confirm_customer_package(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _reject_duplicate_filenames(files)
     try:
         parsed = TypeAdapter(List[PackageRowIn]).validate_python(json.loads(rows))
     except (ValueError, ValidationError) as e:
