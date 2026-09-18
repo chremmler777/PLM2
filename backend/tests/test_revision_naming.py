@@ -105,3 +105,17 @@ def test_legacy_rename_wincarat_baseline_is_official_one():
     # data, so it becomes official 1; a later ECR hangs off it as 1.1.
     rows = [_row(1, "WC-IMP", "engineering"), _row(2, "ECR1.1", "ecn", day=2)]
     assert legacy_rename(rows) == {1: ("1", "official"), 2: ("1.1", "official")}
+
+
+def test_requested_major_above_existing_is_taken():
+    assert next_major_name(["E1"], "review", requested=3) == "E3"
+    assert next_major_name([], "review", requested=2) == "E2"
+    assert next_major_name(["E1", "E2", "1"], "official", requested=4) == "4"
+
+
+@pytest.mark.parametrize("existing,statement,requested", [
+    (["E2"], "review", 2), (["E2"], "review", 1), (["1"], "official", 1), ([], "review", 0),
+])
+def test_requested_major_not_above_existing_is_a_rule_violation(existing, statement, requested):
+    with pytest.raises(RevisionRuleViolation):
+        next_major_name(existing, statement, requested=requested)

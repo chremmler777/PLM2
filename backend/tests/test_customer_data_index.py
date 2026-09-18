@@ -69,3 +69,14 @@ async def test_legacy_endpoints_are_gone(client, eng_auth, seed):
     for path in ("revisions/rfq", "revisions/engineering", "revisions/freeze"):
         r = await client.post(f"/api/v1/parts/{pid}/{path}", headers=eng_auth, json={"summary": "x"})
         assert r.status_code in (404, 405), path
+
+
+async def test_customer_data_with_chosen_major(client, eng_auth, seed):
+    pid = await _mk_part(client, eng_auth, seed, number="P-CD-MAJ")
+    r = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data", headers=eng_auth,
+                          json={"statement": "review", "received_at": "2026-09-01", "major": 2})
+    assert r.status_code == 201 and r.json()["revision_name"] == "E2"
+    r = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data", headers=eng_auth,
+                          json={"statement": "review", "received_at": "2026-09-02", "major": 2})
+    assert r.status_code == 409
+    assert "above E2" in r.json()["detail"]

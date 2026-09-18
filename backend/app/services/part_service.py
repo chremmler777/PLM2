@@ -205,18 +205,21 @@ class RevisionService:
         summary: Optional[str] = None,
         created_by: int = None,
         copy_bom_from: Optional[int] = None,
+        major: Optional[int] = None,
     ) -> PartRevision:
         """Create the next major from a customer statement. This — and
         promote_revision, which delegates here — is the only way a major
         revision comes into existence. The BOM is copied forward from
-        ``copy_bom_from`` (a revision id) or, by default, the previous major."""
+        ``copy_bom_from`` (a revision id) or, by default, the previous major.
+        ``major`` lets the caller choose the major number (see
+        ``next_major_name``)."""
         if statement not in CUSTOMER_STATEMENTS:
             raise ValueError(f"statement must be one of {CUSTOMER_STATEMENTS}")
         part = await session.get(Part, part_id)
         if part is None:
             raise ValueError("Part not found")
         majors = await RevisionService._majors(session, part_id)
-        name = next_major_name([m.revision_name for m in majors], statement)
+        name = next_major_name([m.revision_name for m in majors], statement, requested=major)
         revision = PartRevision(
             part_id=part_id,
             revision_name=name,
@@ -288,6 +291,7 @@ class RevisionService:
         received_at: date,
         customer_index: Optional[str] = None,
         created_by: int = None,
+        major: Optional[int] = None,
     ) -> PartRevision:
         """The customer adopted one of our proposals as their next data state.
         Creates the next major (per statement), marks the proposal approved
@@ -301,7 +305,7 @@ class RevisionService:
         new_revision = await RevisionService.receive_customer_data(
             session, revision.part_id, statement, received_at,
             customer_index=customer_index, summary=summary, created_by=created_by,
-            copy_bom_from=revision.id)
+            copy_bom_from=revision.id, major=major)
         revision.status = RevisionStatus.APPROVED.value
         await ChangelogService.log_action(
             session=session, part_id=revision.part_id, revision_id=revision.id, action="promoted",

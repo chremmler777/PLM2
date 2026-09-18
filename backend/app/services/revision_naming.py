@@ -46,7 +46,10 @@ def _majors(names: list[str]) -> list[tuple[bool, int]]:
     return out
 
 
-def next_major_name(existing_major_names: list[str], statement: str) -> str:
+def next_major_name(existing_major_names: list[str], statement: str, requested: int | None = None) -> str:
+    """Next major of the given kind. ``requested`` lets the user pick the
+    number (the customer's numbering may be ahead of ours); it must be above
+    every existing major of that kind. Gaps are fine."""
     if statement not in STATEMENTS:
         raise ValueError(f"statement must be one of {STATEMENTS}, got {statement!r}")
     want_official = statement == STATEMENT_OFFICIAL
@@ -56,7 +59,13 @@ def next_major_name(existing_major_names: list[str], statement: str) -> str:
             "This part already has official customer data; the customer cannot "
             "un-release it, so new data must be official too.")
     highest = max((n for is_off, n in majors if is_off == want_official), default=0)
-    return format_name(want_official, highest + 1)
+    if requested is None:
+        return format_name(want_official, highest + 1)
+    if requested < 1 or requested <= highest:
+        raise RevisionRuleViolation(
+            f"Revision number must be above {format_name(want_official, highest)}"
+            if highest else "Revision number must be 1 or higher")
+    return format_name(want_official, requested)
 
 
 def next_minor_name(parent_name: str, existing_child_names: list[str]) -> str:

@@ -176,7 +176,8 @@ async def receive_customer_data(
     try:
         revision = await RevisionService.receive_customer_data(
             db, part_id, body.statement, body.received_at,
-            customer_index=body.customer_index, summary=body.summary, created_by=current_user.id)
+            customer_index=body.customer_index, summary=body.summary, created_by=current_user.id,
+            major=body.major)
         await db.commit()
         return revision
     except RevisionRuleViolation as e:
@@ -218,7 +219,7 @@ async def promote_revision(
     try:
         new_revision = await RevisionService.promote_revision(
             db, revision_id, body.statement, body.received_at,
-            customer_index=body.customer_index, created_by=current_user.id)
+            customer_index=body.customer_index, created_by=current_user.id, major=body.major)
         await db.commit()
         return new_revision
     except RevisionRuleViolation as e:

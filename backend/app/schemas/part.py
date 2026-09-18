@@ -184,6 +184,7 @@ class CustomerDataReceivedRequest(BaseModel):
     received_at: date
     customer_index: Optional[str] = Field(None, max_length=20, description="Customer's own index, e.g. B")
     summary: Optional[str] = None
+    major: Optional[int] = Field(None, ge=1, description="Chosen major number; must be above every existing major of this kind")
 
 
 class CreateProposalRequest(BaseModel):
@@ -197,6 +198,7 @@ class PromoteRevisionRequest(BaseModel):
     statement: Literal["review", "official"]
     received_at: date
     customer_index: Optional[str] = Field(None, max_length=20)
+    major: Optional[int] = Field(None, ge=1, description="Chosen major number; must be above every existing major of this kind")
 
 
 class RejectMajorRevisionRequest(BaseModel):
