@@ -7,7 +7,7 @@ import client from '../../api/client'
 vi.mock('../../api/client', () => ({ default: { get: vi.fn() }, API_BASE_URL: '' }))
 
 const roots = [{ part_id: 1, part_number: 'TOP', name: 'Top', part_type: 'internal_mfg', item_category: 'article',
-  revision_id: 11, revision_name: 'E1', revision_phase: 'review', line_count: 2 }]
+  revision_id: 11, revision_name: 'E1', revision_phase: 'review', customer_index: 'B', line_count: 2 }]
 const tree = { part_id: 1, part_number: 'TOP', name: 'Top', part_type: 'internal_mfg', item_category: 'article',
   revision_id: 11, revision_name: 'E1', revision_phase: 'review', cycle: false, lines: [
     { id: 5, item_number: '10', name: 'SUB', quantity: 2, unit: 'pcs', total_quantity: 2, child_part_id: 2, catalog_part_id: null,
@@ -35,6 +35,7 @@ describe('AssemblyTreeList', () => {
     const root = await screen.findByTestId('asm-root-1')
     expect(root.textContent).toContain('TOP')
     expect(root.textContent).toContain('2 lines')
+    expect(root.textContent).toContain('E1 · B')
     fireEvent.click(screen.getByTestId('asm-root-toggle-1'))
     await waitFor(() => expect(screen.getByTestId('asm-node-2')).toBeTruthy())
     fireEvent.click(screen.getByTestId('asm-toggle-2'))

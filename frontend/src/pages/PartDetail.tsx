@@ -13,6 +13,7 @@ import StartChangeButton from '../components/changes/StartChangeButton';
 import RevisionTimeline, { type Revision } from '../components/parts/RevisionTimeline';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
+import { revisionLabel } from '../components/parts/RevisionBadge';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Part {
@@ -36,6 +37,7 @@ interface WhereUsed {
   part_number: string;
   name: string;
   revision_name: string;
+  customer_index?: string | null;
   quantity: number;
   unit: string;
   parents: WhereUsed[];
@@ -153,7 +155,7 @@ export default function PartDetail() {
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
-                  {active ? `${active.revision_name} (active)` : 'no customer data yet'}
+                  {active ? `${revisionLabel(active.revision_name, active.customer_index)} (active)` : 'no customer data yet'}
                 </span>
                 <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
                   {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
@@ -206,7 +208,7 @@ export default function PartDetail() {
             {flattenUsedIn(usedIn).map((u) => (
               <button key={u.part_id} onClick={() => navigate(`/parts/${u.part_id}`)}
                 className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600 font-mono">
-                {u.part_number} <span className="text-slate-400 font-sans">{u.revision_name}</span>
+                {u.part_number} <span className="text-slate-400 font-sans">{revisionLabel(u.revision_name, u.customer_index)}</span>
               </button>
             ))}
           </div>
@@ -214,7 +216,7 @@ export default function PartDetail() {
 
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
           <h2 className="text-xl font-bold text-slate-100 mb-4">
-            Bill of materials{bomTree?.revision_name ? <span className="text-slate-400 font-normal text-base"> · {bomTree.revision_name}</span> : null}
+            Bill of materials{bomTree?.revision_name ? <span className="text-slate-400 font-normal text-base"> · {revisionLabel(bomTree.revision_name, bomTree.customer_index)}</span> : null}
           </h2>
           {bomTree ? <BomTree tree={bomTree} onOpenPart={(id) => navigate(`/parts/${id}`)} /> : <p className="text-slate-400 text-sm">Loading…</p>}
         </div>

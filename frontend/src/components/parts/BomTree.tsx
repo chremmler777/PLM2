@@ -3,6 +3,7 @@
  * its active revision; quantities multiply through to the leaves.
  */
 import { useState } from 'react';
+import RevisionBadge, { revisionLabel } from './RevisionBadge';
 
 export interface BomNode {
   part_id: number;
@@ -13,6 +14,7 @@ export interface BomNode {
   revision_id: number | null;
   revision_name: string | null;
   revision_phase: 'review' | 'official' | null;
+  customer_index?: string | null;
   cycle: boolean;
   lines: BomLine[];
 }
@@ -55,13 +57,9 @@ function Line({ line, depth, onOpenPart }: { line: BomLine; depth: number; onOpe
             <span className="text-slate-200 truncate">{line.name}</span>
           )}
           {child && <span className="text-slate-400 truncate">{child.name}</span>}
-          {child?.revision_name && (
-            <span data-testid={`bom-rev-${line.id}`} title={child.revision_phase ?? undefined}
-              className={`text-xs px-1.5 rounded ${child.revision_phase === 'official' ? 'bg-amber-900/40 text-amber-300' : 'bg-blue-900/40 text-blue-300'}`}>
-              {child.revision_name}
-            </span>
+          {child && (
+            <RevisionBadge testId={`bom-rev-${line.id}`} name={child.revision_name} index={child.customer_index} phase={child.revision_phase} />
           )}
-          {child && !child.revision_name && <span className="text-xs text-slate-500">no data</span>}
           {child?.part_type === 'purchased' && <span className="text-xs px-1.5 rounded bg-slate-700 text-slate-300">purchased</span>}
           {child?.cycle && <span className="text-xs px-1.5 rounded bg-red-900/40 text-red-300">cycle</span>}
         </div>
@@ -77,7 +75,7 @@ function Line({ line, depth, onOpenPart }: { line: BomLine; depth: number; onOpe
 
 export default function BomTree({ tree, onOpenPart }: { tree: BomNode; onOpenPart?(id: number): void }) {
   if (tree.lines.length === 0) {
-    return <p className="text-slate-400 text-sm">No BOM lines on {tree.revision_name ?? 'this part'}.</p>;
+    return <p className="text-slate-400 text-sm">No BOM lines on {tree.revision_name ? revisionLabel(tree.revision_name, tree.customer_index) : 'this part'}.</p>;
   }
   return (
     <div>

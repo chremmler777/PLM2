@@ -3,6 +3,7 @@
  * internal proposals (E1.1, 1.1 …) nested underneath.
  */
 import { groupByMajor, type Revision } from './revisionGrouping';
+import { revisionLabel } from './RevisionBadge';
 
 export type { Revision } from './revisionGrouping';
 
@@ -40,12 +41,11 @@ export default function RevisionTimeline({ revisions, activeRevisionId, onNewPro
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-lg font-bold text-slate-100">{major.revision_name}</span>
+                <span className="font-mono text-lg font-bold text-slate-100">{revisionLabel(major.revision_name, major.customer_index)}</span>
                 <Badge tone={major.phase === 'official' ? 'bg-amber-900/40 text-amber-300' : 'bg-blue-900/40 text-blue-300'}>
                   {major.phase}
                 </Badge>
                 <Badge>{major.part_phase_at_receipt}</Badge>
-                {major.customer_index && <Badge>index {major.customer_index}</Badge>}
                 {activeRevisionId === major.id && <Badge tone="bg-emerald-900/40 text-emerald-300">active</Badge>}
                 <Badge tone={statusColor[major.status] ?? ''}>{major.status}</Badge>
               </div>

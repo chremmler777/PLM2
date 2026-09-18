@@ -20,6 +20,7 @@ import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
+import { revisionLabel } from '../components/parts/RevisionBadge';
 import AssemblyTreeList from '../components/parts/AssemblyTreeList';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
@@ -234,6 +235,7 @@ interface WhereUsedEntry {
   part_id: number;
   part_number: string;
   revision_name: string;
+  customer_index?: string | null;
   parents: WhereUsedEntry[];
 }
 
@@ -269,7 +271,7 @@ export function BomTreeSection({ partId, revisionId, revisionName, onOpenPart }:
             {parents.map((u) => (
               <button key={u.part_id} onClick={() => onOpenPart(u.part_id)}
                 className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600 font-mono">
-                {u.part_number} <span className="text-slate-400 font-sans">{u.revision_name}</span>
+                {u.part_number} <span className="text-slate-400 font-sans">{revisionLabel(u.revision_name, u.customer_index)}</span>
               </button>
             ))}
           </div>
@@ -1298,7 +1300,7 @@ export default function ProjectDetailPage() {
                       >
                         {partRevisions.map((rev) => (
                           <option key={rev.id} value={rev.id}>
-                            {rev.revision_name} ({rev.status.replace(/_/g, ' ')})
+                            {revisionLabel(rev.revision_name, rev.customer_index)} ({rev.status.replace(/_/g, ' ')})
                           </option>
                         ))}
                       </select>
@@ -1453,7 +1455,7 @@ export default function ProjectDetailPage() {
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-mono font-semibold text-slate-100 text-sm">{rev.revision_name}</span>
+                          <span className="font-mono font-semibold text-slate-100 text-sm">{revisionLabel(rev.revision_name, rev.customer_index)}</span>
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${phaseColor(rev.phase)}`}>
                             {rev.phase}{rev.part_phase_at_receipt ? ` · ${rev.part_phase_at_receipt}` : ''}
                           </span>

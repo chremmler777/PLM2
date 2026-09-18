@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 import type { BomNode, BomLine } from './BomTree';
+import RevisionBadge from './RevisionBadge';
 
 export interface AssemblyRoot {
   part_id: number;
@@ -17,6 +18,7 @@ export interface AssemblyRoot {
   revision_id: number | null;
   revision_name: string | null;
   revision_phase: 'review' | 'official' | null;
+  customer_index?: string | null;
   line_count: number;
 }
 
@@ -24,15 +26,6 @@ interface Props {
   projectId: number;
   selectedPartId: number | null;
   onSelect(partId: number): void;
-}
-
-function RevBadge({ name, phase }: { name: string | null; phase: string | null }) {
-  if (!name) return <span className="text-xs text-slate-500">no data</span>;
-  return (
-    <span className={`text-xs px-1.5 rounded ${phase === 'official' ? 'bg-amber-900/40 text-amber-300' : 'bg-blue-900/40 text-blue-300'}`}>
-      {name}
-    </span>
-  );
 }
 
 function NodeRow({ node, qty, unit, depth, selectedPartId, onSelect }: {
@@ -53,7 +46,7 @@ function NodeRow({ node, qty, unit, depth, selectedPartId, onSelect }: {
         <span className="font-mono text-slate-100 truncate">{node.part_number}</span>
         <span className="text-slate-400 truncate flex-1">{node.name}</span>
         {qty !== undefined && <span className="text-xs text-slate-400 tabular-nums">{qty} {unit}</span>}
-        <RevBadge name={node.revision_name} phase={node.revision_phase} />
+        <RevisionBadge name={node.revision_name} index={node.customer_index} phase={node.revision_phase} />
         {node.part_type === 'purchased' && <span className="text-xs text-slate-500">buy</span>}
       </div>
       {open && expandable && node.lines.map((l: BomLine) => l.child ? (
@@ -89,7 +82,7 @@ function AssemblyRootRow({ root, selectedPartId, onSelect }: { root: AssemblyRoo
         <span className="font-mono text-slate-100 truncate">{root.part_number}</span>
         <span className="text-slate-400 truncate flex-1">{root.name}</span>
         <span className="text-xs text-slate-500">{root.line_count > 0 ? `${root.line_count} lines` : 'no BOM yet'}</span>
-        <RevBadge name={root.revision_name} phase={root.revision_phase} />
+        <RevisionBadge name={root.revision_name} index={root.customer_index} phase={root.revision_phase} />
       </div>
       {open && (tree ? tree.lines.map((l) => l.child ? (
         <NodeRow key={l.id} node={l.child} qty={l.quantity} unit={l.unit} depth={1} selectedPartId={selectedPartId} onSelect={onSelect} />

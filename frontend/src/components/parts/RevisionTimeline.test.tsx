@@ -34,7 +34,7 @@ describe('RevisionTimeline', () => {
     const one = screen.getByTestId('major-1')
     expect(one.textContent).toContain('official')
     expect(one.textContent).toContain('nominated')
-    expect(one.textContent).toContain('index B')
+    expect(one.textContent).toContain('1 · B')
     expect(one.textContent).toContain('active')
     expect(screen.getByTestId('major-E1').textContent).toContain('rfq')
   })
