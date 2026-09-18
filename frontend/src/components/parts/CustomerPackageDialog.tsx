@@ -64,11 +64,17 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
     } finally { setBusy(false); }
   };
 
-  /** Any edit repairs the row: the message goes, and an errored row becomes a new major again. */
+  /**
+   * Any edit repairs the row: the message goes, and an errored row becomes a new major again.
+   * The repair happens here, after the edit is merged, so no caller can re-assert 'error'.
+   */
   const patch = (filename: string, p: Partial<PackageRow>) =>
-    setRows((rs) => rs ? rs.map((r) => r.filename === filename
-      ? { ...r, ...(r.action === 'error' ? { action: 'new_major' as const } : {}), ...p, error: null }
-      : r) : rs);
+    setRows((rs) => rs ? rs.map((r) => {
+      if (r.filename !== filename) return r;
+      const merged = { ...r, ...p, error: p.error ?? null };
+      if (merged.action === 'error') merged.action = 'new_major';
+      return merged;
+    }) : rs);
 
   const canStore = !!rows && rows.some((r) => r.action === 'new_major') && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
 
@@ -117,7 +123,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                     <select data-testid={`part-${r.filename}`} value={r.part_id ?? ''} className="bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
                       onChange={(e) => { const id = e.target.value ? parseInt(e.target.value, 10) : null;
                         const p = projectParts.find((x) => x.id === id);
-                        patch(r.filename, { part_id: id, part_number: p?.part_number ?? null, action: id == null ? 'unmatched' : (r.action === 'unmatched' ? 'new_major' : r.action) }); }}>
+                        patch(r.filename, { part_id: id, part_number: p?.part_number ?? null, action: id == null ? 'unmatched' : ((r.action === 'unmatched' || r.action === 'error') ? 'new_major' : r.action) }); }}>
                       <option value="">— not in project —</option>
                       {(r.part_id != null && !projectParts.some((p) => p.id === r.part_id)) && <option value={r.part_id}>{r.part_number}</option>}
                       {projectParts.map((p) => <option key={p.id} value={p.id}>{p.part_number} {p.name}</option>)}
