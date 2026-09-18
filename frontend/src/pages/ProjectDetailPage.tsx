@@ -19,6 +19,7 @@ import ProjectChangesSection from '../components/ProjectChangesSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
+import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import AssemblyTreeList from '../components/parts/AssemblyTreeList';
@@ -1037,6 +1038,7 @@ export default function ProjectDetailPage() {
   const invalidDropIds = draggingPartId !== null && parts ? getDescendantIds(parts, draggingPartId) : new Set<number>();
 
   const [showCustomerData, setShowCustomerData] = useState(false);
+  const [showPackage, setShowPackage] = useState(false);
   const customerDataMutation = useMutation({
     mutationFn: async (v: CustomerDataInput) => {
       const res = await client.post(`/v1/parts/${selectedPartId}/revisions/customer-data`, v);
@@ -1319,6 +1321,21 @@ export default function ProjectDetailPage() {
                     >
                       + Customer data
                     </button>
+                    <button onClick={() => setShowPackage(true)}
+                      className="ml-2 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium">+ Customer package</button>
+                    {showPackage && selectedPartId && (
+                      <CustomerPackageDialog open assemblyId={selectedPartId}
+                        projectParts={(parts ?? []).map((p) => ({ id: p.id, part_number: p.part_number, name: p.name }))}
+                        onClose={() => setShowPackage(false)}
+                        onDone={(r) => {
+                          toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
+                          setShowPackage(false);
+                          queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
+                          queryClient.invalidateQueries({ queryKey: ['parts', id] });
+                          queryClient.invalidateQueries({ queryKey: ['bom-tree'] });
+                          queryClient.invalidateQueries({ queryKey: ['project-assemblies', id] });
+                        }} />
+                    )}
                     {showCustomerData && (() => {
                       const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
                       const revs = partRevisions || [];

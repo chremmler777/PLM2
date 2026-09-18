@@ -12,6 +12,7 @@ import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import RevisionTimeline, { type Revision } from '../components/parts/RevisionTimeline';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
+import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import { useAuth } from '../contexts/AuthContext';
@@ -65,6 +66,7 @@ export default function PartDetail() {
   const { isAdmin } = useAuth();
   const [showStartChange, setShowStartChange] = useState(false);
   const [showCustomerData, setShowCustomerData] = useState(false);
+  const [showPackage, setShowPackage] = useState(false);
   const [promoting, setPromoting] = useState<Revision | null>(null);
   const [proposalParent, setProposalParent] = useState<number | null>(null);
   const [proposalSummary, setProposalSummary] = useState('');
@@ -87,6 +89,11 @@ export default function PartDetail() {
     queryKey: ['where-used', partId],
     queryFn: async () => (await client.get(`/v1/parts/${partId}/where-used`)).data as WhereUsed[],
     enabled: !!partId,
+  });
+  const { data: projectParts } = useQuery({
+    queryKey: ['parts', part?.project_id],
+    queryFn: async () => (await client.get(`/v1/parts/project/${part!.project_id}`)).data as { id: number; part_number: string; name: string }[],
+    enabled: !!part?.project_id,
   });
 
   const customerData = useMutation({
@@ -173,6 +180,8 @@ export default function PartDetail() {
                 className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">
                 + Customer data
               </button>
+              <button onClick={() => setShowPackage(true)}
+                className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium">+ Customer package</button>
               <StartChangeButton label="Start change request" onClick={() => setShowStartChange(true)}
                 className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium" />
             </div>
@@ -187,6 +196,13 @@ export default function PartDetail() {
         {showCustomerData && (
           <CustomerDataDialog open title="Customer data received" officialOnly={hasOfficial} nextMajor={nextMajor}
             pending={customerData.isPending} onClose={() => setShowCustomerData(false)} onSubmit={(v) => customerData.mutate(v)} />
+        )}
+
+        {showPackage && (
+          <CustomerPackageDialog open assemblyId={part.id} projectParts={projectParts ?? []} officialOnly={hasOfficial}
+            onClose={() => setShowPackage(false)}
+            onDone={(r) => { toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`); setShowPackage(false); refetch();
+              queryClient.invalidateQueries({ queryKey: ['where-used', partId] }); }} />
         )}
 
         {promoting && (
