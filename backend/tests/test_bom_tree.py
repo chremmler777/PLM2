@@ -142,3 +142,19 @@ async def test_project_assemblies_lists_self_made_roots_even_without_lines(clien
     assert roots["TOP"]["revision_name"] == "E1" and roots["TOP"]["line_count"] == 1
     assert roots["LONE"]["line_count"] == 0
     assert roots["NEW"]["revision_name"] is None
+
+
+async def test_tree_assemblies_and_where_used_carry_customer_index(client, eng_auth, seed):
+    top, top_rev = await _mk_part(client, eng_auth, seed, "IDX-TOP", with_e1=False)
+    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
+                          json={"statement": "review", "received_at": "2026-09-01", "customer_index": "B"})
+    top_rev = r.json()["id"]
+    sub, _ = await _mk_part(client, eng_auth, seed, "IDX-SUB")
+    await _add(client, eng_auth, top, top_rev, child_id=sub)
+    tree = (await client.get(f"/api/v1/parts/{top}/bom-tree", headers=eng_auth)).json()
+    assert tree["customer_index"] == "B"
+    assert tree["lines"][0]["child"]["customer_index"] is None
+    roots = {a["part_number"]: a for a in (await client.get(f"/api/v1/parts/project/{seed['project_id']}/assemblies", headers=eng_auth)).json()}
+    assert roots["IDX-TOP"]["customer_index"] == "B"
+    used = (await client.get(f"/api/v1/parts/{sub}/where-used", headers=eng_auth)).json()
+    assert used[0]["customer_index"] == "B"

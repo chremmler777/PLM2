@@ -76,6 +76,7 @@ class BomTreeService:
             "revision_id": rev.id if rev else None,
             "revision_name": rev.revision_name if rev else None,
             "revision_phase": rev.phase if rev else None,
+            "customer_index": rev.customer_index if rev else None,
             "cycle": part.id in ancestors, "lines": [],
         }
         if node["cycle"] or rev is None or depth >= MAX_DEPTH:
@@ -122,6 +123,7 @@ class BomTreeService:
             entry = {
                 "part_id": parent.id, "part_number": parent.part_number, "name": parent.name,
                 "revision_id": rev.id, "revision_name": rev.revision_name,
+                "customer_index": rev.customer_index,
                 "quantity": item.quantity, "unit": item.unit,
                 "parents": [] if parent.id in seen else
                 await BomTreeService._parents(session, parent.id, seen | {part_id}),
@@ -162,6 +164,7 @@ class BomTreeService:
                 "revision_id": rev.id if rev else None,
                 "revision_name": rev.revision_name if rev else None,
                 "revision_phase": rev.phase if rev else None,
+                "customer_index": rev.customer_index if rev else None,
                 "line_count": line_count.get(rev.id, 0) if rev else 0,
             })
         return out
