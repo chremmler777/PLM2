@@ -4,10 +4,8 @@ Files are attached to a specific PartRevision (not the part), giving each
 revision its own document set: CAD models, drawings, pictures, documents,
 test results. Uploads are blocked on frozen/cancelled/archived revisions.
 """
-import hashlib
 import logging
 import os
-import uuid
 from datetime import datetime
 from typing import List, Optional
 
@@ -22,57 +20,19 @@ from app.models import get_db
 from app.models import User
 from app.models.part import RevisionFile, RevisionStatus
 from app.services.part_service import PartService, RevisionService, ChangelogService
-from app.utils.cad_converter import convert_step_to_gltf
+from app.services.revision_file_service import (
+    EXTENSION_MAP,
+    VALID_FILE_TYPES,
+    MIME_MAP,
+    MAX_FILE_SIZE,
+    UnsupportedFile,
+    store_revision_file,
+    uploads_dir as _uploads_dir,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/parts", tags=["revision-files"])
-
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-
-# Extension -> (file_type, cad_format) mapping. PDFs default to "document";
-# callers can override with the file_type form field (e.g. "drawing").
-EXTENSION_MAP = {
-    ".step": ("cad", "step"),
-    ".stp": ("cad", "step"),
-    ".iges": ("cad", "iges"),
-    ".igs": ("cad", "iges"),
-    ".stl": ("cad", "stl"),
-    ".jt": ("cad", "jt"),
-    ".catpart": ("cad", "catia"),
-    ".catproduct": ("cad", "catia"),
-    ".dxf": ("drawing", None),
-    ".dwg": ("drawing", None),
-    ".pdf": ("document", None),
-    ".png": ("picture", None),
-    ".jpg": ("picture", None),
-    ".jpeg": ("picture", None),
-    ".gif": ("picture", None),
-    ".webp": ("picture", None),
-    ".docx": ("document", None),
-    ".xlsx": ("document", None),
-    ".pptx": ("document", None),
-    ".txt": ("document", None),
-    ".md": ("document", None),
-    ".csv": ("document", None),
-}
-
-VALID_FILE_TYPES = {"cad", "drawing", "picture", "document", "test_result"}
-
-MIME_MAP = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".txt": "text/plain",
-    ".md": "text/markdown",
-    ".csv": "text/csv",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-}
 
 LOCKED_STATUSES = {
     RevisionStatus.FROZEN.value,
@@ -83,10 +43,6 @@ LOCKED_STATUSES = {
 
 def _status_value(rev_status) -> str:
     return rev_status.value if hasattr(rev_status, "value") else str(rev_status)
-
-
-def _uploads_dir(revision_id: int) -> str:
-    return os.path.join(os.getcwd(), "uploads", "revisions", str(revision_id))
 
 
 async def _uploader_names(db: AsyncSession, user_ids: set) -> dict:
@@ -163,85 +119,21 @@ async def upload_revision_file(
 ):
     """Upload a file (CAD, drawing, picture, document, test result) to a revision."""
     try:
-        ext = os.path.splitext(file.filename or "")[1].lower()
-        if ext not in EXTENSION_MAP:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported file extension '{ext}'. Supported: {', '.join(sorted(EXTENSION_MAP))}",
-            )
-
-        inferred_type, cad_format = EXTENSION_MAP[ext]
-        resolved_type = file_type or inferred_type
-        if resolved_type not in VALID_FILE_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid file_type '{resolved_type}'. Valid: {', '.join(sorted(VALID_FILE_TYPES))}",
-            )
-
         part = await PartService.get_part(db, part_id)
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
-
         revision = await _load_revision(db, part_id, revision_id, mismatch_status=status.HTTP_400_BAD_REQUEST)
         if _status_value(revision.status) in LOCKED_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Revision {revision.revision_name} is {_status_value(revision.status)} and cannot accept new files",
             )
-
         contents = await file.read()
-        if len(contents) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File size must be under 100MB",
-            )
-
-        uploads_dir = _uploads_dir(revision_id)
-        os.makedirs(uploads_dir, exist_ok=True)
-        saved_filename = f"{uuid.uuid4().hex}{ext}"
-        file_path = os.path.join(uploads_dir, saved_filename)
-        with open(file_path, "wb") as fh:
-            fh.write(contents)
-
-        file_hash = hashlib.sha256(contents).hexdigest()
-
-        # Convert STEP CAD files to glTF for the web viewer
-        viewer_file_path = None
-        if cad_format == "step":
-            gltf_path = os.path.join(uploads_dir, f"{uuid.uuid4().hex}.glb")
-            try:
-                if await convert_step_to_gltf(file_path, gltf_path):
-                    viewer_file_path = gltf_path
-                else:
-                    logger.warning(f"glTF conversion failed for {file.filename}")
-            except Exception as e:
-                logger.error(f"glTF conversion error for {file.filename}: {e}", exc_info=True)
-
-        rev_file = RevisionFile(
-            revision_id=revision_id,
-            filename=file.filename,
-            file_type=resolved_type,
-            mime_type=file.content_type or MIME_MAP.get(ext, "application/octet-stream"),
-            file_size=len(contents),
-            file_path=file_path,
-            cad_format=cad_format,
-            file_hash=file_hash,
-            viewer_file_path=viewer_file_path,
-            has_viewer=viewer_file_path is not None,
-            uploaded_by=current_user.id,
-        )
-        db.add(rev_file)
-        await db.flush()
-
-        await ChangelogService.log_action(
-            db,
-            part_id=part_id,
-            revision_id=revision_id,
-            action="file_uploaded",
-            action_description=f"Uploaded {resolved_type} file '{file.filename}' to {revision.revision_name}",
-            performed_by=current_user.id,
-            file_id=rev_file.id,
-        )
+        try:
+            rev_file = await store_revision_file(db, revision, file.filename or "", contents, current_user.id,
+                                                 content_type=file.content_type, file_type=file_type)
+        except UnsupportedFile as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         await db.commit()
 
         logger.info(f"File uploaded to revision {revision_id}: {file.filename}")
