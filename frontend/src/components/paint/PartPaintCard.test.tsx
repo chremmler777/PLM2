@@ -135,6 +135,35 @@ describe('PartPaintCard', () => {
     })
   })
 
+  it('empties the payload when paint required is unchecked, but keeps the draft on screen', async () => {
+    clientMocks.put.mockResolvedValue({ data: setup() })
+    mockGet(setup({
+      paint_required: true,
+      process: 'Spray',
+      notes: 'note1',
+      layers: [
+        { layer_order: 1, area: 'top', notes: null, paint: paint(1) },
+        { layer_order: 2, area: 'bottom', notes: null, paint: paint(2) },
+      ],
+    }))
+    renderCard()
+    await screen.findByTestId('paint-layer-1')
+    fireEvent.click(screen.getByTestId('paint-required-toggle'))
+    fireEvent.click(screen.getByTestId('save-paint'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalled())
+    expect(clientMocks.put.mock.calls[0][1]).toEqual({
+      paint_required: false,
+      process: null,
+      notes: null,
+      layers: [],
+    })
+
+    fireEvent.click(screen.getByTestId('paint-required-toggle'))
+    expect(screen.getByTestId('paint-layer-0').textContent).toContain('Paint 1')
+    expect(screen.getByTestId('paint-layer-1').textContent).toContain('Paint 2')
+    expect((screen.getByTestId('paint-process-input') as HTMLInputElement).value).toBe('Spray')
+  })
+
   it('shows "paint spec missing" when required with no layers', async () => {
     mockGet(setup({ paint_required: true, layers: [] }))
     renderCard()

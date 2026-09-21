@@ -61,9 +61,11 @@ export default function PartPaintCard({ partId }: { partId: number }) {
     mutationFn: () =>
       putPartPaint(partId, {
         paint_required: paintRequired,
-        process: process || null,
-        notes: notes || null,
-        layers: layers.map((l) => ({ paint_id: l.paint_id, area: l.area || null, notes: l.notes || null })),
+        process: paintRequired ? process || null : null,
+        notes: paintRequired ? notes || null : null,
+        layers: paintRequired
+          ? layers.map((l) => ({ paint_id: l.paint_id, area: l.area || null, notes: l.notes || null }))
+          : [],
       }),
     onSuccess: () => {
       toast.success('Paint setup saved');
