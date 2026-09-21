@@ -121,4 +121,22 @@ describe('ProjectPaintSection', () => {
       expect(screen.getByTestId('project-paint-toggle').textContent).toContain('🎨 Paint (2)')
     )
   })
+
+  it('lists a painted article with no layer under "Paint spec missing" so the count and the list agree', async () => {
+    mockOverview([
+      { part_id: 5, part_number: '199409', name: 'Upper trim', process: 'TL 226', layers: [layer(1, paint(1))] },
+      { part_id: 6, part_number: '199407', name: 'Exit cover', process: 'TL 226 (tbc)', layers: [] },
+    ])
+    renderSection()
+    await waitFor(() =>
+      expect(screen.getByTestId('project-paint-toggle').textContent).toContain('🎨 Paint (2)')
+    )
+    await expand()
+    expect(await screen.findByTestId('paint-group-1')).toBeTruthy()
+    const missing = screen.getByTestId('paint-group-unspecified')
+    expect(within(missing).getByText('199407')).toBeTruthy()
+    expect(within(missing).getByText('TL 226 (tbc)')).toBeTruthy()
+    expect(within(screen.getByTestId('paint-group-1')).queryByText('199407')).toBeNull()
+    expect(screen.queryByText('No painted articles yet')).toBeNull()
+  })
 })

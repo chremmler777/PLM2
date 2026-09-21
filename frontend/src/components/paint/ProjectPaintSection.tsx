@@ -45,6 +45,12 @@ export default function ProjectPaintSection({ projectId }: { projectId: number }
   });
 
   const groups = useMemo(() => groupByPaint(overview ?? []), [overview]);
+  // Painted articles with no layer yet: counted in the header, so they must
+  // be listed too, or the count and the list disagree (1994, 2026-09-21).
+  const unspecified = useMemo(
+    () => (overview ?? []).filter((part) => part.layers.length === 0),
+    [overview],
+  );
 
   return (
     <div className="mb-4 bg-slate-800 rounded-lg border border-slate-700 p-3">
@@ -59,7 +65,7 @@ export default function ProjectPaintSection({ projectId }: { projectId: number }
 
       {expanded && (
         <div className="mt-3 space-y-3">
-          {groups.length === 0 ? (
+          {groups.length === 0 && unspecified.length === 0 ? (
             <p className="text-xs text-slate-500">No painted articles yet</p>
           ) : (
             groups.map((group) => (
@@ -91,6 +97,28 @@ export default function ProjectPaintSection({ projectId }: { projectId: number }
                 </div>
               </div>
             ))
+          )}
+          {unspecified.length > 0 && (
+            <div data-testid="paint-group-unspecified">
+              <div className="flex items-center gap-2 text-sm text-amber-300">
+                <span className="font-semibold">Paint spec missing</span>
+                <span className="text-xs text-amber-400/80">paint required, no layer recorded yet</span>
+              </div>
+              <div className="mt-1 space-y-1">
+                {unspecified.map((part) => (
+                  <div
+                    key={part.part_id}
+                    className="flex items-center gap-2 px-2 py-1 rounded bg-slate-900/40 text-sm"
+                  >
+                    <span className="text-slate-400 text-xs">{part.part_number}</span>
+                    <span className="text-slate-200 truncate">{part.name}</span>
+                    {part.process && (
+                      <span className="ml-auto text-xs text-slate-500 flex-shrink-0 truncate">{part.process}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}
