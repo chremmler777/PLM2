@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Mirrors app.models.paint.PAINT_TYPES; kept as a literal here so FastAPI/pydantic
 # can validate and document it directly.
@@ -36,6 +36,16 @@ class PaintUpdate(BaseModel):
     spec_reference: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+
+    # paint_type and is_active are NOT NULL columns on Paint; the field stays
+    # optional so a PUT can omit it, but an explicit `null` must 422 rather
+    # than reach PaintService.update_paint and blow up as a DB IntegrityError.
+    @field_validator("paint_type", "is_active", mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, v, info):
+        if v is None:
+            raise ValueError(f"{info.field_name} must not be null")
+        return v
 
 
 class PaintOut(BaseModel):

@@ -55,6 +55,24 @@ async def test_update_paint_duplicate_name_409(client, eng_auth):
     assert r.status_code == 409, r.text
 
 
+async def test_update_paint_null_paint_type_422(client, eng_auth):
+    paint = await _mk_paint(client, eng_auth, "Null type", paint_type="primer")
+    r = await client.put(f"/api/v1/paints/{paint['id']}", json={"paint_type": None}, headers=eng_auth)
+    assert r.status_code == 422, r.text
+
+    r = await client.get(f"/api/v1/paints/{paint['id']}", headers=eng_auth)
+    assert r.json()["paint_type"] == "primer"
+
+
+async def test_update_paint_null_is_active_422(client, eng_auth):
+    paint = await _mk_paint(client, eng_auth, "Null active")
+    r = await client.put(f"/api/v1/paints/{paint['id']}", json={"is_active": None}, headers=eng_auth)
+    assert r.status_code == 422, r.text
+
+    r = await client.get(f"/api/v1/paints/{paint['id']}", headers=eng_auth)
+    assert r.json()["is_active"] is True
+
+
 async def test_get_and_update_unknown_paint_404(client, eng_auth):
     assert (await client.get("/api/v1/paints/999999", headers=eng_auth)).status_code == 404
     r = await client.put("/api/v1/paints/999999", json={"notes": "x"}, headers=eng_auth)
