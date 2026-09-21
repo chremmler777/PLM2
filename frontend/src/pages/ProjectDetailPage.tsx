@@ -22,6 +22,7 @@ import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/
 import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
 import { revisionLabel } from '../components/parts/RevisionBadge';
+import { comparePartNumbers, stripProjectCode } from '../lib/partDisplay';
 import AssemblyTreeList from '../components/parts/AssemblyTreeList';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
@@ -168,21 +169,8 @@ function useAssemblyFiles(partId: number) {
 // Order by the embedded tool number: "3450" for a tool, the middle "3450" for
 // an article like "20-3450-001-0". Groups each tool with the articles it produces
 // (tool first), so the list runs 3450 → 3457 instead of all 10-/20- prefixes first.
-function toolNumber(partNumber: string): number {
-  const segs = partNumber.split('-');
-  const n = parseInt(segs.length > 1 ? segs[1] : segs[0], 10);
-  return Number.isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
-}
-
 function comparePartNodes(a: TreeNode, b: TreeNode): number {
-  const ta = toolNumber(a.part.part_number);
-  const tb = toolNumber(b.part.part_number);
-  if (ta !== tb) return ta - tb;
-  // Within the same tool number, the tool (no hyphen) comes before its articles.
-  const ha = a.part.part_number.includes('-') ? 1 : 0;
-  const hb = b.part.part_number.includes('-') ? 1 : 0;
-  if (ha !== hb) return ha - hb;
-  return a.part.part_number.localeCompare(b.part.part_number);
+  return comparePartNumbers(a.part.part_number, b.part.part_number);
 }
 
 // Build tree structure from flat parts list
@@ -455,10 +443,12 @@ function TreeNodeComponent({
   onDragStartPart,
   onDragEndPart,
   onDropOnPart,
+  projectCode,
 }: {
   node: TreeNode;
   selectedPartId: number | null;
   onSelect: (id: number) => void;
+  projectCode?: string;
   onContextMenu: (e: React.MouseEvent, id: number) => void;
   depth?: number;
   draggingPartId: number | null;
@@ -530,7 +520,7 @@ function TreeNodeComponent({
         <div className={`truncate flex-1 min-w-0 ${isHeadline ? 'text-slate-50 text-sm font-bold' : 'text-slate-100 text-sm font-medium'}`}>
           <span className="text-slate-400 text-xs">{node.part.part_number}</span>
           <span className="mx-1">•</span>
-          <span>{node.part.name}</span>
+          <span>{stripProjectCode(node.part.name, projectCode)}</span>
           {hasChildren && (
             <span className="ml-2 text-xs text-slate-500">
               ({node.children.length})
@@ -566,6 +556,7 @@ function TreeNodeComponent({
               onDragStartPart={onDragStartPart}
               onDragEndPart={onDragEndPart}
               onDropOnPart={onDropOnPart}
+              projectCode={projectCode}
             />
           ))}
         </div>
@@ -1087,6 +1078,12 @@ export default function ProjectDetailPage() {
 
   const selectedPart = parts?.find((p) => p.id === selectedPartId);
   const partTree = parts ? buildPartTree(parts) : [];
+  const visibleNodes: TreeNode[] = categoryFilter === 'all' || categoryFilter === 'assemblies'
+    ? partTree
+    : (parts ?? [])
+        .filter((p) => p.item_category === categoryFilter)
+        .map((p) => ({ part: p, children: [] }))
+        .sort(comparePartNodes);
 
   const selectedRevision = partRevisions?.find((r) => r.id === selectedRevisionId);
   const revisionLocked = !!selectedRevision && LOCKED_REVISION_STATUSES.includes(selectedRevision.status);
@@ -1151,7 +1148,7 @@ export default function ProjectDetailPage() {
         {/* Left: Parts Tree */}
         <div>
           <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-1">
-            Items ({parts?.length ?? 0})
+            Items ({visibleNodes.length}{categoryFilter !== 'all' ? ` of ${parts?.length ?? 0}` : ''})
           </h2>
           <p className="text-xs text-slate-500 mb-2">Drag a part onto a ★ sub-assembly to restructure</p>
           <div className="flex flex-wrap gap-1 mb-3">
@@ -1180,15 +1177,11 @@ export default function ProjectDetailPage() {
             <p className="text-slate-500 text-sm">No parts yet</p>
           ) : (
             <div className="space-y-1">
-              {(categoryFilter === 'all'
-                ? partTree
-                : (parts ?? [])
-                    .filter((p) => p.item_category === categoryFilter)
-                    .map((p) => ({ part: p, children: [] }))
-              ).map((node) => (
+              {visibleNodes.map((node) => (
                 <TreeNodeComponent
                   key={node.part.id}
                   node={node}
+                  projectCode={project.code}
                   selectedPartId={selectedPartId}
                   onSelect={setSelectedPartId}
                   onContextMenu={handleContextMenu}

@@ -139,3 +139,41 @@ describe('ProjectDetailPage add part form', () => {
     expect(clientMocks.post.mock.calls[0][1].customer_part_number).toBe(null)
   })
 })
+
+describe('ProjectDetailPage items list', () => {
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects')
+        return Promise.resolve({ data: [{ id: 2, name: 'Atlas', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2')
+        return Promise.resolve({ data: [
+          { id: 1, part_number: '1994-10', name: '1994 TOOL A-Bracket', part_type: 'purchased', item_category: 'tool', parent_part_id: null },
+          { id: 2, part_number: '1994-1', name: '1994 TOOL Handle', part_type: 'purchased', item_category: 'tool', parent_part_id: null },
+          { id: 3, part_number: '1994-2', name: '1994 - TOOL Latch', part_type: 'purchased', item_category: 'tool', parent_part_id: null },
+          { id: 4, part_number: '1994-100', name: 'Top', part_type: 'internal_mfg', item_category: 'article', parent_part_id: null },
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  const mount = () => render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/projects/2']}>
+        <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+      </MemoryRouter>
+    </QueryClientProvider>)
+
+  it('sorts numerically, drops the project code from names, and counts the filtered rows', async () => {
+    mount()
+    expect(await screen.findByText('Items (4)')).toBeTruthy()
+    fireEvent.click(screen.getByText(/Tool/))
+    expect(await screen.findByText('Items (3 of 4)')).toBeTruthy()
+    const numbers = screen.getAllByText(/^1994-\d+$/).map((el) => el.textContent)
+    expect(numbers).toEqual(['1994-1', '1994-2', '1994-10'])
+    expect(screen.getByText('TOOL Handle')).toBeTruthy()
+    expect(screen.getByText('TOOL Latch')).toBeTruthy()
+    expect(screen.queryByText('1994 TOOL Handle')).toBeNull()
+  })
+})
