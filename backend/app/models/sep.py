@@ -6,7 +6,7 @@ requires PM + Quality sign-off and locks its items.
 """
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, Float, ForeignKey, Integer
+from sqlalchemy import String, Text, DateTime, Float, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -136,3 +136,31 @@ class SepRisk(Base):
     @property
     def priority(self) -> str:
         return risk_priority(self.rkz)
+
+
+class SepItemFile(Base):
+    """A file attached to a SEP work item (filled-in forms, evidence, photos).
+
+    Any content type; the row is the record and `stored_path` points at the
+    blob under uploads/sep/<project>/<item>/. Deletes are soft so the audit
+    trail keeps pointing at something: the row stays with is_deleted set and
+    the blob is left on disk.
+    """
+    __tablename__ = "sep_item_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("sep_work_items.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+
+    filename: Mapped[str] = mapped_column(String(255))
+    stored_path: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+
+    uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

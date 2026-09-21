@@ -28,6 +28,7 @@ from app.models.sep import (
     SEP_ITEM_STATUSES, SEP_RISK_STATUSES,
 )
 from app.forms.risks import risk_rows_by_gate
+from app.services.sep_file_service import SepFileService
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,8 @@ def _risk_dict(r: SepRisk, names: dict[int, str]) -> dict:
     }
 
 
-def _item_dict(i: SepWorkItem, names: dict[int, str], gate_code: str | None = None, forms: dict | None = None) -> dict:
+def _item_dict(i: SepWorkItem, names: dict[int, str], gate_code: str | None = None,
+               forms: dict | None = None, file_counts: dict[int, int] | None = None) -> dict:
     return {
         "id": i.id,
         "gate_id": i.gate_id,
@@ -142,11 +144,13 @@ def _item_dict(i: SepWorkItem, names: dict[int, str], gate_code: str | None = No
         "lessons_link": _is_lessons_item(i),
         "form": (forms or {}).get(f"{gate_code}:{i.item_no}"),
         "references": _REFERENCES.get(f"{gate_code}:{i.item_no}", []),
+        "file_count": (file_counts or {}).get(i.id, 0),
     }
 
 
 def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True,
-               forms: dict | None = None, risk_rows: list[dict] | None = None) -> dict:
+               forms: dict | None = None, risk_rows: list[dict] | None = None,
+               file_counts: dict[int, int] | None = None) -> dict:
     d = {
         "id": g.id,
         "project_id": g.project_id,
@@ -167,9 +171,12 @@ def _gate_dict(g: SepGate, names: dict[int, str], with_details: bool = True,
         "closed_at": g.closed_at.isoformat() if g.closed_at else None,
         "progress": _gate_progress(g.items),
         "open_risks": sum(1 for r in (risk_rows or []) if r.get("status") != "finished"),
+        # Files live on items; the gate carries the sum so the UI can badge a
+        # gate without walking its items.
+        "file_count": sum((file_counts or {}).get(i.id, 0) for i in g.items),
     }
     if with_details:
-        d["items"] = [_item_dict(i, names, g.code, forms) for i in g.items]
+        d["items"] = [_item_dict(i, names, g.code, forms, file_counts) for i in g.items]
         d["risks"] = [_risk_dict(r, names) for r in g.risks]
     return d
 
@@ -285,11 +292,14 @@ async def get_project_sep(
     from app.forms.service import form_info_by_ref
     forms = await form_info_by_ref(db, project_id)
     rows = await risk_rows_by_gate(db, project_id)
+    # One grouped count query for the whole project, never one per item.
+    counts = await SepFileService.file_counts(db, project_id)
     total_items = [i for g in gates for i in g.items]
     return {
         "project_id": project_id,
         "active": True,
-        "gates": [_gate_dict(g, names, forms=forms, risk_rows=rows.get(g.code, [])) for g in gates],
+        "gates": [_gate_dict(g, names, forms=forms, risk_rows=rows.get(g.code, []),
+                             file_counts=counts) for g in gates],
         "rollup": {"total": _gate_progress(total_items)},
     }
 
@@ -425,7 +435,8 @@ async def update_item(
     await db.commit()
     await db.refresh(item)
     names = await _user_names(db, {item.responsible_id})
-    return _item_dict(item, names)
+    counts = await SepFileService.file_counts(db, item.project_id)
+    return _item_dict(item, names, file_counts=counts)
 
 
 @router.get("/items/{item_id}/audits", response_model=list[dict])

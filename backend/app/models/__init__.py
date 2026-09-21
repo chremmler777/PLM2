@@ -15,7 +15,7 @@ from app.models.lesson import LessonLearned, LessonAction, LessonComment, Lesson
 from app.models.quality import PPAPSubmission, PPAPElement
 from app.models.supplier import Supplier
 from app.models.timing import ProjectMilestone
-from app.models.sep import SepGate, SepWorkItem, SepItemAudit, SepRisk
+from app.models.sep import SepGate, SepWorkItem, SepItemAudit, SepRisk, SepItemFile
 from app.models.forms import FormDefinition, FormInstance, FormEvent
 from app.models.change import (
     ChangeRequest, ChangeImpactedItem, ChangeAssessment, ChangeAttachment, ChangeChangelog,
