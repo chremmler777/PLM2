@@ -31,7 +31,9 @@ const ARTICLE_PREFIX_GROUP: Record<string, ItemGroupKey> = {
  * backend/app/services/equipment_numbering.py. This has to lead over
  * item_category: an EOAT is stored as item_category 'assembly_equipment', so
  * only the number distinguishes it from an in-cell station.
- * A bare tool number (no suffix) is the mold itself.
+ * A bare tool number (no suffix) is the mold itself. Tool numbers are 3-4
+ * digits for legacy tools and 6 for project-coded ones (199401 = project
+ * 1994, tool 01).
  */
 const OP_CODE_GROUP: Record<string, ItemGroupKey> = {
   '1': 'eoat',
@@ -39,7 +41,7 @@ const OP_CODE_GROUP: Record<string, ItemGroupKey> = {
   '3': 'secondary_station',
   '4': 'gauge',
 };
-const EQUIPMENT_NUMBER = /^\d{3,4}-(\d)\d$/;
+const EQUIPMENT_NUMBER = /^\d{3,6}-(\d)\d$/;
 
 /** Order the groups appear in. Articles first — the common change target. */
 export const ITEM_GROUP_ORDER: ItemGroupKey[] = [

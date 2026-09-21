@@ -2,6 +2,7 @@
 
 // Part numbers carry a numeric position after the project or tool prefix:
 // 1994-1, 1994-10 (project items) or 10-3450 (tooling, tool number second).
+// Project-coded tools (199401, 199402) have no hyphen and sort by the whole number.
 // Sort by that number so -10 lands after -9, then a bare tool before its
 // articles, then plain text.
 function positionNumber(partNumber: string): number {

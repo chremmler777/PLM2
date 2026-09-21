@@ -74,3 +74,11 @@ describe('groupItems', () => {
     expect(ITEM_GROUP_ORDER).toEqual(emitted)
   })
 })
+
+describe('project-coded tool numbers', () => {
+  it('reads the op code behind a six-digit tool number', () => {
+    expect(itemGroup({ part_number: '199401-41', item_category: 'assembly_equipment' })).toBe('gauge')
+    expect(itemGroup({ part_number: '199401-11', item_category: 'assembly_equipment' })).toBe('eoat')
+    expect(itemGroup({ part_number: '199401', item_category: 'tool' })).toBe('tool')
+  })
+})

@@ -88,3 +88,9 @@ def test_item_category_splits_gauges_from_equipment():
     assert item_category_for("41") == "gauge"
     assert item_category_for("10") == "assembly_equipment"
     assert item_category_for("30") == "assembly_equipment"
+
+
+def test_normalise_keeps_project_coded_six_digit_tools():
+    assert normalise_tool_ref("199401") == ["199401"]
+    assert normalise_tool_ref("199401/199402") == ["199401", "199402"]
+    assert normalise_tool_ref("199401-001") == ["199401"]

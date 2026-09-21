@@ -19,8 +19,10 @@ OP_CODE_KINDS: dict[int, str] = {
 }
 
 # A sheet cell may name several tools ("918/919") and may carry a cavity or
-# variant suffix ("3197-001-0"). Only the leading 3-4 digit run identifies a tool.
-_TOOL_TOKEN = re.compile(r"^(\d{3,4})")
+# variant suffix ("3197-001-0"). Only the leading digit run identifies a tool:
+# 3-4 digits for legacy tools ('745', '3450'), 6 for project-coded ones
+# ('199401' = project 1994, tool 01).
+_TOOL_TOKEN = re.compile(r"^(\d{3,6})")
 
 # Linkage vocabulary added alongside part_relations' existing
 # produces / checks / assembles / related.
