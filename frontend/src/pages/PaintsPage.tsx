@@ -328,7 +328,7 @@ export default function PaintsPage() {
     queryKey: ['paints', { search, showInactive }],
     queryFn: () =>
       paintsApi.listPaints({
-        activeOnly: showInactive ? undefined : true,
+        activeOnly: !showInactive,
         q: search || undefined,
       }),
   });

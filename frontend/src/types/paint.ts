@@ -14,7 +14,6 @@ export const PAINT_TYPE_LABEL: Record<PaintType, string> = {
 
 export interface Paint {
   id: number;
-  organization_id: number;
   name: string;
   paint_type: PaintType;
   colour_code: string | null;
@@ -25,8 +24,6 @@ export interface Paint {
   spec_reference: string | null;
   notes: string | null;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface PaintCreateRequest {

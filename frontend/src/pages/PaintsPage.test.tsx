@@ -9,7 +9,6 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const paint = (over: Record<string, unknown> = {}) => ({
   id: 1,
-  organization_id: 1,
   name: 'RAL 9005 Basecoat',
   paint_type: 'basecoat',
   colour_code: 'RAL 9005',
@@ -20,8 +19,6 @@ const paint = (over: Record<string, unknown> = {}) => ({
   spec_reference: 'SPEC-1',
   notes: null,
   is_active: true,
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
   ...over,
 })
 
@@ -88,7 +85,7 @@ describe('PaintsPage', () => {
     await waitFor(() =>
       expect(clientMocks.get).toHaveBeenCalledWith(
         '/v1/paints',
-        expect.objectContaining({ params: expect.objectContaining({ active_only: undefined }) })
+        expect.objectContaining({ params: expect.objectContaining({ active_only: false }) })
       )
     )
   })
