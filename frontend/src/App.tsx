@@ -14,6 +14,7 @@ import PartDetail from './pages/PartDetail';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
+import PaintsPage from './pages/PaintsPage';
 import Dashboard from './pages/Dashboard';
 import SuppliersPage from './pages/SuppliersPage';
 import LessonsLearnedPage from './pages/LessonsLearnedPage';
@@ -93,6 +94,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CatalogPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/paints"
+        element={
+          <ProtectedRoute>
+            <PaintsPage />
           </ProtectedRoute>
         }
       />

@@ -23,6 +23,7 @@ export default function Sidebar() {
     { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
     { path: '/projects', label: 'Projects', icon: '📁' },
     { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
+    { path: '/paints', label: 'Paints', icon: '🎨' },
     { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
     { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
     { path: '/changes', label: 'Changes', icon: '🔄' },
