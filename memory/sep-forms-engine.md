@@ -80,3 +80,5 @@ part of this branch): rebuild the backend image, `alembic upgrade head`,
 verify 1994A/1994B got a risk_assessment instance carrying their old
 `sep_risks` rows, then check the K0/RG1 gate colours match what they were
 before. Related: [[brose-award-import-2026-09-02]].
+
+**2026-09-21 decision: forms parked, topics are file slots.** Christoph wants to first collect the existing filled forms for projects 1994 and 2277, then go through the documents and rebuild the forms in the UI. Every SEP work item now accepts file uploads (drag and drop or pick), with a 📎 count per item and gate, and a **Documents** tab lists every file of the project by gate and item. Table `sep_item_files` (migration 074), service `backend/app/services/sep_file_service.py`, routes under `/api/v1/sep/items/{id}/files` and `/api/v1/sep/projects/{id}/files`, UI in `frontend/src/components/sep/`. The forms engine and the "Open form" button stay in place but are secondary until the document pass is done. Known gaps: soft-deleted blobs are never reaped; uploads are buffered in memory; the pre-existing `GET /sep/projects/{id}` is still not org-scoped.
