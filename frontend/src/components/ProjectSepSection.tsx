@@ -4,6 +4,7 @@
  * department (tri-state items), forms tab, and PM+Quality dual sign-off.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
@@ -104,9 +105,10 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
         <div className="text-slate-200 leading-snug" title={item.title_de}>
           {item.title_en}
           {item.lessons_link && (
-            <a href={`/lessons`} className="ml-1.5 text-xs text-blue-400 hover:text-blue-300" title="Linked to lessons learned reuse">
+            <Link to={`/lessons?project=${projectId}`} className="ml-1.5 text-xs text-blue-400 hover:text-blue-300"
+              title="Linked to lessons learned reuse">
               📘 lessons
-            </a>
+            </Link>
           )}
           {item.references.map((r) => (
             <span key={r.path} className="ml-1.5 text-xs text-slate-500" title={r.path}>📎 {r.title}</span>
