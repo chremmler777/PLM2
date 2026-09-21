@@ -1,4 +1,5 @@
 # PLM2 Project Memory
+- [Paint catalog 2026-09-21](paint-catalog-2026-09-21.md) — org-scoped paint master data, ordered layers per article (part-level, engineering only), Painted chip + Paint section on the project page; follow-ups listed
 - [Customer package receive 2026-09-18](customer-package-receive-2026-09-18.md) — merged to main: assembly+parts delivery in one step, unchanged parts keep their E (index-based, no hash), chosen E number, `E2 · B` everywhere, customer part number now editable; rulings + follow-ups listed
 
 - [Brose award import 2026-09-02](brose-award-import-2026-09-02.md) — RFQ 25/26 Brose Sitech loaded as projects 1994A/1994B (full RFQ scope: 25 articles, 18 tools) via backend/scripts/import_brose.py; open mismatches to confirm with Brose
