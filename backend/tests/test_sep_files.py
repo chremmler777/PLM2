@@ -178,6 +178,83 @@ async def test_upload_rejects_a_file_over_the_cap(
     assert listed == []
 
 
+async def test_oversize_file_leaves_no_blob_behind(
+        client, eng_auth, seed, monkeypatch, _uploads_here):
+    """The stream is cut off mid-file, and the partial write is removed."""
+    _, item = await _first_item(client, eng_auth, seed["project_id"])
+    monkeypatch.setattr(sep_file_service, "MAX_FILE_SIZE", 8)
+    monkeypatch.setattr(sep_file_service, "CHUNK_SIZE", 4)
+
+    res = await _upload(client, eng_auth, item["id"], [
+        ("files", ("small.txt", b"fits", "text/plain")),
+        ("files", ("huge.bin", b"0" * 64, "application/octet-stream")),
+    ])
+    assert res.status_code == 413, res.text
+    assert res.json()["detail"] == "File huge.bin exceeds 100MB"
+
+    listed = (await client.get(f"/api/v1/sep/items/{item['id']}/files", headers=eng_auth)).json()
+    assert listed == []
+    item_dir = _uploads_here / "uploads" / "sep" / str(seed["project_id"]) / str(item["id"])
+    assert not item_dir.exists() or list(item_dir.iterdir()) == []
+
+
+async def test_upload_rejects_more_than_twenty_files(client, eng_auth, seed, _uploads_here):
+    _, item = await _first_item(client, eng_auth, seed["project_id"])
+    res = await _upload(client, eng_auth, item["id"], [
+        ("files", (f"f{n}.txt", b"x", "text/plain")) for n in range(21)])
+    assert res.status_code == 413, res.text
+    assert res.json()["detail"] == "Too many files in one upload (max 20)"
+
+    listed = (await client.get(f"/api/v1/sep/items/{item['id']}/files", headers=eng_auth)).json()
+    assert listed == []
+    item_dir = _uploads_here / "uploads" / "sep" / str(seed["project_id"]) / str(item["id"])
+    assert not item_dir.exists() or list(item_dir.iterdir()) == []
+
+
+async def test_twenty_files_still_go_through(client, eng_auth, seed, _uploads_here):
+    _, item = await _first_item(client, eng_auth, seed["project_id"])
+    res = await _upload(client, eng_auth, item["id"], [
+        ("files", (f"f{n}.txt", b"x", "text/plain")) for n in range(20)])
+    assert res.status_code == 201, res.text
+    assert len(res.json()) == 20
+
+
+async def test_a_very_long_filename_is_truncated_to_fit(client, eng_auth, seed, _uploads_here):
+    _, item = await _first_item(client, eng_auth, seed["project_id"])
+    long_name = "x" * 300 + ".xlsx"
+
+    res = await _upload(client, eng_auth, item["id"], [
+        ("files", (long_name, b"bytes", "application/octet-stream"))])
+    assert res.status_code == 201, res.text
+    stored = res.json()[0]["filename"]
+    assert len(stored) <= 255
+    assert stored.endswith(".xlsx")
+
+    res = await client.get(
+        f"/api/v1/sep/items/{item['id']}/files/{res.json()[0]['id']}/download", headers=eng_auth)
+    assert res.status_code == 200
+    assert res.content == b"bytes"
+
+
+async def test_download_404_when_the_blob_is_gone(
+        client, eng_auth, seed, session_factory, _uploads_here):
+    """A row without its file is a 404, not a 500."""
+    import os
+
+    _, item = await _first_item(client, eng_auth, seed["project_id"])
+    created = (await _upload(client, eng_auth, item["id"], [
+        ("files", ("vanishing.txt", b"poof", "text/plain"))])).json()
+
+    async with session_factory() as s:
+        row = (await s.execute(
+            select(SepItemFile).where(SepItemFile.id == created[0]["id"]))).scalar_one()
+        os.remove(row.stored_path)
+
+    res = await client.get(
+        f"/api/v1/sep/items/{item['id']}/files/{created[0]['id']}/download", headers=eng_auth)
+    assert res.status_code == 404
+
+
 async def test_upload_rejects_an_empty_filename(client, eng_auth, seed, _uploads_here):
     _, item = await _first_item(client, eng_auth, seed["project_id"])
     res = await _upload(client, eng_auth, item["id"], [

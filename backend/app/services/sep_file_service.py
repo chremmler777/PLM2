@@ -23,18 +23,37 @@ from app.models.sep import SepGate, SepItemFile, SepWorkItem
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB per file
+MAX_FILES_PER_REQUEST = 20
+CHUNK_SIZE = 1024 * 1024  # stream in 1 MiB bites; never hold a whole upload
+MAX_FILENAME_LEN = 200    # filename column is 255, and the path gets a uuid prefix
 
 
 class SepFileError(Exception):
-    """Upload rejected before anything was written."""
+    """Upload rejected; nothing of this batch survives on disk."""
 
 
 class FileTooLarge(SepFileError):
     pass
 
 
+class TooManyFiles(SepFileError):
+    pass
+
+
 class EmptyFilename(SepFileError):
     pass
+
+
+def _safe_name(raw: str | None) -> str:
+    """Basename, trimmed, and short enough for the column - extension kept."""
+    name = os.path.basename(raw or "").strip()
+    if not name:
+        raise EmptyFilename("Every file needs a filename")
+    if len(name) > MAX_FILENAME_LEN:
+        stem, ext = os.path.splitext(name)
+        ext = ext[:MAX_FILENAME_LEN]          # a pathological "extension" cannot win
+        name = stem[:MAX_FILENAME_LEN - len(ext)] + ext
+    return name
 
 
 class SepFileService:
@@ -44,23 +63,27 @@ class SepFileService:
         return os.path.join(os.getcwd(), "uploads", "sep", str(project_id), str(item_id))
 
     @staticmethod
+    def _discard(paths: list[str]) -> None:
+        for path in paths:
+            try:
+                os.remove(path)
+            except OSError:
+                logger.warning("Could not remove orphaned SEP upload %s", path)
+
+    @staticmethod
     async def store_files(db: AsyncSession, *, item: SepWorkItem, files: list,
                           user_id: int) -> list[SepItemFile]:
-        """Write every upload to disk and insert its row.
+        """Stream every upload to disk and insert its row.
 
-        Reads and validates all files first so a rejected batch leaves nothing
-        behind; if the DB step fails the blobs written for this batch are
-        removed again.
+        Each file is copied a chunk at a time and hashed as it goes, so a
+        request never holds an upload in memory, and it is abandoned the moment
+        it grows past the cap. Whatever the failure - too many files, one file
+        too large, an empty name, a failing insert - every blob written for the
+        batch is removed again, so a rejected batch leaves nothing behind.
         """
-        payloads: list[tuple[str, bytes, str]] = []
-        for f in files:
-            safe_name = os.path.basename(f.filename or "").strip()
-            if not safe_name:
-                raise EmptyFilename("Every file needs a filename")
-            contents = await f.read()
-            if len(contents) > MAX_FILE_SIZE:
-                raise FileTooLarge(f"File {safe_name} exceeds 100MB")
-            payloads.append((safe_name, contents, f.content_type or "application/octet-stream"))
+        if len(files) > MAX_FILES_PER_REQUEST:
+            raise TooManyFiles(
+                f"Too many files in one upload (max {MAX_FILES_PER_REQUEST})")
 
         target_dir = SepFileService._dir(item.project_id, item.id)
         os.makedirs(target_dir, exist_ok=True)
@@ -68,30 +91,34 @@ class SepFileService:
         written: list[str] = []
         rows: list[SepItemFile] = []
         try:
-            for safe_name, contents, content_type in payloads:
+            for f in files:
+                safe_name = _safe_name(f.filename)
                 stored_path = os.path.join(target_dir, f"{uuid.uuid4().hex}_{safe_name}")
-                with open(stored_path, "wb") as fh:
-                    fh.write(contents)
+                digest = hashlib.sha256()
+                size = 0
                 written.append(stored_path)
+                with open(stored_path, "wb") as fh:
+                    while chunk := await f.read(CHUNK_SIZE):
+                        size += len(chunk)
+                        if size > MAX_FILE_SIZE:
+                            raise FileTooLarge(f"File {safe_name} exceeds 100MB")
+                        digest.update(chunk)
+                        fh.write(chunk)
                 row = SepItemFile(
                     item_id=item.id,
                     project_id=item.project_id,
                     filename=safe_name,
                     stored_path=stored_path,
-                    content_type=content_type,
-                    size_bytes=len(contents),
-                    sha256=hashlib.sha256(contents).hexdigest(),
+                    content_type=f.content_type or "application/octet-stream",
+                    size_bytes=size,
+                    sha256=digest.hexdigest(),
                     uploaded_by=user_id,
                 )
                 db.add(row)
                 rows.append(row)
             await db.flush()
         except Exception:
-            for path in written:      # do not leave orphans behind a failed insert
-                try:
-                    os.remove(path)
-                except OSError:
-                    logger.warning("Could not remove orphaned SEP upload %s", path)
+            SepFileService._discard(written)
             raise
         return rows
 

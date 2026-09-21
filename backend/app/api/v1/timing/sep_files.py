@@ -11,6 +11,8 @@ hop part_paint.py makes. An item outside the org is a 404, not a 403.
 """
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
@@ -23,10 +25,13 @@ from app.models.entities import Plant, Project
 from app.models.sep import SepWorkItem
 from app.schemas.sep import SepItemFileOut, SepProjectFileGateOut
 from app.services.sep_file_service import (
-    EmptyFilename, FileTooLarge, SepFileService,
+    EmptyFilename, FileTooLarge, SepFileService, TooManyFiles,
 )
 
 router = APIRouter(prefix="/sep", tags=["sep"])
+
+# Starlette renamed the constant; keep working on both.
+HTTP_413 = getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413)
 
 
 async def _item_in_org(db: AsyncSession, item_id: int, org_id: int) -> SepWorkItem:
@@ -79,8 +84,8 @@ async def upload_item_files(
     try:
         rows = await SepFileService.store_files(
             db, item=item, files=files, user_id=current_user.id)
-    except FileTooLarge as e:
-        raise HTTPException(status_code=413, detail=str(e))
+    except (FileTooLarge, TooManyFiles) as e:
+        raise HTTPException(status_code=HTTP_413, detail=str(e))
     except EmptyFilename as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     for row in rows:
@@ -113,7 +118,7 @@ async def download_item_file(
     """Stream one file back under its original name and content type."""
     await _item_in_org(db, item_id, current_user.organization_id)
     f = await SepFileService.get_file(db, item_id=item_id, file_id=file_id)
-    if f is None:
+    if f is None or not os.path.exists(f.stored_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return FileResponse(f.stored_path, filename=f.filename,
                         media_type=f.content_type or "application/octet-stream")
