@@ -275,3 +275,49 @@ async def test_used_in_is_org_scoped(session_factory, seed):
         await s.commit()
         # asking as the other org must not see this org's paint usage
         assert await PaintService.used_in(s, org_id=other.id, paint_id=paint.id) == []
+
+
+# --- supplier validation ---------------------------------------------------
+
+async def test_create_paint_rejects_unknown_supplier(session_factory, seed):
+    from app.services.paint_service import UnknownSupplier
+    async with session_factory() as s:
+        with pytest.raises(UnknownSupplier):
+            await _paint(s, seed["org_id"], seed["admin_id"], "Bad supplier",
+                         supplier_id=999999)
+
+
+async def test_create_paint_rejects_supplier_of_other_org(session_factory, seed):
+    from app.models.supplier import Supplier
+    from app.services.paint_service import UnknownSupplier
+    async with session_factory() as s:
+        other = await _second_org(s)
+        supplier = Supplier(organization_id=other.id, name="Foreign Coatings", is_active=True)
+        s.add(supplier)
+        await s.flush()
+        with pytest.raises(UnknownSupplier):
+            await _paint(s, seed["org_id"], seed["admin_id"], "Foreign supplier",
+                         supplier_id=supplier.id)
+
+
+async def test_create_and_update_paint_accept_own_supplier(session_factory, seed):
+    from app.models.supplier import Supplier
+    from app.services.paint_service import UnknownSupplier
+    async with session_factory() as s:
+        supplier = Supplier(organization_id=seed["org_id"], name="Own Coatings", is_active=True)
+        s.add(supplier)
+        await s.flush()
+        p = await _paint(s, seed["org_id"], seed["admin_id"], "Own supplier",
+                         supplier_id=supplier.id)
+        await s.commit()
+        assert p.supplier_id == supplier.id
+
+        # clearing it back to NULL stays allowed
+        p = await PaintService.update_paint(s, org_id=seed["org_id"], paint_id=p.id,
+                                            supplier_id=None)
+        await s.commit()
+        assert p.supplier_id is None
+
+        with pytest.raises(UnknownSupplier):
+            await PaintService.update_paint(s, org_id=seed["org_id"], paint_id=p.id,
+                                            supplier_id=999999)

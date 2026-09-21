@@ -73,6 +73,54 @@ async def test_update_paint_null_is_active_422(client, eng_auth):
     assert r.json()["is_active"] is True
 
 
+async def test_update_paint_null_name_422(client, eng_auth):
+    paint = await _mk_paint(client, eng_auth, "Null name")
+    r = await client.put(f"/api/v1/paints/{paint['id']}", json={"name": None}, headers=eng_auth)
+    assert r.status_code == 422, r.text
+
+    r = await client.get(f"/api/v1/paints/{paint['id']}", headers=eng_auth)
+    assert r.json()["name"] == "Null name"
+
+
+async def test_create_paint_unknown_supplier_400(client, eng_auth):
+    r = await client.post("/api/v1/paints",
+                          json={"name": "Ghost supplier", "supplier_id": 999999},
+                          headers=eng_auth)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Unknown supplier"
+
+
+async def test_update_paint_unknown_supplier_400(client, eng_auth):
+    paint = await _mk_paint(client, eng_auth, "Supplier update")
+    r = await client.put(f"/api/v1/paints/{paint['id']}",
+                         json={"supplier_id": 999999}, headers=eng_auth)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Unknown supplier"
+
+
+async def test_create_paint_supplier_of_other_org_400(client, eng_auth, session_factory):
+    from app.models.supplier import Supplier
+    async with session_factory() as s:
+        other = Organization(name="Supplier Org", code="supplier-org", is_active=True)
+        s.add(other)
+        await s.flush()
+        supplier = Supplier(organization_id=other.id, name="Cross Org Coatings", is_active=True)
+        s.add(supplier)
+        await s.commit()
+        supplier_id = supplier.id
+
+    r = await client.post("/api/v1/paints",
+                          json={"name": "Cross org supplier", "supplier_id": supplier_id},
+                          headers=eng_auth)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "Unknown supplier"
+
+    paint = await _mk_paint(client, eng_auth, "Cross org update")
+    r = await client.put(f"/api/v1/paints/{paint['id']}",
+                         json={"supplier_id": supplier_id}, headers=eng_auth)
+    assert r.status_code == 400, r.text
+
+
 async def test_get_and_update_unknown_paint_404(client, eng_auth):
     assert (await client.get("/api/v1/paints/999999", headers=eng_auth)).status_code == 404
     r = await client.put("/api/v1/paints/999999", json={"notes": "x"}, headers=eng_auth)

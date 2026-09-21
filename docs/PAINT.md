@@ -10,8 +10,8 @@ background: `docs/superpowers/specs/2026-09-21-paint-catalog-design.md`.
 A paint is org-scoped master data, edited once and reused across articles:
 name, type (`primer`, `basecoat`, `clearcoat`, `one_coat`, `other`), colour
 code (e.g. `RAL 9005`), colour name, an optional colour swatch (hex),
-supplier (linked or free text), a spec reference (datasheet or spec number),
-and notes. Paint names are unique per organization.
+supplier (free text — a supplier link exists in the API), a spec reference
+(datasheet or spec number), and notes. Paint names are unique per organization.
 
 Paints are never deleted, only deactivated. An article's layers can still
 reference an inactive paint; it keeps rendering, tagged as inactive.

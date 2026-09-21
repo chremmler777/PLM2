@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.entities import Project
 from app.models.paint import Paint, PartPaint, PartPaintLayer
 from app.models.part import Part
+from app.models.supplier import Supplier
 from app.services.part_service import ChangelogService
 
 EMPTY_SETUP: dict[str, Any] = {
@@ -26,6 +27,10 @@ EMPTY_SETUP: dict[str, Any] = {
 
 class DuplicatePaint(ValueError):
     """A paint with that name already exists in the organization."""
+
+
+class UnknownSupplier(ValueError):
+    """The supplier_id does not exist, or belongs to another organization."""
 
 
 def _paint_dict(paint: Paint) -> dict[str, Any]:
@@ -109,12 +114,31 @@ class PaintService:
         return (await session.execute(stmt)).first() is not None
 
     @staticmethod
+    async def _check_supplier(session: AsyncSession, org_id: int, supplier_id: Optional[int]) -> None:
+        """A supplier_id must point at an existing supplier of this org.
+
+        Suppliers may be global (organization_id NULL); those are accepted by
+        every org. Without this check an unknown id reached the DB and blew up
+        as a foreign-key IntegrityError (500) at commit time.
+        """
+        if supplier_id is None:
+            return
+        supplier = (await session.execute(
+            select(Supplier).where(Supplier.id == supplier_id)
+        )).scalar_one_or_none()
+        if supplier is None:
+            raise UnknownSupplier("Unknown supplier")
+        if supplier.organization_id is not None and supplier.organization_id != org_id:
+            raise UnknownSupplier("Unknown supplier")
+
+    @staticmethod
     async def create_paint(session: AsyncSession, org_id: int, created_by: int, **fields) -> Paint:
         name = (fields.pop("name", None) or "").strip()
         if not name:
             raise ValueError("Paint name is required")
         if await PaintService._name_taken(session, org_id, name):
             raise DuplicatePaint(f"A paint named '{name}' already exists")
+        await PaintService._check_supplier(session, org_id, fields.get("supplier_id"))
         fields.pop("organization_id", None)
         fields.pop("created_by", None)
         paint = Paint(organization_id=org_id, name=name, created_by=created_by,
@@ -140,6 +164,8 @@ class PaintService:
             if name != paint.name and await PaintService._name_taken(session, org_id, name, paint.id):
                 raise DuplicatePaint(f"A paint named '{name}' already exists")
             paint.name = name
+        if "supplier_id" in fields:
+            await PaintService._check_supplier(session, org_id, fields["supplier_id"])
         for key, value in fields.items():
             if hasattr(Paint, key):
                 setattr(paint, key, value)

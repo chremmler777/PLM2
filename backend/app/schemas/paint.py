@@ -37,10 +37,11 @@ class PaintUpdate(BaseModel):
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
-    # paint_type and is_active are NOT NULL columns on Paint; the field stays
-    # optional so a PUT can omit it, but an explicit `null` must 422 rather
-    # than reach PaintService.update_paint and blow up as a DB IntegrityError.
-    @field_validator("paint_type", "is_active", mode="before")
+    # name, paint_type and is_active are NOT NULL columns on Paint; the fields
+    # stay optional so a PUT can omit them, but an explicit `null` must 422
+    # rather than reach PaintService.update_paint, where a null name raised a
+    # plain ValueError that the router mapped to a misleading 404.
+    @field_validator("name", "paint_type", "is_active", mode="before")
     @classmethod
     def _reject_explicit_null(cls, v, info):
         if v is None:
