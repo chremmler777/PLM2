@@ -39,6 +39,7 @@ describe('PartDetail customer part number', () => {
     clientMocks.put.mockReset()
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/parts/5') return Promise.resolve({ data: part() })
+      if (url === '/v1/parts/5/paint') return Promise.resolve({ data: { paint_required: false, process: null, notes: null, layers: [] } })
       return Promise.resolve({ data: [] })
     })
     clientMocks.put.mockResolvedValue({ data: part({ customer_part_number: '3CR.807.425.B' }) })

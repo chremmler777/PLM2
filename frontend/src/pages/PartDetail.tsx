@@ -14,6 +14,7 @@ import RevisionTimeline, { type Revision } from '../components/parts/RevisionTim
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
+import PartPaintCard from '../components/paint/PartPaintCard';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -246,6 +247,8 @@ export default function PartDetail() {
             <div><div className="text-sm text-slate-400">Classification</div><div className="font-medium text-slate-100 capitalize">{part.data_classification}</div></div>
           </div>
         </div>
+
+        <PartPaintCard partId={part.id} />
 
         {usedIn && usedIn.length > 0 && (
           <div data-testid="used-in" className="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-8 flex items-center gap-2 flex-wrap text-sm">
