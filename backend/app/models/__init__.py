@@ -5,6 +5,7 @@ from app.models.entities import (
     UserWorkflowRole, AuditLog, LoginHistory
 )
 from app.models.catalog import CatalogPart
+from app.models.paint import Paint, PartPaint, PartPaintLayer
 from app.models.part import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, PartBOMItem, PartRelation
@@ -48,6 +49,9 @@ __all__ = [
     "AuditLog",
     "LoginHistory",
     "CatalogPart",
+    "Paint",
+    "PartPaint",
+    "PartPaintLayer",
     "Part",
     "PartRevision",
     "RevisionFile",
