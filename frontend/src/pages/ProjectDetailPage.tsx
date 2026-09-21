@@ -16,6 +16,10 @@ import MilestoneStrip from '../components/MilestoneStrip';
 import ProjectLessonsSection from '../components/ProjectLessonsSection';
 import ProjectSepSection from '../components/ProjectSepSection';
 import ProjectChangesSection from '../components/ProjectChangesSection';
+import ProjectPaintSection from '../components/paint/ProjectPaintSection';
+import ColourSwatch from '../components/paint/ColourSwatch';
+import { projectPaintOverview } from '../api/paints';
+import type { PartPaintLayer } from '../types/paint';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
@@ -444,11 +448,13 @@ function TreeNodeComponent({
   onDragEndPart,
   onDropOnPart,
   projectCode,
+  paintByPartId,
 }: {
   node: TreeNode;
   selectedPartId: number | null;
   onSelect: (id: number) => void;
   projectCode?: string;
+  paintByPartId?: Map<number, PartPaintLayer>;
   onContextMenu: (e: React.MouseEvent, id: number) => void;
   depth?: number;
   draggingPartId: number | null;
@@ -527,6 +533,14 @@ function TreeNodeComponent({
             </span>
           )}
         </div>
+        {paintByPartId?.get(node.part.id) && (
+          <span data-testid={`paint-swatch-${node.part.id}`} className="flex-shrink-0 flex items-center">
+            <ColourSwatch
+              hex={paintByPartId.get(node.part.id)!.paint.colour_hex}
+              code={paintByPartId.get(node.part.id)!.paint.colour_code}
+            />
+          </span>
+        )}
         {node.part.part_type === 'sub_assembly' && <span className="text-yellow-400 text-sm flex-shrink-0">★</span>}
         {node.part.item_category !== 'article' && CATEGORY_META[node.part.item_category] && (
           <span
@@ -557,6 +571,7 @@ function TreeNodeComponent({
               onDragEndPart={onDragEndPart}
               onDropOnPart={onDropOnPart}
               projectCode={projectCode}
+              paintByPartId={paintByPartId}
             />
           ))}
         </div>
@@ -971,6 +986,20 @@ export default function ProjectDetailPage() {
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
+  const { data: paintOverview } = useQuery({
+    queryKey: ['project-paint-overview', id],
+    queryFn: () => projectPaintOverview(id),
+    enabled: !!id,
+  });
+  // Top layer (layer_order 1) per painted part, for the swatch on the tree row.
+  const paintByPartId = useMemo(() => {
+    const map = new Map<number, PartPaintLayer>();
+    for (const part of paintOverview ?? []) {
+      const top = part.layers.find((l) => l.layer_order === 1) ?? part.layers[0];
+      if (top) map.set(part.part_id, top);
+    }
+    return map;
+  }, [paintOverview]);
   const { data: partRevisions } = usePartRevisions(selectedPartId || 0);
   const { data: revisionFiles } = useRevisionFiles(selectedRevisionId || 0);
   const queryClient = useQueryClient();
@@ -1081,7 +1110,9 @@ export default function ProjectDetailPage() {
   const visibleNodes: TreeNode[] = categoryFilter === 'all' || categoryFilter === 'assemblies'
     ? partTree
     : (parts ?? [])
-        .filter((p) => p.item_category === categoryFilter)
+        .filter((p) =>
+          categoryFilter === 'painted' ? paintByPartId.has(p.id) : p.item_category === categoryFilter
+        )
         .map((p) => ({ part: p, children: [] }))
         .sort(comparePartNodes);
 
@@ -1141,6 +1172,8 @@ export default function ProjectDetailPage() {
 
       <ProjectChangesSection projectId={id} />
 
+      <ProjectPaintSection projectId={id} />
+
       <ProjectLessonsSection projectId={id} />
 
       {/* Two-column layout */}
@@ -1152,7 +1185,7 @@ export default function ProjectDetailPage() {
           </h2>
           <p className="text-xs text-slate-500 mb-2">Drag a part onto a ★ sub-assembly to restructure</p>
           <div className="flex flex-wrap gap-1 mb-3">
-            {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`]), ['assemblies', '🧩 Assemblies']].map(
+            {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`]), ['assemblies', '🧩 Assemblies'], ['painted', `🎨 Painted (${paintOverview?.length ?? 0})`]].map(
               ([key, label]) => (
                 <button
                   key={key}
@@ -1182,6 +1215,7 @@ export default function ProjectDetailPage() {
                   key={node.part.id}
                   node={node}
                   projectCode={project.code}
+                  paintByPartId={paintByPartId}
                   selectedPartId={selectedPartId}
                   onSelect={setSelectedPartId}
                   onContextMenu={handleContextMenu}

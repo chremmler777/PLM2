@@ -177,3 +177,50 @@ describe('ProjectDetailPage items list', () => {
     expect(screen.queryByText('1994 TOOL Handle')).toBeNull()
   })
 })
+
+describe('ProjectDetailPage painted filter', () => {
+  const paint = {
+    id: 7, name: 'Atlas Black', paint_type: 'basecoat', colour_code: 'RAL 9005',
+    colour_name: 'Black', colour_hex: '#111111', supplier_id: null, supplier_text: null,
+    spec_reference: null, notes: null, is_active: true,
+  }
+
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects')
+        return Promise.resolve({ data: [{ id: 2, name: 'Atlas', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2')
+        return Promise.resolve({ data: [
+          { id: 4, part_number: '1994-100', name: 'Top', part_type: 'internal_mfg', item_category: 'article', parent_part_id: null },
+          { id: 5, part_number: '1994-200', name: 'Bracket', part_type: 'internal_mfg', item_category: 'article', parent_part_id: null },
+        ] })
+      if (url === '/v1/parts/project/2/paint-overview')
+        return Promise.resolve({ data: [
+          { part_id: 5, part_number: '1994-200', name: 'Bracket', process: null,
+            layers: [{ layer_order: 1, area: null, notes: null, paint }] },
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  const mount = () => render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={['/projects/2']}>
+        <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+      </MemoryRouter>
+    </QueryClientProvider>)
+
+  it('filters the tree down to the painted parts and marks them with a swatch', async () => {
+    mount()
+    expect(await screen.findByText('🎨 Painted (1)')).toBeTruthy()
+    expect(await screen.findByTestId('paint-swatch-5')).toBeTruthy()
+    expect(screen.queryByTestId('paint-swatch-4')).toBeNull()
+
+    fireEvent.click(screen.getByText('🎨 Painted (1)'))
+    expect(await screen.findByText('Items (1 of 2)')).toBeTruthy()
+    expect(screen.getByText('1994-200')).toBeTruthy()
+    expect(screen.queryByText('1994-100')).toBeNull()
+  })
+})
