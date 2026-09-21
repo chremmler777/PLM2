@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.health import router as health_router
 from app.api.v1.plants import router as plants_router
 from app.api.v1.catalog_parts import router as catalog_parts_router
+from app.api.v1.paints import router as paints_router
 
 # Module: accounts (authentication, user management)
 from app.api.v1.accounts.auth import router as auth_router
@@ -12,6 +13,7 @@ from app.api.v1.accounts.contacts import router as contacts_router
 # Module: items (parts, revisions, files, BOM, relations)
 from app.api.v1.items.parts import router as parts_router
 from app.api.v1.items.revision_files import router as revision_files_router
+from app.api.v1.items.part_paint import router as part_paint_router
 from app.api.v1.items.customer_package import router as customer_package_router
 from app.api.v1.items.part_bom import router as part_bom_router
 from app.api.v1.items.part_relations import router as part_relations_router
@@ -53,6 +55,7 @@ api_router.include_router(contacts_router)
 api_router.include_router(health_router)
 api_router.include_router(parts_router)
 api_router.include_router(revision_files_router)
+api_router.include_router(part_paint_router)
 api_router.include_router(customer_package_router)
 api_router.include_router(part_bom_router)
 api_router.include_router(part_relations_router)
@@ -74,6 +77,7 @@ api_router.include_router(plants_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
 api_router.include_router(catalog_parts_router)
+api_router.include_router(paints_router)
 api_router.include_router(reports_router)
 api_router.include_router(pnl_router)
 
