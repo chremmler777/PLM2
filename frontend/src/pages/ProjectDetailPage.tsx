@@ -1000,6 +1000,13 @@ export default function ProjectDetailPage() {
     }
     return map;
   }, [paintOverview]);
+  // Every part that requires paint, layer or not - the Painted chip counts
+  // these, so the filter must select the same set (a part marked required
+  // with no layer yet was counted but filtered out, 2026-09-21).
+  const paintedIds = useMemo(
+    () => new Set((paintOverview ?? []).map((part) => part.part_id)),
+    [paintOverview],
+  );
   const { data: partRevisions } = usePartRevisions(selectedPartId || 0);
   const { data: revisionFiles } = useRevisionFiles(selectedRevisionId || 0);
   const queryClient = useQueryClient();
@@ -1111,7 +1118,7 @@ export default function ProjectDetailPage() {
     ? partTree
     : (parts ?? [])
         .filter((p) =>
-          categoryFilter === 'painted' ? paintByPartId.has(p.id) : p.item_category === categoryFilter
+          categoryFilter === 'painted' ? paintedIds.has(p.id) : p.item_category === categoryFilter
         )
         .map((p) => ({ part: p, children: [] }))
         .sort(comparePartNodes);
