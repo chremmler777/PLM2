@@ -9,49 +9,9 @@ import client from '../api/client';
 import { toast } from 'sonner';
 import FormPanel from '../forms/FormPanel';
 import ProjectFormsTab from '../forms/ProjectFormsTab';
-import type { ItemFormInfo } from '../forms/types';
-
-interface SepItem {
-  id: number;
-  gate_id: number;
-  item_no: number;
-  title_de: string;
-  title_en: string;
-  department: string;
-  status: 'open' | 'done' | 'not_applicable';
-  remark: string | null;
-  responsible_id: number | null;
-  responsible_name: string | null;
-  completed_at: string | null;
-  lessons_link: boolean;
-  form: ItemFormInfo | null;
-  references: { title: string; path: string }[];
-}
-
-interface SepGate {
-  id: number;
-  project_id: number;
-  code: string;
-  seq: number;
-  phase_de: string;
-  phase_en: string;
-  status: 'pending' | 'in_progress' | 'closed';
-  color: 'green' | 'yellow' | 'red';
-  target_date: string | null;
-  pm_signed_name: string | null;
-  pm_signed_at: string | null;
-  quality_signed_name: string | null;
-  quality_signed_at: string | null;
-  progress: { done: number; open: number; not_applicable: number; total: number; pct: number };
-  open_risks: number;
-  items: SepItem[];
-}
-
-interface SepState {
-  active: boolean;
-  gates: SepGate[];
-  rollup?: { total: { done: number; open: number; total: number; pct: number } };
-}
+import SepItemFiles from './sep/SepItemFiles';
+import SepDocumentsTab from './sep/SepDocumentsTab';
+import type { SepItem, SepGate, SepState } from '../types/sep';
 
 interface UserOption { id: number; name: string }
 
@@ -148,25 +108,28 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
               📘 lessons
             </a>
           )}
-          {item.form && (
-            <button
-              type="button"
-              onClick={() => openForm.mutate()}
-              className={`ml-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-150 ${
-                item.form.status === 'submitted'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                  : 'border-sky-500/30 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20'
-              }`}
-              title={item.form.title}
-            >
-              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h5.5L13 6v7.5H4z M9.5 2.5V6H13 M6 9h4M6 11h4" /></svg>
-              {item.form.status ?? 'open form'}
-            </button>
-          )}
           {item.references.map((r) => (
             <span key={r.path} className="ml-1.5 text-xs text-slate-500" title={r.path}>📎 {r.title}</span>
           ))}
         </div>
+        {/* Files lead the row now — most work packages end in a document, not
+            a form. The form stays, one size smaller, behind the file slot. */}
+        <SepItemFiles itemId={item.id} projectId={projectId} fileCount={item.file_count} locked={locked} />
+        {item.form && (
+          <button
+            type="button"
+            onClick={() => openForm.mutate()}
+            className={`mt-1 inline-flex items-center gap-1 rounded border px-1 py-0.5 text-[10px] transition-colors duration-150 ${
+              item.form.status === 'submitted'
+                ? 'border-emerald-500/30 text-emerald-300/90 hover:bg-emerald-500/10'
+                : 'border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+            }`}
+            title={item.form.title}
+          >
+            <svg viewBox="0 0 16 16" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h5.5L13 6v7.5H4z M9.5 2.5V6H13 M6 9h4M6 11h4" /></svg>
+            {item.form.status ?? 'open form'}
+          </button>
+        )}
         {(item.remark || !locked) && (
           <input
             value={remark}
@@ -209,7 +172,7 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
 
 function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'checklist' | 'forms'>('checklist');
+  const [tab, setTab] = useState<'checklist' | 'forms' | 'documents'>('checklist');
   const [openForm, setOpenForm] = useState<number | null>(null);
   const locked = gate.status === 'closed';
 
@@ -244,6 +207,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
         <span className="text-xs text-slate-400">
           {gate.progress.done} done · {gate.progress.open} open · {gate.progress.not_applicable} n/a
         </span>
+        <span className="text-xs text-slate-400" data-testid="gate-file-count">📎 {gate.file_count ?? 0}</span>
       </div>
 
       <div className="flex items-center gap-2 text-xs">
@@ -274,7 +238,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
       </div>
 
       <div className="flex gap-2 border-b border-slate-700 text-xs">
-        {(['checklist', 'forms'] as const).map((t) => (
+        {(['checklist', 'documents', 'forms'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -282,7 +246,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
               tab === t ? 'border-blue-400 text-blue-300' : 'border-transparent text-slate-400 hover:text-slate-300'
             }`}
           >
-            {t === 'checklist' ? `Checklist (${gate.progress.total})` : 'Forms'}
+            {t === 'checklist' ? `Checklist (${gate.progress.total})` : t === 'documents' ? 'Documents' : 'Forms'}
           </button>
         ))}
       </div>
@@ -303,6 +267,8 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
             </div>
           ))}
         </div>
+      ) : tab === 'documents' ? (
+        <SepDocumentsTab projectId={gate.project_id} />
       ) : (
         <ProjectFormsTab projectId={gate.project_id} />
       )}
