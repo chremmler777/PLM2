@@ -73,6 +73,22 @@ describe('ProjectPaintSection', () => {
     expect(within(group).getByRole('img', { name: 'RAL 9001' })).toBeTruthy()
   })
 
+  it('tags a group whose paint is inactive', async () => {
+    mockOverview([
+      {
+        part_id: 5, part_number: '1994-100', name: 'Top', process: null,
+        layers: [layer(1, paint(1, { is_active: false })), layer(2, paint(2))],
+      },
+    ])
+    renderSection()
+    await expand()
+
+    const inactiveGroup = await screen.findByTestId('paint-group-1')
+    expect(within(inactiveGroup).getByText('inactive')).toBeTruthy()
+    const activeGroup = screen.getByTestId('paint-group-2')
+    expect(within(activeGroup).queryByText('inactive')).toBeNull()
+  })
+
   it('lists a part under each of its paints with its layer position', async () => {
     mockOverview([
       {

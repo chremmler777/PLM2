@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import PaintsPage from './PaintsPage'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
@@ -36,6 +37,7 @@ describe('PaintsPage', () => {
     clientMocks.get.mockReset()
     clientMocks.post.mockReset()
     clientMocks.put.mockReset()
+    vi.mocked(toast.error).mockReset()
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/paints') return Promise.resolve({ data: [paint()] })
       if (url === '/v1/paints/1/used-in') {
@@ -116,6 +118,63 @@ describe('PaintsPage', () => {
     await waitFor(() => expect(clientMocks.put).toHaveBeenCalled())
     expect(clientMocks.put.mock.calls[0][0]).toBe('/v1/paints/1')
     expect(clientMocks.put.mock.calls[0][1]).toMatchObject({ name: 'Updated Name' })
+  })
+
+  // FastAPI answers a 422 with `detail` as an ARRAY; handing that to
+  // toast.error() used to make React render an object and take the app down.
+  const validationError = () => ({
+    response: {
+      status: 422,
+      data: {
+        detail: [
+          { type: 'string_pattern_mismatch', loc: ['body', 'colour_hex'], msg: 'String should match pattern' },
+        ],
+      },
+    },
+  })
+
+  it('shows a toast string when creating a paint fails validation with a 422', async () => {
+    clientMocks.post.mockRejectedValue(validationError())
+    renderPage()
+    await screen.findByText('RAL 9005 Basecoat')
+
+    fireEvent.click(screen.getByRole('button', { name: /new paint/i }))
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'Bad hex' } })
+    fireEvent.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    const calls = vi.mocked(toast.error).mock.calls
+    const arg = calls[calls.length - 1][0]
+    expect(typeof arg).toBe('string')
+    expect(arg).toContain('String should match pattern')
+    // the modal survives: the page did not crash
+    expect(screen.getByText('New Paint')).toBeTruthy()
+  })
+
+  it('shows a toast string when updating a paint fails validation with a 422', async () => {
+    clientMocks.put.mockRejectedValue(validationError())
+    renderPage()
+    await screen.findByText('RAL 9005 Basecoat')
+
+    fireEvent.click(screen.getByRole('button', { name: /edit/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    const calls = vi.mocked(toast.error).mock.calls
+    const arg = calls[calls.length - 1][0]
+    expect(typeof arg).toBe('string')
+    expect(arg).toContain('String should match pattern')
+    expect(screen.getByText(/Edit Paint/)).toBeTruthy()
+  })
+
+  it('gives the colour hex input a #RRGGBB placeholder and pattern', async () => {
+    renderPage()
+    await screen.findByText('RAL 9005 Basecoat')
+    fireEvent.click(screen.getByRole('button', { name: /new paint/i }))
+
+    const hex = screen.getByLabelText(/colour hex/i) as HTMLInputElement
+    expect(hex.placeholder).toBe('#RRGGBB')
+    expect(hex.getAttribute('pattern')).toBe('^#[0-9a-fA-F]{6}$')
   })
 
   it('expanding a row loads used-in and shows part numbers', async () => {

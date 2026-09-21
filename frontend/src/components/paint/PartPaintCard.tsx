@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { getPartPaint, putPartPaint, listPaints } from '../../api/paints';
+import { apiErrorMessage } from '../../lib/apiError';
 import { PAINT_TYPE_LABEL, type Paint } from '../../types/paint';
 import ColourSwatch from './ColourSwatch';
 
@@ -15,10 +16,6 @@ interface DraftLayer {
   area: string;
   notes: string;
   paint: Paint;
-}
-
-function errMsg(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
 }
 
 export default function PartPaintCard({ partId }: { partId: number }) {
@@ -33,7 +30,10 @@ export default function PartPaintCard({ partId }: { partId: number }) {
     queryFn: () => listPaints({ activeOnly: true }),
   });
 
-  const [initialized, setInitialized] = useState(false);
+  // The part this draft was hydrated from. Navigating between parts (used-in
+  // chips, BOM tree) swaps `partId` in place, so a draft hydrated for the old
+  // part must be dropped — otherwise Save would write it to the new part.
+  const [hydratedFor, setHydratedFor] = useState<number | null>(null);
   const [paintRequired, setPaintRequired] = useState(false);
   const [process, setProcess] = useState('');
   const [notes, setNotes] = useState('');
@@ -41,7 +41,16 @@ export default function PartPaintCard({ partId }: { partId: number }) {
   const [pickerPaintId, setPickerPaintId] = useState('');
 
   useEffect(() => {
-    if (data && !initialized) {
+    if (hydratedFor !== null && hydratedFor !== partId) {
+      setHydratedFor(null);
+      setPaintRequired(false);
+      setProcess('');
+      setNotes('');
+      setLayers([]);
+      setPickerPaintId('');
+      return;
+    }
+    if (data && hydratedFor === null) {
       setPaintRequired(data.paint_required);
       setProcess(data.process ?? '');
       setNotes(data.notes ?? '');
@@ -53,9 +62,9 @@ export default function PartPaintCard({ partId }: { partId: number }) {
           paint: l.paint,
         }))
       );
-      setInitialized(true);
+      setHydratedFor(partId);
     }
-  }, [data, initialized]);
+  }, [data, partId, hydratedFor]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -72,7 +81,7 @@ export default function PartPaintCard({ partId }: { partId: number }) {
       queryClient.invalidateQueries({ queryKey: ['part-paint', partId] });
       queryClient.invalidateQueries({ queryKey: ['part', partId] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save the paint setup')),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not save the paint setup')),
   });
 
   const addLayer = () => {
@@ -102,7 +111,7 @@ export default function PartPaintCard({ partId }: { partId: number }) {
 
   const missingSpec = paintRequired && layers.length === 0;
 
-  if (!initialized) {
+  if (hydratedFor === null) {
     return (
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
         <h2 className="text-xl font-bold text-slate-100 mb-4">Paint</h2>
@@ -167,6 +176,7 @@ export default function PartPaintCard({ partId }: { partId: number }) {
                   data-testid={`paint-layer-area-${index}`}
                   value={layer.area}
                   placeholder="area"
+                  maxLength={255}
                   onChange={(e) => updateLayerArea(index, e.target.value)}
                   className="bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-sm text-slate-100 flex-1"
                 />

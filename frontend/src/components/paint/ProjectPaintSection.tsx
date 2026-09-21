@@ -73,6 +73,7 @@ export default function ProjectPaintSection({ projectId }: { projectId: number }
                   {group.paint.colour_code && (
                     <span className="text-xs text-slate-500">{group.paint.colour_code}</span>
                   )}
+                  {!group.paint.is_active && <span className="text-red-400 text-xs">inactive</span>}
                 </div>
                 <div className="mt-1 space-y-1">
                   {group.rows.map((row) => (

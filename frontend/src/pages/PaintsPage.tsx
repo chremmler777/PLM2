@@ -5,6 +5,7 @@ import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import * as paintsApi from '../api/paints';
+import { apiErrorMessage } from '../lib/apiError';
 import ColourSwatch from '../components/paint/ColourSwatch';
 import type { Paint, PaintCreateRequest, PaintUpdateRequest, PaintType, PaintUsedIn } from '../types/paint';
 import { PAINT_TYPE_LABEL } from '../types/paint';
@@ -118,7 +119,9 @@ function PaintFormFields({ form, setForm }: PaintFormFieldsProps) {
             className="mt-1 w-full bg-slate-700 text-slate-100 rounded px-3 py-2 text-sm border border-slate-600 focus:outline-none focus:border-blue-500"
             value={form.colour_hex}
             onChange={e => setForm(f => ({ ...f, colour_hex: e.target.value }))}
-            placeholder="#0a0a0a"
+            placeholder="#RRGGBB"
+            pattern="^#[0-9a-fA-F]{6}$"
+            title="Six hex digits after a #, e.g. #0a0a0a"
           />
         </div>
       </div>
@@ -173,10 +176,7 @@ function NewPaintModal({ onClose }: NewPaintModalProps) {
       queryClient.invalidateQueries({ queryKey: ['paints'] });
       onClose();
     },
-    onError: (err: any) => {
-      const detail = err?.response?.data?.detail || 'Failed to create paint';
-      toast.error(detail);
-    },
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to create paint')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -224,10 +224,7 @@ function EditPaintModal({ paint, onClose }: EditPaintModalProps) {
       queryClient.invalidateQueries({ queryKey: ['paints'] });
       onClose();
     },
-    onError: (err: any) => {
-      const detail = err?.response?.data?.detail || 'Failed to update paint';
-      toast.error(detail);
-    },
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to update paint')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
