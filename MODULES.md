@@ -14,6 +14,7 @@ proposal to react to, not implemented work.
 | **Workflows** | `workflow_templates.py`, `workflow_instances.py`, `workflow_service.py` | WorkflowDesignerPage, MyTasksPage, RevisionWorkflowSection | Complete: RASIC multi-dept chains, e2e tested |
 | **Auth & Users** | `auth.py`, `users.py` | UsersPage, ChangePasswordModal | Complete: DB login, roles, admin UI |
 | **Overview** | `dashboard.py`, `search.py` | Dashboard, SearchBox | Complete: stats, queues, calibration warnings, global search |
+| **Paint** | `models/paint.py`, `services/paint_service.py`, `api/v1/paints.py`, `api/v1/items/part_paint.py` | PaintsPage, PartPaintCard, ProjectPaintSection | Complete: engineering data only (no cost), part-level (not revision-bound). Paint catalog is org-scoped master data; a part's paint setup is ordered layers with process and notes. See `docs/PAINT.md` |
 
 ## Candidate next modules (automotive PLM)
 
