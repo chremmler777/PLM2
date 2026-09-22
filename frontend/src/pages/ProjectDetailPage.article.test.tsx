@@ -70,7 +70,7 @@ describe('ProjectDetailPage article panel', () => {
     expect(await screen.findByText('3D (2)')).toBeTruthy()
     expect(screen.getByText('2D (1)')).toBeTruthy()
     expect(screen.getByTestId('relation-chip-30').textContent).toContain('199401')
-    expect(screen.getByText(/mirrored by 20-1994-002-0/)).toBeTruthy()
+    expect(screen.getAllByText(/mirrored by 20-1994-002-0/).length).toBeGreaterThan(0)
   })
 
   it('Open on the drawing switches the pane to the inline pdf, selecting a revision switches back', async () => {
@@ -101,5 +101,18 @@ describe('ProjectDetailPage article panel', () => {
     await screen.findByTestId('rev-tab-9')
     fireEvent.click(screen.getByText('+ Proposal'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/5/revisions/proposals', { parent_revision_id: 9 }))
+  })
+
+  it('tree rows expand to revisions and tools, and mark mirrors', async () => {
+    mount()
+    const row = await screen.findByText(/Handle LH/)
+    expect(screen.getByTestId('tree-mirror-6').textContent).toContain('mirror of 20-1994-001-0')
+    const chevron = within(row.closest('button')!.parentElement!).getByLabelText('Expand')
+    fireEvent.click(chevron)
+    expect(await screen.findByTestId('tree-rev-10')).toBeTruthy()
+    expect(screen.getByTestId('tree-rev-10').textContent).toContain('E1.1')
+    expect(screen.getByTestId('tree-rel-30').textContent).toContain('199401')
+    fireEvent.click(screen.getByTestId('tree-rev-10'))
+    expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
   })
 })

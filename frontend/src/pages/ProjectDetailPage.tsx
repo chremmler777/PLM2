@@ -33,7 +33,7 @@ import { UploadedBy } from '../components/common/UploadedBy';
 import RevisionStrip from '../components/parts/RevisionStrip';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../components/parts/DocumentPane';
 import RevisionFilesGrouped from '../components/parts/RevisionFilesGrouped';
-import { useProjectStructure, articleOf } from '../hooks/queries/useProjectStructure';
+import { useProjectStructure, articleOf, ProjectStructure } from '../hooks/queries/useProjectStructure';
 
 // Types
 export type CustomerNaming = 'vw' | 'scout' | null;
@@ -459,6 +459,8 @@ function TreeNodeComponent({
   onDropOnPart,
   projectCode,
   paintByPartId,
+  structure,
+  onSelectRevision,
 }: {
   node: TreeNode;
   selectedPartId: number | null;
@@ -472,10 +474,15 @@ function TreeNodeComponent({
   onDragStartPart: (id: number) => void;
   onDragEndPart: () => void;
   onDropOnPart: (targetId: number) => void;
+  structure?: ProjectStructure;
+  onSelectRevision?: (partId: number, revisionId: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const [dragOver, setDragOver] = useState(false);
+  const article = articleOf(structure, node.part.id);
   const hasChildren = node.children.length > 0;
+  const hasStructure = !!article && (article.revisions.length > 0 || article.related.length > 0);
+  const expandable = hasChildren || hasStructure;
+  const [expanded, setExpanded] = useState(hasChildren);
+  const [dragOver, setDragOver] = useState(false);
   const isRoot = depth === 0;
   const isHeadline = isRoot || hasChildren;
 
@@ -519,8 +526,9 @@ function TreeNodeComponent({
         } ${isHeadline ? 'py-2.5' : 'py-2'} ${draggingPartId === node.part.id ? 'opacity-40' : ''}`}
         style={{ marginLeft: `${depth * 20}px`, width: `calc(100% - ${depth * 20}px)` }}
       >
-        {hasChildren ? (
+        {expandable ? (
           <button
+            aria-label={expanded ? 'Collapse' : 'Expand'}
             onClick={(e) => {
               e.stopPropagation();
               setExpanded(!expanded);
@@ -542,6 +550,8 @@ function TreeNodeComponent({
               ({node.children.length})
             </span>
           )}
+          {article?.mirror_of && <span data-testid={`tree-mirror-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirror of {article.mirror_of.part_number}</span>}
+          {article && article.mirrored_by.length > 0 && <span data-testid={`tree-mirror-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirrored by {article.mirrored_by.map((m) => m.part_number).join(', ')}</span>}
         </div>
         {paintByPartId?.get(node.part.id) && (
           <span data-testid={`paint-swatch-${node.part.id}`} className="flex-shrink-0 flex items-center">
@@ -565,6 +575,33 @@ function TreeNodeComponent({
         </span>
       </button>
 
+      {expanded && hasStructure && (
+        <div className="ml-6 my-1 space-y-1 text-xs" style={{ marginLeft: `${depth * 20 + 24}px` }}>
+          {article!.revisions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-slate-500 w-16">Revisions</span>
+              {article!.revisions.map((r) => (
+                <button key={r.id} data-testid={`tree-rev-${r.id}`} onClick={(e) => { e.stopPropagation(); onSelectRevision?.(node.part.id, r.id); }}
+                  className={`px-1.5 py-0.5 rounded ${r.parent_revision_id ? 'bg-amber-900/40 text-amber-200' : 'bg-slate-700 text-slate-200'} ${r.is_active ? 'font-semibold' : ''}`}>
+                  {revisionLabel(r.revision_name, r.customer_index)}{r.parent_revision_id ? ' proposal' : ''}{r.is_active ? ' ●' : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          {article!.related.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-slate-500 w-16">Linked</span>
+              {article!.related.map((r) => (
+                <button key={`${r.relation_type}-${r.part_id}`} data-testid={`tree-rel-${r.part_id}`} onClick={(e) => { e.stopPropagation(); onSelect(r.part_id); }}
+                  className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                  {CATEGORY_META[r.item_category]?.icon} {r.part_number} {stripProjectCode(r.name, projectCode)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {expanded && hasChildren && (
         <div>
           {node.children.map((child) => (
@@ -582,6 +619,8 @@ function TreeNodeComponent({
               onDropOnPart={onDropOnPart}
               projectCode={projectCode}
               paintByPartId={paintByPartId}
+              structure={structure}
+              onSelectRevision={onSelectRevision}
             />
           ))}
         </div>
@@ -1089,10 +1128,29 @@ export default function ProjectDetailPage() {
     [assemblyFiles]
   );
 
+  // Explicit revision request (e.g. clicking a revision chip in the tree) wins over
+  // the default-revision effect below, which otherwise resets to active/latest
+  // whenever selectedPartId changes.
+  const pendingRevisionRef = useRef<{ partId: number; revisionId: number } | null>(null);
+
   // Default revision selection: active revision if known, otherwise the latest
   useEffect(() => {
     setViewingFileId(null);
     setOpenDocId(null);
+    if (pendingRevisionRef.current?.partId === selectedPartId) {
+      const pending = pendingRevisionRef.current;
+      if (partRevisions?.some((r) => r.id === pending.revisionId)) {
+        pendingRevisionRef.current = null;
+        setSelectedRevisionId(pending.revisionId);
+        return;
+      }
+      if (!partRevisions || partRevisions.length === 0) {
+        // Revisions for this part haven't loaded yet — wait for the next
+        // effect run instead of falling through to the default selection.
+        return;
+      }
+      pendingRevisionRef.current = null;
+    }
     if (!partRevisions || partRevisions.length === 0) {
       setSelectedRevisionId(null);
       return;
@@ -1333,6 +1391,8 @@ export default function ProjectDetailPage() {
                   onDragStartPart={setDraggingPartId}
                   onDragEndPart={() => setDraggingPartId(null)}
                   onDropOnPart={handleDropOnPart}
+                  structure={structure}
+                  onSelectRevision={(pid, rid) => { pendingRevisionRef.current = { partId: pid, revisionId: rid }; setSelectedPartId(pid); setSelectedRevisionId(rid); setViewingFileId(null); setOpenDocId(null); }}
                 />
               ))}
               {/* Top-level drop zone, visible while dragging a nested part */}
