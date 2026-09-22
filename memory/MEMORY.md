@@ -31,3 +31,6 @@
 - [SharePoint lessons mirror](sharepoint-lessons-mirror-2026-09-15.md) — Toccoa LL list export + import script; LL-0001..0019 on local + prod as of 2026-09-15
 - [ECR routing & risks 2026-09-16](ecr-assessment-routing-2026-09-16.md) — add-department mid-assessment (4-eyes), per-department risk types + templates (mig 066), RASIC picker at scoping + not-our-responsibility (mig 067), own risk types in dropdown (mig 068), costing table + per-dept cost categories (mig 069), vendor on estimate lines (mig 070); prod DB still at 064
 - [ECR long-term cost effects](ecr-long-term-cost-effects-2026-09-16.md) — costing must also capture recurring per-piece effects on article price (cycle time, weight, PM cycle, scrap, refurbishment); noted 2026-09-16, not built
+- [Prod SSH fail2ban](prod-ssh-fail2ban-2026-09-22.md) — source ~/.ssh/agent.env before any ssh to ktx-server; never retry a failed auth
+- [Prod data is truth](prod-data-is-truth-2026-09-22.md) — data ops run on prod against prod data; never push local DB, never decide from local state
+- [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; BOM marker + viewer warning still to build
