@@ -137,6 +137,40 @@ in creation order, ids unchanged:
 WinCarat was a one-time bulk source and is read-only. New projects start in
 PLM.
 
+## Customer file names (VW group convention, used by Brose)
+
+A VW-world delivery looks like this:
+
+    206_881_479____PCA_TM__003_____INNER_SIDE_COVER___B-RELEASE___20260528.CATPart
+    206_881_479____DRW_TZ__001_____INNER_SIDE_COVER___B-RELEASE___20260528.pdf
+
+| Piece | Meaning | Where it lands in PLM |
+|---|---|---|
+| `206_881_479` | VW part number: model code, main group (881 = seat), item. A trailing letter (`206_881_971_B`) is a variant of the same part. | `customer_part_number`, dotted (`206.881.479`) |
+| `PCA`, `DMU`, `DRW` | Data type, see below | file type and file note |
+| `TM`, `TZ` | `TM` Teilemodell (part model), `TZ` Teilezeichnung (part drawing) | file note |
+| `003` | **Customer data index** of that file. The 3D index is the state of the part; the drawing carries its own. | 3D index → customer index on the major (`E1 · 003`) |
+| `INNER_SIDE_COVER` | Part name | part name stays ours |
+| `B-RELEASE`, `CP3` | Release stage the customer declared | customer statement (review or official) and summary |
+| `20260528` | Date of the data state | received date |
+
+Assembly children use a position token instead of the data type
+(`206_881_971____G02_TM__004_003_MAP_POCKET`): `G02` is position 2 of
+assembly 206.881.971, `004` the assembly index, `003` the position's own index.
+
+### Data types
+
+| Token | What it is | How we treat it |
+|---|---|---|
+| `PCA` | Full construction model: parametric CATIA part with RPS, reference points and lines, annotations, history. 2 to 7 times the size of the DMU. | **Engineering master.** The file to open in CATIA; RPS and datums drive tool, gauge and measurement design. STEP for toolshops and the viewer is exported from this one. |
+| `DMU` | Digital mock-up: reduced solid of the same state, no RPS, no references. | Convenience file for packaging and quick opens. Archived as received, not worked from. |
+| `DRW` | Customer drawing, delivered as PDF. | Stored as drawing on the same major. Mirrored parts (LH/RH, 40/60) share one drawing and usually one 3D. |
+| `OUT` | Name of the delivery folder that holds the DMU and PCA pair. | Not a file, ignored. |
+
+Rule: **keep every customer file as received on the revision it belongs to**, both
+PCA and DMU. The B release is the design record for PPAP and any later dispute.
+STEP, glb and anything else we derive never replaces it.
+
 ## API
 
 | Call | Purpose |
