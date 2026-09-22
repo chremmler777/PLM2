@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import axios from 'axios'
 import UploadDialog from './UploadDialog'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
@@ -73,6 +74,24 @@ describe('UploadDialog', () => {
     fireEvent.change(screen.getByLabelText('Naming convention'), { target: { value: 'none' } })
     await waitFor(() => expect(clientMocks.get).toHaveBeenLastCalledWith('/v1/parts/7/files/parse',
       expect.objectContaining({ params: expect.objectContaining({ convention: 'none' }) })))
+  })
+
+  it('sends repeated bare filename query params, not bracketed ones', async () => {
+    wrap(<UploadDialog {...baseProps} initialFiles={[f('206_881_479____PCA_TM__003_____X.CATPart'), f('b.CATPart')]} />)
+    await screen.findAllByText('PCA')
+    const [url, cfg] = clientMocks.get.mock.calls[0] as [string, { params?: unknown; paramsSerializer?: unknown }]
+    const uri = axios.getUri({ url, params: cfg.params, paramsSerializer: cfg.paramsSerializer as never })
+    expect(uri).toContain('filenames=206_881_479____PCA_TM__003_____X.CATPart&filenames=b.CATPart')
+    expect(uri).not.toContain('filenames%5B%5D')
+  })
+
+  it('stays usable when parsing fails: shows the hint, defaults to attach, and enables Upload', async () => {
+    clientMocks.get.mockReset()
+    clientMocks.get.mockRejectedValue(new Error('parse failed'))
+    wrap(<UploadDialog {...baseProps} initialFiles={[f('206_881_479____PCA_TM__003_____X.CATPart')]} />)
+    await screen.findByText(/Could not read the filenames, you can still upload/)
+    expect((screen.getByLabelText(/Attach to E1/) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByText('Upload') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('proposal level hides the customer index', async () => {

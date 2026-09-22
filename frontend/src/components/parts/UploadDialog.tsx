@@ -50,7 +50,10 @@ export default function UploadDialog(props: UploadDialogProps) {
   const parse = useQuery({
     queryKey: ['parse-filenames', partId, convention, names],
     queryFn: async () => {
-      const res = await client.get(`/v1/parts/${partId}/files/parse`, { params: { filenames: names, convention } });
+      const res = await client.get(`/v1/parts/${partId}/files/parse`, {
+        params: { filenames: names, convention },
+        paramsSerializer: { indexes: null }, // bare repeated keys (filenames=a&filenames=b), matching FastAPI's List[str] Query binding
+      });
       return res.data as { convention: string | null; conventions: Record<string, string>; rows: ParsedRow[] };
     },
     enabled: open && names.length > 0,
@@ -71,6 +74,13 @@ export default function UploadDialog(props: UploadDialogProps) {
     setIndex(detected.index ?? '');
     setReceivedAt(firstDate ?? new Date().toISOString().slice(0, 10));
   }, [parse.data, detected.index, firstDate, currentRevision.customer_index]);
+
+  // If parsing fails, the dialog must still be usable: fall back to attach
+  // so the user can pick a level manually instead of being stuck disabled.
+  useEffect(() => {
+    if (!parse.isError) return;
+    setLevel((prev) => prev ?? 'attach');
+  }, [parse.isError]);
 
   if (!open) return null;
 
