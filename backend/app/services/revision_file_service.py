@@ -95,7 +95,8 @@ def classify(filename: str, file_type: str | None = None) -> tuple[str, str, str
 
 async def store_revision_file(session: AsyncSession, revision: PartRevision, filename: str, contents: bytes,
                               uploaded_by: int, content_type: str | None = None,
-                              file_type: str | None = None) -> RevisionFile:
+                              file_type: str | None = None, kind: str | None = None,
+                              note: str | None = None) -> RevisionFile:
     ext, resolved_type, cad_format = classify(filename, file_type)
     if len(contents) > MAX_FILE_SIZE:
         raise UnsupportedFile("File size must be under 100MB")
@@ -123,6 +124,7 @@ async def store_revision_file(session: AsyncSession, revision: PartRevision, fil
             revision_id=revision.id, filename=filename, file_type=resolved_type,
             mime_type=content_type or MIME_MAP.get(ext, "application/octet-stream"),
             file_size=len(contents), file_path=file_path, cad_format=cad_format,
+            kind=(kind or "").strip().upper() or None, note=(note or "").strip() or None,
             file_hash=hashlib.sha256(contents).hexdigest(),
             viewer_file_path=viewer_file_path, has_viewer=viewer_file_path is not None,
             uploaded_by=uploaded_by,

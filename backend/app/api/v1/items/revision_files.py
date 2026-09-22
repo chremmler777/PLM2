@@ -61,6 +61,8 @@ def _file_response_dict(f: RevisionFile, uploader_name: str | None = None) -> di
         "mime_type": f.mime_type,
         "file_size": f.file_size,
         "cad_format": f.cad_format,
+        "kind": f.kind,
+        "note": f.note,
         "file_hash": f.file_hash,
         "has_viewer": f.has_viewer,
         "uploaded_at": f.uploaded_at.isoformat() if f.uploaded_at else None,
@@ -109,6 +111,8 @@ async def upload_revision_file(
     revision_id: int,
     file: UploadFile = File(...),
     file_type: Optional[str] = Form(None),
+    kind: Optional[str] = Form(None, max_length=10),
+    note: Optional[str] = Form(None, max_length=500),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -126,7 +130,8 @@ async def upload_revision_file(
         contents = await file.read()
         try:
             rev_file = await store_revision_file(db, revision, file.filename or "", contents, current_user.id,
-                                                 content_type=file.content_type, file_type=file_type)
+                                                 content_type=file.content_type, file_type=file_type,
+                                                 kind=kind, note=note)
         except UnsupportedFile as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         await db.commit()
