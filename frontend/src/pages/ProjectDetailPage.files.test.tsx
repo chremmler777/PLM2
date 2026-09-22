@@ -98,8 +98,9 @@ describe('ProjectDetailPage customer package entry point', () => {
       </QueryClientProvider>)
 
     expect(await screen.findByText('Files & 3D Model')).toBeTruthy()
-    // the revision dropdown is there, so this is the "part has revisions" state
-    expect(await screen.findByText('E1 (draft)')).toBeTruthy()
+    // the revision strip is there, so this is the "part has revisions" state
+    expect(await screen.findByTestId('rev-tab-9')).toBeTruthy()
+    expect(screen.getByTestId('rev-tab-9').textContent).toContain('draft')
     expect(screen.getAllByText('+ Customer package').length).toBe(1)
     fireEvent.click(screen.getByText('+ Customer package'))
     expect(screen.getByText('Customer package received')).toBeTruthy()
