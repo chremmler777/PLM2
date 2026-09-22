@@ -5,7 +5,7 @@
  * next proposal. E-numbers are our filing order, the customer index is
  * informational and optional.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -22,7 +22,7 @@ export interface UploadDialogProps {
   officialOnly: boolean;
   projectNaming: 'vw' | 'scout' | null;
   initialFiles: File[];
-  onClose(): void;
+  onClose(targetRevisionId: number | null): void;
   onDone(targetRevisionId: number): void;
 }
 
@@ -37,7 +37,17 @@ const inputCls = 'mt-1 w-full p-2 rounded bg-slate-900 border border-slate-700 t
 
 export default function UploadDialog(props: UploadDialogProps) {
   const { open, partId, currentRevision, revisionNames, officialOnly, projectNaming, initialFiles, onClose, onDone } = props;
-  const [rows, setRows] = useState<Row[]>(() => initialFiles.map((file) => ({ file, fileType: inferFileType(file.name) })));
+  const [rows, setRows] = useState<Row[]>(() => {
+    const seen = new Set<string>();
+    const next: Row[] = [];
+    initialFiles.forEach((file) => {
+      if (file.size > MAX_BYTES) { toast.error(`${file.name}: over 100MB`); return; }
+      if (seen.has(file.name)) return;
+      seen.add(file.name);
+      next.push({ file, fileType: inferFileType(file.name) });
+    });
+    return next;
+  });
   const [convention, setConvention] = useState<'vw' | 'scout' | 'none'>(projectNaming ?? 'none');
   const [level, setLevel] = useState<UploadLevel | null>(null); // null until the first parse decides the default
   const [statement, setStatement] = useState<'review' | 'official'>(officialOnly ? 'official' : 'review');
@@ -45,6 +55,18 @@ export default function UploadDialog(props: UploadDialogProps) {
   const [index, setIndex] = useState('');
   const [summary, setSummary] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number; error?: string } | null>(null);
+  // Resumable retry: a revision created by this dialog session (major/proposal),
+  // or the current revision once at least one file has landed on it via
+  // 'attach'. Non-null means onClose must invalidate/select it too. Also the
+  // guard against re-creating a second revision (duplicate E2) on retry.
+  const [sessionTargetId, setSessionTargetId] = useState<number | null>(null);
+  // Files already uploaded this session, by name, so a retry only re-sends
+  // the ones that didn't land -- not a re-upload of everything.
+  const [uploadedNames, setUploadedNames] = useState<Set<string>>(new Set());
+  // Synchronous (non-state) in-flight guard: two rapid clicks can both fire
+  // before React flushes setProgress, so `busy` (derived from `progress`)
+  // is not enough to stop a second submit().
+  const submittingRef = useRef(false);
 
   const names = rows.map((r) => r.file.name);
   const parse = useQuery({
@@ -102,29 +124,40 @@ export default function UploadDialog(props: UploadDialogProps) {
   };
 
   const submit = async () => {
+    if (submittingRef.current) return; // double click before React flushes setProgress
     if (rows.length === 0 || !level) return;
-    setProgress({ done: 0, total: rows.length });
-    let targetId = currentRevision.id;
+    submittingRef.current = true;
+    let done = uploadedNames.size;
+    setProgress({ done, total: rows.length });
+    // Resume: a target already created this session (major/proposal) is reused
+    // instead of posting customer-data / proposals again (would duplicate E2).
+    let targetId = sessionTargetId ?? currentRevision.id;
     try {
-      if (level === 'major') {
-        const res = await client.post(`/v1/parts/${partId}/revisions/customer-data`, {
-          statement: effectiveStatement, received_at: receivedAt,
-          customer_index: index.trim() || undefined, summary: summary.trim() || undefined,
-        });
-        targetId = res.data.id;
-      } else if (level === 'proposal') {
-        const res = await client.post(`/v1/parts/${partId}/revisions/proposals`, {
-          parent_revision_id: currentRevision.id, summary: summary.trim() || undefined,
-        });
-        targetId = res.data.id;
+      if (sessionTargetId === null) {
+        if (level === 'major') {
+          const res = await client.post(`/v1/parts/${partId}/revisions/customer-data`, {
+            statement: effectiveStatement, received_at: receivedAt,
+            customer_index: index.trim() || undefined, summary: summary.trim() || undefined,
+          });
+          targetId = res.data.id;
+          setSessionTargetId(targetId);
+        } else if (level === 'proposal') {
+          const res = await client.post(`/v1/parts/${partId}/revisions/proposals`, {
+            parent_revision_id: currentRevision.id, summary: summary.trim() || undefined,
+          });
+          targetId = res.data.id;
+          setSessionTargetId(targetId);
+        }
       }
     } catch (error: unknown) {
       const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Could not create the revision';
-      setProgress({ done: 0, total: rows.length, error: msg });
+      setProgress({ done, total: rows.length, error: msg });
+      submittingRef.current = false;
       return;
     }
-    let done = 0;
+    const landed = new Set(uploadedNames);
     for (const row of rows) {
+      if (landed.has(row.file.name)) continue; // already uploaded in a prior attempt
       const parsed = parsedByName.get(row.file.name);
       const fd = new FormData();
       fd.append('file', row.file);
@@ -134,14 +167,19 @@ export default function UploadDialog(props: UploadDialogProps) {
       try {
         await client.post(`/v1/parts/${partId}/revisions/${targetId}/files`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         done += 1;
+        landed.add(row.file.name);
+        setUploadedNames(new Set(landed));
+        if (level === 'attach') setSessionTargetId((prev) => prev ?? targetId);
         setProgress({ done, total: rows.length });
       } catch (error: unknown) {
         const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || `Upload of ${row.file.name} failed`;
         setProgress({ done, total: rows.length, error: `${row.file.name}: ${msg}` });
+        submittingRef.current = false;
         return;
       }
     }
     toast.success(`${done} file${done === 1 ? '' : 's'} uploaded`);
+    submittingRef.current = false;
     onDone(targetId);
   };
 
@@ -254,7 +292,7 @@ export default function UploadDialog(props: UploadDialogProps) {
         )}
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} disabled={busy} className="px-4 py-2 rounded bg-slate-700 text-slate-100 hover:bg-slate-600">
+          <button onClick={() => onClose(sessionTargetId)} disabled={busy} className="px-4 py-2 rounded bg-slate-700 text-slate-100 hover:bg-slate-600">
             {progress?.error ? 'Close' : 'Cancel'}
           </button>
           <button onClick={submit} disabled={busy || rows.length === 0 || !level || (level === 'major' && !receivedAt)}

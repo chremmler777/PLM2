@@ -4,7 +4,7 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user
 from app.models import Plant, User, get_db
@@ -25,10 +25,11 @@ class ProjectCreate(BaseModel):
 
 class ProjectPatch(BaseModel):
     """Partial update of a project header. Every field optional; a field
-    that is present with null clears it (customer_naming only)."""
-    name: Optional[str] = None
+    that is present with null clears it (customer_naming and description
+    only -- name and status ignore a null instead of clearing)."""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal["active", "completed", "archived"]] = None
     customer_naming: Optional[Literal["vw", "scout"]] = None
 
 
@@ -144,7 +145,11 @@ async def patch_project(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update the project header. `customer_naming` may be set to null to clear it."""
+    """Update the project header. `customer_naming` and `description` may be
+    set to null to clear them; `name` and `status` ignore a null (they are
+    NOT NULL columns, so a null there leaves the current value unchanged)."""
+    if current_user.role not in ("admin", "engineer"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or engineer only")
     result = await db.execute(
         select(Project).join(Plant).where(
             (Project.id == project_id) & (Plant.organization_id == current_user.organization_id)
@@ -155,6 +160,8 @@ async def patch_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     fields = body.model_dump(exclude_unset=True)
     for key, value in fields.items():
+        if key in ("name", "status") and value is None:
+            continue
         setattr(project, key, value)
     await db.commit()
     await db.refresh(project)

@@ -139,6 +139,54 @@ describe('UploadDialog', () => {
     expect(baseProps.onDone).not.toHaveBeenCalled()
   })
 
+  it('drops an oversize initial file with a toast, and dedupes by filename', async () => {
+    const { toast } = await import('sonner')
+    const big = f('big.CATPart')
+    Object.defineProperty(big, 'size', { value: 200 * 1024 * 1024 })
+    wrap(<UploadDialog {...baseProps} initialFiles={[big, f('x____PCA_TM__003__.CATPart'), f('x____PCA_TM__003__.CATPart')]} />)
+    await screen.findByText('PCA')
+    expect(screen.queryByText('big.CATPart')).toBeNull()
+    expect(screen.getAllByText('x____PCA_TM__003__.CATPart')).toHaveLength(1)
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('over 100MB'))
+  })
+
+  it('resumes on retry: does not re-create the revision or re-upload landed files', async () => {
+    clientMocks.post.mockReset()
+    clientMocks.post
+      .mockResolvedValueOnce({ data: { id: 42, revision_name: 'E2' } }) // customer-data
+      .mockResolvedValueOnce({ data: { id: 1 } }) // file 1 ok
+      .mockRejectedValueOnce({ response: { data: { detail: 'boom' } } }) // file 2 fails
+    wrap(<UploadDialog {...baseProps} initialFiles={[f('206_881_479____PCA_TM__004_____X.CATPart'), f('206_881_479____DMU_TM__004_____X.CATPart')]} />)
+    await screen.findByText('PCA')
+    fireEvent.click(screen.getByText('Upload'))
+    await screen.findByText(/1 of 2 uploaded/)
+    expect(screen.getByText(/boom/)).toBeTruthy()
+    expect(baseProps.onDone).not.toHaveBeenCalled()
+
+    clientMocks.post.mockResolvedValueOnce({ data: { id: 2 } }) // file 2 ok on retry
+    fireEvent.click(screen.getByText('Upload'))
+    await waitFor(() => expect(baseProps.onDone).toHaveBeenCalledWith(42))
+
+    const customerDataCalls = clientMocks.post.mock.calls.filter((c) => c[0] === '/v1/parts/7/revisions/customer-data')
+    expect(customerDataCalls).toHaveLength(1)
+    const fileCalls = clientMocks.post.mock.calls.filter((c) => c[0] === '/v1/parts/7/revisions/42/files')
+    expect(fileCalls).toHaveLength(3) // file1 once, file2 twice (fail + retry)
+  })
+
+  it('ignores a second click while an upload is in flight', async () => {
+    clientMocks.post.mockReset()
+    let resolveFirst: (v: unknown) => void = () => {}
+    clientMocks.post.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }))
+    wrap(<UploadDialog {...baseProps} initialFiles={[f('206_881_479____PCA_TM__003_____X.CATPart')]} />)
+    await screen.findByText('PCA')
+    const button = screen.getByText('Upload')
+    fireEvent.click(button)
+    fireEvent.click(button)
+    resolveFirst({ data: { id: 99 } })
+    await waitFor(() => expect(baseProps.onDone).toHaveBeenCalledWith(9))
+    expect(clientMocks.post).toHaveBeenCalledTimes(1)
+  })
+
   it('lets the user change a file type and remove a file', async () => {
     wrap(<UploadDialog {...baseProps} initialFiles={[f('scan.pdf'), f('x____PCA_TM__003__.CATPart')]} />)
     await screen.findAllByText('PCA')

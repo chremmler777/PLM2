@@ -40,6 +40,11 @@ def test_vw_release_stage_variants():
     assert (u.release, u.customer_index) == ("B_RELEASE", "003")
 
 
+def test_vw_release_cp_stage_with_two_digits_is_not_truncated():
+    c = parse_filename("206_881_971____PCA_TM__003_____SEAT_BACK_PANEL____CP10_________20260220.stp", "vw")
+    assert (c.release, c.dated) == ("CP10", date(2026, 2, 20))
+
+
 def test_vw_non_matching_name_is_empty_but_keeps_filename():
     p = parse_filename("readme.txt", "vw")
     assert p.filename == "readme.txt"

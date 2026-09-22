@@ -1519,7 +1519,15 @@ export default function ProjectDetailPage() {
                         officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
                         projectNaming={project?.customer_naming ?? null}
                         initialFiles={uploadFiles}
-                        onClose={() => setUploadFiles(null)}
+                        onClose={(targetRevisionId) => {
+                          setUploadFiles(null);
+                          if (targetRevisionId != null) {
+                            queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
+                            queryClient.invalidateQueries({ queryKey: ['revision-files', targetRevisionId] });
+                            queryClient.invalidateQueries({ queryKey: ['parts', id] });
+                            setSelectedRevisionId(targetRevisionId);
+                          }
+                        }}
                         onDone={(targetRevisionId) => {
                           setUploadFiles(null);
                           queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });

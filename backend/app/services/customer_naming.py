@@ -26,7 +26,7 @@ _VW_HEAD = re.compile(
     r"(?P<kind>[A-Z]\d{2}|[A-Z]{3})_(?P<model>[A-Z]{2})__(?P<index>\d{3})",
     re.I,
 )
-_VW_RELEASE = re.compile(r"(B[-_]RELEASE|CP\d|ADS)", re.I)
+_VW_RELEASE = re.compile(r"(B[-_]RELEASE|CP\d+|ADS)", re.I)
 _VW_DATE = re.compile(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})(?!\d)")
 _G_POS = re.compile(r"^G\d{2}$")
 

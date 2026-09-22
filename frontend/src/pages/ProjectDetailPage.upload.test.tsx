@@ -63,4 +63,32 @@ describe('ProjectDetailPage upload entry point', () => {
     expect((dialogProps.last as { currentRevision: { id: number } }).currentRevision.id).toBe(9)
     expect((dialogProps.last as { initialFiles: File[] }).initialFiles[0].name).toBe(f.name)
   })
+
+  it('invalidates part-revisions, revision-files, and parts and selects the revision when the dialog closes after a partial upload', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/projects/2']}>
+          <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>)
+    fireEvent.click(await screen.findByText('Cover'))
+    const zone = await screen.findByTestId('upload-dropzone')
+    const f = new File(['x'], '206_881_479____PCA_TM__003_____X.CATPart')
+    fireEvent.drop(zone, { dataTransfer: { files: [f] } })
+    await waitFor(() => expect(screen.getByText('upload-dialog')).toBeTruthy())
+    clientMocks.get.mockClear()
+
+    // The dialog's onClose contract is (targetRevisionId: number | null) => void.
+    // A non-null id (a revision the session created or wrote to, even if the
+    // upload ended mid-way) must invalidate the same three query keys onDone
+    // uses, and select that revision. The stub can't observe invalidateQueries
+    // calls directly (it doesn't get the real QueryClient instance), so this
+    // asserts the observable effect instead: closing with id 42 both makes the
+    // dialog go away and triggers a refetch of revision 42's files (proving
+    // ['revision-files', 42] was invalidated and 42 was selected).
+    const onClose = (dialogProps.last as { onClose: (id: number | null) => void }).onClose
+    onClose(42)
+    await waitFor(() => expect(screen.queryByText('upload-dialog')).toBeNull())
+    await waitFor(() => expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/revisions/42/files'))
+  })
 })
