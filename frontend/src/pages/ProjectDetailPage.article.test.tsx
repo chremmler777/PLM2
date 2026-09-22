@@ -86,12 +86,61 @@ describe('ProjectDetailPage article panel', () => {
   it('a mirror with no own 3D shows the source viewer under the red banner and the mirror chip', async () => {
     mount()
     fireEvent.click(await screen.findByText(/Handle RH/))
+    // The banner now shows immediately (even before RH's own, empty revision list loads), so wait
+    // for the settled render with the source viewer rather than asserting synchronously.
+    expect(await screen.findByText('viewer')).toBeTruthy()
     const banner = await screen.findByTestId('mirror-banner')
     expect(banner.textContent).toContain('Mirrored part. Showing 206.882.251')
-    expect(screen.getByText('viewer')).toBeTruthy()
     expect(screen.getByTestId('mirror-chip').textContent).toContain('Mirror of 206.882.251')
     fireEvent.click(within(banner).getByText('Open source part'))
     expect(await screen.findByText('3D (2)')).toBeTruthy()
+  })
+
+  it('a mirror whose source has only unviewable, non-drawing files still shows the banner over the placeholder', async () => {
+    const catPartOnly = [
+      { id: 201, revision_id: 9, filename: 'lh.CATPart', file_type: 'cad', mime_type: 'application/octet-stream', file_size: 1, cad_format: 'catia', has_viewer: false, uploaded_at: '2026-05-28' },
+    ]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [{ id: 2, name: 'Seat Trim', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2') return Promise.resolve({ data: [LH, RH] })
+      if (url === '/v1/parts/project/2/structure') return Promise.resolve({ data: structure })
+      if (url === '/v1/parts/5/revisions') return Promise.resolve({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/6/revisions') return Promise.resolve({ data: structure.articles[1].revisions.map((r) => ({ ...r, part_id: 6, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/revisions/9/files') return Promise.resolve({ data: catPartOnly })
+      if (url === '/v1/parts/revisions/10/files') return Promise.resolve({ data: [] })
+      if (url === '/v1/parts/revisions/19/files') return Promise.resolve({ data: [] })
+      if (url.includes('/bom-tree')) return Promise.resolve({ data: { part_id: 5, part_number: LH.part_number, name: LH.name, revision_name: 'E1', customer_index: '003', lines: [] } })
+      return Promise.resolve({ data: [] })
+    })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/projects/2']}><Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes></MemoryRouter>
+      </QueryClientProvider>)
+    fireEvent.click(await screen.findByText(/Handle RH/))
+    expect(await screen.findByTestId('mirror-banner')).toBeTruthy()
+    expect(await screen.findByText('No document to show on this revision')).toBeTruthy()
+  })
+
+  it('a mirror part with zero revisions of its own still shows the banner', async () => {
+    const zeroRevRH = { part_id: 6, part_number: RH.part_number, customer_part_number: '206.882.252', name: RH.name, lifecycle_phase: 'nominated', active_revision_id: null,
+      revisions: [], related: [], mirror_of: { part_id: 5, part_number: LH.part_number, customer_part_number: '206.882.251', name: LH.name }, mirrored_by: [] }
+    const zeroRevStructure = { articles: [structure.articles[0], zeroRevRH] }
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [{ id: 2, name: 'Seat Trim', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2') return Promise.resolve({ data: [LH, RH] })
+      if (url === '/v1/parts/project/2/structure') return Promise.resolve({ data: zeroRevStructure })
+      if (url === '/v1/parts/5/revisions') return Promise.resolve({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/6/revisions') return Promise.resolve({ data: [] })
+      if (url === '/v1/parts/revisions/9/files') return Promise.resolve({ data: files9 })
+      if (url.includes('/bom-tree')) return Promise.resolve({ data: { part_id: 5, part_number: LH.part_number, name: LH.name, revision_name: 'E1', customer_index: '003', lines: [] } })
+      return Promise.resolve({ data: [] })
+    })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/projects/2']}><Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes></MemoryRouter>
+      </QueryClientProvider>)
+    fireEvent.click(await screen.findByText(/Handle RH/))
+    expect(await screen.findByTestId('mirror-banner')).toBeTruthy()
   })
 
   it('+ Proposal on the selected major posts a proposal', async () => {

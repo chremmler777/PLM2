@@ -45,4 +45,15 @@ describe('RevisionFilesGrouped', () => {
     expect(canOpenInline({ mime_type: 'application/octet-stream', filename: 'a.pdf' })).toBe(true)
     expect(canOpenInline({ mime_type: 'application/octet-stream', filename: 'a.CATPart' })).toBe(false)
   })
+
+  it('canOpenInline stays within the backend allowlist for other image mimes', () => {
+    expect(canOpenInline({ mime_type: 'image/svg+xml', filename: 'a.svg' })).toBe(false)
+    expect(canOpenInline({ mime_type: 'image/bmp', filename: 'a.bmp' })).toBe(false)
+  })
+
+  it('does not offer Open for svg or bmp files', () => {
+    wrap(<RevisionFilesGrouped revisionName="E1" locked={false} viewingFileId={null} onView={() => {}} onOpen={() => {}}
+      files={[f(1, 'a.svg', 'picture', 'image/svg+xml'), f(2, 'a.bmp', 'picture', 'image/bmp')]} />)
+    expect(screen.queryByText('Open')).toBeNull()
+  })
 })

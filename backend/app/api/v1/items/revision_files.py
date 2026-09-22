@@ -406,7 +406,8 @@ async def inline_revision_file(
     return FileResponse(
         path=rev_file.file_path,
         media_type=MIME_MAP.get(ext, "application/octet-stream"),
-        headers={"Content-Disposition": f'inline; filename="{rev_file.filename}"'},
+        filename=rev_file.filename,
+        content_disposition_type="inline",
     )
 
 

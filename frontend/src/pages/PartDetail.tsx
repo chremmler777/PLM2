@@ -18,7 +18,7 @@ import PartPaintCard from '../components/paint/PartPaintCard';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import { useAuth } from '../contexts/AuthContext';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
-import RevisionFilesGrouped from '../components/parts/RevisionFilesGrouped';
+import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
 import Viewer3D from '../components/Viewer3D';
 import { API_BASE_URL } from '../api/client';
 import type { RevisionFile } from './ProjectDetailPage';
@@ -180,11 +180,12 @@ export default function PartDetail() {
   const viewableFiles = files?.filter((f) => f.has_viewer) ?? [];
   const viewingFile = viewableFiles.find((f) => f.id === viewingId) ?? null;
   const openDoc = files?.find((f) => f.id === openId) ?? null;
-  const docKind = (f: RevisionFile): 'pdf' | 'image' => (f.mime_type === 'application/pdf' || /\.pdf$/i.test(f.filename) ? 'pdf' : 'image');
   const revName = activeRevision ? revisionLabel(activeRevision.revision_name, activeRevision.customer_index) : '';
   let paneDoc: PaneDocument | null = null;
-  if (openDoc) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind: docKind(openDoc), revisionName: revName };
-  else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
+  if (openDoc) {
+    const kind = docKindFor(openDoc);
+    if (kind) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
+  } else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
 
   return (
     <div className="min-h-screen bg-slate-900 p-8">

@@ -53,3 +53,13 @@ async def test_mirror_chain_is_refused(client, eng_auth, seed):
     r = await _mirror(client, eng_auth, c, b)
     assert r.status_code == 400
     assert "itself a mirror" in r.json()["detail"]
+
+
+async def test_reverse_mirror_chain_is_refused(client, eng_auth, seed):
+    a = await _create(client, eng_auth, seed, "20-1", "A")
+    b = await _create(client, eng_auth, seed, "20-2", "B")
+    c = await _create(client, eng_auth, seed, "20-3", "C")
+    assert (await _mirror(client, eng_auth, a, b)).status_code == 201
+    r = await _mirror(client, eng_auth, b, c)
+    assert r.status_code == 400
+    assert "mirror this one" in r.json()["detail"]

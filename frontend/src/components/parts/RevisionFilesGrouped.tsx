@@ -2,10 +2,20 @@
  *  3D (PCA, DMU, STEP), 2D (drawings), Documents (the rest). */
 import { RevisionFileRow, type RevisionFile } from '../../pages/ProjectDetailPage';
 
-export function canOpenInline(file: { mime_type: string; filename: string }): boolean {
-  if (file.mime_type === 'application/pdf' || file.mime_type.startsWith('image/')) return true;
+// Kept in sync with the backend's INLINE_EXTENSIONS (backend/app/api/v1/items/revision_files.py).
+export const INLINE_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp'] as const;
+
+const IMAGE_EXTENSIONS = INLINE_EXTENSIONS.filter((ext) => ext !== '.pdf');
+
+export function docKindFor(file: { mime_type: string; filename: string }): 'pdf' | 'image' | null {
   const lower = file.filename.toLowerCase();
-  return /\.(pdf|png|jpe?g|gif|webp)$/.test(lower);
+  if (file.mime_type === 'application/pdf' || lower.endsWith('.pdf')) return 'pdf';
+  if (IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return 'image';
+  return null;
+}
+
+export function canOpenInline(file: { mime_type: string; filename: string }): boolean {
+  return docKindFor(file) !== null;
 }
 
 const GROUPS: { key: string; label: string; match(f: RevisionFile): boolean }[] = [

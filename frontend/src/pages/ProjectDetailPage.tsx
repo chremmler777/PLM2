@@ -32,7 +32,7 @@ import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
 import RevisionStrip from '../components/parts/RevisionStrip';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../components/parts/DocumentPane';
-import RevisionFilesGrouped from '../components/parts/RevisionFilesGrouped';
+import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
 import { useProjectStructure, articleOf, ProjectStructure } from '../hooks/queries/useProjectStructure';
 
 // Types
@@ -1284,19 +1284,25 @@ export default function ProjectDetailPage() {
     : null;
 
   const openDoc = revisionFiles?.find((f) => f.id === openDocId) ?? null;
-  const docKind = (f: RevisionFile): 'pdf' | 'image' => (f.mime_type === 'application/pdf' || /\.pdf$/i.test(f.filename) ? 'pdf' : 'image');
   const revName = selectedRevision ? revisionLabel(selectedRevision.revision_name, selectedRevision.customer_index) : '';
   let paneDoc: PaneDocument | null = null;
   let paneMirror: MirrorNotice | null = null;
-  if (openDoc) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind: docKind(openDoc), revisionName: revName };
-  else if (viewingFile || assemblyActive) paneDoc = { fileId: viewingFile?.id ?? 0, filename: assemblyActive ? 'Assembly' : viewingFile!.filename, kind: '3d', revisionName: revName };
+  if (openDoc) {
+    const kind = docKindFor(openDoc);
+    if (kind) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
+  } else if (viewingFile || assemblyActive) paneDoc = { fileId: viewingFile?.id ?? 0, filename: assemblyActive ? 'Assembly' : viewingFile!.filename, kind: '3d', revisionName: revName };
   else if (article?.mirror_of && mirrorSource) {
     const src = mirrorFiles.data ?? [];
-    const pick = src.find((f) => f.has_viewer) ?? src.find((f) => f.file_type === 'drawing') ?? null;
+    const pick = src.find((f) => f.has_viewer) ?? src.find((f) => f.file_type === 'drawing' && docKindFor(f)) ?? null;
+    const sourceActiveRev = mirrorSource.revisions.find((r) => r.is_active);
+    const sourceRevName = sourceActiveRev
+      ? revisionLabel(sourceActiveRev.revision_name, sourceActiveRev.customer_index)
+      : mirrorSource.part_number;
     if (pick) {
-      paneDoc = { fileId: pick.id, filename: pick.filename, kind: pick.has_viewer ? '3d' : docKind(pick), revisionName: `${mirrorSource.part_number} · active` };
-      paneMirror = { sourcePartId: mirrorSource.part_id, sourceNumber: mirrorSource.customer_part_number ?? mirrorSource.part_number, sourceName: mirrorSource.name };
+      const kind = pick.has_viewer ? '3d' : docKindFor(pick);
+      if (kind) paneDoc = { fileId: pick.id, filename: pick.filename, kind, revisionName: sourceRevName };
     }
+    paneMirror = { sourcePartId: mirrorSource.part_id, sourceNumber: mirrorSource.customer_part_number ?? mirrorSource.part_number, sourceName: mirrorSource.name };
   }
   const paneViewerUrl = paneMirror && paneDoc?.kind === '3d' ? `${API_BASE_URL}/v1/parts/revision-files/${paneDoc.fileId}/viewer` : viewerUrl;
 
@@ -1554,6 +1560,17 @@ export default function ProjectDetailPage() {
 
                 {!partRevisions || partRevisions.length === 0 ? (
                   <div className="p-6 text-center">
+                    {article?.mirror_of && (
+                      <div className="mb-4 text-left">
+                        <DocumentPane document={paneDoc} mirror={paneMirror}
+                          onOpenPart={(pid) => { setSelectedPartId(pid); setViewingFileId(null); setOpenDocId(null); }}>
+                          <Viewer3D
+                            fileId={paneDoc?.fileId ?? null}
+                            viewerUrl={paneViewerUrl}
+                          />
+                        </DocumentPane>
+                      </div>
+                    )}
                     <p className="text-slate-400 text-sm mb-3">
                       Files are managed per revision. Record the first customer data to upload files.
                     </p>

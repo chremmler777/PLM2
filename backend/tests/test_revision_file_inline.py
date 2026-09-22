@@ -22,6 +22,15 @@ async def test_inline_picture(client, eng_auth, part):
     assert r.headers["content-type"].startswith("image/png")
 
 
+async def test_inline_non_latin1_filename_uses_rfc5987_encoding(client, eng_auth, part):
+    fid = await _upload(client, eng_auth, part, "Prüfung—A.pdf", b"%PDF-1.4 z", "application/pdf", "drawing")
+    r = await client.get(f"/api/v1/parts/revision-files/{fid}/inline")
+    assert r.status_code == 200
+    disposition = r.headers["content-disposition"]
+    assert disposition.startswith("inline")
+    assert "filename*=utf-8''" in disposition
+
+
 async def test_inline_refuses_other_types(client, eng_auth, part):
     fid = await _upload(client, eng_auth, part, "model.stp", b"ISO-10303-21;", "application/step")
     r = await client.get(f"/api/v1/parts/revision-files/{fid}/inline")

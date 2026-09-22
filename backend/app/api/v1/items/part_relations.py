@@ -74,13 +74,17 @@ async def create_relation(
             if from_part.item_category != "article" or to_part.item_category != "article":
                 raise HTTPException(status_code=400, detail="Only articles can be mirrors of articles")
             already = await db.execute(select(PartRelation).where(
-                PartRelation.from_part_id == part_id, PartRelation.relation_type == "mirror_of"))
-            if already.scalar_one_or_none():
+                PartRelation.from_part_id == part_id, PartRelation.relation_type == "mirror_of").limit(1))
+            if already.scalars().first():
                 raise HTTPException(status_code=409, detail="This part is already a mirror of another part")
             source_is_mirror = await db.execute(select(PartRelation).where(
-                PartRelation.from_part_id == body.to_part_id, PartRelation.relation_type == "mirror_of"))
-            if source_is_mirror.scalar_one_or_none():
+                PartRelation.from_part_id == body.to_part_id, PartRelation.relation_type == "mirror_of").limit(1))
+            if source_is_mirror.scalars().first():
                 raise HTTPException(status_code=400, detail="The source part is itself a mirror; point at the part that holds the data")
+            is_mirrored_by_others = await db.execute(select(PartRelation).where(
+                PartRelation.to_part_id == part_id, PartRelation.relation_type == "mirror_of").limit(1))
+            if is_mirrored_by_others.scalars().first():
+                raise HTTPException(status_code=400, detail="Other parts mirror this one; it must hold the data")
 
         existing = await db.execute(
             select(PartRelation).where(

@@ -68,8 +68,11 @@ describe('PartDetail customer part number', () => {
   })
 
   it('offers the field on a part that has no customer part number yet', async () => {
-    clientMocks.get.mockImplementation((url: string) =>
-      Promise.resolve({ data: url === '/v1/parts/5' ? part({ customer_part_number: null }) : [] }))
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/5') return Promise.resolve({ data: part({ customer_part_number: null }) })
+      if (url === '/v1/parts/5/paint') return Promise.resolve({ data: { paint_required: false, process: null, notes: null, layers: [] } })
+      return Promise.resolve({ data: [] })
+    })
     renderPart()
     expect((await screen.findByTestId('edit-customer-part-number')).textContent).toContain('+ customer part number')
   })
