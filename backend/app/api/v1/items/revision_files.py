@@ -23,7 +23,7 @@ from app.models.entities import Project
 from app.models.part import RevisionFile, RevisionStatus
 from app.services.customer_naming import CONVENTIONS, parse_filename
 from app.services.part_service import PartService, RevisionService, ChangelogService
-from app.services.revision_file_service import UnsupportedFile, store_revision_file
+from app.services.revision_file_service import UnsupportedFile, store_revision_file, MIME_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +385,28 @@ async def download_revision_file(
         path=rev_file.file_path,
         filename=rev_file.filename,
         media_type="application/octet-stream",
+    )
+
+
+INLINE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+
+@router.get("/revision-files/{file_id}/inline")
+async def inline_revision_file(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a drawing PDF or a picture for display in the app (not as a download)."""
+    rev_file = await _get_file_or_404(db, file_id)
+    ext = os.path.splitext(rev_file.filename)[1].lower()
+    if ext not in INLINE_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Only PDF and pictures can be shown inline")
+    if not os.path.exists(rev_file.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+    return FileResponse(
+        path=rev_file.file_path,
+        media_type=MIME_MAP.get(ext, "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{rev_file.filename}"'},
     )
 
 
