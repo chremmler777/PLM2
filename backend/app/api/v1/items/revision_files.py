@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/parts", tags=["revision-files"])
 
+# Starlette renamed the 422 constant; keep working on both spellings.
+HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
+
 LOCKED_STATUSES = {
     RevisionStatus.FROZEN.value,
     RevisionStatus.CANCELLED.value,
@@ -304,7 +307,7 @@ async def parse_upload_filenames(
     elif convention in CONVENTIONS:
         effective = convention
     else:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status_code=HTTP_422,
                             detail=f"Unknown convention '{convention}'")
     rows = []
     for name in filenames:
