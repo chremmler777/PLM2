@@ -33,5 +33,5 @@
 - [ECR long-term cost effects](ecr-long-term-cost-effects-2026-09-16.md) — costing must also capture recurring per-piece effects on article price (cycle time, weight, PM cycle, scrap, refurbishment); noted 2026-09-16, not built
 - [Prod SSH fail2ban](prod-ssh-fail2ban-2026-09-22.md) — source ~/.ssh/agent.env before any ssh to ktx-server; never retry a failed auth
 - [Prod data is truth](prod-data-is-truth-2026-09-22.md) — data ops run on prod against prod data; never push local DB, never decide from local state
-- [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; BOM marker + viewer warning still to build
+- [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; UI (chip, tree marker, red viewer banner) shipped 2026-09-22
 - [1994 nominated E1 reset 2026-09-22](1994-nominated-e1-reset-2026-09-22.md) — prod 1994 = 12 nominated articles 001-012, drawing names, E1 · index, mirrors as relations, E1.1 on 206.886.197

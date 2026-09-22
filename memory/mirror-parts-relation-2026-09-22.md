@@ -15,13 +15,13 @@ delivered). Written by `backend/scripts/reset_1994_e1.py` for 1994:
 206.882.252 → 206.882.251, 206.885.968 → 206.885.967. No files are copied
 to the mirror; only files delivered under its own number are attached.
 
-**Open UI work (not built yet, 2026-09-22):**
-- `mirror_of` is not in the API's `VALID_RELATION_TYPES`
-  (`backend/app/api/v1/items/part_relations.py`), so it cannot be created
-  from the UI. Add it, one mirror per part (see the 2026-09-08 master BOM /
-  tooling board spec, which designed exactly this relation).
-- BOM tree and part page: show "mirror of <part>" on the mirror.
-- 3D viewer on a mirror with no own files: warning "mirrored part, data on
-  <part>", offer to open the source's viewer.
+**Built 2026-09-22 (merged to main, d2c6b387):** `mirror_of` is a valid
+relation type (one mirror per article, no chains in either direction, articles
+of one project only); the project page shows a red `⇄ Mirror of …` chip, the
+tree marks mirrors, and a mirror with no own 3D/drawing shows the source
+part's document under the red banner "Mirrored part. Showing … Geometry is
+the mirror image, RPS and references differ." Relations form offers
+"mirror of" on articles. Deferred: partial unique index for one-mirror-per-part
+(application-level only today), a11y on the revision strip tabs.
 
 See [[prod-data-is-truth]] for how data changes reach prod.
