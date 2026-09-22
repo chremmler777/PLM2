@@ -59,6 +59,13 @@ describe('RevisionFileRow provenance', () => {
     expect(screen.queryByTestId('file-kind')).toBeNull()
     expect(screen.queryByTestId('file-note')).toBeNull()
   })
+
+  it('shows Open when an onOpen handler is given', () => {
+    const onOpen = vi.fn()
+    wrap(<RevisionFileRow file={file({ file_type: 'drawing', mime_type: 'application/pdf', filename: 'd.pdf' })} isViewing={false} locked={false} onOpen={onOpen} />)
+    fireEvent.click(screen.getByText('Open'))
+    expect(onOpen).toHaveBeenCalled()
+  })
 })
 
 describe('ProjectDetailPage customer package entry point', () => {

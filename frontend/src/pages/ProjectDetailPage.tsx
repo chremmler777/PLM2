@@ -123,7 +123,7 @@ function usePartRevisions(partId: number) {
   });
 }
 
-interface RevisionFile {
+export interface RevisionFile {
   id: number;
   revision_id: number;
   filename: string;
@@ -927,11 +927,13 @@ export function RevisionFileRow({
   isViewing,
   locked,
   onView,
+  onOpen,
 }: {
   file: RevisionFile;
   isViewing: boolean;
   locked: boolean;
   onView?: () => void;
+  onOpen?: () => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -980,6 +982,12 @@ export function RevisionFileRow({
             className="px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 disabled:bg-blue-700 text-white font-medium text-xs"
           >
             {isViewing ? 'Viewing' : 'View 3D'}
+          </button>
+        )}
+        {onOpen && (
+          <button onClick={onOpen}
+            className="px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 text-white font-medium text-xs">
+            Open
           </button>
         )}
         <a
