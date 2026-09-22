@@ -3,7 +3,7 @@
  * Majors come only from customer data (E<n> review, <n> official); minors
  * are our proposals.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
@@ -80,6 +80,14 @@ export default function PartDetail() {
   const [editingCustomerNumber, setEditingCustomerNumber] = useState<string | null>(null);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
+  // PartDetail is routed (/parts/:partId) and React Router does not remount
+  // it on param-only changes; in-page navigation (BOM node click, "Used in"
+  // chips) keeps this instance alive, so a stale view/open selection would
+  // otherwise leak into the newly loaded part's render.
+  useEffect(() => {
+    setViewingId(null);
+    setOpenId(null);
+  }, [partId]);
 
   const { data: part, isLoading, error: partError, refetch: refetchPart } = useQuery({
     queryKey: ['part', partId],
