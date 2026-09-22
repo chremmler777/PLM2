@@ -6,7 +6,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client, { API_BASE_URL } from '../api/client';
 import Viewer3D from '../components/Viewer3D';
-import CADUploader from '../components/CADUploader';
+import UploadDialog from '../components/parts/UploadDialog';
 import RevisionWorkflowSection from '../components/workflows/RevisionWorkflowSection';
 import PartBOMSection from '../components/PartBOMSection';
 import PartRelationsSection from '../components/PartRelationsSection';
@@ -135,6 +135,8 @@ interface RevisionFile {
   uploaded_at: string;
   uploaded_by?: number | null;
   uploaded_by_name?: string | null;
+  kind?: string | null;
+  note?: string | null;
 }
 
 function useRevisionFiles(revisionId: number) {
@@ -957,11 +959,16 @@ export function RevisionFileRow({
             {file.file_type.replace(/_/g, ' ')}
           </span>
           <p className="text-slate-100 truncate font-mono text-xs">{file.filename}</p>
+          {file.kind && (
+            <span data-testid="file-kind" title={file.note ?? undefined}
+              className="px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 bg-blue-900/50 text-blue-300">{file.kind}</span>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-1">
           <p className="text-slate-400 text-xs">{(file.file_size / 1024 / 1024).toFixed(2)} MB</p>
           {noPreview && <span className="text-yellow-400 text-xs">No 3D preview available</span>}
         </div>
+        {file.note && <p data-testid="file-note" className="text-slate-500 text-xs truncate">{file.note}</p>}
         {/* Who put the file on the record and when. */}
         <UploadedBy name={file.uploaded_by_name} at={file.uploaded_at} className="block" />
       </div>
@@ -1119,6 +1126,8 @@ export default function ProjectDetailPage() {
 
   const [showCustomerData, setShowCustomerData] = useState(false);
   const [showPackage, setShowPackage] = useState(false);
+  const [uploadFiles, setUploadFiles] = useState<File[] | null>(null);
+  const [uploadDrag, setUploadDrag] = useState(false);
   const customerDataMutation = useMutation({
     mutationFn: async (v: CustomerDataInput) => {
       const res = await client.post(`/v1/parts/${selectedPartId}/revisions/customer-data`, v);
@@ -1485,9 +1494,41 @@ export default function ProjectDetailPage() {
                         </p>
                       )}
                       {!revisionLocked && selectedRevisionId && (
-                        <CADUploader partId={selectedPart.id} revisionId={selectedRevisionId} compact />
+                        <div
+                          data-testid="upload-dropzone"
+                          className={`border-2 border-dashed rounded-lg p-2 text-center text-xs cursor-pointer transition-colors ${uploadDrag ? 'border-blue-500 bg-blue-50/10' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
+                          onDragEnter={(e) => { e.preventDefault(); setUploadDrag(true); }}
+                          onDragOver={(e) => { e.preventDefault(); setUploadDrag(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); setUploadDrag(false); }}
+                          onDrop={(e) => { e.preventDefault(); setUploadDrag(false); setUploadFiles(Array.from(e.dataTransfer.files)); }}
+                          onClick={() => document.getElementById('upload-dropzone-input')?.click()}
+                        >
+                          <input id="upload-dropzone-input" type="file" multiple className="hidden"
+                            onChange={(e) => { if (e.target.files?.length) setUploadFiles(Array.from(e.target.files)); e.target.value = ''; }} />
+                          <p className="text-slate-400">+ Drop files here or click to upload (CAD, drawing, picture, document)</p>
+                        </div>
                       )}
                     </div>
+                    {uploadFiles && selectedRevision && (
+                      <UploadDialog
+                        open
+                        partId={selectedPart.id}
+                        currentRevision={{ id: selectedRevision.id, revision_name: selectedRevision.revision_name,
+                          customer_index: selectedRevision.customer_index, phase: selectedRevision.phase }}
+                        revisionNames={(partRevisions ?? []).map((r) => r.revision_name)}
+                        officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
+                        projectNaming={project?.customer_naming ?? null}
+                        initialFiles={uploadFiles}
+                        onClose={() => setUploadFiles(null)}
+                        onDone={(targetRevisionId) => {
+                          setUploadFiles(null);
+                          queryClient.invalidateQueries({ queryKey: ['part-revisions', selectedPartId] });
+                          queryClient.invalidateQueries({ queryKey: ['revision-files', targetRevisionId] });
+                          queryClient.invalidateQueries({ queryKey: ['parts', id] });
+                          setSelectedRevisionId(targetRevisionId);
+                        }}
+                      />
+                    )}
                   </>
                 )}
               </div>

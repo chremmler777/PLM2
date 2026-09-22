@@ -46,6 +46,19 @@ describe('RevisionFileRow provenance', () => {
     wrap(<RevisionFileRow file={file()} isViewing={false} locked={false} />)
     expect(screen.getByTestId('uploaded-by').textContent).not.toContain('·')
   })
+
+  it('shows the data kind chip and the note', () => {
+    wrap(<RevisionFileRow file={file({ kind: 'PCA', note: 'PCA engineering master: open this one in CATIA.' })}
+      isViewing={false} locked={false} />)
+    expect(screen.getByText('PCA')).toBeTruthy()
+    expect(screen.getByText(/open this one in CATIA/)).toBeTruthy()
+  })
+
+  it('renders nothing extra for a file without kind or note', () => {
+    wrap(<RevisionFileRow file={file()} isViewing={false} locked={false} />)
+    expect(screen.queryByTestId('file-kind')).toBeNull()
+    expect(screen.queryByTestId('file-note')).toBeNull()
+  })
 })
 
 describe('ProjectDetailPage customer package entry point', () => {
