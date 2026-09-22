@@ -106,7 +106,7 @@ describe('ProjectDetailPage article panel', () => {
   it('tree rows expand to revisions and tools, and mark mirrors', async () => {
     mount()
     const row = await screen.findByText(/Handle LH/)
-    expect(screen.getByTestId('tree-mirror-6').textContent).toContain('mirror of 20-1994-001-0')
+    expect(screen.getByTestId('tree-mirror-of-6').textContent).toContain('mirror of 20-1994-001-0')
     const chevron = within(row.closest('button')!.parentElement!).getByLabelText('Expand')
     fireEvent.click(chevron)
     expect(await screen.findByTestId('tree-rev-10')).toBeTruthy()
@@ -114,5 +114,50 @@ describe('ProjectDetailPage article panel', () => {
     expect(screen.getByTestId('tree-rel-30').textContent).toContain('199401')
     fireEvent.click(screen.getByTestId('tree-rev-10'))
     expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('a pending revision pick abandoned by switching parts does not leak into a later re-select', async () => {
+    let resolveLHRevisions!: (value: { data: unknown }) => void
+    const lhRevisionsPromise = new Promise<{ data: unknown }>((resolve) => { resolveLHRevisions = resolve })
+    let lhRevisionsCallCount = 0
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [{ id: 2, name: 'Seat Trim', code: '1994', status: 'active' }] })
+      if (url === '/v1/parts/project/2') return Promise.resolve({ data: [LH, RH] })
+      if (url === '/v1/parts/project/2/structure') return Promise.resolve({ data: structure })
+      if (url === '/v1/parts/5/revisions') {
+        lhRevisionsCallCount++
+        // First fetch (triggered by clicking the tree-rev-10 chip) stays pending until
+        // resolveLHRevisions is called below, simulating the part switch racing ahead of it.
+        return lhRevisionsCallCount === 1 ? lhRevisionsPromise : Promise.resolve({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
+      }
+      if (url === '/v1/parts/6/revisions') return Promise.resolve({ data: structure.articles[1].revisions.map((r) => ({ ...r, part_id: 6, created_at: '2026-05-28' })) })
+      if (url === '/v1/parts/revisions/9/files') return Promise.resolve({ data: files9 })
+      if (url === '/v1/parts/revisions/10/files') return Promise.resolve({ data: [] })
+      if (url === '/v1/parts/revisions/19/files') return Promise.resolve({ data: [] })
+      if (url.includes('/bom-tree')) return Promise.resolve({ data: { part_id: 5, part_number: LH.part_number, name: LH.name, revision_name: 'E1', customer_index: '003', lines: [] } })
+      return Promise.resolve({ data: [] })
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/projects/2']}><Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes></MemoryRouter>
+      </QueryClientProvider>)
+
+    const row = await screen.findByText(/Handle LH/)
+    const chevron = within(row.closest('button')!.parentElement!).getByLabelText('Expand')
+    fireEvent.click(chevron)
+    // Click LH's revision 10 chip: sets pendingRevisionRef = { partId: 5, revisionId: 10 } while
+    // /v1/parts/5/revisions is still in flight (unresolved).
+    fireEvent.click(await screen.findByTestId('tree-rev-10'))
+    // Switch to RH before LH's revisions query resolves.
+    fireEvent.click(screen.getAllByText(/Handle RH/)[0])
+    expect((await screen.findByTestId('rev-tab-19')).getAttribute('aria-selected')).toBe('true')
+    // Now let LH's original in-flight fetch resolve and land in the cache.
+    resolveLHRevisions({ data: structure.articles[0].revisions.map((r) => ({ ...r, part_id: 5, created_at: '2026-05-28' })) })
+    await waitFor(() => expect(queryClient.getQueryData(['part-revisions', 5])).toBeTruthy())
+    // Re-select LH: the abandoned pending pick for revision 10 must not resurrect —
+    // the default (active) revision 9 should be selected instead.
+    fireEvent.click(screen.getAllByText(/Handle LH/)[0])
+    expect((await screen.findByTestId('rev-tab-9')).getAttribute('aria-selected')).toBe('true')
   })
 })

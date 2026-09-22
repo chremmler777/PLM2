@@ -550,8 +550,8 @@ function TreeNodeComponent({
               ({node.children.length})
             </span>
           )}
-          {article?.mirror_of && <span data-testid={`tree-mirror-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirror of {article.mirror_of.part_number}</span>}
-          {article && article.mirrored_by.length > 0 && <span data-testid={`tree-mirror-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirrored by {article.mirrored_by.map((m) => m.part_number).join(', ')}</span>}
+          {article?.mirror_of && <span data-testid={`tree-mirror-of-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirror of {article.mirror_of.part_number}</span>}
+          {article && article.mirrored_by.length > 0 && <span data-testid={`tree-mirrored-by-${node.part.id}`} className="ml-2 text-[10px] text-red-300">⇄ mirrored by {article.mirrored_by.map((m) => m.part_number).join(', ')}</span>}
         </div>
         {paintByPartId?.get(node.part.id) && (
           <span data-testid={`paint-swatch-${node.part.id}`} className="flex-shrink-0 flex items-center">
@@ -576,6 +576,9 @@ function TreeNodeComponent({
       </button>
 
       {expanded && hasStructure && (
+        // This block sits as a sibling of the row <button>, not nested inside it, so the
+        // stopPropagation() calls on the chip buttons below are currently inert — kept as a
+        // defensive guard in case this ever moves inside the row.
         <div className="ml-6 my-1 space-y-1 text-xs" style={{ marginLeft: `${depth * 20 + 24}px` }}>
           {article!.revisions.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
@@ -1137,6 +1140,13 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     setViewingFileId(null);
     setOpenDocId(null);
+    // A pending pick only guards the part change it was made for — once
+    // selectedPartId has moved on to something else, the ref must not
+    // outlive that change, or a later re-select of the original part
+    // (with revisions already cached) would wrongly reapply the stale pick.
+    if (pendingRevisionRef.current && pendingRevisionRef.current.partId !== selectedPartId) {
+      pendingRevisionRef.current = null;
+    }
     if (pendingRevisionRef.current?.partId === selectedPartId) {
       const pending = pendingRevisionRef.current;
       if (partRevisions?.some((r) => r.id === pending.revisionId)) {
