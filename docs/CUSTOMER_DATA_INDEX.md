@@ -50,11 +50,26 @@ On the part page, or on the project page with the part selected:
    (the `.B` in `3CR.807.425.B`). Summary is optional. Optionally type the
    revision number if the customer's numbering is ahead of ours (a part may
    start at E2). It must be above every existing revision of that kind.
-4. Save. The new major becomes the part's active revision. Upload the files
-   to it as usual.
+4. Save. The new major becomes the part's active revision.
 
 The new major **copies the BOM** from the previous major, so an E2 never
 starts with an empty bill of materials.
+
+### Uploading files (project page)
+
+Drop files on the part's file list. The dialog reads each filename under the
+project's **customer file naming** convention (set in the project header,
+overridable in the dialog) and shows the data kind (PCA, DMU, DRW) and the
+customer index it found. Then choose where the files go:
+
+- **Attach to the current revision** (`E1 · 003`).
+- **Next customer data → E2** (or `2` once official): statement, received date
+  and customer index are prefilled from the filenames, all editable, the index
+  optional.
+- **Next proposal → E1.1**: our own iteration, no customer index.
+
+The E number is always our filing order; the customer index is informational
+and shown next to it. Detection only prefills, you decide.
 
 ## Proposals
 
@@ -164,7 +179,7 @@ assembly 206.881.971, `004` the assembly index, `003` the position's own index.
 |---|---|---|
 | `PCA` | Full construction model: parametric CATIA part with RPS, reference points and lines, annotations, history. 2 to 7 times the size of the DMU. | **Engineering master.** The file to open in CATIA; RPS and datums drive tool, gauge and measurement design. STEP for toolshops and the viewer is exported from this one. |
 | `DMU` | Digital mock-up: reduced solid of the same state, no RPS, no references. | Convenience file for packaging and quick opens. Archived as received, not worked from. |
-| `DRW` | Customer drawing, delivered as PDF. | Stored as drawing on the same major. Mirrored parts (LH/RH, 40/60) share one drawing and usually one 3D. |
+| `DRW` | Customer drawing, delivered as PDF. | Stored as drawing on the same major. Mirrored parts (LH/RH, 40/60) are **not** copied: the mirror part carries a `mirror_of` relation to the part that holds the data, and only files delivered under the mirror's own number are attached to it. |
 | `OUT` | Name of the delivery folder that holds the DMU and PCA pair. | Not a file, ignored. |
 
 Rule: **keep every customer file as received on the revision it belongs to**, both
