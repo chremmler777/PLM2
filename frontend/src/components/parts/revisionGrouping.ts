@@ -23,7 +23,9 @@ export function parseRevisionName(name: string): { official: boolean; major: num
 }
 
 /** Official majors first, newest first; minors ascending. */
-export function groupByMajor(revisions: Revision[]): { major: Revision; minors: Revision[] }[] {
+export function groupByMajor<
+  T extends Pick<Revision, 'id' | 'revision_name' | 'phase' | 'status' | 'parent_revision_id' | 'customer_index'>
+>(revisions: T[]): { major: T; minors: T[] }[] {
   const majors = revisions.filter((r) => !r.parent_revision_id);
   return majors
     .map((major) => ({
