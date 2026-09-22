@@ -11,26 +11,11 @@ from sqlalchemy.orm import joinedload
 from app.dependencies import get_current_user
 from app.models import get_db, User, PartRelation
 from app.services.part_service import PartService, ChangelogService
+from app.services.relation_labels import RELATION_LABELS, VALID_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/parts", tags=["part-relations"])
-
-VALID_RELATION_TYPES = {"produces", "checks", "assembles", "related",
-                        "serves", "feeds", "mirror_of"}
-
-# Human-readable labels per direction
-RELATION_LABELS = {
-    "produces": ("produces", "produced by"),
-    "checks": ("checks", "checked by"),
-    "assembles": ("assembles", "assembled by"),
-    "related": ("related to", "related to"),
-    # serves: equipment -> every tool it covers (see equipment_numbering.py).
-    # feeds: tool -> downstream tool whose station consumes its parts.
-    "serves": ("serves", "served by"),
-    "feeds": ("feeds", "fed by"),
-    "mirror_of": ("mirror of", "mirrored by"),
-}
 
 
 class RelationCreate(BaseModel):

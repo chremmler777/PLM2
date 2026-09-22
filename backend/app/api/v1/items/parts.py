@@ -13,6 +13,7 @@ from app.models import get_db
 from app.models import User
 from app.models.part import PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
+from app.services.project_structure_service import project_structure
 from app.utils.cad_converter import convert_step_to_gltf
 from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
@@ -84,6 +85,16 @@ async def get_project_parts(
     """Get all parts in a project."""
     parts = await PartService.get_parts_by_project(db, project_id)
     return parts
+
+
+@router.get("/project/{project_id}/structure", response_model=dict)
+async def get_project_structure(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Articles with revisions, related tools/gauges/equipment and mirror links, in one call."""
+    return await project_structure(db, project_id)
 
 
 @router.put("/{part_id}", response_model=PartResponse)
