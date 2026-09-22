@@ -10,8 +10,10 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.entities import Project
 from app.models.part import Part, PartRevision
 from app.services.bom_tree_service import BomTreeService
+from app.services.customer_naming import parse_filename
 from app.services.customer_package import (
     ACTION_ERROR, ACTION_NEW, ACTION_UNCHANGED, ACTION_UNMATCHED,
     Candidate, decide_action, index_from_filename, match_file)
@@ -91,6 +93,9 @@ class CustomerPackageService:
     async def preview(session: AsyncSession, assembly_id: int, statement: str, received_at: date,
                       package_index: Optional[str], filenames: list[str]) -> list[PackageRow]:
         cands = await CustomerPackageService.candidates(session, assembly_id)
+        assembly = await session.get(Part, assembly_id)
+        project = await session.get(Project, assembly.project_id) if assembly else None
+        convention = project.customer_naming if project else None
         rows: list[PackageRow] = []
         for name in filenames:
             row = PackageRow(filename=name)
@@ -101,7 +106,12 @@ class CustomerPackageService:
                 rows.append(row)
                 continue
             row.part_id = c.part_id
-            row.customer_index = index_from_filename(name, c.customer_part_number) or (package_index or None)
+            detected = None
+            if convention:
+                detected = parse_filename(name, convention, c.customer_part_number).customer_index
+            row.customer_index = (detected
+                                  or index_from_filename(name, c.customer_part_number)
+                                  or (package_index or None))
             await CustomerPackageService._fill_row(session, row, statement)
             if row.action != ACTION_ERROR:
                 row.action = decide_action(row.customer_index, row.current_index)

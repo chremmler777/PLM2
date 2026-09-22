@@ -6,10 +6,11 @@ test results. Uploads are blocked on frozen/cancelled/archived revisions.
 """
 import logging
 import os
+from dataclasses import asdict
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,9 @@ from sqlalchemy import select
 from app.dependencies import get_current_user
 from app.models import get_db
 from app.models import User
+from app.models.entities import Project
 from app.models.part import RevisionFile, RevisionStatus
+from app.services.customer_naming import CONVENTIONS, parse_filename
 from app.services.part_service import PartService, RevisionService, ChangelogService
 from app.services.revision_file_service import UnsupportedFile, store_revision_file
 
@@ -273,6 +276,37 @@ async def get_assembly_files(
     for e in entries:
         e["uploaded_by_name"] = names.get(e["uploaded_by"])
     return entries
+
+
+@router.get("/{part_id}/files/parse", response_model=dict)
+async def parse_upload_filenames(
+    part_id: int,
+    filenames: List[str] = Query(..., min_length=1, max_length=200),
+    convention: Optional[str] = Query(None, description="vw | scout | none; omitted = project default"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read customer index and data kind from filenames before uploading.
+    Detection only prefills the dialog; nothing is stored here."""
+    part = await PartService.get_part(db, part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    if convention is None:
+        project = await db.get(Project, part.project_id)
+        effective = project.customer_naming if project else None
+    elif convention == "none":
+        effective = None
+    elif convention in CONVENTIONS:
+        effective = convention
+    else:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"Unknown convention '{convention}'")
+    rows = []
+    for name in filenames:
+        parsed = asdict(parse_filename(name, effective, part.customer_part_number))
+        parsed["dated"] = parsed["dated"].isoformat() if parsed["dated"] else None
+        rows.append(parsed)
+    return {"convention": effective, "conventions": CONVENTIONS, "rows": rows}
 
 
 @router.get("/revisions/{revision_id}/files", response_model=List[dict])
