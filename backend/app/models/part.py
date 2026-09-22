@@ -239,6 +239,11 @@ class RevisionFile(Base):
     cad_format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # step, iges, stl, etc
     cad_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Metadata as JSON
 
+    # Data kind read from the customer filename (PCA, DMU, DRW, G02 ...) and a
+    # free note shown under the filename (what a PCA vs a DMU file is for).
+    kind: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # File integrity
     file_hash: Mapped[str] = mapped_column(String(64))  # SHA-256
 

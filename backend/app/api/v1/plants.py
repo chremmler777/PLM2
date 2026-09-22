@@ -1,6 +1,6 @@
 """API endpoints for plants."""
 import logging
-from typing import List
+from typing import List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -21,6 +21,27 @@ class ProjectCreate(BaseModel):
     code: str
     description: str | None = None
     plant_id: int
+
+
+class ProjectPatch(BaseModel):
+    """Partial update of a project header. Every field optional; a field
+    that is present with null clears it (customer_naming only)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    customer_naming: Optional[Literal["vw", "scout"]] = None
+
+
+def _project_dict(p: Project) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "code": p.code,
+        "description": p.description,
+        "status": p.status,
+        "plant_id": p.plant_id,
+        "customer_naming": p.customer_naming,
+    }
 
 
 @router.get("", response_model=List[dict])
@@ -56,17 +77,7 @@ async def get_all_projects(
         .order_by(Project.name)
     )
     projects = result.scalars().all()
-    return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "code": p.code,
-            "description": p.description,
-            "status": p.status,
-            "plant_id": p.plant_id,
-        }
-        for p in projects
-    ]
+    return [_project_dict(p) for p in projects]
 
 
 @router.get("/{plant_id}/projects", response_model=List[dict])
@@ -91,17 +102,7 @@ async def get_plant_projects(
     result = await db.execute(select(Project).where(Project.plant_id == plant_id))
     projects = result.scalars().all()
 
-    return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "code": p.code,
-            "description": p.description,
-            "status": p.status,
-            "plant_id": p.plant_id,
-        }
-        for p in projects
-    ]
+    return [_project_dict(p) for p in projects]
 
 
 @router.post("/projects", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -133,11 +134,28 @@ async def create_project(
     await db.commit()
     await db.refresh(project)
 
-    return {
-        "id": project.id,
-        "name": project.name,
-        "code": project.code,
-        "description": project.description,
-        "status": project.status,
-        "plant_id": project.plant_id,
-    }
+    return _project_dict(project)
+
+
+@router.patch("/projects/{project_id}", response_model=dict)
+async def patch_project(
+    project_id: int,
+    body: ProjectPatch,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the project header. `customer_naming` may be set to null to clear it."""
+    result = await db.execute(
+        select(Project).join(Plant).where(
+            (Project.id == project_id) & (Plant.organization_id == current_user.organization_id)
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    fields = body.model_dump(exclude_unset=True)
+    for key, value in fields.items():
+        setattr(project, key, value)
+    await db.commit()
+    await db.refresh(project)
+    return _project_dict(project)

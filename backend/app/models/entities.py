@@ -110,6 +110,10 @@ class Project(Base):
     code: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="active")  # active, completed, archived
+    # Filename convention of the customer delivering data to this project:
+    # "vw" (VW group / Brose / Audi), "scout", or NULL = none. Used to read the
+    # customer index and data kind from uploaded filenames.
+    customer_naming: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
