@@ -32,11 +32,15 @@ import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
 
 // Types
+export type CustomerNaming = 'vw' | 'scout' | null;
+export const CUSTOMER_NAMING_LABELS: Record<Exclude<CustomerNaming, null>, string> = { vw: 'VW group', scout: 'Scout' };
+
 interface Project {
   id: number;
   name: string;
   code: string;
   status: string;
+  customer_naming?: CustomerNaming;
 }
 
 interface Part {
@@ -881,6 +885,40 @@ function fileTypeColor(fileType: string): string {
   return colors[fileType] || 'bg-slate-700 text-slate-300';
 }
 
+export function CustomerNamingSelect({ projectId, value }: { projectId: number; value: CustomerNaming }) {
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: async (next: CustomerNaming) => {
+      const res = await client.patch(`/v1/plants/projects/${projectId}`, { customer_naming: next });
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success('Customer file naming saved');
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+    onError: (error: unknown) => {
+      toast.error((error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed to save');
+    },
+  });
+  return (
+    <label className="flex items-center gap-2 text-xs text-slate-400">
+      Customer file naming
+      <select
+        aria-label="Customer file naming"
+        value={value ?? ''}
+        disabled={save.isPending}
+        onChange={(e) => save.mutate((e.target.value || null) as CustomerNaming)}
+        className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-100 text-xs"
+      >
+        <option value="">None</option>
+        {(Object.keys(CUSTOMER_NAMING_LABELS) as Array<'vw' | 'scout'>).map((k) => (
+          <option key={k} value={k}>{CUSTOMER_NAMING_LABELS[k]}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 // Revision File List Item
 export function RevisionFileRow({
   file,
@@ -1155,6 +1193,7 @@ export default function ProjectDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <CustomerNamingSelect projectId={id} value={project.customer_naming ?? null} />
           <StartChangeButton label="Start change request"
             onClick={() => setShowStartChange(true)}
             className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium" />
