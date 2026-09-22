@@ -71,6 +71,23 @@ customer index it found. Then choose where the files go:
 The E number is always our filing order; the customer index is informational
 and shown next to it. Detection only prefills, you decide.
 
+### Article view (project page)
+
+Select an article: the header shows number, name, phase and, for a mirrored
+part, a red `⇄ Mirror of …` chip. Below it the **revision strip**: majors
+as tabs (`E1 · 003`, `E2 · 004`, `1`), proposals nested under their major
+(`E1.1 proposal`), the active one marked. **+ Proposal** on the selected
+major opens the next `E1.n`.
+
+The **document pane** shows one thing at a time: the 3D viewer, a drawing
+(**Open** on a PDF), or a picture. A mirror part with no data of its own
+shows the source part's model or drawing under a red banner; the source
+holds the files, the mirror only points at it (`mirror_of` relation).
+
+Files are grouped **3D** (PCA, DMU, STEP), **2D** (drawings), **Documents**.
+Linked tools, gauges and equipment appear as chips under the files; the
+left tree expands an article to the same revisions and links.
+
 ## Proposals
 
 **+ Proposal** on any major creates the next minor (`E1.1`, `1.1`) as a draft
