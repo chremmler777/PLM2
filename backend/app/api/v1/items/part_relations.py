@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/parts", tags=["part-relations"])
 
 VALID_RELATION_TYPES = {"produces", "checks", "assembles", "related",
-                        "serves", "feeds"}
+                        "serves", "feeds", "mirror_of"}
 
 # Human-readable labels per direction
 RELATION_LABELS = {
@@ -29,6 +29,7 @@ RELATION_LABELS = {
     # feeds: tool -> downstream tool whose station consumes its parts.
     "serves": ("serves", "served by"),
     "feeds": ("feeds", "fed by"),
+    "mirror_of": ("mirror of", "mirrored by"),
 }
 
 
@@ -83,6 +84,18 @@ async def create_relation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Related parts must be in the same project",
             )
+
+        if body.relation_type == "mirror_of":
+            if from_part.item_category != "article" or to_part.item_category != "article":
+                raise HTTPException(status_code=400, detail="Only articles can be mirrors of articles")
+            already = await db.execute(select(PartRelation).where(
+                PartRelation.from_part_id == part_id, PartRelation.relation_type == "mirror_of"))
+            if already.scalar_one_or_none():
+                raise HTTPException(status_code=409, detail="This part is already a mirror of another part")
+            source_is_mirror = await db.execute(select(PartRelation).where(
+                PartRelation.from_part_id == body.to_part_id, PartRelation.relation_type == "mirror_of"))
+            if source_is_mirror.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="The source part is itself a mirror; point at the part that holds the data")
 
         existing = await db.execute(
             select(PartRelation).where(
