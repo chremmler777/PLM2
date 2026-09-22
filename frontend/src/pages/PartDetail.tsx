@@ -17,6 +17,11 @@ import BomTree, { type BomNode } from '../components/parts/BomTree';
 import PartPaintCard from '../components/paint/PartPaintCard';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import { useAuth } from '../contexts/AuthContext';
+import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
+import RevisionFilesGrouped from '../components/parts/RevisionFilesGrouped';
+import Viewer3D from '../components/Viewer3D';
+import { API_BASE_URL } from '../api/client';
+import type { RevisionFile } from './ProjectDetailPage';
 
 interface Part {
   id: number;
@@ -73,6 +78,8 @@ export default function PartDetail() {
   const [proposalSummary, setProposalSummary] = useState('');
   // null = not editing; '' = editing an empty value
   const [editingCustomerNumber, setEditingCustomerNumber] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   const { data: part, isLoading, error: partError, refetch: refetchPart } = useQuery({
     queryKey: ['part', partId],
@@ -97,6 +104,12 @@ export default function PartDetail() {
     queryKey: ['parts', part?.project_id],
     queryFn: async () => (await client.get(`/v1/parts/project/${part!.project_id}`)).data as { id: number; part_number: string; name: string }[],
     enabled: !!part?.project_id,
+  });
+  const activeRevision = part?.revisions.find((r) => r.id === part.active_revision_id);
+  const { data: files } = useQuery({
+    queryKey: ['revision-files', activeRevision?.id],
+    queryFn: async () => (await client.get(`/v1/parts/revisions/${activeRevision!.id}/files`)).data as RevisionFile[],
+    enabled: !!activeRevision,
   });
 
   const customerData = useMutation({
@@ -149,13 +162,21 @@ export default function PartDetail() {
   }
 
   const hasOfficial = part.revisions.some((r) => r.phase === 'official' && !r.parent_revision_id);
-  const active = part.revisions.find((r) => r.id === part.active_revision_id);
   const nextPhase = NEXT_PHASE[part.lifecycle_phase];
   const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
   const nextMajor = {
     review: Math.max(0, ...majorsOf(part.revisions).filter((r) => r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name.slice(1), 10))) + 1,
     official: Math.max(0, ...majorsOf(part.revisions).filter((r) => !r.revision_name.startsWith('E')).map((r) => parseInt(r.revision_name, 10))) + 1,
   };
+
+  const viewableFiles = files?.filter((f) => f.has_viewer) ?? [];
+  const viewingFile = viewableFiles.find((f) => f.id === viewingId) ?? null;
+  const openDoc = files?.find((f) => f.id === openId) ?? null;
+  const docKind = (f: RevisionFile): 'pdf' | 'image' => (f.mime_type === 'application/pdf' || /\.pdf$/i.test(f.filename) ? 'pdf' : 'image');
+  const revName = activeRevision ? revisionLabel(activeRevision.revision_name, activeRevision.customer_index) : '';
+  let paneDoc: PaneDocument | null = null;
+  if (openDoc) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind: docKind(openDoc), revisionName: revName };
+  else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
 
   return (
     <div className="min-h-screen bg-slate-900 p-8">
@@ -192,7 +213,7 @@ export default function PartDetail() {
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
-                  {active ? `${revisionLabel(active.revision_name, active.customer_index)} (active)` : 'no customer data yet'}
+                  {activeRevision ? `${revisionLabel(activeRevision.revision_name, activeRevision.customer_index)} (active)` : 'no customer data yet'}
                 </span>
                 <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
                   {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
@@ -267,6 +288,17 @@ export default function PartDetail() {
             Bill of materials{bomTree?.revision_name ? <span className="text-slate-400 font-normal text-base"> · {revisionLabel(bomTree.revision_name, bomTree.customer_index)}</span> : null}
           </h2>
           {bomTree ? <BomTree tree={bomTree} onOpenPart={(id) => navigate(`/parts/${id}`)} /> : <p className="text-slate-400 text-sm">Loading…</p>}
+        </div>
+
+        <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
+          <h2 className="text-lg font-semibold text-slate-100 mb-3">Files · {activeRevision ? revisionLabel(activeRevision.revision_name, activeRevision.customer_index) : 'no active revision'}</h2>
+          <DocumentPane document={paneDoc}>
+            {paneDoc?.kind === '3d' && <Viewer3D fileId={paneDoc.fileId} viewerUrl={`${API_BASE_URL}/v1/parts/revision-files/${paneDoc.fileId}/viewer`} />}
+          </DocumentPane>
+          <div className="mt-3">
+            <RevisionFilesGrouped files={files ?? []} locked={true} viewingFileId={viewingId} revisionName={activeRevision?.revision_name ?? ''}
+              onView={(f) => { setViewingId(f.id); setOpenId(null); }} onOpen={(f) => setOpenId(f.id)} />
+          </div>
         </div>
 
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">

@@ -154,6 +154,7 @@ export default function PartRelationsSection({ partId, itemCategory, projectPart
               <option value="checks">checks</option>
               <option value="assembles">assembles</option>
               <option value="related">related to</option>
+              {itemCategory === 'article' && <option value="mirror_of">mirror of</option>}
             </select>
             <select
               value={form.to_part_id}
