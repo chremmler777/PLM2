@@ -70,3 +70,28 @@ cross-reference: handles 206.882.251/252 (S00H4X-110 / S00H4W-110) and latch
 covers 206.885.967/968 (S00H56-110 / S00G0E-110). Tool view + DFM archive spec:
 docs/superpowers/specs/2026-09-23-tool-dfm-archive-design.md.
 
+**Tool view + DFM archive (plan docs/superpowers/plans/2026-09-23-tool-dfm-archive.md):**
+alembic 077 (tool fields on parts) and 078 (dfm_topics / dfm_entries / dfm_entry_files);
+`/api/v1/parts/{id}/dfm/...`; tools open in `ToolDetail` (no 3D, produced-article chips,
+Tool card, DFM archive with three-column ledger). Prod: back up, `alembic upgrade head`
+in the backend container, then `scripts/set_1994_tool_fields.py` dry run and `--apply`
+after the cavities / cycle / tonnage are confirmed against RFQ 26 loop 37. Verification
+(task 14, 2026-09-23): full backend/frontend suites and tsc already green on this branch;
+lint clean on the files this branch touched. Fresh-SQLite `alembic upgrade head` from an
+empty DB fails on migration 001 (pre-existing, predates this branch: SQLite can't ALTER
+ADD CONSTRAINT outside batch mode). More concerning, 077's own `downgrade()` fails on
+SQLite too: `op.drop_column("parts", "toolmaker_id")` hits "unknown column in foreign key
+definition" because the column carries an inline FK and SQLite refuses to drop an
+FK-referenced column without a table rebuild (`op.batch_alter_table`). Verified by
+building the schema with `Base.metadata.create_all` + `alembic stamp head` (same trick
+the test suite's own conftest uses), then exercising 077/078 for real: 078's downgrade
+(plain drop_table) is clean; 077's downgrade needs batch mode to work on SQLite before
+anyone relies on rolling back past 077 on a SQLite deployment. Full end-to-end walkthrough
+via curl against this scratch DB passed: tool + article parts, `produces` relation
+(`other_active_revision_name` present), tool fields set and surviving reload, 400 on tool
+fields for an article, topic opened, 4 ledger entries (ktx to toolmaker+tier1 with a PDF
+and an xlsx, toolmaker to ktx, an update superseding the first with 1 earlier version in
+`history`, tier1 after reopen), xlsx download and inline PDF both correct, xlsx inline
+correctly 415s, close then 409 on a new entry, reopen, changelog lists `dfm_topic_opened`,
+`dfm_entry_recorded` x4, `dfm_topic_closed`, `dfm_topic_reopened` in order.
+

@@ -1,7 +1,8 @@
 # Tool view: tool fields and DFM archive
 
-Date: 2026-09-23. Status: design approved in chat ("go with approach"),
-plan follows.
+Date: 2026-09-23. Status: design approved in chat ("go with approach"); implemented
+per plan 2026-09-23-tool-dfm-archive.md (file routes live at
+/parts/{id}/dfm/files/{file_id}/download|inline).
 
 ## Problem
 
