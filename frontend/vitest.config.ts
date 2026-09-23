@@ -10,5 +10,14 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: false,
+    // Node 22+ ships a native global `localStorage`/`sessionStorage` (stable Web
+    // Storage API) that shadows jsdom's implementation inside the test workers,
+    // leaving getItem/setItem/clear undefined unless --localstorage-file is set.
+    // Disable Node's own implementation in the worker so jsdom's Storage (which
+    // every test, and code under test via safeStorage, relies on) is the one used.
+    poolOptions: {
+      threads: { execArgv: ['--no-experimental-webstorage'] },
+      forks: { execArgv: ['--no-experimental-webstorage'] },
+    },
   },
 });
