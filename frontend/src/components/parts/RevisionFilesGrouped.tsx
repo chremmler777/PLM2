@@ -1,6 +1,7 @@
 /** File list of a revision grouped the way engineers look for things:
  *  3D (PCA, DMU, STEP), 2D (drawings), Documents (the rest). */
-import { RevisionFileRow, type RevisionFile } from '../../pages/ProjectDetailPage';
+import { RevisionFileRow } from '../project/RevisionFileRow';
+import type { RevisionFile } from '../project/projectTypes';
 
 // Kept in sync with the backend's INLINE_EXTENSIONS (backend/app/api/v1/items/revision_files.py).
 export const INLINE_EXTENSIONS = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp'] as const;

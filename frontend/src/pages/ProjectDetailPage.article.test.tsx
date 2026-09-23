@@ -69,6 +69,7 @@ describe('ProjectDetailPage article panel', () => {
     expect(screen.getByTestId('rev-tab-10').textContent).toContain('proposal')
     expect(await screen.findByText('3D (2)')).toBeTruthy()
     expect(screen.getByText('2D (1)')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('detail-tab-links'))
     expect(screen.getByTestId('relation-chip-30').textContent).toContain('199401')
     expect(screen.getAllByText(/mirrored by 20-1994-002-0/).length).toBeGreaterThan(0)
   })

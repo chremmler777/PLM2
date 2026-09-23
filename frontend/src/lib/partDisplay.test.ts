@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { comparePartNumbers, stripProjectCode } from './partDisplay'
+import { comparePartNumbers, shortName, stripProjectCode } from './partDisplay'
 
 describe('comparePartNumbers', () => {
   it('orders by the numeric suffix, so -10 comes after -9', () => {
@@ -24,5 +24,20 @@ describe('stripProjectCode', () => {
     expect(stripProjectCode('Cover 1994', '1994')).toBe('Cover 1994')
     expect(stripProjectCode('1994', '1994')).toBe('1994')
     expect(stripProjectCode('TOOL Handle', undefined)).toBe('TOOL Handle')
+  })
+})
+
+describe('shortName', () => {
+  it('drops the customer number and the project code the row already shows', () => {
+    expect(shortName('206.882.251 Handle LH', '1994', '206.882.251')).toBe('Handle LH')
+    expect(shortName('1994 206.882.251 Cover', '1994', '206.882.251')).toBe('Cover')
+    expect(shortName('Handle 206.882.251 LH', '1994', '206.882.251')).toBe('Handle LH')
+    expect(shortName('1994 TOOL Handle', '1994', null)).toBe('TOOL Handle')
+  })
+  it('keeps the full name when stripping would leave nothing', () => {
+    expect(shortName('206.882.251', '1994', '206.882.251')).toBe('206.882.251')
+  })
+  it('does not cut a number that only shares a prefix', () => {
+    expect(shortName('206.882.2519 Special', null, '206.882.251')).toBe('206.882.2519 Special')
   })
 })

@@ -1,5 +1,9 @@
 /**
- * Sidebar - Main navigation component with collapse/expand
+ * Sidebar - Main navigation component with collapse/expand.
+ *
+ * On a project page it starts as a 48 px icon rail so the items list and the
+ * detail get the width; the choice made there is remembered per browser.
+ * Everywhere else it starts expanded, as before, and is not remembered.
  */
 
 import { useState } from 'react';
@@ -8,15 +12,36 @@ import { useAuth } from '../../contexts/AuthContext';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
 import { useOpenTaskCount } from '../../hooks/queries/useOpenTaskCount';
+import { readStored, writeStored } from '../../lib/safeStorage';
 import ActsAsSwitch from './ActsAsSwitch';
+
+const RAIL_KEY = 'plm2.sidebar.projectRail';
+
+function isProjectPage(path: string): boolean {
+  return /^\/projects\/\d+(\/|$)/.test(path);
+}
 
 export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, username, role } = useAuth();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const onProjectPage = isProjectPage(location.pathname);
+  // Anything but an explicit "expanded" (missing, garbage, unreadable) means the rail.
+  const [railCollapsed, setRailCollapsed] = useState(() => readStored(RAIL_KEY) !== 'expanded');
+  const [pageCollapsed, setPageCollapsed] = useState(false);
+  const isCollapsed = onProjectPage ? railCollapsed : pageCollapsed;
 
-  // Workflow tasks + change tasks — whatever My Tasks would show.
+  const toggleCollapsed = () => {
+    if (onProjectPage) {
+      const next = !railCollapsed;
+      setRailCollapsed(next);
+      writeStored(RAIL_KEY, next ? 'collapsed' : 'expanded');
+    } else {
+      setPageCollapsed(!pageCollapsed);
+    }
+  };
+
+  // Workflow tasks + change tasks: whatever My Tasks would show.
   const openTasks = useOpenTaskCount();
 
   const dailyItems = [
@@ -48,8 +73,9 @@ export default function Sidebar() {
         key={item.path}
         onClick={() => navigate(item.path)}
         aria-current={active ? 'page' : undefined}
-        className={`relative w-full text-left px-3 py-2.5 rounded-md text-sm font-medium ${
-          isCollapsed ? 'justify-center' : ''
+        aria-label={isCollapsed ? item.label : undefined}
+        className={`relative w-full text-left py-2.5 rounded-md text-sm font-medium ${
+          isCollapsed ? 'justify-center px-0' : 'px-3'
         } flex items-center gap-3 ${
           active
             ? 'bg-sky-500/10 text-sky-300'
@@ -63,7 +89,9 @@ export default function Sidebar() {
         <span className={`text-base flex-shrink-0 ${active ? '' : 'opacity-80'}`}>{item.icon}</span>
         {!isCollapsed && <span className="flex-1">{item.label}</span>}
         {item.path === '/my-tasks' && openTasks > 0 && (
-          <span className="px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0">
+          <span className={isCollapsed
+            ? 'absolute top-0.5 right-0.5 min-w-[1rem] px-1 rounded bg-amber-500 text-slate-900 text-[10px] leading-4 font-bold text-center'
+            : 'px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0'}>
             {openTasks}
           </span>
         )}
@@ -72,11 +100,15 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className={`bg-slate-800/80 border-r border-slate-700/70 min-h-screen flex flex-col transition-all duration-200 ${
-      isCollapsed ? 'w-20' : 'w-64'
-    }`}>
+    <aside
+      data-testid="sidebar"
+      data-collapsed={isCollapsed ? 'true' : 'false'}
+      className={`bg-slate-800/80 border-r border-slate-700/70 min-h-screen flex flex-col flex-shrink-0 transition-all duration-200 ${
+        isCollapsed ? 'w-12' : 'w-64'
+      }`}
+    >
       {/* Logo / Collapse Button */}
-      <div className="p-4 border-b border-slate-700/70 flex items-center justify-between">
+      <div className={`border-b border-slate-700/70 flex items-center ${isCollapsed ? 'justify-center py-3' : 'p-4 justify-between'}`}>
         {!isCollapsed && (
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-500 to-blue-700 shadow-lift flex items-center justify-center text-white font-bold text-lg select-none">
@@ -89,7 +121,7 @@ export default function Sidebar() {
           </div>
         )}
         <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={toggleCollapsed}
           className="p-1.5 hover:bg-slate-700 rounded-md text-slate-400 hover:text-slate-100"
           title={isCollapsed ? 'Expand' : 'Collapse'}
         >
@@ -105,7 +137,7 @@ export default function Sidebar() {
       )}
 
       {/* Navigation Items */}
-      <nav className="flex-1 p-2 space-y-0.5">
+      <nav className={`flex-1 space-y-0.5 ${isCollapsed ? 'p-1' : 'p-2'}`}>
         {dailyItems.map(renderNavItem)}
         {showSetup && (
           <>
@@ -120,9 +152,9 @@ export default function Sidebar() {
       </nav>
 
       {/* User block + Logout */}
-      <div className="p-2 border-t border-slate-700/70 space-y-1">
+      <div className={`border-t border-slate-700/70 space-y-1 ${isCollapsed ? 'p-1' : 'p-2'}`}>
         {username && (
-          <div className={`flex items-center gap-2.5 px-2 py-2 ${isCollapsed ? 'justify-center' : ''}`}>
+          <div className={`flex items-center gap-2.5 py-2 ${isCollapsed ? 'justify-center px-0' : 'px-2'}`}>
             <div
               className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-600 to-slate-700 text-slate-100 flex items-center justify-center text-sm font-semibold flex-shrink-0 ring-1 ring-slate-600"
               title={username}
@@ -141,7 +173,7 @@ export default function Sidebar() {
         <NotificationBell collapsed={isCollapsed} />
         <button
           onClick={logout}
-          className="w-full px-3 py-2 rounded-md border border-slate-700 text-slate-400 hover:border-red-500/50 hover:text-red-300 hover:bg-red-500/10 font-medium text-sm"
+          className={`w-full py-2 rounded-md border border-slate-700 text-slate-400 hover:border-red-500/50 hover:text-red-300 hover:bg-red-500/10 font-medium text-sm ${isCollapsed ? 'px-0' : 'px-3'}`}
           title={isCollapsed ? 'Logout' : ''}
         >
           {isCollapsed ? '↪' : 'Logout'}

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { CustomerNamingSelect } from './ProjectDetailPage'
+import { CustomerNamingSelect } from './CustomerNamingSelect'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
-vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
+vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 
 const wrap = (ui: React.ReactElement) =>
   render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
-import ProjectDetailPage, { RevisionFileRow } from './ProjectDetailPage'
+import ProjectDetailPage from './ProjectDetailPage'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -22,51 +22,6 @@ vi.mock('../components/ProjectLessonsSection', () => stub('lessons'))
 vi.mock('../components/ProjectSepSection', () => stub('sep'))
 vi.mock('../components/ProjectChangesSection', () => stub('changes'))
 vi.mock('../components/parts/AssemblyTreeList', () => stub('assemblies'))
-
-const file = (over: Record<string, unknown> = {}) => ({
-  id: 3, revision_id: 9, filename: 'housing.step', file_type: 'cad_native',
-  mime_type: 'application/step', file_size: 2_000_000, cad_format: 'step',
-  has_viewer: true, uploaded_at: '2026-07-01T00:00:00', ...over,
-}) as never
-
-const wrap = (ui: React.ReactElement) =>
-  render(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
-
-describe('RevisionFileRow provenance', () => {
-  afterEach(cleanup)
-
-  it('names who uploaded the revision file and when', () => {
-    wrap(<RevisionFileRow file={file({ uploaded_by: 5, uploaded_by_name: 'Eva Eng' })}
-      isViewing={false} locked={false} />)
-    expect(screen.getByTestId('uploaded-by').textContent)
-      .toContain(`Eva Eng · ${new Date('2026-07-01T00:00:00').toLocaleDateString()}`)
-  })
-
-  it('shows the date alone for a file with no recorded uploader', () => {
-    wrap(<RevisionFileRow file={file()} isViewing={false} locked={false} />)
-    expect(screen.getByTestId('uploaded-by').textContent).not.toContain('·')
-  })
-
-  it('shows the data kind chip and the note', () => {
-    wrap(<RevisionFileRow file={file({ kind: 'PCA', note: 'PCA engineering master: open this one in CATIA.' })}
-      isViewing={false} locked={false} />)
-    expect(screen.getByText('PCA')).toBeTruthy()
-    expect(screen.getByText(/open this one in CATIA/)).toBeTruthy()
-  })
-
-  it('renders nothing extra for a file without kind or note', () => {
-    wrap(<RevisionFileRow file={file()} isViewing={false} locked={false} />)
-    expect(screen.queryByTestId('file-kind')).toBeNull()
-    expect(screen.queryByTestId('file-note')).toBeNull()
-  })
-
-  it('shows Open when an onOpen handler is given', () => {
-    const onOpen = vi.fn()
-    wrap(<RevisionFileRow file={file({ file_type: 'drawing', mime_type: 'application/pdf', filename: 'd.pdf' })} isViewing={false} locked={false} onOpen={onOpen} />)
-    fireEvent.click(screen.getByText('Open'))
-    expect(onOpen).toHaveBeenCalled()
-  })
-})
 
 describe('ProjectDetailPage customer package entry point', () => {
   beforeEach(() => {
@@ -130,7 +85,8 @@ describe('ProjectDetailPage add part form', () => {
         </MemoryRouter>
       </QueryClientProvider>)
 
-    fireEvent.click(await screen.findByText('+ Add Part'))
+    fireEvent.click(await screen.findByLabelText('Project actions'))
+    fireEvent.click(screen.getByText('+ Add Part'))
     fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-100' } })
     fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Top' } })
     fireEvent.change(screen.getByTestId('add-part-customer-number'), { target: { value: '3CR.807.425' } })
@@ -151,7 +107,8 @@ describe('ProjectDetailPage add part form', () => {
         </MemoryRouter>
       </QueryClientProvider>)
 
-    fireEvent.click(await screen.findByText('+ Add Part'))
+    fireEvent.click(await screen.findByLabelText('Project actions'))
+    fireEvent.click(screen.getByText('+ Add Part'))
     fireEvent.change(screen.getByPlaceholderText('e.g., P-001'), { target: { value: '1994-110' } })
     fireEvent.change(screen.getByPlaceholderText('e.g., Housing'), { target: { value: 'Sub' } })
     fireEvent.click(screen.getByText('Add Part'))
@@ -189,7 +146,7 @@ describe('ProjectDetailPage items list', () => {
   it('sorts numerically, drops the project code from names, and counts the filtered rows', async () => {
     mount()
     expect(await screen.findByText('Items (4)')).toBeTruthy()
-    fireEvent.click(screen.getByText(/Tool/))
+    fireEvent.click(screen.getByText('🔧 Tool'))
     expect(await screen.findByText('Items (3 of 4)')).toBeTruthy()
     const numbers = screen.getAllByText(/^1994-\d+$/).map((el) => el.textContent)
     expect(numbers).toEqual(['1994-1', '1994-2', '1994-10'])
