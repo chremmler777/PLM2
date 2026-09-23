@@ -12,6 +12,10 @@ DFM_PARTIES = ("toolmaker", "ktx", "tier1")
 DFM_TOPIC_OPEN = "open"
 DFM_TOPIC_FINISHED = "finished_confirmed"
 DFM_TOPIC_STATUSES = (DFM_TOPIC_OPEN, DFM_TOPIC_FINISHED)
+# Message kinds. An "update" is not a kind: it is a new entry with supersedes_id
+# set, keeping the kind and reply_to of the entry it supersedes.
+DFM_KIND_ORIGINAL = "original"
+DFM_KINDS = (DFM_KIND_ORIGINAL, "forward", "answer", "question")
 
 
 class DfmTopic(Base):
@@ -42,6 +46,9 @@ class DfmEntry(Base):
     party: Mapped[str] = mapped_column(String(20))  # toolmaker | ktx | tier1
     addressed_to: Mapped[list] = mapped_column(JSON, default=list)  # one or two of the other parties
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), default=DFM_KIND_ORIGINAL, server_default=DFM_KIND_ORIGINAL)
+    # the message this one forwards, answers or asks again about; none for an original
+    reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True, index=True)
     # unique so an entry can only be superseded once; NULL stays allowed (multiple
     # entries may have no successor)
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True, unique=True)

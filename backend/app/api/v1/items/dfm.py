@@ -116,6 +116,9 @@ async def create_entry(
     note: Optional[str] = Form(None),
     sent_at: Optional[str] = Form(None),
     supersedes_id: Optional[int] = Form(None),
+    kind: Optional[str] = Form(None, description="original | forward | answer | question; default original, "
+                                                "an update inherits the kind of what it updates"),
+    reply_to_id: Optional[int] = Form(None, description="the message forwarded, answered or asked about"),
     files: List[UploadFile] = File(default=[]),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -128,7 +131,8 @@ async def create_entry(
     try:
         entry = await DfmService.record_entry(
             db, tool, topic, party=party, addressed_to=addressed_to, note=note, sent_at=sent_at,
-            supersedes_id=supersedes_id, files=payloads, user_id=current_user.id)
+            supersedes_id=supersedes_id, files=payloads, user_id=current_user.id,
+            kind=kind, reply_to_id=reply_to_id)
         await db.commit()
     except DfmError as e:
         await db.rollback()
@@ -137,15 +141,11 @@ async def create_entry(
         await db.rollback()
         logger.error(f"DFM entry on topic {topic_id} failed: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not store the entry")
-    names = await user_names(db, {current_user.id})
-    d = DfmService.entry_dict(entry, names)
-    d["history"] = []
-    if entry.supersedes_id:
-        await db.refresh(topic, attribute_names=["entries"])
-        names = await user_names(db, DfmService.user_ids(topic))
-        detail = DfmService.topic_detail(topic, names)
-        d = next(x for x in detail["entries"] if x["id"] == entry.id)
-    return d
+    # shaped through the topic detail so the answered / awaiting state is filled
+    await db.refresh(topic, attribute_names=["entries"])
+    names = await user_names(db, DfmService.user_ids(topic))
+    detail = DfmService.topic_detail(topic, names)
+    return next(x for x in detail["entries"] if x["id"] == entry.id)
 
 
 async def _load_file(db: AsyncSession, tool: Part, file_id: int) -> tuple[DfmEntryFile, str]:
