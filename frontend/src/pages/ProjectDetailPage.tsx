@@ -26,7 +26,7 @@ import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/
 import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
 import { revisionLabel } from '../components/parts/RevisionBadge';
-import { comparePartNumbers, stripProjectCode } from '../lib/partDisplay';
+import { stripProjectCode } from '../lib/partDisplay';
 import AssemblyTreeList from '../components/parts/AssemblyTreeList';
 import { toast } from 'sonner';
 import { UploadedBy } from '../components/common/UploadedBy';
@@ -34,207 +34,17 @@ import RevisionStrip from '../components/parts/RevisionStrip';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../components/parts/DocumentPane';
 import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
 import { useProjectStructure, articleOf, ProjectStructure } from '../hooks/queries/useProjectStructure';
+import {
+  CATEGORY_META, LOCKED_REVISION_STATUSES, buildPartTree, comparePartNodes, getDescendantIds,
+  phaseColor, statusColor, typeColor, CUSTOMER_NAMING_LABELS,
+  type ContextMenuState, type CustomerNaming, type Part, type RevisionFile, type TreeNode,
+} from '../components/project/projectTypes';
+import {
+  useAssemblyFiles, useCatalogParts, useChangelog, usePartRevisions, useProject, useProjectParts, useRevisionFiles,
+} from '../hooks/queries/useProjectDetail';
+import { useSuppliers } from '../hooks/queries/useSuppliers';
 
-// Types
-export type CustomerNaming = 'vw' | 'scout' | null;
-export const CUSTOMER_NAMING_LABELS: Record<Exclude<CustomerNaming, null>, string> = { vw: 'VW group', scout: 'Scout' };
-
-interface Project {
-  id: number;
-  name: string;
-  code: string;
-  status: string;
-  customer_naming?: CustomerNaming;
-}
-
-interface Part {
-  id: number;
-  part_number: string;
-  customer_part_number?: string | null;
-  tier1_part_number?: string | null;
-  name: string;
-  part_type: string;
-  supplier?: string | null;
-  data_classification?: string;
-  active_revision_id: number | null;
-  parent_part_id?: number | null;
-  item_category: string;
-  calibration_interval_months?: number | null;
-  last_calibrated_at?: string | null;
-  next_calibration_due?: string | null;
-}
-
-// Controlled item categories (automotive PLM)
-const CATEGORY_META: Record<string, { label: string; icon: string; badge: string }> = {
-  article: { label: 'Article', icon: '📄', badge: 'bg-slate-600 text-slate-200' },
-  tool: { label: 'Tool', icon: '🔧', badge: 'bg-orange-900/50 text-orange-300' },
-  assembly_equipment: { label: 'Equipment', icon: '🏗️', badge: 'bg-cyan-900/50 text-cyan-300' },
-  gauge: { label: 'Gauge', icon: '📏', badge: 'bg-pink-900/50 text-pink-300' },
-};
-
-interface PartRevision {
-  id: number;
-  part_id: number;
-  revision_name: string;
-  phase: 'review' | 'official';
-  status: string;
-  created_at: string;
-  summary?: string;
-  part_phase_at_receipt?: string;
-  customer_index?: string | null;
-}
-
-interface ContextMenu {
-  partId: number;
-  x: number;
-  y: number;
-}
-
-interface TreeNode {
-  part: Part;
-  children: TreeNode[];
-}
-
-// Queries
-function useProject(projectId: number) {
-  return useQuery<Project>({
-    queryKey: ['project', projectId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/plants/projects`);
-      return res.data.find((p: Project) => p.id === projectId);
-    },
-    enabled: !!projectId,
-  });
-}
-
-function useProjectParts(projectId: number) {
-  return useQuery<Part[]>({
-    queryKey: ['parts', projectId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/parts/project/${projectId}`);
-      return res.data;
-    },
-    enabled: !!projectId,
-  });
-}
-
-function usePartRevisions(partId: number) {
-  return useQuery<PartRevision[]>({
-    queryKey: ['part-revisions', partId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/parts/${partId}/revisions`);
-      return res.data;
-    },
-    enabled: !!partId,
-  });
-}
-
-export interface RevisionFile {
-  id: number;
-  revision_id: number;
-  filename: string;
-  file_type: string;
-  mime_type: string;
-  file_size: number;
-  cad_format: string | null;
-  has_viewer: boolean;
-  uploaded_at: string;
-  uploaded_by?: number | null;
-  uploaded_by_name?: string | null;
-  kind?: string | null;
-  note?: string | null;
-}
-
-function useRevisionFiles(revisionId: number) {
-  return useQuery<RevisionFile[]>({
-    queryKey: ['revision-files', revisionId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/parts/revisions/${revisionId}/files`);
-      return res.data;
-    },
-    enabled: !!revisionId,
-  });
-}
-
-const LOCKED_REVISION_STATUSES = ['frozen', 'cancelled', 'archived'];
-
-interface AssemblyFileEntry {
-  part_id: number;
-  part_number: string;
-  part_name: string;
-  revision_id: number;
-  revision_name: string;
-  file_id: number;
-  // Optional throughout: files uploaded before provenance was recorded have none.
-  uploaded_at?: string | null;
-  uploaded_by?: number | null;
-  uploaded_by_name?: string | null;
-}
-
-function useAssemblyFiles(partId: number) {
-  return useQuery<AssemblyFileEntry[]>({
-    queryKey: ['assembly-files', partId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/parts/${partId}/assembly-files`);
-      return res.data;
-    },
-    enabled: !!partId,
-  });
-}
-
-// Order by the embedded tool number: "3450" for a tool, the middle "3450" for
-// an article like "20-3450-001-0". Groups each tool with the articles it produces
-// (tool first), so the list runs 3450 → 3457 instead of all 10-/20- prefixes first.
-function comparePartNodes(a: TreeNode, b: TreeNode): number {
-  return comparePartNumbers(a.part.part_number, b.part.part_number);
-}
-
-// Build tree structure from flat parts list
-function buildPartTree(parts: Part[]): TreeNode[] {
-  const partMap = new Map<number, Part>(parts.map((p) => [p.id, p]));
-  const roots: TreeNode[] = [];
-  const visited = new Set<number>();
-
-  function buildNode(partId: number): TreeNode | null {
-    if (visited.has(partId)) return null;
-    visited.add(partId);
-
-    const part = partMap.get(partId);
-    if (!part) return null;
-
-    const children: TreeNode[] = [];
-    for (const candidate of parts) {
-      if (candidate.parent_part_id === partId) {
-        const childNode = buildNode(candidate.id);
-        if (childNode) children.push(childNode);
-      }
-    }
-
-    children.sort(comparePartNodes);
-    return { part, children };
-  }
-
-  // Find root parts (no parent)
-  for (const part of parts) {
-    if (!part.parent_part_id) {
-      const node = buildNode(part.id);
-      if (node) roots.push(node);
-    }
-  }
-
-  roots.sort(comparePartNodes);
-  return roots;
-}
-
-// Color helpers
-function typeColor(partType: string): string {
-  const colors: Record<string, string> = {
-    purchased: 'bg-slate-600 text-slate-200',
-    internal_mfg: 'bg-amber-900/50 text-amber-300',
-    sub_assembly: 'bg-blue-900/50 text-blue-300',
-  };
-  return colors[partType] || 'bg-slate-700 text-slate-300';
-}
+export type { RevisionFile } from '../components/project/projectTypes';
 
 interface WhereUsedEntry {
   part_id: number;
@@ -287,43 +97,6 @@ export function BomTreeSection({ partId, revisionId, revisionName, onOpenPart }:
   );
 }
 
-function phaseColor(phase: string): string {
-  return phase === 'official' ? 'bg-amber-900/30 text-amber-300' : 'bg-blue-900/30 text-blue-300';
-}
-
-function statusColor(status: string): string {
-  const colors: Record<string, string> = {
-    draft: 'text-slate-400',
-    in_progress: 'text-blue-400',
-    in_review: 'text-yellow-400',
-    approved: 'text-green-400',
-    frozen: 'text-green-500',
-    rejected: 'text-red-400',
-    cancelled: 'text-slate-500',
-  };
-  return colors[status] || 'text-slate-300';
-}
-
-interface ChangelogEntry {
-  id: number;
-  action: string;
-  action_description: string;
-  performed_by_user: string | null;
-  performed_at: string;
-  revision_id: number | null;
-}
-
-function useChangelog(partId: number) {
-  return useQuery<ChangelogEntry[]>({
-    queryKey: ['part-changelog', partId],
-    queryFn: async () => {
-      const res = await client.get(`/v1/parts/${partId}/changelog`);
-      return res.data;
-    },
-    enabled: !!partId,
-  });
-}
-
 // Changelog Modal
 function ChangelogModal({ partId, onClose }: { partId: number; onClose: () => void }) {
   const { data: entries, isLoading } = useChangelog(partId);
@@ -374,7 +147,7 @@ function ContextMenuComponent({
   onOpenDetails,
   onViewChangelog,
 }: {
-  menu: ContextMenu | null;
+  menu: ContextMenuState | null;
   onClose: () => void;
   onOpenDetails: (partId: number) => void;
   onViewChangelog: (partId: number) => void;
@@ -430,21 +203,6 @@ function ContextMenuComponent({
       </button>
     </div>
   );
-}
-
-// Collect a part's descendant ids (for drag-and-drop cycle prevention)
-function getDescendantIds(parts: Part[], partId: number): Set<number> {
-  const ids = new Set<number>();
-  const walk = (id: number) => {
-    for (const p of parts) {
-      if (p.parent_part_id === id && !ids.has(p.id)) {
-        ids.add(p.id);
-        walk(p.id);
-      }
-    }
-  };
-  walk(partId);
-  return ids;
 }
 
 // Tree Node Component
@@ -643,36 +401,6 @@ function TreeNodeComponent({
       )}
     </div>
   );
-}
-
-interface CatalogPart {
-  id: number;
-  part_number: string;
-  name: string;
-  supplier: string | null;
-  unit: string;
-}
-
-function useCatalogParts() {
-  return useQuery<CatalogPart[]>({
-    queryKey: ['catalog-parts'],
-    queryFn: async () => {
-      const res = await client.get('/v1/catalog-parts?is_active=true');
-      return res.data;
-    },
-  });
-}
-
-interface SupplierOption {
-  id: number;
-  name: string;
-}
-
-function useSuppliers() {
-  return useQuery<SupplierOption[]>({
-    queryKey: ['suppliers', false],
-    queryFn: async () => (await client.get('/v1/suppliers')).data,
-  });
 }
 
 // Add Part Modal
@@ -1104,7 +832,7 @@ export default function ProjectDetailPage() {
   }, [initialPartId]);
   const [viewingFileId, setViewingFileId] = useState<number | null>(null);
   const [openDocId, setOpenDocId] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
