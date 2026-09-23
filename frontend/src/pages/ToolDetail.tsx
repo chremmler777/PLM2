@@ -10,6 +10,8 @@ import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import { revisionLabel } from '../components/parts/RevisionBadge';
 import ToolFieldsCard from '../components/tools/ToolFieldsCard';
+import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
+import DfmArchive from '../components/dfm/DfmArchive';
 
 export interface ToolPart {
   id: number;
@@ -65,6 +67,7 @@ interface Props {
 
 export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
   const [showStartChange, setShowStartChange] = useState(false);
+  const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
   const { data: relations, isLoading: relationsLoading } = useQuery({
     queryKey: ['part-relations', part.id],
     queryFn: async () => (await client.get(`/v1/parts/${part.id}/relations`)).data as ToolRelation[],
@@ -107,6 +110,16 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
           values={{ tool_cavities: part.tool_cavities, toolmaker_id: part.toolmaker_id,
             tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s }}
           producedNotes={produced.map((a) => a.notes)} />
+
+        {openDoc && (
+          <div className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">
+            <div className="flex justify-end px-3 py-1">
+              <button onClick={() => setOpenDoc(null)} className="text-xs text-slate-400 hover:text-slate-200">close</button>
+            </div>
+            <DocumentPane document={openDoc} />
+          </div>
+        )}
+        <DfmArchive partId={part.id} onOpenPdf={setOpenDoc} />
 
         {showStartChange && (
           <StartChangeModal open onClose={() => setShowStartChange(false)}

@@ -10,6 +10,7 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: true }) }
 const stub = vi.hoisted(() => (label: string) => ({ default: () => <div>{label}</div> }))
 vi.mock('../components/changes/StartChangeModal', () => stub('start-change'))
 vi.mock('../components/changes/StartChangeButton', () => stub('start-change-button'))
+vi.mock('../components/dfm/DfmArchive', () => ({ default: () => <div data-testid="dfm-archive" /> }))
 
 const tool: ToolPart = {
   id: 7, part_number: '199403', name: 'ISOFIX Cover', part_type: 'purchased', project_id: 2,
@@ -68,6 +69,12 @@ describe('ToolDetail', () => {
     renderTool()
     expect(await screen.findByTestId('edit-tool-cavities')).toBeTruthy()
     expect(screen.getByTestId('toolmaker-select')).toBeTruthy()
+  })
+
+  it('mounts the DFM archive and no revision file list', async () => {
+    renderTool()
+    expect(await screen.findByTestId('dfm-archive')).toBeTruthy()
+    expect(screen.queryByText(/Files ·/)).toBeNull()
   })
 })
 
