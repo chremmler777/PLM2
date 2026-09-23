@@ -12,7 +12,8 @@ from app.models.part import Part, PartRelation, PartRevision
 
 def _brief(p: Part) -> dict:
     return {"part_id": p.id, "part_number": p.part_number,
-            "customer_part_number": p.customer_part_number, "name": p.name}
+            "customer_part_number": p.customer_part_number, "name": p.name,
+            "thumbnail_url": p.thumbnail_url}
 
 
 async def project_structure(session: AsyncSession, project_id: int) -> dict:

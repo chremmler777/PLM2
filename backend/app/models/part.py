@@ -54,6 +54,11 @@ class Part(Base):
     # part next to the OEM number above. Their sheets and mails use it.
     tier1_part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
+    # Thumbnail image (article/tool picture), stored on disk; see
+    # app/services/thumbnail_service.py for the read/write/clear logic.
+    thumbnail_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    thumbnail_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Tool fields (item_category = tool only). The sold state the DFM answers
     # rest on. tool_cavities is the source of truth over the "n cavities" note
     # on the produces relation.
@@ -99,6 +104,15 @@ class Part(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    @property
+    def thumbnail_url(self) -> str | None:
+        """None when no thumbnail is stored; else the GET url, cache-busted
+        with the last update time so a replaced image is not served stale."""
+        if not self.thumbnail_path:
+            return None
+        ts = int(self.thumbnail_updated_at.timestamp()) if self.thumbnail_updated_at else 0
+        return f"/api/v1/parts/{self.id}/thumbnail?v={ts}"
 
     # Relationships
     project: Mapped["Project"] = relationship(foreign_keys=[project_id])

@@ -73,6 +73,7 @@ class PartResponse(PartBase):
     lifecycle_phase: str = "rfq"
     nominated_at: Optional[date] = None
     sop_at: Optional[date] = None
+    thumbnail_url: Optional[str] = None
     created_by: int
     updated_by: Optional[int] = None
     created_at: datetime

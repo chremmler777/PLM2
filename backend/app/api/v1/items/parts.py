@@ -14,6 +14,9 @@ from app.models import User
 from app.models.part import PartFile
 from app.services.part_service import PartService, RevisionService, ChangelogService
 from app.services.project_structure_service import project_structure
+from app.services.thumbnail_service import (
+    set_thumbnail, clear_thumbnail, media_type_for, InvalidThumbnail, ThumbnailTooLarge,
+)
 from app.utils.cad_converter import convert_step_to_gltf
 from app.schemas.part import (
     PartCreate, PartUpdate, PartResponse, PartDetailResponse,
@@ -165,6 +168,71 @@ async def delete_part(
         await db.rollback()
         logger.error(f"Failed to delete part: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# Thumbnail Endpoints
+@router.put("/{part_id}/thumbnail", response_model=PartResponse)
+async def put_part_thumbnail(
+    part_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload or replace the part's thumbnail image (PNG, JPEG or WEBP, <=2MB,
+    checked by content not by filename)."""
+    part = await PartService.get_part(db, part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    contents = await file.read()
+    try:
+        await set_thumbnail(db, part, contents, current_user.id, source_note=file.filename)
+    except ThumbnailTooLarge as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(e))
+    except InvalidThumbnail as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    await db.commit()
+    await db.refresh(part)
+    return part
+
+
+@router.get("/{part_id}/thumbnail")
+async def get_part_thumbnail(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve the part's thumbnail image."""
+    part = await PartService.get_part(db, part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    if not part.thumbnail_path or not os.path.exists(part.thumbnail_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No thumbnail")
+    return FileResponse(
+        path=part.thumbnail_path,
+        media_type=media_type_for(part.thumbnail_path),
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.delete("/{part_id}/thumbnail", response_model=PartResponse)
+async def delete_part_thumbnail(
+    part_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear the part's thumbnail."""
+    part = await PartService.get_part(db, part_id)
+    if not part:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
+    await clear_thumbnail(db, part, current_user.id)
+    await db.commit()
+    await db.refresh(part)
+    return part
 
 
 # Revision Endpoints
