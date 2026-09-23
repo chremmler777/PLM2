@@ -33,6 +33,7 @@ from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
 )
+from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile
 
 __all__ = [
     "Base",
@@ -59,6 +60,9 @@ __all__ = [
     "RevisionPhase",
     "RevisionStatus",
     "TestDataStatus",
+    "DfmTopic",
+    "DfmEntry",
+    "DfmEntryFile",
     # New workflow template models
     "Department",
     "WfTemplate",
