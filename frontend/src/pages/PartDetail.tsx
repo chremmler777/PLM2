@@ -21,7 +21,7 @@ import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPan
 import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
 import Viewer3D from '../components/Viewer3D';
 import { API_BASE_URL } from '../api/client';
-import type { RevisionFile } from './ProjectDetailPage';
+import type { RevisionFile } from '../components/project/projectTypes';
 
 interface Part {
   id: number;
