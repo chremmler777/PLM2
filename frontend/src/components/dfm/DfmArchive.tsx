@@ -1,13 +1,15 @@
 /**
  * DfmArchive - the folder-like archive on a tool: one row per topic (title,
- * status, entries, last activity), "+ topic", and the selected topic's ledger.
+ * status, who it waits on, last step, message count), "+ topic", and the
+ * selected topic's flow.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createTopic, listTopics } from '../../api/dfm';
 import type { PaneDocument } from '../parts/DocumentPane';
-import DfmLedger from './DfmLedger';
+import DfmFlow from './DfmFlow';
+import { lastStepText, waitingSummary } from './dfmFlow';
 import { apiErrorMessage } from '../../lib/apiError';
 
 interface Props {
@@ -75,20 +77,29 @@ export default function DfmArchive({ partId, onOpenPdf }: Props) {
 
       {topics && topics.length === 0 && <p className="text-slate-500 text-sm">No DFM topic yet. Open one for the first request or study.</p>}
       <div className="divide-y divide-slate-700">
-        {topics?.map((t) => (
-          <button key={t.id} data-testid={`dfm-topic-${t.id}`} onClick={() => setSelected(t.id)}
-            className={`w-full flex items-center gap-3 py-2 px-2 text-left text-sm rounded ${selected === t.id ? 'bg-slate-700' : 'hover:bg-slate-700/50'}`}>
-            <span className="flex-1 text-slate-100 font-medium">{t.title}</span>
-            <span className={`text-xs px-2 py-0.5 rounded ${t.status === 'open' ? 'bg-emerald-900 text-emerald-200' : 'bg-slate-600 text-slate-200'}`}>
-              {t.status === 'open' ? 'Open' : 'Finished confirmed'}
-            </span>
-            <span className="text-slate-400 w-20 text-right">{t.entry_count} {t.entry_count === 1 ? 'entry' : 'entries'}</span>
-            <span className="text-slate-500 font-mono text-xs w-24 text-right">{t.last_activity.slice(0, 10)}</span>
-          </button>
-        ))}
+        {topics?.map((t) => {
+          const waiting = waitingSummary(t);
+          return (
+            <button key={t.id} data-testid={`dfm-topic-${t.id}`} onClick={() => setSelected(t.id)}
+              className={`w-full flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2 px-2 text-left text-sm rounded ${selected === t.id ? 'bg-slate-700' : 'hover:bg-slate-700/50'}`}>
+              <span className="flex-1 min-w-[8rem] text-slate-100 font-medium">{t.title}</span>
+              <span className={`text-xs px-2 py-0.5 rounded ${t.status === 'open' ? 'bg-emerald-900 text-emerald-200' : 'bg-slate-600 text-slate-200'}`}>
+                {t.status === 'open' ? 'Open' : 'Finished confirmed'}
+              </span>
+              {waiting && (
+                <span data-testid={`dfm-topic-waiting-${t.id}`}
+                  className={`text-xs ${t.waiting_on?.length ? 'text-amber-300' : 'text-emerald-300'}`}>{waiting}</span>
+              )}
+              {t.last_step && (
+                <span data-testid={`dfm-topic-last-${t.id}`} className="text-xs text-slate-400">{lastStepText(t.last_step)}</span>
+              )}
+              <span className="text-slate-400 w-24 text-right">{t.entry_count} {t.entry_count === 1 ? 'message' : 'messages'}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {selected !== null && <DfmLedger partId={partId} topicId={selected} onOpenPdf={onOpenPdf} />}
+      {selected !== null && <DfmFlow partId={partId} topicId={selected} onOpenPdf={onOpenPdf} />}
     </div>
   );
 }

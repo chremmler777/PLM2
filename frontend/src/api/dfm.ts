@@ -1,5 +1,7 @@
 /**
- * DFM archive API: topics per tool, three-column ledger entries with files.
+ * DFM archive API: topics per tool, a flow of messages (original, forward,
+ * answer, question) between toolmaker, KTX and Tier 1, with files and the
+ * derived answered / waiting state.
  * Mirrors backend/app/api/v1/items/dfm.py.
  */
 import client, { API_BASE_URL } from './client';
@@ -7,6 +9,42 @@ import client, { API_BASE_URL } from './client';
 export type DfmParty = 'toolmaker' | 'ktx' | 'tier1';
 export const PARTIES: DfmParty[] = ['toolmaker', 'ktx', 'tier1'];
 export const PARTY_LABELS: Record<DfmParty, string> = { toolmaker: 'Toolmaker', ktx: 'KTX', tier1: 'Tier 1' };
+
+export type DfmKind = 'original' | 'forward' | 'answer' | 'question';
+export const KINDS: DfmKind[] = ['original', 'forward', 'answer', 'question'];
+export const KIND_LABELS: Record<DfmKind, string> = { original: 'Original', forward: 'Forward', answer: 'Answer', question: 'Question' };
+
+export interface DfmAnsweredBy {
+  party: DfmParty;
+  entry_id: number;
+  date: string;
+}
+
+export interface DfmAwaiting {
+  party: DfmParty;
+  days: number;
+}
+
+export interface DfmWaitingOn {
+  party: DfmParty;
+  count: number;
+  oldest_days: number;
+}
+
+export interface DfmLastStep {
+  kind: DfmKind;
+  party: DfmParty;
+  addressed_to: DfmParty[];
+  date: string;
+}
+
+export interface DfmNextStep {
+  entry_id: number;
+  kind: DfmKind;
+  from: DfmParty;
+  to: DfmParty;
+  days: number;
+}
 
 export interface DfmFile {
   id: number;
@@ -25,6 +63,10 @@ export interface DfmEntry {
   party: DfmParty;
   addressed_to: DfmParty[];
   note: string | null;
+  kind: DfmKind;
+  reply_to_id: number | null;
+  answered_by: DfmAnsweredBy[];
+  awaiting: DfmAwaiting[];
   sent_at: string | null;
   supersedes_id: number | null;
   recorded_by: number;
@@ -45,9 +87,13 @@ export interface DfmTopicSummary {
   closed_at: string | null;
   entry_count: number;
   last_activity: string;
+  waiting_on: DfmWaitingOn[];
+  last_step: DfmLastStep | null;
+  all_answered: boolean;
 }
 
 export interface DfmTopicDetail extends DfmTopicSummary {
+  next_step: DfmNextStep | null;
   entries: DfmEntry[];
 }
 
@@ -57,6 +103,8 @@ export interface DfmEntryInput {
   note: string;
   sent_at: string;
   supersedes_id: number | null;
+  kind: DfmKind;
+  reply_to_id: number | null;
   files: File[];
 }
 
@@ -89,6 +137,8 @@ export function buildEntryFormData(input: DfmEntryInput): FormData {
   fd.append('note', input.note);
   if (input.sent_at) fd.append('sent_at', input.sent_at);
   if (input.supersedes_id != null) fd.append('supersedes_id', String(input.supersedes_id));
+  fd.append('kind', input.kind);
+  if (input.reply_to_id != null) fd.append('reply_to_id', String(input.reply_to_id));
   for (const f of input.files) fd.append('files', f);
   return fd;
 }
