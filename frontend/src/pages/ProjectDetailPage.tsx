@@ -1,5 +1,6 @@
 /**
- * ProjectDetailPage - the project work surface. A one-line header, the items
+ * ProjectDetailPage - the project work surface. A one-line header, the status
+ * nav bar (SEP gates, changes, lessons) with its inline panel, the items
  * list on the left and the selected item's detail on the right; the page
  * fills the viewport and each pane scrolls on its own. The detail can pop out
  * into its own window, which follows the selection over the project channel
@@ -18,7 +19,7 @@ import { revisionOfSelectedPart, useArticleSelection } from '../hooks/useArticle
 import { selectionChannelSupported, useSelectionChannel } from '../hooks/useSelectionChannel';
 import { windowOwnerId } from '../lib/windowOwner';
 import ProjectHeaderBar from '../components/project/ProjectHeaderBar';
-import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
+import ProjectStatusNav from '../components/project/ProjectStatusNav';
 import ItemsPane from '../components/project/ItemsPane';
 import DetailPane from '../components/project/DetailPane';
 import SplitPane from '../components/project/SplitPane';
@@ -66,8 +67,6 @@ function ProjectDetailView() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
-  const [openSection, setOpenSection] = useState<StatusSection | null>(null);
-  const closeSection = useCallback(() => setOpenSection(null), []);
   const [detailTab, setDetailTab] = useState<DetailTab>('documents');
 
   const { data: paintOverview } = useQuery({
@@ -174,11 +173,10 @@ function ProjectDetailView() {
     <div data-testid="project-page" className="h-full flex flex-col overflow-hidden bg-slate-900">
       <ProjectHeaderBar
         project={project}
-        onOpenSection={setOpenSection}
         onStartChange={() => setShowStartChange(true)}
         onAddPart={() => setShowAddModal(true)}
       />
-      <StatusSlideOver section={openSection} projectId={id} onClose={closeSection} />
+      <ProjectStatusNav projectId={id} />
 
       {showStartChange && (
         <StartChangeModal

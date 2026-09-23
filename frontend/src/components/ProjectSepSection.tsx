@@ -2,12 +2,18 @@
  * ProjectSepSection - SEP Q-Gate panel (GB-DP-0001 stage-gate process).
  * Gate stepper with green/yellow/red status, per-gate checklist grouped by
  * department (tri-state items), forms tab, and PM+Quality dual sign-off.
+ *
+ * By default the section is self-contained (its own expand toggle and gate
+ * selection). The project status nav bar renders it twice instead: view
+ * "strip" is the collapsed gate row only, and view "gate" is one gate's
+ * review; the nav bar owns which gate is open.
  */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../lib/apiError';
 import FormPanel from '../forms/FormPanel';
 import ProjectFormsTab from '../forms/ProjectFormsTab';
 import SepItemFiles from './sep/SepItemFiles';
@@ -31,8 +37,10 @@ function fmtDate(iso: string | null): string {
   return iso ? iso.slice(0, 10) : '—';
 }
 
-function GateStepper({ gates, selected, onSelect }: {
+function GateStepper({ gates, selected, onSelect, controls }: {
   gates: SepGate[]; selected: number | null; onSelect: (id: number) => void;
+  /** Set when the chips act as nav items for a panel elsewhere (view "strip"). */
+  controls?: string;
 }) {
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -43,6 +51,8 @@ function GateStepper({ gates, selected, onSelect }: {
           <button
             key={g.id}
             onClick={() => onSelect(g.id)}
+            aria-expanded={controls ? isSel : undefined}
+            aria-controls={controls}
             title={`${g.phase_en} — ${g.progress.pct}% (${g.progress.done}/${g.progress.total - g.progress.not_applicable} done)`}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs ${
               isSel ? 'border-blue-400 bg-slate-700' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
@@ -95,7 +105,7 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
     mutationFn: async (patch: Record<string, unknown>) =>
       client.patch(`/v1/sep/items/${item.id}`, patch),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sep'] }),
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Update failed'),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Update failed')),
   });
 
   return (
@@ -172,7 +182,11 @@ function ItemRow({ item, locked, users, projectId, onOpenForm }: {
   );
 }
 
-function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
+function GateDetail({ gate, users, unbounded = false }: {
+  gate: SepGate; users: UserOption[];
+  /** The host scrolls already (nav bar panel): no inner scroll box on the checklist. */
+  unbounded?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'checklist' | 'forms' | 'documents'>('checklist');
   const [openForm, setOpenForm] = useState<number | null>(null);
@@ -185,7 +199,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
       queryClient.invalidateQueries({ queryKey: ['sep'] });
       toast.success(res.data.status === 'closed' ? `Gate ${gate.code} closed 🔒` : 'Signed off');
     },
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Sign-off rejected'),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Sign-off rejected')),
   });
 
   const byDept = gate.items.reduce<Record<string, SepItem[]>>((acc, i) => {
@@ -194,7 +208,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
   }, {});
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className={`${unbounded ? '' : 'mt-3 '}space-y-3`}>
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-[200px]">
           <div className="text-sm text-slate-200 font-semibold">{gate.code} — {gate.phase_en}</div>
@@ -254,7 +268,7 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
       </div>
 
       {tab === 'checklist' ? (
-        <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
+        <div className={`space-y-3 ${unbounded ? '' : 'max-h-[28rem] overflow-y-auto pr-1'}`}>
           {Object.entries(byDept).map(([dept, items]) => (
             <div key={dept}>
               <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
@@ -280,7 +294,16 @@ function GateDetail({ gate, users }: { gate: SepGate; users: UserOption[] }) {
   );
 }
 
-export default function ProjectSepSection({ projectId }: { projectId: number }) {
+export default function ProjectSepSection({ projectId, view = 'full', gateId = null, onGateClick, panelId }: {
+  projectId: number;
+  view?: 'full' | 'strip' | 'gate';
+  /** strip: the gate whose review is open (null when none); gate: the gate to show. */
+  gateId?: number | null;
+  /** strip: a gate chip was clicked. */
+  onGateClick?: (id: number) => void;
+  /** strip: id of the panel the gate chips open, for aria-controls. */
+  panelId?: string;
+}) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [selectedGate, setSelectedGate] = useState<number | null>(null);
@@ -301,8 +324,45 @@ export default function ProjectSepSection({ projectId }: { projectId: number }) 
       queryClient.invalidateQueries({ queryKey: ['sep'] });
       toast.success('SEP activated: 7 gates, 232 work items');
     },
-    onError: (e: any) => toast.error(e.response?.data?.detail || 'Activation failed'),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Activation failed')),
   });
+
+  if (view === 'gate') {
+    const shown = sep?.active ? sep.gates.find((g) => g.id === gateId) : undefined;
+    return shown ? <GateDetail gate={shown} users={users ?? []} unbounded /> : null;
+  }
+
+  if (view === 'strip') {
+    if (!sep) return <span className="text-sm font-semibold text-slate-300">🚦 SEP Q-Gates</span>;
+    if (!sep.active) {
+      return (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-semibold text-slate-300">🚦 SEP Q-Gates</span>
+          <span className="text-xs text-slate-500">not active for this project</span>
+          <button
+            onClick={() => activate.mutate()}
+            disabled={activate.isPending}
+            className="text-xs px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+          >
+            Activate SEP
+          </button>
+        </div>
+      );
+    }
+    const now = sep.gates.find((g) => g.status === 'in_progress');
+    return (
+      <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap">
+        <span className="text-sm font-semibold text-slate-300 whitespace-nowrap">🚦 SEP Q-Gates</span>
+        {now && <span className="text-xs text-slate-400 whitespace-nowrap">current: <span className="text-slate-200">{now.code}</span></span>}
+        <GateStepper gates={sep.gates} selected={gateId} onSelect={(id) => onGateClick?.(id)} controls={panelId} />
+        {sep.rollup && (
+          <span className="text-xs text-slate-400 whitespace-nowrap">
+            total {sep.rollup.total.pct}% · {sep.rollup.total.done}/{sep.rollup.total.total} work packages
+          </span>
+        )}
+      </div>
+    );
+  }
 
   if (!sep) return null;
 

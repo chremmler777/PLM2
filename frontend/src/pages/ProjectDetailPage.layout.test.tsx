@@ -18,7 +18,9 @@ vi.mock('../components/ProcessFlowSection', () => stub('process-flow-section'))
 vi.mock('../components/PPAPSection', () => stub('ppap-section'))
 vi.mock('../components/MilestoneStrip', () => stub('milestones'))
 vi.mock('../components/ProjectLessonsSection', () => stub('lessons-section'))
-vi.mock('../components/ProjectSepSection', () => stub('sep-section'))
+vi.mock('../components/ProjectSepSection', () => ({
+  default: ({ view }: { view?: string }) => <div>{view === 'strip' ? 'sep-strip' : view === 'gate' ? 'sep-gate' : 'sep-section'}</div>,
+}))
 vi.mock('../components/ProjectChangesSection', () => stub('changes-section'))
 vi.mock('../components/parts/AssemblyTreeList', () => stub('assemblies'))
 vi.mock('../components/parts/UploadDialog', () => stub('upload-dialog'))
@@ -83,29 +85,37 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('project header and slide-over', () => {
-  it('no longer stacks the SEP, changes and lessons blocks above the items', async () => {
+describe('project header and status nav bar', () => {
+  it('shows the gate strip in a nav bar under the header, with nothing open and no slide-over', async () => {
     mount()
-    expect(await screen.findByTestId('project-header')).toBeTruthy()
+    const header = await screen.findByTestId('project-header')
+    const nav = screen.getByTestId('project-status-nav')
+    expect(header.nextElementSibling).toBe(nav)
+    expect(within(nav).getByText('sep-strip')).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /Changes/ })).toBeTruthy()
+    expect(within(nav).getByRole('button', { name: /Lessons/ })).toBeTruthy()
     expect(screen.queryByText('sep-section')).toBeNull()
     expect(screen.queryByText('changes-section')).toBeNull()
     expect(screen.queryByText('lessons-section')).toBeNull()
+    expect(screen.queryByTestId('status-slideover')).toBeNull()
+    expect(screen.queryByTestId('chip-sep')).toBeNull()
+    expect(screen.getByTestId('status-panel').hidden).toBe(true)
   })
 
-  it('opens each section in the slide-over and closes it with Escape or a click outside', async () => {
+  it('opens one section inline below the bar, switches between them and closes with Escape', async () => {
     mount()
-    fireEvent.click(await screen.findByTestId('chip-sep'))
-    expect(within(screen.getByTestId('status-slideover')).getByText('sep-section')).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: /Lessons/ }))
+    const panel = screen.getByTestId('status-panel')
+    expect(within(panel).getByText('lessons-section')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Changes/ }))
+    expect(within(panel).getByText('changes-section')).toBeTruthy()
+    expect(screen.queryByText('lessons-section')).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
+    expect(panel.hidden).toBe(true)
+    expect(screen.queryByText('changes-section')).toBeNull()
     expect(screen.queryByTestId('status-slideover')).toBeNull()
-
-    fireEvent.click(screen.getByTestId('chip-lessons'))
-    expect(screen.getByText('lessons-section')).toBeTruthy()
-    fireEvent.click(screen.getByTestId('slideover-backdrop'))
-    expect(screen.queryByTestId('status-slideover')).toBeNull()
-
-    fireEvent.click(screen.getByTestId('chip-changes'))
-    expect(screen.getByText('changes-section')).toBeTruthy()
+    // the items and detail keep the rest of the fixed-height page
+    expect(panel.className).toContain('max-h-[45vh]')
   })
 
   it('the ⋯ menu still reaches the add-part dialog', async () => {

@@ -11,7 +11,7 @@ vi.mock('../MilestoneStrip', () => ({ default: () => <div>milestones</div> }))
 const project = { id: 2, name: 'Seat Trim', code: '1994', status: 'active', customer_naming: 'vw' as const }
 
 function mount() {
-  const props = { onOpenSection: vi.fn(), onStartChange: vi.fn(), onAddPart: vi.fn() }
+  const props = { onStartChange: vi.fn(), onAddPart: vi.fn() }
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter><ProjectHeaderBar project={project} {...props} /></MemoryRouter>
@@ -33,24 +33,15 @@ describe('ProjectHeaderBar', () => {
   })
   afterEach(cleanup)
 
-  it('shows code, name and customer on one row with the three status chips', async () => {
+  it('shows code, name and customer on one row, without the old status chips', () => {
     mount()
     const header = screen.getByTestId('project-header')
     expect(header.textContent).toContain('1994')
     expect(header.textContent).toContain('Seat Trim')
     expect(header.textContent).toContain('VW group')
-    expect((await screen.findByText('K0/RG1 0%'))).toBeTruthy()
-    expect(await screen.findByText('1 change')).toBeTruthy()
-    expect(await screen.findByText('No lessons review')).toBeTruthy()
-    expect(screen.getByTestId('chip-lessons').className).toContain('amber')
-  })
-
-  it('opens the matching section from each chip', async () => {
-    const props = mount()
-    fireEvent.click(screen.getByTestId('chip-sep'))
-    fireEvent.click(screen.getByTestId('chip-changes'))
-    fireEvent.click(screen.getByTestId('chip-lessons'))
-    expect(props.onOpenSection.mock.calls).toEqual([['sep'], ['changes'], ['lessons']])
+    expect(screen.queryByTestId('chip-sep')).toBeNull()
+    expect(screen.queryByTestId('chip-changes')).toBeNull()
+    expect(screen.queryByTestId('chip-lessons')).toBeNull()
   })
 
   it('keeps the project actions in the ⋯ menu', async () => {

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../lib/apiError';
 
 interface LessonRow {
   id: number;
@@ -58,7 +59,7 @@ function ReviewLessonsModal({ projectId, referencedIds, onClose }: {
       queryClient.invalidateQueries({ queryKey: ['lesson-references', projectId] });
       queryClient.invalidateQueries({ queryKey: ['lesson-kpis'] });
     },
-    onError: (error: any) => toast.error(error.response?.data?.detail || 'Failed to record'),
+    onError: (error: unknown) => toast.error(apiErrorMessage(error, 'Failed to record')),
   });
 
   const candidates = (lessons ?? []).filter((l) => l.project_id !== projectId && l.status !== 'rejected');
@@ -66,6 +67,9 @@ function ReviewLessonsModal({ projectId, referencedIds, onClose }: {
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center" onClick={onClose}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Review Applicable Lessons"
         className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

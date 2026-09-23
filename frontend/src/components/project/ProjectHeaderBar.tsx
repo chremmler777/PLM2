@@ -1,46 +1,20 @@
 /**
- * One-line project header: code, name and customer, three status chips that
- * open their section in the slide-over, and the project actions menu.
+ * One-line project header: code, name and customer, and the project actions
+ * menu. The SEP gates, changes and lessons live in the status nav bar below.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MilestoneStrip from '../MilestoneStrip';
 import StartChangeButton from '../changes/StartChangeButton';
-import { useProjectStatus, type ChipTone, type StatusChip } from '../../hooks/queries/useProjectStatus';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
-import type { StatusSection } from './StatusSlideOver';
 
-const TONE_CLASS: Record<ChipTone, string> = {
-  neutral: 'border-slate-600 bg-slate-800 text-slate-200',
-  green: 'border-emerald-700 bg-emerald-900/30 text-emerald-200',
-  yellow: 'border-yellow-700 bg-yellow-900/30 text-yellow-200',
-  red: 'border-red-700 bg-red-900/30 text-red-200',
-  amber: 'border-amber-600 bg-amber-600/20 text-amber-300',
-};
-
-function Chip({ chip, testId, onClick }: { chip: StatusChip; testId: string; onClick(): void }) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      title={chip.title}
-      onClick={onClick}
-      className={`px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap hover:brightness-125 ${TONE_CLASS[chip.tone]}`}
-    >
-      {chip.label}
-    </button>
-  );
-}
-
-export default function ProjectHeaderBar({ project, onOpenSection, onStartChange, onAddPart }: {
+export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: {
   project: Project;
-  onOpenSection(section: StatusSection): void;
   onStartChange(): void;
   onAddPart(): void;
 }) {
   const navigate = useNavigate();
-  const status = useProjectStatus(project.id);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -81,11 +55,6 @@ export default function ProjectHeaderBar({ project, onOpenSection, onStartChange
         <span className="font-semibold">{project.name}</span>
         {customer && <span className="text-slate-400"> · {customer}</span>}
       </h1>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        <Chip chip={status.sep} testId="chip-sep" onClick={() => onOpenSection('sep')} />
-        <Chip chip={status.changes} testId="chip-changes" onClick={() => onOpenSection('changes')} />
-        <Chip chip={status.lessons} testId="chip-lessons" onClick={() => onOpenSection('lessons')} />
-      </div>
       <div className="ml-auto relative" ref={menuRef}>
         <button
           aria-label="Project actions"
