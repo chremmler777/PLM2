@@ -6,7 +6,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import ProjectPaintSection from '../components/paint/ProjectPaintSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { projectPaintOverview } from '../api/paints';
 import type { PartPaintLayer } from '../types/paint';
@@ -107,8 +106,6 @@ export default function ProjectDetailPage() {
           prefill={{ projectId: id }}
         />
       )}
-
-      <ProjectPaintSection projectId={id} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">

@@ -113,3 +113,11 @@ describe('project header and slide-over', () => {
     expect(screen.getByText('Add New Item')).toBeTruthy()
   })
 })
+
+describe('paint on the project page', () => {
+  it('does not mount the paint section but keeps the Painted filter', async () => {
+    mount()
+    expect(await screen.findByText('🎨 Painted (1)')).toBeTruthy()
+    expect(screen.queryByTestId('project-paint-toggle')).toBeNull()
+  })
+})
