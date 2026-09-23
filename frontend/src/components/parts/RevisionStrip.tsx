@@ -5,7 +5,7 @@
  * customer index is shown next to them.
  */
 import { groupByMajor } from './revisionGrouping';
-import { revisionLabel } from './RevisionBadge';
+import RevisionLabel from './RevisionLabel';
 
 export interface StripRevision {
   id: number;
@@ -46,7 +46,7 @@ export default function RevisionStrip({ revisions, selectedId, activeId, onSelec
           <div key={major.id} data-testid={`rev-group-${major.id}`} className="flex flex-col gap-1">
             <button role="tab" aria-selected={majorSelected} data-testid={`rev-tab-${major.id}`}
               onClick={() => onSelect(major.id)} className={tabClass(major as StripRevision, majorSelected, false)}>
-              {revisionLabel(major.revision_name, major.customer_index)}
+              <RevisionLabel name={major.revision_name} index={major.customer_index} />
               {activeId === major.id && <span className="ml-1 text-[10px] uppercase text-green-400">active</span>}
               <span className="ml-1 text-[10px] text-slate-500">{major.status.replace(/_/g, ' ')}</span>
             </button>
@@ -55,7 +55,7 @@ export default function RevisionStrip({ revisions, selectedId, activeId, onSelec
                 {minors.map((m) => (
                   <button key={m.id} role="tab" aria-selected={selectedId === m.id} data-testid={`rev-tab-${m.id}`}
                     onClick={() => onSelect(m.id)} className={tabClass(m as StripRevision, selectedId === m.id, true)}>
-                    {m.revision_name}
+                    <RevisionLabel name={m.revision_name} />
                     <span className="ml-1 text-[10px] text-amber-300">proposal</span>
                     <span className="ml-1 text-[10px] text-slate-500">{m.status.replace(/_/g, ' ')}</span>
                   </button>

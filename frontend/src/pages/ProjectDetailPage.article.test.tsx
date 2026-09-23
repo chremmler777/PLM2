@@ -162,8 +162,9 @@ describe('ProjectDetailPage article panel', () => {
     expect(await screen.findByTestId('tree-rev-10')).toBeTruthy()
     expect(screen.getByTestId('tree-rev-10').textContent).toContain('E1.1')
     expect(screen.getByTestId('tree-rel-30').textContent).toContain('199401')
-    expect(screen.getByTestId('tree-numbers-5').textContent).toContain('206.882.251')
-    expect(screen.getByTestId('tree-numbers-5').textContent).toContain('Tier 1 S00H4X-110')
+    // the numbers are always on the row now, not in the expand block
+    expect(screen.queryByTestId('tree-numbers-5')).toBeNull()
+    expect(screen.getByTestId('row-numbers-5-tier1').textContent).toBe('Tier 1 S00H4X-110')
     fireEvent.click(screen.getByTestId('tree-rev-10'))
     expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
   })

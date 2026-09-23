@@ -1,5 +1,5 @@
 /**
- * Pinned detail header: name, numbers, phase, active revision, type and
+ * Pinned detail header: thumbnail, name, labelled KTX / Tier 1 / OEM numbers, phase, active revision, type and
  * category, mirror link, gauge calibration, and the part actions. It never
  * scrolls; the tab content below it does.
  */
@@ -7,7 +7,9 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
-import { revisionLabel } from '../parts/RevisionBadge';
+import PartNumbers from '../parts/PartNumbers';
+import PartThumbnail from '../parts/PartThumbnail';
+import RevisionLabel from '../parts/RevisionLabel';
 import { apiErrorMessage } from '../../lib/apiError';
 import type { StructureArticle } from '../../hooks/queries/useProjectStructure';
 import type { ArticleSelection } from '../../hooks/useArticleSelection';
@@ -47,6 +49,9 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
 
   return (
     <div data-testid="detail-header" className="flex-shrink-0 px-4 py-3 border-b border-slate-700 bg-slate-800">
+      <div className="flex items-start gap-3">
+      <PartThumbnail url={part.thumbnail_url ?? article?.thumbnail_url} name={part.name} size="lg" testId="detail-thumbnail" />
+      <div className="flex-1 min-w-0">
       <div className="flex items-start justify-between gap-3">
         <h2 className="min-w-0 truncate text-lg font-bold text-slate-100">{part.name}</h2>
         <div className="flex gap-2 flex-shrink-0">
@@ -68,14 +73,14 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
           </button>
         </div>
       </div>
+      <div className="text-sm mt-1">
+        <PartNumbers part={part} testIdPrefix="detail-numbers" />
+      </div>
       <div className="text-slate-400 text-sm mt-1 flex items-center gap-2 flex-wrap">
-        <span className="font-mono">{part.part_number}</span>
-        {part.customer_part_number && <span className="font-mono" title="Customer (OEM) part number">{part.customer_part_number}</span>}
-        {part.tier1_part_number && <span className="font-mono" data-testid="selected-tier1-number" title="Tier 1 part number">Tier 1 {part.tier1_part_number}</span>}
         {phase && <span data-testid="detail-phase" className="text-xs text-slate-300">{phase}</span>}
         {activeRevision && (
           <span data-testid="detail-active-revision" title="Active revision" className="px-1.5 py-0.5 rounded bg-slate-700 text-xs text-slate-200 font-mono">
-            {revisionLabel(activeRevision.revision_name, activeRevision.customer_index)}
+            <RevisionLabel name={activeRevision.revision_name} index={activeRevision.customer_index} />
           </span>
         )}
         <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(part.part_type)}`}>
@@ -113,6 +118,8 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
         </div>
       )}
       {facts && <p className="text-slate-500 text-xs mt-1">{facts}</p>}
+      </div>
+      </div>
     </div>
   );
 }

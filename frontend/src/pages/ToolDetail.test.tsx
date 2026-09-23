@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ToolDetail, { type ToolPart } from './ToolDetail'
 import { producedArticles } from '../components/tools/toolRelations'
@@ -27,9 +27,9 @@ const relations = [
     other_active_revision_name: null, other_active_customer_index: null, notes: null },
 ]
 
-function renderTool(onOpenPart = vi.fn()) {
+function renderTool(onOpenPart = vi.fn(), part: ToolPart = tool) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={qc}><ToolDetail part={tool} onOpenPart={onOpenPart} onBack={() => {}} /></QueryClientProvider>)
+  render(<QueryClientProvider client={qc}><ToolDetail part={part} onOpenPart={onOpenPart} onBack={() => {}} /></QueryClientProvider>)
   return onOpenPart
 }
 
@@ -49,6 +49,21 @@ describe('ToolDetail', () => {
     expect(screen.getByText('ISOFIX Cover')).toBeTruthy()
     expect(screen.queryByTestId('edit-customer-part-number')).toBeNull()
     expect(screen.queryByTestId('edit-tier1-part-number')).toBeNull()
+  })
+
+  it('shows the tool picture left of the title, or the placeholder without one', async () => {
+    renderTool(vi.fn(), { ...tool, thumbnail_url: '/api/v1/parts/7/thumbnail?v=2' })
+    expect((await screen.findByAltText('ISOFIX Cover')).getAttribute('src')).toBe('/v1/parts/7/thumbnail?v=2')
+    expect(screen.getByTestId('tool-thumbnail').className).toContain('w-24')
+    cleanup()
+    renderTool()
+    expect(await screen.findByTestId('tool-thumbnail-placeholder')).toBeTruthy()
+  })
+
+  it('shows the produced article revision with our E level bold', async () => {
+    renderTool()
+    const chips = await screen.findByTestId('produced-articles')
+    expect((await within(chips).findByText('E1')).className).toContain('font-bold')
   })
 
   it('lists the produced articles as chips with their active revision and opens them', async () => {

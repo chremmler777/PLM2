@@ -5,7 +5,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
-import { revisionLabel } from '../parts/RevisionBadge';
+import RevisionLabel from '../parts/RevisionLabel';
 import ToolFieldsCard from '../tools/ToolFieldsCard';
 import { producedArticles, type ToolRelation } from '../tools/toolRelations';
 import type { Part } from './projectTypes';
@@ -27,7 +27,7 @@ export default function ToolInfoTab({ part, onOpenPart }: { part: Part; onOpenPa
             <button key={a.part_id} onClick={() => onOpenPart(a.part_id)}
               className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600">
               {a.name}
-              {a.revision_name && <span className="text-slate-400"> · {revisionLabel(a.revision_name, a.customer_index)}</span>}
+              {a.revision_name && <span className="text-slate-400"> · <RevisionLabel name={a.revision_name} index={a.customer_index} /></span>}
             </button>
           ))}
         </div>

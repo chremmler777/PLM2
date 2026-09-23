@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 import BomTree, { type BomNode } from '../parts/BomTree';
-import { revisionLabel } from '../parts/RevisionBadge';
+import RevisionLabel from '../parts/RevisionLabel';
 
 interface WhereUsedEntry {
   part_id: number;
@@ -44,7 +44,7 @@ export function BomTreeSection({ partId, revisionId, revisionName, onOpenPart }:
             {parents.map((u) => (
               <button key={u.part_id} onClick={() => onOpenPart(u.part_id)}
                 className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600 font-mono">
-                {u.part_number} <span className="text-slate-400 font-sans">{revisionLabel(u.revision_name, u.customer_index)}</span>
+                {u.part_number} <span className="text-slate-400 font-sans"><RevisionLabel name={u.revision_name} index={u.customer_index} /></span>
               </button>
             ))}
           </div>

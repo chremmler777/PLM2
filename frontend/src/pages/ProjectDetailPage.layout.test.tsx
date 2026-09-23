@@ -144,17 +144,17 @@ describe('grouped slim item rows', () => {
     expect(screen.getByTestId('group-toggle-article').textContent).toContain('2')
   })
 
-  it('shows customer number and short name on line 1, internal number, revision, phase and icons on line 2', async () => {
+  it('shows thumbnail, short name, revision and phase on line 1, the labelled numbers and icons on line 2', async () => {
     mount()
     const lh = await screen.findByTestId('item-row-5')
     await within(lh).findByTestId('row-rev-5')
-    const [line1, line2] = Array.from(lh.children) as HTMLElement[]
-    expect(line1.textContent).toContain('206.882.251')
+    expect(within(lh).getByTestId('row-thumb-5')).toBeTruthy()
     // the name span holds the short name alone (customer number stripped)
-    expect(within(line1).getByText('Handle LH')).toBeTruthy()
-    expect(line2.textContent).toContain('20-1994-001-0')
+    expect(within(lh).getByText('Handle LH')).toBeTruthy()
     expect(within(lh).getByTestId('row-rev-5').textContent).toBe('E1 · 003')
-    expect(line2.textContent).toContain('nominated')
+    expect(within(lh).getByTestId('row-phase-5').textContent).toBe('nominated')
+    expect(within(lh).getByTestId('row-numbers-5').textContent)
+      .toBe('KTX 20-1994-001-0 · Tier 1 S00H4X-110 · OEM 206.882.251')
     expect(within(lh).getByTestId('row-proposal-5')).toBeTruthy()
     const rh = screen.getByTestId('item-row-6')
     expect(within(rh).getByTestId('tree-mirror-of-6')).toBeTruthy()
@@ -473,9 +473,9 @@ describe('pop-out detail window from the project page', () => {
     act(() => p.channel.postMessage(hello))
     const table = await screen.findByTestId('items-table')
     expect(within(table).getAllByRole('columnheader').map((th) => th.textContent))
-      .toEqual(['Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', 'Cavities'])
+      .toEqual(['Image', 'KTX no.', 'Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', 'Cavities'])
     await waitFor(() => expect(within(within(table).getByTestId('table-row-5')).getAllByRole('cell').map((td) => td.textContent))
-      .toEqual(['206.882.251', 'S00H4X-110', 'Handle LH', 'nominated', 'E1 · 003', '199401', '2']))
+      .toEqual(['', '20-1994-001-0', '206.882.251', 'S00H4X-110', 'Handle LH', 'nominated', 'E1 · 003', '199401', '2']))
   })
 
   it('leaves the cavities column out before the tool fields exist', async () => {

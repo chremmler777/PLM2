@@ -14,6 +14,8 @@ import RevisionStrip from '../parts/RevisionStrip';
 import DocumentPane, { type PaneDocument, type MirrorNotice } from '../parts/DocumentPane';
 import RevisionFilesGrouped, { docKindFor } from '../parts/RevisionFilesGrouped';
 import { revisionLabel } from '../parts/RevisionBadge';
+import ThumbnailSnapshot from '../parts/ThumbnailSnapshot';
+import type { CaptureFn } from '../../lib/thumbnail';
 import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import { useAssemblyFiles, useRevisionFiles } from '../../hooks/queries/useProjectDetail';
@@ -59,6 +61,11 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
   const [packageFor, setPackageFor] = useState<number | null>(null);
   const [upload, setUpload] = useState<{ partId: number; revision: PartRevision; files: File[] } | null>(null);
   const [uploadDrag, setUploadDrag] = useState(false);
+  // The viewer's capture, tagged with the part it was produced for so a
+  // stale capture never lands on the next selected part.
+  const [shot, setShot] = useState<{ partId: number; capture: CaptureFn } | null>(null);
+  const onCaptureReady = (capture: CaptureFn | null) => setShot(capture ? { partId: part.id, capture } : null);
+  const capture = shot && shot.partId === part.id ? shot.capture : null;
 
   const customerDataMutation = useMutation({
     mutationFn: async ({ partId, input }: { partId: number; input: CustomerDataInput }) => {
@@ -217,7 +224,12 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
               fileId={assemblyActive ? null : paneDoc?.fileId ?? null}
               viewerUrl={assemblyActive ? null : paneViewerUrl}
               models={assemblyActive ? assemblyModels : undefined}
+              onCaptureReady={paneMirror ? undefined : onCaptureReady}
             />
+            {paneDoc?.kind === '3d' && !paneMirror && (
+              <ThumbnailSnapshot partId={part.id} hasThumbnail={!!part.thumbnail_url}
+                capture={capture} auto={!assemblyActive} />
+            )}
             {assemblyActive && (
               <div className="absolute top-2 right-2 z-10 px-2 py-1 rounded bg-blue-900/70 text-blue-200 text-xs font-medium">
                 Assembly · {assemblyFiles?.length} components

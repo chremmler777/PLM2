@@ -1,3 +1,5 @@
+import RevisionLabel from './RevisionLabel';
+
 /** One way to print a revision: name plus the customer's own index, "E2 · B". */
 export function revisionLabel(name: string | null | undefined, index?: string | null): string {
   if (!name) return '';
@@ -12,7 +14,7 @@ export default function RevisionBadge({ name, index, phase, testId }: {
   return (
     <span data-testid={testId} title={phase ?? undefined}
       className={`text-xs px-1.5 rounded font-mono ${phase === 'official' ? 'bg-amber-900/40 text-amber-300' : 'bg-blue-900/40 text-blue-300'}`}>
-      {revisionLabel(name, index)}
+      <RevisionLabel name={name} index={index} />
     </span>
   );
 }

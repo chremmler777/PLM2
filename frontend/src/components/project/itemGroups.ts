@@ -71,11 +71,15 @@ export function findNode(nodes: TreeNode[], partId: number): TreeNode | undefine
 
 export interface TableRow {
   id: number;
+  thumbnailUrl: string | null;
+  ktxNumber: string;
   customerNumber: string;
   tier1: string;
   name: string;
   phase: string;
   revision: string;
+  revisionName: string;
+  revisionIndex: string | null;
   tools: string;
   cavities: string;
 }
@@ -97,11 +101,15 @@ export function tableRow(part: Part, parts: Part[], structure: ProjectStructure 
   const ownCavities = part.item_category === 'tool' && part.tool_cavities != null ? [part.tool_cavities] : [];
   return {
     id: part.id,
-    customerNumber: customer ?? part.part_number,
+    thumbnailUrl: part.thumbnail_url ?? article?.thumbnail_url ?? null,
+    ktxNumber: part.part_number,
+    customerNumber: customer ?? '',
     tier1: part.tier1_part_number ?? '',
     name: shortName(part.name, projectCode, customer),
     phase: article?.lifecycle_phase ?? part.lifecycle_phase ?? '',
     revision: active ? revisionLabel(active.revision_name, active.customer_index) : '',
+    revisionName: active?.revision_name ?? '',
+    revisionIndex: active?.customer_index ?? null,
     tools: toolLinks.map((r) => r.part_number).join(', '),
     cavities: [...ownCavities, ...linkedCavities].join(', '),
   };

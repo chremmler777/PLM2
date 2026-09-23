@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { comparePartNumbers, shortName, stripProjectCode } from './partDisplay'
+import { comparePartNumbers, labelledNumbers, shortName, stripProjectCode } from './partDisplay'
 
 describe('comparePartNumbers', () => {
   it('orders by the numeric suffix, so -10 comes after -9', () => {
@@ -39,5 +39,13 @@ describe('shortName', () => {
   })
   it('does not cut a number that only shares a prefix', () => {
     expect(shortName('206.882.2519 Special', null, '206.882.251')).toBe('206.882.2519 Special')
+  })
+})
+
+describe('labelledNumbers', () => {
+  it('lists KTX, Tier 1 and OEM in that order and leaves missing ones out', () => {
+    expect(labelledNumbers({ part_number: '20-1994-005-0', tier1_part_number: 'S00H54-110', customer_part_number: '206.887.233' })
+      .map((n) => `${n.label} ${n.value}`)).toEqual(['KTX 20-1994-005-0', 'Tier 1 S00H54-110', 'OEM 206.887.233'])
+    expect(labelledNumbers({ part_number: '199401', tier1_part_number: null }).map((n) => n.key)).toEqual(['ktx'])
   })
 })

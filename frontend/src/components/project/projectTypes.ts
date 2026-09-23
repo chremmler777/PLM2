@@ -35,6 +35,8 @@ export interface Part {
   toolmaker_id?: number | null;
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;
+  /** /api/v1/parts/{id}/thumbnail?v=..., null when the part has no picture. */
+  thumbnail_url?: string | null;
 }
 
 // Controlled item categories (automotive PLM)

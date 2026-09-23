@@ -13,6 +13,8 @@ import { articleOf, type ProjectStructure } from '../../hooks/queries/useProject
 import type { PartPaintLayer } from '../../types/paint';
 import { comparePartNumbers } from '../../lib/partDisplay';
 import ItemRow from './ItemRow';
+import PartThumbnail from '../parts/PartThumbnail';
+import RevisionLabel from '../parts/RevisionLabel';
 import { findNode, groupNodes, hasToolFields, matchesSearch, tableRow, visibleOrder, type GroupKey } from './itemGroups';
 import {
   CATEGORY_META, buildPartTree, comparePartNodes, getDescendantIds, type Part, type TreeNode,
@@ -192,7 +194,8 @@ export default function ItemsPane({
           <table data-testid="items-table" className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-slate-900 text-left text-slate-400">
               <tr>
-                {['Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', ...(showCavities ? ['Cavities'] : [])].map((h) => (
+                <th className="px-2 py-1 w-12"><span className="sr-only">Image</span></th>
+                {['KTX no.', 'Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', ...(showCavities ? ['Cavities'] : [])].map((h) => (
                   <th key={h} className="px-2 py-1 font-medium">{h}</th>
                 ))}
               </tr>
@@ -211,11 +214,13 @@ export default function ItemsPane({
                     onContextMenu={(e) => onContextMenu(e, p.id)}
                     className={`cursor-pointer border-t border-slate-800 ${selected ? 'bg-blue-900/40' : 'hover:bg-slate-800'}`}
                   >
+                    <td className="px-2 py-1"><PartThumbnail url={row.thumbnailUrl} name={row.name} testId={`table-thumb-${p.id}`} /></td>
+                    <td className="px-2 py-1 font-mono text-slate-200">{row.ktxNumber}</td>
                     <td className="px-2 py-1 font-mono text-slate-200">{row.customerNumber}</td>
                     <td className="px-2 py-1 font-mono text-slate-400">{row.tier1}</td>
                     <td className="px-2 py-1 text-slate-100">{row.name}</td>
                     <td className="px-2 py-1 text-slate-400">{row.phase}</td>
-                    <td className="px-2 py-1 font-mono text-slate-300">{row.revision}</td>
+                    <td className="px-2 py-1 font-mono text-slate-300"><RevisionLabel name={row.revisionName} index={row.revisionIndex} /></td>
                     <td className="px-2 py-1 font-mono text-slate-300">{row.tools}</td>
                     {showCavities && <td className="px-2 py-1 text-slate-300">{row.cavities}</td>}
                   </tr>

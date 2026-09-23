@@ -16,6 +16,7 @@ import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
 import BomTree, { type BomNode } from '../components/parts/BomTree';
 import PartPaintCard from '../components/paint/PartPaintCard';
 import { revisionLabel } from '../components/parts/RevisionBadge';
+import RevisionLabel from '../components/parts/RevisionLabel';
 import { useAuth } from '../contexts/AuthContext';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFilesGrouped';
@@ -43,6 +44,7 @@ interface Part {
   toolmaker_id?: number | null;
   tool_tonnage_class?: number | null;
   tool_cycle_time_s?: number | null;
+  thumbnail_url?: string | null;
 }
 
 interface WhereUsed {
@@ -189,6 +191,7 @@ export default function PartDetail() {
           project_id: part.project_id, item_category: part.item_category, lifecycle_phase: part.lifecycle_phase,
           tool_cavities: part.tool_cavities ?? null, toolmaker_id: part.toolmaker_id ?? null,
           tool_tonnage_class: part.tool_tonnage_class ?? null, tool_cycle_time_s: part.tool_cycle_time_s ?? null,
+          thumbnail_url: part.thumbnail_url ?? null,
         }}
         onOpenPart={(id) => navigate(`/parts/${id}`)}
         onBack={() => navigate('/dashboard')}
@@ -271,8 +274,8 @@ export default function PartDetail() {
               )}
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
-                  {activeRevision ? `${revisionLabel(activeRevision.revision_name, activeRevision.customer_index)} (active)` : 'no customer data yet'}
+                <span className="text-sm text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
+                  {activeRevision ? <><RevisionLabel name={activeRevision.revision_name} index={activeRevision.customer_index} /> (active)</> : 'no customer data yet'}
                 </span>
                 <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
                   {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
@@ -336,7 +339,7 @@ export default function PartDetail() {
             {flattenUsedIn(usedIn).map((u) => (
               <button key={u.part_id} onClick={() => navigate(`/parts/${u.part_id}`)}
                 className="px-2 py-0.5 rounded bg-slate-700 text-slate-100 hover:bg-slate-600 font-mono">
-                {u.part_number} <span className="text-slate-400 font-sans">{revisionLabel(u.revision_name, u.customer_index)}</span>
+                {u.part_number} <span className="text-slate-400 font-sans"><RevisionLabel name={u.revision_name} index={u.customer_index} /></span>
               </button>
             ))}
           </div>

@@ -11,6 +11,8 @@ import { MeasurementReadout } from './MeasurementReadout'
 import { SceneNode } from '../hooks/useGLTFLoader'
 import { useTheme } from '../contexts/ThemeContext'
 import { API_BASE_URL } from '../api/client'
+import { captureFrame, SNAPSHOT_HIDDEN_NAME } from '../lib/canvasCapture'
+import type { CaptureFn } from '../lib/thumbnail'
 
 export interface AssemblyModel {
   id: number  // unique per model (e.g. revision file id)
@@ -24,6 +26,8 @@ interface Viewer3DProps {
   models?: AssemblyModel[]  // Assembly mode: render multiple models in one scene
   onError?: (error: Error) => void
   onLoad?: () => void
+  /** Called with a capture of the current view once the model is loaded and rendered, and with null while it is not. */
+  onCaptureReady?: (capture: CaptureFn | null) => void
 }
 
 interface BoundingBoxInfo {
@@ -43,6 +47,7 @@ export default function Viewer3D({
   models,
   onError,
   onLoad,
+  onCaptureReady,
 }: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const orbitControlsRef = useRef<any>(null)
@@ -236,6 +241,30 @@ export default function Viewer3D({
     }
   }, [boundingBox, loading])
 
+  // Snapshot: hand out a capture once the model is loaded, the camera fitted
+  // and a frame drawn; null again as soon as that no longer holds.
+  const threeRef = useRef<{ gl: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.Camera } | null>(null)
+  const onCaptureReadyRef = useRef(onCaptureReady)
+  onCaptureReadyRef.current = onCaptureReady
+  const hasModel = !!modelUrl || assemblyMode
+  useEffect(() => {
+    if (!onCaptureReadyRef.current) return
+    onCaptureReadyRef.current(null)
+    if (loading || error || !boundingBox || !hasModel) return
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const t = threeRef.current
+        if (!t) return
+        onCaptureReadyRef.current?.(() => captureFrame(t.gl, t.scene, t.camera))
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [loading, error, boundingBox, hasModel, modelUrl])
+
   // Handle model loading completion
   const handleModelLoading = (isLoading: boolean) => {
     setLoading(isLoading)
@@ -426,7 +455,8 @@ export default function Viewer3D({
             </button>
           </div>
         ) : modelUrl || assemblyMode ? (
-          <Canvas camera={{ position: [15, 15, 15], fov: 50, near: 0.1, far: 1000 }} gl={{ logarithmicDepthBuffer: true }} className="w-full h-full">
+          <Canvas camera={{ position: [15, 15, 15], fov: 50, near: 0.1, far: 1000 }} gl={{ logarithmicDepthBuffer: true }} className="w-full h-full"
+            onCreated={(state) => { threeRef.current = { gl: state.gl, scene: state.scene, camera: state.camera } }}>
             <Suspense fallback={null}>
               {assemblyMode && models ? (
                 models.map((m) => (
@@ -495,6 +525,7 @@ export default function Viewer3D({
               {/* Helpers */}
               {showGrid && (
                 <Grid
+                  name={SNAPSHOT_HIDDEN_NAME}
                   args={[30, 30]}
                   cellSize={1}
                   cellColor={resolvedTheme === 'dark' ? '#1f2937' : '#e5e7eb'}

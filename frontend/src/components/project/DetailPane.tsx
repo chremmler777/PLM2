@@ -9,6 +9,7 @@ import PartRelationsSection from '../PartRelationsSection';
 import ProcessFlowSection from '../ProcessFlowSection';
 import PPAPSection from '../PPAPSection';
 import { revisionLabel } from '../parts/RevisionBadge';
+import RevisionLabel from '../parts/RevisionLabel';
 import { stripProjectCode } from '../../lib/partDisplay';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import { useRevisionFiles } from '../../hooks/queries/useProjectDetail';
@@ -165,7 +166,7 @@ export default function DetailPane({
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-mono font-semibold text-slate-100 text-sm">{revisionLabel(rev.revision_name, rev.customer_index)}</span>
+                        <span className="font-mono text-slate-100 text-sm"><RevisionLabel name={rev.revision_name} index={rev.customer_index} /></span>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${phaseColor(rev.phase)}`}>
                           {rev.phase}{rev.part_phase_at_receipt ? ` · ${rev.part_phase_at_receipt}` : ''}
                         </span>

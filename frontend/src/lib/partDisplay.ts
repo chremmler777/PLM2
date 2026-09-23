@@ -43,3 +43,24 @@ export function shortName(name: string, code: string | undefined | null, custome
   out = stripProjectCode(out.trim(), code).trim();
   return out.length ? out : name;
 }
+
+export interface LabelledNumber {
+  key: 'ktx' | 'tier1' | 'oem';
+  label: string;
+  value: string;
+  title: string;
+}
+
+/** The three numbers of a part in display order, each labelled; missing ones left out. */
+export function labelledNumbers(p: {
+  part_number: string;
+  tier1_part_number?: string | null;
+  customer_part_number?: string | null;
+}): LabelledNumber[] {
+  const all: (LabelledNumber | null)[] = [
+    p.part_number ? { key: 'ktx', label: 'KTX', value: p.part_number, title: 'KTX part number' } : null,
+    p.tier1_part_number ? { key: 'tier1', label: 'Tier 1', value: p.tier1_part_number, title: 'Tier 1 part number' } : null,
+    p.customer_part_number ? { key: 'oem', label: 'OEM', value: p.customer_part_number, title: 'Customer (OEM) part number' } : null,
+  ];
+  return all.filter((n): n is LabelledNumber => n !== null);
+}

@@ -71,13 +71,14 @@ describe('tableRow', () => {
 
   it('fills the table cells from the part, its structure and its tools', () => {
     expect(tableRow(lh, [lh, tool], structure, '1994')).toEqual({
-      id: 5, customerNumber: '206.882.251', tier1: 'S00H4X-110', name: 'Handle LH', phase: 'nominated',
-      revision: 'E1 · 003', tools: '199401', cavities: '2',
+      id: 5, thumbnailUrl: null, ktxNumber: '20-1994-001-0', customerNumber: '206.882.251', tier1: 'S00H4X-110',
+      name: 'Handle LH', phase: 'nominated', revision: 'E1 · 003', revisionName: 'E1', revisionIndex: '003',
+      tools: '199401', cavities: '2',
     })
   })
 
-  it('uses the internal number when there is no customer number, and a tool shows its own cavities', () => {
-    expect(tableRow(tool, [lh, tool], structure, '1994')).toMatchObject({ customerNumber: '199401', name: 'TOOL Handle', phase: 'rfq', cavities: '2', tools: '' })
+  it('leaves the customer cell empty when there is no customer number, and a tool shows its own cavities', () => {
+    expect(tableRow(tool, [lh, tool], structure, '1994')).toMatchObject({ ktxNumber: '199401', customerNumber: '', name: 'TOOL Handle', phase: 'rfq', cavities: '2', tools: '' })
   })
 
   it('knows whether the API sends tool fields at all', () => {
