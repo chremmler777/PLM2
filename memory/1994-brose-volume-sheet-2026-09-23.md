@@ -61,3 +61,12 @@ of days out; 2277 not awarded to the toolshop, no DFMs and a team risk analysis
 needed first; Karl to supply sold state per part (series material + datasheets,
 tonnage class, target cycle time, official timing: DFM design freeze, FOT, home-line
 FOT); Brose contacts needed for a DFM review series and a PM kick-off.
+
+**Shipped 2026-09-23 (prod, commit c59f3fb7, alembic 076, backup
+db-backups/plm2-before-076-20260923-155343.sql.gz):** `parts.tier1_part_number`
+next to the OEM `customer_part_number`; 8 Brose -110 numbers set on 1994 via
+`backend/scripts/set_1994_tier1_numbers.py`. Still empty, pending Brose
+cross-reference: handles 206.882.251/252 (S00H4X-110 / S00H4W-110) and latch
+covers 206.885.967/968 (S00H56-110 / S00G0E-110). Tool view + DFM archive spec:
+docs/superpowers/specs/2026-09-23-tool-dfm-archive-design.md.
+
