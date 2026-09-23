@@ -3,12 +3,9 @@
  * selected item's detail. Data hooks and selection state live here; the
  * panes live in components/project.
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import ProjectLessonsSection from '../components/ProjectLessonsSection';
-import ProjectSepSection from '../components/ProjectSepSection';
-import ProjectChangesSection from '../components/ProjectChangesSection';
 import ProjectPaintSection from '../components/paint/ProjectPaintSection';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { projectPaintOverview } from '../api/paints';
@@ -23,6 +20,7 @@ import ProjectContextMenu from '../components/project/ProjectContextMenu';
 import ChangelogModal from '../components/project/ChangelogModal';
 import AddPartModal from '../components/project/AddPartModal';
 import type { ContextMenuState } from '../components/project/projectTypes';
+import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -47,6 +45,8 @@ export default function ProjectDetailPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
+  const [openSection, setOpenSection] = useState<StatusSection | null>(null);
+  const closeSection = useCallback(() => setOpenSection(null), []);
 
   const { data: paintOverview } = useQuery({
     queryKey: ['project-paint-overview', id],
@@ -94,9 +94,11 @@ export default function ProjectDetailPage() {
     <div className="p-6 bg-slate-900 min-h-screen">
       <ProjectHeaderBar
         project={project}
+        onOpenSection={setOpenSection}
         onStartChange={() => setShowStartChange(true)}
         onAddPart={() => setShowAddModal(true)}
       />
+      <StatusSlideOver section={openSection} projectId={id} onClose={closeSection} />
 
       {showStartChange && (
         <StartChangeModal
@@ -106,13 +108,7 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      <ProjectSepSection projectId={id} />
-
-      <ProjectChangesSection projectId={id} />
-
       <ProjectPaintSection projectId={id} />
-
-      <ProjectLessonsSection projectId={id} />
 
       {/* Two-column layout */}
       <div className="grid grid-cols-3 gap-6">
