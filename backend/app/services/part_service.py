@@ -10,6 +10,7 @@ from app.models import (
     Part, PartRevision, RevisionFile, RevisionChangelog,
     RevisionPhase, RevisionStatus, TestDataStatus, User
 )
+from app.models.supplier import Supplier
 from app.models.part import CUSTOMER_STATEMENTS
 from app.services.revision_naming import next_major_name, next_minor_name
 
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Controlled item categories (automotive PLM)
 VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "eoat", "gauge"}
+
+TOOL_FIELDS = ("tool_cavities", "toolmaker_id", "tool_tonnage_class", "tool_cycle_time_s")
+TOOL_FIELDS_ONLY_ON_TOOLS = "Tool fields (cavities, toolmaker, tonnage class, cycle time) only apply to tools"
 
 
 def compute_next_calibration(
@@ -31,6 +35,11 @@ def compute_next_calibration(
 
 class PartService:
     """Service for part management and revision lifecycle."""
+
+    @staticmethod
+    async def _check_toolmaker(session: AsyncSession, toolmaker_id: Optional[int]) -> None:
+        if toolmaker_id is not None and await session.get(Supplier, toolmaker_id) is None:
+            raise ValueError("Toolmaker not found: no supplier with that id")
 
     @staticmethod
     async def create_part(
@@ -50,12 +59,23 @@ class PartService:
         supplier_id: Optional[int] = None,
         customer_part_number: Optional[str] = None,
         tier1_part_number: Optional[str] = None,
+        tool_cavities: Optional[int] = None,
+        toolmaker_id: Optional[int] = None,
+        tool_tonnage_class: Optional[int] = None,
+        tool_cycle_time_s: Optional[float] = None,
     ) -> Part:
         """Create a new controlled item (article, tool, assembly equipment, gauge)."""
         if item_category not in VALID_ITEM_CATEGORIES:
             raise ValueError(
                 f"Invalid item_category '{item_category}'. Valid: {', '.join(sorted(VALID_ITEM_CATEGORIES))}"
             )
+
+        tool_values = {"tool_cavities": tool_cavities, "toolmaker_id": toolmaker_id,
+                       "tool_tonnage_class": tool_tonnage_class, "tool_cycle_time_s": tool_cycle_time_s}
+        if item_category != "tool" and any(v is not None for v in tool_values.values()):
+            raise ValueError(TOOL_FIELDS_ONLY_ON_TOOLS)
+        await PartService._check_toolmaker(session, toolmaker_id)
+
         part = Part(
             project_id=project_id,
             part_number=part_number,
@@ -73,6 +93,7 @@ class PartService:
             calibration_interval_months=calibration_interval_months,
             last_calibrated_at=last_calibrated_at,
             next_calibration_due=compute_next_calibration(last_calibrated_at, calibration_interval_months),
+            **tool_values,
         )
         session.add(part)
         await session.flush()
@@ -116,6 +137,14 @@ class PartService:
         update_customer_part_number: bool = False,
         tier1_part_number: Optional[str] = None,
         update_tier1_part_number: bool = False,
+        tool_cavities: Optional[int] = None,
+        update_tool_cavities: bool = False,
+        toolmaker_id: Optional[int] = None,
+        update_toolmaker_id: bool = False,
+        tool_tonnage_class: Optional[int] = None,
+        update_tool_tonnage_class: bool = False,
+        tool_cycle_time_s: Optional[float] = None,
+        update_tool_cycle_time_s: bool = False,
     ) -> Optional[Part]:
         """Update a part. parent_part_id is only applied when update_parent is True
         (None then means: move to top level)."""
@@ -156,6 +185,22 @@ class PartService:
             part.customer_part_number = customer_part_number
         if update_tier1_part_number:
             part.tier1_part_number = tier1_part_number
+
+        tool_updates = {
+            "tool_cavities": (update_tool_cavities, tool_cavities),
+            "toolmaker_id": (update_toolmaker_id, toolmaker_id),
+            "tool_tonnage_class": (update_tool_tonnage_class, tool_tonnage_class),
+            "tool_cycle_time_s": (update_tool_cycle_time_s, tool_cycle_time_s),
+        }
+        if any(flag for flag, _ in tool_updates.values()):
+            if (item_category or part.item_category) != "tool":
+                raise ValueError(TOOL_FIELDS_ONLY_ON_TOOLS)
+            if update_toolmaker_id:
+                await PartService._check_toolmaker(session, toolmaker_id)
+            for attr, (flag, value) in tool_updates.items():
+                if flag:
+                    setattr(part, attr, value)
+
         if item_category is not None:
             if item_category not in VALID_ITEM_CATEGORIES:
                 raise ValueError(

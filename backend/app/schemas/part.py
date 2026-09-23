@@ -26,6 +26,12 @@ class PartBase(BaseModel):
     last_calibrated_at: Optional[datetime] = None
     next_calibration_due: Optional[datetime] = None
 
+    # Tool fields (item_category = tool only)
+    tool_cavities: Optional[int] = Field(None, ge=1, le=256, description="Cavities in the tool, total")
+    toolmaker_id: Optional[int] = Field(None, description="Supplier building the tool")
+    tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
+    tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
+
 
 class PartCreate(PartBase):
     """Create a new part."""
@@ -51,6 +57,12 @@ class PartUpdate(BaseModel):
     item_category: Optional[str] = None
     calibration_interval_months: Optional[int] = Field(None, ge=1, le=120)
     last_calibrated_at: Optional[NaiveUtcDatetime] = None
+
+    # Tool fields (item_category = tool only)
+    tool_cavities: Optional[int] = Field(None, ge=1, le=256, description="Cavities in the tool, total")
+    toolmaker_id: Optional[int] = Field(None, description="Supplier building the tool")
+    tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
+    tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
 
 
 class PartResponse(PartBase):

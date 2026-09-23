@@ -1,6 +1,6 @@
 """Part and revision models - customer data index (E<n> review, <n> official)."""
 from datetime import date, datetime
-from sqlalchemy import String, Text, Date, DateTime, ForeignKey, Integer, Boolean, Float, JSON, Enum
+from sqlalchemy import String, Text, Date, DateTime, ForeignKey, Integer, Boolean, Float, JSON, Enum, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 import enum
@@ -53,6 +53,15 @@ class Part(Base):
     # When we are Tier 2, the Tier 1 (e.g. Brose) has its own number for the
     # part next to the OEM number above. Their sheets and mails use it.
     tier1_part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+
+    # Tool fields (item_category = tool only). The sold state the DFM answers
+    # rest on. tool_cavities is the source of truth over the "n cavities" note
+    # on the produces relation.
+    tool_cavities: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    toolmaker_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True, index=True)
+    tool_tonnage_class: Mapped[int | None] = mapped_column(Integer, nullable=True)  # clamping force class, t
+    tool_cycle_time_s: Mapped[float | None] = mapped_column(Numeric(6, 1, asdecimal=False), nullable=True)
+
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

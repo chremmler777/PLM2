@@ -55,6 +55,10 @@ async def create_part(
             supplier_id=body.supplier_id,
             customer_part_number=body.customer_part_number,
             tier1_part_number=body.tier1_part_number,
+            tool_cavities=body.tool_cavities,
+            toolmaker_id=body.toolmaker_id,
+            tool_tonnage_class=body.tool_tonnage_class,
+            tool_cycle_time_s=body.tool_cycle_time_s,
         )
         await db.commit()
         return part
@@ -126,6 +130,14 @@ async def update_part(
             update_customer_part_number='customer_part_number' in body.model_fields_set,
             tier1_part_number=body.tier1_part_number,
             update_tier1_part_number='tier1_part_number' in body.model_fields_set,
+            tool_cavities=body.tool_cavities,
+            update_tool_cavities='tool_cavities' in body.model_fields_set,
+            toolmaker_id=body.toolmaker_id,
+            update_toolmaker_id='toolmaker_id' in body.model_fields_set,
+            tool_tonnage_class=body.tool_tonnage_class,
+            update_tool_tonnage_class='tool_tonnage_class' in body.model_fields_set,
+            tool_cycle_time_s=body.tool_cycle_time_s,
+            update_tool_cycle_time_s='tool_cycle_time_s' in body.model_fields_set,
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")
