@@ -434,6 +434,27 @@ describe('pop-out detail window from the project page', () => {
     }
   })
 
+  it('still notices the pop-out closing after it reloaded (bye, then hello again)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const win = { closed: false }
+      window.open = vi.fn(() => win as unknown as Window)
+      const p = popout()
+      mount()
+      fireEvent.click(await screen.findByTestId('item-row-5'))
+      fireEvent.click(await screen.findByLabelText('Open detail in new window'))
+      await screen.findByTestId('items-table')
+      act(() => p.channel.postMessage(bye))
+      act(() => p.channel.postMessage(hello))
+      await screen.findByTestId('items-table')
+      win.closed = true
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(screen.queryByTestId('items-table')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows the table columns, with cavities once the tool fields exist', async () => {
     partsData = [LH, RH, { ...TOOL, tool_cavities: 2 }]
     const p = popout()

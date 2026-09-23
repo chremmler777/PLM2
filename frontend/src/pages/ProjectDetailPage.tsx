@@ -105,7 +105,9 @@ function ProjectDetailView() {
       setPopoutOpen(true);
       post({ type: 'select', partId: sel.partId, revisionId: postedRevisionId });
     } else if (message.type === 'bye') {
-      popoutRef.current = null;
+      // A reloading pop-out says bye and then hello again from the same
+      // window: keep the handle so the closed-window poll still covers it.
+      if (popoutRef.current?.closed) popoutRef.current = null;
       setPopoutOpen(false);
     }
   });
