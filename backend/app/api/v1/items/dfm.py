@@ -101,3 +101,45 @@ async def reopen_topic(part_id: int, topic_id: int, current_user: User = Depends
         raise HTTPException(status_code=e.status, detail=str(e))
     await db.commit()
     return await _detail(db, topic)
+
+
+@router.post("/{part_id}/dfm/topics/{topic_id}/entries", response_model=dict,
+             status_code=status.HTTP_201_CREATED)
+async def create_entry(
+    part_id: int,
+    topic_id: int,
+    party: str = Form(...),
+    addressed_to: str = Form(..., description="JSON list of the other parties"),
+    note: Optional[str] = Form(None),
+    sent_at: Optional[str] = Form(None),
+    supersedes_id: Optional[int] = Form(None),
+    files: List[UploadFile] = File(default=[]),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record one ledger entry in `party`'s column, optionally with files and
+    as an update of one of that column's earlier entries."""
+    tool = await _load_tool(db, part_id)
+    topic = await _topic(db, tool, topic_id)
+    payloads = [(f.filename or "", await f.read(), f.content_type) for f in files]
+    try:
+        entry = await DfmService.record_entry(
+            db, tool, topic, party=party, addressed_to=addressed_to, note=note, sent_at=sent_at,
+            supersedes_id=supersedes_id, files=payloads, user_id=current_user.id)
+        await db.commit()
+    except DfmError as e:
+        await db.rollback()
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"DFM entry on topic {topic_id} failed: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not store the entry")
+    names = await user_names(db, {current_user.id})
+    d = DfmService.entry_dict(entry, names)
+    d["history"] = []
+    if entry.supersedes_id:
+        await db.refresh(topic, attribute_names=["entries"])
+        names = await user_names(db, DfmService.user_ids(topic))
+        detail = DfmService.topic_detail(topic, names)
+        d = next(x for x in detail["entries"] if x["id"] == entry.id)
+    return d
