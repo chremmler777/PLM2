@@ -55,3 +55,13 @@ export function visibleOrder(
   }
   return out;
 }
+
+/** The node for a part id anywhere in the tree, or undefined. */
+export function findNode(nodes: TreeNode[], partId: number): TreeNode | undefined {
+  for (const n of nodes) {
+    if (n.part.id === partId) return n;
+    const hit = findNode(n.children, partId);
+    if (hit) return hit;
+  }
+  return undefined;
+}

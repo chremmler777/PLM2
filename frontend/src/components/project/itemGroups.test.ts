@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupNodes, groupOf, matchesSearch, visibleOrder } from './itemGroups'
+import { findNode, groupNodes, groupOf, matchesSearch, visibleOrder } from './itemGroups'
 import type { Part, TreeNode } from './projectTypes'
 
 const part = (id: number, over: Partial<Part> = {}): Part => ({
@@ -46,5 +46,14 @@ describe('visibleOrder', () => {
     expect(visibleOrder(groups, new Set(), () => true)).toEqual([1, 2, 10, 11])
     expect(visibleOrder(groups, new Set(['tool']), () => true)).toEqual([1, 10, 11])
     expect(visibleOrder(groups, new Set(), () => false)).toEqual([1, 2, 10])
+  })
+})
+
+describe('findNode', () => {
+  it('finds nested nodes and returns undefined for unknown ids', () => {
+    const child = node(part(11))
+    const tree = [node(part(1)), node(part(10), [child])]
+    expect(findNode(tree, 11)).toBe(child)
+    expect(findNode(tree, 99)).toBeUndefined()
   })
 })

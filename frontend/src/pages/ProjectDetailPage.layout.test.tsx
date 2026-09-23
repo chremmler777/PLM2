@@ -253,3 +253,48 @@ describe('detail tabs under a pinned header', () => {
     expect(await screen.findByText('Select an item from the list')).toBeTruthy()
   })
 })
+
+describe('keyboard in the items list', () => {
+  const current = () => screen.getAllByTestId(/^item-row-/).find((el) => el.getAttribute('aria-current') === 'true')?.getAttribute('data-row-id')
+
+  it('moves the selection with up and down and the detail follows', async () => {
+    mount()
+    await screen.findByTestId('item-row-5')
+    const list = screen.getByTestId('items-scroll')
+    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    await waitFor(() => expect(screen.getByTestId('detail-header').textContent).toContain('Handle LH'))
+    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    await waitFor(() => expect(screen.getByTestId('detail-header').textContent).toContain('Handle RH'))
+    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    fireEvent.keyDown(list, { key: 'ArrowDown' })
+    expect(current()).toBe('30')
+    fireEvent.keyDown(list, { key: 'ArrowUp' })
+    expect(current()).toBe('6')
+  })
+
+  it('expands and collapses the selected row with right and left', async () => {
+    mount()
+    await within(await screen.findByTestId('item-row-5')).findByTestId('row-rev-5')
+    fireEvent.click(screen.getByTestId('item-row-5'))
+    const list = screen.getByTestId('items-scroll')
+    fireEvent.keyDown(list, { key: 'ArrowRight' })
+    expect(await screen.findByTestId('tree-rev-10')).toBeTruthy()
+    fireEvent.keyDown(list, { key: 'ArrowLeft' })
+    expect(screen.queryByTestId('tree-rev-10')).toBeNull()
+  })
+
+  it('ignores arrows typed in the search box', async () => {
+    mount()
+    fireEvent.click(await screen.findByTestId('item-row-5'))
+    fireEvent.keyDown(screen.getByLabelText('Search items'), { key: 'ArrowDown' })
+    expect(current()).toBe('5')
+  })
+
+  it('jumps to the first visible row when the selection sits in a collapsed group', async () => {
+    mount()
+    fireEvent.click(await screen.findByTestId('item-row-30'))
+    fireEvent.click(screen.getByTestId('group-toggle-tool'))
+    fireEvent.keyDown(screen.getByTestId('items-scroll'), { key: 'ArrowDown' })
+    expect(current()).toBe('5')
+  })
+})

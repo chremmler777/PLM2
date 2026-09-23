@@ -3,16 +3,16 @@
  * groups of slim rows, and drag-to-restructure onto sub-assemblies. Only the
  * list below the controls scrolls.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import AssemblyTreeList from '../parts/AssemblyTreeList';
 import { apiErrorMessage } from '../../lib/apiError';
-import type { ProjectStructure } from '../../hooks/queries/useProjectStructure';
+import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import type { PartPaintLayer } from '../../types/paint';
 import ItemRow from './ItemRow';
-import { groupNodes, matchesSearch, type GroupKey } from './itemGroups';
+import { findNode, groupNodes, matchesSearch, visibleOrder, type GroupKey } from './itemGroups';
 import {
   CATEGORY_META, buildPartTree, comparePartNodes, getDescendantIds, type Part, type TreeNode,
 } from './projectTypes';
@@ -99,6 +99,36 @@ export default function ItemsPane({
       return next;
     });
 
+  const listRef = useRef<HTMLDivElement>(null);
+  const order = visibleOrder(groups, collapsedGroups, isExpanded);
+  const rowExpandable = (n: TreeNode) => {
+    const a = articleOf(structure, n.part.id);
+    return n.children.length > 0 || (!!a && (a.revisions.length > 0 || a.related.length > 0));
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('input, select, textarea')) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (order.length === 0) return;
+      const at = selectedPartId === null ? -1 : order.indexOf(selectedPartId);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const next = at === -1
+        ? (step === 1 ? 0 : order.length - 1)
+        : Math.min(order.length - 1, Math.max(0, at + step));
+      const nextId = order[next];
+      onSelect(nextId);
+      listRef.current?.querySelector<HTMLElement>(`[data-row-id="${nextId}"]`)?.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && selectedPartId !== null) {
+      const n = findNode(visibleNodes, selectedPartId);
+      if (!n || !rowExpandable(n)) return;
+      e.preventDefault();
+      setExpanded(selectedPartId, e.key === 'ArrowRight');
+    }
+  };
+
   const filtered = categoryFilter !== 'all' || !!query;
 
   return (
@@ -138,7 +168,14 @@ export default function ItemsPane({
         </div>
       </div>
 
-      <div data-testid="items-scroll" className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+      <div
+        ref={listRef}
+        data-testid="items-scroll"
+        tabIndex={0}
+        aria-label="Items"
+        onKeyDown={onListKeyDown}
+        className="flex-1 min-h-0 overflow-y-auto px-2 py-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-600"
+      >
         {categoryFilter === 'assemblies' ? (
           <AssemblyTreeList projectId={projectId} selectedPartId={selectedPartId} onSelect={onOpenPart} />
         ) : partsLoading ? (
