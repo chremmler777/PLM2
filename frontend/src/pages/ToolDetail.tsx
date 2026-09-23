@@ -9,6 +9,7 @@ import client from '../api/client';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import { revisionLabel } from '../components/parts/RevisionBadge';
+import ToolFieldsCard from '../components/tools/ToolFieldsCard';
 
 export interface ToolPart {
   id: number;
@@ -101,6 +102,11 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
               className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-sm font-medium" />
           </div>
         </div>
+
+        <ToolFieldsCard partId={part.id}
+          values={{ tool_cavities: part.tool_cavities, toolmaker_id: part.toolmaker_id,
+            tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s }}
+          producedNotes={produced.map((a) => a.notes)} />
 
         {showStartChange && (
           <StartChangeModal open onClose={() => setShowStartChange(false)}

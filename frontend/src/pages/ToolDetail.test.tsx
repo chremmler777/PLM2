@@ -63,6 +63,12 @@ describe('ToolDetail', () => {
     renderTool()
     expect((await screen.findByTestId('produced-articles')).textContent).toContain('No produced article linked yet')
   })
+
+  it('shows the tool fields card', async () => {
+    renderTool()
+    expect(await screen.findByTestId('edit-tool-cavities')).toBeTruthy()
+    expect(screen.getByTestId('toolmaker-select')).toBeTruthy()
+  })
 })
 
 describe('producedArticles', () => {
