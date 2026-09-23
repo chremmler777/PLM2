@@ -31,6 +31,7 @@ export interface Part {
   last_calibrated_at?: string | null;
   next_calibration_due?: string | null;
   lifecycle_phase?: string;
+  tool_cavities?: number | null;
 }
 
 // Controlled item categories (automotive PLM)

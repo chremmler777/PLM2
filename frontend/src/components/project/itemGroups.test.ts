@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findNode, groupNodes, groupOf, matchesSearch, visibleOrder } from './itemGroups'
+import { findNode, groupNodes, groupOf, hasToolFields, matchesSearch, tableRow, visibleOrder } from './itemGroups'
 import type { Part, TreeNode } from './projectTypes'
 
 const part = (id: number, over: Partial<Part> = {}): Part => ({
@@ -55,5 +55,33 @@ describe('findNode', () => {
     const tree = [node(part(1)), node(part(10), [child])]
     expect(findNode(tree, 11)).toBe(child)
     expect(findNode(tree, 99)).toBeUndefined()
+  })
+})
+
+describe('tableRow', () => {
+  const structure = { articles: [{
+    part_id: 5, part_number: '20-1994-001-0', customer_part_number: '206.882.251', name: '206.882.251 Handle LH',
+    lifecycle_phase: 'nominated', active_revision_id: 9,
+    revisions: [{ id: 9, revision_name: 'E1', customer_index: '003', status: 'approved', phase: 'review' as const, parent_revision_id: null, is_active: true }],
+    related: [{ relation_type: 'produces', direction: 'incoming' as const, label: 'produced by', part_id: 30, part_number: '199401', name: 'TOOL Handle', item_category: 'tool' }],
+    mirror_of: null, mirrored_by: [],
+  }] }
+  const lh = part(5, { part_number: '20-1994-001-0', customer_part_number: '206.882.251', tier1_part_number: 'S00H4X-110', name: '206.882.251 Handle LH' })
+  const tool = part(30, { part_number: '199401', name: '1994 TOOL Handle', item_category: 'tool', lifecycle_phase: 'rfq', tool_cavities: 2 })
+
+  it('fills the table cells from the part, its structure and its tools', () => {
+    expect(tableRow(lh, [lh, tool], structure, '1994')).toEqual({
+      id: 5, customerNumber: '206.882.251', tier1: 'S00H4X-110', name: 'Handle LH', phase: 'nominated',
+      revision: 'E1 · 003', tools: '199401', cavities: '2',
+    })
+  })
+
+  it('uses the internal number when there is no customer number, and a tool shows its own cavities', () => {
+    expect(tableRow(tool, [lh, tool], structure, '1994')).toMatchObject({ customerNumber: '199401', name: 'TOOL Handle', phase: 'rfq', cavities: '2', tools: '' })
+  })
+
+  it('knows whether the API sends tool fields at all', () => {
+    expect(hasToolFields([lh])).toBe(false)
+    expect(hasToolFields([lh, part(31, { item_category: 'tool', tool_cavities: null })])).toBe(true)
   })
 })

@@ -1,5 +1,8 @@
 /** Grouping, search and display order of the project items list. */
 import type { Part, TreeNode } from './projectTypes';
+import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
+import { revisionLabel } from '../parts/RevisionBadge';
+import { shortName } from '../../lib/partDisplay';
 
 export type GroupKey = 'article' | 'tool' | 'equipment' | 'gauge' | 'assemblies';
 
@@ -64,4 +67,42 @@ export function findNode(nodes: TreeNode[], partId: number): TreeNode | undefine
     if (hit) return hit;
   }
   return undefined;
+}
+
+export interface TableRow {
+  id: number;
+  customerNumber: string;
+  tier1: string;
+  name: string;
+  phase: string;
+  revision: string;
+  tools: string;
+  cavities: string;
+}
+
+/** The API sends tool_cavities (even as null) once the tool fields exist; before that the key is missing. */
+export function hasToolFields(parts: Part[]): boolean {
+  return parts.some((p) => p.tool_cavities !== undefined);
+}
+
+/** Cells of one row of the items table shown while the detail is popped out. */
+export function tableRow(part: Part, parts: Part[], structure: ProjectStructure | undefined, projectCode: string): TableRow {
+  const article = articleOf(structure, part.id);
+  const customer = part.customer_part_number ?? article?.customer_part_number ?? null;
+  const active = article?.revisions.find((r) => r.is_active);
+  const toolLinks = (article?.related ?? []).filter((r) => r.item_category === 'tool');
+  const linkedCavities = toolLinks
+    .map((r) => parts.find((p) => p.id === r.part_id)?.tool_cavities)
+    .filter((c): c is number => c !== null && c !== undefined);
+  const ownCavities = part.item_category === 'tool' && part.tool_cavities != null ? [part.tool_cavities] : [];
+  return {
+    id: part.id,
+    customerNumber: customer ?? part.part_number,
+    tier1: part.tier1_part_number ?? '',
+    name: shortName(part.name, projectCode, customer),
+    phase: article?.lifecycle_phase ?? part.lifecycle_phase ?? '',
+    revision: active ? revisionLabel(active.revision_name, active.customer_index) : '',
+    tools: toolLinks.map((r) => r.part_number).join(', '),
+    cavities: [...ownCavities, ...linkedCavities].join(', '),
+  };
 }

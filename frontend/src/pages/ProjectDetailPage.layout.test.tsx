@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ProjectDetailPage from './ProjectDetailPage'
+import { FakeBroadcastChannel } from '../testing/fakeBroadcastChannel'
+import type { SelectionMessage } from '../hooks/useSelectionChannel'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -296,5 +298,110 @@ describe('keyboard in the items list', () => {
     fireEvent.click(screen.getByTestId('group-toggle-tool'))
     fireEvent.keyDown(screen.getByTestId('items-scroll'), { key: 'ArrowDown' })
     expect(current()).toBe('5')
+  })
+})
+
+describe('pop-out detail window from the project page', () => {
+  beforeEach(() => {
+    FakeBroadcastChannel.reset()
+    vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel)
+  })
+
+  const popout = () => {
+    const got: SelectionMessage[] = []
+    const channel = new FakeBroadcastChannel('plm2-project-2')
+    channel.onmessage = (e) => { got.push(e.data as SelectionMessage) }
+    return { channel, got }
+  }
+
+  it('opens the detail in a named window and shows the list as a table', async () => {
+    const open = vi.fn(() => ({ closed: false }) as unknown as Window)
+    window.open = open
+    mount()
+    fireEvent.click(await screen.findByTestId('item-row-5'))
+    await screen.findByTestId('rev-tab-9')
+    fireEvent.click(screen.getByLabelText('Open detail in new window'))
+    expect(open).toHaveBeenCalledWith('/projects/2/detail?part=5&rev=9', 'plm2-detail-2', expect.any(String))
+    expect(await screen.findByTestId('items-table')).toBeTruthy()
+    expect(screen.queryByTestId('detail-pane')).toBeNull()
+    expect(screen.queryByRole('separator')).toBeNull()
+  })
+
+  it('answers a hello with the selection and posts every change', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    expect(await screen.findByTestId('items-table')).toBeTruthy()
+    expect(p.got).toContainEqual({ type: 'select', partId: null, revisionId: null })
+    fireEvent.click(screen.getByTestId('table-row-6'))
+    await waitFor(() => expect(p.got).toContainEqual({ type: 'select', partId: 6, revisionId: 19 }))
+    expect(screen.getByTestId('table-row-6').getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('asks on load whether a pop-out is already open', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    expect(p.got).toContainEqual({ type: 'ping' })
+  })
+
+  it('brings the detail back when the pop-out says bye', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    await screen.findByTestId('items-table')
+    act(() => p.channel.postMessage({ type: 'bye' }))
+    expect(screen.queryByTestId('items-table')).toBeNull()
+    expect(screen.getByRole('separator')).toBeTruthy()
+  })
+
+  it('notices a pop-out that was closed without saying bye', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const win = { closed: false }
+      window.open = vi.fn(() => win as unknown as Window)
+      mount()
+      fireEvent.click(await screen.findByTestId('item-row-5'))
+      fireEvent.click(await screen.findByLabelText('Open detail in new window'))
+      await screen.findByTestId('items-table')
+      win.closed = true
+      act(() => { vi.advanceTimersByTime(1000) })
+      expect(screen.queryByTestId('items-table')).toBeNull()
+      expect(screen.getByTestId('detail-pane')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the table columns, with cavities once the tool fields exist', async () => {
+    partsData = [LH, RH, { ...TOOL, tool_cavities: 2 }]
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    const table = await screen.findByTestId('items-table')
+    expect(within(table).getAllByRole('columnheader').map((th) => th.textContent))
+      .toEqual(['Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', 'Cavities'])
+    await waitFor(() => expect(within(within(table).getByTestId('table-row-5')).getAllByRole('cell').map((td) => td.textContent))
+      .toEqual(['206.882.251', 'S00H4X-110', 'Handle LH', 'nominated', 'E1 · 003', '199401', '2']))
+  })
+
+  it('leaves the cavities column out before the tool fields exist', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    const table = await screen.findByTestId('items-table')
+    expect(within(table).queryByText('Cavities')).toBeNull()
+  })
+
+  it('offers no pop-out when the browser has no BroadcastChannel', async () => {
+    vi.stubGlobal('BroadcastChannel', undefined)
+    mount()
+    fireEvent.click(await screen.findByTestId('item-row-5'))
+    await screen.findByTestId('detail-header')
+    expect(screen.queryByLabelText('Open detail in new window')).toBeNull()
   })
 })

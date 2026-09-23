@@ -11,8 +11,9 @@ import AssemblyTreeList from '../parts/AssemblyTreeList';
 import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import type { PartPaintLayer } from '../../types/paint';
+import { comparePartNumbers } from '../../lib/partDisplay';
 import ItemRow from './ItemRow';
-import { findNode, groupNodes, matchesSearch, visibleOrder, type GroupKey } from './itemGroups';
+import { findNode, groupNodes, hasToolFields, matchesSearch, tableRow, visibleOrder, type GroupKey } from './itemGroups';
 import {
   CATEGORY_META, buildPartTree, comparePartNodes, getDescendantIds, type Part, type TreeNode,
 } from './projectTypes';
@@ -31,11 +32,13 @@ export interface ItemsPaneProps {
   onOpenPart(partId: number): void;
   onPickRevision(partId: number, revisionId: number): void;
   onContextMenu(e: React.MouseEvent, partId: number): void;
+  /** 'table' while the detail is popped out: one flat row per item with the key columns. */
+  mode?: 'list' | 'table';
 }
 
 export default function ItemsPane({
   projectId, projectCode, parts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
-  selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu,
+  selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu, mode = 'list',
 }: ItemsPaneProps) {
   const queryClient = useQueryClient();
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -87,6 +90,14 @@ export default function ItemsPane({
       .sort(comparePartNodes);
   }, [categoryFilter, query, partTree, parts, paintedIds]);
   const groups = useMemo(() => groupNodes(visibleNodes), [visibleNodes]);
+  const tableParts = useMemo(() => (parts ?? [])
+    .filter((p) => matchesSearch(p, query))
+    .filter((p) => categoryFilter === 'all'
+      || (categoryFilter === 'assemblies' ? p.part_type === 'sub_assembly'
+        : categoryFilter === 'painted' ? paintedIds.has(p.id) : p.item_category === categoryFilter))
+    .sort((a, b) => comparePartNumbers(a.part_number, b.part_number)), [parts, query, categoryFilter, paintedIds]);
+  const showCavities = hasToolFields(parts ?? []);
+  const isTable = mode === 'table';
 
   const isExpanded = (n: TreeNode) => expandOverride[n.part.id] ?? n.children.length > 0;
   const setExpanded = (partId: number, next: boolean) =>
@@ -100,7 +111,7 @@ export default function ItemsPane({
     });
 
   const listRef = useRef<HTMLDivElement>(null);
-  const order = visibleOrder(groups, collapsedGroups, isExpanded);
+  const order = isTable ? tableParts.map((p) => p.id) : visibleOrder(groups, collapsedGroups, isExpanded);
   const rowExpandable = (n: TreeNode) => {
     const a = articleOf(structure, n.part.id);
     return n.children.length > 0 || (!!a && (a.revisions.length > 0 || a.related.length > 0));
@@ -122,6 +133,7 @@ export default function ItemsPane({
       return;
     }
     if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && selectedPartId !== null) {
+      if (isTable) return;
       const n = findNode(visibleNodes, selectedPartId);
       if (!n || !rowExpandable(n)) return;
       e.preventDefault();
@@ -136,7 +148,7 @@ export default function ItemsPane({
       <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-slate-800">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
-            Items ({visibleNodes.length}{filtered ? ` of ${parts?.length ?? 0}` : ''})
+            Items ({isTable ? tableParts.length : visibleNodes.length}{filtered ? ` of ${parts?.length ?? 0}` : ''})
           </h2>
           <span className="text-[11px] text-slate-500">Drag onto a ★ sub-assembly to restructure</span>
         </div>
@@ -145,7 +157,7 @@ export default function ItemsPane({
           aria-label="Search items"
           placeholder="Search number or name"
           value={search}
-          disabled={categoryFilter === 'assemblies'}
+          disabled={categoryFilter === 'assemblies' && !isTable}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50"
         />
@@ -176,7 +188,42 @@ export default function ItemsPane({
         onKeyDown={onListKeyDown}
         className="flex-1 min-h-0 overflow-y-auto px-2 py-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-600"
       >
-        {categoryFilter === 'assemblies' ? (
+        {isTable ? (
+          <table data-testid="items-table" className="w-full text-xs border-collapse">
+            <thead className="sticky top-0 bg-slate-900 text-left text-slate-400">
+              <tr>
+                {['Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', ...(showCavities ? ['Cavities'] : [])].map((h) => (
+                  <th key={h} className="px-2 py-1 font-medium">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableParts.map((p) => {
+                const row = tableRow(p, parts ?? [], structure, projectCode);
+                const selected = selectedPartId === p.id;
+                return (
+                  <tr
+                    key={p.id}
+                    data-testid={`table-row-${p.id}`}
+                    data-row-id={p.id}
+                    aria-selected={selected}
+                    onClick={() => onSelect(p.id)}
+                    onContextMenu={(e) => onContextMenu(e, p.id)}
+                    className={`cursor-pointer border-t border-slate-800 ${selected ? 'bg-blue-900/40' : 'hover:bg-slate-800'}`}
+                  >
+                    <td className="px-2 py-1 font-mono text-slate-200">{row.customerNumber}</td>
+                    <td className="px-2 py-1 font-mono text-slate-400">{row.tier1}</td>
+                    <td className="px-2 py-1 text-slate-100">{row.name}</td>
+                    <td className="px-2 py-1 text-slate-400">{row.phase}</td>
+                    <td className="px-2 py-1 font-mono text-slate-300">{row.revision}</td>
+                    <td className="px-2 py-1 font-mono text-slate-300">{row.tools}</td>
+                    {showCavities && <td className="px-2 py-1 text-slate-300">{row.cavities}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : categoryFilter === 'assemblies' ? (
           <AssemblyTreeList projectId={projectId} selectedPartId={selectedPartId} onSelect={onOpenPart} />
         ) : partsLoading ? (
           <p className="text-slate-500 text-sm">Loading...</p>

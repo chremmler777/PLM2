@@ -1,29 +1,34 @@
 /**
- * ProjectDetailPage - the project work surface: header, items list and the
- * selected item's detail. Data hooks and selection state live here; the
- * panes live in components/project.
+ * ProjectDetailPage - the project work surface. A one-line header, the items
+ * list on the left and the selected item's detail on the right; the page
+ * fills the viewport and each pane scrolls on its own. The detail can pop out
+ * into its own window, which follows the selection over the project channel
+ * while the list here turns into a table.
  */
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useHref, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import StartChangeModal from '../components/changes/StartChangeModal';
 import { projectPaintOverview } from '../api/paints';
 import type { PartPaintLayer } from '../types/paint';
 import { useProjectStructure } from '../hooks/queries/useProjectStructure';
 import { useProject, useProjectParts } from '../hooks/queries/useProjectDetail';
 import { useArticleSelection } from '../hooks/useArticleSelection';
+import { selectionChannelSupported, useSelectionChannel } from '../hooks/useSelectionChannel';
 import ProjectHeaderBar from '../components/project/ProjectHeaderBar';
+import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
 import ItemsPane from '../components/project/ItemsPane';
 import DetailPane from '../components/project/DetailPane';
+import SplitPane from '../components/project/SplitPane';
 import ProjectContextMenu from '../components/project/ProjectContextMenu';
 import ChangelogModal from '../components/project/ChangelogModal';
 import AddPartModal from '../components/project/AddPartModal';
-import SplitPane from '../components/project/SplitPane';
-import type { ContextMenuState } from '../components/project/projectTypes';
 import type { DetailTab } from '../components/project/detailTabs';
-import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
+import type { ContextMenuState } from '../components/project/projectTypes';
 
 const SPLIT_KEY = 'plm2.project.splitLeft';
+const POPOUT_POLL_MS = 1000;
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -49,8 +54,8 @@ export default function ProjectDetailPage() {
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [openSection, setOpenSection] = useState<StatusSection | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>('documents');
   const closeSection = useCallback(() => setOpenSection(null), []);
+  const [detailTab, setDetailTab] = useState<DetailTab>('documents');
 
   const { data: paintOverview } = useQuery({
     queryKey: ['project-paint-overview', id],
@@ -73,6 +78,56 @@ export default function ProjectDetailPage() {
     () => new Set((paintOverview ?? []).map((part) => part.part_id)),
     [paintOverview],
   );
+
+  // Pop-out detail window
+  const [popoutOpen, setPopoutOpen] = useState(false);
+  const popoutRef = useRef<Window | null>(null);
+  const popoutHref = useHref(`/projects/${id}/detail`);
+
+  const post = useSelectionChannel(id, (message) => {
+    if (message.type === 'hello') {
+      setPopoutOpen(true);
+      post({ type: 'select', partId: sel.partId, revisionId: sel.revisionId });
+    } else if (message.type === 'bye') {
+      popoutRef.current = null;
+      setPopoutOpen(false);
+    }
+  });
+
+  // On load, ask whether a pop-out of this project is already open; it answers hello.
+  useEffect(() => {
+    post({ type: 'ping' });
+  }, [post]);
+
+  useEffect(() => {
+    if (popoutOpen) post({ type: 'select', partId: sel.partId, revisionId: sel.revisionId });
+  }, [popoutOpen, sel.partId, sel.revisionId, post]);
+
+  // A window closed by the OS or a crash never says bye: watch the handle we opened.
+  useEffect(() => {
+    if (!popoutOpen) return;
+    const timer = window.setInterval(() => {
+      if (popoutRef.current?.closed) {
+        popoutRef.current = null;
+        setPopoutOpen(false);
+      }
+    }, POPOUT_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [popoutOpen]);
+
+  const openPopout = useCallback(() => {
+    const query = sel.partId !== null
+      ? `?part=${sel.partId}${sel.revisionId !== null ? `&rev=${sel.revisionId}` : ''}`
+      : '';
+    // A fixed name per project: a second click reuses the same window.
+    const win = window.open(`${popoutHref}${query}`, `plm2-detail-${id}`, 'popup,width=1100,height=900');
+    if (!win) {
+      toast.error('The browser blocked the new window');
+      return;
+    }
+    popoutRef.current = win;
+    setPopoutOpen(true);
+  }, [sel.partId, sel.revisionId, popoutHref, id]);
 
   if (projectLoading) {
     return <div className="p-6 text-slate-400">Loading project...</div>;
@@ -115,6 +170,7 @@ export default function ProjectDetailPage() {
       <div className="flex-1 min-h-0">
         <SplitPane
           storageKey={SPLIT_KEY}
+          rightHidden={popoutOpen}
           left={
             <ItemsPane
               projectId={id}
@@ -130,6 +186,7 @@ export default function ProjectDetailPage() {
               onOpenPart={openPart}
               onPickRevision={pickRevision}
               onContextMenu={handleContextMenu}
+              mode={popoutOpen ? 'table' : 'list'}
             />
           }
           right={
@@ -142,6 +199,7 @@ export default function ProjectDetailPage() {
                 sel={sel}
                 tab={detailTab}
                 onTabChange={setDetailTab}
+                onPopOut={selectionChannelSupported() ? openPopout : undefined}
               />
             </div>
           }
