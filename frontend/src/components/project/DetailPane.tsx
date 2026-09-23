@@ -79,7 +79,8 @@ export default function DetailPane({
 
       <div role="tabpanel" data-testid="detail-scroll" className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
         {tab === 'documents' && (
-          <DocumentsTab projectId={projectId} project={project} parts={parts} structure={structure} sel={sel} part={part} />
+          // Keyed by part: open dialogs and their state never carry over to another item.
+          <DocumentsTab key={part.id} projectId={projectId} project={project} parts={parts} structure={structure} sel={sel} part={part} />
         )}
 
         {tab === 'links' && (

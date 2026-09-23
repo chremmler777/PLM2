@@ -18,7 +18,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import { useAssemblyFiles, useRevisionFiles } from '../../hooks/queries/useProjectDetail';
 import type { ArticleSelection } from '../../hooks/useArticleSelection';
-import { LOCKED_REVISION_STATUSES, type Part, type Project } from './projectTypes';
+import { LOCKED_REVISION_STATUSES, type Part, type PartRevision, type Project } from './projectTypes';
 
 export default function DocumentsTab({ projectId, project, parts, structure, sel, part }: {
   projectId: number;
@@ -52,20 +52,23 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
     [assemblyFiles]
   );
 
-  const [showCustomerData, setShowCustomerData] = useState(false);
-  const [showPackage, setShowPackage] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[] | null>(null);
+  // Each dialog keeps the target it was opened for. In the pop-out the
+  // selection is driven by the main window and can move while a dialog is
+  // open; submitting must never retarget to whatever is selected by then.
+  const [customerDataFor, setCustomerDataFor] = useState<number | null>(null);
+  const [packageFor, setPackageFor] = useState<number | null>(null);
+  const [upload, setUpload] = useState<{ partId: number; revision: PartRevision; files: File[] } | null>(null);
   const [uploadDrag, setUploadDrag] = useState(false);
 
   const customerDataMutation = useMutation({
-    mutationFn: async (v: CustomerDataInput) => {
-      const res = await client.post(`/v1/parts/${part.id}/revisions/customer-data`, v);
+    mutationFn: async ({ partId, input }: { partId: number; input: CustomerDataInput }) => {
+      const res = await client.post(`/v1/parts/${partId}/revisions/customer-data`, input);
       return res.data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, { partId }) => {
       toast.success(`Recorded ${data.revision_name}`);
-      setShowCustomerData(false);
-      queryClient.invalidateQueries({ queryKey: ['part-revisions', part.id] });
+      setCustomerDataFor(null);
+      queryClient.invalidateQueries({ queryKey: ['part-revisions', partId] });
       queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
       queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
     },
@@ -90,8 +93,8 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
     },
   });
 
-  const afterUpload = (targetRevisionId: number) => {
-    queryClient.invalidateQueries({ queryKey: ['part-revisions', part.id] });
+  const afterUpload = (partId: number, targetRevisionId: number) => {
+    queryClient.invalidateQueries({ queryKey: ['part-revisions', partId] });
     queryClient.invalidateQueries({ queryKey: ['revision-files', targetRevisionId] });
     queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
     queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
@@ -100,6 +103,9 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
 
   const selectedRevision = partRevisions?.find((r) => r.id === sel.revisionId);
   const revisionLocked = !!selectedRevision && LOCKED_REVISION_STATUSES.includes(selectedRevision.status);
+  const openUpload = (files: File[]) => {
+    if (selectedRevision) setUpload({ partId: part.id, revision: selectedRevision, files });
+  };
   const viewableFiles = revisionFiles?.filter((f) => f.has_viewer) ?? [];
   const viewingFile = viewableFiles.find((f) => f.id === sel.viewingFileId) ?? viewableFiles[0] ?? null;
   const viewerUrl = viewingFile
@@ -139,7 +145,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
           {revisionLocked && (
             <span className="text-xs text-amber-400" title="This revision is locked; files are read-only">🔒 {selectedRevision?.status}</span>
           )}
-          <button onClick={() => setShowPackage(true)}
+          <button onClick={() => setPackageFor(part.id)}
             className="bg-blue-700 hover:bg-blue-600 border border-blue-600 rounded px-2 py-1 text-white text-xs font-medium">+ Customer package</button>
         </div>
       </div>
@@ -155,15 +161,15 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
         </div>
       )}
 
-      {showPackage && (
-        <CustomerPackageDialog open assemblyId={part.id}
+      {packageFor !== null && (
+        <CustomerPackageDialog open assemblyId={packageFor}
           projectParts={(parts ?? []).map((p) => ({ id: p.id, part_number: p.part_number, name: p.name }))}
           officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
-          onClose={() => setShowPackage(false)}
+          onClose={() => setPackageFor(null)}
           onDone={(r) => {
             toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
-            setShowPackage(false);
-            queryClient.invalidateQueries({ queryKey: ['part-revisions', part.id] });
+            setPackageFor(null);
+            queryClient.invalidateQueries({ queryKey: ['part-revisions', packageFor] });
             queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
             queryClient.invalidateQueries({ queryKey: ['bom-tree'] });
             queryClient.invalidateQueries({ queryKey: ['project-assemblies', projectId] });
@@ -184,12 +190,12 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
             Files are managed per revision. Record the first customer data to upload files.
           </p>
           <button
-            onClick={() => setShowCustomerData(true)}
+            onClick={() => setCustomerDataFor(part.id)}
             className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"
           >
             + Customer data
           </button>
-          {showCustomerData && (() => {
+          {customerDataFor !== null && (() => {
             const majorsOf = (revs: { revision_name: string }[]) => revs.filter((r) => !r.revision_name.includes('.'));
             const revs = partRevisions || [];
             const nextMajor = {
@@ -198,8 +204,8 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
             };
             return (
               <CustomerDataDialog open title="Customer data received" nextMajor={nextMajor}
-                pending={customerDataMutation.isPending} onClose={() => setShowCustomerData(false)}
-                onSubmit={(v) => customerDataMutation.mutate(v)} />
+                pending={customerDataMutation.isPending} onClose={() => setCustomerDataFor(null)}
+                onSubmit={(input) => customerDataMutation.mutate({ partId: customerDataFor, input })} />
             );
           })()}
         </div>
@@ -243,32 +249,32 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
                 onDragEnter={(e) => { e.preventDefault(); setUploadDrag(true); }}
                 onDragOver={(e) => { e.preventDefault(); setUploadDrag(true); }}
                 onDragLeave={(e) => { e.preventDefault(); setUploadDrag(false); }}
-                onDrop={(e) => { e.preventDefault(); setUploadDrag(false); setUploadFiles(Array.from(e.dataTransfer.files)); }}
+                onDrop={(e) => { e.preventDefault(); setUploadDrag(false); openUpload(Array.from(e.dataTransfer.files)); }}
                 onClick={() => document.getElementById('upload-dropzone-input')?.click()}
               >
                 <input id="upload-dropzone-input" type="file" multiple className="hidden"
-                  onChange={(e) => { if (e.target.files?.length) setUploadFiles(Array.from(e.target.files)); e.target.value = ''; }} />
+                  onChange={(e) => { if (e.target.files?.length) openUpload(Array.from(e.target.files)); e.target.value = ''; }} />
                 <p className="text-slate-400">+ Drop files here or click to upload (CAD, drawing, picture, document)</p>
               </div>
             )}
           </div>
-          {uploadFiles && selectedRevision && (
+          {upload && (
             <UploadDialog
               open
-              partId={part.id}
-              currentRevision={{ id: selectedRevision.id, revision_name: selectedRevision.revision_name,
-                customer_index: selectedRevision.customer_index, phase: selectedRevision.phase }}
+              partId={upload.partId}
+              currentRevision={{ id: upload.revision.id, revision_name: upload.revision.revision_name,
+                customer_index: upload.revision.customer_index, phase: upload.revision.phase }}
               revisionNames={(partRevisions ?? []).map((r) => r.revision_name)}
               officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
               projectNaming={project.customer_naming ?? null}
-              initialFiles={uploadFiles}
+              initialFiles={upload.files}
               onClose={(targetRevisionId) => {
-                setUploadFiles(null);
-                if (targetRevisionId != null) afterUpload(targetRevisionId);
+                setUpload(null);
+                if (targetRevisionId != null) afterUpload(upload.partId, targetRevisionId);
               }}
               onDone={(targetRevisionId) => {
-                setUploadFiles(null);
-                afterUpload(targetRevisionId);
+                setUpload(null);
+                afterUpload(upload.partId, targetRevisionId);
               }}
             />
           )}
