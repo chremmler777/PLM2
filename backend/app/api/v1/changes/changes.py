@@ -815,6 +815,7 @@ async def get_change(
         a.has_change_ppt = state.get("has_change_ppt", False)
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
+    change.next_step = await ChangeService.next_step_missing(db, change)
     return change
 
 

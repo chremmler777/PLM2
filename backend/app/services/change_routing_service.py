@@ -260,7 +260,9 @@ class ChangeRoutingService:
         return list(dict.fromkeys(ids))
 
     @staticmethod
-    async def blocking_complete(session: AsyncSession, change: ChangeRequest) -> bool:
+    async def blocking_rows(session: AsyncSession,
+                            change: ChangeRequest) -> list[ChangeAssessment]:
+        """The assessments that gate leaving assessment (see blocking_complete)."""
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
@@ -274,15 +276,19 @@ class ChangeRoutingService:
         # task carries step_id None): someone deliberately added that
         # department to the assessment, whatever stage number it landed on.
         first = min((a.stage_order for a in rows), default=None)
-        blocking = [a for a in rows
-                    if a.rasic_letter in BLOCKING_LETTERS
-                    and (a.stage_order == first
-                         # linked deviation row outside the template
-                         or (a.task is not None and a.task.step_id is None)
-                         # the same row before the repair links its task: an
-                         # unlinked later-stage row carrying its own "active"
-                         # (template phase rows sit unlinked as "pending")
-                         or (a.task is None and a.status == "active"))]
+        return [a for a in rows
+                if a.rasic_letter in BLOCKING_LETTERS
+                and (a.stage_order == first
+                     # linked deviation row outside the template
+                     or (a.task is not None and a.task.step_id is None)
+                     # the same row before the repair links its task: an
+                     # unlinked later-stage row carrying its own "active"
+                     # (template phase rows sit unlinked as "pending")
+                     or (a.task is None and a.status == "active"))]
+
+    @staticmethod
+    async def blocking_complete(session: AsyncSession, change: ChangeRequest) -> bool:
+        blocking = await ChangeRoutingService.blocking_rows(session, change)
         return bool(blocking) and all(
             a.effective_status in ("submitted", "waived") for a in blocking)
 
