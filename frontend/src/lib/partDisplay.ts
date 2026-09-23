@@ -29,3 +29,17 @@ export function stripProjectCode(name: string, code: string | undefined | null):
   const stripped = name.replace(new RegExp(`^${escaped}(?=[\\s\\-_:·•])[\\s\\-_:·•]+`, 'i'), '');
   return stripped.length ? stripped : name;
 }
+
+const SEPARATORS = '[\\s\\-_:·•]';
+
+/** Row name without the customer number and the project code: the row
+ *  already shows the number, so repeating it only pushes the name out. */
+export function shortName(name: string, code: string | undefined | null, customerNumber: string | undefined | null): string {
+  let out = name;
+  if (customerNumber) {
+    const escaped = customerNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(^|${SEPARATORS})${escaped}(?=$|${SEPARATORS})${SEPARATORS}*`, 'i'), '$1');
+  }
+  out = stripProjectCode(out.trim(), code).trim();
+  return out.length ? out : name;
+}

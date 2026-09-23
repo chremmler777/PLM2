@@ -1,8 +1,9 @@
 /**
- * ItemsPane - the project's items: category filter, the part tree, and
- * drag-to-restructure onto sub-assemblies.
+ * ItemsPane - the project's items: search, category filter, collapsible
+ * groups of slim rows, and drag-to-restructure onto sub-assemblies. Only the
+ * list below the controls scrolls.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -11,6 +12,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import type { ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import type { PartPaintLayer } from '../../types/paint';
 import ItemRow from './ItemRow';
+import { groupNodes, matchesSearch, type GroupKey } from './itemGroups';
 import {
   CATEGORY_META, buildPartTree, comparePartNodes, getDescendantIds, type Part, type TreeNode,
 } from './projectTypes';
@@ -35,9 +37,12 @@ export default function ItemsPane({
   projectId, projectCode, parts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
   selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu,
 }: ItemsPaneProps) {
-  const id = projectId;
   const queryClient = useQueryClient();
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [search, setSearch] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<GroupKey>>(() => new Set());
+  // Rows with children start expanded, everything else collapsed; a click overrides.
+  const [expandOverride, setExpandOverride] = useState<Record<number, boolean>>({});
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
 
@@ -47,7 +52,7 @@ export default function ItemsPane({
     },
     onSuccess: () => {
       toast.success('Part moved');
-      queryClient.invalidateQueries({ queryKey: ['parts', id] });
+      queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
       queryClient.invalidateQueries({ queryKey: ['assembly-files'] });
     },
     onError: (error: unknown) => {
@@ -68,93 +73,153 @@ export default function ItemsPane({
 
   const invalidDropIds = draggingPartId !== null && parts ? getDescendantIds(parts, draggingPartId) : new Set<number>();
 
-  const partTree = parts ? buildPartTree(parts) : [];
-  const visibleNodes: TreeNode[] = categoryFilter === 'all' || categoryFilter === 'assemblies'
-    ? partTree
-    : (parts ?? [])
-        .filter((p) =>
-          categoryFilter === 'painted' ? paintedIds.has(p.id) : p.item_category === categoryFilter
-        )
-        .map((p) => ({ part: p, children: [] }))
-        .sort(comparePartNodes);
+  const query = search.trim();
+  const partTree = useMemo(() => (parts ? buildPartTree(parts) : []), [parts]);
+  const visibleNodes: TreeNode[] = useMemo(() => {
+    if (categoryFilter === 'assemblies' || (categoryFilter === 'all' && !query)) return partTree;
+    // A filter or a search lists the matching parts flat, so a hit nested
+    // under a non-matching assembly still shows.
+    return (parts ?? [])
+      .filter((p) => matchesSearch(p, query))
+      .filter((p) => categoryFilter === 'all'
+        || (categoryFilter === 'painted' ? paintedIds.has(p.id) : p.item_category === categoryFilter))
+      .map((p) => ({ part: p, children: [] }))
+      .sort(comparePartNodes);
+  }, [categoryFilter, query, partTree, parts, paintedIds]);
+  const groups = useMemo(() => groupNodes(visibleNodes), [visibleNodes]);
+
+  const isExpanded = (n: TreeNode) => expandOverride[n.part.id] ?? n.children.length > 0;
+  const setExpanded = (partId: number, next: boolean) =>
+    setExpandOverride((o) => ({ ...o, [partId]: next }));
+  const toggleGroup = (key: GroupKey) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const filtered = categoryFilter !== 'all' || !!query;
 
   return (
-    <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-1">
-        Items ({visibleNodes.length}{categoryFilter !== 'all' ? ` of ${parts?.length ?? 0}` : ''})
-      </h2>
-      <p className="text-xs text-slate-500 mb-2">Drag a part onto a ★ sub-assembly to restructure</p>
-      <div className="flex flex-wrap gap-1 mb-3">
-        {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`]), ['assemblies', '🧩 Assemblies'], ['painted', `🎨 Painted (${paintedCount})`]].map(
-          ([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setCategoryFilter(key)}
-              className={`px-2 py-1 rounded text-xs font-medium transition ${
-                categoryFilter === key
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-              }`}
-            >
-              {label}
-            </button>
-          )
-        )}
-      </div>
-      {categoryFilter === 'assemblies' ? (
-        <AssemblyTreeList projectId={Number(id)} selectedPartId={selectedPartId} onSelect={onOpenPart} />
-      ) : partsLoading ? (
-        <p className="text-slate-500 text-sm">Loading...</p>
-      ) : (parts?.length ?? 0) === 0 ? (
-        <p className="text-slate-500 text-sm">No parts yet</p>
-      ) : (
-        <div className="space-y-1">
-          {visibleNodes.map((node) => (
-            <ItemRow
-              key={node.part.id}
-              node={node}
-              projectCode={projectCode}
-              paintByPartId={paintByPartId}
-              selectedPartId={selectedPartId}
-              onSelect={onSelect}
-              onContextMenu={onContextMenu}
-              draggingPartId={draggingPartId}
-              invalidDropIds={invalidDropIds}
-              onDragStartPart={setDraggingPartId}
-              onDragEndPart={() => setDraggingPartId(null)}
-              onDropOnPart={handleDropOnPart}
-              structure={structure}
-              onSelectRevision={onPickRevision}
-            />
-          ))}
-          {/* Top-level drop zone, visible while dragging a nested part */}
-          {draggingPartId !== null &&
-            parts?.find((p) => p.id === draggingPartId)?.parent_part_id != null && (
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setTopLevelDragOver(true);
-                }}
-                onDragLeave={() => setTopLevelDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setTopLevelDragOver(false);
-                  if (draggingPartId !== null) {
-                    reparentMutation.mutate({ partId: draggingPartId, parentPartId: null });
-                    setDraggingPartId(null);
-                  }
-                }}
-                className={`mt-2 px-3 py-3 rounded border-2 border-dashed text-center text-xs font-medium transition ${
-                  topLevelDragOver
-                    ? 'border-green-500 bg-green-900/30 text-green-300'
-                    : 'border-slate-600 text-slate-400'
+    <div className="h-full flex flex-col min-h-0" data-testid="items-pane">
+      <div className="flex-shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-slate-800">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+            Items ({visibleNodes.length}{filtered ? ` of ${parts?.length ?? 0}` : ''})
+          </h2>
+          <span className="text-[11px] text-slate-500">Drag onto a ★ sub-assembly to restructure</span>
+        </div>
+        <input
+          type="search"
+          aria-label="Search items"
+          placeholder="Search number or name"
+          value={search}
+          disabled={categoryFilter === 'assemblies'}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50"
+        />
+        <div className="flex flex-wrap gap-1">
+          {[['all', 'All'], ...Object.entries(CATEGORY_META).map(([k, v]) => [k, `${v.icon} ${v.label}`]), ['assemblies', '🧩 Assemblies'], ['painted', `🎨 Painted (${paintedCount})`]].map(
+            ([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setCategoryFilter(key)}
+                className={`px-2 py-1 rounded text-xs font-medium transition ${
+                  categoryFilter === key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                 }`}
               >
-                Drop here to move to top level
-              </div>
-            )}
+                {label}
+              </button>
+            )
+          )}
         </div>
-      )}
+      </div>
+
+      <div data-testid="items-scroll" className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+        {categoryFilter === 'assemblies' ? (
+          <AssemblyTreeList projectId={projectId} selectedPartId={selectedPartId} onSelect={onOpenPart} />
+        ) : partsLoading ? (
+          <p className="text-slate-500 text-sm">Loading...</p>
+        ) : (parts?.length ?? 0) === 0 ? (
+          <p className="text-slate-500 text-sm">No parts yet</p>
+        ) : visibleNodes.length === 0 ? (
+          <p className="text-slate-500 text-sm">No items match</p>
+        ) : (
+          <div className="space-y-2">
+            {groups.map((g) => {
+              const open = !collapsedGroups.has(g.key);
+              return (
+                <section key={g.key}>
+                  <button
+                    type="button"
+                    data-testid={`group-toggle-${g.key}`}
+                    aria-expanded={open}
+                    onClick={() => toggleGroup(g.key)}
+                    className="w-full flex items-center gap-2 px-1 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200"
+                  >
+                    <span className="w-3">{open ? '▾' : '▸'}</span>
+                    <span>{g.label}</span>
+                    <span className="text-slate-500 font-normal">{g.nodes.length}</span>
+                  </button>
+                  {open && (
+                    <div className="space-y-0.5">
+                      {g.nodes.map((node) => (
+                        <ItemRow
+                          key={node.part.id}
+                          node={node}
+                          projectCode={projectCode}
+                          structure={structure}
+                          paintByPartId={paintByPartId}
+                          selectedPartId={selectedPartId}
+                          isExpanded={isExpanded}
+                          onSetExpanded={setExpanded}
+                          onSelect={onSelect}
+                          onContextMenu={onContextMenu}
+                          onSelectRevision={onPickRevision}
+                          draggingPartId={draggingPartId}
+                          invalidDropIds={invalidDropIds}
+                          onDragStartPart={setDraggingPartId}
+                          onDragEndPart={() => setDraggingPartId(null)}
+                          onDropOnPart={handleDropOnPart}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+            {/* Top-level drop zone, visible while dragging a nested part */}
+            {draggingPartId !== null &&
+              parts?.find((p) => p.id === draggingPartId)?.parent_part_id != null && (
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setTopLevelDragOver(true);
+                  }}
+                  onDragLeave={() => setTopLevelDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setTopLevelDragOver(false);
+                    if (draggingPartId !== null) {
+                      reparentMutation.mutate({ partId: draggingPartId, parentPartId: null });
+                      setDraggingPartId(null);
+                    }
+                  }}
+                  className={`mt-2 px-3 py-3 rounded border-2 border-dashed text-center text-xs font-medium transition ${
+                    topLevelDragOver
+                      ? 'border-green-500 bg-green-900/30 text-green-300'
+                      : 'border-slate-600 text-slate-400'
+                  }`}
+                >
+                  Drop here to move to top level
+                </div>
+              )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

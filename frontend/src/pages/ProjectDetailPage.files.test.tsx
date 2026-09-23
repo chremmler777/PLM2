@@ -146,7 +146,7 @@ describe('ProjectDetailPage items list', () => {
   it('sorts numerically, drops the project code from names, and counts the filtered rows', async () => {
     mount()
     expect(await screen.findByText('Items (4)')).toBeTruthy()
-    fireEvent.click(screen.getByText(/Tool/))
+    fireEvent.click(screen.getByText('🔧 Tool'))
     expect(await screen.findByText('Items (3 of 4)')).toBeTruthy()
     const numbers = screen.getAllByText(/^1994-\d+$/).map((el) => el.textContent)
     expect(numbers).toEqual(['1994-1', '1994-2', '1994-10'])

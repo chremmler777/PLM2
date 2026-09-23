@@ -121,3 +121,64 @@ describe('paint on the project page', () => {
     expect(screen.queryByTestId('project-paint-toggle')).toBeNull()
   })
 })
+
+describe('grouped slim item rows', () => {
+  it('groups the items by category in a fixed order and hides empty groups', async () => {
+    mount()
+    await screen.findByTestId('group-toggle-article')
+    expect(screen.getAllByTestId(/^group-toggle-/).map((el) => el.getAttribute('data-testid')))
+      .toEqual(['group-toggle-article', 'group-toggle-tool'])
+    expect(screen.getByTestId('group-toggle-article').textContent).toContain('Articles')
+    expect(screen.getByTestId('group-toggle-article').textContent).toContain('2')
+  })
+
+  it('shows customer number and short name on line 1, internal number, revision, phase and icons on line 2', async () => {
+    mount()
+    const lh = await screen.findByTestId('item-row-5')
+    await within(lh).findByTestId('row-rev-5')
+    const [line1, line2] = Array.from(lh.children) as HTMLElement[]
+    expect(line1.textContent).toContain('206.882.251')
+    // the name span holds the short name alone (customer number stripped)
+    expect(within(line1).getByText('Handle LH')).toBeTruthy()
+    expect(line2.textContent).toContain('20-1994-001-0')
+    expect(within(lh).getByTestId('row-rev-5').textContent).toBe('E1 · 003')
+    expect(line2.textContent).toContain('nominated')
+    expect(within(lh).getByTestId('row-proposal-5')).toBeTruthy()
+    const rh = screen.getByTestId('item-row-6')
+    expect(within(rh).getByTestId('tree-mirror-of-6')).toBeTruthy()
+    expect(await within(rh).findByTestId('paint-swatch-6')).toBeTruthy()
+    // no part-type badge on the rows any more
+    expect(screen.queryByText('internal mfg')).toBeNull()
+  })
+
+  it('shows the internal number on line 1 when there is no customer number, and only once', async () => {
+    mount()
+    const tool = await screen.findByTestId('item-row-30')
+    expect(tool.children[0].textContent).toContain('199401')
+    expect(tool.children[0].textContent).toContain('TOOL Handle')
+    expect(tool.textContent!.split('199401').length - 1).toBe(1)
+  })
+
+  it('collapses a group from its header', async () => {
+    mount()
+    fireEvent.click(await screen.findByTestId('group-toggle-tool'))
+    expect(screen.getByTestId('group-toggle-tool').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByTestId('item-row-30')).toBeNull()
+  })
+
+  it('search finds a part nested under an assembly whose own name does not match', async () => {
+    partsData = [
+      { id: 40, part_number: '1994-40', name: 'Seat frame assy', part_type: 'sub_assembly', item_category: 'article', active_revision_id: null, parent_part_id: null },
+      { id: 41, part_number: '1994-41', name: 'Bracket inner', part_type: 'internal_mfg', item_category: 'article', active_revision_id: null, parent_part_id: 40 },
+      LH, TOOL,
+    ]
+    mount()
+    await screen.findByTestId('item-row-41')
+    fireEvent.change(screen.getByLabelText('Search items'), { target: { value: 'bracket' } })
+    expect(screen.getByText('Items (1 of 4)')).toBeTruthy()
+    expect(screen.getByTestId('item-row-41')).toBeTruthy()
+    expect(screen.queryByTestId('item-row-40')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search items'), { target: { value: '' } })
+    expect(screen.getByTestId('item-row-40')).toBeTruthy()
+  })
+})
