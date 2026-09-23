@@ -12,6 +12,8 @@ export interface PaneDocument {
   filename: string;
   kind: '3d' | 'pdf' | 'image';
   revisionName: string;
+  /** Override for documents that are not revision files (DFM archive). */
+  inlineUrl?: string;
 }
 
 export interface MirrorNotice {
@@ -28,7 +30,9 @@ interface Props {
 }
 
 export default function DocumentPane({ document, mirror, onOpenPart, children }: Props) {
-  const inlineUrl = document ? `${API_BASE_URL}/v1/parts/revision-files/${document.fileId}/inline` : null;
+  const inlineUrl = document
+    ? (document.inlineUrl ?? `${API_BASE_URL}/v1/parts/revision-files/${document.fileId}/inline`)
+    : null;
   return (
     <div className="relative border-b border-slate-700">
       {mirror && (

@@ -22,6 +22,7 @@ import RevisionFilesGrouped, { docKindFor } from '../components/parts/RevisionFi
 import Viewer3D from '../components/Viewer3D';
 import { API_BASE_URL } from '../api/client';
 import type { RevisionFile } from './ProjectDetailPage';
+import ToolDetail from './ToolDetail';
 
 interface Part {
   id: number;
@@ -38,6 +39,10 @@ interface Part {
   nominated_at?: string | null;
   sop_at?: string | null;
   revisions: Revision[];
+  tool_cavities?: number | null;
+  toolmaker_id?: number | null;
+  tool_tonnage_class?: number | null;
+  tool_cycle_time_s?: number | null;
 }
 
 interface WhereUsed {
@@ -98,7 +103,7 @@ export default function PartDetail() {
   const { data: bomTree } = useQuery({
     queryKey: ['bom-tree', partId],
     queryFn: async () => (await client.get(`/v1/parts/${partId}/bom-tree`)).data as BomNode,
-    enabled: !!partId,
+    enabled: !!part && part.item_category !== 'tool',
   });
   const queryClient = useQueryClient();
   const refetch = () => {
@@ -108,7 +113,7 @@ export default function PartDetail() {
   const { data: usedIn } = useQuery({
     queryKey: ['where-used', partId],
     queryFn: async () => (await client.get(`/v1/parts/${partId}/where-used`)).data as WhereUsed[],
-    enabled: !!partId,
+    enabled: !!part && part.item_category !== 'tool',
   });
   const { data: projectParts } = useQuery({
     queryKey: ['parts', part?.project_id],
@@ -173,6 +178,21 @@ export default function PartDetail() {
           <p className="text-red-700">{(partError as Error | null)?.message || 'The requested part could not be loaded.'}</p>
         </div>
       </div>
+    );
+  }
+
+  if (part.item_category === 'tool') {
+    return (
+      <ToolDetail
+        part={{
+          id: part.id, part_number: part.part_number, name: part.name, part_type: part.part_type,
+          project_id: part.project_id, item_category: part.item_category, lifecycle_phase: part.lifecycle_phase,
+          tool_cavities: part.tool_cavities ?? null, toolmaker_id: part.toolmaker_id ?? null,
+          tool_tonnage_class: part.tool_tonnage_class ?? null, tool_cycle_time_s: part.tool_cycle_time_s ?? null,
+        }}
+        onOpenPart={(id) => navigate(`/parts/${id}`)}
+        onBack={() => navigate('/dashboard')}
+      />
     );
   }
 

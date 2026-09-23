@@ -21,6 +21,7 @@ import ColourSwatch from '../components/paint/ColourSwatch';
 import { projectPaintOverview } from '../api/paints';
 import type { PartPaintLayer } from '../types/paint';
 import StartChangeModal from '../components/changes/StartChangeModal';
+import { useSuppliers } from '../hooks/queries/useSuppliers';
 import StartChangeButton from '../components/changes/StartChangeButton';
 import CustomerDataDialog, { type CustomerDataInput } from '../components/parts/CustomerDataDialog';
 import CustomerPackageDialog from '../components/parts/CustomerPackageDialog';
@@ -660,18 +661,6 @@ function useCatalogParts() {
       const res = await client.get('/v1/catalog-parts?is_active=true');
       return res.data;
     },
-  });
-}
-
-interface SupplierOption {
-  id: number;
-  name: string;
-}
-
-function useSuppliers() {
-  return useQuery<SupplierOption[]>({
-    queryKey: ['suppliers', false],
-    queryFn: async () => (await client.get('/v1/suppliers')).data,
   });
 }
 
