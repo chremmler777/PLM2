@@ -11,7 +11,14 @@ vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ isAdmin: true }) }
 const stub = vi.hoisted(() => (label: string) => ({ default: () => <div>{label}</div> }))
 vi.mock('../components/changes/StartChangeModal', () => stub('start-change'))
 vi.mock('../components/changes/StartChangeButton', () => stub('start-change-button'))
-vi.mock('../components/dfm/DfmArchive', () => ({ default: () => <div data-testid="dfm-archive" /> }))
+vi.mock('../components/dfm/DfmArchive', () => ({
+  default: (p: { onOpenPdf: (d: unknown) => void }) => (
+    <button data-testid="dfm-archive" onClick={() => p.onOpenPdf({
+      fileId: 41, filename: 'ISOFIX_DFM_rev2.pdf', kind: 'pdf', revisionName: 'Gate position ISOFIX',
+      sourceLabel: 'Answer #8 · KTX to Toolmaker', inlineUrl: '/x',
+    })} />
+  ),
+}))
 
 const tool: ToolPart = {
   id: 7, part_number: '199403', name: 'ISOFIX Cover', part_type: 'purchased', project_id: 2,
@@ -91,6 +98,17 @@ describe('ToolDetail', () => {
     renderTool()
     expect(await screen.findByTestId('dfm-archive')).toBeTruthy()
     expect(screen.queryByText(/Files ·/)).toBeNull()
+  })
+
+  it('scrolls an opened DFM pdf into view and shows a title bar naming the message, with a close button', async () => {
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy
+    renderTool()
+    fireEvent.click(await screen.findByTestId('dfm-archive'))
+    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth', block: 'start' }))
+    expect((await screen.findByTestId('doc-header')).textContent).toContain('ISOFIX_DFM_rev2.pdf · Answer #8 · KTX to Toolmaker')
+    fireEvent.click(screen.getByTestId('doc-close'))
+    expect(screen.queryByTestId('doc-header')).toBeNull()
   })
 })
 

@@ -19,7 +19,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import DfmEntryForm from './DfmEntryForm';
 import {
   arrowGeometry, cardActions, currentIds, formatDays, initials, KIND_STYLE, laneCenterPct, laneIndex,
-  newOriginalStep, nextStepText, partyList, shortDate, type DfmStep,
+  newOriginalStep, nextStepText, partyList, PARTY_STYLE, shortDate, sourceLabel, type DfmStep,
 } from './dfmFlow';
 
 interface Props {
@@ -81,10 +81,10 @@ export default function DfmFlow({ partId, topicId, onOpenPdf }: Props) {
       onDone={() => { setForm(null); refresh(); }} onCancel={() => setForm(null)} />
   );
 
-  const fileLink = (f: DfmEntry['files'][number]) =>
+  const fileLink = (e: Omit<DfmEntry, 'history'>, f: DfmEntry['files'][number]) =>
     f.original_filename.toLowerCase().endsWith('.pdf') ? (
       <button key={f.id} data-testid={`dfm-file-${f.id}`}
-        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, kind: 'pdf', revisionName: topic.title, inlineUrl: dfmFileUrl(partId, f.id, 'inline') })}
+        onClick={() => onOpenPdf({ fileId: f.id, filename: f.original_filename, kind: 'pdf', revisionName: topic.title, sourceLabel: sourceLabel(e), inlineUrl: dfmFileUrl(partId, f.id, 'inline') })}
         className="font-mono text-xs text-blue-300 hover:underline text-left break-all">{f.original_filename}</button>
     ) : (
       <a key={f.id} data-testid={`dfm-file-${f.id}`} href={dfmFileUrl(partId, f.id, 'download')}
@@ -94,12 +94,13 @@ export default function DfmFlow({ partId, topicId, onOpenPdf }: Props) {
   const body = (e: Omit<DfmEntry, 'history'>) => (
     <>
       <div className="text-xs text-slate-400">
-        to {partyList(e.addressed_to)} · {shortDate(e.sent_at ?? e.recorded_at)} · {initials(e.recorded_by_name)}
+        <span className={`font-semibold ${PARTY_STYLE[e.party].text}`}>{partyList([e.party])}</span>
+        {' → '}{partyList(e.addressed_to)} · {shortDate(e.sent_at ?? e.recorded_at)} · {initials(e.recorded_by_name)}
       </div>
       {e.note && <div className="text-slate-100 whitespace-pre-wrap mt-0.5">{e.note}</div>}
       {e.files.length > 0 && (
         <div className="flex flex-col gap-0.5 mt-1">
-          {e.files.map((f) => <span key={f.id}>{fileLink(f)}</span>)}
+          {e.files.map((f) => <span key={f.id}>{fileLink(e, f)}</span>)}
         </div>
       )}
     </>
@@ -236,34 +237,36 @@ export default function DfmFlow({ partId, topicId, onOpenPdf }: Props) {
 
       {form?.step.anchorId === null && formEl}
 
-      <div className="grid grid-cols-3 mb-1">
-        {PARTIES.map((p) => (
-          <div key={p} data-testid={`dfm-lane-${p}`} data-waiting={waitingCount(p)}
-            className="mx-1.5 border-b border-slate-600 pb-1 flex items-center justify-center gap-2">
-            <span className="font-semibold text-slate-200">{PARTY_LABELS[p]}</span>
-            {waitingCount(p) > 0 && (
-              <span className="text-xs px-1.5 rounded bg-amber-900 text-amber-200">{waitingCount(p)} waiting</span>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="relative">
-        {PARTIES.map((p, i) => (
-          <div key={p} aria-hidden className="absolute top-0 bottom-0 border-l border-dashed border-slate-700"
-            style={{ left: `${laneCenterPct(i)}%` }} />
-        ))}
-        {entries.map((e) => (
-          <Fragment key={e.id}>
-            <div data-testid={`dfm-row-${e.id}`} className="relative pb-2">
-              <div className="relative" style={{ height: 12 + (e.addressed_to.length - 1) * ARROW_GAP }}>{arrows(e)}</div>
-              <div className="grid grid-cols-3">
-                <div className="px-1.5" style={{ gridColumnStart: laneIndex(e.party) + 1 }}>{card(e)}</div>
-              </div>
+      <div data-testid="dfm-flow-body">
+        <div data-testid="dfm-lane-headers" className="grid grid-cols-3 mb-1 sticky top-0 z-20 bg-slate-800">
+          {PARTIES.map((p) => (
+            <div key={p} data-testid={`dfm-lane-${p}`} data-waiting={waitingCount(p)}
+              className="mx-1.5 border-b border-slate-600 pb-1 flex items-center justify-center gap-2">
+              <span className="font-semibold text-slate-200">{PARTY_LABELS[p]}</span>
+              {waitingCount(p) > 0 && (
+                <span className="text-xs px-1.5 rounded bg-amber-900 text-amber-200">{waitingCount(p)} waiting</span>
+              )}
             </div>
-            {form?.step.anchorId === e.id && <div className="relative pb-2">{formEl}</div>}
-          </Fragment>
-        ))}
+          ))}
+        </div>
+
+        <div className="relative">
+          {PARTIES.map((p, i) => (
+            <div key={p} aria-hidden className="absolute top-0 bottom-0 border-l border-dashed border-slate-700"
+              style={{ left: `${laneCenterPct(i)}%` }} />
+          ))}
+          {entries.map((e) => (
+            <Fragment key={e.id}>
+              <div data-testid={`dfm-row-${e.id}`} className="relative pb-2">
+                <div className="relative" style={{ height: 12 + (e.addressed_to.length - 1) * ARROW_GAP }}>{arrows(e)}</div>
+                <div className="grid grid-cols-3">
+                  <div className="px-1.5" style={{ gridColumnStart: laneIndex(e.party) + 1 }}>{card(e)}</div>
+                </div>
+              </div>
+              {form?.step.anchorId === e.id && <div className="relative pb-2">{formEl}</div>}
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   );

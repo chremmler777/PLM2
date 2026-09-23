@@ -3,7 +3,7 @@
  * pane, no revision strip and no customer numbers; it shows what it
  * produces, its sold state (Task 10) and the DFM archive (Task 11).
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import client from '../api/client';
 import StartChangeModal from '../components/changes/StartChangeModal';
@@ -39,6 +39,12 @@ interface Props {
 export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
   const [showStartChange, setShowStartChange] = useState(false);
   const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (openDoc) paneRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [openDoc]);
+
   const { data: relations, isLoading: relationsLoading } = useQuery({
     queryKey: ['part-relations', part.id],
     queryFn: async () => (await client.get(`/v1/parts/${part.id}/relations`)).data as ToolRelation[],
@@ -86,11 +92,8 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
           producedNotes={produced.map((a) => a.notes)} />
 
         {openDoc && (
-          <div className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">
-            <div className="flex justify-end px-3 py-1">
-              <button onClick={() => setOpenDoc(null)} className="text-xs text-slate-400 hover:text-slate-200">close</button>
-            </div>
-            <DocumentPane document={openDoc} />
+          <div ref={paneRef} className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">
+            <DocumentPane document={openDoc} onClose={() => setOpenDoc(null)} />
           </div>
         )}
         <DfmArchive partId={part.id} onOpenPdf={setOpenDoc} />

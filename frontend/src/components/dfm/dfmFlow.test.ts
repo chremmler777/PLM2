@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   arrowGeometry, cardActions, currentIds, formatDays, initials, laneCenterPct, lastStepText, newOriginalStep,
-  nextStepText, shortDate, stepSentence, waitingSummary,
+  nextStepText, PARTY_STYLE, shortDate, sourceLabel, stepSentence, waitingSummary,
 } from './dfmFlow'
 import { makeEntry, relayEntries, relaySummary } from './dfmFixtures'
 
@@ -87,5 +87,18 @@ describe('dfmFlow helpers', () => {
     expect(waitingSummary(relaySummary({ waiting_on: [], all_answered: true }))).toBe('all answered')
     expect(waitingSummary(relaySummary({ status: 'finished_confirmed' }))).toBeNull()
     expect(lastStepText(relaySummary().last_step!)).toBe('Question Toolmaker → KTX 09-22')
+  })
+
+  it('describes an entry for the document pane title, sender first', () => {
+    expect(sourceLabel(makeEntry({ id: 8, kind: 'answer', party: 'ktx', addressed_to: ['toolmaker'] })))
+      .toBe('Answer #8 · KTX to Toolmaker')
+    expect(sourceLabel(makeEntry({ id: 1, kind: 'original', party: 'toolmaker', addressed_to: ['ktx'] })))
+      .toBe('Original #1 · Toolmaker to KTX')
+  })
+
+  it('gives every party a distinct sender colour', () => {
+    expect(PARTY_STYLE.toolmaker.text).not.toBe(PARTY_STYLE.ktx.text)
+    expect(PARTY_STYLE.ktx.text).not.toBe(PARTY_STYLE.tier1.text)
+    expect(PARTY_STYLE.toolmaker.text).not.toBe(PARTY_STYLE.tier1.text)
   })
 })

@@ -46,7 +46,8 @@ describe('DfmFlow', () => {
     expect(arrows(5)).toEqual([{ from: '0', to: '1', kind: 'question', dashed: 'true' }])
 
     const first = screen.getByTestId('dfm-entry-1')
-    expect(first.textContent).toContain('to KTX')
+    expect(first.textContent).toContain('Toolmaker')
+    expect(first.textContent).toContain('→ KTX')
     expect(first.textContent).toContain('09-13')
     expect(first.textContent).toContain('CD')
     expect(first.textContent).toContain('DFM rev 1')
@@ -130,10 +131,23 @@ describe('DfmFlow', () => {
   it('opens PDFs in the pane and downloads other files', async () => {
     const onOpenPdf = wrap()
     fireEvent.click(await screen.findByTestId('dfm-file-41'))
-    expect(onOpenPdf).toHaveBeenCalledWith({ fileId: 41, filename: 'dfm_rev1.pdf', kind: 'pdf', revisionName: 'Gate position', inlineUrl: '/api/v1/parts/7/dfm/files/41/inline' })
+    expect(onOpenPdf).toHaveBeenCalledWith({
+      fileId: 41, filename: 'dfm_rev1.pdf', kind: 'pdf', revisionName: 'Gate position',
+      sourceLabel: 'Original #1 · Toolmaker to KTX', inlineUrl: '/api/v1/parts/7/dfm/files/41/inline',
+    })
     const link = screen.getByTestId('dfm-file-42') as HTMLAnchorElement
     expect(link.tagName).toBe('A')
     expect(link.href).toContain('/api/v1/parts/7/dfm/files/42/download')
+  })
+
+  it('keeps the lane headers sticky at the top of the flow, first in the scrolling body', async () => {
+    wrap()
+    await screen.findByTestId('dfm-entry-1')
+    const body = screen.getByTestId('dfm-flow-body')
+    const header = screen.getByTestId('dfm-lane-headers')
+    expect(header.className).toContain('sticky')
+    expect(header.className).toContain('top-0')
+    expect(body.firstElementChild).toBe(header)
   })
 
   it('marks an updated message and collapses the earlier version', async () => {

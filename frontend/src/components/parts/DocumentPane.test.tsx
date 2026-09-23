@@ -40,4 +40,24 @@ describe('DocumentPane', () => {
     expect((screen.getByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/api/v1/parts/7/dfm/files/9/inline')
     expect(screen.getByTestId('doc-header').textContent).toContain('study.pdf · Gate position')
   })
+
+  it('prefers the source label over the revision name, for messages opened from the DFM flow', () => {
+    render(<DocumentPane document={{
+      fileId: 9, filename: 'ISOFIX_DFM_rev2.pdf', kind: 'pdf', revisionName: 'Gate position ISOFIX',
+      sourceLabel: 'Answer #8 · KTX to Toolmaker', inlineUrl: '/api/v1/parts/7/dfm/files/9/inline',
+    }} />)
+    expect(screen.getByTestId('doc-header').textContent).toContain('ISOFIX_DFM_rev2.pdf · Answer #8 · KTX to Toolmaker')
+  })
+
+  it('shows a close button that calls onClose when given', () => {
+    const onClose = vi.fn()
+    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position' }} onClose={onClose} />)
+    fireEvent.click(screen.getByTestId('doc-close'))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('has no close button when onClose is not given', () => {
+    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position' }} />)
+    expect(screen.queryByTestId('doc-close')).toBeNull()
+  })
 })

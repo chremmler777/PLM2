@@ -34,6 +34,18 @@ export const KIND_STYLE: Record<DfmKind, { badge: string; line: string; head: st
   question: { badge: 'bg-amber-900 text-amber-200 border-amber-500', line: 'border-amber-400', head: 'text-amber-400', swatch: 'bg-amber-400' },
 };
 
+/** Tailwind text colour per party, for the sender name on a card and other sender labels. */
+export const PARTY_STYLE: Record<DfmParty, { text: string }> = {
+  toolmaker: { text: 'text-sky-300' },
+  ktx: { text: 'text-fuchsia-300' },
+  tier1: { text: 'text-orange-300' },
+};
+
+/** "Answer #8 · KTX to Toolmaker", for the document pane title bar. */
+export function sourceLabel(e: { id: number; kind: DfmKind; party: DfmParty; addressed_to: DfmParty[] }): string {
+  return `${KIND_LABELS[e.kind]} #${e.id} · ${PARTY_LABELS[e.party]} to ${partyList(e.addressed_to)}`;
+}
+
 export const laneIndex = (p: DfmParty) => PARTIES.indexOf(p);
 export const laneCenterPct = (lane: number) => ((lane * 2 + 1) / (PARTIES.length * 2)) * 100;
 
