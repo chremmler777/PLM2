@@ -95,3 +95,27 @@ async def test_relation_guards(client, eng_auth, seed):
         headers=eng_auth,
     )
     assert res.status_code == 409
+
+
+async def test_relation_carries_other_active_revision(client, eng_auth, seed):
+    article = await _create(client, eng_auth, seed, "20-1994-003-0", "206.887.233 Isofix cover")
+    tool = await _create(client, eng_auth, seed, "199403", "ISOFIX Cover", "tool")
+    res = await client.post(f"/api/v1/parts/{article}/revisions/customer-data",
+                            json={"statement": "review", "received_at": "2026-09-01", "customer_index": "003"},
+                            headers=eng_auth)
+    assert res.status_code == 201, res.text
+    res = await client.post(f"/api/v1/parts/{tool}/relations",
+                            json={"to_part_id": article, "relation_type": "produces", "notes": "4 cavities"},
+                            headers=eng_auth)
+    assert res.status_code == 201, res.text
+
+    res = await client.get(f"/api/v1/parts/{tool}/relations", headers=eng_auth)
+    rel = res.json()[0]
+    assert rel["other_part_id"] == article
+    assert rel["other_active_revision_name"] == "E1"
+    assert rel["other_active_customer_index"] == "003"
+    assert rel["notes"] == "4 cavities"
+
+    # the article side sees the tool, which has no revisions
+    res = await client.get(f"/api/v1/parts/{article}/relations", headers=eng_auth)
+    assert res.json()[0]["other_active_revision_name"] is None

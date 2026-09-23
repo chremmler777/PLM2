@@ -27,6 +27,7 @@ class RelationCreate(BaseModel):
 def _relation_dict(rel: PartRelation, direction: str) -> dict:
     other = rel.to_part if direction == "outgoing" else rel.from_part
     forward, backward = RELATION_LABELS.get(rel.relation_type, (rel.relation_type, rel.relation_type))
+    active = next((r for r in other.revisions if r.id == other.active_revision_id), None)
     return {
         "id": rel.id,
         "relation_type": rel.relation_type,
@@ -36,6 +37,8 @@ def _relation_dict(rel: PartRelation, direction: str) -> dict:
         "other_part_number": other.part_number,
         "other_part_name": other.name,
         "other_item_category": other.item_category,
+        "other_active_revision_name": active.revision_name if active else None,
+        "other_active_customer_index": active.customer_index if active else None,
         "notes": rel.notes,
     }
 
