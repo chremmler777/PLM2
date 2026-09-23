@@ -339,6 +339,18 @@ describe('pop-out detail window from the project page', () => {
     expect(screen.getByTestId('table-row-6').getAttribute('aria-selected')).toBe('true')
   })
 
+  it('never posts the previous item\'s revision together with a newly selected item', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    fireEvent.click(await screen.findByTestId('table-row-5'))
+    await waitFor(() => expect(p.got).toContainEqual({ type: 'select', partId: 5, revisionId: 9 }))
+    fireEvent.click(screen.getByTestId('table-row-6'))
+    await waitFor(() => expect(p.got).toContainEqual({ type: 'select', partId: 6, revisionId: 19 }))
+    expect(p.got).not.toContainEqual({ type: 'select', partId: 6, revisionId: 9 })
+  })
+
   it('asks on load whether a pop-out is already open', async () => {
     const p = popout()
     mount()

@@ -28,6 +28,18 @@ export interface ArticleSelection {
   setOpenDocId(fileId: number | null): void;
 }
 
+/**
+ * The selected revision when it belongs to the selected part's loaded
+ * revisions, else null. Right after an item switch revisionId still holds the
+ * previous item's revision until the new list loads; this never pairs them.
+ */
+export function revisionOfSelectedPart(
+  sel: Pick<ArticleSelection, 'revisionId' | 'partRevisions'>,
+): number | null {
+  if (sel.revisionId === null) return null;
+  return sel.partRevisions?.some((r) => r.id === sel.revisionId) ? sel.revisionId : null;
+}
+
 export function useArticleSelection(parts: Part[] | undefined, initialPartId: number | null = null): ArticleSelection {
   const [partId, setPartId] = useState<number | null>(initialPartId);
   const [revisionId, setRevisionId] = useState<number | null>(null);
@@ -56,9 +68,10 @@ export function useArticleSelection(parts: Part[] | undefined, initialPartId: nu
         setRevisionId(pending.revisionId);
         return;
       }
-      if (!partRevisions || partRevisions.length === 0) {
+      if (!partRevisions) {
         // Revisions for this part have not loaded yet: wait for the next run
-        // instead of falling through to the default selection.
+        // instead of falling through to the default selection. A loaded but
+        // empty list means the pick can never apply, so it is dropped below.
         return;
       }
       pendingRevisionRef.current = null;

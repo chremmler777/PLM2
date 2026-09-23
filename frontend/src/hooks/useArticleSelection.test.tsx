@@ -45,6 +45,14 @@ describe('useArticleSelection', () => {
     expect(result.current.revisionId).toBe(10)
   })
 
+  it('drops a pick for a part that turns out to have no revisions', async () => {
+    const { result } = renderHook(() => useArticleSelection([...parts, { ...parts[1], id: 7 }], 5), { wrapper })
+    await waitFor(() => expect(result.current.revisionId).toBe(9))
+    act(() => result.current.pickRevision(7, 99))
+    await waitFor(() => expect(result.current.partRevisions).toEqual([]))
+    expect(result.current.revisionId).toBeNull()
+  })
+
   it('openPart resets the document view even for the same part', async () => {
     const { result } = renderHook(() => useArticleSelection(parts, 5), { wrapper })
     await waitFor(() => expect(result.current.revisionId).toBe(9))

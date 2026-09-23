@@ -14,7 +14,7 @@ import { projectPaintOverview } from '../api/paints';
 import type { PartPaintLayer } from '../types/paint';
 import { useProjectStructure } from '../hooks/queries/useProjectStructure';
 import { useProject, useProjectParts } from '../hooks/queries/useProjectDetail';
-import { useArticleSelection } from '../hooks/useArticleSelection';
+import { revisionOfSelectedPart, useArticleSelection } from '../hooks/useArticleSelection';
 import { selectionChannelSupported, useSelectionChannel } from '../hooks/useSelectionChannel';
 import ProjectHeaderBar from '../components/project/ProjectHeaderBar';
 import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
@@ -43,6 +43,8 @@ export default function ProjectDetailPage() {
   const { data: structure } = useProjectStructure(id);
   const sel = useArticleSelection(parts, initialPartId ? parseInt(initialPartId, 10) : null);
   const { selectPart, openPart, pickRevision } = sel;
+  // What the pop-out gets told: never a revision of the previously selected item.
+  const postedRevisionId = revisionOfSelectedPart(sel);
 
   // Follow ?part= deep links from global search while already on the page
   useEffect(() => {
@@ -87,7 +89,7 @@ export default function ProjectDetailPage() {
   const post = useSelectionChannel(id, (message) => {
     if (message.type === 'hello') {
       setPopoutOpen(true);
-      post({ type: 'select', partId: sel.partId, revisionId: sel.revisionId });
+      post({ type: 'select', partId: sel.partId, revisionId: postedRevisionId });
     } else if (message.type === 'bye') {
       popoutRef.current = null;
       setPopoutOpen(false);
@@ -100,8 +102,8 @@ export default function ProjectDetailPage() {
   }, [post]);
 
   useEffect(() => {
-    if (popoutOpen) post({ type: 'select', partId: sel.partId, revisionId: sel.revisionId });
-  }, [popoutOpen, sel.partId, sel.revisionId, post]);
+    if (popoutOpen) post({ type: 'select', partId: sel.partId, revisionId: postedRevisionId });
+  }, [popoutOpen, sel.partId, postedRevisionId, post]);
 
   // A window closed by the OS or a crash never says bye: watch the handle we opened.
   useEffect(() => {
@@ -117,7 +119,7 @@ export default function ProjectDetailPage() {
 
   const openPopout = useCallback(() => {
     const query = sel.partId !== null
-      ? `?part=${sel.partId}${sel.revisionId !== null ? `&rev=${sel.revisionId}` : ''}`
+      ? `?part=${sel.partId}${postedRevisionId !== null ? `&rev=${postedRevisionId}` : ''}`
       : '';
     // A fixed name per project: a second click reuses the same window.
     const win = window.open(`${popoutHref}${query}`, `plm2-detail-${id}`, 'popup,width=1100,height=900');
@@ -127,7 +129,7 @@ export default function ProjectDetailPage() {
     }
     popoutRef.current = win;
     setPopoutOpen(true);
-  }, [sel.partId, sel.revisionId, popoutHref, id]);
+  }, [sel.partId, postedRevisionId, popoutHref, id]);
 
   if (projectLoading) {
     return <div className="p-6 text-slate-400">Loading project...</div>;
