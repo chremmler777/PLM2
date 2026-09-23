@@ -50,6 +50,9 @@ class Part(Base):
     # PPAP, deviations) is discussed in this number, not ours, so it is indexed
     # and searchable. Tools and gauges normally have none.
     customer_part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    # When we are Tier 2, the Tier 1 (e.g. Brose) has its own number for the
+    # part next to the OEM number above. Their sheets and mails use it.
+    tier1_part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

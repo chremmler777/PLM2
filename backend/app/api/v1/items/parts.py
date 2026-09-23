@@ -54,6 +54,7 @@ async def create_part(
             last_calibrated_at=body.last_calibrated_at,
             supplier_id=body.supplier_id,
             customer_part_number=body.customer_part_number,
+            tier1_part_number=body.tier1_part_number,
         )
         await db.commit()
         return part
@@ -123,6 +124,8 @@ async def update_part(
             update_supplier='supplier_id' in body.model_fields_set,
             customer_part_number=body.customer_part_number,
             update_customer_part_number='customer_part_number' in body.model_fields_set,
+            tier1_part_number=body.tier1_part_number,
+            update_tier1_part_number='tier1_part_number' in body.model_fields_set,
         )
         if not part:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Part not found")

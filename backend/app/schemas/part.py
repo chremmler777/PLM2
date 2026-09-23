@@ -12,6 +12,8 @@ class PartBase(BaseModel):
     part_number: str = Field(..., min_length=1, max_length=100)
     customer_part_number: Optional[str] = Field(
         None, max_length=100, description="Customer's own number, e.g. 3CR.919.491.A")
+    tier1_part_number: Optional[str] = Field(
+        None, max_length=100, description="Tier 1 number when we are Tier 2, e.g. S00H54-110")
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     part_type: str = Field(..., description="purchased, internal_mfg, sub_assembly")
@@ -40,6 +42,7 @@ class PartUpdate(BaseModel):
     provided (send null to move the part to top level)."""
     name: Optional[str] = None
     customer_part_number: Optional[str] = Field(None, max_length=100)
+    tier1_part_number: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
     part_type: Optional[str] = None
     supplier: Optional[str] = None

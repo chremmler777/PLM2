@@ -27,6 +27,7 @@ interface Part {
   id: number;
   part_number: string;
   customer_part_number?: string | null;
+  tier1_part_number?: string | null;
   name: string;
   part_type: string;
   data_classification: string;
@@ -78,6 +79,7 @@ export default function PartDetail() {
   const [proposalSummary, setProposalSummary] = useState('');
   // null = not editing; '' = editing an empty value
   const [editingCustomerNumber, setEditingCustomerNumber] = useState<string | null>(null);
+  const [editingTier1Number, setEditingTier1Number] = useState<string | null>(null);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   // PartDetail is routed (/parts/:partId) and React Router does not remount
@@ -129,6 +131,11 @@ export default function PartDetail() {
     mutationFn: (v: string) => client.put(`/v1/parts/${partId}`, { customer_part_number: v.trim() || null }),
     onSuccess: () => { toast.success('Customer part number saved'); setEditingCustomerNumber(null); refetch(); },
     onError: (e) => toast.error(errMsg(e, 'Could not save the customer part number')),
+  });
+  const saveTier1Number = useMutation({
+    mutationFn: (v: string) => client.put(`/v1/parts/${partId}`, { tier1_part_number: v.trim() || null }),
+    onSuccess: () => { toast.success('Tier 1 part number saved'); setEditingTier1Number(null); refetch(); },
+    onError: (e) => toast.error(errMsg(e, 'Could not save the tier 1 part number')),
   });
   const promote = useMutation({
     mutationFn: ({ id, v }: { id: number; v: CustomerDataInput }) =>
@@ -216,6 +223,29 @@ export default function PartDetail() {
                     onClick={() => saveCustomerNumber.mutate(editingCustomerNumber)}
                     className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
                   <button onClick={() => setEditingCustomerNumber(null)}
+                    className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
+                </div>
+              )}
+              {editingTier1Number === null ? (
+                <button data-testid="edit-tier1-part-number" title="Edit the Tier 1 part number (the Tier 1's own number when we are Tier 2; the customer number stays the OEM number)"
+                  onClick={() => setEditingTier1Number(part.tier1_part_number ?? '')}
+                  className="block text-slate-400 font-mono text-sm mb-1 hover:text-slate-200">
+                  {part.tier1_part_number ? `Tier 1 ${part.tier1_part_number}` : '+ tier 1 part number'}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 mb-1">
+                  <input data-testid="tier1-part-number-input" autoFocus value={editingTier1Number}
+                    onChange={(e) => setEditingTier1Number(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveTier1Number.mutate(editingTier1Number);
+                      if (e.key === 'Escape') setEditingTier1Number(null);
+                    }}
+                    placeholder="tier 1 part number"
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-100 font-mono text-sm" />
+                  <button data-testid="save-tier1-part-number" disabled={saveTier1Number.isPending}
+                    onClick={() => saveTier1Number.mutate(editingTier1Number)}
+                    className="text-sm px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-600 text-white">Save</button>
+                  <button onClick={() => setEditingTier1Number(null)}
                     className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
                 </div>
               )}

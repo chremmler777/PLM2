@@ -50,6 +50,8 @@ interface Project {
 interface Part {
   id: number;
   part_number: string;
+  customer_part_number?: string | null;
+  tier1_part_number?: string | null;
   name: string;
   part_type: string;
   supplier?: string | null;
@@ -680,6 +682,7 @@ function AddPartModal({
   const [formData, setFormData] = useState({
     part_number: '',
     customer_part_number: '',
+    tier1_part_number: '',
     name: '',
     part_type: 'purchased',
     supplier: '',
@@ -697,6 +700,7 @@ function AddPartModal({
         project_id: projectId,
         part_number: data.part_number,
         customer_part_number: data.customer_part_number || null,
+        tier1_part_number: data.tier1_part_number || null,
         name: data.name,
         part_type: data.part_type,
         supplier: data.supplier || null,
@@ -721,6 +725,7 @@ function AddPartModal({
       setFormData({
         part_number: '',
         customer_part_number: '',
+        tier1_part_number: '',
         name: '',
         part_type: 'purchased',
         supplier: '',
@@ -793,6 +798,18 @@ function AddPartModal({
               onChange={(e) => setFormData({ ...formData, customer_part_number: e.target.value })}
               className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
               placeholder="e.g., 3CR.807.425"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-1">Tier 1 Part Number</label>
+            <input
+              type="text"
+              data-testid="add-part-tier1-number"
+              value={formData.tier1_part_number}
+              onChange={(e) => setFormData({ ...formData, tier1_part_number: e.target.value })}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
+              placeholder="e.g., S00H54-110 (when we are Tier 2)"
             />
           </div>
 
@@ -1469,6 +1486,8 @@ export default function ProjectDetailPage() {
                 </div>
                 <div className="text-slate-400 text-sm mt-1 flex items-center gap-2">
                   <span className="font-mono">{selectedPart.part_number}</span>
+                  {selectedPart.customer_part_number && <span className="font-mono" title="Customer (OEM) part number">{selectedPart.customer_part_number}</span>}
+                  {selectedPart.tier1_part_number && <span className="font-mono" data-testid="selected-tier1-number" title="Tier 1 part number">Tier 1 {selectedPart.tier1_part_number}</span>}
                   <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(selectedPart.part_type)}`}>
                     {selectedPart.part_type.replace(/_/g, ' ')}
                   </span>

@@ -35,3 +35,4 @@
 - [Prod data is truth](prod-data-is-truth-2026-09-22.md) — data ops run on prod against prod data; never push local DB, never decide from local state
 - [Mirror parts relation](mirror-parts-relation-2026-09-22.md) — mirrors are a mirror_of relation, never copies; UI (chip, tree marker, red viewer banner) shipped 2026-09-22
 - [1994 nominated E1 reset 2026-09-22](1994-nominated-e1-reset-2026-09-22.md) — prod 1994 = 12 nominated articles 001-012, drawing names, E1 · index, mirrors as relations, E1.1 on 206.886.197
+- [1994 Brose volume sheet 2026-09-23](1994-brose-volume-sheet-2026-09-23.md) — Brose -110 finished-part volume sheet mapped to the 12 nominated parts; ISOFIX +90%, decor cover +151% lifetime; shots table per tool; open points for Brose; prod PLM 199403 cavity note wrong (2 vs 4)

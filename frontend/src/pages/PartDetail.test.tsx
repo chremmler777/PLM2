@@ -77,3 +77,40 @@ describe('PartDetail customer part number', () => {
     expect((await screen.findByTestId('edit-customer-part-number')).textContent).toContain('+ customer part number')
   })
 })
+
+describe('PartDetail tier 1 part number', () => {
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.put.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/5') return Promise.resolve({ data: part({ tier1_part_number: null }) })
+      if (url === '/v1/parts/5/paint') return Promise.resolve({ data: { paint_required: false, process: null, notes: null, layers: [] } })
+      return Promise.resolve({ data: [] })
+    })
+    clientMocks.put.mockResolvedValue({ data: part({ tier1_part_number: 'S00H54-110' }) })
+  })
+  afterEach(cleanup)
+
+  it('saves a tier 1 part number without touching the customer number', async () => {
+    renderPart()
+    expect((await screen.findByTestId('edit-tier1-part-number')).textContent).toContain('+ tier 1 part number')
+    fireEvent.click(screen.getByTestId('edit-tier1-part-number'))
+    fireEvent.change(screen.getByTestId('tier1-part-number-input'), { target: { value: ' S00H54-110 ' } })
+    fireEvent.click(screen.getByTestId('save-tier1-part-number'))
+
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalled())
+    expect(clientMocks.put.mock.calls[0][0]).toBe('/v1/parts/5')
+    expect(clientMocks.put.mock.calls[0][1]).toEqual({ tier1_part_number: 'S00H54-110' })
+  })
+
+  it('shows the tier 1 number labelled next to the customer number', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/5') return Promise.resolve({ data: part({ tier1_part_number: 'S00H54-110' }) })
+      if (url === '/v1/parts/5/paint') return Promise.resolve({ data: { paint_required: false, process: null, notes: null, layers: [] } })
+      return Promise.resolve({ data: [] })
+    })
+    renderPart()
+    expect((await screen.findByTestId('edit-tier1-part-number')).textContent).toContain('Tier 1 S00H54-110')
+    expect(screen.getByTestId('edit-customer-part-number').textContent).toContain('3CR.807.425')
+  })
+})
