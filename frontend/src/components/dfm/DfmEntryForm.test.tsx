@@ -112,6 +112,22 @@ describe('DfmEntryForm', () => {
     expect(screen.getByText('study.pdf')).toBeTruthy()
   })
 
+  it('keeps chosen files although the browser empties the live file list when the input is reset', async () => {
+    const { onDone } = wrap()
+    const input = screen.getByTestId('dfm-files-input') as HTMLInputElement
+    const file = new File(['%PDF-1.4'], 'dfm_rev1.pdf', { type: 'application/pdf' })
+    // A real FileList is live: resetting input.value empties it. Emulate that.
+    const live: File[] = [file]
+    Object.defineProperty(input, 'files', { configurable: true, get: () => live })
+    Object.defineProperty(input, 'value', { configurable: true, get: () => '', set: () => { live.length = 0 } })
+    fireEvent.change(input)
+    expect(await screen.findByText('dfm_rev1.pdf')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('dfm-submit'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+    expect((posted().getAll('files') as File[]).map((f) => f.name)).toEqual(['dfm_rev1.pdf'])
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+  })
+
   it('cancels', () => {
     const { onCancel } = wrap()
     fireEvent.click(screen.getByText('Cancel'))
