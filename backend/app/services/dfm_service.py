@@ -14,7 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dfm import (
-    DfmEntry, DfmEntryFile, DfmTopic, DFM_PARTIES, DFM_TOPIC_FINISHED, DFM_TOPIC_OPEN,
+    DfmEntry, DfmEntryFile, DfmTopic, DFM_KIND_ORIGINAL, DFM_KINDS, DFM_PARTIES, DFM_TOPIC_FINISHED,
+    DFM_TOPIC_OPEN,
 )
 from app.models.entities import User
 from app.models.part import Part
@@ -27,6 +28,8 @@ TOPIC_CLOSED_MESSAGE = "Topic is finished, reopen it first"
 ALREADY_SUPERSEDED_MESSAGE = "This entry was already updated, refresh"
 MAX_FILENAME_LEN = 255
 MAX_CONTENT_TYPE_LEN = 100
+# kinds whose addressees owe an answer
+DFM_AWAITING_KINDS = ("original", "forward", "question")
 
 
 class DfmError(ValueError):
@@ -99,6 +102,118 @@ def truncate_filename(name: str, limit: int = MAX_FILENAME_LEN) -> str:
     return base[: limit - len(ext)] + ext
 
 
+def parse_kind(raw: str | None) -> str | None:
+    """None when not given (an update then inherits the kind)."""
+    if raw is None or raw.strip() == "":
+        return None
+    kind = raw.strip()
+    if kind not in DFM_KINDS:
+        raise DfmError(f"Unknown kind '{kind}'. Valid: {', '.join(DFM_KINDS)}")
+    return kind
+
+
+def check_flow(topic: DfmTopic, party: str, targets: list[str], kind: str, reply_to: DfmEntry | None,
+               reply_to_id: int | None) -> None:
+    """The spec's rules on who may answer, ask again or forward what."""
+    if kind == DFM_KIND_ORIGINAL:
+        if reply_to_id is not None:
+            raise DfmError("An original has no reply link")
+        return
+    if reply_to_id is None:
+        raise DfmError(f"A {kind} needs the message it replies to")
+    if reply_to is None or reply_to.topic_id != topic.id:
+        raise DfmError("The message replied to is not in this topic")
+    received = list(reply_to.addressed_to or [])
+    if kind == "forward":
+        if party != "ktx":
+            raise DfmError("Only KTX forwards messages")
+        if "ktx" not in received:
+            raise DfmError("KTX can only forward a message it received")
+        if any(t == reply_to.party or t in received for t in targets):
+            raise DfmError("A forward goes to a party that has not had the message yet")
+        return
+    if kind == "question":
+        if reply_to.kind != "answer":
+            raise DfmError("A question must reply to an answer")
+        if party not in received:
+            raise DfmError("Only a party the answer was addressed to can ask again on it")
+        if reply_to.party not in targets:
+            raise DfmError("A question must be addressed to the sender of the answer it asks about")
+        return
+    # answer
+    if party not in received:
+        raise DfmError("Only a party the message was addressed to can answer it")
+    if reply_to.party not in targets:
+        raise DfmError("An answer must be addressed to the sender of the message it replies to")
+
+
+def _msg_date(e: DfmEntry) -> date:
+    """The mail date when set, else the day it was recorded."""
+    return e.sent_at or e.recorded_at.date()
+
+
+def _order_key(e: DfmEntry):
+    return (_msg_date(e), e.recorded_at, e.id)
+
+
+def flow_state(topic: DfmTopic, today: date | None = None) -> dict:
+    """Answered or waiting, derived from the entries, never stored.
+
+    For each current (not superseded) original, forward and question, every
+    addressee is either answered (a current answer from that party replies
+    to any version of the message) or awaiting since the message date."""
+    today = today or date.today()
+    entries = list(topic.entries)
+    successor = {e.supersedes_id: e.id for e in entries if e.supersedes_id is not None}
+
+    def head(i: int) -> int:
+        seen = set()
+        while i in successor and i not in seen:
+            seen.add(i)
+            i = successor[i]
+        return i
+
+    current = sorted((e for e in entries if e.id not in successor), key=_order_key)
+    known = {e.id for e in entries}
+    answers: dict[int, list[DfmEntry]] = {}
+    for e in current:
+        if e.kind == "answer" and e.reply_to_id in known:
+            answers.setdefault(head(e.reply_to_id), []).append(e)
+
+    per_entry: dict[int, dict] = {}
+    waiting: list[tuple[int, int, DfmEntry, str]] = []  # (days, position, entry, party)
+    for pos, e in enumerate(current):
+        answered_by, awaiting = [], []
+        if e.kind in DFM_AWAITING_KINDS:
+            for p in e.addressed_to or []:
+                hits = [a for a in answers.get(e.id, []) if a.party == p]
+                if hits:
+                    answered_by.extend({"party": p, "entry_id": a.id, "date": _iso(_msg_date(a))} for a in hits)
+                else:
+                    days = max(0, (today - _msg_date(e)).days)
+                    awaiting.append({"party": p, "days": days})
+                    waiting.append((days, pos, e, p))
+        per_entry[e.id] = {"answered_by": answered_by, "awaiting": awaiting}
+
+    waiting_on = []
+    for p in DFM_PARTIES:
+        mine = [w[0] for w in waiting if w[3] == p]
+        if mine:
+            waiting_on.append({"party": p, "count": len(mine), "oldest_days": max(mine)})
+    next_step = None
+    if waiting:
+        days, _, e, p = min(waiting, key=lambda w: (-w[0], w[1]))
+        next_step = {"entry_id": e.id, "kind": e.kind, "from": e.party, "to": p, "days": days}
+    last = current[-1] if current else None
+    last_step = ({"kind": last.kind, "party": last.party, "addressed_to": list(last.addressed_to or []),
+                  "date": _iso(_msg_date(last))} if last else None)
+    return {
+        "current": current, "per_entry": per_entry, "waiting_on": waiting_on, "next_step": next_step,
+        "last_step": last_step,
+        "all_answered": not waiting and any(e.kind == "answer" for e in current),
+    }
+
+
 def parse_sent_at(raw: str | None) -> date | None:
     if raw is None or raw.strip() == "":
         return None
@@ -162,7 +277,7 @@ class DfmService:
     async def record_entry(session: AsyncSession, tool: Part, topic: DfmTopic, *, party: str,
                            addressed_to: str | list | None, note: str | None, sent_at: str | None,
                            supersedes_id: int | None, files: list[tuple[str, bytes, str | None]],
-                           user_id: int) -> DfmEntry:
+                           user_id: int, kind: str | None = None, reply_to_id: int | None = None) -> DfmEntry:
         """files: (original filename, bytes, content type). The row is flushed
         first for its id, the files are written, then the file rows are added;
         the caller commits. A failed write removes what was written and raises,
@@ -173,6 +288,7 @@ class DfmService:
             raise DfmError(f"Unknown party '{party}'. Valid: {', '.join(DFM_PARTIES)}")
         targets = parse_addressed_to(addressed_to, party)
         sent = parse_sent_at(sent_at)
+        kind = parse_kind(kind)
         if supersedes_id is not None:
             old = await session.get(DfmEntry, supersedes_id)
             if old is None or old.topic_id != topic.id:
@@ -183,6 +299,15 @@ class DfmService:
                 select(DfmEntry.id).where(DfmEntry.supersedes_id == old.id))).scalar_one_or_none()
             if successor is not None:
                 raise DfmClosed(ALREADY_SUPERSEDED_MESSAGE)
+            # an update keeps the kind and reply link of what it updates unless given
+            if kind is not None and kind != old.kind:
+                raise DfmError("An update keeps the kind of the message it updates")
+            kind = old.kind
+            if reply_to_id is None:
+                reply_to_id = old.reply_to_id
+        kind = kind or DFM_KIND_ORIGINAL
+        reply_to = await session.get(DfmEntry, reply_to_id) if reply_to_id is not None else None
+        check_flow(topic, party, targets, kind, reply_to, reply_to_id)
         for name, contents, _ in files:
             if not (name or "").strip():
                 raise DfmError("A file needs a filename")
@@ -191,7 +316,8 @@ class DfmService:
 
         entry = DfmEntry(topic_id=topic.id, party=party, addressed_to=targets,
                          note=(note or "").strip() or None, sent_at=sent,
-                         supersedes_id=supersedes_id, recorded_by=user_id)
+                         supersedes_id=supersedes_id, recorded_by=user_id, kind=kind,
+                         reply_to_id=reply_to_id)
         session.add(entry)
         await session.flush()
 
@@ -218,7 +344,7 @@ class DfmService:
             what = "updated" if supersedes_id else "recorded"
             await ChangelogService.log_action(
                 session, part_id=tool.id, action="dfm_entry_recorded",
-                action_description=f"DFM entry {what} in {topic.title} by {party} to {', '.join(targets)}"
+                action_description=f"DFM entry ({kind}) {what} in {topic.title} by {party} to {', '.join(targets)}"
                                    + (f" with {len(files)} file(s)" if files else ""),
                 performed_by=user_id)
         except Exception:
@@ -233,7 +359,8 @@ class DfmService:
     # ---- response shaping -------------------------------------------------
 
     @staticmethod
-    def topic_summary(topic: DfmTopic) -> dict:
+    def topic_summary(topic: DfmTopic, today: date | None = None, flow: dict | None = None) -> dict:
+        flow = flow or flow_state(topic, today)
         stamps = [topic.opened_at] + [e.recorded_at for e in topic.entries]
         if topic.closed_at:
             stamps.append(topic.closed_at)
@@ -244,6 +371,9 @@ class DfmService:
             "closed_by": topic.closed_by, "closed_at": _iso(topic.closed_at),
             "entry_count": len(topic.entries),
             "last_activity": _iso(max(s for s in stamps if s is not None)),
+            "waiting_on": flow["waiting_on"],
+            "last_step": flow["last_step"],
+            "all_answered": flow["all_answered"],
         }
 
     @staticmethod
@@ -256,10 +386,15 @@ class DfmService:
         }
 
     @staticmethod
-    def entry_dict(e: DfmEntry, names: dict) -> dict:
+    def entry_dict(e: DfmEntry, names: dict, state: dict | None = None) -> dict:
+        """state: this entry's answered_by / awaiting from flow_state; earlier
+        versions (history) carry empty lists."""
+        state = state or {}
         return {
             "id": e.id, "topic_id": e.topic_id, "party": e.party,
             "addressed_to": list(e.addressed_to or []), "note": e.note,
+            "kind": e.kind or DFM_KIND_ORIGINAL, "reply_to_id": e.reply_to_id,
+            "answered_by": state.get("answered_by", []), "awaiting": state.get("awaiting", []),
             "sent_at": _iso(e.sent_at), "supersedes_id": e.supersedes_id,
             "recorded_by": e.recorded_by, "recorded_by_name": names.get(e.recorded_by),
             "recorded_at": _iso(e.recorded_at),
@@ -267,22 +402,19 @@ class DfmService:
         }
 
     @staticmethod
-    def topic_detail(topic: DfmTopic, names: dict) -> dict:
+    def topic_detail(topic: DfmTopic, names: dict, today: date | None = None) -> dict:
         """Entries in the order they were received: by sent_at when it is
         set, else the date they were recorded, then recorded_at, then id.
         This lets a backfilled mail dated earlier sit above one recorded
         earlier but sent later. Each supersede chain is collapsed onto its
-        newest entry; `history` lists the earlier versions, newest first."""
+        newest entry; `history` lists the earlier versions, newest first.
+        Adds the derived flow: per entry answered_by / awaiting, per topic
+        waiting_on and next_step (the longest waiting addressee)."""
         by_id = {e.id: e for e in topic.entries}
-        superseded = {e.supersedes_id for e in topic.entries if e.supersedes_id is not None}
-        ordered = sorted(
-            topic.entries,
-            key=lambda e: (e.sent_at or e.recorded_at.date(), e.recorded_at, e.id))
+        flow = flow_state(topic, today)
         entries = []
-        for e in ordered:
-            if e.id in superseded:
-                continue
-            d = DfmService.entry_dict(e, names)
+        for e in flow["current"]:
+            d = DfmService.entry_dict(e, names, flow["per_entry"][e.id])
             history = []
             cursor = by_id.get(e.supersedes_id) if e.supersedes_id else None
             while cursor is not None:
@@ -290,7 +422,8 @@ class DfmService:
                 cursor = by_id.get(cursor.supersedes_id) if cursor.supersedes_id else None
             d["history"] = history
             entries.append(d)
-        return {**DfmService.topic_summary(topic), "entries": entries}
+        return {**DfmService.topic_summary(topic, flow=flow), "next_step": flow["next_step"],
+                "entries": entries}
 
     @staticmethod
     def user_ids(topic: DfmTopic) -> set:
