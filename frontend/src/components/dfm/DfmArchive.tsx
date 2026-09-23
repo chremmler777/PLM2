@@ -8,10 +8,7 @@ import { toast } from 'sonner';
 import { createTopic, listTopics } from '../../api/dfm';
 import type { PaneDocument } from '../parts/DocumentPane';
 import DfmLedger from './DfmLedger';
-
-function errMsg(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
-}
+import { apiErrorMessage } from '../../lib/apiError';
 
 interface Props {
   partId: number;
@@ -23,7 +20,7 @@ export default function DfmArchive({ partId, onOpenPdf }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [newTitle, setNewTitle] = useState<string | null>(null);  // null = not adding
 
-  const { data: topics } = useQuery({
+  const { data: topics, isError } = useQuery({
     queryKey: ['dfm-topics', partId],
     queryFn: () => listTopics(partId),
   });
@@ -37,7 +34,7 @@ export default function DfmArchive({ partId, onOpenPdf }: Props) {
       queryClient.invalidateQueries({ queryKey: ['dfm-topics', partId] });
       queryClient.invalidateQueries({ queryKey: ['changelog', String(partId)] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not open the topic')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not open the topic')),
   });
 
   const submit = () => {
@@ -45,6 +42,14 @@ export default function DfmArchive({ partId, onOpenPdf }: Props) {
     if (!title) { toast.error('Give the topic a title'); return; }
     create.mutate(title);
   };
+
+  if (isError) {
+    return (
+      <p data-testid="dfm-archive-error" className="text-red-400 text-sm mb-8">
+        Could not load the DFM archive
+      </p>
+    );
+  }
 
   if (!topics) return null;
 

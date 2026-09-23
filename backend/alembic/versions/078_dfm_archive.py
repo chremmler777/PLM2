@@ -37,12 +37,20 @@ def upgrade() -> None:
             sa.Column("party", sa.String(20), nullable=False),
             sa.Column("addressed_to", sa.JSON(), nullable=False),
             sa.Column("note", sa.Text(), nullable=True),
-            sa.Column("supersedes_id", sa.Integer(), sa.ForeignKey("dfm_entries.id"), nullable=True),
+            sa.Column("supersedes_id", sa.Integer(), sa.ForeignKey("dfm_entries.id"), nullable=True, unique=True),
             sa.Column("recorded_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
             sa.Column("recorded_at", sa.DateTime(), nullable=False),
             sa.Column("sent_at", sa.Date(), nullable=True),
         )
         op.create_index("ix_dfm_entries_topic_id", "dfm_entries", ["topic_id"])
+    else:
+        cols = {c["name"]: c for c in insp.get_columns("dfm_entries")}
+        has_unique_supersedes = any(
+            list(c.get("column_names", [])) == ["supersedes_id"] for c in insp.get_unique_constraints("dfm_entries")
+        )
+        if "supersedes_id" in cols and not has_unique_supersedes:
+            with op.batch_alter_table("dfm_entries") as batch:
+                batch.create_unique_constraint("uq_dfm_entries_supersedes_id", ["supersedes_id"])
     if "dfm_entry_files" not in tables:
         op.create_table(
             "dfm_entry_files",

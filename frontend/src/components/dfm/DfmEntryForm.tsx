@@ -7,6 +7,7 @@ import { useRef, useState, type DragEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createEntry, PARTIES, PARTY_LABELS, type DfmParty } from '../../api/dfm';
+import { apiErrorMessage } from '../../lib/apiError';
 
 interface Props {
   partId: number;
@@ -15,10 +16,6 @@ interface Props {
   supersedesId?: number | null;
   onDone(): void;
   onCancel(): void;
-}
-
-function errMsg(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
 }
 
 export default function DfmEntryForm({ partId, topicId, party, supersedesId = null, onDone, onCancel }: Props) {
@@ -33,7 +30,7 @@ export default function DfmEntryForm({ partId, topicId, party, supersedesId = nu
   const save = useMutation({
     mutationFn: () => createEntry(partId, topicId, { party, addressed_to: addressed, note, sent_at: sentAt, supersedes_id: supersedesId, files }),
     onSuccess: () => { toast.success(supersedesId ? 'Entry updated' : 'Entry recorded'); onDone(); },
-    onError: (e) => toast.error(errMsg(e, 'Could not record the entry')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not record the entry')),
   });
 
   const toggle = (p: DfmParty) =>

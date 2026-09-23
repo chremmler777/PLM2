@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB, same as revision files
 TOPIC_CLOSED_MESSAGE = "Topic is finished, reopen it first"
+ALREADY_SUPERSEDED_MESSAGE = "This entry was already updated, refresh"
+MAX_FILENAME_LEN = 255
+MAX_CONTENT_TYPE_LEN = 100
 
 
 class DfmError(ValueError):
@@ -84,6 +87,16 @@ def parse_addressed_to(raw: str | list | None, party: str) -> list[str]:
         if p not in seen:
             seen.append(p)
     return seen
+
+
+def truncate_filename(name: str, limit: int = MAX_FILENAME_LEN) -> str:
+    """Keep the extension when a filename is longer than the column limit."""
+    if len(name) <= limit:
+        return name
+    base, ext = os.path.splitext(name)
+    if len(ext) >= limit:
+        return name[:limit]
+    return base[: limit - len(ext)] + ext
 
 
 def parse_sent_at(raw: str | None) -> date | None:
@@ -166,6 +179,10 @@ class DfmService:
                 raise DfmError("The entry to update is not in this topic")
             if old.party != party:
                 raise DfmError("An entry can only be updated from its own column")
+            successor = (await session.execute(
+                select(DfmEntry.id).where(DfmEntry.supersedes_id == old.id))).scalar_one_or_none()
+            if successor is not None:
+                raise DfmClosed(ALREADY_SUPERSEDED_MESSAGE)
         for name, contents, _ in files:
             if not (name or "").strip():
                 raise DfmError("A file needs a filename")
@@ -190,10 +207,11 @@ class DfmService:
                 with open(path, "wb") as fh:
                     fh.write(contents)
                 written.append(path)
+                stored_type = (content_type or mimetypes.guess_type(name)[0] or "application/octet-stream")
                 session.add(DfmEntryFile(
-                    entry_id=entry.id, original_filename=name, saved_filename=saved,
+                    entry_id=entry.id, original_filename=truncate_filename(name), saved_filename=saved,
                     file_size=len(contents),
-                    content_type=content_type or mimetypes.guess_type(name)[0] or "application/octet-stream",
+                    content_type=stored_type[:MAX_CONTENT_TYPE_LEN],
                     uploaded_by=user_id))
             await session.flush()
             await session.refresh(entry, attribute_names=["files"])
@@ -250,12 +268,18 @@ class DfmService:
 
     @staticmethod
     def topic_detail(topic: DfmTopic, names: dict) -> dict:
-        """Entries in time order with each supersede chain collapsed onto its
+        """Entries in the order they were received: by sent_at when it is
+        set, else the date they were recorded, then recorded_at, then id.
+        This lets a backfilled mail dated earlier sit above one recorded
+        earlier but sent later. Each supersede chain is collapsed onto its
         newest entry; `history` lists the earlier versions, newest first."""
         by_id = {e.id: e for e in topic.entries}
         superseded = {e.supersedes_id for e in topic.entries if e.supersedes_id is not None}
+        ordered = sorted(
+            topic.entries,
+            key=lambda e: (e.sent_at or e.recorded_at.date(), e.recorded_at, e.id))
         entries = []
-        for e in topic.entries:  # already ordered by recorded_at, id
+        for e in ordered:
             if e.id in superseded:
                 continue
             d = DfmService.entry_dict(e, names)

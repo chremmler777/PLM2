@@ -133,3 +133,58 @@ async def test_bare_entry_and_blank_sent_at(client, eng_auth, seed, monkeypatch,
     assert res.json()["sent_at"] is None
     assert res.json()["files"] == []
     assert (await post_entry(client, eng_auth, tool, topic, sent_at="yesterday")).status_code == 400
+
+
+async def test_double_supersede_is_rejected(client, eng_auth, seed, monkeypatch, tmp_path):
+    """Two updates racing against the same entry: the first supersede wins,
+    the second is rejected with 409 so the client can refresh instead of
+    silently forking the history."""
+    monkeypatch.chdir(tmp_path)
+    tool = await make_tool(client, eng_auth, seed)
+    topic = await make_topic(client, eng_auth, tool)
+    first = (await post_entry(client, eng_auth, tool, topic, note="answer v1")).json()
+
+    res = await post_entry(client, eng_auth, tool, topic, note="answer v2", supersedes_id=first["id"])
+    assert res.status_code == 201, res.text
+    second = res.json()
+
+    res = await post_entry(client, eng_auth, tool, topic, note="answer v2 too", supersedes_id=first["id"])
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"] == "This entry was already updated, refresh"
+
+    detail = (await client.get(f"/api/v1/parts/{tool}/dfm/topics/{topic}", headers=eng_auth)).json()
+    assert [e["id"] for e in detail["entries"]] == [second["id"]]
+    assert detail["entry_count"] == 2  # first + second only, the rejected third never got stored
+
+
+async def test_ledger_orders_by_sent_at_then_recorded(client, eng_auth, seed, monkeypatch, tmp_path):
+    """A backfilled mail dated earlier sits above one recorded earlier but
+    sent later."""
+    monkeypatch.chdir(tmp_path)
+    tool = await make_tool(client, eng_auth, seed)
+    topic = await make_topic(client, eng_auth, tool)
+
+    entry_a = (await post_entry(client, eng_auth, tool, topic, note="A", sent_at="2026-09-26")).json()
+    entry_b = (await post_entry(client, eng_auth, tool, topic, note="B", sent_at="2026-09-20")).json()
+
+    detail = (await client.get(f"/api/v1/parts/{tool}/dfm/topics/{topic}", headers=eng_auth)).json()
+    assert [e["id"] for e in detail["entries"]] == [entry_b["id"], entry_a["id"]]
+
+
+async def test_long_filename_and_content_type_are_truncated(client, eng_auth, seed, monkeypatch, tmp_path):
+    """Postgres varchar(255)/varchar(100) columns would overflow on an
+    untruncated filename or content type; the service truncates before
+    insert, keeping the extension."""
+    monkeypatch.chdir(tmp_path)
+    tool = await make_tool(client, eng_auth, seed)
+    topic = await make_topic(client, eng_auth, tool)
+
+    long_name = "a" * 296 + ".pdf"  # 300 chars total
+    long_type = "application/" + "x" * 90  # > 100 chars
+
+    res = await post_entry(client, eng_auth, tool, topic, files=[(long_name, b"%PDF-1.4", long_type)])
+    assert res.status_code == 201, res.text
+    f = res.json()["files"][0]
+    assert len(f["original_filename"]) <= 255
+    assert f["original_filename"].endswith(".pdf")
+    assert len(f["content_type"]) <= 100

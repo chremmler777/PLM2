@@ -42,7 +42,9 @@ class DfmEntry(Base):
     party: Mapped[str] = mapped_column(String(20))  # toolmaker | ktx | tier1
     addressed_to: Mapped[list] = mapped_column(JSON, default=list)  # one or two of the other parties
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True)
+    # unique so an entry can only be superseded once; NULL stays allowed (multiple
+    # entries may have no successor)
+    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True, unique=True)
 
     recorded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))  # the KTX user who put it in
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

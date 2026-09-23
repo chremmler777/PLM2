@@ -61,4 +61,10 @@ describe('DfmArchive', () => {
     wrap()
     expect((await screen.findByTestId('dfm-archive')).textContent).toContain('No DFM topic yet')
   })
+
+  it('shows an error line when the topics query fails', async () => {
+    clientMocks.get.mockImplementation(() => Promise.reject(new Error('network down')))
+    wrap()
+    expect((await screen.findByTestId('dfm-archive-error')).textContent).toContain('Could not load the DFM archive')
+  })
 })

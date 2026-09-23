@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ToolFieldsCard, { cavitiesFromNotes, type ToolFieldValues } from './ToolFieldsCard'
+import { toast } from 'sonner'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -63,6 +64,20 @@ describe('ToolFieldsCard', () => {
     wrap({ ...empty, tool_cavities: 4 }, ['2 cavities'])
     expect(screen.getByTestId('edit-tool-cavities').textContent).toContain('4')
     expect(screen.queryByTestId('cavities-fallback')).toBeNull()
+  })
+
+  it('shows a string toast, not a crash, on a 422 with an array detail', async () => {
+    clientMocks.put.mockRejectedValue({
+      response: { data: { detail: [{ type: 'greater_than', loc: ['body', 'tool_cavities'], msg: 'Input should be greater than 0' }] } },
+    })
+    wrap()
+    fireEvent.click(screen.getByTestId('edit-tool-cavities'))
+    fireEvent.change(screen.getByTestId('tool-cavities-input'), { target: { value: '4' } })
+    fireEvent.click(screen.getByTestId('save-tool-cavities'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    const message = (toast.error as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(typeof message).toBe('string')
+    expect(message).toContain('Input should be greater than 0')
   })
 })
 

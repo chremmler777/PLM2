@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../../api/client';
 import { toast } from 'sonner';
 import { useSuppliers } from '../../hooks/queries/useSuppliers';
+import { apiErrorMessage } from '../../lib/apiError';
 
 export interface ToolFieldValues {
   tool_cavities: number | null;
@@ -25,10 +26,6 @@ export function cavitiesFromNotes(notes: (string | null | undefined)[]): number 
     if (m) { total += parseInt(m[1], 10); found = true; }
   }
   return found ? total : null;
-}
-
-function errMsg(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
 }
 
 type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s';
@@ -57,7 +54,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes }: Props)
       setEditing(null);
       queryClient.invalidateQueries({ queryKey: ['part', String(partId)] });
     },
-    onError: (e) => toast.error(errMsg(e, 'Could not save the tool data')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not save the tool data')),
   });
 
   const submitNumeric = (field: (typeof NUMERIC)[number], raw: string) => {

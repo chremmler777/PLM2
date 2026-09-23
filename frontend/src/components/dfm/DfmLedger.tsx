@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { closeTopic, dfmFileUrl, getTopic, reopenTopic, PARTIES, PARTY_LABELS, type DfmEntry, type DfmParty } from '../../api/dfm';
 import type { PaneDocument } from '../parts/DocumentPane';
 import DfmEntryForm from './DfmEntryForm';
+import { apiErrorMessage } from '../../lib/apiError';
 
 export function initials(name: string | null | undefined): string {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
@@ -19,10 +20,6 @@ export function initials(name: string | null | undefined): string {
 
 export function shortDate(iso: string | null | undefined): string {
   return iso ? iso.slice(5, 10) : '';
-}
-
-function errMsg(error: unknown, fallback: string) {
-  return (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || fallback;
 }
 
 interface Props {
@@ -50,12 +47,12 @@ export default function DfmLedger({ partId, topicId, onOpenPdf }: Props) {
   const finish = useMutation({
     mutationFn: () => closeTopic(partId, topicId),
     onSuccess: () => { toast.success('Topic finished confirmed'); setForm(null); refresh(); },
-    onError: (e) => toast.error(errMsg(e, 'Could not finish the topic')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not finish the topic')),
   });
   const reopen = useMutation({
     mutationFn: () => reopenTopic(partId, topicId),
     onSuccess: () => { toast.success('Topic reopened'); refresh(); },
-    onError: (e) => toast.error(errMsg(e, 'Could not reopen the topic')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not reopen the topic')),
   });
 
   if (!topic) return <div className="text-slate-400 text-sm">Loading…</div>;
