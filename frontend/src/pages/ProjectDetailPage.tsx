@@ -20,6 +20,7 @@ import ChangelogModal from '../components/project/ChangelogModal';
 import AddPartModal from '../components/project/AddPartModal';
 import SplitPane from '../components/project/SplitPane';
 import type { ContextMenuState } from '../components/project/projectTypes';
+import type { DetailTab } from '../components/project/detailTabs';
 import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
 
 const SPLIT_KEY = 'plm2.project.splitLeft';
@@ -48,6 +49,7 @@ export default function ProjectDetailPage() {
   const [showStartChange, setShowStartChange] = useState(false);
   const [changelogPartId, setChangelogPartId] = useState<number | null>(null);
   const [openSection, setOpenSection] = useState<StatusSection | null>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>('documents');
   const closeSection = useCallback(() => setOpenSection(null), []);
 
   const { data: paintOverview } = useQuery({
@@ -131,15 +133,15 @@ export default function ProjectDetailPage() {
             />
           }
           right={
-            // Until Task 10 pins the detail header, the whole detail column scrolls.
-            <div data-testid="detail-column" className="h-full min-h-0 overflow-y-auto p-4 space-y-4" onClick={() => selectPart(null)}>
+            <div data-testid="detail-column" className="h-full min-h-0" onClick={() => selectPart(null)}>
               <DetailPane
                 projectId={id}
                 project={project}
                 parts={parts}
                 structure={structure}
                 sel={sel}
-                onShowChangelog={setChangelogPartId}
+                tab={detailTab}
+                onTabChange={setDetailTab}
               />
             </div>
           }

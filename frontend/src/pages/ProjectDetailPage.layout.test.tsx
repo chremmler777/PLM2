@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ProjectDetailPage from './ProjectDetailPage'
@@ -197,5 +197,59 @@ describe('fixed-height layout', () => {
     localStorage.setItem('plm2.project.splitLeft', '520')
     mount()
     expect((await screen.findByRole('separator')).getAttribute('aria-valuenow')).toBe('520')
+  })
+})
+
+describe('detail tabs under a pinned header', () => {
+  const selectLH = async () => {
+    fireEvent.click(await screen.findByTestId('item-row-5'))
+    return screen.findByTestId('detail-header')
+  }
+
+  it('pins header and tab bar while only the tab content scrolls', async () => {
+    mount()
+    const header = await selectLH()
+    expect(header.textContent).toContain('206.882.251 Handle LH')
+    expect(within(header).getByText('internal mfg')).toBeTruthy()
+    expect((await within(header).findByTestId('detail-active-revision')).textContent).toBe('E1 · 003')
+    expect(within(header).getByTestId('detail-phase').textContent).toBe('nominated')
+    expect(screen.getByRole('tablist', { name: 'Detail sections' })).toBeTruthy()
+    expect(screen.getByTestId('detail-scroll').className).toContain('overflow-y-auto')
+    expect(screen.getByTestId('detail-pane').className).not.toContain('overflow-y-auto')
+    expect(await screen.findByTestId('rev-tab-9')).toBeTruthy()
+
+    fireEvent.click(screen.getByTestId('detail-tab-links'))
+    expect(screen.queryByTestId('rev-tab-9')).toBeNull()
+    expect(screen.getByTestId('detail-header')).toBe(header)
+    expect(screen.getByTestId('relation-chip-30')).toBeTruthy()
+    expect(screen.getByText('relations-section')).toBeTruthy()
+  })
+
+  it('shows the existing sections under BOM, Workflow and Changelog', async () => {
+    mount()
+    await selectLH()
+    await screen.findByTestId('rev-tab-9')
+    fireEvent.click(screen.getByTestId('detail-tab-bom'))
+    expect(await screen.findByTestId('bom-tree-section')).toBeTruthy()
+    expect(screen.getByText('bom-section')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('detail-tab-workflow'))
+    expect(screen.getByText('workflow-section')).toBeTruthy()
+    expect(screen.getByText('ppap-section')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('detail-tab-changelog'))
+    expect(await screen.findByText('No changelog entries yet')).toBeTruthy()
+  })
+
+  it('keeps the selected tab when switching items', async () => {
+    mount()
+    await selectLH()
+    fireEvent.click(screen.getByTestId('detail-tab-bom'))
+    fireEvent.click(screen.getByTestId('item-row-6'))
+    await waitFor(() => expect(screen.getByTestId('detail-header').textContent).toContain('Handle RH'))
+    expect(screen.getByTestId('detail-tab-bom').getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('shows a prompt instead of an empty pane when nothing is selected', async () => {
+    mount()
+    expect(await screen.findByText('Select an item from the list')).toBeTruthy()
   })
 })
