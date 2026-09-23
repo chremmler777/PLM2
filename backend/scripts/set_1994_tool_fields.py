@@ -1,12 +1,12 @@
 """Set the sold-state tool fields on the ten 1994 tools from the nominated
 RFQ 26 loop 37 (REV8): cavities, target cycle time, machine tonnage class,
-and the toolmaker once known. One changelog entry per tool. Dry run by default.
+and the toolmaker once known. One changelog entry per changed field. Dry run by default.
 
     docker exec -i -e PYTHONPATH=/app compose-plm2-backend-1 \
         python scripts/set_1994_tool_fields.py [--toolmaker "<supplier name>"] [--apply]
 
-A None in FIELDS leaves that field untouched. Fill cycle_time_s / tonnage
-from RFQ2 before applying (see the plan, Task 2 Step 2).
+Cavities and cycle times are final from RFQ 26 loop 37 (REV8, read 2026-09-23).
+Tonnage class remains None (untouched). A None in FIELDS leaves that field alone.
 """
 import argparse
 import asyncio
@@ -25,7 +25,7 @@ from app.services.part_service import ChangelogService
 FIELDS = {
     "199401": (2, 55.0, None),   # Handle, height adjustment LH/RH
     "199402": (2, 50.0, None),   # Latch cover 40/60
-    "199403": (4, 55.0, None),   # Isofix cover (relation note on prod says 2, RFQ says 4)
+    "199403": (4, 55.0, None),   # Isofix cover, 4 cavities per nominated RFQ (prod relation note still says 2)
     "199404": (2, 50.0, None),   # A-bracket inner trim
     "199405": (2, 55.0, None),   # Cover trim, center back
     "199406": (2, 50.0, None),   # Center bearing cover
