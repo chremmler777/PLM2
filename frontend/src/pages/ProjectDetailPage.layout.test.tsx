@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useNavigate, type NavigateFunction } from 'react-router-dom'
 import ProjectDetailPage from './ProjectDetailPage'
 import { FakeBroadcastChannel } from '../testing/fakeBroadcastChannel'
 import type { SelectionMessage } from '../hooks/useSelectionChannel'
@@ -307,6 +307,8 @@ describe('pop-out detail window from the project page', () => {
     vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel)
   })
 
+  const hello: SelectionMessage = { type: 'hello' }
+
   const popout = () => {
     const got: SelectionMessage[] = []
     const channel = new FakeBroadcastChannel('plm2-project-2')
@@ -407,6 +409,33 @@ describe('pop-out detail window from the project page', () => {
     act(() => p.channel.postMessage({ type: 'hello' }))
     const table = await screen.findByTestId('items-table')
     expect(within(table).queryByText('Cavities')).toBeNull()
+  })
+
+  it('starts another project with its detail pane, not in the previous project\'s table mode', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/plants/projects') return Promise.resolve({ data: [
+        { id: 2, name: 'Seat Trim', code: '1994', status: 'active', customer_naming: 'vw' },
+        { id: 3, name: 'Door Trim', code: '1995', status: 'active', customer_naming: 'vw' }] })
+      if (url === '/v1/parts/project/3') return Promise.resolve({ data: [{ ...RH, id: 40, part_number: '20-1995-001-0', name: 'Door handle' }] })
+      return routeGet(url)
+    })
+    const nav: { go: NavigateFunction | null } = { go: null }
+    const Nav = () => { nav.go = useNavigate(); return null }
+    const p = popout()
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/projects/2']}>
+          <Nav />
+          <Routes><Route path="/projects/:projectId" element={<ProjectDetailPage />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider>)
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage(hello))
+    await screen.findByTestId('items-table')
+    act(() => { nav.go!('/projects/3') })
+    expect(await screen.findByTestId('item-row-40')).toBeTruthy()
+    expect(screen.queryByTestId('items-table')).toBeNull()
+    expect(screen.getByTestId('detail-column')).toBeTruthy()
   })
 
   it('offers no pop-out when the browser has no BroadcastChannel', async () => {

@@ -30,7 +30,17 @@ import type { ContextMenuState } from '../components/project/projectTypes';
 const SPLIT_KEY = 'plm2.project.splitLeft';
 const POPOUT_POLL_MS = 1000;
 
+/**
+ * One page instance per project: switching projects on the same route mounts a
+ * fresh page, so pop-out state (table mode, the window handle) and the
+ * selection never carry over from the previous project.
+ */
 export default function ProjectDetailPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <ProjectDetailView key={projectId} />;
+}
+
+function ProjectDetailView() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = projectId ? parseInt(projectId, 10) : 0;
   const navigate = useNavigate();
