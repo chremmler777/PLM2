@@ -34,4 +34,10 @@ describe('DocumentPane', () => {
     render(<DocumentPane document={null} />)
     expect(screen.getByText(/No document to show/)).toBeTruthy()
   })
+
+  it('uses an explicit inline url when the document carries one', () => {
+    render(<DocumentPane document={{ fileId: 9, filename: 'study.pdf', kind: 'pdf', revisionName: 'Gate position', inlineUrl: '/api/v1/parts/7/dfm/files/9/inline' }} />)
+    expect((screen.getByTestId('doc-iframe') as HTMLIFrameElement).src).toContain('/api/v1/parts/7/dfm/files/9/inline')
+    expect(screen.getByTestId('doc-header').textContent).toContain('study.pdf · Gate position')
+  })
 })
