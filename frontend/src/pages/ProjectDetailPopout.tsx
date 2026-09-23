@@ -24,6 +24,8 @@ export default function ProjectDetailPopout() {
   const [searchParams] = useSearchParams();
   const initialPart = toId(searchParams.get('part'));
   const initialRev = toId(searchParams.get('rev'));
+  // The main window that opened this one; it only listens to hello and bye carrying its id.
+  const owner = searchParams.get('owner') ?? undefined;
   const queryClient = useQueryClient();
 
   const { data: project } = useProject(id);
@@ -39,7 +41,7 @@ export default function ProjectDetailPopout() {
 
   const post = useSelectionChannel(id, (message) => {
     if (message.type === 'ping') {
-      post({ type: 'hello' });
+      post(owner ? { type: 'hello', owner } : { type: 'hello' });
       return;
     }
     if (message.type !== 'select') return;
@@ -54,11 +56,11 @@ export default function ProjectDetailPopout() {
     if (message.revisionId === null) openPart(message.partId);
     else if (message.partId === partId) selectRevision(message.revisionId);
     else pickRevision(message.partId, message.revisionId);
-  }, { type: 'bye' });
+  }, owner ? { type: 'bye', owner } : { type: 'bye' });
 
   useEffect(() => {
-    post({ type: 'hello' });
-  }, [post]);
+    post(owner ? { type: 'hello', owner } : { type: 'hello' });
+  }, [post, owner]);
 
   useEffect(() => {
     if (project) document.title = `${project.code} ${project.name} detail`;

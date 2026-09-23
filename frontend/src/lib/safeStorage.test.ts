@@ -20,6 +20,16 @@ describe('safeStorage', () => {
     expect(() => writeStored('k', 'v')).not.toThrow()
   })
 
+  it('reads and writes sessionStorage when asked, leaving localStorage alone', () => {
+    sessionStorage.clear()
+    writeStored('s', 'tab', 'session')
+    expect(sessionStorage.getItem('s')).toBe('tab')
+    expect(localStorage.getItem('s')).toBeNull()
+    expect(readStored('s', 'session')).toBe('tab')
+    expect(readStored('s')).toBeNull()
+    sessionStorage.clear()
+  })
+
   it('reads numbers with a fallback for garbage and clamps the range', () => {
     expect(readStoredNumber('w', 420, 280, 1600)).toBe(420)
     localStorage.setItem('w', 'abc')

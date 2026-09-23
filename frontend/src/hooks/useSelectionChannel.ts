@@ -2,15 +2,17 @@
  * The line between a project window and its pop-out detail window: one
  * BroadcastChannel per project, `plm2-project-<id>`. The main window posts
  * the selected part and revision; the pop-out announces itself with hello
- * and leaves with bye.
+ * and leaves with bye, both carrying the owner id of the window that opened it.
  */
 import { useCallback, useEffect, useRef } from 'react';
 
 export type SelectionMessage =
   | { type: 'select'; partId: number | null; revisionId: number | null }
   | { type: 'ping' }
-  | { type: 'hello' }
-  | { type: 'bye' };
+  // owner: the id of the main window that opened the pop-out (its ?owner=),
+  // so only that window reacts when several windows show the same project.
+  | { type: 'hello'; owner?: string }
+  | { type: 'bye'; owner?: string };
 
 export function selectionChannelSupported(): boolean {
   return typeof BroadcastChannel !== 'undefined';

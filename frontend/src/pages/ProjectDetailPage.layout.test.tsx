@@ -305,9 +305,13 @@ describe('pop-out detail window from the project page', () => {
   beforeEach(() => {
     FakeBroadcastChannel.reset()
     vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel)
+    // This main window's owner id; its pop-out echoes it in hello and bye.
+    sessionStorage.setItem('plm2.project.windowOwner', 'owner-a')
   })
+  afterEach(() => sessionStorage.clear())
 
-  const hello: SelectionMessage = { type: 'hello' }
+  const hello: SelectionMessage = { type: 'hello', owner: 'owner-a' }
+  const bye: SelectionMessage = { type: 'bye', owner: 'owner-a' }
 
   const popout = () => {
     const got: SelectionMessage[] = []
@@ -323,7 +327,7 @@ describe('pop-out detail window from the project page', () => {
     fireEvent.click(await screen.findByTestId('item-row-5'))
     await screen.findByTestId('rev-tab-9')
     fireEvent.click(screen.getByLabelText('Open detail in new window'))
-    expect(open).toHaveBeenCalledWith('/projects/2/detail?part=5&rev=9', 'plm2-detail-2', expect.any(String))
+    expect(open).toHaveBeenCalledWith('/projects/2/detail?part=5&rev=9&owner=owner-a', 'plm2-detail-2', expect.any(String))
     expect(await screen.findByTestId('items-table')).toBeTruthy()
     expect(screen.queryByTestId('detail-pane')).toBeNull()
     expect(screen.queryByRole('separator')).toBeNull()
@@ -333,7 +337,7 @@ describe('pop-out detail window from the project page', () => {
     const p = popout()
     mount()
     await screen.findByTestId('item-row-5')
-    act(() => p.channel.postMessage({ type: 'hello' }))
+    act(() => p.channel.postMessage(hello))
     expect(await screen.findByTestId('items-table')).toBeTruthy()
     expect(p.got).toContainEqual({ type: 'select', partId: null, revisionId: null })
     fireEvent.click(screen.getByTestId('table-row-6'))
@@ -345,12 +349,53 @@ describe('pop-out detail window from the project page', () => {
     const p = popout()
     mount()
     await screen.findByTestId('item-row-5')
-    act(() => p.channel.postMessage({ type: 'hello' }))
+    act(() => p.channel.postMessage(hello))
     fireEvent.click(await screen.findByTestId('table-row-5'))
     await waitFor(() => expect(p.got).toContainEqual({ type: 'select', partId: 5, revisionId: 9 }))
     fireEvent.click(screen.getByTestId('table-row-6'))
     await waitFor(() => expect(p.got).toContainEqual({ type: 'select', partId: 6, revisionId: 19 }))
     expect(p.got).not.toContainEqual({ type: 'select', partId: 6, revisionId: 9 })
+  })
+
+  it('ignores a hello from the pop-out of another main window', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello', owner: 'owner-b' }))
+    act(() => p.channel.postMessage({ type: 'hello' }))
+    expect(screen.queryByTestId('items-table')).toBeNull()
+    expect(p.got.filter((m) => m.type === 'select')).toEqual([])
+    act(() => p.channel.postMessage(hello))
+    expect(await screen.findByTestId('items-table')).toBeTruthy()
+  })
+
+  it('ignores a bye from the pop-out of another main window', async () => {
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage(hello))
+    await screen.findByTestId('items-table')
+    act(() => p.channel.postMessage({ type: 'bye', owner: 'owner-b' }))
+    expect(screen.getByTestId('items-table')).toBeTruthy()
+  })
+
+  it('keeps the same owner id across a reload of the main window', async () => {
+    sessionStorage.clear()
+    const open = vi.fn(() => ({ closed: false }) as unknown as Window)
+    window.open = open
+    mount()
+    fireEvent.click(await screen.findByTestId('item-row-5'))
+    await screen.findByTestId('rev-tab-9')
+    fireEvent.click(screen.getByLabelText('Open detail in new window'))
+    const url = new URL(String((open.mock.calls[0] as unknown[])[0]), 'http://x')
+    const owner = url.searchParams.get('owner')
+    expect(owner).toBeTruthy()
+    cleanup()
+    const p = popout()
+    mount()
+    await screen.findByTestId('item-row-5')
+    act(() => p.channel.postMessage({ type: 'hello', owner: owner! }))
+    expect(await screen.findByTestId('items-table')).toBeTruthy()
   })
 
   it('asks on load whether a pop-out is already open', async () => {
@@ -364,9 +409,9 @@ describe('pop-out detail window from the project page', () => {
     const p = popout()
     mount()
     await screen.findByTestId('item-row-5')
-    act(() => p.channel.postMessage({ type: 'hello' }))
+    act(() => p.channel.postMessage(hello))
     await screen.findByTestId('items-table')
-    act(() => p.channel.postMessage({ type: 'bye' }))
+    act(() => p.channel.postMessage(bye))
     expect(screen.queryByTestId('items-table')).toBeNull()
     expect(screen.getByRole('separator')).toBeTruthy()
   })
@@ -394,7 +439,7 @@ describe('pop-out detail window from the project page', () => {
     const p = popout()
     mount()
     await screen.findByTestId('item-row-5')
-    act(() => p.channel.postMessage({ type: 'hello' }))
+    act(() => p.channel.postMessage(hello))
     const table = await screen.findByTestId('items-table')
     expect(within(table).getAllByRole('columnheader').map((th) => th.textContent))
       .toEqual(['Customer no.', 'Tier 1', 'Name', 'Phase', 'Revision', 'Tool', 'Cavities'])
@@ -406,7 +451,7 @@ describe('pop-out detail window from the project page', () => {
     const p = popout()
     mount()
     await screen.findByTestId('item-row-5')
-    act(() => p.channel.postMessage({ type: 'hello' }))
+    act(() => p.channel.postMessage(hello))
     const table = await screen.findByTestId('items-table')
     expect(within(table).queryByText('Cavities')).toBeNull()
   })

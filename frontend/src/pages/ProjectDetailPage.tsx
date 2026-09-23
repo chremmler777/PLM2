@@ -16,6 +16,7 @@ import { useProjectStructure } from '../hooks/queries/useProjectStructure';
 import { useProject, useProjectParts } from '../hooks/queries/useProjectDetail';
 import { revisionOfSelectedPart, useArticleSelection } from '../hooks/useArticleSelection';
 import { selectionChannelSupported, useSelectionChannel } from '../hooks/useSelectionChannel';
+import { windowOwnerId } from '../lib/windowOwner';
 import ProjectHeaderBar from '../components/project/ProjectHeaderBar';
 import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
 import ItemsPane from '../components/project/ItemsPane';
@@ -95,8 +96,11 @@ function ProjectDetailView() {
   const [popoutOpen, setPopoutOpen] = useState(false);
   const popoutRef = useRef<Window | null>(null);
   const popoutHref = useHref(`/projects/${id}/detail`);
+  // Another tab on the same project shares the channel; its pop-out carries a different owner.
+  const [owner] = useState(windowOwnerId);
 
   const post = useSelectionChannel(id, (message) => {
+    if ((message.type === 'hello' || message.type === 'bye') && message.owner !== owner) return;
     if (message.type === 'hello') {
       setPopoutOpen(true);
       post({ type: 'select', partId: sel.partId, revisionId: postedRevisionId });
@@ -128,18 +132,21 @@ function ProjectDetailView() {
   }, [popoutOpen]);
 
   const openPopout = useCallback(() => {
-    const query = sel.partId !== null
-      ? `?part=${sel.partId}${postedRevisionId !== null ? `&rev=${postedRevisionId}` : ''}`
-      : '';
+    const params = new URLSearchParams();
+    if (sel.partId !== null) {
+      params.set('part', String(sel.partId));
+      if (postedRevisionId !== null) params.set('rev', String(postedRevisionId));
+    }
+    params.set('owner', owner);
     // A fixed name per project: a second click reuses the same window.
-    const win = window.open(`${popoutHref}${query}`, `plm2-detail-${id}`, 'popup,width=1100,height=900');
+    const win = window.open(`${popoutHref}?${params.toString()}`, `plm2-detail-${id}`, 'popup,width=1100,height=900');
     if (!win) {
       toast.error('The browser blocked the new window');
       return;
     }
     popoutRef.current = win;
     setPopoutOpen(true);
-  }, [sel.partId, postedRevisionId, popoutHref, id]);
+  }, [sel.partId, postedRevisionId, popoutHref, id, owner]);
 
   if (projectLoading) {
     return <div className="p-6 text-slate-400">Loading project...</div>;

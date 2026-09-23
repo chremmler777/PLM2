@@ -71,6 +71,18 @@ describe('ProjectDetailPopout', () => {
     expect(main.got).toContainEqual({ type: 'hello' })
   })
 
+  it('echoes the owner id of its main window in hello and bye', async () => {
+    const main = mainWindow()
+    mount('/projects/2/detail?part=5&owner=owner-a')
+    await screen.findByTestId('detail-header')
+    expect(main.got).toContainEqual({ type: 'hello', owner: 'owner-a' })
+    main.got.length = 0
+    act(() => main.channel.postMessage({ type: 'ping' }))
+    expect(main.got).toEqual([{ type: 'hello', owner: 'owner-a' }])
+    cleanup()
+    expect(main.got).toContainEqual({ type: 'bye', owner: 'owner-a' })
+  })
+
   it('opens on the revision named in the URL', async () => {
     mount('/projects/2/detail?part=5&rev=10')
     expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
