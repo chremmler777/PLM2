@@ -21,7 +21,7 @@ vi.mock('../components/ProjectChangesSection', () => stub('changes'))
 vi.mock('../components/parts/AssemblyTreeList', () => stub('assemblies'))
 vi.mock('../components/parts/UploadDialog', () => stub('upload-dialog'))
 
-const LH = { id: 5, part_number: '20-1994-001-0', name: '206.882.251 Handle LH', part_type: 'internal_mfg', active_revision_id: 9, item_category: 'article', parent_part_id: null }
+const LH = { id: 5, part_number: '20-1994-001-0', customer_part_number: '206.882.251', tier1_part_number: 'S00H4X-110', name: '206.882.251 Handle LH', part_type: 'internal_mfg', active_revision_id: 9, item_category: 'article', parent_part_id: null }
 const RH = { id: 6, part_number: '20-1994-002-0', name: '206.882.252 Handle RH', part_type: 'internal_mfg', active_revision_id: 19, item_category: 'article', parent_part_id: null }
 const structure = { articles: [
   { part_id: 5, part_number: LH.part_number, customer_part_number: '206.882.251', name: LH.name, lifecycle_phase: 'nominated', active_revision_id: 9,
@@ -161,6 +161,8 @@ describe('ProjectDetailPage article panel', () => {
     expect(await screen.findByTestId('tree-rev-10')).toBeTruthy()
     expect(screen.getByTestId('tree-rev-10').textContent).toContain('E1.1')
     expect(screen.getByTestId('tree-rel-30').textContent).toContain('199401')
+    expect(screen.getByTestId('tree-numbers-5').textContent).toContain('206.882.251')
+    expect(screen.getByTestId('tree-numbers-5').textContent).toContain('Tier 1 S00H4X-110')
     fireEvent.click(screen.getByTestId('tree-rev-10'))
     expect((await screen.findByTestId('rev-tab-10')).getAttribute('aria-selected')).toBe('true')
   })

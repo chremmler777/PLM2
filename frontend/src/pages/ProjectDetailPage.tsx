@@ -582,6 +582,17 @@ function TreeNodeComponent({
         // stopPropagation() calls on the chip buttons below are currently inert — kept as a
         // defensive guard in case this ever moves inside the row.
         <div className="ml-6 my-1 space-y-1 text-xs" style={{ marginLeft: `${depth * 20 + 24}px` }}>
+          {(node.part.customer_part_number || node.part.tier1_part_number) && (
+            <div className="flex flex-wrap items-center gap-1" data-testid={`tree-numbers-${node.part.id}`}>
+              <span className="text-slate-500 w-16">Numbers</span>
+              {node.part.customer_part_number && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono" title="Customer (OEM) part number">{node.part.customer_part_number}</span>
+              )}
+              {node.part.tier1_part_number && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono" title="Tier 1 part number">Tier 1 {node.part.tier1_part_number}</span>
+              )}
+            </div>
+          )}
           {article!.revisions.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
               <span className="text-slate-500 w-16">Revisions</span>
