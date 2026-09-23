@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
+import ProjectDetailPopout from './pages/ProjectDetailPopout';
 import PartDetail from './pages/PartDetail';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
@@ -28,14 +29,14 @@ import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, bare = false }: { children: React.ReactNode; bare?: boolean }) {
   const { isAuthenticated, loading } = useAuth();
   if (loading) return null; // or a spinner
   if (!isAuthenticated) {
     window.location.href = '/';
     return null;
   }
-  return <AppLayout>{children}</AppLayout>;
+  return bare ? <>{children}</> : <AppLayout>{children}</AppLayout>;
 }
 
 function AppRoutes() {
@@ -62,6 +63,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Pop-out detail window: the detail pane alone, no sidebar. */}
+      <Route
+        path="/projects/:projectId/detail"
+        element={
+          <ProtectedRoute bare>
+            <ProjectDetailPopout />
           </ProtectedRoute>
         }
       />
