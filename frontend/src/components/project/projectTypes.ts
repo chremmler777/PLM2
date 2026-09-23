@@ -32,6 +32,9 @@ export interface Part {
   next_calibration_due?: string | null;
   lifecycle_phase?: string;
   tool_cavities?: number | null;
+  toolmaker_id?: number | null;
+  tool_tonnage_class?: number | null;
+  tool_cycle_time_s?: number | null;
 }
 
 // Controlled item categories (automotive PLM)

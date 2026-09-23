@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -5,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import DetailPane from './DetailPane'
 import type { ArticleSelection } from '../../hooks/useArticleSelection'
 import type { Part, PartRevision, Project } from './projectTypes'
+import type { DetailTab } from './detailTabs'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
@@ -105,5 +107,76 @@ describe('DetailPane dialogs keep their target when the selection moves (pop-out
       await Promise.resolve()
     }
     expect(clientMocks.post).not.toHaveBeenCalledWith(expect.stringContaining('/v1/parts/8/'), expect.anything())
+  })
+})
+
+describe('DetailPane branches on a tool selection', () => {
+  const toolPart: Part = {
+    id: 20, part_number: '199403', name: 'Tool 199403', part_type: 'purchased', active_revision_id: null,
+    item_category: 'tool', parent_part_id: null,
+    tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null,
+  } as Part
+  const allParts = [...parts, toolPart]
+  const toolRelations = [
+    { id: 1, relation_type: 'produces', direction: 'outgoing', other_part_id: 5, other_part_number: '20-1994-005-0',
+      other_part_name: 'Part 5', other_item_category: 'article', other_active_revision_name: 'E1', other_active_customer_index: null, notes: '2 cavities' },
+  ]
+
+  function toolSelection(): ArticleSelection {
+    return {
+      partId: 20, revisionId: null, viewingFileId: null, openDocId: null, partRevisions: [],
+      selectPart: vi.fn(), openPart: vi.fn(), selectRevision: vi.fn(), pickRevision: vi.fn(),
+      setRevisionId: vi.fn(), setViewingFileId: vi.fn(), setOpenDocId: vi.fn(),
+    }
+  }
+
+  function Harness({ sel, initialTab = 'documents' }: { sel: ArticleSelection; initialTab?: DetailTab }) {
+    const [tab, setTab] = useState<DetailTab>(initialTab)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <DetailPane projectId={2} project={project} parts={allParts} structure={undefined} sel={sel}
+            tab={tab} onTabChange={setTab} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    clientMocks.get.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/20/relations') return Promise.resolve({ data: toolRelations })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  it('shows the DFM tab with the archive when a tool is selected, even with an article tab remembered', async () => {
+    render(<Harness sel={toolSelection()} initialTab="documents" />)
+    expect(screen.getByTestId('detail-tab-dfm').getAttribute('aria-selected')).toBe('true')
+    expect(await screen.findByTestId('dfm-archive')).toBeTruthy()
+    expect(screen.queryByTestId('detail-tab-documents')).toBeNull()
+    expect(screen.queryByTestId('detail-tab-bom')).toBeNull()
+    expect(screen.queryByTestId('detail-tab-workflow')).toBeNull()
+  })
+
+  it('shows the Tool tab with produced-article chips and the tool fields card', async () => {
+    const sel = toolSelection()
+    render(<Harness sel={sel} />)
+    fireEvent.click(screen.getByTestId('detail-tab-tool'))
+    const chips = await screen.findByTestId('produced-articles')
+    expect(chips.textContent).toContain('Part 5')
+    expect(screen.getByTestId('edit-tool-cavities')).toBeTruthy()
+    expect(screen.getByTestId('toolmaker-select')).toBeTruthy()
+    fireEvent.click(screen.getByText(/Part 5/))
+    expect(sel.openPart).toHaveBeenCalledWith(5)
+  })
+
+  it('shows Documents when an article is selected after a tool, not the dfm/tool tabs', () => {
+    render(<Harness sel={selection(5, 9)} initialTab="dfm" />)
+    expect(screen.getByTestId('detail-tab-documents').getAttribute('aria-selected')).toBe('true')
+    expect(screen.queryByTestId('detail-tab-dfm')).toBeNull()
+    expect(screen.queryByTestId('detail-tab-tool')).toBeNull()
   })
 })

@@ -55,9 +55,9 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
               aria-label="Open detail in new window"
               title="Open detail in new window"
               onClick={onPopOut}
-              className="px-2 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs"
+              className="px-3 py-1 rounded border border-slate-600 text-slate-300 hover:bg-slate-700 text-xs font-medium"
             >
-              ⧉
+              ⧉ Pop out
             </button>
           )}
           <button

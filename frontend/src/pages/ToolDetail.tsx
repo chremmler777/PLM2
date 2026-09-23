@@ -12,6 +12,7 @@ import { revisionLabel } from '../components/parts/RevisionBadge';
 import ToolFieldsCard from '../components/tools/ToolFieldsCard';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import DfmArchive from '../components/dfm/DfmArchive';
+import { producedArticles, type ToolRelation } from '../components/tools/toolRelations';
 
 export interface ToolPart {
   id: number;
@@ -25,38 +26,6 @@ export interface ToolPart {
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
-}
-
-export interface ToolRelation {
-  id: number;
-  relation_type: string;
-  direction: 'outgoing' | 'incoming';
-  other_part_id: number;
-  other_part_number: string;
-  other_part_name: string;
-  other_item_category: string;
-  other_active_revision_name: string | null;
-  other_active_customer_index: string | null;
-  notes: string | null;
-}
-
-export interface ProducedArticle {
-  part_id: number;
-  part_number: string;
-  name: string;
-  revision_name: string | null;
-  customer_index: string | null;
-  notes: string | null;
-}
-
-export function producedArticles(relations: ToolRelation[]): ProducedArticle[] {
-  return relations
-    .filter((r) => r.relation_type === 'produces' && r.direction === 'outgoing')
-    .map((r) => ({
-      part_id: r.other_part_id, part_number: r.other_part_number, name: r.other_part_name,
-      revision_name: r.other_active_revision_name, customer_index: r.other_active_customer_index, notes: r.notes,
-    }))
-    .sort((a, b) => a.part_number.localeCompare(b.part_number));
 }
 
 interface Props {

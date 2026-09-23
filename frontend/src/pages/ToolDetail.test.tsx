@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ToolDetail, { producedArticles, type ToolPart } from './ToolDetail'
+import ToolDetail, { type ToolPart } from './ToolDetail'
+import { producedArticles } from '../components/tools/toolRelations'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
 vi.mock('../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))

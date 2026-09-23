@@ -17,7 +17,9 @@ import { BomTreeSection } from './BomTreeSection';
 import { ChangelogList } from './ChangelogModal';
 import DetailHeader from './DetailHeader';
 import DocumentsTab from './DocumentsTab';
-import { DETAIL_TABS, type DetailTab } from './detailTabs';
+import ToolDfmTab from './ToolDfmTab';
+import ToolInfoTab from './ToolInfoTab';
+import { detailTabsFor, effectiveDetailTab, type DetailTab } from './detailTabs';
 import {
   CATEGORY_META, LOCKED_REVISION_STATUSES, phaseColor, statusColor, type Part, type Project,
 } from './projectTypes';
@@ -54,22 +56,27 @@ export default function DetailPane({
   const revisionLocked = !!selectedRevision && LOCKED_REVISION_STATUSES.includes(selectedRevision.status);
   const revName = revisionLabel(selectedRevision?.revision_name, selectedRevision?.customer_index);
   const hasLinks = !!article && (article.related.length > 0 || !!article.mirror_of || article.mirrored_by.length > 0);
+  // The remembered tab may not apply to this item's category (e.g. it was
+  // 'dfm' and an article got selected). Derive what to actually show without
+  // ever calling onTabChange, so the remembered tab survives the detour.
+  const tabs = detailTabsFor(part.item_category);
+  const effectiveTab = effectiveDetailTab(tab, part.item_category);
 
   return (
     <div data-testid="detail-pane" className="h-full min-h-0 flex flex-col bg-slate-900" onClick={(e) => e.stopPropagation()}>
       <DetailHeader projectId={projectId} part={part} article={article} sel={sel} onPopOut={onPopOut} />
 
       <div role="tablist" aria-label="Detail sections" className="flex-shrink-0 flex gap-1 px-3 border-b border-slate-700 bg-slate-800/60">
-        {DETAIL_TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             role="tab"
             type="button"
             data-testid={`detail-tab-${t.key}`}
-            aria-selected={tab === t.key}
+            aria-selected={effectiveTab === t.key}
             onClick={() => onTabChange(t.key)}
             className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${
-              tab === t.key ? 'border-sky-400 text-sky-300' : 'border-transparent text-slate-400 hover:text-slate-200'
+              effectiveTab === t.key ? 'border-sky-400 text-sky-300' : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             {t.label}
@@ -78,12 +85,21 @@ export default function DetailPane({
       </div>
 
       <div role="tabpanel" data-testid="detail-scroll" className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
-        {tab === 'documents' && (
+        {effectiveTab === 'documents' && (
           // Keyed by part: open dialogs and their state never carry over to another item.
           <DocumentsTab key={part.id} projectId={projectId} project={project} parts={parts} structure={structure} sel={sel} part={part} />
         )}
 
-        {tab === 'links' && (
+        {effectiveTab === 'dfm' && (
+          // Keyed by part: the open DFM PDF never carries over to another tool.
+          <ToolDfmTab key={part.id} partId={part.id} />
+        )}
+
+        {effectiveTab === 'tool' && (
+          <ToolInfoTab key={part.id} part={part} onOpenPart={sel.openPart} />
+        )}
+
+        {effectiveTab === 'links' && (
           <>
             {hasLinks && (
               <div className="flex flex-wrap gap-1">
@@ -111,7 +127,7 @@ export default function DetailPane({
           </>
         )}
 
-        {tab === 'bom' && (
+        {effectiveTab === 'bom' && (
           sel.revisionId ? (
             <>
               <BomTreeSection partId={part.id} revisionId={sel.revisionId} revisionName={revName} onOpenPart={sel.openPart} />
@@ -130,7 +146,7 @@ export default function DetailPane({
           )
         )}
 
-        {tab === 'workflow' && (
+        {effectiveTab === 'workflow' && (
           <>
             <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
               <h3 className="text-sm font-semibold text-slate-200 mb-3">Revisions</h3>
@@ -177,7 +193,7 @@ export default function DetailPane({
           </>
         )}
 
-        {tab === 'changelog' && <ChangelogList partId={part.id} />}
+        {effectiveTab === 'changelog' && <ChangelogList partId={part.id} />}
       </div>
     </div>
   );
