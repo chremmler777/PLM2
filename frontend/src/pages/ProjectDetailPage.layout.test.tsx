@@ -182,3 +182,20 @@ describe('grouped slim item rows', () => {
     expect(screen.getByTestId('item-row-40')).toBeTruthy()
   })
 })
+
+describe('fixed-height layout', () => {
+  it('fills the viewport, never scrolls as a whole, and scrolls the list on its own', async () => {
+    mount()
+    const page = await screen.findByTestId('project-page')
+    expect(page.className).toContain('h-full')
+    expect(page.className).toContain('overflow-hidden')
+    expect(screen.getByTestId('items-scroll').className).toContain('overflow-y-auto')
+    expect(screen.getByRole('separator', { name: 'Resize items list' })).toBeTruthy()
+  })
+
+  it('opens with the splitter where it was left last time', async () => {
+    localStorage.setItem('plm2.project.splitLeft', '520')
+    mount()
+    expect((await screen.findByRole('separator')).getAttribute('aria-valuenow')).toBe('520')
+  })
+})

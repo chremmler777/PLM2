@@ -18,8 +18,11 @@ import DetailPane from '../components/project/DetailPane';
 import ProjectContextMenu from '../components/project/ProjectContextMenu';
 import ChangelogModal from '../components/project/ChangelogModal';
 import AddPartModal from '../components/project/AddPartModal';
+import SplitPane from '../components/project/SplitPane';
 import type { ContextMenuState } from '../components/project/projectTypes';
 import StatusSlideOver, { type StatusSection } from '../components/project/StatusSlideOver';
+
+const SPLIT_KEY = 'plm2.project.splitLeft';
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -90,7 +93,7 @@ export default function ProjectDetailPage() {
   };
 
   return (
-    <div className="p-6 bg-slate-900 min-h-screen">
+    <div data-testid="project-page" className="h-full flex flex-col overflow-hidden bg-slate-900">
       <ProjectHeaderBar
         project={project}
         onOpenSection={setOpenSection}
@@ -107,35 +110,40 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-3 gap-6">
-        <ItemsPane
-          projectId={id}
-          projectCode={project.code}
-          parts={parts}
-          partsLoading={partsLoading}
-          structure={structure}
-          paintByPartId={paintByPartId}
-          paintedIds={paintedIds}
-          paintedCount={paintOverview?.length ?? 0}
-          selectedPartId={sel.partId}
-          onSelect={selectPart}
-          onOpenPart={openPart}
-          onPickRevision={pickRevision}
-          onContextMenu={handleContextMenu}
+      <div className="flex-1 min-h-0">
+        <SplitPane
+          storageKey={SPLIT_KEY}
+          left={
+            <ItemsPane
+              projectId={id}
+              projectCode={project.code}
+              parts={parts}
+              partsLoading={partsLoading}
+              structure={structure}
+              paintByPartId={paintByPartId}
+              paintedIds={paintedIds}
+              paintedCount={paintOverview?.length ?? 0}
+              selectedPartId={sel.partId}
+              onSelect={selectPart}
+              onOpenPart={openPart}
+              onPickRevision={pickRevision}
+              onContextMenu={handleContextMenu}
+            />
+          }
+          right={
+            // Until Task 10 pins the detail header, the whole detail column scrolls.
+            <div data-testid="detail-column" className="h-full min-h-0 overflow-y-auto p-4 space-y-4" onClick={() => selectPart(null)}>
+              <DetailPane
+                projectId={id}
+                project={project}
+                parts={parts}
+                structure={structure}
+                sel={sel}
+                onShowChangelog={setChangelogPartId}
+              />
+            </div>
+          }
         />
-
-        {/* Right: Part Detail */}
-        <div className="col-span-2 space-y-4 min-h-96" onClick={() => selectPart(null)}>
-          <DetailPane
-            projectId={id}
-            project={project}
-            parts={parts}
-            structure={structure}
-            sel={sel}
-            onShowChangelog={setChangelogPartId}
-          />
-        </div>
       </div>
 
       <ProjectContextMenu
