@@ -221,7 +221,7 @@ export default function AddPartModal({
                 onChange={(e) => setFormData({ ...formData, supplier_id: e.target.value })}
                 className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-slate-100 text-sm"
               >
-                <option value="">— No supplier —</option>
+                <option value="">No supplier</option>
                 {suppliers?.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
