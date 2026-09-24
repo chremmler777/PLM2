@@ -668,6 +668,8 @@ export interface ChangeConcern {
   /** Risk rows only: what kind of risk it is and how bad it is. */
   risk_type?: RiskType | null;
   severity?: RiskSeverity | null;
+  /** Risk raised from a checklist row: that row's key (or free:<label>). */
+  checklist_key?: string | null;
 }
 
 export interface ChangeMeeting {

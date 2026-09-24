@@ -252,7 +252,7 @@ export const changesApi = {
   // team's question or cancel vote); assessment raises typed, rated risks.
   raiseConcern: (id: number, body: {
     kind: ConcernKind; note: string; department_id?: number;
-    risk_type?: RiskType; severity?: RiskSeverity;
+    risk_type?: RiskType; severity?: RiskSeverity; checklist_key?: string;
   }) => client.post<ChangeConcern>(`/v1/changes/${id}/concerns`, body).then((r) => r.data),
 
   // The risk vocabulary is the backend's list, not a hard-coded one here.

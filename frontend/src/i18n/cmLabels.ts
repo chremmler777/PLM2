@@ -387,11 +387,19 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Attach the explanation (PPT) for the customer — sent by the responsible side.',
   },
   'check.hint': {
-    de: 'Was aus Ihrem Katalog ist betroffen? Angehakte Punkte werden in der '
-      + 'Kostenerfassung vorbelegt.',
-    en: 'What from your catalog is impacted? Ticked items are pre-seeded into '
-      + 'cost input.',
+    de: 'Jede Zeile mit Ja oder Nein beantworten. Ja wird in der Kostenerfassung '
+      + 'vorbelegt; wer ein Risiko sieht, meldet es direkt an der Zeile.',
+    en: 'Answer every row Yes or No. Yes is pre-seeded into cost input; if you '
+      + 'see a risk, flag it right on the row.',
   },
+  'check.yes': { de: 'Ja', en: 'Yes' },
+  'check.no': { de: 'Nein', en: 'No' },
+  'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
+  'check.openRows': { de: '{n} Punkte offen', en: '{n} rows unanswered' },
+  'check.noCount': { de: '{n} × Nein', en: '{n} × No' },
+  'check.summary': { de: '{n} betroffen · {k} Risiken', en: '{n} impacted · {k} risks flagged' },
+  'check.flagRisk': { de: '⚑ Risiko melden', en: '⚑ Flag risk' },
+  'check.riskFlagged': { de: '⚑ Risiko gemeldet (Sev {s})', en: '⚑ risk flagged (sev {s})' },
   'check.remark': { de: 'Bemerkung', en: 'Remark' },
   'check.remarkPlaceholder': { de: 'Was ist zu tun?', en: 'What has to be done?' },
   'check.addItem': { de: '+ Eigener Punkt', en: '+ Own item' },
