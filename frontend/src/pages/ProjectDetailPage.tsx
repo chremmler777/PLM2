@@ -198,7 +198,7 @@ function ProjectDetailView() {
 
       <div className="flex-1 min-h-0">
         {showWorksheet ? (
-          <WorksheetView projectId={id} onClose={() => setWorksheet(false)} />
+          <WorksheetView projectId={id} projectCode={project?.code ?? null} onClose={() => setWorksheet(false)} />
         ) : (
           <SplitPane
             storageKey={SPLIT_KEY}

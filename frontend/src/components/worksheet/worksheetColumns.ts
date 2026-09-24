@@ -7,8 +7,9 @@
 import { PARTY_LABELS } from '../../api/dfm';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
 import type { WorksheetDfm, WorksheetRow } from '../../api/worksheet';
-import { noteKey } from '../../lib/fieldNotes';
+import { fieldKeyAllowed, noteKey } from '../../lib/fieldNotes';
 import { materialText } from '../../lib/material';
+import { shortName } from '../../lib/partDisplay';
 
 export type ColumnGroup = 'Identity' | 'Revision' | 'Material' | 'Paint' | 'Tool' | 'DFM' | 'Notes';
 export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' | 'material' | 'dfm' | 'notes';
@@ -16,6 +17,7 @@ export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' 
 export interface WorksheetContext {
   byKey: Map<string, FieldNoteSummary>;
   byPart: Map<number, FieldNoteSummary[]>;
+  projectCode: string | null;
 }
 
 export interface EditTarget {
@@ -35,24 +37,27 @@ export interface WorksheetColumn {
   defaultVisible: boolean;
   frozenWidth?: number;
   value(row: WorksheetRow, ctx: WorksheetContext): string | number | null;
+  /** Tooltip when the shown value is shortened. */
+  title?(row: WorksheetRow): string | null;
   edit(row: WorksheetRow): EditTarget | null;
 }
 
-export function buildContext(notes: FieldNoteSummary[] | undefined): WorksheetContext {
+export function buildContext(notes: FieldNoteSummary[] | undefined, projectCode: string | null = null): WorksheetContext {
   const byKey = new Map<string, FieldNoteSummary>();
   const byPart = new Map<number, FieldNoteSummary[]>();
   for (const n of Array.isArray(notes) ? notes : []) {
     byKey.set(noteKey(n.part_id, n.field_key), n);
     byPart.set(n.part_id, [...(byPart.get(n.part_id) ?? []), n]);
   }
-  return { byKey, byPart };
+  return { byKey, byPart, projectCode };
 }
 
 const TOOL_KEY = /^(tool|dfm)\./;
 
+/** The part a cell's note lives on, or null where the backend would refuse the field key for that part. */
 export function notePartId(col: WorksheetColumn, row: WorksheetRow): number | null {
-  if (col.noteOwner === 'row') return row.part_id;
-  if (col.noteOwner === 'tool') return row.tool?.part_id ?? null;
+  if (col.noteOwner === 'row') return fieldKeyAllowed(col.key, row.item_category) ? row.part_id : null;
+  if (col.noteOwner === 'tool') return row.tool && fieldKeyAllowed(col.key, 'tool') ? row.tool.part_id : null;
   return null;
 }
 
@@ -121,7 +126,8 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
   def({ key: 'part.tier1_part_number', label: 'Tier 1 no.', group: 'Identity', display: 'mono', noteOwner: 'row',
     editableOn: 'article', value: (r) => r.tier1_part_number, edit: onArticle('part.tier1_part_number') }),
   def({ key: 'part.name', label: 'Name', group: 'Identity', noteOwner: 'row', editableOn: 'article',
-    value: (r) => r.name, edit: onRow('part.name') }),
+    value: (r, ctx) => shortName(r.name, ctx.projectCode, r.customer_part_number), title: (r) => r.name,
+    edit: onRow('part.name') }),
   def({ key: 'part.part_type', label: 'Type', group: 'Identity', filter: 'enum', noteOwner: 'row', editableOn: 'article',
     value: (r) => r.part_type.replace(/_/g, ' '), edit: onArticle('part.part_type') }),
   def({ key: 'part.mirror_of', label: 'Mirror of', group: 'Identity', display: 'mono', noteOwner: 'row', editableOn: null,

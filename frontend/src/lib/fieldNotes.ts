@@ -14,6 +14,41 @@ export const FLAG_BUTTON: Record<FieldFlag, string> = {
 /** Same rule as the backend (field_note_service.FIELD_KEY_RE). */
 export const FIELD_KEY_RE = /^[a-z][a-z0-9_]{0,30}\.[a-z][a-z0-9_]{0,30}$/;
 
+/** Same limit as the backend (field_note_service.MAX_COMMENT_LENGTH). */
+export const MAX_COMMENT_LENGTH = 4000;
+
+const TOOL_ONLY_PREFIXES = ['tool', 'dfm'];
+const NOT_ON_TOOL_PREFIXES = ['paint', 'revision'];
+
+/** Same rule as the backend (field_note_service.check_field_key): tool. and dfm. only on tools, paint. and revision. never on tools. */
+export function fieldKeyAllowed(fieldKey: string, itemCategory: string | null | undefined): boolean {
+  const prefix = fieldKey.split('.', 1)[0];
+  const isTool = itemCategory === 'tool';
+  if (TOOL_ONLY_PREFIXES.includes(prefix)) return isTool;
+  if (NOT_ON_TOOL_PREFIXES.includes(prefix)) return !isTool;
+  return true;
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** The backend sends naive UTC ("2026-09-24T14:54:27"): read it as UTC, whatever offset marker it has or lacks. */
+function parseUtc(iso: string): Date | null {
+  const d = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "2026-09-24" in the viewer's local time. */
+export function localDate(iso: string): string {
+  const d = parseUtc(iso);
+  return d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : iso;
+}
+
+/** "2026-09-24 16:54" in the viewer's local time. */
+export function localDateTime(iso: string): string {
+  const d = parseUtc(iso);
+  return d ? `${localDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}` : iso;
+}
+
 export function flagTint(flag: FieldFlag | null | undefined): string {
   return flag ? FLAG_TINT[flag] : '';
 }

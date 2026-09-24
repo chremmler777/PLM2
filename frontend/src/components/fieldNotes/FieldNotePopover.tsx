@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useFieldNoteActions, useFieldNoteThread } from '../../hooks/queries/useFieldNotes';
-import { FLAG_BUTTON, FLAG_LABELS, FLAGS } from '../../lib/fieldNotes';
+import { FLAG_BUTTON, FLAG_LABELS, FLAGS, MAX_COMMENT_LENGTH, localDate, localDateTime } from '../../lib/fieldNotes';
 
 export interface FieldNotePopoverProps {
   partId: number;
@@ -86,7 +86,7 @@ export default function FieldNotePopover({ partId, fieldKey, label, position, on
       </div>
       {current && thread?.flag_set_by_name && (
         <p className="text-[11px] text-slate-500 mb-2">
-          {FLAG_LABELS[current]} by {thread.flag_set_by_name}{thread.flag_set_at ? `, ${thread.flag_set_at.slice(0, 10)}` : ''}
+          {FLAG_LABELS[current]} by {thread.flag_set_by_name}{thread.flag_set_at ? `, ${localDate(thread.flag_set_at)}` : ''}
         </p>
       )}
       <div data-testid="note-comments" className="max-h-56 overflow-y-auto space-y-2 my-2">
@@ -97,7 +97,7 @@ export default function FieldNotePopover({ partId, fieldKey, label, position, on
         ) : (
           comments.map((c) => (
             <div key={c.id} className="bg-slate-900/60 rounded px-2 py-1">
-              <div className="text-[11px] text-slate-500">{c.author_name ?? 'Unknown'}, {c.created_at.slice(0, 16).replace('T', ' ')}</div>
+              <div className="text-[11px] text-slate-500">{c.author_name ?? 'Unknown'}, {localDateTime(c.created_at)}</div>
               <div className="text-slate-200 whitespace-pre-wrap break-words">{c.body}</div>
             </div>
           ))
@@ -107,6 +107,7 @@ export default function FieldNotePopover({ partId, fieldKey, label, position, on
         aria-label="New comment"
         data-testid="note-comment-input"
         value={draft}
+        maxLength={MAX_COMMENT_LENGTH}
         rows={2}
         placeholder="Add a comment (Ctrl+Enter to add)"
         onChange={(e) => setDraft(e.target.value)}

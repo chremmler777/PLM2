@@ -88,6 +88,17 @@ export function enumOptions(col: WorksheetColumn, rows: WorksheetRow[], ctx: Wor
   return [...values].sort((x, y) => compareValues(x, y));
 }
 
+/** Enum choices for a column: the values of the rows every other filter leaves (Excel style), plus the current choice. */
+export function filterOptions(
+  col: WorksheetColumn, rows: WorksheetRow[], cols: WorksheetColumn[], filters: Record<string, string>,
+  ctx: WorksheetContext, onlyOpenFlags: boolean,
+): string[] {
+  const others = Object.fromEntries(Object.entries(filters).filter(([key]) => key !== col.key));
+  const options = enumOptions(col, applyFilters(rows, cols, others, ctx, onlyOpenFlags), ctx);
+  const chosen = (filters[col.key] ?? '').trim();
+  return chosen && !options.includes(chosen) ? [...options, chosen].sort((x, y) => compareValues(x, y)) : options;
+}
+
 /** The filters without enum values the rows no longer offer, so a stale choice cannot hide every row behind "All". */
 export function offeredFilters(
   filters: Record<string, string>, cols: WorksheetColumn[], rows: WorksheetRow[], ctx: WorksheetContext,

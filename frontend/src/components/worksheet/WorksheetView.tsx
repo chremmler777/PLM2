@@ -17,7 +17,7 @@ import { apiErrorMessage } from '../../lib/apiError';
 import { flagTint } from '../../lib/fieldNotes';
 import { WORKSHEET_COLUMNS, buildContext, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
-  applyFilters, buildExportPayload, enumOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
+  applyFilters, buildExportPayload, filterOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
   saveHiddenColumns, sortRows, visibleColumns, type RowKindFilter, type SortState,
 } from './worksheetTable';
 import WorksheetCell from './WorksheetCell';
@@ -25,12 +25,14 @@ import WorksheetCellMenu, { type CellMenuState } from './WorksheetCellMenu';
 
 export interface WorksheetViewProps {
   projectId: number;
+  /** Stripped from names, as in the item list. */
+  projectCode?: string | null;
   onClose(): void;
 }
 
 const GROUPS = ['Identity', 'Revision', 'Material', 'Paint', 'Tool', 'DFM', 'Notes'] as const;
 
-export default function WorksheetView({ projectId, onClose }: WorksheetViewProps) {
+export default function WorksheetView({ projectId, projectCode = null, onClose }: WorksheetViewProps) {
   const { data, isLoading, isError } = useWorksheet(projectId);
   const { data: notes } = useProjectFieldNotes(projectId);
   const [hidden, setHidden] = useState<Set<string>>(loadHiddenColumns);
@@ -50,7 +52,7 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
   });
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  const ctx = useMemo(() => buildContext(notes), [notes]);
+  const ctx = useMemo(() => buildContext(notes, projectCode), [notes, projectCode]);
   const menuNote = menu ? noteFor(menu.col, menu.row, ctx) : undefined;
   const cols = useMemo(() => visibleColumns(hidden), [hidden]);
   const offsets = useMemo(() => frozenOffsets(cols), [cols]);
@@ -166,7 +168,7 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
                           onChange={(e) => setFilters((f) => ({ ...f, [c.key]: e.target.value }))}
                           className="w-full bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-100 font-normal">
                           <option value="">All</option>
-                          {enumOptions(c, kindRows, ctx).map((o) => <option key={o} value={o}>{o}</option>)}
+                          {filterOptions(c, kindRows, cols, activeFilters, ctx, onlyOpen).map((o) => <option key={o} value={o}>{o}</option>)}
                         </select>
                       )}
                     </div>

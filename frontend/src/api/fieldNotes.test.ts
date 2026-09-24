@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { addFieldComment, getFieldNoteThread, listProjectFieldNotes, setFieldFlag } from './fieldNotes'
 import { downloadWorksheetXlsx, getWorksheet } from './worksheet'
+import { apiErrorMessage } from '../lib/apiError'
 import { searchMaterials, setPartMaterial, refreshPartMaterial, materialDbUrl } from './materials'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }))
@@ -46,11 +47,26 @@ describe('field notes, material and worksheet api', () => {
     Object.assign(URL, { createObjectURL: url, revokeObjectURL: revoke })
     clientMocks.post.mockResolvedValue({ data: new Blob(['x']), headers: { 'content-disposition': 'attachment; filename="1994-worksheet-2026-09-24.xlsx"' } })
     const payload = { columns: [{ key: 'part.part_number', label: 'KTX no.', type: 'text' as const }], rows: [], frozen_columns: 1 }
-    await downloadWorksheetXlsx(35, payload)
-    expect(clientMocks.post).toHaveBeenCalledWith('/v1/projects/35/worksheet/export', payload, { responseType: 'blob' })
-    expect(anchor.download).toBe('1994-worksheet-2026-09-24.xlsx')
-    expect(click).toHaveBeenCalled()
-    expect(revoke).toHaveBeenCalledWith('blob:x')
-    create.mockRestore()
+    vi.useFakeTimers()
+    try {
+      await downloadWorksheetXlsx(35, payload)
+      expect(clientMocks.post).toHaveBeenCalledWith('/v1/projects/35/worksheet/export', payload, { responseType: 'blob' })
+      expect(anchor.download).toBe('1994-worksheet-2026-09-24.xlsx')
+      expect(click).toHaveBeenCalled()
+      expect(revoke).not.toHaveBeenCalled() // some browsers still read the URL after click()
+      vi.runAllTimers()
+      expect(revoke).toHaveBeenCalledWith('blob:x')
+    } finally {
+      vi.useRealTimers()
+      create.mockRestore()
+    }
+  })
+
+  it('turns a Blob error body into the backend message', async () => {
+    const body = new Blob([JSON.stringify({ detail: 'every row needs exactly 3 cells, one per column' })], { type: 'application/json' })
+    clientMocks.post.mockRejectedValue({ response: { status: 422, data: body } })
+    const payload = { columns: [{ key: 'part.part_number', label: 'KTX no.', type: 'text' as const }], rows: [], frozen_columns: 1 }
+    const err = await downloadWorksheetXlsx(35, payload).then(() => null, (e: unknown) => e)
+    expect(apiErrorMessage(err, 'fallback')).toBe('every row needs exactly 3 cells, one per column')
   })
 })

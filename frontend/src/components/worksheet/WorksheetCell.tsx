@@ -41,7 +41,7 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpe
       break;
     default:
       body = value === null ? null : (
-        <span className={col.display === 'mono' ? 'font-mono text-slate-200' : col.display === 'number' ? 'tabular-nums text-slate-200' : 'text-slate-100'}>
+        <span title={col.title?.(row) ?? undefined} className={col.display === 'mono' ? 'font-mono text-slate-200' : col.display === 'number' ? 'tabular-nums text-slate-200' : 'text-slate-100'}>
           {value}
         </span>
       );

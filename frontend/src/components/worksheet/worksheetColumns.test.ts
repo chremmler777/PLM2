@@ -83,3 +83,30 @@ describe('worksheet column registry', () => {
     expect(dfmLabel({ status: 'finished', waiting_on: [], open_topics: 0 })).toBe('Finished')
   })
 })
+
+
+describe('worksheet notes on tool-only rows', () => {
+  const toolOnly = row({ part_id: 95, part_number: '199413', row_kind: 'tool_only', item_category: 'tool', part_type: 'purchased',
+    tool: { part_id: 95, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null, toolmaker_name: null, cycle_time_s: null, tonnage_class: null } })
+
+  it('offers no note where the backend would refuse the field key for the owner', () => {
+    expect(notePartId(col('paint.painted'), toolOnly)).toBeNull()
+    expect(notePartId(col('paint.colour'), toolOnly)).toBeNull()
+    expect(notePartId(col('revision.level'), toolOnly)).toBeNull()
+    expect(notePartId(col('part.name'), toolOnly)).toBe(95)
+    expect(notePartId(col('tool.cavities'), toolOnly)).toBe(95)
+    expect(notePartId(col('paint.painted'), row())).toBe(1)
+    expect(notePartId(col('tool.cavities'), row())).toBe(90)
+  })
+})
+
+describe('worksheet name column', () => {
+  const r = row({ name: '206.882.251 Handle, manual lift, passenger', customer_part_number: '206.882.251' })
+
+  it('shows the short name without the OEM number and project code, full name in the tooltip', () => {
+    const ctx = buildContext([], '1994')
+    expect(col('part.name').value(r, ctx)).toBe('Handle, manual lift, passenger')
+    expect(col('part.name').value(row({ name: '1994 Isofix Cover', customer_part_number: null }), ctx)).toBe('Isofix Cover')
+    expect(col('part.name').title?.(r)).toBe('206.882.251 Handle, manual lift, passenger')
+  })
+})

@@ -47,6 +47,9 @@ describe('FieldNoteMarker', () => {
     fireEvent.click(screen.getByTestId('note-marker-tool.cavities'))
     expect(await screen.findByText('Excel BOM says 4 cavities')).toBeTruthy()
     expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/7/field-notes/tool.cavities')
+    expect(screen.getByText('Engineer, 2026-09-24 12:12')).toBeTruthy() // 10:12 UTC in Europe/Berlin
+    expect(screen.getByText(/Open by Engineer, 2026-09-24/)).toBeTruthy()
+    expect((screen.getByTestId('note-comment-input') as HTMLTextAreaElement).maxLength).toBe(4000)
     fireEvent.change(screen.getByTestId('note-comment-input'), { target: { value: '  PLM 2 is the sold state  ' } })
     fireEvent.click(screen.getByTestId('note-comment-add'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/field-notes/tool.cavities/comments', { body: 'PLM 2 is the sold state' }))

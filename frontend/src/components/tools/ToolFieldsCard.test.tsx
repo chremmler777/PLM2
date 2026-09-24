@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ToolFieldsCard, { cavitiesFromNotes, type ToolFieldValues } from './ToolFieldsCard'
+import ToolFieldsCard, { type ToolFieldValues } from './ToolFieldsCard'
+import { cavitiesFromNotes } from './toolCavities'
 import { toast } from 'sonner'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))

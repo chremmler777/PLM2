@@ -66,6 +66,57 @@ describe('WorksheetView', () => {
     expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-3', 'ws-row-1'])
   })
 
+  it('offers the Type values of the rows currently included', async () => {
+    const tool = row({ part_id: 4, part_number: '199413', name: 'TOOL Cover', row_kind: 'tool_only', item_category: 'tool',
+      part_type: 'purchased', tool: null, dfm: null })
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows: [rows[0], tool] } })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    await screen.findByTestId('ws-row-1')
+    const options = () => [...(screen.getByTestId('filter-part.part_type') as HTMLSelectElement).options].map((o) => o.value)
+    expect(options()).toEqual(['', 'internal mfg'])
+    fireEvent.click(screen.getByTestId('ws-kind-tool-only'))
+    expect(options()).toEqual(['', 'internal mfg', 'purchased'])
+    fireEvent.change(screen.getByTestId('filter-part.name'), { target: { value: 'tool' } })
+    expect(options()).toEqual(['', 'purchased'])
+  })
+
+  it('a tool-only row has no comment or flag on paint and revision cells', async () => {
+    const tool = row({ part_id: 4, part_number: '199413', name: 'TOOL Cover', row_kind: 'tool_only', item_category: 'tool',
+      part_type: 'purchased', tool: { part_id: 4, part_number: '199413', name: 't', cavities: 2, toolmaker_id: null,
+        toolmaker_name: null, cycle_time_s: null, tonnage_class: null }, dfm: null })
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows: [tool] } })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    fireEvent.click(await screen.findByTestId('ws-kind-tool-only'))
+    const paint = await screen.findByTestId('ws-cell-4-paint.painted')
+    expect(within(paint).queryByTestId('note-marker-paint.painted')).toBeNull()
+    fireEvent.contextMenu(paint)
+    expect((screen.getByTestId('ws-menu-comment') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('ws-menu-flag-open') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.contextMenu(screen.getByTestId('ws-cell-4-tool.cavities'))
+    expect((screen.getByTestId('ws-menu-comment') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('shows the short name with the full name as tooltip', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') {
+        return Promise.resolve({ data: { project_id: 35, rows: [row({ part_id: 1, name: '206.882.251 Handle, manual lift, passenger' })] } })
+      }
+      return Promise.resolve({ data: [] })
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><MemoryRouter><WorksheetView projectId={35} projectCode="1994" onClose={vi.fn()} /></MemoryRouter></QueryClientProvider>)
+    const cell = await screen.findByTestId('ws-cell-1-part.name')
+    expect(within(cell).getByText('Handle, manual lift, passenger').closest('[title]')?.getAttribute('title'))
+      .toBe('206.882.251 Handle, manual lift, passenger')
+  })
+
   it('hides a column and remembers it', async () => {
     mount()
     await screen.findByTestId('ws-row-1')

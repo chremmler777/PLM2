@@ -12,22 +12,13 @@ import { useSuppliers } from '../../hooks/queries/useSuppliers';
 import { usePartFieldNoteIndex } from '../../hooks/queries/useFieldNotes';
 import { apiErrorMessage } from '../../lib/apiError';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
+import { cavitiesFromNotes } from './toolCavities';
 
 export interface ToolFieldValues {
   tool_cavities: number | null;
   toolmaker_id: number | null;
   tool_tonnage_class: number | null;
   tool_cycle_time_s: number | null;
-}
-
-export function cavitiesFromNotes(notes: (string | null | undefined)[]): number | null {
-  let total = 0;
-  let found = false;
-  for (const n of notes) {
-    const m = /(\d+)\s*cavit/i.exec(n ?? '');
-    if (m) { total += parseInt(m[1], 10); found = true; }
-  }
-  return found ? total : null;
 }
 
 type NumericKey = 'tool_cavities' | 'tool_tonnage_class' | 'tool_cycle_time_s';

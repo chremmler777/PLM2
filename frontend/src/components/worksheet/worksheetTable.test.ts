@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   HIDDEN_COLUMNS_KEY, applyFilters, buildExportPayload, compareValues, enumOptions, frozenOffsets, loadHiddenColumns,
-  offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
+  filterOptions, offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
 } from './worksheetTable'
 import { WORKSHEET_COLUMNS, buildContext } from './worksheetColumns'
 import { row } from './worksheetFixtures'
@@ -46,6 +46,19 @@ describe('worksheet table helpers', () => {
 
   it('lists enum options from the rows', () => {
     expect(enumOptions(col('part.part_type'), [a, b, a], ctx)).toEqual(['internal mfg', 'purchased'])
+  })
+
+  it('offers the enum values of the rows the other filters leave, never narrowed by its own choice', () => {
+    const tool = row({ part_id: 4, part_number: '199413', name: 'TOOL Cover', row_kind: 'tool_only', item_category: 'tool',
+      part_type: 'purchased' })
+    const cols = [col('part.name'), col('part.part_type')]
+    expect(filterOptions(col('part.part_type'), [a, tool], cols, {}, ctx, false)).toEqual(['internal mfg', 'purchased'])
+    expect(filterOptions(col('part.part_type'), [a, tool], cols, { 'part.name': 'tool' }, ctx, false)).toEqual(['purchased'])
+    expect(filterOptions(col('part.part_type'), [a, tool], cols, { 'part.part_type': 'purchased' }, ctx, false))
+      .toEqual(['internal mfg', 'purchased'])
+    // the chosen value stays selectable even when another filter leaves no row with it
+    expect(filterOptions(col('part.part_type'), [a, tool], cols, { 'part.name': 'side', 'part.part_type': 'purchased' }, ctx, false))
+      .toEqual(['internal mfg', 'purchased'])
   })
 
   it('remembers hidden columns and falls back to the defaults', () => {

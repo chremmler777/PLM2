@@ -86,12 +86,32 @@ function filenameFrom(disposition: string | undefined, fallback: string): string
   return m ? m[1] : fallback;
 }
 
+/** With responseType blob an error body is a Blob too: read it back as JSON so apiErrorMessage finds the detail. */
+async function withJsonErrorBody(e: unknown): Promise<unknown> {
+  const response = (e as { response?: { data?: unknown } })?.response;
+  if (!(response?.data instanceof Blob)) return e;
+  try {
+    response.data = JSON.parse(await response.data.text());
+  } catch {
+    // not JSON: keep the Blob, the caller shows its fallback text
+  }
+  return e;
+}
+
+const REVOKE_DELAY_MS = 10_000;
+
 export async function downloadWorksheetXlsx(projectId: number, payload: WorksheetExportPayload): Promise<void> {
-  const res = await client.post(`/v1/projects/${projectId}/worksheet/export`, payload, { responseType: 'blob' });
+  let res;
+  try {
+    res = await client.post(`/v1/projects/${projectId}/worksheet/export`, payload, { responseType: 'blob' });
+  } catch (e) {
+    throw await withJsonErrorBody(e);
+  }
   const url = URL.createObjectURL(res.data as Blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filenameFrom(res.headers?.['content-disposition'] as string | undefined, `worksheet-${projectId}.xlsx`);
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking right after click() can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 }
