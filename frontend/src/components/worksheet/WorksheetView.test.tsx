@@ -91,10 +91,10 @@ describe('WorksheetView', () => {
   it('keeps the frozen columns at their width, truncating long values', async () => {
     mount()
     const cell = await screen.findByTestId('ws-cell-1-part.part_number')
-    expect(cell.style.width).toBe('128px')
-    expect(cell.style.maxWidth).toBe('128px')
+    expect(cell.style.width).toBe('170px')
+    expect(cell.style.maxWidth).toBe('170px')
     const inner = within(cell).getByTestId('ws-tint-1-part.part_number')
-    expect(inner.style.width).toBe('128px')
+    expect(inner.style.width).toBe('170px')
     expect(inner.style.overflow).toBe('hidden')
     expect(within(cell).getByTitle('20-1994-010-0').className).toContain('truncate')
     const thumb = screen.getByTestId('ws-cell-1-part.thumbnail')

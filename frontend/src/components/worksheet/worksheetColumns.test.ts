@@ -19,6 +19,9 @@ describe('worksheet column registry', () => {
     for (const k of keys) expect(FIELD_KEY_RE.test(k)).toBe(true)
     expect(WORKSHEET_COLUMNS.slice(0, 3).map((c) => c.key)).toEqual(['part.thumbnail', 'part.part_number', 'part.customer_part_number'])
     expect(WORKSHEET_COLUMNS.filter((c) => c.frozenWidth).length).toBe(3)
+    // Measured in the browser: a 13 character number, flag dot, 2 digit comment count and the menu button.
+    expect(WORKSHEET_COLUMNS.filter((c) => c.frozenWidth).map((c) => [c.key, c.frozenWidth]))
+      .toEqual([['part.thumbnail', 44], ['part.part_number', 170], ['part.customer_part_number', 170]])
   })
 
   it('reads the values PLM holds', () => {

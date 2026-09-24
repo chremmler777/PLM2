@@ -67,8 +67,8 @@ describe('worksheet table helpers', () => {
 
   it('stacks the frozen columns from the left', () => {
     const offsets = frozenOffsets(visibleColumns(new Set()))
-    expect([...offsets.entries()]).toEqual([['part.thumbnail', 0], ['part.part_number', 44], ['part.customer_part_number', 172]])
-    expect([...frozenOffsets(visibleColumns(new Set(['part.thumbnail']))).entries()]).toEqual([['part.part_number', 0], ['part.customer_part_number', 128]])
+    expect([...offsets.entries()]).toEqual([['part.thumbnail', 0], ['part.part_number', 44], ['part.customer_part_number', 214]])
+    expect([...frozenOffsets(visibleColumns(new Set(['part.thumbnail']))).entries()]).toEqual([['part.part_number', 0], ['part.customer_part_number', 170]])
   })
 
   it('drops enum filters whose value is no longer offered, keeps text filters', () => {
