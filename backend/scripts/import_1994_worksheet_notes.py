@@ -10,13 +10,21 @@ open points 2026-09-23.xlsx, sheet BOM) into PLM field notes. Dry run by default
 Per Excel row (article by the OEM number in column D, tool by column B):
 - Tier 1 numbers: the four the Excel resolves, only where PLM has none.
 - Material: new with the "Material acc. drawing" text where no material is set.
+- Colour code (column M, e.g. NM0) on unpainted articles (Excel column L and PLM
+  paint agree it is not painted) and grain (column T, e.g. KF8): only plain
+  codes, only where PLM has none (never overwritten). A painted part's colour
+  ("VM0 = Skyscraper (paint)") belongs to its paint, not to colour_code.
 - Designation (column F) marked yellow (open): a comment on part.name.
 - Proposed resin and resin status: a comment on part.material, flag from the colour.
 - Cavities differing from PLM (or marked yellow): open flag and a comment on the
   tool's tool.cavities; PLM cavities are never overwritten.
 - Painted, colour, MIC cells with a colour: comments on paint.painted / paint.colour.
-- Open question and answer: comments on the field they are about (QUESTION_FIELD).
-- Grain (drawing, frozen RFQ, gloss, question, answer): one comment on revision.level.
+- Open question and answer: comments on the field they are about (QUESTION_FIELD);
+  the first import put them all on paint.colour, where found they count as imported.
+- Grain (drawing, frozen RFQ, gloss, question, answer): one comment on part.grain,
+  open flag where the Excel marks the RFQ grain as differing. The first import put
+  this comment on revision.level: where that note already has it, it counts as
+  imported and is not planned again on either key.
 Colours: yellow = open, green = confirmed, salmon = rejected.
 Every comment starts with COMMENT_PREFIX. The dry run lists only what --apply
 would write: comments that already exist (also in the wording of the first
@@ -26,6 +34,7 @@ after an apply says "nothing to do".
 import argparse
 import asyncio
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -35,6 +44,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.entities import Project
+from app.models.paint import PartPaint
 from app.models.part import Part
 from app.services.field_note_service import FieldNoteService
 from app.services.part_material_service import PartMaterialService
@@ -55,6 +65,16 @@ COMMENT_PREFIX = "From engineering Excel BOM 2026-09-23: "
 #   15  | 206.881.793 | Painted VM0 or chrome? What color is VM0?          | paint.painted
 # Rows 13 and 15 both ask first whether the part is painted at all, so both go
 # on paint.painted; their colour cells (M) carry the colour comment. Default paint.colour.
+GRAIN_KEY = "part.grain"
+GRAIN_LEGACY_KEY = "revision.level"  # where the first import put the grain comment
+PLAIN_CODE = re.compile(r"^[A-Z]{1,4}[0-9]{0,4}$")
+
+
+def plain_code(value: str) -> bool:
+    """A bare code like NM0 or KF8, not a sentence ("none on drawing", "VM0 = Skyscraper (paint)")."""
+    return bool(PLAIN_CODE.match((value or "").strip())) and any(ch.isdigit() for ch in value)
+
+
 QUESTION_FIELD = {"206.887.233": "paint.colour", "206.883.607": "paint.painted",
                   "206.881.479": "paint.colour", "206.881.793": "paint.painted"}
 
@@ -67,13 +87,15 @@ class Cell:
 
 @dataclass
 class Action:
-    kind: str                 # tier1 | material_new | comment | flag
+    kind: str                 # tier1 | material_new | colour_code | grain | comment | flag
     part_id: int
     label: str                # part number, for the printout
     field_key: Optional[str] = None
     text: Optional[str] = None
     flag: Optional[str] = None
     legacy_text: Optional[str] = None  # the first import's wording of the same comment
+    legacy_field_key: Optional[str] = None  # where the first import put it
+    legacy_texts: tuple = ()  # flag: the comments that, found on legacy_field_key, mean already imported
 
 
 def _flag(cell) -> Optional[str]:
@@ -109,9 +131,13 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
     parts = (await session.execute(select(Part).where(Part.project_id == project_id))).scalars().all()
     articles = {p.customer_part_number: p for p in parts if p.item_category == "article" and p.customer_part_number}
     tools = {p.part_number: p for p in parts if p.item_category == "tool"}
+    painted_in_plm = set((await session.execute(select(PartPaint.part_id).where(
+        PartPaint.part_id.in_([p.id for p in parts]), PartPaint.paint_required.is_(True)))).scalars().all()) \
+        if parts else set()
     comments: list[Action] = []
     seen: set = set()
     flags: dict = {}
+    flag_legacy: dict = {}
     other: list[Action] = []
     warnings: list[str] = []
 
@@ -120,11 +146,15 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
         if flag and FLAG_RANK[flag] > FLAG_RANK.get(current, 0):
             flags[(part.id, key)] = (part, flag)
 
-    def comment(part: Part, key: str, text: str, flag: Optional[str] = None, legacy: Optional[str] = None):
+    def comment(part: Part, key: str, text: str, flag: Optional[str] = None, legacy: Optional[str] = None,
+                legacy_key: Optional[str] = None):
         if (part.id, key, text) not in seen:
             seen.add((part.id, key, text))
             comments.append(Action("comment", part.id, part.part_number, key, COMMENT_PREFIX + text,
-                                   legacy_text=legacy or text))
+                                   legacy_text=legacy or text, legacy_field_key=legacy_key))
+        if legacy_key:
+            _, texts = flag_legacy.get((part.id, key), (None, ()))
+            flag_legacy[(part.id, key)] = (legacy_key, texts + (COMMENT_PREFIX + text, legacy or text))
         want_flag(part, key, flag)
 
     for cells in rows:
@@ -142,6 +172,11 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             other.append(Action("tier1", article.id, article.part_number, text=TIER1[oem]))
         if _s(cells, "I") and article.material_source is None:
             other.append(Action("material_new", article.id, article.part_number, text=_s(cells, "I")))
+        painted = _s(cells, "L").lower().startswith("yes") or article.id in painted_in_plm
+        if not painted and plain_code(_s(cells, "M")) and not article.colour_code:
+            other.append(Action("colour_code", article.id, article.part_number, text=_s(cells, "M")))
+        if plain_code(_s(cells, "T")) and not article.grain:
+            other.append(Action("grain", article.id, article.part_number, text=_s(cells, "T")))
         if _s(cells, "J") or _s(cells, "K"):
             comment(article, "part.material",
                     f"Proposed resin: {_s(cells, 'J') or 'none'}. Resin status: {_s(cells, 'K') or 'none'}",
@@ -167,10 +202,12 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             comment(article, "paint.colour", f"MIC / colour change: {_s(cells, 'N')}", _f(cells, "N"))
         if _s(cells, "R") or _s(cells, "S"):
             key = QUESTION_FIELD.get(oem, "paint.colour")
+            # The first import put every question on paint.colour.
+            old_key = "paint.colour" if key != "paint.colour" else None
             if _s(cells, "R"):
-                comment(article, key, f"Question: {_s(cells, 'R')}")
+                comment(article, key, f"Question: {_s(cells, 'R')}", legacy_key=old_key)
             if _s(cells, "S"):
-                comment(article, key, f"Answer: {_s(cells, 'S')}")
+                comment(article, key, f"Answer: {_s(cells, 'S')}", legacy_key=old_key)
             want_flag(article, key, _f(cells, "S") or _f(cells, "R"))
         grain = [f"{label} {_s(cells, col)}" for col, label in
                  (("T", "drawing"), ("U", "RFQ 26 frozen"), ("V", "gloss"))
@@ -182,10 +219,13 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             if _s(cells, "X"):
                 text += f" Answer: {_s(cells, 'X')}"
             grain_flag = "open" if any(_f(cells, c) == "open" for c in "TUVWX") else None
-            comment(article, "revision.level", text, grain_flag)
+            comment(article, GRAIN_KEY, text, grain_flag, legacy_key=GRAIN_LEGACY_KEY)
 
-    flag_actions = [Action("flag", part.id, part.part_number, key[1], flag=flag)
-                    for key, (part, flag) in flags.items()]
+    flag_actions = []
+    for key, (part, flag) in flags.items():
+        legacy_key, legacy_texts = flag_legacy.get(key, (None, ()))
+        flag_actions.append(Action("flag", part.id, part.part_number, key[1], flag=flag,
+                                   legacy_field_key=legacy_key, legacy_texts=legacy_texts))
     pending = [a for a in other + comments + flag_actions if await _pending(session, a)]
     return pending, warnings
 
@@ -205,11 +245,20 @@ async def _pending(session: AsyncSession, a: Action) -> bool:
         return not part.tier1_part_number
     if a.kind == "material_new":
         return part.material_source is None
+    if a.kind in ("colour_code", "grain"):
+        return not getattr(part, a.kind)
+    wordings = {a.text, a.legacy_text} - {None} if a.kind == "comment" else set(a.legacy_texts)
+    if a.legacy_field_key and wordings & await _bodies(session, part.id, a.legacy_field_key):
+        return False  # the first import already put it on the legacy key
     note = await FieldNoteService.get(session, part.id, a.field_key)
     if a.kind == "comment":
-        bodies = {c.body for c in note.comments} if note is not None else set()
-        return a.text not in bodies and (a.legacy_text is None or a.legacy_text not in bodies)
+        return not wordings & await _bodies(session, part.id, a.field_key)
     return note is None or note.flag_status != a.flag
+
+
+async def _bodies(session: AsyncSession, part_id: int, field_key: str) -> set:
+    note = await FieldNoteService.get(session, part_id, field_key)
+    return {c.body for c in note.comments} if note is not None else set()
 
 
 async def apply_actions(session: AsyncSession, actions: list, user_id: int) -> int:
@@ -227,6 +276,13 @@ async def apply_actions(session: AsyncSession, actions: list, user_id: int) -> i
                 performed_by=user_id, field_name="tier1_part_number", old_value=old, new_value=a.text)
         elif a.kind == "material_new":
             await PartMaterialService.set_new(session, part, a.text, user_id)
+        elif a.kind in ("colour_code", "grain"):
+            setattr(part, a.kind, a.text)
+            await ChangelogService.log_action(
+                session, part_id=part.id, action="field_updated",
+                action_description=f"{a.kind.replace('_', ' ').capitalize()} set to {a.text} "
+                                   "from the 1994 Excel BOM 2026-09-23",
+                performed_by=user_id, field_name=a.kind, old_value=None, new_value=a.text)
         elif a.kind == "comment":
             await FieldNoteService.add_comment(session, part, a.field_key, a.text, user_id)
         elif a.kind == "flag":

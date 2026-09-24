@@ -87,7 +87,11 @@ async def test_plan_then_apply_once(session_factory, seed, tmp_path):
     assert ("flag", ids["t01"], "tool.cavities", "open") in kinds
     assert ("flag", ids["t03"], "tool.cavities", "open") in kinds
     assert ("flag", ids["iso"], "paint.colour", "confirmed") in kinds
-    assert ("flag", ids["iso"], "revision.level", "open") in kinds
+    assert ("flag", ids["iso"], "part.grain", "open") in kinds
+    assert not any(a.field_key == "revision.level" for a in actions)
+    assert {(a.kind, a.part_id, a.text) for a in actions if a.kind in ("colour_code", "grain")} == {
+        ("colour_code", ids["lh"], "NM0"), ("colour_code", ids["iso"], "NM0"),
+        ("grain", ids["lh"], "KF8"), ("grain", ids["iso"], "KF8")}
     cav = [a.text for a in actions if a.kind == "comment" and a.field_key == "tool.cavities" and a.part_id == ids["t01"]]
     assert cav == [PREFIX + "4 cavities, PLM has 2. Check against RFQ 26 loop 37; PLM not changed."]
     assert all(a.text.startswith(PREFIX) for a in actions if a.kind == "comment")
@@ -104,6 +108,7 @@ async def test_plan_then_apply_once(session_factory, seed, tmp_path):
         assert lh.tier1_part_number == "S00H4X-110"
         assert (lh.material_source, lh.material_new_text) == ("new", "PA6-GF15 acc. VW 50125")
         assert t01.tool_cavities == 2  # never overwritten
+        assert (lh.colour_code, lh.grain) == ("NM0", "KF8")
         notes = (await s.execute(select(FieldNote))).scalars().all()
         count = sum(len(n.comments) for n in notes)
 
@@ -115,6 +120,63 @@ async def test_plan_then_apply_once(session_factory, seed, tmp_path):
         notes = (await s.execute(select(FieldNote))).scalars().all()
         assert sum(len(n.comments) for n in notes) == count
     assert not any(a.kind in ("tier1", "material_new") for a in actions2)
+
+
+async def test_colour_code_only_on_unpainted_parts_with_a_plain_code(session_factory, seed, tmp_path):
+    from app.models.paint import PartPaint
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    async with session_factory() as s:
+        s.add(PartPaint(part_id=ids["iso"], paint_required=True))  # PLM says painted, Excel says no
+        await s.commit()
+    rows = mod.read_rows(_xlsx(tmp_path))
+    # Excel says painted, the colour cell names the paint
+    rows[0]["L"] = mod.Cell("YES TL 226", None)
+    rows[0]["M"] = mod.Cell("VM0 = Skyscraper (paint)", "confirmed")
+    rows[0]["T"] = mod.Cell("N/A (painted)", None)
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.kind == "colour_code" for a in actions)
+    # a grain that is not a plain code stays a comment only
+    assert [(a.part_id, a.text) for a in actions if a.kind == "grain"] == [(ids["iso"], "KF8")]
+    assert mod.plain_code("NM0") and mod.plain_code("KF8")
+    assert not any(mod.plain_code(v) for v in ("VM0 = Skyscraper (paint)", "none on drawing", "N/A (painted)",
+                                               "KF8 (S00H4D-110 NM0); KF7 on S00HTD-110 RHO", ""))
+
+
+async def test_colour_code_and_grain_are_never_overwritten(session_factory, seed, tmp_path):
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    async with session_factory() as s:
+        lh = await s.get(Part, ids["lh"])
+        lh.colour_code, lh.grain = "RHO", "KF7"
+        await s.commit()
+    rows = mod.read_rows(_xlsx(tmp_path))
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.part_id == ids["lh"] and a.kind in ("colour_code", "grain") for a in actions)
+
+
+async def test_grain_notes_from_the_first_import_on_revision_level_count_as_imported(session_factory, seed, tmp_path):
+    """plm_integ got the grain comment on revision.level: not again there, and not a second copy on part.grain."""
+    from app.services.field_note_service import FieldNoteService
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    grain = "Grain: drawing KF8, RFQ 26 frozen Stipple 2, gloss 2 ±0.3. Question: RFQ has Stipple 2, drawing KF8"
+    async with session_factory() as s:
+        iso = await s.get(Part, ids["iso"])
+        await FieldNoteService.add_comment(s, iso, "revision.level", PREFIX + grain, seed["engineer_id"])
+        await FieldNoteService.set_flag(s, iso, "revision.level", "open", seed["engineer_id"])
+        lh = await s.get(Part, ids["lh"])  # the first wording, without the prefix
+        await FieldNoteService.add_comment(s, lh, "revision.level", "Grain: drawing KF8, RFQ 26 frozen Stipple 4, gloss 2 ±0.3.",
+                                           seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.field_key in ("revision.level", "part.grain") for a in actions)
+    # the grain value itself is still set
+    assert {(a.part_id, a.text) for a in actions if a.kind == "grain"} == {(ids["lh"], "KF8"), (ids["iso"], "KF8")}
 
 
 async def test_unknown_rows_are_warnings(session_factory, seed, tmp_path):
@@ -196,3 +258,22 @@ async def test_dry_run_disposes_the_engine(session_factory, seed, tmp_path, db_e
     await mod.main()
     assert disposed == [True]
     assert "DRY RUN" in capsys.readouterr().out
+
+
+async def test_question_notes_the_first_import_put_on_paint_colour_are_not_repeated(session_factory, seed, tmp_path):
+    """Before QUESTION_FIELD sent "Painted ...?" questions to paint.painted, the first import put them on paint.colour."""
+    from app.services.field_note_service import FieldNoteService
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    rows[1]["D"] = mod.Cell("206.883.607", None)  # a paint.painted question row
+    async with session_factory() as s:
+        iso = await s.get(Part, ids["iso"])
+        iso.customer_part_number = "206.883.607"
+        for body in ("Question: 1 or 3 colors?", "Answer: Confirmed 2026-09-23: no MIC, NM0 only"):
+            await FieldNoteService.add_comment(s, iso, "paint.colour", body, seed["engineer_id"])
+        await FieldNoteService.set_flag(s, iso, "paint.colour", "confirmed", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.part_id == ids["iso"] and a.field_key == "paint.painted" for a in actions)
