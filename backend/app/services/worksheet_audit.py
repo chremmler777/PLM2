@@ -69,6 +69,11 @@ FIELD_NAME_KEYS: dict[str, str] = {
     "toolmaker_id": "tool.toolmaker",
 }
 
+# Fixed-key actions that also match another field's filter: paint_updated saves the whole paint
+# setup (paint_required and the layers) in one changelog entry, so it belongs under both the
+# Colour and the Painted history, though it still displays under its primary key (paint.colour).
+EXTRA_FIELD_FILTERS: dict[str, tuple[str, ...]] = {"paint_updated": ("paint.painted",)}
+
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 MAX_CSV_ROWS = 10_000
@@ -102,7 +107,7 @@ def _allowed():
 def _field_filter(field_key: str):
     C = RevisionChangelog
     names = [n for n, k in FIELD_NAME_KEYS.items() if k == field_key]
-    fixed = [a for a, s in AUDIT_ACTIONS.items() if s.field == field_key]
+    fixed = [a for a, s in AUDIT_ACTIONS.items() if s.field == field_key or field_key in EXTRA_FIELD_FILTERS.get(a, ())]
     conds = [and_(C.action.in_(_actions(KEY)), C.field_name == field_key)]
     if names:
         conds.append(and_(C.action.in_(_actions(MAPPED)), C.field_name.in_(names)))
@@ -168,7 +173,9 @@ def _cell(value) -> str:
     return f"'{text}" if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
 
 
-def build_csv(entries: list[dict]) -> bytes:
+def build_csv(entries: list[dict], truncated: bool = False) -> bytes:
+    """truncated: the caller hit MAX_CSV_ROWS and cut off older entries - a final row says so,
+    matching the X-Truncated response header (see export_worksheet_audit)."""
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(CSV_HEADER)
@@ -177,4 +184,7 @@ def build_csv(entries: list[dict]) -> bytes:
             (e["at"] or "")[:19].replace("T", " "), (e["actor"] or {}).get("name"), e["part"]["part_number"],
             e["part"]["customer_part_number"], e["action_group"], e["action"], e["field_key"], e["old_value"],
             e["new_value"], e["description"])])
+    if truncated:
+        w.writerow(["", "", "", "", "", "", "", "", "",
+                   f"Export truncated at {MAX_CSV_ROWS} entries; older entries were left out"])
     return ("﻿" + out.getvalue()).encode("utf-8")

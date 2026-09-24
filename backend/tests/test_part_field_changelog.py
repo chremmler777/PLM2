@@ -68,6 +68,37 @@ async def test_tool_fields_are_logged(client, eng_auth, seed):
     ]
 
 
+async def test_tier1_and_customer_part_number_are_trimmed_and_blank_over_null_logs_nothing(client, eng_auth, seed):
+    pid = await _tool(client, eng_auth, seed)
+    # trimmed: leading/trailing whitespace is not part of the value
+    await client.put(f"/api/v1/parts/{pid}", json={"tier1_part_number": "  T1-1  "}, headers=eng_auth)
+    await client.put(f"/api/v1/parts/{pid}", json={"customer_part_number": "  C-1  "}, headers=eng_auth)
+    # "" over NULL (no prior value): normalises to None, so nothing changed, nothing logged
+    pid2 = await _tool(client, eng_auth, seed, number="199404")
+    await client.put(f"/api/v1/parts/{pid2}", json={"tier1_part_number": ""}, headers=eng_auth)
+    await client.put(f"/api/v1/parts/{pid2}", json={"customer_part_number": ""}, headers=eng_auth)
+    assert await _log(client, eng_auth, pid) == [
+        ("field_updated", "tier1_part_number", None, "T1-1"),
+        ("field_updated", "customer_part_number", None, "C-1"),
+    ]
+    assert await _log(client, eng_auth, pid2) == []
+    res = await client.get(f"/api/v1/parts/{pid2}", headers=eng_auth)
+    assert res.json()["tier1_part_number"] is None
+    assert res.json()["customer_part_number"] is None
+
+
+async def test_tool_cycle_time_is_rounded_to_one_decimal_before_comparing_and_logging(client, eng_auth, seed):
+    pid = await _tool(client, eng_auth, seed)
+    await client.put(f"/api/v1/parts/{pid}", json={"tool_cycle_time_s": 12.34}, headers=eng_auth)
+    res = await client.get(f"/api/v1/parts/{pid}", headers=eng_auth)
+    assert res.json()["tool_cycle_time_s"] == 12.3
+    # re-saving the unrounded value that rounds to the same number: no entry
+    await client.put(f"/api/v1/parts/{pid}", json={"tool_cycle_time_s": 12.34}, headers=eng_auth)
+    assert await _log(client, eng_auth, pid) == [
+        ("field_updated", "tool_cycle_time_s", None, "12.3"),
+    ]
+
+
 async def test_toolmaker_change_logs_supplier_name(client, eng_auth, seed):
     pid = await _tool(client, eng_auth, seed)
     sued = await _supplier(client, eng_auth, "Toolshop Sued")

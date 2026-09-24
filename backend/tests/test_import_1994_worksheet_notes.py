@@ -86,7 +86,7 @@ async def test_plan_then_apply_once(session_factory, seed, tmp_path):
     assert ("flag", ids["lh"], "part.material", "rejected") in kinds
     assert ("flag", ids["t01"], "tool.cavities", "open") in kinds
     assert ("flag", ids["t03"], "tool.cavities", "open") in kinds
-    assert ("flag", ids["iso"], "paint.colour", "confirmed") in kinds
+    assert ("flag", ids["iso"], "part.colour_code", "confirmed") in kinds  # iso is unpainted
     assert ("flag", ids["iso"], "part.grain", "open") in kinds
     assert not any(a.field_key == "revision.level" for a in actions)
     assert {(a.kind, a.part_id, a.text) for a in actions if a.kind in ("colour_code", "grain")} == {
@@ -211,6 +211,67 @@ async def test_comments_from_the_first_import_wording_are_not_planned_again(sess
     planned = {(a.part_id, a.field_key) for a in actions if a.kind == "comment"}
     assert (ids["t01"], "tool.cavities") not in planned
     assert (ids["lh"], "part.material") not in planned
+
+
+async def test_mic_comment_and_colour_questions_route_to_colour_code_when_unpainted(session_factory, seed, tmp_path):
+    """Column N (MIC / colour change) and a colour question/answer (not a painted question) are
+    about the article's own colour code on an unpainted article, not about the paint."""
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    iso_comment_keys = {a.field_key for a in actions if a.kind == "comment" and a.part_id == ids["iso"]}
+    assert iso_comment_keys == {"part.material", "part.name", "part.colour_code", "part.grain"}
+    mic = [a.text for a in actions if a.kind == "comment" and a.part_id == ids["iso"]
+          and a.field_key == "part.colour_code" and "MIC / colour change" in a.text]
+    assert mic == [PREFIX + "MIC / colour change: no (confirmed)"]
+    question = [a.text for a in actions if a.kind == "comment" and a.part_id == ids["iso"]
+               and a.field_key == "part.colour_code" and a.text.startswith(PREFIX + "Question:")]
+    assert question == [PREFIX + "Question: 1 or 3 colors?"]
+    assert ("flag", ids["iso"], "part.colour_code", "confirmed") in [
+        (a.kind, a.part_id, a.field_key, a.flag) for a in actions]
+
+
+async def test_mic_comment_and_colour_questions_route_to_paint_colour_when_painted(session_factory, seed, tmp_path):
+    from app.models.paint import PartPaint
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    async with session_factory() as s:
+        s.add(PartPaint(part_id=ids["iso"], paint_required=True))
+        await s.commit()
+    rows = mod.read_rows(_xlsx(tmp_path))
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    iso_comment_keys = {a.field_key for a in actions if a.kind == "comment" and a.part_id == ids["iso"]}
+    assert "part.colour_code" not in iso_comment_keys
+    assert "paint.colour" in iso_comment_keys
+    mic = [a.text for a in actions if a.kind == "comment" and a.part_id == ids["iso"]
+          and a.field_key == "paint.colour" and "MIC / colour change" in a.text]
+    assert mic == [PREFIX + "MIC / colour change: no (confirmed)"]
+    assert ("flag", ids["iso"], "paint.colour", "confirmed") in [
+        (a.kind, a.part_id, a.field_key, a.flag) for a in actions]
+
+
+async def test_colour_comments_on_an_unpainted_article_dedupe_against_the_first_imports_paint_colour(
+        session_factory, seed, tmp_path):
+    """plm_integ was imported before the painted/unpainted split: its colour question, answer and
+    MIC comment all landed on paint.colour, even for iso, which is unpainted. A rerun must not
+    write a second copy on part.colour_code."""
+    from app.services.field_note_service import FieldNoteService
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    async with session_factory() as s:
+        iso = await s.get(Part, ids["iso"])
+        for body in ("Question: 1 or 3 colors?", "Answer: Confirmed 2026-09-23: no MIC, NM0 only",
+                     "MIC / colour change: no (confirmed)"):
+            await FieldNoteService.add_comment(s, iso, "paint.colour", body, seed["engineer_id"])
+        await FieldNoteService.set_flag(s, iso, "paint.colour", "confirmed", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.part_id == ids["iso"] and a.field_key in ("part.colour_code", "paint.colour") for a in actions)
 
 
 async def test_paint_questions_map_by_question_text():

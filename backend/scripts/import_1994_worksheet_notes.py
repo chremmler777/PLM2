@@ -18,7 +18,12 @@ Per Excel row (article by the OEM number in column D, tool by column B):
 - Proposed resin and resin status: a comment on part.material, flag from the colour.
 - Cavities differing from PLM (or marked yellow): open flag and a comment on the
   tool's tool.cavities; PLM cavities are never overwritten.
-- Painted, colour, MIC cells with a colour: comments on paint.painted / paint.colour.
+- Painted (column L): a comment on paint.painted. Colour (column M): a comment on
+  paint.colour, always (see colour code above for the plain-code value action).
+  MIC / colour change (column N) and an open colour question/answer (QUESTION_FIELD
+  entries mapped to a colour, not a painted question): a comment on paint.colour for a
+  painted article, part.colour_code for an unpainted one - the same field the value and
+  the M comment already use for a painted article, but the MIC code field otherwise.
 - Open question and answer: comments on the field they are about (QUESTION_FIELD);
   the first import put them all on paint.colour, where found they count as imported.
 - Grain (drawing, frozen RFQ, gloss, question, answer): one comment on part.grain,
@@ -77,6 +82,12 @@ def plain_code(value: str) -> bool:
 
 QUESTION_FIELD = {"206.887.233": "paint.colour", "206.883.607": "paint.painted",
                   "206.881.479": "paint.colour", "206.881.793": "paint.painted"}
+
+
+def colour_field(painted: bool) -> str:
+    """Where a colour comment (MIC/colour change, a colour question) belongs: the paint on a
+    painted article, the article's own colour code (MIC) field otherwise."""
+    return "paint.colour" if painted else "part.colour_code"
 
 
 @dataclass
@@ -198,12 +209,21 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             comment(article, "paint.painted", f"Painted: {_s(cells, 'L')}", _f(cells, "L"))
         if _f(cells, "M"):
             comment(article, "paint.colour", f"Colour: {_s(cells, 'M')}", _f(cells, "M"))
+        # The first import put every colour comment on paint.colour, painted or not: the legacy
+        # key is paint.colour whenever the current key ends up elsewhere.
+        colour_key = colour_field(painted)
+        colour_legacy_key = "paint.colour" if colour_key != "paint.colour" else None
         if _f(cells, "N"):
-            comment(article, "paint.colour", f"MIC / colour change: {_s(cells, 'N')}", _f(cells, "N"))
+            comment(article, colour_key, f"MIC / colour change: {_s(cells, 'N')}", _f(cells, "N"),
+                    legacy_key=colour_legacy_key)
         if _s(cells, "R") or _s(cells, "S"):
             key = QUESTION_FIELD.get(oem, "paint.colour")
-            # The first import put every question on paint.colour.
-            old_key = "paint.colour" if key != "paint.colour" else None
+            old_key = None
+            if key == "paint.colour":
+                key, old_key = colour_key, colour_legacy_key
+            else:
+                # painted question (paint.painted): the first import put it on paint.colour too.
+                old_key = "paint.colour" if key != "paint.colour" else None
             if _s(cells, "R"):
                 comment(article, key, f"Question: {_s(cells, 'R')}", legacy_key=old_key)
             if _s(cells, "S"):

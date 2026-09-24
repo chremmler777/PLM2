@@ -5,7 +5,8 @@ import MaterialValue from '../materials/MaterialValue';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
 import type { WorksheetRow } from '../../api/worksheet';
-import { cellNoteKey, colourSource, notePartId, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
+import { noteKey } from '../../lib/fieldNotes';
+import { cellNoteKey, colourSource, notePartId, otherColourKey, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
 
 export interface WorksheetCellProps {
   row: WorksheetRow;
@@ -25,6 +26,11 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, projectId
   const value = col.value(row, ctx);
   const partId = notePartId(col, row);
   const fieldKey = cellNoteKey(col, row);
+  // Colour cell only: the other key's own note (not the combined one in `note`), shown as a second marker
+  // when it has a comment or flag the active key's marker would otherwise hide.
+  const otherKey = col.key === 'part.colour' ? otherColourKey(row) : null;
+  const otherNote = otherKey && partId !== null ? ctx.byKey.get(noteKey(partId, otherKey)) : undefined;
+  const showOther = !!otherNote && (!!otherNote.flag_status || otherNote.comment_count > 0);
   let body: React.ReactNode;
   switch (col.display) {
     case 'thumbnail':
@@ -72,6 +78,9 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, projectId
       {partId !== null && fieldKey !== null && (
         <FieldNoteMarker partId={partId} fieldKey={fieldKey} label={col.label} note={note} projectId={projectId}
           open={noteOpen} onOpenChange={onNoteOpenChange} quietWhenEmpty />
+      )}
+      {showOther && otherKey && partId !== null && (
+        <FieldNoteMarker partId={partId} fieldKey={otherKey} label={`${col.label} (other)`} note={otherNote} projectId={projectId} />
       )}
       {col.display !== 'thumbnail' && (
         <button

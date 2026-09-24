@@ -17,6 +17,8 @@ describe('worksheet audit helpers', () => {
     expect(auditFieldLabel('paint.colour')).toBe('Colour')
     expect(auditFieldLabel('part.unknown')).toBe('part.unknown')
     expect(auditFieldLabel(null)).toBe('')
+    expect(auditFieldLabel('part.tier1_part_number')).toBe('Tier 1 no.')
+    expect(auditFieldLabel('part.customer_part_number')).toBe('OEM no.')
   })
 
   it('says what happened in plain words', () => {

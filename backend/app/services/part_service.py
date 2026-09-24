@@ -227,12 +227,14 @@ class PartService:
             part.supplier_id = supplier_id
         if update_customer_part_number:
             old_customer_part_number = part.customer_part_number
-            part.customer_part_number = customer_part_number
-            await _log_field_change("customer_part_number", old_customer_part_number, customer_part_number)
+            new_customer_part_number = clean_text(customer_part_number)
+            part.customer_part_number = new_customer_part_number
+            await _log_field_change("customer_part_number", old_customer_part_number, new_customer_part_number)
         if update_tier1_part_number:
             old_tier1_part_number = part.tier1_part_number
-            part.tier1_part_number = tier1_part_number
-            await _log_field_change("tier1_part_number", old_tier1_part_number, tier1_part_number)
+            new_tier1_part_number = clean_text(tier1_part_number)
+            part.tier1_part_number = new_tier1_part_number
+            await _log_field_change("tier1_part_number", old_tier1_part_number, new_tier1_part_number)
 
         tool_updates = {
             "tool_cavities": (update_tool_cavities, tool_cavities),
@@ -253,6 +255,12 @@ class PartService:
                         new_text = await PartService._supplier_name(session, value)
                         setattr(part, attr, value)
                         await _log_field_change(attr, old, value, old_text, new_text)
+                    elif attr == "tool_cycle_time_s":
+                        # stored as Numeric(6,1): round before comparing/logging so re-saving the same
+                        # unrounded value (12.34 after a 12.3 save) is not logged as a change.
+                        new_cycle_time = None if value is None else round(value, 1)
+                        setattr(part, attr, new_cycle_time)
+                        await _log_field_change(attr, old, new_cycle_time)
                     else:
                         setattr(part, attr, value)
                         await _log_field_change(attr, old, value)

@@ -77,6 +77,14 @@ describe('WorksheetAuditView', () => {
       '/plm2/api/v1/projects/35/worksheet/audit.csv?action_group=flags&part=206.882&field_key=part.material')
   })
 
+  it('offers the Tier 1 and OEM part number fields in the field filter', async () => {
+    mount()
+    await screen.findByTestId('audit-row-9')
+    const options = [...screen.getByTestId('audit-filter-field').querySelectorAll('option')].map((o) => o.textContent)
+    expect(options).toContain('Tier 1 no.')
+    expect(options).toContain('OEM no.')
+  })
+
   it('loads older entries with before_id', async () => {
     mount()
     await screen.findByTestId('audit-row-7')

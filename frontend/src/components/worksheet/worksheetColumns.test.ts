@@ -143,6 +143,23 @@ describe('worksheet colour and grain columns', () => {
     expect(noteFor(col('part.grain'), mic, ctx)?.flag_status).toBe('rejected')
     for (const k of ['paint.colour', 'part.colour_code', 'part.grain']) expect(FIELD_KEY_RE.test(k)).toBe(true)
   })
+
+  it('combines the worst flag and total comments of both colour keys, for tint and export alike', () => {
+    // unpainted row: part.colour_code is the active key, paint.colour is the other one
+    const both = buildContext([
+      note(2, 'part.colour_code', 'confirmed', 'looks right'),
+      note(2, 'paint.colour', 'open', 'wait, is this painted after all?'),
+    ])
+    expect(noteFor(col('part.colour'), mic, both)?.flag_status).toBe('open')
+    expect(noteFor(col('part.colour'), mic, both)?.comment_count).toBe(2)
+    // painted row: paint.colour is the active key, part.colour_code is the other one
+    const painted2 = buildContext([note(1, 'paint.colour', 'rejected'), note(1, 'part.colour_code', 'open')])
+    expect(noteFor(col('part.colour'), painted, painted2)?.flag_status).toBe('open')
+    // only the active key has a note: unaffected by the other, absent key
+    expect(noteFor(col('part.colour'), mic, buildContext([note(2, 'part.colour_code', 'confirmed')]))?.comment_count).toBe(0)
+    // neither key has a note: no note
+    expect(noteFor(col('part.colour'), mic, empty)).toBeUndefined()
+  })
 })
 
 describe('worksheet name column', () => {

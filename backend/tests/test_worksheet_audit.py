@@ -109,6 +109,21 @@ async def test_filters_group_part_and_field(client, eng_auth, seed, session_fact
     assert bad.status_code == 422
 
 
+async def test_paint_updated_appears_under_both_colour_and_painted_history(client, eng_auth, seed, session_factory):
+    ids = await _build(session_factory, seed)
+    async with session_factory() as s:
+        art = await s.get(Part, ids["art"])
+        s.add(RevisionChangelog(part_id=art.id, action="paint_updated", action_description="Paint setup: painted, base coat",
+                                performed_by=seed["engineer_id"], performed_at=datetime(2026, 9, 20, 11, 0)))
+        await s.commit()
+    colour = (await client.get(_url(seed), params={"field_key": "paint.colour"}, headers=eng_auth)).json()["entries"]
+    assert "paint_updated" in [e["action"] for e in colour]
+    painted = (await client.get(_url(seed), params={"field_key": "paint.painted"}, headers=eng_auth)).json()["entries"]
+    assert [e["action"] for e in painted] == ["paint_updated"]
+    # it still displays under its primary key
+    assert next(e for e in painted if e["action"] == "paint_updated")["field_key"] == "paint.colour"
+
+
 async def test_pagination_by_before_id_and_limit_cap(client, eng_auth, seed, session_factory):
     ids = await _build(session_factory, seed)
     first = (await client.get(_url(seed), params={"limit": 3}, headers=eng_auth)).json()
@@ -161,6 +176,27 @@ async def test_csv_neutralises_formula_like_text(client, eng_auth, seed, session
     r = await client.get(_url(seed, ".csv"), headers=eng_auth)
     rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
     assert rows[1][8] == "'=1+1" and rows[1][9] == "'=HYPERLINK(1)"
+
+
+async def test_csv_export_is_truncated_past_the_row_cap(client, eng_auth, seed, session_factory, monkeypatch):
+    await _build(session_factory, seed)  # 7 worksheet-relevant entries for the project
+    monkeypatch.setattr("app.api.v1.items.worksheet.MAX_CSV_ROWS", 2)
+    monkeypatch.setattr("app.services.worksheet_audit.MAX_CSV_ROWS", 2)
+    r = await client.get(_url(seed, ".csv"), headers=eng_auth)
+    assert r.status_code == 200, r.text
+    assert r.headers["x-truncated"] == "true"
+    rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+    assert len(rows) == 1 + 2 + 1  # header + capped rows + the truncation notice
+    assert rows[-1][-1] == "Export truncated at 2 entries; older entries were left out"
+
+
+async def test_csv_export_under_the_cap_is_not_truncated(client, eng_auth, seed, session_factory):
+    await _build(session_factory, seed)
+    r = await client.get(_url(seed, ".csv"), headers=eng_auth)
+    assert r.status_code == 200, r.text
+    assert "x-truncated" not in r.headers
+    rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
+    assert "truncated" not in rows[-1][-1].lower()
 
 
 async def test_field_key_mapping():

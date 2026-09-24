@@ -73,10 +73,20 @@ export function notePartId(col: WorksheetColumn, row: WorksheetRow): number | nu
   return null;
 }
 
+/**
+ * The note driving a cell's marker, tint and export flag/comment count. For the Colour column this is the
+ * combined note of both possible keys (part.colour_code and paint.colour), so a note on the key the cell is
+ * not currently showing still tints the cell and counts toward the export - see otherColourKey.
+ */
 export function noteFor(col: WorksheetColumn, row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary | undefined {
   const partId = notePartId(col, row);
   const key = cellNoteKey(col, row);
-  return partId === null || key === null ? undefined : ctx.byKey.get(noteKey(partId, key));
+  if (partId === null || key === null) return undefined;
+  const primary = ctx.byKey.get(noteKey(partId, key));
+  if (col.key !== 'part.colour') return primary;
+  const otherKey = otherColourKey(row);
+  const other = otherKey ? ctx.byKey.get(noteKey(partId, otherKey)) : undefined;
+  return combineNotes(primary, other);
 }
 
 /** Where a row's colour comes from: the paint (painted), the article's MIC colour code, or nowhere. */
@@ -96,6 +106,28 @@ function colourValue(row: WorksheetRow): string | null {
 /** Painted rows keep the paint section's key; unpainted rows the article's colour code. */
 const colourKey = (row: WorksheetRow): string | null =>
   row.row_kind === 'tool_only' ? null : row.paint.painted ? 'paint.colour' : 'part.colour_code';
+
+/** The colour key not currently shown: the article's colour code on a painted row, the paint on an unpainted row. */
+export const otherColourKey = (row: WorksheetRow): string | null =>
+  row.row_kind === 'tool_only' ? null : row.paint.painted ? 'part.colour_code' : 'paint.colour';
+
+const FLAG_RANK: Record<string, number> = { open: 0, rejected: 1, confirmed: 2 };
+
+/** The more attention-worthy of two flags: open, then rejected, then confirmed, then none. */
+function worseFlag(a: FieldNoteSummary['flag_status'], b: FieldNoteSummary['flag_status']): FieldNoteSummary['flag_status'] {
+  const ra = a ? FLAG_RANK[a] : 3;
+  const rb = b ? FLAG_RANK[b] : 3;
+  return ra <= rb ? (a ?? null) : (b ?? null);
+}
+
+/** Merges the notes of the Colour cell's two possible keys: the worst flag, the total comment count. */
+function combineNotes(primary: FieldNoteSummary | undefined, other: FieldNoteSummary | undefined): FieldNoteSummary | undefined {
+  if (!primary && !other) return undefined;
+  const base = primary ?? other!;
+  return { ...base, flag_status: worseFlag(primary?.flag_status ?? null, other?.flag_status ?? null),
+    comment_count: (primary?.comment_count ?? 0) + (other?.comment_count ?? 0) };
+}
+
 const articleOnlyKey = (key: string) => (row: WorksheetRow): string | null => (row.row_kind === 'tool_only' ? null : key);
 
 /** The row's own notes plus its tool's tool./dfm. notes. */

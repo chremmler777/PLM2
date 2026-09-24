@@ -105,7 +105,9 @@ async def export_worksheet_audit(project_id: int, filters: dict = Depends(_audit
                                  current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await _project_in_org(db, project_id, current_user.organization_id)
     project = await db.get(Project, project_id)
-    entries, _ = await audit_entries(db, project_id, **filters, limit=MAX_CSV_ROWS)
+    entries, truncated = await audit_entries(db, project_id, **filters, limit=MAX_CSV_ROWS)
     filename = f"{_safe(project.code)}-worksheet-audit-{date.today().isoformat()}.csv"
-    return Response(content=build_csv(entries), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if truncated:
+        headers["X-Truncated"] = "true"
+    return Response(content=build_csv(entries, truncated), media_type="text/csv; charset=utf-8", headers=headers)
