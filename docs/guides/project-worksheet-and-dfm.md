@@ -90,6 +90,14 @@ field on the article, tool and paint pages, so a flag set in the worksheet is
 visible there too. A flag on a tool value (for example cavities) belongs to
 the tool, so both articles of a 1+1 tool show it.
 
+The Colour cell holds two fields: the paint colour and the moulded-in colour
+code. The menu and the main marker act on the one the cell shows (paint on
+painted parts, colour code on the others). A note on the other field shows
+as a second, smaller marker in the same cell; click it to read or clear it.
+The cell tint and the export take the flag of the two that needs more
+attention (open, then rejected, then confirmed), so a cell stays yellow
+while either field is still open.
+
 ![Comment thread with flag buttons and history](img/pw-ws-final-comment-popover.png)
 
 ![Edit lands on the tool page with the field highlighted](img/pw-ws-final-tool-page-focus.png)
