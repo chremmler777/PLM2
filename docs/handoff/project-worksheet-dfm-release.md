@@ -1,7 +1,7 @@
 # Release: project page, DFM archive, worksheet (main 7954ef68)
 
-Date: 2026-09-24. Status: on `main`, tested locally, **not deployed to
-prod**. Prod runs alembic 076 (Tier 1 numbers, 2026-09-23).
+Date: 2026-09-24. Status: on `main` and **deployed to prod** 2026-09-24
+(alembic 084), 1994 data scripts applied the same day.
 
 User guide: `docs/guides/project-worksheet-and-dfm.md`.
 
