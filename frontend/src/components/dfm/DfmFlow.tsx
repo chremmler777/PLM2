@@ -19,6 +19,7 @@ import {
 } from '../../api/dfm';
 import type { PaneDocument } from '../parts/DocumentPane';
 import { apiErrorMessage } from '../../lib/apiError';
+import DfmAuditLog from './DfmAuditLog';
 import DfmEntryForm from './DfmEntryForm';
 import {
   arrowSpan, CARD_MARGIN_PX, CARD_MAX_PX, cardActions, cardLane, currentIds, dayLabel, flowRows, formatDays, initials,
@@ -37,6 +38,8 @@ interface Props {
   onPopOut?: () => void;
   /** Fill the parent height (pop-out window) instead of a capped scroll box. */
   fill?: boolean;
+  /** Jump to this entry's card in the flow once loaded (from the tool-wide audit log). */
+  initialJumpEntryId?: number | null;
 }
 
 /** Width of the date column and the narrowest canvas (date column plus three lanes), in px. */
@@ -49,7 +52,7 @@ const cardWidth = `min(${CARD_MAX_PX}px, calc(100% - ${CARD_MARGIN_PX * 2}px))`;
 
 const iconBtn = 'h-7 min-w-7 px-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-transparent';
 
-export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, fill = false }: Props) {
+export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, fill = false, initialJumpEntryId = null }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<{ step: DfmStep; n: number } | null>(null);
   const [openHistory, setOpenHistory] = useState<Set<number>>(new Set());
@@ -57,9 +60,12 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [view, setView] = useState<'flow' | 'log'>('flow');
+  const [pendingHighlight, setPendingHighlight] = useState<number | null>(null);
   const { zoom, setZoom, zoomBy } = useDfmZoom();
   const cardRefs = useRef(new Map<number, HTMLDivElement>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initJumpApplied = useRef(false);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -106,6 +112,39 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
     onError: (e) => toast.error(apiErrorMessage(e, 'Could not reopen the topic')),
   });
 
+  const openStep = (step: DfmStep) => { setMenuFor(null); setForm((cur) => ({ step, n: (cur?.n ?? 0) + 1 })); };
+  const jumpTo = (id: number) => {
+    cardRefs.current.get(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    setHighlighted(id);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setHighlighted(null), 2000);
+  };
+
+  // A jump requested from the tool-wide audit log (via initialJumpEntryId) or the
+  // topic's own audit log (jumpFromLog): resolve to the current entry id, switch
+  // to the flow, then highlight it once the card is on screen.
+  useEffect(() => {
+    if (!topic || initJumpApplied.current || initialJumpEntryId == null) return;
+    initJumpApplied.current = true;
+    const ids = currentIds(topic.entries);
+    setPendingHighlight(ids.get(initialJumpEntryId) ?? initialJumpEntryId);
+  }, [topic, initialJumpEntryId]);
+
+  useEffect(() => {
+    if (view === 'flow' && pendingHighlight != null && topic) {
+      jumpTo(pendingHighlight);
+      setPendingHighlight(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, pendingHighlight, topic]);
+
+  const jumpFromLog = (entryId: number) => {
+    if (!topic) return;
+    const ids = currentIds(topic.entries);
+    setView('flow');
+    setPendingHighlight(ids.get(entryId) ?? entryId);
+  };
+
   if (!topic) return <div className="text-slate-400 text-sm">Loading…</div>;
   const open = topic.status === 'open';
   const entries = topic.entries;
@@ -116,14 +155,6 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
   const compact = isCompact(zoom);
   const canvasWidth = Math.max(MIN_CANVAS_PX, Math.floor((viewportWidth * 100) / zoom));
   const formWidth = viewportWidth > 0 ? Math.min(720, Math.max(320, viewportWidth - 96)) : 720;
-
-  const openStep = (step: DfmStep) => { setMenuFor(null); setForm((cur) => ({ step, n: (cur?.n ?? 0) + 1 })); };
-  const jumpTo = (id: number) => {
-    cardRefs.current.get(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-    setHighlighted(id);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setHighlighted(null), 2000);
-  };
 
   const formEl = form && open && (
     <DfmEntryForm key={form.n} partId={partId} topicId={topicId} step={form.step}
@@ -321,14 +352,21 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
           {open ? 'Open' : 'Finished confirmed'}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div role="group" aria-label="Zoom" className="flex items-center rounded-md bg-slate-900 ring-1 ring-slate-700 overflow-hidden">
-            <button data-testid="dfm-zoom-out" aria-label="Zoom out" onClick={() => zoomBy(-1)} disabled={zoom <= ZOOM_MIN} className={iconBtn}>−</button>
-            <span data-testid="dfm-zoom-level" className="w-12 text-center text-xs tabular-nums text-slate-200">{zoom}%</span>
-            <button data-testid="dfm-zoom-in" aria-label="Zoom in" onClick={() => zoomBy(1)} disabled={zoom >= ZOOM_MAX} className={iconBtn}>+</button>
-            <button data-testid="dfm-zoom-fit" onClick={() => setZoom(fitZoom(viewportWidth, MIN_CANVAS_PX))}
-              className={`${iconBtn} text-xs border-l border-slate-700`}>Fit</button>
-          </div>
-          {open && (
+          {view === 'flow' && (
+            <div role="group" aria-label="Zoom" className="flex items-center rounded-md bg-slate-900 ring-1 ring-slate-700 overflow-hidden">
+              <button data-testid="dfm-zoom-out" aria-label="Zoom out" onClick={() => zoomBy(-1)} disabled={zoom <= ZOOM_MIN} className={iconBtn}>−</button>
+              <span data-testid="dfm-zoom-level" className="w-12 text-center text-xs tabular-nums text-slate-200">{zoom}%</span>
+              <button data-testid="dfm-zoom-in" aria-label="Zoom in" onClick={() => zoomBy(1)} disabled={zoom >= ZOOM_MAX} className={iconBtn}>+</button>
+              <button data-testid="dfm-zoom-fit" onClick={() => setZoom(fitZoom(viewportWidth, MIN_CANVAS_PX))}
+                className={`${iconBtn} text-xs border-l border-slate-700`}>Fit</button>
+            </div>
+          )}
+          <button data-testid="dfm-audit-toggle" aria-pressed={view === 'log'}
+            onClick={() => setView((v) => (v === 'flow' ? 'log' : 'flow'))}
+            className={`px-3 py-1 rounded-md text-sm ${view === 'log' ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-100'}`}>
+            Audit log
+          </button>
+          {open && view === 'flow' && (
             <button data-testid="dfm-new-original" onClick={() => openStep(newOriginalStep())}
               className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-sm">+ New DFM</button>
           )}
@@ -346,6 +384,12 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
         </div>
       </div>
 
+      {view === 'log' ? (
+        <div data-testid="dfm-topic-audit-log" className={fill ? 'flex-1 min-h-0 overflow-auto' : ''}>
+          <DfmAuditLog partId={partId} topicId={topicId} onJumpToEntry={(entryId) => jumpFromLog(entryId)} />
+        </div>
+      ) : (
+      <>
       <div data-testid="dfm-status-strip"
         className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 px-3 py-1.5 rounded-md bg-slate-900/60 ring-1 ring-slate-700/70 text-xs">
         {waitingOn.map((w) => (
@@ -440,6 +484,8 @@ export default function DfmFlow({ partId, topicId, onOpenPdf, onBack, onPopOut, 
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

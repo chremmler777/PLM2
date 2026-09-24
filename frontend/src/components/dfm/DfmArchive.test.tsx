@@ -8,9 +8,10 @@ const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('./DfmFlow', () => ({
-  default: (p: { topicId: number; onBack(): void; onPopOut?: () => void }) => (
+  default: (p: { topicId: number; onBack(): void; onPopOut?: () => void; initialJumpEntryId?: number | null }) => (
     <div data-testid="flow">
       <span data-testid="flow-topic">topic {p.topicId}</span>
+      <span data-testid="flow-jump">jump {String(p.initialJumpEntryId ?? '')}</span>
       <button data-testid="flow-back" onClick={p.onBack}>back</button>
       {p.onPopOut && <button data-testid="flow-popout" onClick={p.onPopOut}>pop</button>}
     </div>
@@ -105,5 +106,41 @@ describe('DfmArchive', () => {
     clientMocks.get.mockImplementation(() => Promise.reject(new Error('network down')))
     wrap()
     expect((await screen.findByTestId('dfm-archive-error')).textContent).toContain('Could not load the DFM archive')
+  })
+
+  it('shows the tool-wide audit log from the topic list, with a breadcrumb back', async () => {
+    const auditEvents = [
+      { id: 5, at: '2026-09-24T09:00:00', action: 'topic_opened', actor: { id: 2, name: 'Engineer' },
+        topic: { id: 2, title: 'Gate position' }, entry: null, file: null, details: { title: 'Gate position' } },
+    ]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/7/dfm/topics') return Promise.resolve({ data: topics })
+      if (url === '/v1/parts/7/dfm/audit') return Promise.resolve({ data: auditEvents })
+      return Promise.resolve({ data: [] })
+    })
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-tool-audit-log'))
+    expect(await screen.findByTestId('dfm-audit-row-5')).toBeTruthy()
+    expect(screen.queryByTestId('dfm-topic-2')).toBeNull()
+    fireEvent.click(screen.getByTestId('dfm-audit-breadcrumb-archive'))
+    expect(await screen.findByTestId('dfm-topic-2')).toBeTruthy()
+  })
+
+  it('jumping "#N" from the tool-wide log opens that topic\'s flow with the entry to highlight', async () => {
+    const auditEvents = [
+      { id: 5, at: '2026-09-24T09:00:00', action: 'entry_recorded', actor: { id: 2, name: 'Engineer' },
+        topic: { id: 2, title: 'Gate position' }, entry: { id: 19, kind: 'original', party: 'ktx' }, file: null,
+        details: { kind: 'original', party: 'ktx', addressed_to: ['toolmaker'] } },
+    ]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/7/dfm/topics') return Promise.resolve({ data: topics })
+      if (url === '/v1/parts/7/dfm/audit') return Promise.resolve({ data: auditEvents })
+      return Promise.resolve({ data: [] })
+    })
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-tool-audit-log'))
+    fireEvent.click(await screen.findByTestId('dfm-audit-jump-19'))
+    expect((await screen.findByTestId('flow-topic')).textContent).toBe('topic 2')
+    expect(screen.getByTestId('flow-jump').textContent).toBe('jump 19')
   })
 })

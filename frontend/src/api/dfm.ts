@@ -151,3 +151,74 @@ export async function createEntry(partId: number, topicId: number, input: DfmEnt
 export function dfmFileUrl(partId: number, fileId: number, mode: 'download' | 'inline'): string {
   return `${API_BASE_URL}${base(partId)}/files/${fileId}/${mode}`;
 }
+
+export type DfmAuditAction =
+  | 'topic_opened' | 'topic_closed' | 'topic_reopened'
+  | 'entry_recorded' | 'entry_updated'
+  | 'file_attached' | 'file_downloaded' | 'file_viewed';
+
+export interface DfmAuditActor {
+  id: number;
+  name: string;
+}
+
+export interface DfmAuditTopicRef {
+  id: number;
+  title: string;
+}
+
+export interface DfmAuditEntryRef {
+  id: number;
+  kind: DfmKind;
+  party: DfmParty;
+}
+
+export interface DfmAuditFileRef {
+  id: number;
+  filename: string;
+}
+
+export interface DfmAuditEvent {
+  id: number;
+  at: string;
+  action: DfmAuditAction;
+  actor: DfmAuditActor;
+  topic: DfmAuditTopicRef | null;
+  entry: DfmAuditEntryRef | null;
+  file: DfmAuditFileRef | null;
+  details: {
+    title?: string;
+    kind?: DfmKind;
+    party?: DfmParty;
+    addressed_to?: DfmParty[];
+    reply_to_id?: number | null;
+    note?: string | null;
+    supersedes_id?: number | null;
+    filename?: string;
+    size?: number;
+    content_type?: string;
+    sha256?: string | null;
+    backfilled?: boolean;
+  };
+}
+
+export interface DfmAuditQuery {
+  topicId?: number;
+  action?: DfmAuditAction;
+  limit?: number;
+  beforeId?: number;
+}
+
+export async function getAudit(partId: number, query: DfmAuditQuery = {}): Promise<DfmAuditEvent[]> {
+  const params: Record<string, string | number> = {};
+  if (query.topicId != null) params.topic_id = query.topicId;
+  if (query.action) params.action = query.action;
+  if (query.limit != null) params.limit = query.limit;
+  if (query.beforeId != null) params.before_id = query.beforeId;
+  return (await client.get(`${base(partId)}/audit`, { params })).data;
+}
+
+export function dfmAuditCsvUrl(partId: number, topicId?: number | null): string {
+  const qs = topicId != null ? `?topic_id=${topicId}` : '';
+  return `${API_BASE_URL}${base(partId)}/audit.csv${qs}`;
+}

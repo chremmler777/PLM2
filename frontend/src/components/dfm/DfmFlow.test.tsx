@@ -277,4 +277,41 @@ describe('DfmFlow', () => {
     wrap()
     expect((await screen.findByTestId('dfm-status-strip')).textContent).toContain('No messages yet')
   })
+
+  it('toggles the topic body between the flow and its audit log', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/7/dfm/topics/1') return Promise.resolve({ data: current })
+      if (url === '/v1/parts/7/dfm/audit') return Promise.resolve({ data: [] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap()
+    await screen.findByTestId('dfm-flow-viewport')
+    expect(screen.queryByTestId('dfm-topic-audit-log')).toBeNull()
+    fireEvent.click(screen.getByTestId('dfm-audit-toggle'))
+    expect(await screen.findByTestId('dfm-topic-audit-log')).toBeTruthy()
+    expect(screen.queryByTestId('dfm-flow-viewport')).toBeNull()
+    expect(clientMocks.get).toHaveBeenCalledWith('/v1/parts/7/dfm/audit', expect.objectContaining({ params: expect.objectContaining({ topic_id: 1 }) }))
+    fireEvent.click(screen.getByTestId('dfm-audit-toggle'))
+    expect(await screen.findByTestId('dfm-flow-viewport')).toBeTruthy()
+  })
+
+  it('jumping from the audit log switches back to the flow and highlights the message', async () => {
+    const auditEvents = [
+      { id: 90, at: '2026-09-24T09:00:00', action: 'entry_recorded', actor: { id: 2, name: 'Engineer' },
+        topic: { id: 1, title: 'Gate position' }, entry: { id: 2, kind: 'forward', party: 'ktx' }, file: null,
+        details: { kind: 'forward', party: 'ktx', addressed_to: ['tier1'] } },
+    ]
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/parts/7/dfm/topics/1') return Promise.resolve({ data: current })
+      if (url === '/v1/parts/7/dfm/audit') return Promise.resolve({ data: auditEvents })
+      return Promise.resolve({ data: [] })
+    })
+    wrap()
+    await screen.findByTestId('dfm-flow-viewport')
+    fireEvent.click(screen.getByTestId('dfm-audit-toggle'))
+    const jumpBtn = await screen.findByTestId('dfm-audit-jump-2')
+    fireEvent.click(jumpBtn)
+    expect(await screen.findByTestId('dfm-flow-viewport')).toBeTruthy()
+    await waitFor(() => expect(screen.getByTestId('dfm-entry-2').getAttribute('data-highlighted')).toBe('true'))
+  })
 })
