@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.models.change import ChangeAssessment, ChangeImpactedItem, ChangeRequest
 from app.models.change_cost import AssessmentActivity, AssessmentCostLine, DepartmentRate
 from app.models.workflow import Department
+from tests.checklist_helpers import answered
 
 pytestmark = pytest.mark.asyncio
 
@@ -109,12 +110,10 @@ async def test_development_extra_carries_its_choices(
 
 
 async def test_keyed_checklist_round_trips_with_remarks(client, admin_auth, tab):
-    impacts = [
-        {"key": "cycle_time_change", "impacted": True, "remark": "+0.4s"},
-        {"key": "scrap_increase", "impacted": False},
-        {"key": "modification_external", "impacted": True,
-         "remark": "Supplier rebuild"},
-    ]
+    impacts = answered("Tool Engineer",
+                       yes={"cycle_time_change", "modification_external"},
+                       remarks={"cycle_time_change": "+0.4s",
+                                "modification_external": "Supplier rebuild"})
     res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
     assert res.json()["details"]["impacts"] == impacts
@@ -154,8 +153,9 @@ async def test_the_sub_choice_is_validated(client, admin_auth, seed,
     async def submit(choice):
         return await client.post(f"/api/v1/changes/{cid}/assessments", json={
             "department_id": dev_id, "verdict": "feasible",
-            "details": {"impacts": [{"key": "article_design_update",
-                                     "impacted": True, "choice": choice}]}},
+            "details": {"impacts": answered(
+                "Development", yes={"article_design_update"},
+                choices={"article_design_update": choice})}},
             headers=admin_auth)
 
     bad = await submit("whatever")
@@ -177,12 +177,12 @@ async def test_legacy_rows_are_still_accepted(client, admin_auth, tab):
 async def test_checklist_coexists_with_department_specific_keys(
         client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        [{"key": "new_process", "impacted": True}],
+                        answered("Tool Engineer", yes={"new_process"}),
                         packaging_impacted=False)
     assert res.status_code == 200, res.text
     body = res.json()["details"]
     assert body["packaging_impacted"] is False
-    assert len(body["impacts"]) == 1
+    assert len(body["impacts"]) == 13
 
 
 async def test_not_feasible_requires_the_explanation_document(
@@ -223,7 +223,7 @@ async def test_rfq_expectation_is_reported_not_enforced(client, admin_auth, tab)
     """Checking external modification is a promise to ask a supplier; the RFQ
     is expected, and submitting without it still works."""
     res = await _submit(client, admin_auth, tab,
-                        [{"key": "modification_external", "impacted": True}])
+                        answered("Tool Engineer", yes={"modification_external"}))
     assert res.status_code == 200, res.text
 
     detail = (await client.get(f"/api/v1/changes/{tab['change_id']}",
@@ -251,14 +251,12 @@ async def test_rfq_expectation_is_reported_not_enforced(client, admin_auth, tab)
 
 async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
     """Cycle time is charged per part; everything else is a one-off."""
-    await _submit(client, admin_auth, tab, [
-        {"key": "cycle_time_change", "impacted": True, "remark": "+0.4s"},
-        {"key": "scrap_increase", "impacted": False},
-        {"key": "sparepart_required", "impacted": True},
-        {"key": "modification_external", "impacted": True},
-        {"key": "prototyping_required", "impacted": True},
-        {"key": "matching_required", "impacted": False},
-    ])
+    res = await _submit(client, admin_auth, tab, answered(
+        "Tool Engineer",
+        yes={"cycle_time_change", "sparepart_required", "modification_external",
+             "prototyping_required"},
+        remarks={"cycle_time_change": "+0.4s"}))
+    assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     lines = (await client.get(url, headers=admin_auth)).json()
@@ -274,8 +272,9 @@ async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
 
 
 async def test_seeding_stays_idempotent_with_keys(client, admin_auth, tab):
-    await _submit(client, admin_auth, tab,
-                  [{"key": "new_process", "impacted": True}])
+    res = await _submit(client, admin_auth, tab,
+                        answered("Tool Engineer", yes={"new_process"}))
+    assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     first = (await client.get(url, headers=admin_auth)).json()
@@ -284,8 +283,8 @@ async def test_seeding_stays_idempotent_with_keys(client, admin_auth, tab):
 
 
 async def test_nothing_checked_seeds_nothing(client, admin_auth, tab):
-    await _submit(client, admin_auth, tab,
-                  [{"key": "new_process", "impacted": False}])
+    res = await _submit(client, admin_auth, tab, answered("Tool Engineer"))
+    assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     assert (await client.get(url, headers=admin_auth)).json() == []
