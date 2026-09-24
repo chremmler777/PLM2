@@ -488,3 +488,59 @@ clarification.
   hint`; new kinds `offer_expiring {offer_id, version, valid_until,
   days_left}`, `plan_feedback {department_id, stale}`, `release_check
   {department_id, check_keys, open_count}`, each with `target_tab`.
+
+## 11. Gantt 2.0: a reusable, MS-Project-grade planner (2026-09-25)
+
+Decision: keep our own planner and lift it into a generic module. Checked
+SVAR React Gantt and DHTMLX Gantt (both MIT cores): critical path,
+baselines, auto-scheduling, working calendars and MS Project export are paid
+PRO features there, and those are exactly the features we need. Ideas are
+borrowed (grid + chart split, lightbox editor, link drawing, zoom levels).
+
+### Generic module `frontend/src/components/gantt/`
+No change-management imports inside it. Other modules (projects, SEP timing,
+tool build plans) use it through an adapter.
+```ts
+interface GanttTask { id: string|number; parentId?: id|null; name; start: 'YYYY-MM-DD';
+  duration: number /* in calendar or working days per calendar mode */;
+  kind?: string; lane?: string|null; isIdea?: boolean; progress?: number;
+  baselineStart?; baselineEnd?; actualStart?; actualEnd?;
+  constraint?: { type: 'asap'|'snet'|'fnlt'|'mso'|'mfo'; date? };
+  color?: string; readOnly?: boolean; meta?: Record<string, unknown> }
+interface GanttLink { id; from; to; type: 'FS'|'SS'|'FF'|'SF'; lagDays: number }
+interface GanttCalendar { mode: 'calendar'|'working'; workdays: number[] /* 1..7, Mon=1 */; holidays: string[] }
+interface GanttAdapter { load(); applyChanges(ChangeSet, {reason?}): Promise<void> ; rights: {...} }
+```
+Engine `gantt/engine/` (pure TS, fully unit tested): calendar date math
+(working-day add/diff, holidays), end dates (exclusive), all four link types
+with lag/lead, forward pass (auto-schedule, ASAP + constraints), backward
+pass, total + free slack, critical path, summary task rollup (start/end/
+progress of children), cycle detection, validation issues, WBS numbering,
+MSPDI XML export AND import (MS Project .xml), CSV export, undo/redo command
+stack (ChangeSet based).
+
+Component features: grid with configurable columns (WBS, name, start, end,
+duration, predecessors in MS Project notation e.g. `3FS+2d`, lane, progress,
+slack), inline cell editing, indent/outdent (summary tasks, collapse),
+row drag reorder, chart with day/week/month/quarter zoom, fit-to-plan,
+today + deadline markers, weekend/holiday shading, bars per kind, idea
+dashed, buffer hatched, milestone diamond, summary bracket bars, baseline
+ghosts, progress fill and drag, slip tails, critical path, link drawing from
+either bar end (type from the ends used), link click to edit type/lag,
+multi-select block move/resize, keyboard (arrows, shift, Delete, ctrl+z/y,
+ctrl+c/v duplicate, Insert new row, Tab indent), context menu, virtualised
+rows (200+ tasks smooth), print/PNG export of the chart, light and dark theme
+via CSS variables.
+
+### Backend (migration 088, additive)
+`change_plan_tasks`: `parent_id` (self fk null), `constraint_type`
+String(4) null, `constraint_date` Date null, `wbs` not stored (computed).
+New table `change_plan_links` (id, change_id, plan, from_task_id,
+to_task_id, type FS|SS|FF|SF, lag_days int). `predecessors` JSON stays
+readable for old rows and is migrated into links. Plan-level calendar on
+`change_requests`: `plan_calendar` JSON null (default calendar mode,
+Mon-Fri, no holidays). The service schedules with the same rules as the TS
+engine (shared test vectors in `backend/tests/data/gantt_vectors.json`, the
+frontend engine tests read the same file). MSPDI export includes link type +
+lag (LinkLag in tenths of minutes) and summary tasks (OutlineLevel);
+`POST /plan/import` accepts an MSPDI file.
