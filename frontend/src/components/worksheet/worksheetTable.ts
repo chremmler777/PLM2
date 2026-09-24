@@ -1,8 +1,8 @@
 /** Pure worksheet table logic: row kinds, filters, sort, hidden columns, frozen offsets. */
-import type { WorksheetRow } from '../../api/worksheet';
+import type { WorksheetExportPayload, WorksheetRow } from '../../api/worksheet';
 import { comparePartNumbers } from '../../lib/partDisplay';
 import { readStored, writeStored } from '../../lib/safeStorage';
-import { WORKSHEET_COLUMNS, rowNotes, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
+import { WORKSHEET_COLUMNS, noteFor, rowNotes, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
 
 export const HIDDEN_COLUMNS_KEY = 'plm2.worksheet.hiddenColumns';
 
@@ -99,6 +99,23 @@ export function offeredFilters(
     out[key] = value;
   }
   return out;
+}
+
+/** What the xlsx gets: the visible columns (no images) and rows, in order, typed, with flags. */
+export function buildExportPayload(
+  cols: WorksheetColumn[], rows: WorksheetRow[], ctx: WorksheetContext,
+): WorksheetExportPayload {
+  const exported = cols.filter((c) => c.display !== 'thumbnail');
+  return {
+    columns: exported.map((c) => ({ key: c.key, label: c.label, type: c.exportType })),
+    rows: rows.map((row) => ({
+      cells: exported.map((c) => {
+        const note = noteFor(c, row, ctx);
+        return { value: c.value(row, ctx), flag: note?.flag_status ?? null, comments: note?.comment_count ?? 0 };
+      }),
+    })),
+    frozen_columns: exported.filter((c) => c.frozenWidth).length,
+  };
 }
 
 export function frozenOffsets(cols: WorksheetColumn[]): Map<string, number> {

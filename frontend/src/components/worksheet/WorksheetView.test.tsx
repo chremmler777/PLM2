@@ -120,6 +120,19 @@ describe('WorksheetView', () => {
     expect(screen.queryByTestId('ws-count')).toBeNull()
   })
 
+  it('exports the visible rows as xlsx', async () => {
+    clientMocks.post.mockResolvedValue({ data: new Blob(['x']), headers: { 'content-disposition': 'attachment; filename="1994-worksheet.xlsx"' } })
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    mount()
+    await screen.findByTestId('ws-row-1')
+    fireEvent.change(screen.getByTestId('filter-part.name'), { target: { value: 'isofix' } })
+    fireEvent.click(screen.getByTestId('ws-export'))
+    await waitFor(() => expect(clientMocks.post).toHaveBeenCalled())
+    const [url, payload] = clientMocks.post.mock.calls[0]
+    expect(url).toBe('/v1/projects/35/worksheet/export')
+    expect(payload.rows).toHaveLength(1)
+    expect(payload.columns.some((c: { key: string }) => c.key === 'part.thumbnail')).toBe(false)
+  })
 })
 
 function Where() {

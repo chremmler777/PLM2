@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  HIDDEN_COLUMNS_KEY, applyFilters, compareValues, enumOptions, frozenOffsets, loadHiddenColumns,
+  HIDDEN_COLUMNS_KEY, applyFilters, buildExportPayload, compareValues, enumOptions, frozenOffsets, loadHiddenColumns,
   offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
 } from './worksheetTable'
 import { WORKSHEET_COLUMNS, buildContext } from './worksheetColumns'
@@ -76,5 +76,23 @@ describe('worksheet table helpers', () => {
     const filters = { 'part.name': 'side', 'part.part_type': 'purchased' }
     expect(offeredFilters(filters, cols, [a, b], ctx)).toEqual(filters)
     expect(offeredFilters(filters, cols, [a], ctx)).toEqual({ 'part.name': 'side' })
+  })
+
+  it('builds the export from visible columns and rows with types and flags', () => {
+    const flagged = buildContext([{ id: 1, part_id: 90, field_key: 'tool.cavities', flag_status: 'open', flag_set_by: null,
+      flag_set_by_name: null, flag_set_at: null, created_at: null, comment_count: 2, last_comment: null }])
+    const cols = visibleColumns(new Set()).filter((x) => ['part.thumbnail', 'part.part_number', 'part.customer_part_number', 'tool.cavities'].includes(x.key))
+    const payload = buildExportPayload(cols, [a], flagged)
+    expect(payload.columns).toEqual([
+      { key: 'part.part_number', label: 'KTX no.', type: 'text' },
+      { key: 'part.customer_part_number', label: 'OEM no.', type: 'text' },
+      { key: 'tool.cavities', label: 'Cavities', type: 'number' },
+    ])
+    expect(payload.frozen_columns).toBe(2)
+    expect(payload.rows[0].cells).toEqual([
+      { value: '20-1994-010-0', flag: null, comments: 0 },
+      { value: '206.882.251', flag: null, comments: 0 },
+      { value: 2, flag: 'open', comments: 2 },
+    ])
   })
 })

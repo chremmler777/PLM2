@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { setFieldFlag, type FieldFlag } from '../../api/fieldNotes';
+import { downloadWorksheetXlsx } from '../../api/worksheet';
 import { useProjectFieldNotes, FIELD_NOTES_KEY } from '../../hooks/queries/useFieldNotes';
 import { useWorksheet } from '../../hooks/queries/useWorksheet';
 import { FOCUS_PARAM } from '../../hooks/useFieldFocus';
@@ -16,8 +17,8 @@ import { apiErrorMessage } from '../../lib/apiError';
 import { flagTint } from '../../lib/fieldNotes';
 import { WORKSHEET_COLUMNS, buildContext, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
-  applyFilters, enumOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible, saveHiddenColumns,
-  sortRows, visibleColumns, type RowKindFilter, type SortState,
+  applyFilters, buildExportPayload, enumOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
+  saveHiddenColumns, sortRows, visibleColumns, type RowKindFilter, type SortState,
 } from './worksheetTable';
 import WorksheetCell from './WorksheetCell';
 import WorksheetCellMenu, { type CellMenuState } from './WorksheetCellMenu';
@@ -60,6 +61,11 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
     const sortCol = sort ? cols.find((c) => c.key === sort.key) : undefined;
     return sortRows(filtered, sortCol, sort?.dir ?? 'asc', ctx);
   }, [kindRows, cols, activeFilters, ctx, onlyOpen, sort]);
+
+  const exportXlsx = useMutation({
+    mutationFn: () => downloadWorksheetXlsx(projectId, buildExportPayload(cols, shown, ctx)),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not export the worksheet')),
+  });
 
   const toggleHidden = (key: string) => {
     const next = new Set(hidden);
@@ -115,7 +121,11 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
             </div>
           )}
         </div>
-        {/* Task 15 puts the export button here */}
+        <button type="button" data-testid="ws-export" disabled={exportXlsx.isPending || shown.length === 0}
+          onClick={() => exportXlsx.mutate()}
+          className="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-600 text-white">
+          {exportXlsx.isPending ? 'Exporting...' : 'Export xlsx'}
+        </button>
         <button type="button" data-testid="ws-close" onClick={onClose}
           className="ml-auto px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Back to list</button>
       </div>
