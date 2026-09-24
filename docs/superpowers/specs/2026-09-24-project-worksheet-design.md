@@ -155,3 +155,21 @@ Browser check on the local test stack with project 1994.
 Editing values inside the worksheet, custom per-project columns, writing to
 MaterialDB from PLM (creating materials happens in MaterialDB), the
 structural assembly BOM (unchanged).
+
+## Deploy
+
+The material picker needs two backend environment values on prod, passed
+through by `docker/docker-compose.prod.yml` (and by the hub compose, if prod
+runs the backend from there):
+
+- `MATERIALDB_BASE_URL`: the MaterialDB API root that holds `/v1`, e.g.
+  `http://materialdb-backend:8000` inside the docker network.
+- `MATERIALDB_SERVICE_TOKEN`: the same value as MaterialDB's own
+  `MATERIALDB_SERVICE_TOKEN`. MaterialDB disables its `/v1` service API
+  while its token is empty, so it must be set on both sides.
+
+Both must be set in the prod `.env`. When either is unset, the material
+search answers 503 and the picker shows "MaterialDB is not configured on this
+PLM server"; picking from MaterialDB and "Refresh from MaterialDB" are then
+unavailable. Everything else keeps working: stored materials still show,
+"new material" text can still be entered, and the worksheet is unaffected.

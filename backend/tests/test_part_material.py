@@ -143,3 +143,9 @@ async def test_refresh_of_unlinked_material_is_400(client, eng_auth, seed):
     pid = await _part(client, eng_auth, seed)
     r = await client.post(f"/api/v1/parts/{pid}/material/refresh", headers=eng_auth)
     assert r.status_code == 400
+
+
+async def test_material_body_must_name_the_source(client, eng_auth, seed):
+    pid = await _part(client, eng_auth, seed)
+    r = await client.put(f"/api/v1/parts/{pid}/material", json={}, headers=eng_auth)
+    assert r.status_code == 422, r.text

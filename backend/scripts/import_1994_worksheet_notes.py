@@ -3,19 +3,25 @@ open points 2026-09-23.xlsx, sheet BOM) into PLM field notes. Dry run by default
 
     docker cp "<xlsx>" plm2-integ-backend:/tmp/bom-1994.xlsx
     docker exec -i -e PYTHONPATH=/app plm2-integ-backend \
-        python scripts/import_1994_worksheet_notes.py --xlsx /tmp/bom-1994.xlsx [--user <id>] [--apply]
+        python scripts/import_1994_worksheet_notes.py --xlsx /tmp/bom-1994.xlsx --user <id> [--apply]
+
+--user is required: the PLM user id the comments and flags are written as.
 
 Per Excel row (article by the OEM number in column D, tool by column B):
 - Tier 1 numbers: the four the Excel resolves, only where PLM has none.
 - Material: new with the "Material acc. drawing" text where no material is set.
+- Designation (column F) marked yellow (open): a comment on part.name.
 - Proposed resin and resin status: a comment on part.material, flag from the colour.
 - Cavities differing from PLM (or marked yellow): open flag and a comment on the
   tool's tool.cavities; PLM cavities are never overwritten.
 - Painted, colour, MIC cells with a colour: comments on paint.painted / paint.colour.
-- Open question and answer: comments on the field they are about.
+- Open question and answer: comments on the field they are about (QUESTION_FIELD).
 - Grain (drawing, frozen RFQ, gloss, question, answer): one comment on revision.level.
-Colours: yellow = open, green = confirmed, salmon = rejected. A rerun skips
-comments that already exist and flags that are already set.
+Colours: yellow = open, green = confirmed, salmon = rejected.
+Every comment starts with COMMENT_PREFIX. The dry run lists only what --apply
+would write: comments that already exist (also in the wording of the first
+import, without the prefix) and flags already set are left out, so a dry run
+after an apply says "nothing to do".
 """
 import argparse
 import asyncio
@@ -40,9 +46,17 @@ FILL_FLAG = {"FFFFFF00": "open", "FFC6EFCE": "confirmed", "FFF8CBAD": "rejected"
 FLAG_RANK = {"confirmed": 1, "open": 2, "rejected": 3}  # the stronger flag wins on one field
 TIER1 = {"206.882.251": "S00H4X-110", "206.882.252": "S00H4W-110",
          "206.885.967": "S00G0E-110", "206.885.968": "S00G0D-110"}
-# Which field each row's open question (R/S) is about; default paint.colour.
+COMMENT_PREFIX = "From engineering Excel BOM 2026-09-23: "
+# Which field each row's open question (R/S) is about, decided by the question text:
+#   row | OEM no.     | question                                           | field
+#   8   | 206.887.233 | 1 or 3 colors?                                     | paint.colour
+#   13  | 206.883.607 | Painted or MIC? What color is RHO? Volume split?   | paint.painted
+#   14  | 206.881.479 | 1 or 2 colors?                                     | paint.colour
+#   15  | 206.881.793 | Painted VM0 or chrome? What color is VM0?          | paint.painted
+# Rows 13 and 15 both ask first whether the part is painted at all, so both go
+# on paint.painted; their colour cells (M) carry the colour comment. Default paint.colour.
 QUESTION_FIELD = {"206.887.233": "paint.colour", "206.883.607": "paint.painted",
-                  "206.881.479": "paint.colour", "206.881.793": "paint.colour"}
+                  "206.881.479": "paint.colour", "206.881.793": "paint.painted"}
 
 
 @dataclass
@@ -59,6 +73,7 @@ class Action:
     field_key: Optional[str] = None
     text: Optional[str] = None
     flag: Optional[str] = None
+    legacy_text: Optional[str] = None  # the first import's wording of the same comment
 
 
 def _flag(cell) -> Optional[str]:
@@ -105,10 +120,11 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
         if flag and FLAG_RANK[flag] > FLAG_RANK.get(current, 0):
             flags[(part.id, key)] = (part, flag)
 
-    def comment(part: Part, key: str, text: str, flag: Optional[str] = None):
+    def comment(part: Part, key: str, text: str, flag: Optional[str] = None, legacy: Optional[str] = None):
         if (part.id, key, text) not in seen:
             seen.add((part.id, key, text))
-            comments.append(Action("comment", part.id, part.part_number, key, text))
+            comments.append(Action("comment", part.id, part.part_number, key, COMMENT_PREFIX + text,
+                                   legacy_text=legacy or text))
         want_flag(part, key, flag)
 
     for cells in rows:
@@ -130,16 +146,19 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             comment(article, "part.material",
                     f"Proposed resin: {_s(cells, 'J') or 'none'}. Resin status: {_s(cells, 'K') or 'none'}",
                     _f(cells, "K") or _f(cells, "J"))
-        if tool is not None and _s(cells, "C"):
-            excel = int(float(_s(cells, "C")))
+        excel = _cavities(cells)
+        if tool is not None and excel is None and _s(cells, "C"):
+            warnings.append(f"row {row_no}: cavities '{_s(cells, 'C')}' is not a number, skipped")
+        if tool is not None and excel is not None:
+            check = "Check against RFQ 26 loop 37; PLM not changed."
             if tool.tool_cavities is not None and excel != tool.tool_cavities:
-                comment(tool, "tool.cavities",
-                        f"Excel BOM 2026-09-23 says {excel} cavities, PLM has {tool.tool_cavities}. "
-                        "Check against RFQ 26 loop 37; PLM not changed.", "open")
+                comment(tool, "tool.cavities", f"{excel} cavities, PLM has {tool.tool_cavities}. {check}", "open",
+                        legacy=f"Excel BOM 2026-09-23 says {excel} cavities, PLM has {tool.tool_cavities}. {check}")
             elif _f(cells, "C") == "open":
-                comment(tool, "tool.cavities", f"Excel BOM 2026-09-23 marks the cavities ({excel}) as open.", "open")
-        if _f(cells, "F"):
-            comment(article, "part.name", f"Designation on the drawing: {_s(cells, 'F')}", _f(cells, "F"))
+                comment(tool, "tool.cavities", f"cavities ({excel}) marked as open.", "open",
+                        legacy=f"Excel BOM 2026-09-23 marks the cavities ({excel}) as open.")
+        if _f(cells, "F") == "open":
+            comment(article, "part.name", f"Designation on the drawing: {_s(cells, 'F')}", "open")
         if _f(cells, "L"):
             comment(article, "paint.painted", f"Painted: {_s(cells, 'L')}", _f(cells, "L"))
         if _f(cells, "M"):
@@ -167,16 +186,39 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
 
     flag_actions = [Action("flag", part.id, part.part_number, key[1], flag=flag)
                     for key, (part, flag) in flags.items()]
-    return other + comments + flag_actions, warnings
+    pending = [a for a in other + comments + flag_actions if await _pending(session, a)]
+    return pending, warnings
+
+
+def _cavities(cells: dict) -> Optional[int]:
+    try:
+        f = float(_s(cells, "C").replace(",", "."))
+    except ValueError:
+        return None
+    return int(f) if f.is_integer() else None
+
+
+async def _pending(session: AsyncSession, a: Action) -> bool:
+    """True when applying the action would write something. Plan and apply share it."""
+    part = await session.get(Part, a.part_id)
+    if a.kind == "tier1":
+        return not part.tier1_part_number
+    if a.kind == "material_new":
+        return part.material_source is None
+    note = await FieldNoteService.get(session, part.id, a.field_key)
+    if a.kind == "comment":
+        bodies = {c.body for c in note.comments} if note is not None else set()
+        return a.text not in bodies and (a.legacy_text is None or a.legacy_text not in bodies)
+    return note is None or note.flag_status != a.flag
 
 
 async def apply_actions(session: AsyncSession, actions: list, user_id: int) -> int:
     written = 0
     for a in actions:
+        if not await _pending(session, a):
+            continue
         part = await session.get(Part, a.part_id)
         if a.kind == "tier1":
-            if part.tier1_part_number:
-                continue
             old = part.tier1_part_number
             part.tier1_part_number = a.text
             await ChangelogService.log_action(
@@ -184,18 +226,10 @@ async def apply_actions(session: AsyncSession, actions: list, user_id: int) -> i
                 action_description=f"Tier 1 part number set to {a.text} from the 1994 Excel BOM 2026-09-23",
                 performed_by=user_id, field_name="tier1_part_number", old_value=old, new_value=a.text)
         elif a.kind == "material_new":
-            if part.material_source is not None:
-                continue
             await PartMaterialService.set_new(session, part, a.text, user_id)
         elif a.kind == "comment":
-            note = await FieldNoteService.get(session, part.id, a.field_key)
-            if note is not None and any(c.body == a.text for c in note.comments):
-                continue
             await FieldNoteService.add_comment(session, part, a.field_key, a.text, user_id)
         elif a.kind == "flag":
-            note = await FieldNoteService.get(session, part.id, a.field_key)
-            if note is not None and note.flag_status == a.flag:
-                continue
             await FieldNoteService.set_flag(session, part, a.field_key, a.flag, user_id)
         written += 1
     await session.flush()
@@ -225,18 +259,23 @@ async def main():
     rows = read_rows(args.xlsx)
     engine = create_async_engine(os.environ["DATABASE_URL"])
     Session = async_sessionmaker(engine, expire_on_commit=False)
-    async with Session() as s:
-        project = (await s.execute(select(Project).where(Project.code == args.project))).scalar_one()
-        actions, warnings = await plan_actions(s, project.id, rows)
-        print(f"{len(rows)} Excel rows, {len(actions)} actions for project {project.code} (id {project.id})")
-        _print(actions, warnings)
-        if not args.apply:
-            print("DRY RUN - nothing written. Rerun with --apply after checking the list.")
-            return
-        written = await apply_actions(s, actions, args.user)
-        await s.commit()
-        print(f"Applied: {written} changes written.")
-    await engine.dispose()
+    try:
+        async with Session() as s:
+            project = (await s.execute(select(Project).where(Project.code == args.project))).scalar_one()
+            actions, warnings = await plan_actions(s, project.id, rows)
+            print(f"{len(rows)} Excel rows, {len(actions)} actions for project {project.code} (id {project.id})")
+            _print(actions, warnings)
+            if not actions:
+                print("Nothing to do: everything in the Excel is already in PLM.")
+                return
+            if not args.apply:
+                print("DRY RUN: nothing written. Rerun with --apply after checking the list.")
+                return
+            written = await apply_actions(s, actions, args.user)
+            await s.commit()
+            print(f"Applied: {written} changes written.")
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":

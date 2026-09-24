@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Iterable, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.field_note import FIELD_FLAG_STATUSES, FieldNote, FieldNoteComment
@@ -53,10 +54,18 @@ class FieldNoteService:
     @staticmethod
     async def _get_or_new(session: AsyncSession, part: Part, field_key: str) -> FieldNote:
         note = await FieldNoteService.get(session, part.id, field_key)
-        if note is None:
-            note = FieldNote(part_id=part.id, field_key=field_key, comments=[])
-            session.add(note)
-            await session.flush()
+        if note is not None:
+            return note
+        note = FieldNote(part_id=part.id, field_key=field_key, comments=[])
+        try:
+            async with session.begin_nested():
+                session.add(note)
+                await session.flush()
+        except IntegrityError:
+            # A concurrent request created the note first: use that one.
+            note = await FieldNoteService.get(session, part.id, field_key)
+            if note is None:
+                raise
         return note
 
     @staticmethod

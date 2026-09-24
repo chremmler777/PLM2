@@ -166,3 +166,31 @@ async def test_list_for_project_only_returns_that_projects_parts(session_factory
         await s.commit()
         notes = await FieldNoteService.list_for_project(s, seed["project_id"])
     assert [n.part_id for n in notes] == [pid]
+
+
+async def test_concurrent_first_write_reuses_the_note_the_other_request_created(session_factory, seed, monkeypatch):
+    """Two requests both see no note and both insert: the loser hits the unique
+    constraint and must re-fetch the winner's note instead of failing."""
+    pid = await _mk(session_factory, seed)
+    async with session_factory() as s:
+        part = await s.get(Part, pid)
+        await FieldNoteService.add_comment(s, part, "part.material", "first", seed["engineer_id"])
+        await s.commit()
+    real_get = FieldNoteService.get
+    calls = {"n": 0}
+
+    async def stale_get(session, part_id, field_key):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None          # the other request's insert is not visible yet
+        return await real_get(session, part_id, field_key)
+
+    monkeypatch.setattr(FieldNoteService, "get", staticmethod(stale_get))
+    async with session_factory() as s:
+        part = await s.get(Part, pid)
+        await FieldNoteService.add_comment(s, part, "part.material", "second", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        notes = (await s.execute(select(FieldNote))).scalars().all()
+        assert len(notes) == 1
+        assert [c.body for c in notes[0].comments] == ["first", "second"]

@@ -68,3 +68,40 @@ async def test_export_rejects_ragged_rows_and_foreign_projects(client, eng_auth,
     bad = {**PAYLOAD, "rows": [{"cells": [{"value": "x"}]}]}
     assert (await _export(client, eng_auth, seed["project_id"], bad)).status_code == 422
     assert (await _export(client, eng_auth, 999999)).status_code == 404
+
+
+def _one_cell(value, label="Notes", comments=0):
+    return {"columns": [{"key": "notes.summary", "label": label, "type": "text"}],
+            "rows": [{"cells": [{"value": value, "comments": comments}]}], "frozen_columns": 0}
+
+
+async def test_export_caps_cell_text_label_and_comment_count(client, eng_auth, seed):
+    pid = seed["project_id"]
+    assert (await _export(client, eng_auth, pid, _one_cell("x" * 5000))).status_code == 200
+    assert (await _export(client, eng_auth, pid, _one_cell("x" * 5001))).status_code == 422
+    assert (await _export(client, eng_auth, pid, _one_cell("x", label="L" * 101))).status_code == 422
+    assert (await _export(client, eng_auth, pid, _one_cell("x", comments=10_001))).status_code == 422
+
+
+async def test_export_header_label_is_never_a_formula(client, eng_auth, seed):
+    r = await _export(client, eng_auth, seed["project_id"], _one_cell("x", label='=HYPERLINK("http://evil","x")'))
+    assert r.status_code == 200, r.text
+    ws = openpyxl.load_workbook(BytesIO(r.content)).active
+    assert ws["A1"].value == '=HYPERLINK("http://evil","x")'
+    assert ws["A1"].data_type == "s"
+
+
+async def test_export_strips_illegal_control_characters(client, eng_auth, seed):
+    r = await _export(client, eng_auth, seed["project_id"], _one_cell("a\x01b\x1fc", label="La\x02bel"))
+    assert r.status_code == 200, r.text
+    ws = openpyxl.load_workbook(BytesIO(r.content)).active
+    assert ws["A1"].value == "Label"
+    assert ws["A2"].value == "abc"
+
+
+async def test_build_xlsx_strips_control_characters_from_sheet_title():
+    from app.services.worksheet_export import build_xlsx
+    data = build_xlsx([{"key": "k", "label": "K", "type": "text"}], [[{"value": "v"}]], 0,
+                      sheet_title="19\x0194 worksheet")
+    wb = openpyxl.load_workbook(BytesIO(data))
+    assert wb.active.title == "1994 worksheet"

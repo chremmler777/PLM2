@@ -31,7 +31,7 @@ async def search_materials(q: str = Query("", max_length=100), current_user: Use
 
 
 class MaterialIn(BaseModel):
-    source: Optional[Literal["materialdb", "new"]] = None
+    source: Optional[Literal["materialdb", "new"]]  # required key; null clears
     materialdb_id: Optional[int] = None
     new_text: Optional[str] = Field(None, max_length=500)
 

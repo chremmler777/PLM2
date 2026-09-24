@@ -6,6 +6,7 @@ from io import BytesIO
 from typing import Optional
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -37,7 +38,14 @@ def _date(v):
             return str(v)
 
 
+def _clean(text: str) -> str:
+    """Drop control characters openpyxl refuses (they would fail the save)."""
+    return ILLEGAL_CHARACTERS_RE.sub("", text)
+
+
 def _typed(kind: str, v):
+    if isinstance(v, str):
+        v = _clean(v)
     if v is None or v == "":
         return None
     if kind == "number":
@@ -47,22 +55,29 @@ def _typed(kind: str, v):
     return str(v)
 
 
+def _literal(cell) -> None:
+    """Text starting like a formula stays literal text, never a formula."""
+    if isinstance(cell.value, str) and cell.value[:1] in ("=", "+", "-", "@"):
+        cell.data_type = "s"
+
+
 def build_xlsx(columns: list[dict], rows: list[list[dict]], frozen_columns: int,
                 sheet_title: str = "Worksheet") -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = sheet_title[:31] or "Worksheet"
-    ws.append([c["label"] for c in columns])
-    for cell in ws[1]:
+    ws.title = _clean(sheet_title)[:31] or "Worksheet"
+    labels = [_clean(c["label"]) for c in columns]
+    for j, label in enumerate(labels, start=1):
+        cell = ws.cell(row=1, column=j, value=label)
+        _literal(cell)
         cell.font = Font(bold=True, color="FFFFFFFF")
         cell.fill = PatternFill("solid", fgColor=HEADER_FILL)
-    widths = [len(c["label"]) for c in columns]
+    widths = [len(label) for label in labels]
     for i, cells in enumerate(rows, start=2):
         for j, (col, data) in enumerate(zip(columns, cells), start=1):
             value = _typed(col.get("type", "text"), data.get("value"))
             cell = ws.cell(row=i, column=j, value=value)
-            if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
-                cell.data_type = "s"  # literal text, never a formula
+            _literal(cell)
             if isinstance(value, datetime):
                 cell.number_format = "yyyy-mm-dd"
             flag: Optional[str] = data.get("flag")

@@ -2,7 +2,7 @@
 export of what the browser shows. Org scoping as in part_paint.py."""
 import re
 from datetime import date
-from typing import List, Literal, Optional, Union
+from typing import Annotated, List, Literal, Optional, Union
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field, model_validator
@@ -31,10 +31,14 @@ class ExportColumn(BaseModel):
     type: Literal["text", "number", "date"] = "text"
 
 
+MAX_CELL_TEXT = 5000
+MAX_COMMENTS = 10_000
+
+
 class ExportCell(BaseModel):
-    value: Union[int, float, str, None] = None
+    value: Union[int, float, Annotated[str, Field(max_length=MAX_CELL_TEXT)], None] = None
     flag: Optional[Literal["open", "confirmed", "rejected"]] = None
-    comments: int = Field(0, ge=0)
+    comments: int = Field(0, ge=0, le=MAX_COMMENTS)
 
 
 class ExportRow(BaseModel):

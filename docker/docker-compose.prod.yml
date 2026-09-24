@@ -51,6 +51,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost"]}
       UPLOAD_DIR: /app/storage/uploads
       GLTF_DIR: /app/storage/gltf
+      # MaterialDB service API for the material picker. Both empty = material
+      # search answers 503 "not configured"; the rest of PLM keeps working.
+      MATERIALDB_BASE_URL: ${MATERIALDB_BASE_URL:-}
+      MATERIALDB_SERVICE_TOKEN: ${MATERIALDB_SERVICE_TOKEN:-}
     volumes:
       - upload_data:/app/storage/uploads
       - gltf_data:/app/storage/gltf
