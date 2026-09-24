@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
-import ActivityChecklist from './departmentForms/ActivityChecklist'
+import ActivityChecklist, { checklistProgress } from './departmentForms/ActivityChecklist'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -43,6 +43,15 @@ export default function AssessmentSubmitForm({
   // A questionnaire that answers "not impacted" is a complete assessment on its
   // own: nothing is affected, so there is nothing further to ask.
   const notImpacted = !!Fields && details.impacted === false
+  // Same query the checklist renders from (shared cache): the form needs the
+  // count to hold the submit until every row is answered.
+  const { data: defs = [] } = useQuery({
+    queryKey: ['assessment-checklist', departmentId],
+    queryFn: () => changesApi.assessmentChecklist(departmentId),
+  })
+  const progress = checklistProgress(defs, details)
+  const [showOpen, setShowOpen] = useState(false)
+  const checklistDone = notImpacted || progress.answered === progress.total
   const submit = useMutation({
     mutationFn: () => changesApi.submitAssessment(changeId, {
       department_id: departmentId,
@@ -67,7 +76,7 @@ export default function AssessmentSubmitForm({
       toast.error(detail)
     },
   })
-  const ready = !needsChangePpt && (notImpacted || (verdict !== ''
+  const ready = !needsChangePpt && checklistDone && (notImpacted || (verdict !== ''
     && (!showEffort || (effort !== '' && parseFloat(effort) >= 0))
     && (!Fields || details.impacted !== undefined)))
   return (
@@ -75,10 +84,17 @@ export default function AssessmentSubmitForm({
       {Fields && <Fields value={details} onChange={setDetails} />}
       {/* The workbook's checklist: their catalog, off by default. Skipped once a
           questionnaire has said the department is not impacted at all. */}
+      {!notImpacted && progress.total > 0 && (
+        <p data-testid="check-progress"
+          className={`text-[11px] ${progress.answered === progress.total ? 'text-emerald-400' : 'text-slate-400'}`}>
+          {t('check.progress').replace('{n}', String(progress.answered))
+            .replace('{m}', String(progress.total))}
+        </p>
+      )}
       {!notImpacted && (
         <ActivityChecklist departmentId={departmentId} value={details} onChange={setDetails}
           changeId={changeId} assessmentId={assessmentId}
-          attachments={evidence} onUploaded={onUploaded} />
+          attachments={evidence} onUploaded={onUploaded} highlightOpen={showOpen} />
       )}
       {/* Not impacted answers everything: the rest of the form would only ask
           about work that does not exist. */}
@@ -139,6 +155,17 @@ export default function AssessmentSubmitForm({
         className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50">
         {notImpacted ? t('pkg.submitNotImpacted') : t('assessment.submit')}
       </button>
+      {!checklistDone && progress.firstOpen && (
+        <button type="button" data-testid="check-open-jump"
+          className="ml-2 text-xs text-amber-300 underline decoration-dotted underline-offset-2"
+          onClick={() => {
+            setShowOpen(true)
+            document.getElementById(`check-row-${progress.firstOpen}`)
+              ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }}>
+          {t('check.openRows').replace('{n}', String(progress.total - progress.answered))}
+        </button>
+      )}
     </div>
   )
 }

@@ -341,6 +341,14 @@ describe('AssessmentBuckets checklist', () => {
   })
   afterEach(cleanup)
 
+  // The submit waits for every row: answer the ones a test does not care about.
+  const answerRestNo = () => CHECKLIST.forEach((i) => {
+    if (screen.getByTestId(`check-yes-${i.key}`).getAttribute('aria-pressed') !== 'true'
+      && screen.getByTestId(`check-no-${i.key}`).getAttribute('aria-pressed') !== 'true') {
+      fireEvent.click(screen.getByTestId(`check-no-${i.key}`))
+    }
+  })
+
   const open2 = async () => {
     buckets({ myDepartmentIds: [2] })
     return screen.findByTestId('check-yes-cycle_time_change')
@@ -354,13 +362,15 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.click(screen.getByTestId('check-yes-cycle_time_change'))
     fireEvent.change(screen.getByTestId('check-remark-cycle_time_change'),
       { target: { value: '+2s per part' } })
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [
+        details: { impacts: expect.arrayContaining([
           { key: 'cycle_time_change', answer: 'yes', impacted: true, remark: '+2s per part' },
-        ] },
+          { key: 'sparepart_required', answer: 'no', impacted: false },
+        ]) },
       })))
   })
 
@@ -375,6 +385,7 @@ describe('AssessmentBuckets checklist', () => {
     expect(slot).toBeTruthy()
     // A hint, not a gate: a feasible verdict still submits without the RFQ.
     expect(screen.getByTestId('check-rfq-missing')).toBeTruthy()
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
     const zone = screen.getAllByTestId('dropzone')
@@ -403,13 +414,14 @@ describe('AssessmentBuckets checklist', () => {
     await open2()
     fireEvent.click(screen.getByTestId('check-yes-article_design_update'))
     fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [
+        details: { impacts: expect.arrayContaining([
           { key: 'article_design_update', answer: 'yes', impacted: true, choice: 'customer_given' },
-        ] },
+        ]) },
       })))
   })
 
@@ -418,11 +430,13 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.click(screen.getByTestId('check-add-item'))
     fireEvent.blur(screen.getByTestId('check-free-input-0'),
       { target: { value: 'operator training' } })
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [{ label: 'operator training', answer: 'yes', impacted: true }] },
+        details: { impacts: expect.arrayContaining([
+          { label: 'operator training', answer: 'yes', impacted: true }]) },
       })))
   })
 
