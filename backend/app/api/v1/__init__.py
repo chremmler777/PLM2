@@ -20,6 +20,7 @@ from app.api.v1.items.part_relations import router as part_relations_router
 from app.api.v1.items.process_flow import router as process_flow_router
 from app.api.v1.items.dfm import router as dfm_router
 from app.api.v1.items.field_notes import router as field_notes_router
+from app.api.v1.items.materials import router as materials_router
 from app.api.v1.equipment import router as equipment_router
 
 # Module: workflows (RASIC templates and instances)
@@ -65,6 +66,7 @@ api_router.include_router(part_relations_router)
 api_router.include_router(process_flow_router)
 api_router.include_router(dfm_router)
 api_router.include_router(field_notes_router)
+api_router.include_router(materials_router)
 api_router.include_router(equipment_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
