@@ -2,7 +2,10 @@
  * The worksheet's column registry. key is the field_key used by field notes
  * (backend rule: <group>.<field>, lower case), so a comment or flag set in
  * the worksheet is the same note the article, tool and paint pages show.
- * Values are only read here; edit() says where the value is changed.
+ * Values are only read here; edit() says where the value is changed. A
+ * column whose value lives in different places per row (Colour: the paint on
+ * a painted article, the article's colour code otherwise) names the note key
+ * per row with noteKey(); the column key then only identifies the column.
  */
 import { PARTY_LABELS } from '../../api/dfm';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
@@ -12,7 +15,7 @@ import { materialText } from '../../lib/material';
 import { shortName } from '../../lib/partDisplay';
 
 export type ColumnGroup = 'Identity' | 'Revision' | 'Material' | 'Paint' | 'Tool' | 'DFM' | 'Notes';
-export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' | 'material' | 'dfm' | 'notes';
+export type CellDisplay = 'thumbnail' | 'text' | 'mono' | 'number' | 'revision' | 'material' | 'colour' | 'dfm' | 'notes';
 
 export interface WorksheetContext {
   byKey: Map<string, FieldNoteSummary>;
@@ -40,6 +43,8 @@ export interface WorksheetColumn {
   /** Tooltip when the shown value is shortened. */
   title?(row: WorksheetRow): string | null;
   edit(row: WorksheetRow): EditTarget | null;
+  /** The field key of this row's note when it is not the column key; null: no note on this row. */
+  noteKey?(row: WorksheetRow): string | null;
 }
 
 export function buildContext(notes: FieldNoteSummary[] | undefined, projectCode: string | null = null): WorksheetContext {
@@ -54,17 +59,44 @@ export function buildContext(notes: FieldNoteSummary[] | undefined, projectCode:
 
 const TOOL_KEY = /^(tool|dfm)\./;
 
+/** The field key a cell's note uses on this row (the same key the article, tool and paint pages show), or null. */
+export function cellNoteKey(col: WorksheetColumn, row: WorksheetRow): string | null {
+  return col.noteKey ? col.noteKey(row) : col.key;
+}
+
 /** The part a cell's note lives on, or null where the backend would refuse the field key for that part. */
 export function notePartId(col: WorksheetColumn, row: WorksheetRow): number | null {
-  if (col.noteOwner === 'row') return fieldKeyAllowed(col.key, row.item_category) ? row.part_id : null;
-  if (col.noteOwner === 'tool') return row.tool && fieldKeyAllowed(col.key, 'tool') ? row.tool.part_id : null;
+  const key = cellNoteKey(col, row);
+  if (key === null) return null;
+  if (col.noteOwner === 'row') return fieldKeyAllowed(key, row.item_category) ? row.part_id : null;
+  if (col.noteOwner === 'tool') return row.tool && fieldKeyAllowed(key, 'tool') ? row.tool.part_id : null;
   return null;
 }
 
 export function noteFor(col: WorksheetColumn, row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary | undefined {
   const partId = notePartId(col, row);
-  return partId === null ? undefined : ctx.byKey.get(noteKey(partId, col.key));
+  const key = cellNoteKey(col, row);
+  return partId === null || key === null ? undefined : ctx.byKey.get(noteKey(partId, key));
 }
+
+/** Where a row's colour comes from: the paint (painted), the article's MIC colour code, or nowhere. */
+export function colourSource(row: WorksheetRow): 'paint' | 'mic' | null {
+  if (row.paint.painted) return row.paint.colour || row.paint.paint_system ? 'paint' : null;
+  return row.colour_code ? 'mic' : null;
+}
+
+function colourValue(row: WorksheetRow): string | null {
+  switch (colourSource(row)) {
+    case 'paint': return [row.paint.colour, row.paint.paint_system].filter(Boolean).join(' / ');
+    case 'mic': return row.colour_code;
+    default: return null;
+  }
+}
+
+/** Painted rows keep the paint section's key; unpainted rows the article's colour code. */
+const colourKey = (row: WorksheetRow): string | null =>
+  row.row_kind === 'tool_only' ? null : row.paint.painted ? 'paint.colour' : 'part.colour_code';
+const articleOnlyKey = (key: string) => (row: WorksheetRow): string | null => (row.row_kind === 'tool_only' ? null : key);
 
 /** The row's own notes plus its tool's tool./dfm. notes. */
 export function rowNotes(row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary[] {
@@ -142,8 +174,12 @@ export const WORKSHEET_COLUMNS: WorksheetColumn[] = [
     value: (r) => materialText(r.material), edit: onArticle('part.material') }),
   def({ key: 'paint.painted', label: 'Painted', group: 'Paint', filter: 'enum', noteOwner: 'row', editableOn: 'paint',
     value: (r) => r.row_kind === 'tool_only' ? null : (r.paint.painted ? 'yes' : 'no'), edit: onArticle('paint.painted') }),
-  def({ key: 'paint.colour', label: 'Colour / paint system', group: 'Paint', noteOwner: 'row', editableOn: 'paint',
-    value: (r) => [r.paint.colour, r.paint.paint_system].filter(Boolean).join(' / ') || null, edit: onArticle('paint.colour') }),
+  // Painted: the paint colour / system (edited in the paint section); unpainted: the MIC colour code on the article.
+  def({ key: 'part.colour', label: 'Colour', group: 'Paint', display: 'colour', noteOwner: 'row', editableOn: 'article',
+    value: colourValue, noteKey: colourKey,
+    edit: (r) => (r.row_kind === 'tool_only' ? null : { partId: r.part_id, focus: colourKey(r)! }) }),
+  def({ key: 'part.grain', label: 'Grain', group: 'Material', noteOwner: 'row', editableOn: 'article',
+    value: (r) => r.grain, noteKey: articleOnlyKey('part.grain'), edit: onArticle('part.grain') }),
   def({ key: 'tool.number', label: 'Tool no.', group: 'Tool', display: 'mono', noteOwner: 'tool', editableOn: 'tool',
     value: (r) => r.tool ? [r.tool.part_number, ...r.other_tools].join(', ') : null, edit: onTool('tool.number') }),
   def({ key: 'tool.cavities', label: 'Cavities', group: 'Tool', display: 'number', exportType: 'number', noteOwner: 'tool',

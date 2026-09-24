@@ -15,7 +15,7 @@ import { useWorksheet } from '../../hooks/queries/useWorksheet';
 import { FOCUS_PARAM } from '../../hooks/useFieldFocus';
 import { apiErrorMessage } from '../../lib/apiError';
 import { flagTint } from '../../lib/fieldNotes';
-import { WORKSHEET_COLUMNS, buildContext, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
+import { WORKSHEET_COLUMNS, buildContext, cellNoteKey, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
   applyFilters, buildExportPayload, filterOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
   saveHiddenColumns, sortRows, visibleColumns, type RowKindFilter, type SortState,
@@ -217,7 +217,8 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
         onComment={() => { if (menu) setOpenNote(`${menu.row.part_id}|${menu.col.key}`); }}
         onFlag={(flag) => {
           const partId = menu ? notePartId(menu.col, menu.row) : null;
-          if (menu && partId !== null) flagMutation.mutate({ partId, key: menu.col.key, flag });
+          const key = menu ? cellNoteKey(menu.col, menu.row) : null;
+          if (partId !== null && key !== null) flagMutation.mutate({ partId, key, flag });
         }}
       />
     </div>

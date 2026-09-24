@@ -25,6 +25,7 @@ import { API_BASE_URL } from '../api/client';
 import type { RevisionFile } from '../components/project/projectTypes';
 import ToolDetail from './ToolDetail';
 import MaterialField from '../components/materials/MaterialField';
+import ArticleTextField from '../components/parts/ArticleTextField';
 import { materialOf } from '../lib/material';
 import type { PartMaterial } from '../api/materials';
 import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
@@ -36,6 +37,8 @@ interface Part extends Partial<PartMaterial> {
   part_number: string;
   customer_part_number?: string | null;
   tier1_part_number?: string | null;
+  colour_code?: string | null;
+  grain?: string | null;
   name: string;
   part_type: string;
   data_classification: string;
@@ -354,6 +357,15 @@ export default function PartDetail() {
                 <div className="text-sm text-slate-400">Material{marker('part.material', 'Material')}</div>
                 <MaterialField partId={part.id} material={materialOf(part)} />
               </div>
+            )}
+            {part.item_category === 'article' && (
+              <>
+                <ArticleTextField partId={part.id} field="colour_code" label="Colour code" value={part.colour_code}
+                  placeholder="e.g. NM0" marker={marker('part.colour_code', 'Colour code')} onSaved={refetch}
+                  title="Colour of the moulded (unpainted, MIC) article, e.g. NM0. A painted article's colour comes from its paint." />
+                <ArticleTextField partId={part.id} field="grain" label="Grain" value={part.grain}
+                  placeholder="e.g. KF8" marker={marker('part.grain', 'Grain')} onSaved={refetch} />
+              </>
             )}
           </div>
         </div>

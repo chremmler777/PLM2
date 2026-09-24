@@ -271,6 +271,30 @@ describe('WorksheetView cell menu', () => {
     rectSpy.mockRestore()
   })
 
+  it('Colour shows a paint or MIC tag and flags, comments and edits where the colour lives', async () => {
+    const mic = row({ part_id: 7, part_number: '20-1994-007-0', colour_code: 'NM0',
+      paint: { painted: false, colour: null, colour_hex: null, paint_system: null } })
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows: [rows[0], mic] } })
+      return Promise.resolve({ data: [] })
+    })
+    mountRouted()
+    const painted = await screen.findByTestId('ws-cell-1-part.colour')
+    expect(within(painted).getByTestId('ws-colour-tag').textContent).toBe('paint')
+    expect(within(painted).getByTestId('note-marker-paint.colour')).toBeTruthy()
+    const cell = screen.getByTestId('ws-cell-7-part.colour')
+    expect(cell.textContent).toContain('NM0')
+    expect(within(cell).getByTestId('ws-colour-tag').textContent).toBe('MIC')
+    expect(within(cell).getByTestId('note-marker-part.colour_code')).toBeTruthy()
+    expect(within(screen.getByTestId('ws-cell-7-part.grain')).getByTestId('note-marker-part.grain')).toBeTruthy()
+    fireEvent.contextMenu(cell)
+    fireEvent.click(screen.getByTestId('ws-menu-flag-open'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7/field-notes/part.colour_code/flag', { status: 'open' }))
+    fireEvent.contextMenu(cell)
+    fireEvent.click(screen.getByTestId('ws-menu-edit'))
+    expect((await screen.findByTestId('where')).textContent).toBe('/parts/7?focus=part.colour_code')
+  })
+
   it('Flag on a tool field sends the PUT to the tool part, not the row', async () => {
     mountRouted()
     fireEvent.contextMenu(await screen.findByTestId('ws-cell-3-tool.cavities'))

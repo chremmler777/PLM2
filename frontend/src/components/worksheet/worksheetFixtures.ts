@@ -10,7 +10,7 @@ const tool = {
 export const row = (over: Partial<WorksheetRow> = {}): WorksheetRow => ({
   part_id: 1, row_kind: 'article', part_number: '20-1994-001-0', customer_part_number: '206.882.251',
   tier1_part_number: 'S00H4X-110', name: 'Handle LH', part_type: 'internal_mfg', item_category: 'article',
-  thumbnail_url: null, lifecycle_phase: 'rfq', mirror_of: null,
+  thumbnail_url: null, lifecycle_phase: 'rfq', colour_code: null, grain: 'KF8', mirror_of: null,
   revision: { revision_name: 'E1', customer_index: '001', phase: 'review' },
   material: { ...materialOf({}), material_source: 'new', material_new_text: 'PA6-GF15' },
   paint: { painted: true, colour: 'VM0 Skyscraper', colour_hex: null, paint_system: 'Base / Clear' },

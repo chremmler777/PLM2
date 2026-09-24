@@ -46,6 +46,10 @@ export interface WorksheetRow {
   item_category: string;
   thumbnail_url: string | null;
   lifecycle_phase: string;
+  /** MIC colour of an unpainted article, e.g. NM0 (a painted article's colour is in paint). */
+  colour_code: string | null;
+  /** e.g. KF8 */
+  grain: string | null;
   mirror_of: { part_id: number; part_number: string; customer_part_number: string | null } | null;
   revision: { revision_name: string; customer_index: string | null; phase: string } | null;
   material: PartMaterial;

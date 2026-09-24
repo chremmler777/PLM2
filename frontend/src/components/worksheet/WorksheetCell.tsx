@@ -5,7 +5,7 @@ import MaterialValue from '../materials/MaterialValue';
 import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
 import type { FieldNoteSummary } from '../../api/fieldNotes';
 import type { WorksheetRow } from '../../api/worksheet';
-import { notePartId, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
+import { cellNoteKey, colourSource, notePartId, type WorksheetColumn, type WorksheetContext } from './worksheetColumns';
 
 export interface WorksheetCellProps {
   row: WorksheetRow;
@@ -22,6 +22,7 @@ const DFM_TONE: Record<string, string> = { waiting: 'text-amber-300', all_answer
 export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpenChange, onMenu }: WorksheetCellProps) {
   const value = col.value(row, ctx);
   const partId = notePartId(col, row);
+  const fieldKey = cellNoteKey(col, row);
   let body: React.ReactNode;
   switch (col.display) {
     case 'thumbnail':
@@ -33,6 +34,19 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpe
     case 'material':
       body = row.row_kind === 'tool_only' ? null : <MaterialValue material={row.material} testId={`ws-material-${row.part_id}`} />;
       break;
+    case 'colour': {
+      const source = colourSource(row);
+      body = value === null || source === null ? null : (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-slate-100">{value}</span>
+          <span data-testid="ws-colour-tag" title={source === 'paint' ? 'Colour of the paint' : 'Moulded in colour (colour code on the article)'}
+            className={`px-1 rounded text-[10px] leading-4 ${source === 'paint' ? 'bg-sky-900/60 text-sky-200' : 'bg-slate-700 text-slate-300'}`}>
+            {source === 'paint' ? 'paint' : 'MIC'}
+          </span>
+        </span>
+      );
+      break;
+    }
     case 'dfm':
       body = value === null ? null : <span className={DFM_TONE[row.dfm?.status ?? ''] ?? 'text-slate-300'}>{value}</span>;
       break;
@@ -53,8 +67,8 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpe
       {frozen && col.display !== 'thumbnail'
         ? <span className="min-w-0 truncate" title={value === null ? undefined : String(value)}>{body}</span>
         : body}
-      {partId !== null && (
-        <FieldNoteMarker partId={partId} fieldKey={col.key} label={col.label} note={note}
+      {partId !== null && fieldKey !== null && (
+        <FieldNoteMarker partId={partId} fieldKey={fieldKey} label={col.label} note={note}
           open={noteOpen} onOpenChange={onNoteOpenChange} quietWhenEmpty />
       )}
       {col.display !== 'thumbnail' && (

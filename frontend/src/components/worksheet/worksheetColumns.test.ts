@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { WORKSHEET_COLUMNS, buildContext, dfmLabel, noteFor, notePartId, notesSummary, rowNotes } from './worksheetColumns'
+import { WORKSHEET_COLUMNS, buildContext, cellNoteKey, colourSource, dfmLabel, noteFor, notePartId, notesSummary, rowNotes } from './worksheetColumns'
 import { FIELD_KEY_RE } from '../../lib/fieldNotes'
 import { row } from './worksheetFixtures'
 import type { FieldNoteSummary } from '../../api/fieldNotes'
@@ -31,7 +31,8 @@ describe('worksheet column registry', () => {
     expect(col('revision.level').value(r, empty)).toBe('E1 · 001')
     expect(col('part.material').value(r, empty)).toBe('PA6-GF15 (NEW, not in MaterialDB)')
     expect(col('paint.painted').value(r, empty)).toBe('yes')
-    expect(col('paint.colour').value(r, empty)).toBe('VM0 Skyscraper / Base / Clear')
+    expect(col('part.colour').value(r, empty)).toBe('VM0 Skyscraper / Base / Clear')
+    expect(col('part.grain').value(r, empty)).toBe('KF8')
     expect(col('tool.number').value(r, empty)).toBe('199401, 199409')
     expect(col('tool.cavities').value(r, empty)).toBe(2)
     expect(col('tool.toolmaker').value(r, empty)).toBe('Formenbau Nord')
@@ -55,8 +56,9 @@ describe('worksheet column registry', () => {
     const r = row()
     expect(notePartId(col('part.material'), r)).toBe(1)
     expect(col('part.material').edit(r)).toEqual({ partId: 1, focus: 'part.material' })
-    expect(col('paint.colour').edit(r)).toEqual({ partId: 1, focus: 'paint.colour' })
-    expect(col('paint.colour').edit(row({ row_kind: 'tool_only' }))).toBeNull()
+    expect(col('part.colour').edit(r)).toEqual({ partId: 1, focus: 'paint.colour' })
+    expect(col('part.colour').edit(row({ row_kind: 'tool_only' }))).toBeNull()
+    expect(col('part.grain').edit(r)).toEqual({ partId: 1, focus: 'part.grain' })
     expect(col('part.mirror_of').edit(r)).toBeNull()
     expect(notePartId(col('part.thumbnail'), r)).toBeNull()
     expect(notePartId(col('notes.summary'), r)).toBeNull()
@@ -91,12 +93,55 @@ describe('worksheet notes on tool-only rows', () => {
 
   it('offers no note where the backend would refuse the field key for the owner', () => {
     expect(notePartId(col('paint.painted'), toolOnly)).toBeNull()
-    expect(notePartId(col('paint.colour'), toolOnly)).toBeNull()
+    expect(notePartId(col('part.colour'), toolOnly)).toBeNull()
+    expect(notePartId(col('part.grain'), toolOnly)).toBeNull()
     expect(notePartId(col('revision.level'), toolOnly)).toBeNull()
     expect(notePartId(col('part.name'), toolOnly)).toBe(95)
     expect(notePartId(col('tool.cavities'), toolOnly)).toBe(95)
     expect(notePartId(col('paint.painted'), row())).toBe(1)
     expect(notePartId(col('tool.cavities'), row())).toBe(90)
+  })
+})
+
+describe('worksheet colour and grain columns', () => {
+  const painted = row()
+  const mic = row({ part_id: 2, paint: { painted: false, colour: null, colour_hex: null, paint_system: null }, colour_code: 'NM0' })
+  const bare = row({ part_id: 3, paint: { painted: false, colour: null, colour_hex: null, paint_system: null }, colour_code: null, grain: null })
+
+  it('sits between Painted and Tool no. with Material before it', () => {
+    const keys = WORKSHEET_COLUMNS.map((c) => c.key)
+    const at = (k: string) => keys.indexOf(k)
+    expect(keys.includes('paint.colour')).toBe(false)
+    expect([at('part.material'), at('paint.painted'), at('part.colour'), at('part.grain'), at('tool.number')])
+      .toEqual([...Array(5).keys()].map((i) => at('part.material') + i))
+    expect(col('part.colour').exportType).toBe('text')
+    expect(col('part.grain').exportType).toBe('text')
+  })
+
+  it('shows the paint colour on painted rows and the MIC colour code otherwise', () => {
+    expect(colourSource(painted)).toBe('paint')
+    expect(colourSource(mic)).toBe('mic')
+    expect(colourSource(bare)).toBeNull()
+    expect(colourSource(row({ paint: { painted: true, colour: null, colour_hex: null, paint_system: null } }))).toBeNull()
+    // painted wins over a stray colour code
+    expect(col('part.colour').value(row({ colour_code: 'NM0' }), empty)).toBe('VM0 Skyscraper / Base / Clear')
+    expect(col('part.colour').value(mic, empty)).toBe('NM0')
+    expect(col('part.colour').value(bare, empty)).toBeNull()
+    expect(col('part.grain').value(bare, empty)).toBeNull()
+  })
+
+  it('edits and notes the paint colour on painted rows, the article colour code otherwise', () => {
+    expect(cellNoteKey(col('part.colour'), painted)).toBe('paint.colour')
+    expect(cellNoteKey(col('part.colour'), mic)).toBe('part.colour_code')
+    expect(cellNoteKey(col('part.colour'), bare)).toBe('part.colour_code')
+    expect(cellNoteKey(col('part.grain'), mic)).toBe('part.grain')
+    expect(cellNoteKey(col('part.name'), mic)).toBe('part.name')
+    expect(col('part.colour').edit(mic)).toEqual({ partId: 2, focus: 'part.colour_code' })
+    const ctx = buildContext([note(1, 'paint.colour', 'confirmed'), note(2, 'part.colour_code', 'open'), note(2, 'part.grain', 'rejected')])
+    expect(noteFor(col('part.colour'), painted, ctx)?.flag_status).toBe('confirmed')
+    expect(noteFor(col('part.colour'), mic, ctx)?.flag_status).toBe('open')
+    expect(noteFor(col('part.grain'), mic, ctx)?.flag_status).toBe('rejected')
+    for (const k of ['paint.colour', 'part.colour_code', 'part.grain']) expect(FIELD_KEY_RE.test(k)).toBe(true)
   })
 })
 
