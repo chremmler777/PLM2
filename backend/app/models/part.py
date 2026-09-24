@@ -67,6 +67,17 @@ class Part(Base):
     tool_tonnage_class: Mapped[int | None] = mapped_column(Integer, nullable=True)  # clamping force class, t
     tool_cycle_time_s: Mapped[float | None] = mapped_column(Numeric(6, 1, asdecimal=False), nullable=True)
 
+    # Material (item_category = article only). Linked to MaterialDB (a series
+    # material with a 40- KTX number, or a research material without one) or
+    # explicitly new, not in MaterialDB yet. material_label caches the display
+    # text so a link still reads when MaterialDB is down.
+    material_source: Mapped[str | None] = mapped_column(String(20), nullable=True)  # materialdb | new
+    materialdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    material_ktx_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    material_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    material_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    material_new_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

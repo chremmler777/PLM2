@@ -333,3 +333,46 @@ async def force_complete_check_workflows(session_factory, change_id: int):
                             .values(status="completed",
                                     completed_at=datetime.utcnow()))
         await s.commit()
+
+
+MATERIALDB_ITEMS = [
+    {"id": 11, "ktx_number": "40-1234", "trade_name": "Ultramid B3WG6", "grade": "black 00564",
+     "manufacturer": "BASF", "family": "PA6", "classification": "series", "iso_designation": "PA6-GF30",
+     "supplier": None},
+    {"id": 12, "ktx_number": None, "trade_name": "REZYcom PA6 RB122 F15", "grade": None,
+     "manufacturer": "Polykemi", "family": "PA6", "classification": "research", "iso_designation": "PA6-GF15",
+     "supplier": None},
+    {"id": 13, "ktx_number": "40-2002", "trade_name": "Hostacom TRC 787N", "grade": None,
+     "manufacturer": "LyondellBasell", "family": "PP", "classification": "series", "iso_designation": "PP-TD20",
+     "supplier": None},
+]
+
+
+@pytest_asyncio.fixture
+async def materialdb(monkeypatch):
+    """MaterialDB configured and answered by an in-process mock. Mutate
+    state["items"] to change what MaterialDB returns, set state["fail"] to
+    "down" (connection error) or "500" (error answer)."""
+    import copy
+    import httpx
+    from app.services import materialdb_client
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "materialdb_base_url", "http://materialdb.test/")
+    monkeypatch.setattr(settings, "materialdb_service_token", "svc-token")
+    state = {"items": copy.deepcopy(MATERIALDB_ITEMS), "fail": None, "calls": 0, "auth": None, "url": None}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["calls"] += 1
+        state["auth"] = request.headers.get("authorization")
+        state["url"] = str(request.url)
+        if state["fail"] == "down":
+            raise httpx.ConnectError("connection refused", request=request)
+        if state["fail"] == "500":
+            return httpx.Response(500, json={"detail": "boom"})
+        return httpx.Response(200, json=state["items"])
+
+    monkeypatch.setattr(materialdb_client, "TRANSPORT", httpx.MockTransport(handler))
+    materialdb_client.clear_cache()
+    yield state
+    materialdb_client.clear_cache()

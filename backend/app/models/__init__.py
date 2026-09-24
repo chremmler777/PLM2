@@ -34,6 +34,7 @@ from app.models.workflow import (
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
 )
 from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
+from app.models.field_note import FieldNote, FieldNoteComment
 
 __all__ = [
     "Base",
@@ -64,6 +65,8 @@ __all__ = [
     "DfmEntry",
     "DfmEntryFile",
     "DfmAuditEvent",
+    "FieldNote",
+    "FieldNoteComment",
     # New workflow template models
     "Department",
     "WfTemplate",

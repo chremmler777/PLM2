@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # /contacts endpoint falls back to local PLM2 users.
     hub_api_base: str = ""
 
+    # MaterialDB service API (read only for PLM). Base is the API root that
+    # holds /v1: http://materialdb-backend:8000 inside the docker network, or
+    # https://<hub>/materialdb/api through nginx. Token is MaterialDB's
+    # MATERIALDB_SERVICE_TOKEN. Both empty = material search answers 503.
+    materialdb_base_url: str = ""
+    materialdb_service_token: str = ""
+
     # Admin setup
     admin_registration_code: str = "CHANGE-THIS-ADMIN-CODE-IN-PRODUCTION"
 
