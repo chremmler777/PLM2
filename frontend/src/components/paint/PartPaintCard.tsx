@@ -10,6 +10,8 @@ import { getPartPaint, putPartPaint, listPaints } from '../../api/paints';
 import { apiErrorMessage } from '../../lib/apiError';
 import { PAINT_TYPE_LABEL, type Paint } from '../../types/paint';
 import ColourSwatch from './ColourSwatch';
+import FieldNoteMarker from '../fieldNotes/FieldNoteMarker';
+import { usePartFieldNoteIndex } from '../../hooks/queries/useFieldNotes';
 
 interface DraftLayer {
   paint_id: number;
@@ -29,6 +31,7 @@ export default function PartPaintCard({ partId }: { partId: number }) {
     queryKey: ['paints', 'active'],
     queryFn: () => listPaints({ activeOnly: true }),
   });
+  const fieldNotes = usePartFieldNoteIndex(partId);
 
   // The part this draft was hydrated from. Navigating between parts (used-in
   // chips, BOM tree) swaps `partId` in place, so a draft hydrated for the old
@@ -124,15 +127,23 @@ export default function PartPaintCard({ partId }: { partId: number }) {
     <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-slate-100">Paint</h2>
-        <label className="flex items-center gap-2 text-sm text-slate-200">
-          <input
-            type="checkbox"
-            data-testid="paint-required-toggle"
-            checked={paintRequired}
-            onChange={(e) => setPaintRequired(e.target.checked)}
-          />
-          Paint required
-        </label>
+        <div data-field-key="paint.painted" className="flex items-center">
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              data-testid="paint-required-toggle"
+              checked={paintRequired}
+              onChange={(e) => setPaintRequired(e.target.checked)}
+            />
+            Paint required
+          </label>
+          <FieldNoteMarker partId={partId} fieldKey="paint.painted" label="Painted" note={fieldNotes.get('paint.painted')} />
+        </div>
+      </div>
+
+      <div data-field-key="paint.colour" className="flex items-center gap-1 text-sm text-slate-400 mb-2">
+        Colour / paint system
+        <FieldNoteMarker partId={partId} fieldKey="paint.colour" label="Colour / paint system" note={fieldNotes.get('paint.colour')} />
       </div>
 
       {missingSpec && <p className="text-amber-400 text-sm mb-4">paint spec missing</p>}

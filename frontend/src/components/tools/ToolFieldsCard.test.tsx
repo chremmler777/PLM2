@@ -79,6 +79,18 @@ describe('ToolFieldsCard', () => {
     expect(typeof message).toBe('string')
     expect(message).toContain('Input should be greater than 0')
   })
+
+  it('puts a note marker on every tool field', async () => {
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve({ data: url === '/v1/parts/7/field-notes'
+      ? [{ id: 1, part_id: 7, field_key: 'tool.cavities', flag_status: 'open', flag_set_by: null, flag_set_by_name: null,
+          flag_set_at: null, created_at: null, comment_count: 0, last_comment: null }]
+      : [{ id: 3, name: 'Toolshop Sued' }] }))
+    wrap()
+    await waitFor(() => expect(screen.getByTestId('note-dot-tool.cavities').className).toContain('bg-yellow-400'))
+    for (const key of ['tool.tonnage_class', 'tool.cycle_time_s', 'tool.toolmaker']) {
+      expect(screen.getByTestId(`note-marker-${key}`)).toBeTruthy()
+    }
+  })
 })
 
 describe('cavitiesFromNotes', () => {

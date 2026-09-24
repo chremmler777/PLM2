@@ -27,6 +27,9 @@ import ToolDetail from './ToolDetail';
 import MaterialField from '../components/materials/MaterialField';
 import { materialOf } from '../lib/material';
 import type { PartMaterial } from '../api/materials';
+import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
+import { usePartFieldNoteIndex } from '../hooks/queries/useFieldNotes';
+import { useFieldFocus } from '../hooks/useFieldFocus';
 
 interface Part extends Partial<PartMaterial> {
   id: number;
@@ -131,6 +134,8 @@ export default function PartDetail() {
     queryFn: async () => (await client.get(`/v1/parts/revisions/${activeRevision!.id}/files`)).data as RevisionFile[],
     enabled: !!activeRevision,
   });
+  const fieldNotes = usePartFieldNoteIndex(part?.id);
+  useFieldFocus(!!part);
 
   const customerData = useMutation({
     mutationFn: (v: CustomerDataInput) => client.post(`/v1/parts/${partId}/revisions/customer-data`, v),
@@ -220,6 +225,10 @@ export default function PartDetail() {
     if (kind) paneDoc = { fileId: openDoc.id, filename: openDoc.filename, kind, revisionName: revName };
   } else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
 
+  const marker = (fieldKey: string, label: string) => (
+    <FieldNoteMarker partId={part.id} fieldKey={fieldKey} label={label} note={fieldNotes.get(fieldKey)} />
+  );
+
   return (
     <div className="min-h-screen bg-slate-900 p-8">
       <div className="max-w-5xl mx-auto">
@@ -228,13 +237,16 @@ export default function PartDetail() {
             className="mb-4 px-3 py-1 bg-slate-700 text-slate-100 rounded hover:bg-slate-600 text-sm">← Back</button>
           <div className="flex justify-between items-start gap-4">
             <div>
-              <h1 className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}</h1>
+              <h1 data-field-key="part.part_number" className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}{marker('part.part_number', 'KTX no.')}</h1>
               {editingCustomerNumber === null ? (
-                <button data-testid="edit-customer-part-number" title="Edit the customer part number"
-                  onClick={() => setEditingCustomerNumber(part.customer_part_number ?? '')}
-                  className="block text-slate-400 font-mono text-sm mb-1 hover:text-slate-200">
-                  {part.customer_part_number || '+ customer part number'}
-                </button>
+                <div data-field-key="part.customer_part_number" className="flex items-center mb-1">
+                  <button data-testid="edit-customer-part-number" title="Edit the customer part number"
+                    onClick={() => setEditingCustomerNumber(part.customer_part_number ?? '')}
+                    className="block text-slate-400 font-mono text-sm hover:text-slate-200">
+                    {part.customer_part_number || '+ customer part number'}
+                  </button>
+                  {marker('part.customer_part_number', 'OEM no.')}
+                </div>
               ) : (
                 <div className="flex items-center gap-2 mb-1">
                   <input data-testid="customer-part-number-input" autoFocus value={editingCustomerNumber}
@@ -253,11 +265,14 @@ export default function PartDetail() {
                 </div>
               )}
               {editingTier1Number === null ? (
-                <button data-testid="edit-tier1-part-number" title="Edit the Tier 1 part number (the Tier 1's own number when we are Tier 2; the customer number stays the OEM number)"
-                  onClick={() => setEditingTier1Number(part.tier1_part_number ?? '')}
-                  className="block text-slate-400 font-mono text-sm mb-1 hover:text-slate-200">
-                  {part.tier1_part_number ? `Tier 1 ${part.tier1_part_number}` : '+ tier 1 part number'}
-                </button>
+                <div data-field-key="part.tier1_part_number" className="flex items-center mb-1">
+                  <button data-testid="edit-tier1-part-number" title="Edit the Tier 1 part number (the Tier 1's own number when we are Tier 2; the customer number stays the OEM number)"
+                    onClick={() => setEditingTier1Number(part.tier1_part_number ?? '')}
+                    className="block text-slate-400 font-mono text-sm hover:text-slate-200">
+                    {part.tier1_part_number ? `Tier 1 ${part.tier1_part_number}` : '+ tier 1 part number'}
+                  </button>
+                  {marker('part.tier1_part_number', 'Tier 1 no.')}
+                </div>
               ) : (
                 <div className="flex items-center gap-2 mb-1">
                   <input data-testid="tier1-part-number-input" autoFocus value={editingTier1Number}
@@ -275,13 +290,16 @@ export default function PartDetail() {
                     className="text-sm px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-100">Cancel</button>
                 </div>
               )}
-              <p className="text-slate-300 mb-2">{part.name}</p>
+              <p data-field-key="part.name" className="text-slate-300 mb-2">{part.name}{marker('part.name', 'Name')}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-blue-300 bg-blue-900 px-3 py-1 rounded-md">
                   {activeRevision ? <><RevisionLabel name={activeRevision.revision_name} index={activeRevision.customer_index} /> (active)</> : 'no customer data yet'}
                 </span>
-                <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
-                  {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
+                <span data-field-key="part.lifecycle_phase" className="inline-flex items-center">
+                  <span data-testid="lifecycle-phase" className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md capitalize">
+                    {part.lifecycle_phase}{part.nominated_at ? ` · nominated ${part.nominated_at}` : ''}{part.sop_at ? ` · SOP ${part.sop_at}` : ''}
+                  </span>
+                  {marker('part.lifecycle_phase', 'Phase')}
                 </span>
                 {isAdmin && nextPhase && (
                   <button onClick={() => phase.mutate(nextPhase)} disabled={phase.isPending}
@@ -329,11 +347,11 @@ export default function PartDetail() {
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
           <h2 className="text-xl font-bold text-slate-100 mb-4">Part Information</h2>
           <div className="grid grid-cols-2 gap-4">
-            <div><div className="text-sm text-slate-400">Type</div><div className="font-medium text-slate-100 capitalize">{part.part_type}</div></div>
+            <div data-field-key="part.part_type"><div className="text-sm text-slate-400">Type{marker('part.part_type', 'Type')}</div><div className="font-medium text-slate-100 capitalize">{part.part_type}</div></div>
             <div><div className="text-sm text-slate-400">Classification</div><div className="font-medium text-slate-100 capitalize">{part.data_classification}</div></div>
             {part.item_category === 'article' && (
               <div className="col-span-2" data-field-key="part.material">
-                <div className="text-sm text-slate-400">Material</div>
+                <div className="text-sm text-slate-400">Material{marker('part.material', 'Material')}</div>
                 <MaterialField partId={part.id} material={materialOf(part)} />
               </div>
             )}
@@ -373,7 +391,7 @@ export default function PartDetail() {
         </div>
 
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-8">
-          <h2 className="text-xl font-bold text-slate-100 mb-6">Revisions</h2>
+          <h2 data-field-key="revision.level" className="text-xl font-bold text-slate-100 mb-6">Revisions{marker('revision.level', 'E level')}</h2>
           <RevisionTimeline revisions={part.revisions} activeRevisionId={part.active_revision_id}
             onNewProposal={(id) => setProposalParent(id)} onPromote={(r) => setPromoting(r)}
             onReject={(id) => reject.mutate(id)} onUnreject={(id) => unreject.mutate(id)} />

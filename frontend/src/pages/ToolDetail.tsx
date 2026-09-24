@@ -14,6 +14,8 @@ import ToolFieldsCard from '../components/tools/ToolFieldsCard';
 import DocumentPane, { type PaneDocument } from '../components/parts/DocumentPane';
 import DfmArchive from '../components/dfm/DfmArchive';
 import { producedArticles, type ToolRelation } from '../components/tools/toolRelations';
+import FieldNoteMarker from '../components/fieldNotes/FieldNoteMarker';
+import { usePartFieldNoteIndex } from '../hooks/queries/useFieldNotes';
 
 export interface ToolPart {
   id: number;
@@ -37,6 +39,7 @@ interface Props {
 }
 
 export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
+  const notes = usePartFieldNoteIndex(part.id);
   const [showStartChange, setShowStartChange] = useState(false);
   const [openDoc, setOpenDoc] = useState<PaneDocument | null>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -60,7 +63,10 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
             <div className="flex items-start gap-4 min-w-0">
             <PartThumbnail url={part.thumbnail_url} name={part.name} size="lg" testId="tool-thumbnail" />
             <div className="min-w-0">
-              <h1 className="text-4xl font-bold text-slate-100 mb-1">{part.part_number}</h1>
+              <h1 data-field-key="tool.number" className="text-4xl font-bold text-slate-100 mb-1">
+                {part.part_number}
+                <FieldNoteMarker partId={part.id} fieldKey="tool.number" label="Tool no." note={notes.get('tool.number')} />
+              </h1>
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap mb-3">
                 <span className="text-sm text-slate-200 bg-slate-700 px-3 py-1 rounded-md">Tool</span>
@@ -96,6 +102,10 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
             <DocumentPane document={openDoc} onClose={() => setOpenDoc(null)} />
           </div>
         )}
+        <div data-field-key="dfm.status" className="flex items-center gap-1 mb-2 text-sm text-slate-400">
+          DFM status notes
+          <FieldNoteMarker partId={part.id} fieldKey="dfm.status" label="DFM status" note={notes.get('dfm.status')} />
+        </div>
         <DfmArchive partId={part.id} onOpenPdf={setOpenDoc} />
 
         {showStartChange && (
