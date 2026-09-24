@@ -401,6 +401,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
   'check.openRows': { de: '{n} Punkte offen', en: '{n} rows unanswered' },
   'check.noCount': { de: '{n} × Nein', en: '{n} × No' },
+  'check.noCountBulk': {
+    de: '{n} × Nein ({b} per Rest → Nein)', en: '{n} × No ({b} set via Rest → No)' },
+  'check.restNo': { de: 'Rest → Nein', en: 'Rest → No' },
+  'check.restNoHint': {
+    de: 'Nur offene Zeilen werden Nein; jede Zeile bleibt änderbar.',
+    en: 'Only unanswered rows become No; every row stays editable.' },
   'check.summary': { de: '{n} betroffen · {k} Risiken', en: '{n} impacted · {k} risks flagged' },
   'check.flagRisk': { de: '⚑ Risiko melden', en: '⚑ Flag risk' },
   'check.riskFlagged': { de: '⚑ Risiko gemeldet (Sev {s})', en: '⚑ risk flagged (sev {s})' },

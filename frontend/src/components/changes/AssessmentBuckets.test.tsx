@@ -483,6 +483,21 @@ describe('AssessmentBuckets checklist', () => {
       .toBe(t('check.summary').replace('{n}', '1').replace('{k}', '1')))
   })
 
+  it('says how many No answers came from Rest → No', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-09-24T00:00:00',
+      details: { impacts: [
+        { key: 'cycle_time_change', answer: 'no', impacted: false },
+        { key: 'sparepart_required', answer: 'no', impacted: false, bulk: true },
+        { key: 'visual_risk', answer: 'no', impacted: false, bulk: true },
+      ] },
+    })] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-no-2').textContent)
+      .toBe(t('check.noCountBulk').replace('{n}', '3').replace('{b}', '2'))
+  })
+
   it('lists No answers collapsed so a reviewer sees they were answered', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([])
     submittedWithAnswers()

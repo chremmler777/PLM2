@@ -5,7 +5,7 @@ import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
 import { DEPARTMENT_FIELDS } from './departmentForms'
-import ActivityChecklist, { checklistProgress } from './departmentForms/ActivityChecklist'
+import ActivityChecklist, { checklistProgress, restToNo } from './departmentForms/ActivityChecklist'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -92,6 +92,13 @@ export default function AssessmentSubmitForm({
           className={`text-[11px] ${progress.answered === progress.total ? 'text-emerald-400' : 'text-slate-400'}`}>
           {t('check.progress').replace('{n}', String(progress.answered))
             .replace('{m}', String(progress.total))}
+          {progress.answered < progress.total && (
+            <button type="button" data-testid="check-rest-no" title={t('check.restNoHint')}
+              onClick={() => setDetails((d) => restToNo(defs, d))}
+              className="ml-2 rounded border border-slate-600 px-1.5 py-0 text-[11px] text-slate-300 hover:bg-slate-700">
+              {t('check.restNo')}
+            </button>
+          )}
         </p>
       )}
       {!notImpacted && (

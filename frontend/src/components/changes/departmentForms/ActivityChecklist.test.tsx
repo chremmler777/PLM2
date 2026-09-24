@@ -137,3 +137,16 @@ describe('ActivityChecklist risk flag', () => {
     expect(riskKeyOf('free:Hot runner: zone 3')).toBe('free:Hot runner: zone 3')
   })
 })
+
+describe('ActivityChecklist Rest → No marks', () => {
+  afterEach(cleanup)
+
+  it('a row changed by hand is no longer marked as bulk', async () => {
+    const onChange = vi.fn()
+    render(wrap(<ActivityChecklist departmentId={2} onChange={onChange}
+      value={{ impacts: [{ key: 'threed_change', answer: 'no', impacted: false, bulk: true }] }} />))
+    fireEvent.click(await screen.findByTestId('check-yes-threed_change'))
+    const row = onChange.mock.calls[0][0].impacts.find((i: { key: string }) => i.key === 'threed_change')
+    expect(row).toEqual({ key: 'threed_change', answer: 'yes', impacted: true })
+  })
+})

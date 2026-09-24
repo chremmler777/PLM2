@@ -29,6 +29,8 @@ export interface ImpactItem {
   label?: string
   /** The department's answer. `impacted` mirrors it (yes) for costing. */
   answer?: 'yes' | 'no'
+  /** Answered by "Rest → No" rather than row by row — shown to reviewers. */
+  bulk?: boolean
   impacted: boolean
   remark?: string
   choice?: string
@@ -54,6 +56,18 @@ export function checklistProgress(
   const open = defs.filter((d) => !byKey.get(d.key)?.answer)
   return { answered: defs.length - open.length, total: defs.length,
            firstOpen: open[0]?.key ?? null }
+}
+
+/** "Rest → No": every keyed row still unanswered becomes a marked No. */
+export function restToNo(
+  defs: ChecklistItemDef[], value: Record<string, unknown>,
+): Record<string, unknown> {
+  const impacts = impactsOf(value)
+  const answered = new Set(impacts.filter((i) => i.key && i.answer).map((i) => i.key!))
+  const rest = impacts.filter((i) => !(i.key && !i.answer))
+  const filled = defs.filter((d) => !answered.has(d.key))
+    .map((d) => ({ key: d.key, answer: 'no' as const, impacted: false, bulk: true }))
+  return { ...value, impacts: [...rest, ...filled] }
 }
 
 /** Keys are capped where the backend caps them (change_concerns.checklist_key). */
@@ -117,8 +131,11 @@ export default function ActivityChecklist({
   const row = (id: string, label: string, def?: ChecklistItemDef) => {
     const item = answerFor(id)
     const wantsRfq = id === RFQ_ITEM && item.impacted
+    // Answering by hand drops the Rest → No mark: the row was now considered.
+    const { bulk: _bulk, ...own } = item
+    void _bulk
     const setAnswer = (answer: 'yes' | 'no') => put(answer === 'yes'
-      ? { ...item, answer, impacted: true }
+      ? { ...own, answer, impacted: true }
       : { ...(item.key ? { key: item.key } : { label: item.label }), answer, impacted: false })
     const open = !item.answer && !id.startsWith('free:')
     return (

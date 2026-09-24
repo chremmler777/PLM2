@@ -100,3 +100,28 @@ describe('AssessmentSubmitForm without a loaded checklist', () => {
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('AssessmentSubmitForm Rest → No', () => {
+  afterEach(cleanup)
+
+  it('fills only the unanswered rows with No and marks them', async () => {
+    submitAssessment.mockClear()
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2}
+      departmentName="Quality" showEffort={false} onDone={() => {}} />))
+    fireEvent.click(await screen.findByTestId('check-yes-threed_change'))
+    fireEvent.click(screen.getByTestId('check-rest-no'))
+    expect(screen.getByTestId('check-progress').textContent).toContain('2 of 2')
+    expect(screen.getByTestId('check-yes-threed_change').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByTestId('check-rest-no')).toBeNull()       // nothing left to fill
+    fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
+    fireEvent.click(screen.getByTestId('assessment-submit'))
+    await waitFor(() => expect(submitAssessment).toHaveBeenLastCalledWith(7, expect.objectContaining({
+      details: { impacts: expect.arrayContaining([
+        { key: 'cycle_time_change', answer: 'no', impacted: false, bulk: true },
+        expect.objectContaining({ key: 'threed_change', answer: 'yes', impacted: true }),
+      ]) } })))
+    const three = submitAssessment.mock.lastCall![1].details.impacts
+      .find((i: { key: string }) => i.key === 'threed_change')
+    expect(three.bulk).toBeUndefined()
+  })
+})

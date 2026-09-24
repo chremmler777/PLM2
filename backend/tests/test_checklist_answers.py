@@ -129,3 +129,14 @@ async def test_free_lines_alone_do_not_skip_the_gate(client, admin_auth, tab):
         {"label": "Foo", "answer": "yes", "impacted": True}]})
     assert res.status_code == 400
     assert res.json()["detail"].startswith("Checklist incomplete")
+
+
+async def test_rest_to_no_mark_is_kept(client, admin_auth, tab, session_factory):
+    """Rows answered by "Rest → No" keep their mark so reviewers can tell."""
+    impacts = answered(DEPT)
+    impacts[3]["bulk"] = True
+    res = await _submit(client, admin_auth, tab, {"impacts": impacts})
+    assert res.status_code == 200, res.text
+    stored = await _stored(session_factory, tab)
+    assert stored["impacts"][3]["bulk"] is True
+    assert sum(1 for e in stored["impacts"] if e.get("bulk")) == 1

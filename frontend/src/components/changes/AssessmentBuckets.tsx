@@ -481,10 +481,14 @@ export default function AssessmentBuckets({
                   </ul>
                 )}
                 {(() => {
-                  const nos = impactsOf(a?.details).filter((i) => i.answer === 'no').length
+                  const noRows = impactsOf(a?.details).filter((i) => i.answer === 'no')
+                  const nos = noRows.length
+                  const bulk = noRows.filter((i) => i.bulk).length
                   return nos > 0 ? (
                     <p className="text-xs text-slate-500" data-testid={`bucket-no-${row.id}`}>
-                      {t('check.noCount').replace('{n}', String(nos))}
+                      {bulk > 0
+                        ? t('check.noCountBulk').replace('{n}', String(nos)).replace('{b}', String(bulk))
+                        : t('check.noCount').replace('{n}', String(nos))}
                     </p>
                   ) : null
                 })()}
