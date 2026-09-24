@@ -284,6 +284,11 @@ export const changesApi = {
 
   // Withdrawal is a recorded act, not a delete: the note says how the point was
   // addressed (mandatory for department-scoped concerns, optional in scoping).
+  // A risk raised by mistake: its raiser deletes it (hidden, kept on record).
+  retractConcern: (id: number, concernId: number) =>
+    client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/retract`)
+      .then((r) => r.data),
+
   withdrawConcern: (id: number, concernId: number, resolutionNote?: string) =>
     client.post<ChangeConcern>(`/v1/changes/${id}/concerns/${concernId}/withdraw`, {
       resolution_note: resolutionNote ?? null,

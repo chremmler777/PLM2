@@ -275,6 +275,22 @@ export default function ConcernStrip({
   const docsOf = (concernId: number) =>
     attachments.filter((a) => a.concern_id === concernId)
 
+  // A risk raised by mistake: its raiser may delete it while nothing hangs off
+  // it yet. Acting-as does not matter here — the raise carried their own id.
+  const [retracting, setRetracting] = useState<number | null>(null)
+  const mayRetract = (c: ChangeConcern) =>
+    c.kind === 'risk' && c.is_open && userId != null && c.raised_by === userId
+    && !c.answered_at && docsOf(c.id).length === 0
+  const retract = useMutation({
+    mutationFn: (concernId: number) => changesApi.retractConcern(changeId, concernId),
+    onSuccess: () => { setRetracting(null); setFailure(null); invalidate() },
+    onError: (e: unknown) => {
+      const detail = errDetail(e) ?? 'Could not delete the risk'
+      setFailure(detail)
+      toast.error(detail)
+    },
+  })
+
   const propose = useMutation({
     mutationFn: (vars: { concernId: number; note: string }) =>
       changesApi.answerConcern(changeId, vars.concernId, vars.note.trim()),
@@ -454,7 +470,8 @@ export default function ConcernStrip({
                     <textarea value={resolution} rows={2}
                       onChange={(e) => setResolution(e.target.value)}
                       data-testid="concern-withdraw-note"
-                      placeholder={answering ? t('concern.answerPlaceholder') : t('concern.resolution')}
+                      placeholder={c.kind === 'risk' ? t('risk.resolutionPlaceholder')
+                        : answering ? t('concern.answerPlaceholder') : t('concern.resolution')}
                       aria-label={answering ? t('concern.answer') : t('concern.resolution')}
                       className="flex-1 min-w-[14rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
                     <button data-testid="concern-withdraw-confirm"
@@ -479,7 +496,24 @@ export default function ConcernStrip({
             {/* Its author may drop it; PM or the raising department may settle
                 it. Anyone else sees the control greyed with the rule, never a
                 vanished button or a late 403. Admin is no exception. */}
-            {c.is_open && editable && withdrawing !== c.id && (
+            {editable && mayRetract(c) && withdrawing !== c.id && (retracting === c.id ? (
+              <span className="flex items-center gap-2 flex-shrink-0 text-xs">
+                <span className="text-slate-300">{t('risk.retractConfirm')}</span>
+                <button data-testid={`concern-retract-confirm-${c.id}`}
+                  className="bg-red-700 hover:bg-red-600 text-white px-2 py-0.5 rounded disabled:opacity-50"
+                  disabled={retract.isPending}
+                  onClick={() => retract.mutate(c.id)}>{t('risk.retractYes')}</button>
+                <button className="text-slate-400 hover:text-slate-200"
+                  onClick={() => setRetracting(null)}>{t('common.cancel')}</button>
+              </span>
+            ) : (
+              <button data-testid={`concern-retract-${c.id}`}
+                className="text-xs text-red-300/80 hover:text-red-200 flex-shrink-0"
+                onClick={() => setRetracting(c.id)}>
+                {t('risk.retract')}
+              </button>
+            ))}
+            {c.is_open && editable && withdrawing !== c.id && retracting !== c.id && (
               <button data-testid={`concern-close-${c.id}`}
                 className="text-xs underline decoration-dotted flex-shrink-0 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
                 disabled={!mayClose(c) || withdraw.isPending}

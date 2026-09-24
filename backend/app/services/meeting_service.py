@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import (
@@ -294,6 +294,41 @@ class MeetingService:
                        "severity": concern.severity,
                        "checklist_key": checklist_key},
             notes=concern.note)
+        return concern
+
+    @staticmethod
+    async def retract_concern(
+        session: AsyncSession, change: ChangeRequest, concern_id: int, user: User,
+    ) -> ChangeConcern:
+        """Delete a risk raised by mistake. Only its raiser, only while it is
+        open, and only while nothing hangs off it — once a mitigation proposal
+        or a document exists, the risk has a history and is closed with a
+        resolution instead."""
+        concern = await session.get(ChangeConcern, concern_id)
+        if concern is None or concern.change_id != change.id:
+            raise ChangeError("Concern not found on this change")
+        if concern.kind != "risk":
+            raise ChangeError("Only a risk can be deleted — close other concerns instead")
+        if not concern.is_open:
+            raise ChangeError("This risk is no longer open")
+        if concern.raised_by != user.id:
+            raise ChangeError("Only the person who raised this risk may delete it")
+        from app.models.change import ChangeAttachment
+        docs = (await session.execute(
+            select(func.count()).select_from(ChangeAttachment).where(
+                ChangeAttachment.concern_id == concern.id))).scalar() or 0
+        if concern.answered_at is not None or docs:
+            raise ChangeError(
+                "This risk already has a mitigation proposal or documents — "
+                "resolve it instead of deleting it")
+        concern.retracted_at = datetime.utcnow()
+        concern.retracted_by = user.id
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "concern_retracted",
+            f"Risk #{concern.id} deleted — raised by mistake: {concern.note}",
+            user.id, new_value={"concern_id": concern.id,
+                                "checklist_key": concern.checklist_key})
         return concern
 
     @staticmethod
