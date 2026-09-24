@@ -69,7 +69,11 @@ export const changesApi = {
   customerResponse: (
     id: number,
     response: string,
-    body?: { release_due_date?: string; release_due_reason?: string | null },
+    body?: {
+      release_due_date?: string; release_due_reason?: string | null;
+      /** Required by the server when the latest sent offer is past valid-until. */
+      expired_override_reason?: string | null;
+    },
   ) =>
     client.post(`/v1/changes/${id}/customer-response`, { response, ...body }).then((r) => r.data),
 
@@ -313,6 +317,8 @@ export const changesApi = {
   addNegotiation: (id: number, body: {
     channel: NegotiationChannel; note: string;
     counter_price?: number | null; is_final?: boolean;
+    /** The offer version the round is about; the server defaults to the latest sent. */
+    offer_id?: number | null;
   }) => client.post<ChangeNegotiation>(`/v1/changes/${id}/negotiations`, body).then((r) => r.data),
   deleteNegotiation: (id: number, negotiationId: number) =>
     client.delete(`/v1/changes/${id}/negotiations/${negotiationId}`).then((r) => r.data),

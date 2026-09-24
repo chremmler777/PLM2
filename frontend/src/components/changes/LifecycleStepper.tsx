@@ -1,5 +1,5 @@
 import type { ChangeStatus } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, branchStepOrder } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, branchStepOrder, stepperLabel } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 
@@ -34,7 +34,7 @@ export default function LifecycleStepper({
                   offPath ? 'bg-slate-800 text-slate-600'
                   : i < idx ? 'bg-emerald-900 text-emerald-200'
                   : i === idx ? 'bg-sky-600 text-white'
-                  : 'bg-slate-800 text-slate-500'}`}>{STATUS_LABELS[s]}</span>
+                  : 'bg-slate-800 text-slate-500'}`}>{stepperLabel(s)}</span>
               {/* Who owns the stage, shown on the stage node itself. */}
               <StageResponsibleBadge status={s} />
               {!offPath && i === idx && (

@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
-import type { ChangeDetail, ChangeStatus, PnlActuals } from '../../types/change';
+import type { ChangeDetail, ChangeStatus, PnlActualExtra, PnlActuals } from '../../types/change';
 
 const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment'];
+/** Stages where booked hours exist, so an actuals block is expected. */
+const ACTUALS_STATUSES: ChangeStatus[] = ['in_implementation', 'in_validation', 'released', 'closed'];
 
 const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined ? '—' : v.toLocaleString('de-DE');
+  v === null || v === undefined || !Number.isFinite(v) ? '-' : v.toLocaleString('de-DE');
 
 function marginAccent(v: number | null | undefined): string {
   if (v === null || v === undefined) return 'text-slate-400';
@@ -39,16 +41,62 @@ const extraLabel = (key: string, given?: string | null): string => {
  * zero — a total built on a missing rate is a floor, and saying so is cheaper
  * than having somebody discover it in a review.
  */
+/** A finite number, or null: NaN and missing fields never reach the card. */
+const num = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null
+
+interface NormalRow {
+  department_id: number
+  department_name?: string | null
+  hours: number
+  internal_cost: number
+  unrated: boolean
+  plan: number | null
+}
+
+/**
+ * The backend serves the actuals block as `departments / actual_cost /
+ * booked_hours / total_actual / total_plan / variance` (ActualsBlock); older
+ * payloads and fixtures use `by_department / internal_cost / hours /
+ * total_cost / delta`. Both read the same here, and a field that is absent
+ * stays absent instead of turning the total into NaN.
+ */
+function normalizeActuals(raw: PnlActuals | Record<string, unknown>) {
+  const a = raw as Record<string, unknown>
+  const rawRows = (Array.isArray(a.by_department) ? a.by_department
+    : Array.isArray(a.departments) ? a.departments : []) as Record<string, unknown>[]
+  const rows: NormalRow[] = rawRows.map((r) => ({
+    department_id: Number(r.department_id),
+    department_name: (r.department_name as string | null | undefined) ?? null,
+    hours: num(r.hours) ?? num(r.booked_hours) ?? 0,
+    internal_cost: num(r.internal_cost) ?? num(r.actual_cost) ?? 0,
+    unrated: !!r.unrated,
+    plan: num(r.plan_internal_cost) ?? num(r.plan_cost),
+  }))
+  const extras = ((Array.isArray(a.extras) ? a.extras : []) as PnlActualExtra[])
+  const extraSum = extras.reduce((s, x) => s + (num(x.amount) ?? 0), 0)
+  const internal = num(a.internal_cost) ?? num(a.total_actual)
+    ?? rows.reduce((s, r) => s + r.internal_cost, 0)
+  const extraCost = num(a.extra_cost) ?? num(a.total_extras) ?? extraSum
+  const total = num(a.total_cost) ?? internal + extraCost
+  const plan = num(a.plan_internal_cost) ?? num(a.total_plan)
+  const delta = num(a.delta) ?? num(a.variance)
+  const unrated = typeof a.unrated === 'boolean' ? a.unrated
+    : typeof a.unrated_hours === 'boolean' ? a.unrated_hours
+    : rows.some((r) => r.unrated)
+  const hasData = rows.some((r) => r.hours > 0 || r.internal_cost !== 0)
+    || extras.some((x) => num(x.amount) !== null)
+  return { rows, extras, total, plan, delta, unrated, hasData }
+}
+
 function ActualsSection({
   actuals, departmentName,
 }: {
-  actuals: PnlActuals;
-  departmentName: (id: number) => string;
+  actuals: ReturnType<typeof normalizeActuals>;
+  departmentName: (id: number, given?: string | null) => string;
 }) {
-  const rows = actuals.by_department ?? [];
-  const extras = actuals.extras ?? [];
-  const anyUnrated = actuals.unrated ?? rows.some((r) => r.unrated);
-  const total = actuals.total_cost ?? (actuals.internal_cost + (actuals.extra_cost ?? 0));
+  const { rows, extras, total } = actuals;
+  const anyUnrated = actuals.unrated;
 
   return (
     <div data-testid="pnl-actuals" className="border-t border-slate-700 mt-4 pt-3 md:col-span-3">
@@ -65,7 +113,7 @@ function ActualsSection({
             <li key={r.department_id} data-testid={`pnl-actual-dept-${r.department_id}`}
               className="flex items-baseline gap-2 text-xs text-slate-300">
               <span className="min-w-0 flex-1 text-slate-200">
-                {departmentName(r.department_id)}
+                {departmentName(r.department_id, r.department_name)}
               </span>
               <span className="tabular-nums text-slate-400">{hoursText(r.hours)} h</span>
               {r.unrated && (
@@ -78,7 +126,7 @@ function ActualsSection({
                 {fmtMoney(r.internal_cost)}
               </span>
               <span className="tabular-nums text-slate-500 w-24 text-right">
-                {t('actuals.plan')} {fmtMoney(r.plan_internal_cost)}
+                {t('actuals.plan')} {fmtMoney(r.plan)}
               </span>
             </li>
           ))}
@@ -113,12 +161,12 @@ function ActualsSection({
         <span data-testid="pnl-actuals-total" className="font-semibold text-slate-100 tabular-nums">
           {fmtMoney(total)}
         </span>
-        {actuals.plan_internal_cost !== null && actuals.plan_internal_cost !== undefined && (
+        {actuals.plan !== null && (
           <span className="text-xs text-slate-500 tabular-nums">
-            {t('actuals.plan')} {fmtMoney(actuals.plan_internal_cost)}
+            {t('actuals.plan')} {fmtMoney(actuals.plan)}
           </span>
         )}
-        {actuals.delta !== null && actuals.delta !== undefined && (
+        {actuals.delta !== null && (
           <span data-testid="pnl-actuals-delta"
             className={`text-xs font-medium tabular-nums ${
               actuals.delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -146,12 +194,17 @@ export default function PnlCard({ change, departments = [] }: {
   if (hidden) return null;
 
   const totals = data?.totals;
-  const internalCost = totals ? totals.one_time_internal + totals.lifecycle_internal : undefined;
-  const externalCost = totals ? totals.one_time_external + totals.lifecycle_external : undefined;
-  const totalCost = totals?.grand_total;
+  const sum = (...xs: unknown[]) => xs.reduce<number>((s, x) => s + (num(x) ?? 0), 0);
+  const internalCost = totals ? sum(totals.one_time_internal, totals.lifecycle_internal) : undefined;
+  const externalCost = totals ? sum(totals.one_time_external, totals.lifecycle_external) : undefined;
+  const totalCost = totals ? num(totals.grand_total) ?? undefined : undefined;
+  // Actual cost only means something once work is booked: before
+  // implementation an empty block would read as a total of nothing.
+  const actuals = data?.actuals ? normalizeActuals(data.actuals) : null;
+  const showActuals = !!actuals && (actuals.hasData || ACTUALS_STATUSES.includes(change.status));
 
   const revenue = change.customer_relevant ? change.quoted_price : change.internal_approved_amount;
-  const margin = revenue !== null && revenue !== undefined && totalCost !== undefined
+  const margin = revenue !== null && revenue !== undefined && Number.isFinite(revenue) && totalCost !== undefined
     ? revenue - totalCost
     : undefined;
   const marginLabel = change.customer_relevant ? 'Margin' : 'vs. approved budget';
@@ -178,9 +231,9 @@ export default function PnlCard({ change, departments = [] }: {
         <div className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin)}</div>
       </div>
 
-      {data?.actuals && (
-        <ActualsSection actuals={data.actuals}
-          departmentName={(id) => departments.find((d) => d.id === id)?.name ?? `#${id}`} />
+      {showActuals && actuals && (
+        <ActualsSection actuals={actuals}
+          departmentName={(id, given) => departments.find((d) => d.id === id)?.name ?? given ?? `#${id}`} />
       )}
     </div>
   );

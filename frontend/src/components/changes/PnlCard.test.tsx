@@ -122,4 +122,35 @@ describe('PnlCard', () => {
     render(wrap(<PnlCard change={change({ status: 'captured' })} />))
     expect(screen.queryByText('Revenue')).toBeNull()
   })
+
+  it('never shows NaN: reads the backend ActualsBlock shape and hides an empty block in costing', async () => {
+    const block = {
+      departments: [], extras: [], total_actual: 0, total_plan: 0,
+      total_booked_hours: 0, total_extras: 0, unrated_hours: false, variance: 0,
+    }
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation({ grand_total: 2000 }), actuals: block,
+    } as never)
+    const { container } = render(wrap(<PnlCard change={change({ status: 'costing', customer_relevant: true })} />))
+    expect(await screen.findByText('Revenue')).toBeDefined()
+    expect(container.textContent).not.toContain('NaN')
+    expect(screen.queryByTestId('pnl-actuals')).toBeNull()
+  })
+
+  it('totals the backend ActualsBlock once work is booked', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation({ grand_total: 2000 }),
+      actuals: {
+        departments: [{ department_id: 2, department_name: 'Development', booked_hours: 10,
+          hourly_rate: 90, actual_cost: 900, plan_cost: 1000, variance: -100, unrated: false }],
+        extras: [{ key: 'weight_delta', label: 'Weight', amount: null }],
+        total_actual: 900, total_plan: 1000, total_booked_hours: 10,
+        total_extras: 0, unrated_hours: false, variance: -100,
+      },
+    } as never)
+    const { container } = render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })} />))
+    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('900')
+    expect(screen.getByTestId('pnl-actual-dept-2').textContent).toContain('Development')
+    expect(container.textContent).not.toContain('NaN')
+  })
 })

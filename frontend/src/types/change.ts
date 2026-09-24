@@ -234,6 +234,14 @@ export interface ChangeRequest {
   /** Set once Sales has put the plan in front of the customer. */
   plan_published_by_name?: string | null;
   plan_published_at?: string | null;
+  /** Costing to close (spec 2026-09-25): timing, offer and release stage. */
+  plan_revision?: number | null;
+  timing_validated_at?: string | null;
+  timing_validated_by?: number | null;
+  accepted_offer_id?: number | null;
+  lessons_done_at?: string | null;
+  lessons_done_by?: number | null;
+  lessons_none_reason?: string | null;
 }
 
 /** Running change vs planned scrap — the two ways a change reaches the line. */
@@ -259,6 +267,8 @@ export interface ChangeNegotiation {
   /** Present when the backend serves the raw id; used to gate the delete. */
   created_by?: number | null;
   created_at: string;
+  /** The offer version the round was about (spec 2026-09-25). */
+  offer_id?: number | null;
 }
 
 export interface ChangeDetail extends ChangeRequest {

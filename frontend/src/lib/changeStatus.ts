@@ -99,3 +99,83 @@ export const GATE_TARGET_STATUS: Record<GateKey, ChangeStatus> = {
   budget: 'costing',
   release: 'in_implementation',
 }
+
+/**
+ * Stepper names where the stage reads better by its work than by its status:
+ * at `approved` the open job is the detailed timing, so the node says so. The
+ * status itself (and every advance button) keeps its own label.
+ */
+export const STEPPER_LABELS: Partial<Record<ChangeStatus, string>> = {
+  approved: 'Timing',
+}
+export const stepperLabel = (s: ChangeStatus): string => STEPPER_LABELS[s] ?? STATUS_LABELS[s]
+
+/**
+ * The change detail tabs (spec 2026-09-25 section 9). Governance tabs (d1,
+ * audit) sit in their own group on the right.
+ */
+export type ChangeTab =
+  | 'overview' | 'scoping' | 'impacted' | 'assessments'
+  | 'costing' | 'offer' | 'timing' | 'release' | 'd1' | 'audit'
+
+export const EVERYDAY_TABS: ChangeTab[] = [
+  'overview', 'scoping', 'impacted', 'assessments', 'costing', 'offer', 'timing', 'release',
+]
+export const GOVERNANCE_TABS: ChangeTab[] = ['d1', 'audit']
+export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, ...GOVERNANCE_TABS]
+
+/** Each phase-bound tab opens when the change reaches its phase. */
+export const TAB_UNLOCK_STATUS: Partial<Record<ChangeTab, ChangeStatus>> = {
+  scoping: 'scoping',
+  impacted: 'scoping',
+  assessments: 'in_assessment',
+  costing: 'costing',
+  // The quote plan can be prepared while costing still runs.
+  offer: 'costing',
+  timing: 'approved',
+  release: 'in_validation',
+}
+
+/** The tab where the change's current phase is worked. */
+export const STATUS_ACTIVE_TAB: Partial<Record<ChangeStatus, ChangeTab>> = {
+  captured: 'scoping', scoping: 'scoping',
+  in_assessment: 'assessments',
+  costing: 'costing',
+  quoting: 'offer', quoted: 'offer',
+  approved: 'timing', in_implementation: 'timing',
+  in_validation: 'release', released: 'release',
+}
+
+const RELEASE_STAGE: string[] = ['in_validation', 'released', 'closed']
+
+/**
+ * A tab name as links, actions and waits may still send it: the old
+ * `commercial` and `implementation` tabs resolve to the new tab for the
+ * change's stage. Unknown names come back as null.
+ */
+export function resolveChangeTab(raw: string | null | undefined, status: string): ChangeTab | null {
+  if (!raw) return null
+  if (raw === 'commercial') return status === 'costing' ? 'costing' : 'offer'
+  if (raw === 'implementation') return RELEASE_STAGE.includes(status) ? 'release' : 'timing'
+  if (raw === 'quote' || raw === 'quoting') return 'offer'
+  if (raw === 'validation') return 'release'
+  return (ALL_TABS as string[]).includes(raw) ? raw as ChangeTab : null
+}
+
+/** Display name of a tab (also for the aliases). */
+export function changeTabLabel(raw: string, customerRelevant?: boolean | null, status = ''): string {
+  const tb = resolveChangeTab(raw, status) ?? raw
+  switch (tb) {
+    case 'overview': return 'Overview'
+    case 'scoping': return 'Scoping'
+    case 'impacted': return 'Impacted'
+    case 'assessments': return 'Assessments'
+    case 'costing': return 'Costing'
+    case 'offer': return customerRelevant ? 'Offer' : 'Approval'
+    case 'timing': return 'Timing'
+    case 'release': return 'Release'
+    case 'd1': return 'D1'
+    case 'audit': return 'Audit'
+    default: return tb ? tb[0].toUpperCase() + tb.slice(1) : tb
+  }
+}

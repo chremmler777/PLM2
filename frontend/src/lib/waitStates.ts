@@ -17,7 +17,7 @@ export interface WaitState {
   key: string
   text: string
   /** Where the work happens, for the "take me there" affordance. */
-  tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'commercial' | 'implementation'
+  tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'costing' | 'offer' | 'timing' | 'release'
 }
 
 /** Long reasons are a banner, not an essay. */
@@ -152,7 +152,7 @@ export function resolveWaitStates(
       key: 'costing-input',
       text: t('wait.onCosting').replace('{x}',
         change.costing_pending_department_ids!.map(departmentName).join(', ')),
-      tab: 'commercial',
+      tab: 'costing',
     })
   }
 
@@ -161,9 +161,9 @@ export function resolveWaitStates(
   // the resulting plan in front of them. Two waits, one after the other.
   if (change.status === 'approved') {
     if (!change.bank_build_mode) {
-      waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'implementation' })
+      waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'timing' })
     } else if (change.customer_relevant && !change.plan_published_at) {
-      waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'implementation' })
+      waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'timing' })
     }
   }
 
@@ -181,7 +181,7 @@ export function resolveWaitStates(
       waits.push({
         key: 'implementation-reports',
         text: t('wait.onProgressReports').replace('{n}', String(owing)),
-        tab: 'implementation',
+        tab: 'timing',
       })
     }
     // An escalation is a change-level act, so the pairing is change-level too:
@@ -191,7 +191,7 @@ export function resolveWaitStates(
       waits.push({
         key: 'implementation-escalation',
         text: t('wait.onRiskEscalation'),
-        tab: 'implementation',
+        tab: 'timing',
       })
     }
   }
@@ -206,14 +206,14 @@ export function resolveWaitStates(
       waits.push({
         key: 'validation-checks',
         text: t('wait.onValidationChecks').replace('{n}', String(owing)),
-        tab: 'implementation',
+        tab: 'release',
       })
     }
     if ((validation.weight_delta_g ?? 0) !== 0 && !validation.weight_ack_at) {
       waits.push({
         key: 'validation-weight-ack',
         text: t('wait.onWeightAck'),
-        tab: 'implementation',
+        tab: 'release',
       })
     }
   }

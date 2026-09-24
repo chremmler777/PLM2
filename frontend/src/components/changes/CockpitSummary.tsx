@@ -1,5 +1,5 @@
 import type { ChangeDetail, Gate, GateKey, MyAction } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
@@ -73,8 +73,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const offPath = OFF_PATH_STATUSES.includes(change.status)
 
   // Same names as the tab bar.
-  const tabName = (tb: string) => tb === 'implementation' ? t('impl.title')
-    : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)
+  // Old names (commercial, implementation) resolve to the tab for the stage.
+  const tabName = (tb: string) => changeTabLabel(tb, change.customer_relevant, change.status)
 
   const gateRow = (g: Gate, blocking: boolean) => {
     const label = (

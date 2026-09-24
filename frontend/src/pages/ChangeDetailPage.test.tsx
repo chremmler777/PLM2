@@ -102,6 +102,19 @@ vi.mock('../components/changes/CockpitSummary', () => ({
 }))
 vi.mock('../components/changes/DeadlineChip', () => ({ DeadlineChip: () => <div>mock-deadline-chip</div> }))
 vi.mock('../components/changes/AuditTimeline', () => ({ default: () => <div>mock-audit-timeline</div> }))
+vi.mock('../components/changes/offer/OfferTab', () => ({
+  default: (p: { canWrite: boolean; canSeePrices: boolean; canSignPm: boolean; canSignQuality: boolean }) => (
+    <div data-testid="mock-offer-tab">{`write=${p.canWrite} prices=${p.canSeePrices} pm=${p.canSignPm} quality=${p.canSignQuality}`}</div>
+  ),
+}))
+vi.mock('../components/changes/timing/TimingTab', () => ({
+  default: (p: { canEditPlan: boolean; canPublish: boolean }) => (
+    <div data-testid="mock-timing-tab">edit={String(p.canEditPlan)} publish={String(p.canPublish)}</div>
+  ),
+}))
+vi.mock('../components/changes/release/ReleaseTab', () => ({
+  default: (p: { canManage: boolean }) => <div data-testid="mock-release-tab">manage={String(p.canManage)}</div>,
+}))
 
 function wrap(initialPath: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -196,70 +209,7 @@ describe('ChangeDetailPage governance tab gating', () => {
   })
 })
 
-describe('ChangeDetailPage commercial tab sign-off (F8)', () => {
-  afterEach(() => {
-    cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
-    change.status = 'in_assessment'
-    change.customer_relevant = undefined
-    change.pm_signed_by = null
-    change.quality_signed_by = null
-  })
-
-  it('disables the Quality sign-off button and shows the 4-eyes hint when the same user already PM-signed', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
-    change.status = 'quoted'
-    change.customer_relevant = true
-    change.pm_signed_by = 42
-    change.quality_signed_by = null
-    wrap('/changes/1?tab=commercial')
-    const qualityButton = await screen.findByRole('button', { name: /Quality sign-off/ })
-    expect(qualityButton).toHaveProperty('disabled', true)
-    expect(screen.getByText('PM and Quality sign-off must be different users')).toBeDefined()
-  })
-
-  it('leaves both sign-off buttons enabled when no one has signed yet', async () => {
-    authState.current = { isAdmin: true, role: 'admin', userId: 42 }
-    change.status = 'quoted'
-    change.customer_relevant = true
-    change.pm_signed_by = null
-    change.quality_signed_by = null
-    wrap('/changes/1?tab=commercial')
-    const pmButton = await screen.findByRole('button', { name: /PM sign-off/ })
-    const qualityButton = screen.getByRole('button', { name: /Quality sign-off/ })
-    expect(pmButton).toHaveProperty('disabled', false)
-    expect(qualityButton).toHaveProperty('disabled', false)
-    expect(screen.queryByText('PM and Quality sign-off must be different users')).toBeNull()
-  })
-
-  it('hides both sign-off buttons for a non-member, non-admin, non-PM viewer', async () => {
-    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
-    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'quoted'
-    change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
-    await screen.findByText(/Customer response/)
-    expect(screen.queryByRole('button', { name: /PM sign-off/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Quality sign-off/ })).toBeNull()
-  })
-
-  it('shows only the Quality sign-off button for a Quality department member', async () => {
-    vi.mocked(useDepartments).mockReturnValue({
-      data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
-    } as unknown as ReturnType<typeof useDepartments>)
-    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'quoted'
-    change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
-    const qualityButton = await screen.findByRole('button', { name: /Quality sign-off/ })
-    expect(qualityButton).toBeDefined()
-    expect(screen.queryByRole('button', { name: /PM sign-off/ })).toBeNull()
-  })
-})
-
-describe('ChangeDetailPage commercial tab quoted-price and internal-approval authz', () => {
+describe('ChangeDetailPage offer tab rights', () => {
   afterEach(() => {
     cleanup()
     authState.current = { isAdmin: false, role: 'engineer', userId: null }
@@ -270,46 +220,151 @@ describe('ChangeDetailPage commercial tab quoted-price and internal-approval aut
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
   })
 
-  it('hides the quoted-price edit control for a non-lead, non-Sales, non-admin viewer', async () => {
+  it('gives Sales write and price access, no sign-off', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 3, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [3] })
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'costing'
+    change.status = 'quoted'
     change.customer_relevant = true
-    change.quoted_price = 1000
-    wrap('/changes/1?tab=commercial')
-    await screen.findByText(/Quoted price/)
-    expect(screen.queryByRole('spinbutton')).toBeNull()
+    wrap('/changes/1?tab=offer')
+    await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+      .toContain('write=true prices=true pm=false quality=false'))
   })
 
-  it('shows the quoted-price edit control for the change lead', async () => {
-    change.lead_id = 5
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'costing'
-    change.customer_relevant = true
-    change.quoted_price = 1000
-    wrap('/changes/1?tab=commercial')
-    await screen.findByText(/Quoted price/)
-    expect(screen.queryByRole('spinbutton')).not.toBeNull()
-  })
-
-  it('hides the internal-approve button for a non-PM, non-admin viewer', async () => {
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'costing'
-    change.customer_relevant = false
-    wrap('/changes/1?tab=commercial')
-    await screen.findByText(/Project Manager department member/)
-    expect(screen.queryByText('Approve internal costs')).toBeNull()
-  })
-
-  it('shows the internal-approve button for a Project Manager department member', async () => {
+  it('gives PM read-only prices and the PM sign-off', async () => {
     vi.mocked(useDepartments).mockReturnValue({
       data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
     } as unknown as ReturnType<typeof useDepartments>)
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=offer')
+    await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+      .toContain('write=false prices=true pm=true quality=false'))
+  })
+
+  it('gives a Quality member no prices but the Quality sign-off', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 7, name: 'Quality', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'quoted'
+    change.customer_relevant = true
+    wrap('/changes/1?tab=offer')
+    await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+      .toContain('write=false prices=false pm=false quality=true'))
+  })
+
+  it('labels the tab Approval for an internal change', async () => {
     change.status = 'costing'
     change.customer_relevant = false
-    wrap('/changes/1?tab=commercial')
-    expect(await screen.findByText('Approve internal costs')).toBeDefined()
+    wrap('/changes/1')
+    expect(await screen.findByRole('button', { name: /Approval/ })).toBeDefined()
+    expect(screen.queryByRole('button', { name: /^Offer$/ })).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage tab model (costing to close)', () => {
+  afterEach(() => {
+    cleanup()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    change.status = 'in_assessment'
+    change.customer_relevant = undefined
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  const btn = (name: RegExp) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+  it('unlocks costing and offer at costing, timing at approved, release at in_validation', async () => {
+    change.customer_relevant = true
+    change.status = 'costing' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Costing/ })
+    expect(btn(/Costing/).disabled).toBe(false)
+    expect(btn(/Offer/).disabled).toBe(false)
+    expect(btn(/Timing/).disabled).toBe(true)
+    expect(btn(/Release/).disabled).toBe(true)
+    cleanup()
+    change.status = 'approved' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Timing/ })
+    expect(btn(/Timing/).disabled).toBe(false)
+    expect(btn(/Release/).disabled).toBe(true)
+    cleanup()
+    change.status = 'in_validation' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: /Release/ })
+    expect(btn(/Release/).disabled).toBe(false)
+  })
+
+  it.each([
+    ['costing', /Costing/],
+    ['quoting', /Offer/],
+    ['quoted', /Offer/],
+    ['approved', /Timing/],
+    ['in_implementation', /Timing/],
+    ['in_validation', /Release/],
+    ['released', /Release/],
+  ])('marks the active phase tab at %s', async (status, name) => {
+    change.customer_relevant = true
+    change.status = status as ChangeDetail['status']
+    wrap('/changes/1')
+    const tab = await screen.findByRole('button', { name })
+    expect(tab.querySelector('[aria-label="' + t('tab.activePhase') + '"]')).not.toBeNull()
+  })
+
+  it.each([
+    ['commercial', 'costing', /Costing/],
+    ['commercial', 'quoted', /Offer/],
+    ['implementation', 'in_implementation', /Timing/],
+    ['implementation', 'approved', /Timing/],
+    ['implementation', 'in_validation', /Release/],
+  ])('resolves the old ?tab=%s at %s', async (alias, status, name) => {
+    change.customer_relevant = true
+    change.status = status as ChangeDetail['status']
+    wrap(`/changes/1?tab=${alias}`)
+    const tab = await screen.findByRole('button', { name })
+    expect(tab.className).toContain('border-b-2')
+  })
+
+  it('renders the timing tab with plan and publish rights for Scheduling', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 11, name: 'Scheduling', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [11] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'approved' as ChangeDetail['status']
+    wrap('/changes/1?tab=timing')
+    await waitFor(() => expect(screen.getByTestId('mock-timing-tab').textContent)
+      .toBe('edit=true publish=false'))
+  })
+
+  it('widens the page for the offer, timing and release work', async () => {
+    change.customer_relevant = true
+    change.status = 'quoted' as ChangeDetail['status']
+    const { container } = wrap('/changes/1?tab=offer')
+    await screen.findByTestId('mock-offer-tab')
+    expect((container.firstChild as HTMLElement).className).toContain('max-w-[1400px]')
+    cleanup()
+    const r = wrap('/changes/1')
+    await screen.findByRole('button', { name: /Overview/ })
+    expect((r.container.firstChild as HTMLElement).className).toContain('max-w-5xl')
+  })
+
+  it('gives PM the release management rights', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    wrap('/changes/1?tab=release')
+    await waitFor(() => expect(screen.getByTestId('mock-release-tab').textContent).toBe('manage=true'))
   })
 })
 
@@ -338,64 +393,6 @@ describe('ChangeDetailPage rejection', () => {
     await screen.findByText('mock-lifecycle-stepper')
     expect(screen.queryByText(/the flow is stopped/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /Reopen/ })).toBeNull()
-  })
-})
-
-describe('ChangeDetailPage release-deadline collection', () => {
-  afterEach(() => {
-    cleanup()
-    authState.current = { isAdmin: false, role: 'engineer', userId: null }
-    change.status = 'in_assessment'
-    change.customer_relevant = undefined
-    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
-    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
-    vi.mocked(changesApi.customerResponse).mockClear()
-    vi.mocked(changesApi.approveInternalCosts).mockClear()
-  })
-
-  it('requires a release date before recording customer acceptance', async () => {
-    change.status = 'costing'
-    change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
-    fireEvent.click(await screen.findByText('Customer accepted'))
-    expect(changesApi.customerResponse).not.toHaveBeenCalled()
-    const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
-    expect(confirm.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('accept-release-due'), { target: { value: '2026-11-30' } })
-    fireEvent.click(screen.getByTestId('accept-confirm'))
-    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(
-      expect.any(Number), 'accepted',
-      { release_due_date: '2026-11-30T23:59:59Z', release_due_reason: null }))
-  })
-
-  it('posts a decline without opening the confirm row', async () => {
-    change.status = 'costing'
-    change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
-    fireEvent.click(await screen.findByText('Customer declined'))
-    await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(
-      expect.any(Number), 'declined', undefined))
-    expect(screen.queryByTestId('accept-release-due')).toBeNull()
-  })
-
-  it('requires a release date before internal cost approval', async () => {
-    vi.mocked(useDepartments).mockReturnValue({
-      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
-    } as unknown as ReturnType<typeof useDepartments>)
-    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'costing'
-    change.customer_relevant = false
-    wrap('/changes/1?tab=commercial')
-    fireEvent.click(await screen.findByText(t('internal.approve')))
-    expect(changesApi.approveInternalCosts).not.toHaveBeenCalled()
-    const confirm = screen.getByTestId('internal-approve-confirm') as HTMLButtonElement
-    expect(confirm.disabled).toBe(true)
-    fireEvent.change(screen.getByTestId('internal-release-due'), { target: { value: '2026-12-15' } })
-    fireEvent.click(screen.getByTestId('internal-approve-confirm'))
-    await waitFor(() => expect(changesApi.approveInternalCosts).toHaveBeenCalledWith(
-      expect.any(Number),
-      { note: null, release_due_date: '2026-12-15T23:59:59Z', release_due_reason: null }))
   })
 })
 
@@ -447,32 +444,32 @@ describe('ChangeDetailPage capture phase', () => {
     const scoping = await screen.findByRole('button', { name: /Scoping/ })
     expect((scoping as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(false)
-    const commercial = screen.getByRole('button', { name: /Commercial/ })
-    expect((commercial as HTMLButtonElement).disabled).toBe(true)
-    expect(commercial.getAttribute('title')).toBe(t('tab.lockedUntilPhase'))
-    expect((screen.getByRole('button', { name: /Implementation|Umsetzung/ }) as HTMLButtonElement).disabled).toBe(true)
+    const costing = screen.getByRole('button', { name: /Costing/ })
+    expect((costing as HTMLButtonElement).disabled).toBe(true)
+    expect(costing.getAttribute('title')).toBe(t('tab.lockedUntilPhase'))
+    expect((screen.getByRole('button', { name: /Timing/ }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('unlocks the commercial tab once the change reaches costing', async () => {
+  it('unlocks the costing tab once the change reaches costing', async () => {
     change.status = 'costing' as ChangeDetail['status']
     wrap('/changes/1')
-    const commercial = await screen.findByRole('button', { name: /Commercial/ })
-    expect((commercial as HTMLButtonElement).disabled).toBe(false)
+    const costing = await screen.findByRole('button', { name: /Costing/ })
+    expect((costing as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(false)
-    // Implementation is still a phase away.
-    expect((screen.getByRole('button', { name: /Implementation|Umsetzung/ }) as HTMLButtonElement).disabled).toBe(true)
+    // Timing is still a phase away.
+    expect((screen.getByRole('button', { name: /Timing/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('withholds nothing from an off-path change', async () => {
     change.status = 'rejected' as ChangeDetail['status']
     wrap('/changes/1')
-    const commercial = await screen.findByRole('button', { name: /Commercial/ })
-    expect((commercial as HTMLButtonElement).disabled).toBe(false)
+    const costing = await screen.findByRole('button', { name: /Costing/ })
+    expect((costing as HTMLButtonElement).disabled).toBe(false)
   })
 })
 
-describe('ChangeDetailPage quote preparation (commercial tab)', () => {
+describe('ChangeDetailPage costing tab', () => {
   afterEach(() => {
     cleanup()
     authState.current = { isAdmin: false, role: 'engineer', userId: null }
@@ -480,22 +477,12 @@ describe('ChangeDetailPage quote preparation (commercial tab)', () => {
     change.customer_relevant = undefined
   })
 
-  it('marks the implementation-timeline step for the people who quote', async () => {
+  it('states the stage and no longer carries the timeline placeholder', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
-    change.status = 'quoting' as ChangeDetail['status']
+    change.status = 'costing' as ChangeDetail['status']
     change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
-    const card = await screen.findByTestId('quote-timeline-placeholder')
-    expect(card.textContent).toContain(t('quote.timeline'))
-    // Deliberately empty: the step is named, the tool is not built.
-    expect(card.textContent).toContain(t('quote.timelineBody'))
-  })
-
-  it('keeps the timeline card away from someone who may not see the costs', async () => {
-    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
-    change.status = 'quoting' as ChangeDetail['status']
-    wrap('/changes/1?tab=commercial')
-    await screen.findByRole('button', { name: /Commercial/ })
+    wrap('/changes/1?tab=costing')
+    expect((await screen.findByTestId('costing-stage')).textContent).toContain(t('costing.stageBody'))
     expect(screen.queryByTestId('quote-timeline-placeholder')).toBeNull()
   })
 
@@ -503,7 +490,7 @@ describe('ChangeDetailPage quote preparation (commercial tab)', () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'quoting' as ChangeDetail['status']
     change.customer_relevant = true
-    wrap('/changes/1?tab=commercial')
+    wrap('/changes/1?tab=costing')
     expect((await screen.findByTestId('costing-closed')).textContent).toContain(t('costing.closedHint'))
     // The reason dialog is mocked here; the button opening it is the contract.
     expect(screen.getByTestId('costing-reopen').textContent).toBe(t('costing.reopen'))
@@ -512,17 +499,18 @@ describe('ChangeDetailPage quote preparation (commercial tab)', () => {
   it('tells a bystander costing is closed without offering the reopen', async () => {
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
     change.status = 'quoting' as ChangeDetail['status']
-    wrap('/changes/1?tab=commercial')
+    wrap('/changes/1?tab=costing')
     await screen.findByTestId('costing-closed')
     expect(screen.queryByTestId('costing-reopen')).toBeNull()
   })
 
-  it('opens the commercial tab at quote creation', async () => {
+  it('opens the offer tab at quote creation', async () => {
     change.status = 'quoting' as ChangeDetail['status']
+    change.customer_relevant = true
     wrap('/changes/1?tab=commercial')
-    const commercial = await screen.findByRole('button', { name: /Commercial/ })
-    expect((commercial as HTMLButtonElement).disabled).toBe(false)
-    expect(commercial.className).toContain('border-b-2')
+    const offer = await screen.findByRole('button', { name: /Offer/ })
+    expect((offer as HTMLButtonElement).disabled).toBe(false)
+    expect(offer.className).toContain('border-b-2')
   })
 })
 

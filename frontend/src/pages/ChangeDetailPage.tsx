@@ -11,15 +11,12 @@ import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
 import QuoteBasis from '../components/changes/QuoteBasis';
-import NegotiationCard from '../components/changes/NegotiationCard';
-import QuoteTimelineCard from '../components/changes/QuoteTimelineCard';
 import DeviationBanner from '../components/changes/DeviationBanner';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
-import ImplementationPanel from '../components/changes/ImplementationPanel';
-import BankBuildCard from '../components/changes/BankBuildCard';
-import ImplementationTracking from '../components/changes/ImplementationTracking';
-import ValidationPanel from '../components/changes/ValidationPanel';
+import OfferTab from '../components/changes/offer/OfferTab';
+import ReleaseTab from '../components/changes/release/ReleaseTab';
+import TimingTab from '../components/changes/timing/TimingTab';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import PnlCard from '../components/changes/PnlCard';
@@ -30,12 +27,14 @@ import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
 import { CustomerRelevantEditor } from '../components/changes/CustomerRelevantEditor';
 import { DescriptionEditor } from '../components/changes/DescriptionEditor';
-import { QuotedPriceEditor } from '../components/changes/QuotedPriceEditor';
 import { ScopingMappingHint } from '../components/changes/ScopingMappingHint';
 import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
-import { STATUS_LABELS, OFF_PATH_STATUSES } from '../lib/changeStatus';
+import {
+  STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS,
+  STATUS_ACTIVE_TAB, resolveChangeTab, changeTabLabel, type ChangeTab,
+} from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
@@ -43,43 +42,13 @@ import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-type Tab = 'overview' | 'scoping' | 'impacted' | 'implementation' | 'assessments' | 'commercial' | 'd1' | 'audit';
-const TABS: Tab[] = ['overview', 'scoping', 'impacted', 'implementation', 'assessments', 'commercial', 'd1', 'audit'];
-// Everyday tab bar order (Task 6). D1/Audit are "governance" tabs, rendered as a
-// separate right-aligned group and gated by authz — see `canSeeGovernance` below.
-const EVERYDAY_TABS: Tab[] = ['overview', 'scoping', 'impacted', 'assessments', 'commercial', 'implementation'];
-const GOVERNANCE_TABS: Tab[] = ['d1', 'audit'];
-
-// Which tab represents the change's current phase — so the tab bar shows what
-// is ACTIVE, not just what the user clicked. Terminal statuses map to nothing.
-const STATUS_ACTIVE_TAB: Record<string, Tab> = {
-  captured: 'scoping', scoping: 'scoping',
-  in_assessment: 'assessments',
-  // Quote creation is Sales' step, and the commercial tab is where they do it.
-  costing: 'commercial', quoting: 'commercial', quoted: 'commercial',
-  // Once approved, the open work is the bank-build decision and publishing the
-  // plan — both on the implementation tab.
-  approved: 'implementation',
-  in_implementation: 'implementation', in_validation: 'implementation',
-};
-// F2: before costing there's no cost basis yet — the commercial tab shows an
-// explainer instead of a dead-end disabled control (mirrors PnlCard's hidden
-// rule, which hides the P&L card for the same statuses).
+type Tab = ChangeTab;
+// F2: before costing there's no cost basis yet: the costing tab is locked and
+// PnlCard hides itself for the same statuses.
 const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
-// Each phase-bound tab unlocks when the change reaches its phase: at capture only
-// the request itself is on the table (Sales writes it and attaches the evidence),
-// scope and affected parts arrive with scoping, costs with costing, and so on. A
-// tab with no entry here (overview) is always open; governance tabs keep their
-// own authz rule instead.
-const TAB_UNLOCK_STATUS: Partial<Record<Tab, ChangeStatus>> = {
-  scoping: 'scoping',
-  impacted: 'scoping',
-  assessments: 'in_assessment',
-  commercial: 'costing',
-  // Stage 7 (bank build) is the first job of the implementation tab and it runs
-  // at `approved`, before the change formally moves into implementation.
-  implementation: 'approved',
-};
+// Tabs that carry wide content (the Gantt, the offer workspace with its sum
+// card, the costing buckets): the page widens for them, header included.
+const WIDE_TABS: Tab[] = ['costing', 'offer', 'timing', 'release'];
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
   const from = TAB_UNLOCK_STATUS[tb];
@@ -102,7 +71,6 @@ export default function ChangeDetailPage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab');
-  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : 'overview';
   const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -113,13 +81,6 @@ export default function ChangeDetailPage() {
   // Pulling a change from quote creation back into costing: same people who
   // may close costing (PM, Sales, lead, admin), always with a reason.
   const [reopenCostingOpen, setReopenCostingOpen] = useState(false);
-  // Customer acceptance and internal approval both start the release phase, so
-  // both collect a mandatory release deadline through an inline confirm row.
-  const [acceptOpen, setAcceptOpen] = useState(false);
-  const [acceptDue, setAcceptDue] = useState('');
-  const [acceptReason, setAcceptReason] = useState('');
-  const [internalOpen, setInternalOpen] = useState(false);
-  const [internalDue, setInternalDue] = useState('');
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -234,17 +195,13 @@ export default function ChangeDetailPage() {
   // The description is written during capture, and capture is Sales' job — the
   // backend PATCH gate allows lead / Sales / admin, so the editor must too.
   const canEditDescription = isAdmin || isChangeLead || isSalesMember;
-  // Stage 7 mirrors the backend's two gates: Scheduling (plus PM/lead/admin)
-  // decides how the change reaches the line, Sales publishes the plan.
-  const canSetBankBuild = isAdmin || isChangeLead || isSchedulingMember || isPmMember;
+  // Sales (plus lead/admin) publishes the plan and acknowledges the weight delta.
   const canPublishPlan = isAdmin || isChangeLead || isSalesMember;
-  // F8: the backend enforces "PM and Quality sign-off must be different
-  // users" (4-eyes) and 400s if violated. Disable the button in place and
-  // name the rule instead of letting the user hit the error after clicking.
-  const samePersonBlocksPm = !change?.pm_signed_by
-    && !!change?.quality_signed_by && userId != null && userId === change.quality_signed_by;
-  const samePersonBlocksQuality = !change?.quality_signed_by
-    && !!change?.pm_signed_by && userId != null && userId === change.pm_signed_by;
+  // Timing (spec 2026-09-25): plan editors and who publishes to the customer.
+  const canEditPlan = isAdmin || isChangeLead || isSalesMember || isPmMember || isSchedulingMember;
+  const canPublishTiming = isAdmin || isChangeLead || isSalesMember;
+  // Release checklist rows beyond the owner department, and the lessons step.
+  const canManageRelease = isAdmin || isChangeLead || isPmMember;
 
   const transition = useMutation({
     mutationFn: (vars: {
@@ -265,45 +222,20 @@ export default function ChangeDetailPage() {
       else toast.error(detail);
     },
   });
-  const signOff = useMutation({
-    mutationFn: (role: 'pm' | 'quality') => changesApi.signOff(changeId, role),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId] }),
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
-  });
-  const customer = useMutation({
-    mutationFn: (vars: { response: string; release_due_date?: string; release_due_reason?: string | null }) =>
-      changesApi.customerResponse(changeId, vars.response,
-        vars.response === 'accepted'
-          ? { release_due_date: vars.release_due_date, release_due_reason: vars.release_due_reason }
-          : undefined),
-    onSuccess: () => {
-      setAcceptOpen(false);
-      qc.invalidateQueries({ queryKey: ['change', changeId] });
-    },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to record customer response'),
-  });
-  const internalApprove = useMutation({
-    mutationFn: (vars: { note?: string | null; release_due_date: string }) =>
-      changesApi.approveInternalCosts(changeId, {
-        note: vars.note ?? null,
-        release_due_date: vars.release_due_date,
-        release_due_reason: null,
-      }),
-    onSuccess: () => {
-      toast.success(t('internal.approved'))
-      setInternalOpen(false);
-      qc.invalidateQueries({ queryKey: ['change', changeId] })
-    },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Approval failed'),
-  });
   if (isLoading || !change) return <div className="p-6 text-slate-400">Loading…</div>;
 
   // A deep link into a tab the viewer or the phase does not allow — a
   // governance tab without authz, or any later-phase tab while capturing —
   // falls back to overview rather than rendering a blank/forbidden tab.
+  // Old names (?tab=commercial, ?tab=implementation) land on the tab for the
+  // change's stage; anything unknown is overview.
+  const tab: Tab = resolveChangeTab(rawTab, change.status) ?? 'overview';
   const effectiveTab: Tab =
     (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || isTabLocked(change.status, tab)
       ? 'overview' : tab;
+  // Actions and waits may still name old tabs; resolve them the same way.
+  const goTab = (raw: string) => setTab(resolveChangeTab(raw, change.status) ?? 'overview');
+  const wide = WIDE_TABS.includes(effectiveTab);
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
@@ -314,11 +246,11 @@ export default function ChangeDetailPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
+    <div className={`${wide ? 'max-w-[1400px]' : 'max-w-5xl'} mx-auto p-6`}>
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-semibold flex items-center gap-3">
           <span>
-            <span className="font-mono text-slate-400">{change.change_number}</span> — {change.title}
+            <span className="font-mono text-slate-400">{change.change_number}</span> · {change.title}
             {/* Which project this belongs to, one line under the name. */}
             {projectLabel(change.project_number, change.project_name) && (
               <Link data-testid="change-project"
@@ -352,7 +284,7 @@ export default function ChangeDetailPage() {
 
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
-          <p className="font-semibold text-red-200">This change was rejected — the flow is stopped.</p>
+          <p className="font-semibold text-red-200">This change was rejected, the flow is stopped.</p>
           {change.rejection_reason && (
             <p className="mt-1 text-red-100/80">{change.rejection_reason}</p>
           )}
@@ -375,7 +307,7 @@ export default function ChangeDetailPage() {
         open={rejectOpen}
         title="Reject change"
         warning={'Rejecting stops this change here. Assessments and routing stay as they are '
-          + 'and nothing downstream runs again. It can be reopened later, with a reason — '
+          + 'and nothing downstream runs again. It can be reopened later, with a reason, '
           + 'but the rejection stays on the record either way.'}
         label="Why is this rejected? (required, audited)"
         submitLabel="Reject change"
@@ -421,13 +353,13 @@ export default function ChangeDetailPage() {
         onResolveGate={() => setTab('d1')}
         onShowImpact={() => setTab('impacted')}
         actions={myActions?.actions ?? []}
-        onAction={(targetTab) => setTab(targetTab as Tab)}
+        onAction={goTab}
         canSeeGovernance={canSeeGovernance}
         // What the change is waiting on — same list for every viewer, whoever
         // owns the next move.
         waits={resolveWaitStates(change, concerns, deptName, change.assessments,
           { state: implState, escalations: implEscalations }, validation)}
-        onGo={(tb) => setTab(tb as Tab)}
+        onGo={goTab}
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
@@ -457,7 +389,7 @@ export default function ChangeDetailPage() {
                   className="w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-300/50"
                   aria-label={t('tab.openWork')} />
               )}
-              {tb === 'implementation' ? t('impl.title') : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)}
+              {changeTabLabel(tb, change.customer_relevant, change.status)}
             </button>
           );
         })}
@@ -468,7 +400,7 @@ export default function ChangeDetailPage() {
               <button key={tb}
                 className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
                 onClick={() => setTab(tb)}>
-                {tb[0].toUpperCase() + tb.slice(1)}
+                {changeTabLabel(tb)}
               </button>
             ))}
           </>
@@ -483,7 +415,7 @@ export default function ChangeDetailPage() {
             <PriorityEditor change={change} canEdit={isAdmin || isChangeLead} />
           </p>
           <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
-          <p><span className="text-slate-400">Reason:</span> {change.reason ?? '—'}</p>
+          <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
           <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
 
@@ -510,31 +442,18 @@ export default function ChangeDetailPage() {
           canConfirm={canConfirmImpact} />
       )}
 
-      {effectiveTab === 'implementation' && change && (
-        <div className="space-y-3">
-          {/* Stage 7 opens the implementation tab: the bank-build decision is
-              made and published before any of the work below starts. */}
-          {phaseIndex(change.status) >= phaseIndex('approved') && (
-            <BankBuildCard change={change}
-              canSetMode={canSetBankBuild} canPublish={canPublishPlan} />
-          )}
-          {/* Stage 8 sits under the plan: the plan says how the change reaches
-              the line, this says how the work is actually going. */}
-          {phaseIndex(change.status) >= phaseIndex('in_implementation') && (
-            <ImplementationTracking changeId={change.id} status={change.status}
-              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
-              canSeeAll={canSeeCosts} canEscalate={canPublishPlan} />
-          )}
-          {/* Stage 9 sits under the tracking: the work is done, this says
-              whether it holds. Read-only once the change has moved on. */}
-          {phaseIndex(change.status) >= phaseIndex('in_validation') && (
-            <ValidationPanel changeId={change.id} status={change.status}
-              departments={departments} myDepartmentIds={myActions?.memberships ?? []}
-              canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
-              canEscalate={canSeeCosts} />
-          )}
-          <ImplementationPanel changeId={change.id} />
-        </div>
+      {effectiveTab === 'timing' && change && (
+        <TimingTab change={change} departments={departments}
+          myDepartmentIds={myActions?.memberships ?? []}
+          canEditPlan={canEditPlan} canPublish={canPublishTiming} canSeeAll={canSeeCosts} />
+      )}
+
+      {effectiveTab === 'release' && change && (
+        <ReleaseTab change={change} departments={departments}
+          myDepartmentIds={myActions?.memberships ?? []}
+          canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
+          canManage={canManageRelease}
+          onAdvance={advance} advancing={transition.isPending} />
       )}
 
       {effectiveTab === 'assessments' && (
@@ -552,8 +471,28 @@ export default function ChangeDetailPage() {
         </div>
       )}
 
-      {effectiveTab === 'commercial' && (
+      {effectiveTab === 'costing' && (
         <div className="space-y-3 text-sm">
+          <div data-testid="costing-stage" className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
+            <h2 className="text-sm font-semibold text-slate-100">{t('costing.stageTitle')}</h2>
+            <p className="mt-0.5 text-xs text-slate-400">{t('costing.stageBody')}</p>
+          </div>
+          {/* Costing closed: departments read only; whoever may close it may
+              reopen it, with a reason on the record. */}
+          {change.status === 'quoting' && (
+            <div data-testid="costing-closed"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+              <span>{t('costing.closedHint')}</span>
+              {(isAdmin || isChangeLead || isSalesMember || isPmMember) && (
+                <button type="button" data-testid="costing-reopen"
+                  className="border border-slate-600 text-slate-200 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-xs"
+                  disabled={transition.isPending}
+                  onClick={() => setReopenCostingOpen(true)}>
+                  {t('costing.reopen')}
+                </button>
+              )}
+            </div>
+          )}
           <PnlCard change={change} departments={departments} />
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
@@ -570,24 +509,8 @@ export default function ChangeDetailPage() {
               canSeeAll={canSeeCosts} editable={change.status === 'costing'}
               isPm={isPmMember || isAdmin} />
           )}
-          {/* Costing closed: departments read only; whoever may close it may
-              reopen it — with a reason on the record. */}
-          {change.status === 'quoting' && (
-            <div data-testid="costing-closed"
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
-              <span>{t('costing.closedHint')}</span>
-              {(isAdmin || isChangeLead || isSalesMember || isPmMember) && (
-                <button type="button" data-testid="costing-reopen"
-                  className="border border-slate-600 text-slate-200 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-xs"
-                  disabled={transition.isPending}
-                  onClick={() => setReopenCostingOpen(true)}>
-                  {t('costing.reopen')}
-                </button>
-              )}
-            </div>
-          )}
-          {/* The whole picture, for the people who answer for it — and, at
-              quoting, the basis the price is judged against. */}
+          {/* The whole picture, for the people who answer for it; at quoting
+              also where Sales makes the binding vendor decisions. */}
           {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
             <SummationView changeId={changeId}
               status={change.status} canQuote={canEditQuotedPrice}
@@ -597,136 +520,29 @@ export default function ChangeDetailPage() {
                 ? { date: change.release_due_date, label: t('deadline.release') }
                 : { date: change.required_by_date, label: t('deadline.quote') }} />
           )}
-          {/* The step after costing: Sales sequences the work before pricing it.
-              No tool yet — the card marks the place in the flow. */}
-          {!BEFORE_COSTING.includes(change.status) && canSeeCosts && (
-            <QuoteTimelineCard />
-          )}
-          {BEFORE_COSTING.includes(change.status) ? (
-            <div className="border border-slate-700 bg-slate-800/60 rounded-lg p-4 text-slate-300">
-              {change.customer_relevant ? (
-                <p>
-                  Quotes are entered once the change reaches Costing. Currently in{' '}
-                  <strong>{STATUS_LABELS[change.status] ?? change.status}</strong> — departments first
-                  assess and cost the change.
-                </p>
-              ) : (
-                <p>
-                  Costs are approved once the change reaches Costing. Currently in{' '}
-                  <strong>{STATUS_LABELS[change.status] ?? change.status}</strong> — departments first
-                  assess and cost the change.
-                </p>
-              )}
-            </div>
-          ) : change.customer_relevant ? (
-            <>
-              {/* The basis, stated next to the entry: what the change costs and
-                  what it does to production time. The price itself stays a
-                  judgement — nothing here sums into it. */}
-              {canSeeCosts && <QuoteBasis changeId={changeId}
-                plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
-                concerns={concerns} departments={departments} />}
-              <QuotedPriceEditor change={change} canEdit={canEditQuotedPrice} />
-              {/* Once the offer is out, the price stops being a single number
-                  and becomes a conversation. The log runs it to a final result;
-                  the go-ahead stays with the acceptance controls below. */}
-              {canSeeCosts && phaseIndex(change.status) >= phaseIndex('quoted') && (
-                <NegotiationCard changeId={changeId} status={change.status}
-                  canWrite={canEditQuotedPrice} />
-              )}
-              <p><span className="text-slate-400">Customer response:</span> {change.customer_response}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <button className="px-3 py-1.5 border rounded-lg"
-                  onClick={() => setAcceptOpen((o) => !o)}>Customer accepted</button>
-                <button className="px-3 py-1.5 border rounded-lg"
-                  onClick={() => customer.mutate({ response: 'declined' })}>Customer declined</button>
-              </div>
-              {acceptOpen && (
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  <label className="text-xs text-slate-400">{t('customer.releaseDue')}</label>
-                  <input type="date" data-testid="accept-release-due" value={acceptDue}
-                    onChange={(e) => setAcceptDue(e.target.value)}
-                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-                  <input type="text" placeholder={t('customer.releaseDueReason')} value={acceptReason}
-                    onChange={(e) => setAcceptReason(e.target.value)}
-                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-40" />
-                  <button data-testid="accept-confirm"
-                    className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
-                    disabled={!acceptDue || customer.isPending}
-                    onClick={() => customer.mutate({
-                      response: 'accepted',
-                      release_due_date: `${acceptDue}T23:59:59Z`,
-                      release_due_reason: acceptReason || null,
-                    })}>
-                    {t('customer.confirmAccept')}
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-2 pt-2">
-                {canSignPm && (
-                  <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
-                    disabled={!!change.pm_signed_by || samePersonBlocksPm}
-                    onClick={() => signOff.mutate('pm')}>
-                    PM sign-off {change.pm_signed_by ? '✓' : ''}
-                  </button>
-                )}
-                {canSignQuality && (
-                  <button className="px-3 py-1.5 border rounded-lg disabled:opacity-50"
-                    disabled={!!change.quality_signed_by || samePersonBlocksQuality}
-                    onClick={() => signOff.mutate('quality')}>
-                    Quality sign-off {change.quality_signed_by ? '✓' : ''}
-                  </button>
-                )}
-              </div>
-              {(samePersonBlocksPm || samePersonBlocksQuality) && (
-                <p className="text-xs text-amber-300">PM and Quality sign-off must be different users</p>
-              )}
-              <p className="text-xs text-slate-400">Approve requires customer acceptance + both sign-offs.</p>
-            </>
-          ) : (
-            <div className="space-y-2">
-              {change.internal_approved_at ? (
-                <div className="border border-emerald-800 bg-emerald-950/40 rounded-lg p-3">
-                  <p className="text-emerald-300 font-medium">✓ {t('internal.approved')}</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {t('internal.amount')}: {change.internal_approved_amount?.toFixed(2) ?? '—'}
-                    {' · '}{new Date(change.internal_approved_at).toLocaleDateString()}
-                  </p>
-                  {change.internal_approval_note && (
-                    <p className="text-xs text-slate-400">{change.internal_approval_note}</p>
-                  )}
-                </div>
-              ) : canApproveInternalCosts ? (
-                <>
-                  <button
-                    className="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50"
-                    disabled={change.status !== 'costing' || internalApprove.isPending}
-                    onClick={() => setInternalOpen((o) => !o)}>
-                    {t('internal.approve')}
-                  </button>
-                  {internalOpen && (
-                    <div className="flex flex-wrap items-center gap-2 mt-2">
-                      <label className="text-xs text-slate-400">{t('customer.releaseDue')}</label>
-                      <input type="date" data-testid="internal-release-due" value={internalDue}
-                        onChange={(e) => setInternalDue(e.target.value)}
-                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
-                      <button data-testid="internal-approve-confirm"
-                        className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
-                        disabled={!internalDue || internalApprove.isPending}
-                        onClick={() => internalApprove.mutate({ release_due_date: `${internalDue}T23:59:59Z` })}>
-                        {t('internal.approve')}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-xs text-slate-400">
-                  Only a Project Manager department member or an admin may approve internal costs.
-                </p>
-              )}
-            </div>
+          {/* What the offer is judged against: production-time delta and the
+              risks nobody could close. */}
+          {!BEFORE_COSTING.includes(change.status) && canSeeCosts && change.customer_relevant && (
+            <QuoteBasis changeId={changeId}
+              plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+              concerns={concerns} departments={departments} />
           )}
         </div>
+      )}
+
+      {effectiveTab === 'offer' && (
+        <OfferTab change={change}
+          canWrite={canEditQuotedPrice} canSeePrices={canSeeCosts}
+          canSignPm={canSignPm} canSignQuality={canSignQuality}
+          canApproveInternalCosts={canApproveInternalCosts}
+          userId={userId ?? null}
+          costSummary={canSeeCosts ? <SummationView changeId={changeId}
+                status={change.status} canQuote={canEditQuotedPrice}
+                plants={allPlants.map((p) => ({ id: p.id, name: p.name }))}
+                validatedWeightG={change.validated_part_weight_g}
+                deadline={change.active_deadline === 'release'
+                  ? { date: change.release_due_date, label: t('deadline.release') }
+                  : { date: change.required_by_date, label: t('deadline.quote') }} /> : null} />
       )}
 
       {effectiveTab === 'd1' && (

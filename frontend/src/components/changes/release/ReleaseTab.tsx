@@ -1,0 +1,224 @@
+/**
+ * The Release tab (spec 2026-09-25 section 7): the work is done, now prove it
+ * holds and hand the change over. Four steps in order: validation checks,
+ * release checklist, lessons learned, release and close. Once released, a
+ * closing summary puts plan against actual.
+ */
+import { useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { changesApi } from '../../../api/changes'
+import { changeReleaseApi } from '../../../api/changeRelease'
+import { planApi } from '../../../api/changePlan'
+import type { ChangeDetail } from '../../../types/change'
+import ValidationPanel from '../ValidationPanel'
+import ImplementationPanel from '../ImplementationPanel'
+import PnlCard from '../PnlCard'
+import { StepSection } from '../offer/ui'
+import { fmtDate, sectionLabel } from '../offer/offerFormat'
+import ReleaseChecklist from './ReleaseChecklist'
+import { releaseKey } from './releaseKeys'
+import LessonsStep from './LessonsStep'
+
+export interface ReleaseTabProps {
+  change: ChangeDetail
+  departments: { id: number; name: string }[]
+  myDepartmentIds: number[]
+  canSeeAll: boolean
+  canAcknowledge: boolean
+  /** PM, the change lead, admin. */
+  canManage: boolean
+  onAdvance: (to: string) => void
+  advancing: boolean
+}
+
+const AFTER: string[] = ['released', 'closed']
+
+/** Inclusive last day from an exclusive end date. */
+const lastDay = (iso: string | null | undefined): string | null => {
+  if (!iso) return null
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+}
+const maxIso = (xs: (string | null | undefined)[]): string | null => {
+  const sorted = xs.filter((x): x is string => !!x).sort()
+  return sorted.length ? sorted[sorted.length - 1] : null
+}
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000)
+
+function ClosingSummary({ change, departments }: { change: ChangeDetail; departments: { id: number; name: string }[] }) {
+  const { data: plan } = useQuery({
+    queryKey: ['change', change.id, 'plan', 'detailed'],
+    queryFn: () => planApi.get(change.id, 'detailed'),
+  })
+  const tasks = (plan?.tasks ?? []).filter((t) => !t.is_idea)
+  const baseline = lastDay(maxIso(tasks.map((t) => t.baseline_finish)))
+  const planned = lastDay(plan?.summary?.finish ?? null)
+  const allFinished = tasks.length > 0 && tasks.every((t) => !!t.actual_finish)
+  const actual = allFinished ? maxIso(tasks.map((t) => t.actual_finish)) : null
+  const slip = baseline && (actual ?? planned) ? daysBetween(baseline, (actual ?? planned)!) : null
+  return (
+    <section data-testid="release-summary" className="rounded-xl border border-emerald-900/70 bg-emerald-950/10 p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <span className="text-emerald-400">✓</span>
+        <h3 className="text-sm font-semibold text-slate-100">
+          {change.status === 'closed' ? 'Change closed' : 'Change released'}
+        </h3>
+      </div>
+      {tasks.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-4">
+          {([
+            ['Baseline finish', fmtDate(baseline)],
+            ['Planned finish', fmtDate(planned)],
+            ['Actual finish', actual ? fmtDate(actual) : 'open tasks'],
+            ['Against baseline', slip == null ? '-' : slip === 0 ? 'on time' : `${slip > 0 ? '+' : ''}${slip} d`],
+          ] as [string, string][]).map(([k, v]) => (
+            <div key={k}>
+              <div className={sectionLabel}>{k}</div>
+              <div data-testid={`summary-${k.toLowerCase().replace(/ /g, '-')}`}
+                className={`mt-0.5 text-lg font-semibold tabular-nums ${k === 'Against baseline' && slip != null
+                  ? slip > 0 ? 'text-rose-400' : 'text-emerald-400' : 'text-slate-100'}`}>{v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <PnlCard change={change} departments={departments} />
+    </section>
+  )
+}
+
+function Collapsible({ title, children, testId }: { title: string; children: ReactNode; testId?: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section data-testid={testId} className="rounded-xl border border-slate-700 bg-slate-800/40">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/60">
+        <span className={`text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+        {title}
+      </button>
+      {open && <div className="border-t border-slate-700/70 p-4">{children}</div>}
+    </section>
+  )
+}
+
+export default function ReleaseTab({
+  change, departments, myDepartmentIds, canSeeAll, canAcknowledge, canManage, onAdvance, advancing,
+}: ReleaseTabProps) {
+  const { data: release } = useQuery({
+    queryKey: releaseKey(change.id),
+    queryFn: () => changeReleaseApi.get(change.id),
+  })
+  const { data: validation } = useQuery({
+    queryKey: ['change', change.id, 'validation'],
+    queryFn: () => changesApi.validationState(change.id),
+  })
+  const inValidation = change.status === 'in_validation'
+  const after = AFTER.includes(change.status)
+
+  const validationDone = after || ((validation?.departments?.length ?? 0) > 0
+    && (validation?.departments ?? []).every((d) => d.checks.every((c) => c.status === 'passed')))
+  const checklistDone = after || (!!release && release.checks.length > 0 && release.open_count === 0)
+  const lessonsDone = !!release?.lessons?.done_at
+  const releasedDone = after
+
+  const steps: [string, boolean, string][] = [
+    ['Validation checks', validationDone, 'release-validation'],
+    ['Release checklist', checklistDone, 'release-checklist'],
+    ['Lessons learned', lessonsDone, 'release-lessons'],
+    ['Release & close', releasedDone, 'release-final'],
+  ]
+  const blockers = release?.blockers ?? []
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
+        <h2 className="text-sm font-semibold text-slate-100">Release</h2>
+        <p className="mt-0.5 text-xs text-slate-400">
+          The work is done. Departments confirm it holds, the owners tick the release checklist, the team records its
+          lessons, then PM releases the change and closes it.
+        </p>
+        <ol data-testid="release-progress" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {steps.map(([label, done, id], i) => (
+            <li key={id}>
+              <a href={`#${id}`} onClick={(e) => {
+                e.preventDefault()
+                document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+              }}
+                className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${done
+                  ? 'border-emerald-800 bg-emerald-950/30 text-emerald-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
+                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${done
+                  ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>{done ? '✓' : i + 1}</span>
+                {label}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {after && <ClosingSummary change={change} departments={departments} />}
+
+      <StepSection id="release-validation" n={1} title="Validation checks" done={validationDone}>
+        <ValidationPanel changeId={change.id} status={change.status}
+          departments={departments} myDepartmentIds={myDepartmentIds}
+          canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll} />
+      </StepSection>
+
+      <StepSection id="release-checklist" n={2} title="Release checklist" done={checklistDone}
+        right={release ? (
+          <span className={`text-xs ${release.open_count ? 'text-amber-300' : 'text-emerald-400'}`}>
+            {release.open_count ? `${release.open_count} open` : 'all done'}
+          </span>
+        ) : undefined}
+        hint="Each point is owned by a department. Not applicable needs a note.">
+        {release ? (
+          <ReleaseChecklist changeId={change.id} checks={release.checks} myDepartmentIds={myDepartmentIds}
+            canManage={canManage} editable={inValidation} />
+        ) : <p className="text-xs text-slate-500">Loading checklist</p>}
+      </StepSection>
+
+      <StepSection id="release-lessons" n={3} title="Lessons learned" done={lessonsDone}
+        hint="What should go differently on the next change? Lessons land in the lessons learned register, linked to this change.">
+        {release ? (
+          <LessonsStep changeId={change.id} lessons={release.lessons}
+            canAdd={inValidation || change.status === 'released'} canComplete={canManage && inValidation} />
+        ) : null}
+      </StepSection>
+
+      <StepSection id="release-final" n={4} title="Release & close" done={releasedDone}>
+        {inValidation && (
+          <div className="space-y-2">
+            {blockers.length > 0 && (
+              <ul data-testid="release-blockers" className="space-y-1">
+                {blockers.map((b) => (
+                  <li key={b} className="text-xs text-amber-300">⏳ {b}</li>
+                ))}
+              </ul>
+            )}
+            {canManage ? (
+              <button type="button" data-testid="release-change"
+                disabled={advancing || (!!release && !release.can_release)}
+                onClick={() => onAdvance('released')}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
+                Release change
+              </button>
+            ) : <p className="text-xs text-slate-500">PM releases the change once every step is done.</p>}
+          </div>
+        )}
+        {change.status === 'released' && (
+          canManage ? (
+            <button type="button" data-testid="close-change" disabled={advancing}
+              onClick={() => onAdvance('closed')}
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+              Close change
+            </button>
+          ) : <p className="text-xs text-slate-500">Released. PM closes the change.</p>
+        )}
+        {change.status === 'closed' && <p className="text-xs text-emerald-400">✓ Closed.</p>}
+      </StepSection>
+
+      <Collapsible title="Revisions (ECN)" testId="release-revisions">
+        <ImplementationPanel changeId={change.id} />
+      </Collapsible>
+    </div>
+  )
+}

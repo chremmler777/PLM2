@@ -709,6 +709,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Die Änderung geht von der Angebotserstellung zurück in die Kalkulation. Die Fachbereiche können ihre Zeilen wieder bearbeiten, bis die Kalkulation erneut geschlossen wird.',
     en: 'The change goes from quote creation back to costing. Departments can edit their lines again until costing is closed once more.',
   },
+  'costing.stageTitle': { de: 'Kalkulation', en: 'Costing' },
+  'costing.stageBody': {
+    de: 'Jeder Fachbereich kalkuliert seinen Teil: interne Stunden, Schätzungen oder Lieferantenangebote, und die Durchlaufzeit jeder Zeile. PM schließt die Kalkulation, wenn sie vollständig ist.',
+    en: 'Each department prices its part: internal hours, estimates or vendor quotes, and the lead time of every line. PM closes costing when complete.',
+  },
   'costing.closedHint': {
     de: 'Kalkulation geschlossen — Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
     en: 'Costing is closed — departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
@@ -1193,7 +1198,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'status.quoting': { de: 'Angebotserstellung', en: 'Quote creation' },
   'stepper.hint.quoted': { de: 'Angebot an Kunden gesendet', en: 'Offer sent to customer' },
-  'stepper.hint.approved': { de: 'Go-Entscheidung getroffen', en: 'Go decision made' },
+  'stepper.hint.approved': { de: 'Detailplanung, alle Teams bestätigen den Zeitplan', en: 'Detailed timing, every team confirms its part' },
   'stepper.hint.in_implementation': { de: 'Umsetzung läuft', en: 'Doing the work' },
   'stepper.hint.in_validation': { de: 'Ergebnisse werden geprüft', en: 'Checking results' },
   'stepper.hint.released': { de: 'Änderung ist live', en: 'Change is live' },

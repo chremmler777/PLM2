@@ -89,7 +89,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'costing', costing_pending_department_ids: [2, 4] }), [], deptName)
     expect(waits[0].key).toBe('costing-input')
     expect(waits[0].text).toContain('Development, Tool Engineer')
-    expect(waits[0].tab).toBe('commercial')
+    expect(waits[0].tab).toBe('costing')
     // Only while costing is the live phase.
     expect(resolveWaitStates(
       change({ status: 'quoted', costing_pending_department_ids: [2] }), [], deptName)).toEqual([])
@@ -110,7 +110,7 @@ describe('resolveWaitStates', () => {
     const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['bank-build'])
     expect(waits[0].text).toBe(t('wait.onBankBuild'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
     // Only at approved: earlier the decision is not due, later it is history.
     expect(resolveWaitStates(change({ status: 'quoted' }), [], deptName)).toEqual([])
     expect(resolveWaitStates(
@@ -122,7 +122,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'approved', bank_build_mode: 'planned_scrap' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['plan-publish'])
     expect(waits[0].text).toBe(t('wait.onPlanPublish'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
     // Published — nothing left; and an internal change has nobody to publish to.
     expect(resolveWaitStates(change({
       status: 'approved', bank_build_mode: 'planned_scrap',
@@ -182,7 +182,7 @@ describe('resolveWaitStates', () => {
     })
     expect(waits.map((w) => w.key)).toEqual(['implementation-reports'])
     expect(waits[0].text).toBe(t('wait.onProgressReports').replace('{n}', '2'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
   })
 
   it('keeps the implementation waits out of every other phase', () => {
@@ -199,7 +199,7 @@ describe('resolveWaitStates', () => {
       change({ status: 'in_implementation' }), [], deptName, [], { state })
     expect(waits.map((w) => w.key)).toEqual(['implementation-escalation'])
     expect(waits[0].text).toBe(t('wait.onRiskEscalation'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('timing')
 
     // An open escalation is the answer; a settled one is not.
     expect(resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [],
@@ -231,7 +231,7 @@ describe('resolveWaitStates', () => {
       })
     expect(waits.map((w) => w.key)).toEqual(['validation-checks'])
     expect(waits[0].text).toBe(t('wait.onValidationChecks').replace('{n}', '2'))
-    expect(waits[0].tab).toBe('implementation')
+    expect(waits[0].tab).toBe('release')
   })
 
   it('names the unacknowledged weight delta as its own wait, on Sales', () => {

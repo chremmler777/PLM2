@@ -1,0 +1,177 @@
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import ReleaseTab from './ReleaseTab'
+import ReleaseChecklist from './ReleaseChecklist'
+import LessonsStep from './LessonsStep'
+import { changeReleaseApi } from '../../../api/changeRelease'
+import type { ChangeDetail } from '../../../types/change'
+import type { ReleaseCheck, ReleaseState } from '../../../types/changeRelease'
+
+vi.mock('../../../api/changeRelease', () => ({
+  changeReleaseApi: {
+    get: vi.fn(), setCheck: vi.fn().mockResolvedValue({}),
+    addLesson: vi.fn().mockResolvedValue({}), completeLessons: vi.fn().mockResolvedValue({}),
+  },
+}))
+vi.mock('../../../api/changes', () => ({
+  changesApi: { validationState: vi.fn().mockResolvedValue({ departments: [] }) },
+}))
+vi.mock('../../../api/changePlan', () => ({
+  planApi: {
+    get: vi.fn().mockResolvedValue({
+      tasks: [
+        { id: 1, is_idea: false, baseline_finish: '2026-10-11', actual_finish: '2026-10-14' },
+        { id: 2, is_idea: false, baseline_finish: '2026-10-01', actual_finish: '2026-10-02' },
+      ],
+      summary: { finish: '2026-10-14' },
+    }),
+  },
+}))
+vi.mock('../ValidationPanel', () => ({ default: () => <div>mock-validation</div> }))
+vi.mock('../ImplementationPanel', () => ({ default: () => <div>mock-ecn</div> }))
+vi.mock('../PnlCard', () => ({ default: () => <div>mock-pnl</div> }))
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+
+const check = (over: Partial<ReleaseCheck> = {}): ReleaseCheck => ({
+  key: 'weight_measured', label: 'Part weight measured and recorded', department_id: 4,
+  department_name: 'Tool Engineer', status: 'open', note: null, hint: 'Validated weight exists: 412 g', ...over,
+})
+
+const state = (over: Partial<ReleaseState> = {}): ReleaseState => ({
+  checks: [check(), check({ key: 'erp_updated', label: 'ERP updated', department_id: 11, department_name: 'Scheduling' })],
+  open_count: 2,
+  lessons: { items: [] },
+  can_release: false,
+  blockers: ['Release checklist incomplete: 2 open'],
+  ...over,
+})
+
+const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
+  id: 7, change_number: 'CR-7', project_id: 1, title: 'x', change_type: 'tooling',
+  priority: 'medium', status: 'in_validation', raised_by: 1, customer_response: 'accepted',
+  created_at: '2026-07-01T00:00:00', updated_at: '2026-07-01T00:00:00',
+  impacted_items: [], assessments: [], attachments: [], ...over,
+} as ChangeDetail)
+
+const wrap = (ui: React.ReactElement) => render(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
+
+describe('ReleaseChecklist', () => {
+  afterEach(cleanup)
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('n.a. needs a note before it saves', async () => {
+    wrap(<ReleaseChecklist changeId={7} checks={[check()]} myDepartmentIds={[4]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-weight_measured-na'))
+    const confirm = screen.getByTestId('release-check-weight_measured-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('release-check-weight_measured-note'), { target: { value: 'Weight unchanged' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeReleaseApi.setCheck).toHaveBeenCalledWith(7, 'weight_measured',
+      { status: 'na', note: 'Weight unchanged' }))
+  })
+
+  it('done saves without a note', async () => {
+    wrap(<ReleaseChecklist changeId={7} checks={[check()]} myDepartmentIds={[4]} canManage={false} editable />)
+    fireEvent.click(screen.getByTestId('release-check-weight_measured-done'))
+    const confirm = screen.getByTestId('release-check-weight_measured-confirm') as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeReleaseApi.setCheck).toHaveBeenCalledWith(7, 'weight_measured', { status: 'done' }))
+  })
+
+  it('gives controls only to the owner department, and to PM/lead/admin', () => {
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[4]} canManage={false} editable
+      checks={[check(), check({ key: 'erp_updated', department_id: 11, department_name: 'Scheduling' })]} />)
+    expect(screen.getByTestId('release-check-weight_measured-done')).toBeDefined()
+    expect(screen.queryByTestId('release-check-erp_updated-done')).toBeNull()
+    cleanup()
+    wrap(<ReleaseChecklist changeId={7} myDepartmentIds={[]} canManage editable
+      checks={[check({ key: 'erp_updated', department_id: 11, department_name: 'Scheduling' })]} />)
+    expect(screen.getByTestId('release-check-erp_updated-done')).toBeDefined()
+  })
+
+  it('shows the hint and no controls once the stage has moved on', () => {
+    wrap(<ReleaseChecklist changeId={7} checks={[check()]} myDepartmentIds={[4]} canManage editable={false} />)
+    expect(screen.getByText('Validated weight exists: 412 g')).toBeDefined()
+    expect(screen.queryByTestId('release-check-weight_measured-done')).toBeNull()
+  })
+})
+
+describe('LessonsStep', () => {
+  afterEach(cleanup)
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('completing without lessons requires a reason', async () => {
+    wrap(<LessonsStep changeId={7} lessons={{ items: [] }} canAdd canComplete />)
+    const btn = screen.getByTestId('lessons-complete') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('lessons-none-reason'), { target: { value: 'Routine index change' } })
+    fireEvent.click(btn)
+    await waitFor(() => expect(changeReleaseApi.completeLessons).toHaveBeenCalledWith(7, 'Routine index change'))
+  })
+
+  it('completing with a lesson needs no reason', async () => {
+    wrap(<LessonsStep changeId={7} canAdd canComplete lessons={{ items: [
+      { id: 1, title: 'Order steel earlier', category: 'tooling', lesson_type: 'problem', severity: 'high', status: 'in_review' },
+    ] }} />)
+    expect(screen.queryByTestId('lessons-none-reason')).toBeNull()
+    fireEvent.click(screen.getByTestId('lessons-complete'))
+    await waitFor(() => expect(changeReleaseApi.completeLessons).toHaveBeenCalledWith(7, undefined))
+  })
+
+  it('adds a lesson through the inline form', async () => {
+    wrap(<LessonsStep changeId={7} lessons={{ items: [] }} canAdd canComplete={false} />)
+    fireEvent.click(screen.getByTestId('lesson-add'))
+    const submit = screen.getByTestId('lesson-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('lesson-title'), { target: { value: 'Steel lead time' } })
+    fireEvent.change(screen.getByTestId('lesson-description'), { target: { value: 'Supplier took 6 weeks' } })
+    fireEvent.click(submit)
+    await waitFor(() => expect(changeReleaseApi.addLesson).toHaveBeenCalledWith(7, expect.objectContaining({
+      title: 'Steel lead time', description: 'Supplier took 6 weeks', category: 'other',
+    })))
+    expect(screen.queryByTestId('lessons-complete')).toBeNull()
+  })
+})
+
+describe('ReleaseTab', () => {
+  afterEach(cleanup)
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('lists the blockers and keeps Release disabled while they stand', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    const onAdvance = vi.fn()
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={onAdvance} advancing={false} />)
+    expect((await screen.findByTestId('release-blockers')).textContent).toContain('2 open')
+    await waitFor(() => expect((screen.getByTestId('release-change') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('releases once the server says it can', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state({
+      checks: [check({ status: 'done' })], open_count: 0, can_release: true, blockers: [],
+      lessons: { items: [], done_at: '2026-09-20', none_reason: 'none' },
+    }))
+    const onAdvance = vi.fn()
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={onAdvance} advancing={false} />)
+    await waitFor(() => expect((screen.getByTestId('release-change') as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByTestId('release-change'))
+    expect(onAdvance).toHaveBeenCalledWith('released')
+  })
+
+  it('after release shows plan against actual and the close action', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state({ open_count: 0, can_release: false, blockers: [] }))
+    const onAdvance = vi.fn()
+    wrap(<ReleaseTab change={change({ status: 'released' })} departments={[]} myDepartmentIds={[]} canSeeAll
+      canAcknowledge canManage onAdvance={onAdvance} advancing={false} />)
+    // Baseline finish is exclusive 2026-10-11 -> last day 10.10.2026; actual 14.10.2026.
+    expect((await screen.findByTestId('summary-baseline-finish')).textContent).toBe('10.10.2026')
+    await waitFor(() => expect(screen.getByTestId('summary-actual-finish').textContent).toBe('14.10.2026'))
+    expect(screen.getByTestId('summary-against-baseline').textContent).toBe('+4 d')
+    fireEvent.click(screen.getByTestId('close-change'))
+    expect(onAdvance).toHaveBeenCalledWith('closed')
+  })
+})
