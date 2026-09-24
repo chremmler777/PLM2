@@ -12,6 +12,7 @@ import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import ProjectDetailPopout from './pages/ProjectDetailPopout';
 import PartDetail from './pages/PartDetail';
+import DfmPopout from './pages/DfmPopout';
 import WorkflowDesignerPage from './pages/WorkflowDesignerPage';
 import MyTasksPage from './pages/MyTasksPage';
 import CatalogPage from './pages/CatalogPage';
@@ -80,6 +81,15 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PartDetail />
+          </ProtectedRoute>
+        }
+      />
+      {/* Pop-out DFM window: a tool's DFM archive alone, no sidebar. */}
+      <Route
+        path="/parts/:partId/dfm"
+        element={
+          <ProtectedRoute bare>
+            <DfmPopout />
           </ProtectedRoute>
         }
       />

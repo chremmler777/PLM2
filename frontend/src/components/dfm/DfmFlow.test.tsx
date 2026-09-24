@@ -10,9 +10,11 @@ vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '/api' 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 let current: DfmTopicDetail
-function wrap(onOpenPdf = vi.fn()) {
+function wrap(onOpenPdf = vi.fn(), extra: { onBack?: () => void; onPopOut?: () => void } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={qc}><DfmFlow partId={7} topicId={1} onOpenPdf={onOpenPdf} /></QueryClientProvider>)
+  render(<QueryClientProvider client={qc}>
+    <DfmFlow partId={7} topicId={1} onOpenPdf={onOpenPdf} onBack={extra.onBack ?? vi.fn()} onPopOut={extra.onPopOut} />
+  </QueryClientProvider>)
   return onOpenPdf
 }
 const actionKeys = (id: number) =>
@@ -29,6 +31,7 @@ describe('DfmFlow', () => {
     clientMocks.get.mockImplementation((url: string) =>
       url === '/v1/parts/7/dfm/topics/1' ? Promise.resolve({ data: current }) : Promise.resolve({ data: [] }))
     Element.prototype.scrollIntoView = vi.fn()
+    localStorage.clear()
   })
   afterEach(() => { cleanup(); vi.useRealTimers() })
 
@@ -48,7 +51,6 @@ describe('DfmFlow', () => {
     const first = screen.getByTestId('dfm-entry-1')
     expect(first.textContent).toContain('Toolmaker')
     expect(first.textContent).toContain('→ KTX')
-    expect(first.textContent).toContain('09-13')
     expect(first.textContent).toContain('CD')
     expect(first.textContent).toContain('DFM rev 1')
     expect(within(first).getByTestId('dfm-status-1').textContent).toContain('Answered by KTX 09-20')
@@ -58,10 +60,93 @@ describe('DfmFlow', () => {
     expect(screen.getByTestId('dfm-entry-4').textContent).toContain('KH')
   })
 
+  it('draws each arrow to a marker on the receiver lane with a kind label, dashed while waiting', async () => {
+    wrap()
+    await screen.findByTestId('dfm-entry-5')
+    const a1 = screen.getByTestId('dfm-arrow-1-ktx')
+    expect(a1.getAttribute('data-direction')).toBe('right')
+    expect(a1.style.left).toContain('16.6667%')
+    expect(within(a1).getByTestId('dfm-kind-label').textContent).toBe('Original')
+    const m1 = screen.getByTestId('dfm-marker-1-ktx')
+    expect(m1.style.left).toBe('50%')
+    expect(screen.getByTestId('dfm-arrow-3-ktx').getAttribute('data-direction')).toBe('left')
+    expect(screen.getByTestId('dfm-arrow-5-ktx').className).toContain('border-dashed')
+    expect(screen.getByTestId('dfm-arrow-4-toolmaker').className).toContain('border-solid')
+  })
+
+  it('puts a day divider in the date column whenever the date changes', async () => {
+    wrap()
+    const body = await screen.findByTestId('dfm-flow-body')
+    await screen.findByTestId('dfm-entry-5')
+    const order = Array.from(body.querySelectorAll('[data-testid^="dfm-day-"], [data-testid^="dfm-row-"]')).map((n) => n.getAttribute('data-testid'))
+    expect(order).toEqual(['dfm-day-2026-09-13', 'dfm-row-1', 'dfm-day-2026-09-15', 'dfm-row-2', 'dfm-day-2026-09-18', 'dfm-row-3',
+      'dfm-day-2026-09-20', 'dfm-row-4', 'dfm-day-2026-09-22', 'dfm-row-5'])
+    expect(screen.getByTestId('dfm-day-2026-09-13').textContent).toContain('13 Sep')
+  })
+
+  it('shows one header row: breadcrumb back to the archive, status, actions, zoom, pop-out', async () => {
+    const onBack = vi.fn()
+    const onPopOut = vi.fn()
+    wrap(vi.fn(), { onBack, onPopOut })
+    const crumb = await screen.findByTestId('dfm-breadcrumb')
+    expect(crumb.textContent).toBe('DFM archive/Gate position')
+    fireEvent.click(screen.getByTestId('dfm-breadcrumb-archive'))
+    expect(onBack).toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('dfm-popout'))
+    expect(onPopOut).toHaveBeenCalled()
+    expect(screen.getByTestId('dfm-topic-status').textContent).toBe('Open')
+  })
+
+  it('hides Open in window when the flow already is in its own window', async () => {
+    wrap()
+    await screen.findByTestId('dfm-breadcrumb')
+    expect(screen.queryByTestId('dfm-popout')).toBeNull()
+  })
+
+  it('zooms with the controls and ctrl+wheel, remembered in storage', async () => {
+    wrap()
+    await screen.findByTestId('dfm-entry-5')
+    const level = screen.getByTestId('dfm-zoom-level')
+    expect(level.textContent).toBe('100%')
+    fireEvent.click(screen.getByTestId('dfm-zoom-in'))
+    expect(level.textContent).toBe('110%')
+    expect(screen.getByTestId('dfm-flow-body').getAttribute('data-zoom')).toBe('110')
+    fireEvent.click(screen.getByTestId('dfm-zoom-out'))
+    fireEvent.click(screen.getByTestId('dfm-zoom-out'))
+    expect(level.textContent).toBe('90%')
+    expect(localStorage.getItem('plm2.dfm.zoom')).toBe('90')
+    fireEvent.wheel(screen.getByTestId('dfm-flow-viewport'), { deltaY: -100, ctrlKey: true })
+    expect(level.textContent).toBe('100%')
+    fireEvent.wheel(screen.getByTestId('dfm-flow-viewport'), { deltaY: 100 })
+    expect(level.textContent).toBe('100%')
+    // jsdom has no layout: the container reads 0 wide, so Fit lands on the floor
+    fireEvent.click(screen.getByTestId('dfm-zoom-fit'))
+    expect(level.textContent).toBe('50%')
+  })
+
+  it('shows compact cards below 75%, with the actions behind a small menu', async () => {
+    localStorage.setItem('plm2.dfm.zoom', '70')
+    wrap()
+    const card = await screen.findByTestId('dfm-entry-5')
+    expect(card.getAttribute('data-compact')).toBe('true')
+    expect(card.textContent).not.toContain('and the rib?')
+    expect(card.textContent).toContain('Question')
+    expect(card.textContent).toContain('09-22')
+    expect(card.textContent).toContain('Waiting on KTX')
+    expect(screen.queryByTestId('dfm-action-5-answer-ktx')).toBeNull()
+    fireEvent.click(within(card).getByTestId('dfm-menu-5'))
+    fireEvent.click(screen.getByTestId('dfm-action-5-answer-ktx'))
+    expect(screen.getByTestId('dfm-step-sentence').textContent).toBe('Answer from KTX to Toolmaker on Question #5')
+    fireEvent.click(screen.getByTestId('dfm-zoom-in'))
+    expect(screen.getByTestId('dfm-entry-5').getAttribute('data-compact')).toBe('false')
+    expect(screen.getByTestId('dfm-entry-5').textContent).toContain('and the rib?')
+  })
+
   it('shows the status strip, per-lane waiting counts and the legend', async () => {
     wrap()
     const strip = await screen.findByTestId('dfm-status-strip')
     expect(strip.textContent).toContain('Waiting on KTX for 1 day: Question #5 from Toolmaker')
+    expect(within(strip).getByTestId('dfm-waiting-ktx').textContent).toBe('KTX1 · 1 day')
     expect(screen.getByTestId('dfm-lane-ktx').getAttribute('data-waiting')).toBe('1')
     expect(screen.getByTestId('dfm-lane-ktx').textContent).toContain('1 waiting')
     expect(screen.getByTestId('dfm-lane-tier1').getAttribute('data-waiting')).toBe('0')

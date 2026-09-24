@@ -7,7 +7,17 @@ import { relaySummary } from './dfmFixtures'
 const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock('./DfmFlow', () => ({ default: (p: { topicId: number }) => <div data-testid="flow">topic {p.topicId}</div> }))
+vi.mock('./DfmFlow', () => ({
+  default: (p: { topicId: number; onBack(): void; onPopOut?: () => void }) => (
+    <div data-testid="flow">
+      <span data-testid="flow-topic">topic {p.topicId}</span>
+      <button data-testid="flow-back" onClick={p.onBack}>back</button>
+      {p.onPopOut && <button data-testid="flow-popout" onClick={p.onPopOut}>pop</button>}
+    </div>
+  ),
+}))
+const windowMocks = vi.hoisted(() => ({ openDfmWindow: vi.fn() }))
+vi.mock('./dfmWindow', () => windowMocks)
 
 const topics = [
   relaySummary({ id: 2, title: 'Gate position', waiting_on: [{ party: 'tier1', count: 1, oldest_days: 4 }],
@@ -17,14 +27,14 @@ const topics = [
   relaySummary({ id: 1, title: 'Draft angles', status: 'finished_confirmed', closed_by: 14, closed_at: '2026-09-20T09:00:00' }),
 ]
 
-function wrap() {
+function wrap(props: { initialTopic?: number; inWindow?: boolean } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={qc}><DfmArchive partId={7} onOpenPdf={vi.fn()} /></QueryClientProvider>)
+  render(<QueryClientProvider client={qc}><DfmArchive partId={7} onOpenPdf={vi.fn()} {...props} /></QueryClientProvider>)
 }
 
 describe('DfmArchive', () => {
   beforeEach(() => {
-    clientMocks.get.mockReset(); clientMocks.post.mockReset()
+    clientMocks.get.mockReset(); clientMocks.post.mockReset(); windowMocks.openDfmWindow.mockReset()
     clientMocks.get.mockImplementation((url: string) => {
       if (url === '/v1/parts/7/dfm/topics') return Promise.resolve({ data: topics })
       return Promise.resolve({ data: [] })
@@ -46,10 +56,33 @@ describe('DfmArchive', () => {
     expect(screen.queryByTestId('dfm-topic-waiting-1')).toBeNull()
   })
 
-  it('opens the flow of the selected topic', async () => {
+  it('opens the selected topic in place of the list, and the breadcrumb returns to the list', async () => {
     wrap()
     fireEvent.click(await screen.findByTestId('dfm-topic-2'))
-    expect(screen.getByTestId('flow').textContent).toBe('topic 2')
+    expect(screen.getByTestId('flow-topic').textContent).toBe('topic 2')
+    expect(screen.queryByTestId('dfm-topic-3')).toBeNull()
+    expect(screen.queryByTestId('dfm-new-topic')).toBeNull()
+    fireEvent.click(screen.getByTestId('flow-back'))
+    expect(screen.queryByTestId('flow')).toBeNull()
+    expect(screen.getByTestId('dfm-topic-3')).toBeTruthy()
+  })
+
+  it('opens the archive in its own window, with the open topic', async () => {
+    wrap()
+    fireEvent.click(await screen.findByTestId('dfm-popout'))
+    expect(windowMocks.openDfmWindow).toHaveBeenCalledWith(7, null)
+    fireEvent.click(screen.getByTestId('dfm-topic-2'))
+    fireEvent.click(screen.getByTestId('flow-popout'))
+    expect(windowMocks.openDfmWindow).toHaveBeenLastCalledWith(7, 2)
+  })
+
+  it('in its own window: starts on the asked topic and offers no further pop-out', async () => {
+    wrap({ initialTopic: 3, inWindow: true })
+    expect((await screen.findByTestId('flow-topic')).textContent).toBe('topic 3')
+    expect(screen.queryByTestId('flow-popout')).toBeNull()
+    fireEvent.click(screen.getByTestId('flow-back'))
+    expect(await screen.findByTestId('dfm-topic-2')).toBeTruthy()
+    expect(screen.queryByTestId('dfm-popout')).toBeNull()
   })
 
   it('creates a topic and selects it', async () => {
@@ -59,7 +92,7 @@ describe('DfmArchive', () => {
     fireEvent.change(screen.getByTestId('dfm-topic-title'), { target: { value: 'Cooling layout' } })
     fireEvent.click(screen.getByTestId('dfm-create-topic'))
     await waitFor(() => expect(clientMocks.post).toHaveBeenCalledWith('/v1/parts/7/dfm/topics', { title: 'Cooling layout' }))
-    await waitFor(() => expect(screen.getByTestId('flow').textContent).toBe('topic 9'))
+    await waitFor(() => expect(screen.getByTestId('flow-topic').textContent).toBe('topic 9'))
   })
 
   it('says when there is nothing yet', async () => {

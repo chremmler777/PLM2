@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  arrowGeometry, cardActions, currentIds, formatDays, initials, laneCenterPct, lastStepText, newOriginalStep,
-  nextStepText, PARTY_STYLE, shortDate, sourceLabel, stepSentence, waitingSummary,
+  arrowSpan, cardActions, cardLane, currentIds, dayLabel, entryDay, flowRows, formatDays, initials, laneCenterPct,
+  lastStepText, newOriginalStep, nextStepText, PARTY_STYLE, shortDate, sourceLabel, stepSentence, waitingSummary,
 } from './dfmFlow'
 import { makeEntry, relayEntries, relaySummary } from './dfmFixtures'
 
@@ -19,14 +19,39 @@ describe('dfmFlow helpers', () => {
     expect(formatDays(4)).toBe('4 days')
   })
 
-  it('places arrows by lane index', () => {
+  it('places cards on the sender lane and arrows from the card edge to the receiver lane line', () => {
     expect(laneCenterPct(0)).toBeCloseTo(16.667, 2)
     expect(laneCenterPct(2)).toBeCloseTo(83.333, 2)
-    const g = arrowGeometry(2, 1)
-    expect(g.direction).toBe('left')
-    expect(g.leftPct).toBeCloseTo(50, 2)
-    expect(g.widthPct).toBeCloseTo(33.333, 2)
-    expect(arrowGeometry(0, 2).direction).toBe('right')
+    expect(cardLane(makeEntry({ party: 'tier1' }))).toBe(2)
+    const right = arrowSpan(0, 1)
+    expect(right.direction).toBe('right')
+    // leaves the right edge of the card centred on lane 0, stops short of the marker on lane 1
+    expect(right.left).toBe('calc(16.6667% + min(150px, 16.6667% - 12px))')
+    expect(right.width).toBe('calc(33.3333% - min(150px, 16.6667% - 12px) - 6px)')
+    expect(right.markerPct).toBeCloseTo(50, 2)
+    const left = arrowSpan(2, 1)
+    expect(left.direction).toBe('left')
+    // starts just right of the marker on lane 1 and runs to the left edge of the card on lane 2
+    expect(left.left).toBe('calc(50% + 6px)')
+    expect(left.width).toBe('calc(33.3333% - min(150px, 16.6667% - 12px) - 6px)')
+    expect(left.markerPct).toBeCloseTo(50, 2)
+    expect(arrowSpan(0, 2).width).toBe('calc(66.6667% - min(150px, 16.6667% - 12px) - 6px)')
+  })
+
+  it('splits the timeline into day dividers when the date changes', () => {
+    const es = [
+      makeEntry({ id: 1, sent_at: '2026-09-13' }),
+      makeEntry({ id: 2, sent_at: '2026-09-13' }),
+      makeEntry({ id: 3, sent_at: null, recorded_at: '2026-09-15T10:00:00' }),
+      makeEntry({ id: 4, sent_at: '2026-09-15' }),
+      makeEntry({ id: 5, sent_at: '2026-09-18' }),
+    ]
+    expect(entryDay(es[2])).toBe('2026-09-15')
+    expect(flowRows(es).map((r) => (r.type === 'day' ? `day ${r.date}` : `#${r.entry.id}`)))
+      .toEqual(['day 2026-09-13', '#1', '#2', 'day 2026-09-15', '#3', '#4', 'day 2026-09-18', '#5'])
+    expect(flowRows([])).toEqual([])
+    expect(dayLabel('2026-09-13')).toEqual({ day: '13', month: 'Sep', year: '2026' })
+    expect(dayLabel('2026-01-02T08:00:00')).toEqual({ day: '2', month: 'Jan', year: '2026' })
   })
 
   it('offers only valid actions per card in the relay', () => {
