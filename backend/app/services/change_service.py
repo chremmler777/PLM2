@@ -621,6 +621,14 @@ class ChangeService:
                 if missing:
                     return ("no check-workflow template mapped for item "
                             f"category: {', '.join(missing)}")
+            # The detailed plan is what the customer is told and what every
+            # team works to. Implementation starting on a plan nobody
+            # confirmed is how "we never agreed to that date" happens. Only
+            # on the hop out of 'approved': resuming from on_hold or looping
+            # back from validation re-enters a plan that was already live.
+            if change.status == "approved" and change.timing_validated_at is None:
+                return ("Timing not validated - every responsible team must "
+                        "confirm the detailed plan")
         if to_status == "released":
             # Stage 9 first: "the Tool Engineer's weight check failed" is a
             # more useful refusal than "2 of 5 revisions have not completed
@@ -636,6 +644,13 @@ class ChangeService:
                 pending = sum(1 for e in progress["items"] if not e["ready"])
                 return (f"not ready to go: {pending} of {len(progress['items'])} "
                         "impacted revisions have not completed their check workflow")
+            # Stage 10: the paperwork around the part (release checklist) and
+            # the lessons-learned step. After the validation blocker, so the
+            # more concrete refusal wins while validation is still open.
+            from app.services.release_service import ReleaseService
+            blocker = await ReleaseService.guard_reason(session, change)
+            if blocker is not None:
+                return blocker
         # Gate wiring (additive): a gate constrains its target transition only when a
         # row exists. Changes with no gate rows behave exactly as before.
         for gate in change.gates:
@@ -1604,7 +1619,11 @@ class ChangeService:
             actions.append({
                 "kind": "wf_task",
                 "label": f"Complete {step_name or 'workflow'} task",
-                "target_tab": "implementation",
+                # The ECN check flows run through implementation (Timing tab)
+                # and finish during validation (Release tab).
+                "target_tab": ("release"
+                               if change.status in ("in_validation", "released")
+                               else "timing"),
                 "task_id": t.id,
             })
 
@@ -1677,6 +1696,9 @@ class ChangeService:
                 "target_tab": "scoping",
             })
 
+        actions += await ChangeService._costing_to_close_actions(
+            session, change, user, dept_ids)
+
         # kind "gate": a gate that guards the currently-reachable transition,
         # not yet decided 'yes', decidable by this user. Mirrors put_gate's
         # authz exactly (changes.py put_gate: admin or the change lead).
@@ -1693,6 +1715,95 @@ class ChangeService:
                     })
 
         return actions
+
+    @staticmethod
+    async def _costing_to_close_actions(
+        session: AsyncSession, change: ChangeRequest, user: User,
+        dept_ids: set,
+    ) -> list[dict]:
+        """Spec §8 kinds: the offer, the detailed plan, deviations and the
+        release step. Each mirrors the rights of the endpoint that does the
+        work (plan_offer.py)."""
+        from app.services.change_plan_service import ChangePlanService
+        from app.services.offer_service import OfferService
+        from app.services.release_service import ReleaseService
+        from app.services import release_checklist
+        out: list[dict] = []
+        in_sales = await ChangeService._user_in_department(session, user, "Sales")
+
+        if change.status == "quoting" and in_sales:
+            out.append({"kind": "offer_build",
+                        "label": "Build and send the offer",
+                        "target_tab": "offer"})
+        if change.status == "quoted" and in_sales:
+            offer = await OfferService.expiring_offer(session, change)
+            if offer is not None:
+                left = OfferService.days_left(offer)
+                out.append({
+                    "kind": "offer_expiring",
+                    "label": (f"Offer v{offer.version} expired"
+                              if left < 0 else
+                              f"Offer v{offer.version} expires in {left} day(s)"),
+                    "target_tab": "offer", "offer_id": offer.id,
+                    "days_left": left,
+                })
+
+        if change.status == "approved" and change.timing_validated_at is None:
+            if await ChangePlanService.tasks(session, change, "detailed"):
+                state = await ChangePlanService.feedback_state(session, change)
+                for row in state["required"]:
+                    if row["department_id"] not in dept_ids:
+                        continue
+                    if row["verdict"] == "confirmed" and not row["stale"]:
+                        continue
+                    out.append({
+                        "kind": "plan_feedback",
+                        "label": f"Confirm the detailed plan for "
+                                 f"{row['department_name']}",
+                        "target_tab": "timing",
+                        "department_id": row["department_id"],
+                    })
+                if (state["all_confirmed"]
+                        and await ChangePlanService.may_validate_timing(
+                            session, change, user)):
+                    out.append({"kind": "timing_validate",
+                                "label": "Every team confirmed: validate the timing",
+                                "target_tab": "timing"})
+
+        if change.status in ("approved", "in_implementation", "in_validation"):
+            n = await ChangePlanService.open_deviation_count(session, change)
+            if n and await ChangePlanService.may_decide_deviation(session, change, user):
+                out.append({"kind": "plan_deviation",
+                            "label": f"Decide {n} plan deviation(s): lock or "
+                                     "escalate to the customer",
+                            "target_tab": "timing", "count": n})
+
+        if change.status == "in_validation":
+            answered = {r.check_key: r for r in await ReleaseService.rows(session, change)}
+            names = {i: n for i, n in (await session.execute(
+                select(Department.id, Department.name))).all()}
+            by_name = {n: i for i, n in names.items()}
+            open_by_dept: dict[int, int] = defaultdict(int)
+            for key in release_checklist.CHECK_KEYS:
+                row = answered.get(key)
+                if row is not None and row.status in ("done", "na"):
+                    continue
+                did = (row.department_id if row is not None
+                       else by_name.get(release_checklist.owner_for(key)))
+                if did is not None and did in dept_ids:
+                    open_by_dept[did] += 1
+            for did, n in sorted(open_by_dept.items()):
+                out.append({"kind": "release_check",
+                            "label": f"Answer {n} release check(s) for "
+                                     f"{names.get(did, did)}",
+                            "target_tab": "release", "department_id": did,
+                            "count": n})
+            if (change.lessons_done_at is None
+                    and await ReleaseService.is_pm_or_lead(session, change, user)):
+                out.append({"kind": "lessons_step",
+                            "label": "Record lessons learned and complete the step",
+                            "target_tab": "release"})
+        return out
 
     @staticmethod
     async def has_rejection_letter(
@@ -2607,6 +2718,7 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, response: str, user_id: int,
         *, release_due_date: Optional[datetime] = None,
         release_due_reason: Optional[str] = None,
+        expired_override_reason: Optional[str] = None,
     ) -> ChangeRequest:
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
@@ -2616,6 +2728,14 @@ class ChangeService:
                 and change.release_due_date is None):
             raise ChangeError(
                 "Recording acceptance requires a release deadline (release_due_date)")
+        # When the offer went out as a versioned document, the answer is an
+        # answer to THAT version: an expired one is only accepted with a
+        # reason on the record. Checked before anything is written.
+        from app.services.offer_service import OfferService
+        await OfferService.check_customer_response(
+            session, change, response, expired_override_reason)
+        await OfferService.apply_customer_response(
+            session, change, response, user_id, expired_override_reason)
         change.customer_response = response
         change.customer_response_at = datetime.utcnow()
         change.customer_response_by = user_id

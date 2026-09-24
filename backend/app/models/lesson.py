@@ -39,6 +39,10 @@ class LessonLearned(Base):
     # Capture-first, link-later: FK is optional, free-text ref keeps the project name
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     project_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The engineering change the lesson came out of (the release step's
+    # lessons-learned list). Optional: most lessons are not about a change.
+    change_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_requests.id"), nullable=True, index=True)
 
     category: Mapped[str] = mapped_column(String(30), default="other")
     lesson_type: Mapped[str] = mapped_column(String(20), default="problem")

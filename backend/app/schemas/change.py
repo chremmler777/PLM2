@@ -68,6 +68,8 @@ class CustomerResponseRequest(BaseModel):
     # Mandatory when response == 'accepted' (enforced in the service)
     release_due_date: Optional[NaiveUtcDatetime] = None
     release_due_reason: Optional[str] = None
+    # Required to accept when the latest sent offer version has expired.
+    expired_override_reason: Optional[str] = None
 
 
 class SignOffRequest(BaseModel):
@@ -247,6 +249,13 @@ class ChangeResponse(BaseModel):
     affected_plant_ids: List[int] = []
     required_by_date: Optional[datetime] = None
     required_by_reason: Optional[str] = None
+    # Costing to close (087).
+    plan_revision: int = 0
+    timing_validated_at: Optional[datetime] = None
+    timing_validated_by: Optional[int] = None
+    accepted_offer_id: Optional[int] = None
+    lessons_done_at: Optional[datetime] = None
+    lessons_none_reason: Optional[str] = None
     deadline_state: Optional[str] = None
     quoted_at: Optional[datetime] = None
     quoted_on_time: Optional[bool] = None
@@ -851,6 +860,8 @@ class NegotiationCreate(BaseModel):
     # number in it.
     counter_price: Optional[float] = Field(default=None, ge=0)
     is_final: bool = False
+    # The offer version the round is about; defaults to the latest sent one.
+    offer_id: Optional[int] = None
 
 
 class NegotiationResponse(BaseModel):
@@ -860,6 +871,7 @@ class NegotiationResponse(BaseModel):
     note: str
     counter_price: Optional[float] = None
     is_final: bool = False
+    offer_id: Optional[int] = None
     created_by: int
     created_by_name: Optional[str] = None
     created_at: datetime

@@ -160,6 +160,10 @@ async def _approved_change_for_kickoff(session_factory, seed, part_id, *, confir
         s.add(ChangeImpactedItem(change_id=change.id, part_id=part_id,
                                  is_lead=True, created_by=seed["engineer_id"]))
         change.status = "approved"
+        # Timing validated, so the only kickoff guard in play is the one
+        # under test (impact confirmation).
+        change.timing_validated_by = seed["engineer_id"]
+        change.timing_validated_at = datetime.utcnow()
         if confirm:
             change.impact_confirmed_by = confirmed_by or seed["engineer_id"]
             change.impact_confirmed_at = datetime.utcnow()

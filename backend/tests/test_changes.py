@@ -6,6 +6,7 @@ from sqlalchemy import select
 from tests.conftest import (
     approve_gates, force_complete_check_workflows, advance_to_assessment, login,
     satisfy_capture_gate, make_development_member, make_internal,
+    validate_timing, complete_release_step,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -279,6 +280,7 @@ async def test_implementation_spawns_ecn_revision_per_item(
     await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
+    await validate_timing(session_factory, cid)   # the approved -> in_implementation soft guard
     res = await _transition(client, eng_auth, cid, "in_implementation")
     assert res.status_code == 200, res.text
     res = await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)
@@ -300,10 +302,12 @@ async def test_release_activates_revisions_and_stamps_eng_level(
     await make_development_member(session_factory, seed["admin_id"])
     conf = await client.post(f"/api/v1/changes/{cid}/impact/confirm", headers=admin_auth)
     assert conf.status_code == 200, conf.text
+    await validate_timing(session_factory, cid)
     await _transition(client, eng_auth, cid, "in_implementation")
     res = await _transition(client, eng_auth, cid, "in_validation")
     assert res.status_code == 200, res.text
     await force_complete_check_workflows(session_factory, cid)
+    await complete_release_step(session_factory, cid)   # release checklist + lessons
     res = await _transition(client, eng_auth, cid, "released")
     assert res.status_code == 200, res.text
 

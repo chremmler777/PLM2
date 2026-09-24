@@ -180,6 +180,49 @@ async def lock_impact(session_factory, change_id: int, actor_id: int = 1):
         await s.commit()
 
 
+async def validate_timing(session_factory, change_id: int, actor_id: int = 1):
+    """Stamp 'Timing validated' directly (bypasses the detailed plan and the
+    teams' confirmations) so state-machine tests can cross the approved ->
+    in_implementation soft guard. Same shortcut as lock_impact; the real
+    flow is covered in test_change_plan.py."""
+    from datetime import datetime
+    from app.models.change import ChangeRequest
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, change_id)
+        change.timing_validated_by = actor_id
+        change.timing_validated_at = datetime.utcnow()
+        await s.commit()
+
+
+async def complete_release_step(session_factory, change_id: int,
+                                actor_id: int = 1):
+    """Answer every release-checklist item 'done' and complete the lessons
+    step directly, so state-machine tests can cross the in_validation ->
+    released soft guard. The real flow is covered in
+    test_release_checklist.py."""
+    from datetime import datetime
+    from sqlalchemy import select as _select
+    from app.models.change import ChangeRequest
+    from app.models.change_validation import ChangeReleaseCheck
+    from app.services.release_checklist import CHECK_KEYS
+    async with session_factory() as s:
+        have = {r.check_key: r for r in (await s.execute(_select(
+            ChangeReleaseCheck).where(
+                ChangeReleaseCheck.change_id == change_id))).scalars()}
+        for key in CHECK_KEYS:
+            row = have.get(key) or ChangeReleaseCheck(
+                change_id=change_id, check_key=key)
+            row.status = "done"
+            row.checked_by = actor_id
+            row.checked_at = datetime.utcnow()
+            s.add(row)
+        change = await s.get(ChangeRequest, change_id)
+        change.lessons_done_by = actor_id
+        change.lessons_done_at = datetime.utcnow()
+        change.lessons_none_reason = "test fixture"
+        await s.commit()
+
+
 async def make_internal(client, auth, change_id: int):
     """Turn a freshly captured change internal.
 

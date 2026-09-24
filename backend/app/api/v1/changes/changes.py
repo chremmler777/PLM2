@@ -178,6 +178,12 @@ async def my_change_tasks(
       update_quote     the validated part weight missed the estimate and
                        nobody has settled the difference, for Sales — the
                        delta rides on the row
+      offer_expiring   quoted, and the latest sent offer version expires
+                       within 7 days (or already has), for Sales
+      plan_feedback    approved with a detailed plan this caller's required
+                       department has not confirmed at the current revision
+      release_check    in_validation with open release-checklist items owned
+                       by this caller's department
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -285,9 +291,18 @@ async def my_change_tasks(
         # offer has to be written from it. has_price says which half is left —
         # put a number on it, then send it (-> quoted).
         elif c.status == "quoting" and in_sales and c.customer_relevant:
+            from app.services.offer_service import OfferService
+            offers = await OfferService.list_offers(db, c)
+            draft = next((o for o in offers if o.status == "draft"), None)
             tasks.append({
                 **await _base(c), "kind": "create_quote",
                 "has_price": c.quoted_price is not None,
+                # The offer document is the quote now: whether a draft exists
+                # says which half of "build and send the offer" is left.
+                "has_offer_draft": draft is not None,
+                "offer_id": draft.id if draft is not None else None,
+                "target_tab": "offer",
+                "hint": "Build and send the offer",
             })
         elif (c.status == "quoted" and in_sales and c.customer_relevant
                 and c.customer_response in (None, "pending")):
@@ -311,6 +326,63 @@ async def my_change_tasks(
                     **await _base(c), "kind": "publish_plan",
                     "mode": c.bank_build_mode,
                     "scrap_quote_price": c.scrap_quote_price,
+                })
+
+        # The offer is valid for 30 days from receipt: a week before it runs
+        # out (or once it has) the customer has to be chased or a new
+        # version sent.
+        if c.status == "quoted" and in_sales and c.customer_relevant:
+            from app.services.offer_service import OfferService
+            offer = await OfferService.expiring_offer(db, c)
+            if offer is not None:
+                tasks.append({
+                    **await _base(c), "kind": "offer_expiring",
+                    "offer_id": offer.id, "version": offer.version,
+                    "valid_until": offer.valid_until,
+                    "days_left": OfferService.days_left(offer),
+                    "target_tab": "offer",
+                })
+
+        # The detailed plan waits on every responsible team's confirmation;
+        # each unconfirmed one is that department's errand.
+        if (c.status == "approved" and dep_ids
+                and c.timing_validated_at is None):
+            from app.services.change_plan_service import ChangePlanService
+            if await ChangePlanService.tasks(db, c, "detailed"):
+                fb = await ChangePlanService.feedback_state(db, c)
+                for row in fb["required"]:
+                    if row["department_id"] not in dep_ids:
+                        continue
+                    if row["verdict"] == "confirmed" and not row["stale"]:
+                        continue
+                    tasks.append({
+                        **await _base(c), "kind": "plan_feedback",
+                        "department_id": row["department_id"],
+                        "stale": row["stale"], "target_tab": "timing",
+                        "hint": "Confirm the detailed plan or raise a concern",
+                    })
+
+        # Stage 10: open release-checklist items, per owner department.
+        if c.status == "in_validation" and dep_ids:
+            from app.services import release_checklist
+            from app.services.release_service import ReleaseService
+            rows = {r.check_key: r for r in await ReleaseService.rows(db, c)}
+            by_name = {n: i for i, n in (await db.execute(
+                select(Department.id, Department.name))).all()}
+            open_by_dept: dict = {}
+            for key in release_checklist.CHECK_KEYS:
+                r = rows.get(key)
+                if r is not None and r.status in ("done", "na"):
+                    continue
+                did = (r.department_id if r is not None
+                       else by_name.get(release_checklist.owner_for(key)))
+                if did in dep_ids:
+                    open_by_dept.setdefault(did, []).append(key)
+            for did, keys in sorted(open_by_dept.items()):
+                tasks.append({
+                    **await _base(c), "kind": "release_check",
+                    "department_id": did, "check_keys": keys,
+                    "open_count": len(keys), "target_tab": "release",
                 })
 
         # Costing is a queue too: a department that called the change feasible
@@ -1306,7 +1378,8 @@ async def customer_response(
         await ChangeService.record_customer_response(
             db, change, body.response, current_user.id,
             release_due_date=body.release_due_date,
-            release_due_reason=body.release_due_reason)
+            release_due_reason=body.release_due_reason,
+            expired_override_reason=body.expired_override_reason)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -2071,7 +2144,8 @@ async def record_negotiation(
     try:
         row = await NegotiationService.record_round(
             db, change, current_user, channel=body.channel, note=body.note,
-            counter_price=body.counter_price, is_final=body.is_final)
+            counter_price=body.counter_price, is_final=body.is_final,
+            offer_id=body.offer_id)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

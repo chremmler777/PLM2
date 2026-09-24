@@ -9,7 +9,9 @@ to in_implementation; both show up as my-tasks rows.
 import pytest
 
 from app.models.workflow import Department, UserDepartment
-from tests.conftest import login, lock_impact, approve_gates, ENGINEER_PASSWORD
+from tests.conftest import (
+    login, lock_impact, approve_gates, validate_timing, ENGINEER_PASSWORD,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -295,6 +297,7 @@ async def test_approved_to_in_implementation_is_still_open(
     existing approved -> in_implementation flow."""
     cid = await _change(client, admin_auth, seed, session_factory=session_factory)
     await lock_impact(session_factory, cid, seed["admin_id"])
+    await validate_timing(session_factory, cid, seed["admin_id"])
     await approve_gates(client, admin_auth, cid, "release")
     res = await client.post(f"/api/v1/changes/{cid}/transition",
                             json={"to_status": "in_implementation"},

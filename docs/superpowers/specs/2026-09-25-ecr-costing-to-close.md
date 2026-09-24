@@ -376,3 +376,115 @@ It fetches `['change', id, 'plan', plan]` itself and owns every plan mutation.
 Timing tab component `components/changes/timing/TimingTab.tsx` with props
 `{ change: ChangeRequest, departments, myDepartmentIds: number[], canEditPlan:
 boolean, canPublish: boolean, canSeeAll: boolean }`.
+
+## 10. Backend notes
+
+What the backend actually does where the spec was silent or had to be made
+concrete. Shapes above still hold; everything here is additive or a
+clarification.
+
+### Errors
+- 400 business refusal (`detail` is a string), 403 rights, 404 unknown
+  task / offer / deviation / release check key on this change.
+- 409 `detail` is an object `{message, ...}`: `POST /offers` with a draft
+  present gives `{message, draft_id}`; `POST /plan/seed` without `replace`
+  gives `{message}`.
+
+### Plan
+- `baseline_finish` and deviation `old_end` / `new_end` are EXCLUSIVE, like
+  `end_date` (compare them directly). The CSV prints Finish / Baseline finish
+  as the inclusive last day.
+- After "Timing validated": `can_edit = false`, `can_edit_dates = true`.
+  Structural fields (`name, kind, lane, department_id, predecessors, is_idea,
+  sort_order`) are refused (400), `notes` stays editable, add / delete /
+  schedule are refused. A date move does NOT push successors (no forward pass
+  after the baseline): to move a chain, send the selection through the bulk
+  PATCH. `finish_impact_days` is the same value on every deviation of one call.
+- Progress (`progress_pct, actual_start, actual_finish`): detailed plan only,
+  status `in_implementation` only. A PATCH that carries only these fields uses
+  the department rule; mixing them with other fields needs an editor.
+- Writes refuse `empty_name`, negative durations, unknown or self
+  predecessors (400), so those error codes only show for legacy data.
+  `dependency_violation` and `cycle` are allowed on write and reported.
+- `plan_revision` bumps once per mutating API call on the detailed plan
+  before the baseline (seed included). Quote plan edits never bump it.
+- Detailed seed with an empty quote plan builds the template directly.
+  Template: when positions exist but none yields a block, the 20-day
+  `Implementation` fallback is used; `Safety buffer` lane is
+  `Project Manager`; lanes that match a department carry its `department_id`.
+- `timing_validated` may be re-run while approved / in_implementation (resets
+  the baseline). Feedback is accepted in approved and in_implementation and
+  needs detailed blocks.
+- `deadlines` keys: `quote`, `release`, `offer_valid_until`, present only when
+  set.
+- Response of `POST /plan/validate-timing`: detailed `PlanOut`.
+  `POST /plan/feedback`: the `GET /plan/feedback` shape.
+  `POST /plan/deviations/{id}/lock|escalate`: that one deviation row, same
+  shape as the list items: `{id, task_id, task_name, old_start, old_end,
+  new_start, new_end, slip_days, finish_impact_days, reason, status,
+  decided_by, decided_by_name, decided_at, decision_note, escalation_id,
+  created_by, created_by_name, created_at}`.
+- `TaskOut` also carries `change_id, created_by, created_at, updated_by,
+  updated_at`.
+- MSPDI: idea blocks are left out, UIDs are 1..n in plan order (not our task
+  ids), every task has ConstraintType 4 (start no earlier than) on its own
+  start so MS Project keeps our dates.
+
+### Offer
+- `POST /offers` answers 201. `OfferOut` also carries `change_id, sent_by,
+  created_by, updated_at`. `days_left` is set only for status `sent`.
+- `totals.factors` lists only enabled factors. `piece_price_delta` and
+  `annual_effect` are null when piece price is disabled; `margin_pct` null
+  when the total is 0. `internal_cost` = summation grand total.
+- Seeded cost line keys: `dept:<id>` (department's internal money incl. valued
+  position hours), `dept_ext:<id>` (the department's cost-line external money
+  not covered by positions, only when > 0), `pos:<id>` (external position at
+  Sales' chosen, else favourite vendor; label `"<label> (<vendor>)"`). Any
+  other key is a manual line and survives `refresh`.
+- Seeded changeover mode is `customer_pays_scrap` when `bank_build_mode` is
+  `planned_scrap`.
+- Warning codes: `no_cost_lines, zero_total, below_internal_cost,
+  costing_changed` (draft, summation moved: refresh), `change_note_missing`
+  (draft v>=2), `timing_plan_empty, high_risk_unpriced, expired`.
+- `diff` compares against the previous non-draft version; `field` is a human
+  label (`Total one-time`, `Piece price delta`, `Cost line <label>`,
+  `Factor <label>`, `Risk <label>`, `Changeover`, `Scrap quantity`,
+  `Scrap unit price`, `Timing weeks from order`, `Terms <key>`).
+- Customer response writes changelog `offer_accepted` / `offer_declined`;
+  acceptance with no sent offer (legacy quotes) is unchanged.
+- `CustomerResponseRequest.expired_override_reason`,
+  `NegotiationCreate.offer_id`, `NegotiationResponse.offer_id` added.
+- PDF: `Content-Disposition: inline`.
+
+### Release
+- Checks are answerable in `in_implementation` and `in_validation`; lessons
+  can be added in any status; the lessons step is completed in
+  `in_implementation` / `in_validation`. Status `open` resets an answer.
+- `department_name` falls back to the catalog owner name when that
+  department does not exist (then `department_id` is null and only PM, lead,
+  admin answer it). `hint` is set on `weight_measured` when a validated weight
+  exists.
+- `blockers` lists every reason (validation blocker, ready-to-go, checklist,
+  lessons); `can_release` = status `in_validation` and no blockers.
+- `POST /release/checks/{key}` and `POST /lessons/complete` return the
+  `GET /release` shape; `POST /lessons` returns the `LessonOut` (201):
+  `{id, title, description, category, lesson_type, severity, recommendation,
+  status, project_id, change_id, created_by, created_by_name, created_at}`.
+
+### Guards, cockpit, my-tasks
+- The timing guard applies to `approved -> in_implementation` only (not to
+  resuming from on_hold or looping back from validation). The release guard
+  runs after the validation blocker and the ready-to-go check.
+- `ChangeResponse` also carries `plan_revision, timing_validated_at,
+  timing_validated_by, accepted_offer_id, lessons_done_at,
+  lessons_none_reason`.
+- `my_actions` extra keys: `offer_expiring {offer_id, days_left}`,
+  `plan_feedback {department_id}`, `plan_deviation {count}`,
+  `release_check {department_id, count}`. `wf_task` now says `timing`
+  (`release` at in_validation/released). The backend never emitted
+  `commercial`.
+- `GET /changes/my-tasks`: the existing `create_quote` row IS the "build the
+  offer" task and now carries `has_offer_draft, offer_id, target_tab: "offer",
+  hint`; new kinds `offer_expiring {offer_id, version, valid_until,
+  days_left}`, `plan_feedback {department_id, stale}`, `release_check
+  {department_id, check_keys, open_count}`, each with `target_tab`.

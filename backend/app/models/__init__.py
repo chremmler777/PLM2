@@ -28,7 +28,11 @@ from app.models.change_cost import (
 from app.models.change_impl import (
     ImplementationBooking, ImplementationReport, ImplementationEscalation,
 )
-from app.models.change_validation import ValidationCheck
+from app.models.change_validation import ValidationCheck, ChangeReleaseCheck
+from app.models.change_plan import (
+    ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation,
+)
+from app.models.change_offer import ChangeOffer
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
@@ -95,6 +99,11 @@ __all__ = [
     "ImplementationReport",
     "ImplementationEscalation",
     "ValidationCheck",
+    "ChangeReleaseCheck",
+    "ChangePlanTask",
+    "ChangePlanFeedback",
+    "ChangePlanDeviation",
+    "ChangeOffer",
     "FormDefinition",
     "FormInstance",
     "FormEvent",

@@ -214,6 +214,24 @@ class ChangeRequest(Base):
         ForeignKey("users.id"), nullable=True)
     plan_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Costing to close (migration 087). plan_revision counts edits to the
+    # DETAILED plan before its baseline: a team's confirmation is only worth
+    # the revision it confirmed. timing_validated_* is the baseline moment —
+    # the soft guard on approved -> in_implementation reads it.
+    plan_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    timing_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    timing_validated_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    # The offer version the customer said yes to. No FK: change_offers points
+    # back at this table, and a cycle of constraints buys nothing here.
+    accepted_offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The lessons-learned step before release: done with at least one lesson,
+    # or with a reason there is none. Guarded on in_validation -> released.
+    lessons_done_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lessons_done_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    lessons_none_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -667,6 +685,8 @@ class ChangeNegotiation(Base):
         Numeric(12, 2, asdecimal=False), nullable=True)
     # The round that ended it. At most one per change.
     is_final: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    # The offer version this round is about (defaults to the latest sent one).
+    offer_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
