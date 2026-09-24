@@ -454,6 +454,36 @@ describe('AssessmentBuckets checklist', () => {
     expect(screen.getByTestId('bucket-impacts-2').textContent).toContain('Tool rework — insert')
   })
 
+  const submittedWithAnswers = () => buckets({ canSeeAll: true, change: change({
+    assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-09-24T00:00:00',
+      details: { impacts: [
+        { key: 'cycle_time_change', answer: 'yes', impacted: true },
+        { key: 'sparepart_required', answer: 'no', impacted: false },
+        { key: 'visual_risk', answer: 'no', impacted: false },
+      ] },
+    })] }) })
+
+  it('chip counts impacted rows and open checklist risks of that department', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 1, kind: 'risk', is_open: true, department_id: 2, checklist_key: 'cycle_time_change', severity: 2 },
+      { id: 2, kind: 'risk', is_open: true, department_id: 2, checklist_key: null, severity: 1 },
+      { id: 3, kind: 'risk', is_open: false, department_id: 2, checklist_key: 'visual_risk', severity: 3 },
+      { id: 4, kind: 'risk', is_open: true, department_id: 4, checklist_key: 'visual_risk', severity: 3 },
+    ] as never)
+    submittedWithAnswers()
+    await waitFor(() => expect(screen.getByTestId('bucket-areas-2').textContent)
+      .toBe(t('check.summary').replace('{n}', '1').replace('{k}', '1')))
+  })
+
+  it('lists No answers collapsed so a reviewer sees they were answered', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    submittedWithAnswers()
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-no-2').textContent)
+      .toBe(t('check.noCount').replace('{n}', '2'))
+  })
+
   it('counts the impacted areas on the collapsed row once submitted', async () => {
     buckets({ canSeeAll: true, change: change({ assessments: [assessment({
       status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00',
