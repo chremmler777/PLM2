@@ -21,10 +21,11 @@ from app.models.supplier import Supplier
 from app.services.part_service import ChangelogService
 
 # tool part_number -> (cavities, cycle_time_s, tonnage_class)
-# Cavities: RFQ 26 loop 37 REV8 on prod. Handles and latch covers are 1+1 tools.
+# Cavities: total per tool. RFQ 26 loop 37 REV8 on prod stores cavities per article;
+# the handles and latch covers are family tools with 2 per side (2+2 = 4).
 FIELDS = {
-    "199401": (2, 55.0, None),   # Handle, height adjustment LH/RH
-    "199402": (2, 50.0, None),   # Latch cover 40/60
+    "199401": (4, 55.0, None),   # Handle, height adjustment LH/RH, 2+2
+    "199402": (4, 50.0, None),   # Latch cover 40/60, 2+2
     "199403": (4, 55.0, None),   # Isofix cover, 4 cavities per nominated RFQ (prod relation note still says 2)
     "199404": (2, 50.0, None),   # A-bracket inner trim
     "199405": (2, 55.0, None),   # Cover trim, center back
