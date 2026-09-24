@@ -93,7 +93,13 @@ vi.mock('../components/changes/ReasonDialog', () => ({ default: () => <div>mock-
 vi.mock('../components/changes/ImpactTree', () => ({ default: () => <div>mock-impact-tree</div> }))
 vi.mock('../components/changes/ImplementationPanel', () => ({ default: () => <div>mock-implementation-panel</div> }))
 vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>mock-lifecycle-stepper</div> }))
-vi.mock('../components/changes/CockpitSummary', () => ({ default: () => <div>mock-cockpit-summary</div> }))
+vi.mock('../components/changes/CockpitSummary', () => ({
+  default: ({ waits = [] }: { waits?: { key: string; text: string }[] }) => (
+    <div>mock-cockpit-summary
+      {waits.map((w) => <p key={w.key} data-testid={`wait-${w.key}`}>{w.text}</p>)}
+    </div>
+  ),
+}))
 vi.mock('../components/changes/DeadlineChip', () => ({ DeadlineChip: () => <div>mock-deadline-chip</div> }))
 vi.mock('../components/changes/AuditTimeline', () => ({ default: () => <div>mock-audit-timeline</div> }))
 
@@ -637,9 +643,8 @@ describe('ChangeDetailPage wait banner', () => {
     change.status = 'scoping' as ChangeDetail['status']
     vi.mocked(changesApi.listConcerns).mockResolvedValue([concern()] as never)
     wrap('/changes/1')
-    const banner = await screen.findByTestId('wait-banner')
-    expect(banner.textContent).toContain('What is the target price?')
-    expect(screen.getByTestId('wait-sales-info-1')).toBeTruthy()
+    const line = await screen.findByTestId('wait-sales-info-1')
+    expect(line.textContent).toContain('What is the target price?')
   })
 
   it('switches to awaiting review once the answer is in', async () => {
@@ -669,9 +674,11 @@ describe('ChangeDetailPage wait banner', () => {
     expect(await screen.findByTestId('wait-rejection-letter')).toBeTruthy()
   })
 
-  it('shows no banner when nothing is waiting', async () => {
+  it('states waits once, in the cockpit, with no separate banner', async () => {
+    change.status = 'scoping' as ChangeDetail['status']
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([concern()] as never)
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Overview/ })
+    expect(await screen.findAllByTestId('wait-sales-info-1')).toHaveLength(1)
     expect(screen.queryByTestId('wait-banner')).toBeNull()
   })
 })

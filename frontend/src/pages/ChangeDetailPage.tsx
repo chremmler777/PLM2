@@ -6,7 +6,6 @@ import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
-import WaitBanner from '../components/changes/WaitBanner';
 import { resolveWaitStates } from '../lib/waitStates';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
@@ -351,14 +350,6 @@ export default function ChangeDetailPage() {
 
       <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant} />
 
-      {/* What the change is waiting on — same line for every viewer, whoever
-          owns the next move. */}
-      <div className="mt-3">
-        <WaitBanner waits={resolveWaitStates(change, concerns, deptName, change.assessments,
-          { state: implState, escalations: implEscalations }, validation)}
-          onGo={(tb) => setTab(tb as Tab)} />
-      </div>
-
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
           <p className="font-semibold text-red-200">This change was rejected — the flow is stopped.</p>
@@ -432,6 +423,11 @@ export default function ChangeDetailPage() {
         actions={myActions?.actions ?? []}
         onAction={(targetTab) => setTab(targetTab as Tab)}
         canSeeGovernance={canSeeGovernance}
+        // What the change is waiting on — same list for every viewer, whoever
+        // owns the next move.
+        waits={resolveWaitStates(change, concerns, deptName, change.assessments,
+          { state: implState, escalations: implEscalations }, validation)}
+        onGo={(tb) => setTab(tb as Tab)}
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">

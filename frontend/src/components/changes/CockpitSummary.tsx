@@ -4,6 +4,7 @@ import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
+import type { WaitState } from '../../lib/waitStates'
 
 interface Props {
   change: ChangeDetail
@@ -30,9 +31,14 @@ interface Props {
       tabs the row must not offer a dead-end jump affordance. Defaults to
       true so existing callers that don't pass it keep prior behavior. */
   canSeeGovernance?: boolean
+  /** What the change is waiting on (resolveWaitStates). Listed under "Blocked
+      by" — the one place a viewer looks to see why nothing is moving. */
+  waits?: WaitState[]
+  /** Called with a wait's tab when its row is clicked. */
+  onGo?: (tab: string) => void
 }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, waits = [], onGo }: Props) {
   const next = (NEXT_STATUS[change.status] ?? []).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
     // internal one is approved outright and never sees either quoting step.
@@ -61,14 +67,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
     ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
   ]
-  // Departments whose own assessment submit is held by an open concern. The
-  // wait itself is stated once, in the shared banner above; here it only counts
-  // toward "something is blocking".
-  const blockedDepts = change.status === 'in_assessment'
-    ? (change.blocked_department_ids?.length ?? 0) : 0
+  // Held departments, open assessments, customer questions, … arrive as waits.
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
-    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + (blockedDepts > 0 ? 1 : 0)
+    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + waits.length
   const offPath = OFF_PATH_STATUSES.includes(change.status)
+
+  // Same names as the tab bar.
+  const tabName = (tb: string) => tb === 'implementation' ? t('impl.title')
+    : tb === 'scoping' ? t('scoping.title') : tb[0].toUpperCase() + tb.slice(1)
 
   const gateRow = (g: Gate, blocking: boolean) => {
     const label = (
@@ -148,6 +154,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           </>
         ) : (
           <ul className="space-y-1.5 text-sm">
+            {waits.map((w) => (
+              <li key={w.key} data-testid={`wait-${w.key}`} className="text-amber-300">
+                {w.tab && onGo ? (
+                  <button type="button"
+                    className="text-left hover:underline decoration-dotted underline-offset-2"
+                    onClick={() => onGo(w.tab!)}>
+                    ⏳ {w.text} <span className="text-xs opacity-70">→ {tabName(w.tab)}</span>
+                  </button>
+                ) : <>⏳ {w.text}</>}
+              </li>
+            ))}
             {blockingGates.map((g) => gateRow(g, true))}
             {pendingDeviations > 0 && (
               <li className="text-amber-300">⚠ {t('cockpit.pendingDeviations')}: {pendingDeviations}</li>
