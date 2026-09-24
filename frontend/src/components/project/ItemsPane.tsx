@@ -19,6 +19,7 @@ import { findNode, groupNodes, hasToolFields, matchesSearch, tableRow, visibleOr
 import {
   CATEGORY_META, buildPartTree, comparePartNodes, getDescendantIds, type Part, type TreeNode,
 } from './projectTypes';
+import { mirrorConnectors, mirrorGutterWidth } from './mirrorConnectors';
 
 export interface ItemsPaneProps {
   projectId: number;
@@ -50,6 +51,7 @@ export default function ItemsPane({
   const [expandOverride, setExpandOverride] = useState<Record<number, boolean>>({});
   const [draggingPartId, setDraggingPartId] = useState<number | null>(null);
   const [topLevelDragOver, setTopLevelDragOver] = useState(false);
+  const [hoveredMirrorRowId, setHoveredMirrorRowId] = useState<number | null>(null);
 
   const reparentMutation = useMutation({
     mutationFn: async ({ partId, parentPartId }: { partId: number; parentPartId: number | null }) => {
@@ -114,6 +116,17 @@ export default function ItemsPane({
 
   const listRef = useRef<HTMLDivElement>(null);
   const order = isTable ? tableParts.map((p) => p.id) : visibleOrder(groups, collapsedGroups, isExpanded);
+  // Connectors are only rendered in list mode, but computing them off `order` is cheap either way.
+  const connectors = useMemo(
+    () => mirrorConnectors(order, structure?.articles ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [order.join(','), structure],
+  );
+  const gutterWidth = useMemo(() => mirrorGutterWidth(connectors), [connectors]);
+  const hoveredMirrorPairIds = useMemo(
+    () => new Set((hoveredMirrorRowId !== null ? connectors.get(hoveredMirrorRowId) : undefined)?.map((s) => s.pairId) ?? []),
+    [hoveredMirrorRowId, connectors],
+  );
   const rowExpandable = (n: TreeNode) => {
     const a = articleOf(structure, n.part.id);
     return n.children.length > 0 || (!!a && (a.revisions.length > 0 || a.related.length > 0));
@@ -273,6 +286,10 @@ export default function ItemsPane({
                           onDragStartPart={setDraggingPartId}
                           onDragEndPart={() => setDraggingPartId(null)}
                           onDropOnPart={handleDropOnPart}
+                          mirrorConnectors={connectors}
+                          mirrorGutterWidth={gutterWidth}
+                          hoveredMirrorPairIds={hoveredMirrorPairIds}
+                          onHoverRow={setHoveredMirrorRowId}
                         />
                       ))}
                     </div>

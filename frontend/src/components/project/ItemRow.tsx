@@ -14,6 +14,7 @@ import { shortName, stripProjectCode } from '../../lib/partDisplay';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import type { PartPaintLayer } from '../../types/paint';
 import { CATEGORY_META, type TreeNode } from './projectTypes';
+import { MIRROR_LANE_WIDTH, type MirrorSegment } from './mirrorConnectors';
 
 export interface ItemRowProps {
   node: TreeNode;
@@ -32,6 +33,13 @@ export interface ItemRowProps {
   onDragStartPart(id: number): void;
   onDragEndPart(): void;
   onDropOnPart(targetId: number): void;
+  /** Mirror-pair dotted connector segments for this row's gutter cell. */
+  mirrorConnectors?: Map<number, MirrorSegment[]>;
+  /** Fixed gutter width in px, shared by every row so they stay aligned; 0 hides it. */
+  mirrorGutterWidth?: number;
+  /** pairId set of the currently hovered mirror pair, for full-opacity highlight. */
+  hoveredMirrorPairIds?: Set<string>;
+  onHoverRow?(id: number | null): void;
 }
 
 export default function ItemRow(props: ItemRowProps) {
@@ -39,6 +47,7 @@ export default function ItemRow(props: ItemRowProps) {
     node, depth = 0, projectCode, structure, paintByPartId, selectedPartId, isExpanded, onSetExpanded,
     onSelect, onContextMenu, onSelectRevision, draggingPartId, invalidDropIds,
     onDragStartPart, onDragEndPart, onDropOnPart,
+    mirrorConnectors, mirrorGutterWidth = 0, hoveredMirrorPairIds, onHoverRow,
   } = props;
   const [dragOver, setDragOver] = useState(false);
   const part = node.part;
@@ -63,8 +72,45 @@ export default function ItemRow(props: ItemRowProps) {
   const name = shortName(part.name, projectCode, customerNumber);
   const indent = depth * 16;
 
+  const mirrorSegments = mirrorConnectors?.get(part.id) ?? [];
+  const isMirrorHighlighted = mirrorSegments.some((s) => hoveredMirrorPairIds?.has(s.pairId));
+
   return (
-    <div>
+    <div
+      className="flex items-stretch"
+      onMouseEnter={() => mirrorSegments.length > 0 && onHoverRow?.(part.id)}
+      onMouseLeave={() => mirrorSegments.length > 0 && onHoverRow?.(null)}
+    >
+      {mirrorGutterWidth > 0 && (
+        <div aria-hidden="true" className="relative flex-shrink-0" style={{ width: `${mirrorGutterWidth}px` }}>
+          {mirrorSegments.map((seg) => {
+            const active = hoveredMirrorPairIds?.has(seg.pairId) ?? false;
+            return (
+              <div
+                key={`${seg.lane}-${seg.kind}`}
+                data-testid={`mirror-seg-${part.id}-${seg.lane}-${seg.kind}`}
+                aria-hidden="true"
+                className={`absolute border-l-2 border-dotted border-red-300 ${active ? 'opacity-100' : 'opacity-70'}`}
+                style={{
+                  left: `${seg.lane * MIRROR_LANE_WIDTH}px`,
+                  width: `${MIRROR_LANE_WIDTH}px`,
+                  top: seg.kind === 'start' ? '50%' : 0,
+                  bottom: seg.kind === 'end' ? '50%' : 0,
+                }}
+              >
+                {seg.kind !== 'middle' && (
+                  <span
+                    aria-hidden="true"
+                    className={`absolute border-t-2 border-dotted border-red-300 ${active ? 'opacity-100' : 'opacity-70'}`}
+                    style={{ top: 0, left: 0, width: `${MIRROR_LANE_WIDTH}px` }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
       <div className="flex items-stretch gap-1" style={{ paddingLeft: `${indent}px` }}>
         {expandable ? (
           <button
@@ -109,7 +155,7 @@ export default function ItemRow(props: ItemRowProps) {
               : selected
                 ? 'bg-blue-900/40 border-blue-500'
                 : 'border-transparent hover:bg-slate-800'
-          } ${draggingPartId === part.id ? 'opacity-40' : ''}`}
+          } ${draggingPartId === part.id ? 'opacity-40' : ''} ${isMirrorHighlighted ? 'ring-1 ring-red-400/60' : ''}`}
         >
           <div className="flex items-center gap-2 min-w-0">
             <PartThumbnail url={thumbnailUrl} name={name} testId={`row-thumb-${part.id}`} />
@@ -188,6 +234,7 @@ export default function ItemRow(props: ItemRowProps) {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }

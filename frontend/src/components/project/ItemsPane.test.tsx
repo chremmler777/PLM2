@@ -82,4 +82,42 @@ describe('ItemsPane', () => {
     expect(within(cells[0]).getByTestId('table-thumb-2-placeholder')).toBeTruthy()
     expect(cells[1].textContent).toBe('20-1994-001-0')
   })
+
+  describe('mirror connectors', () => {
+    const mirrorParts: Part[] = [
+      { id: 2, part_number: '20-1994-001-0', name: 'Handle LH', part_type: 'internal_mfg', item_category: 'article', active_revision_id: null, parent_part_id: null },
+      { id: 3, part_number: '20-1994-002-0', name: 'Handle RH', part_type: 'internal_mfg', item_category: 'article', active_revision_id: null, parent_part_id: null },
+    ]
+    const mirrorStructure = { articles: [
+      { part_id: 2, part_number: '20-1994-001-0', customer_part_number: null, name: 'Handle LH', lifecycle_phase: 'nominated', active_revision_id: null, revisions: [], related: [], mirror_of: null, mirrored_by: [{ part_id: 3, part_number: '20-1994-002-0', customer_part_number: null, name: 'Handle RH' }] },
+      { part_id: 3, part_number: '20-1994-002-0', customer_part_number: null, name: 'Handle RH', lifecycle_phase: 'nominated', active_revision_id: null, revisions: [], related: [], mirror_of: { part_id: 2, part_number: '20-1994-001-0', customer_part_number: null, name: 'Handle LH' }, mirrored_by: [] },
+    ] }
+
+    it('draws start and end segments for a visible mirror pair', () => {
+      mount({ parts: mirrorParts, structure: mirrorStructure })
+      expect(screen.getByTestId('mirror-seg-2-0-start')).toBeTruthy()
+      expect(screen.getByTestId('mirror-seg-3-0-end')).toBeTruthy()
+    })
+
+    it('draws no connectors when the partner is filtered out', () => {
+      mount({ parts: mirrorParts, structure: mirrorStructure })
+      fireEvent.change(screen.getByLabelText('Search items'), { target: { value: 'RH' } })
+      expect(screen.queryByTestId('mirror-seg-3-0-start')).toBeNull()
+      expect(screen.queryByTestId('mirror-seg-2-0-start')).toBeNull()
+    })
+
+    it('hovering either row of a pair highlights both, and hovering away removes it', () => {
+      mount({ parts: mirrorParts, structure: mirrorStructure })
+      const row = screen.getByTestId('item-row-2')
+      const seg2 = screen.getByTestId('mirror-seg-2-0-start')
+      const seg3 = screen.getByTestId('mirror-seg-3-0-end')
+      expect(seg2.className).toContain('opacity-70')
+      expect(row.className).not.toContain('ring-1')
+      fireEvent.mouseOver(row)
+      expect(seg2.className).toContain('opacity-100')
+      expect(seg3.className).toContain('opacity-100')
+      expect(row.className).toContain('ring-1')
+      expect(screen.getByTestId('item-row-3').className).toContain('ring-1')
+    })
+  })
 })
