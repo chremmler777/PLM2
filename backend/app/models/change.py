@@ -766,6 +766,10 @@ class ChangeConcern(Base):
     # change so the next department (and the customer conversation) can see it.
     risk_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     severity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The checklist row a risk was raised from ("threed_change", or
+    # "free:<label>" for a department's own line). Lets the row show that it
+    # is already flagged. No FK: the checklist lives in code.
+    checklist_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # In assessment: the department this concern soft-holds (required there).
     # In scoping: optional attribution — NULL means the whole team's point.

@@ -2151,7 +2151,8 @@ async def raise_concern(
         concern = await MeetingService.raise_concern(
             db, change, current_user, body.kind, body.note,
             department_id=body.department_id,
-            risk_type=body.risk_type, severity=body.severity)
+            risk_type=body.risk_type, severity=body.severity,
+            checklist_key=body.checklist_key)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()

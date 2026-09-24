@@ -173,6 +173,7 @@ class MeetingService:
         session: AsyncSession, change: ChangeRequest, user: User,
         kind: str, note: str, department_id: Optional[int] = None,
         risk_type: Optional[str] = None, severity: Optional[int] = None,
+        checklist_key: Optional[str] = None,
     ) -> ChangeConcern:
         """Two phases, two meanings for department_id.
 
@@ -227,6 +228,19 @@ class MeetingService:
             if severity not in RISK_SEVERITIES:
                 raise ChangeError(
                     "Risk severity must be 1 (low), 2 (medium) or 3 (high)")
+        if checklist_key is not None:
+            if kind != "risk":
+                raise ChangeError("Only a risk can point at a checklist row")
+            if len(checklist_key) > 120:
+                raise ChangeError("checklist_key is too long")
+            if not checklist_key.startswith("free:"):
+                from app.services import assessment_checklist as checklist
+                dept_for_keys = (await session.get(Department, department_id)
+                                 if department_id is not None else None)
+                if checklist_key not in checklist.keys_for(
+                        dept_for_keys.name if dept_for_keys else None):
+                    raise ChangeError(
+                        f"'{checklist_key}' is not a checklist item for this department")
         if not (note or "").strip():
             raise ChangeError("A concern needs a note saying what the problem is")
         if in_assessment:
@@ -264,7 +278,8 @@ class MeetingService:
             change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id,
             department_id=department_id,
             risk_type=risk_type if kind == "risk" else None,
-            severity=severity if kind == "risk" else None)
+            severity=severity if kind == "risk" else None,
+            checklist_key=checklist_key)
         session.add(concern)
         await session.flush()
         await ChangeService.append_changelog(
@@ -276,7 +291,8 @@ class MeetingService:
             new_value={"concern_id": concern.id, "kind": kind,
                        "department_id": department_id,
                        "risk_type": concern.risk_type,
-                       "severity": concern.severity},
+                       "severity": concern.severity,
+                       "checklist_key": checklist_key},
             notes=concern.note)
         return concern
 
