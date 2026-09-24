@@ -37,11 +37,11 @@ function mockGetByPart(setups: Record<number, ReturnType<typeof setup>>, paints:
   })
 }
 
-function renderCard(partId = 1) {
+function renderCard(partId = 1, projectId: number | null = null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const utils = render(
     <QueryClientProvider client={qc}>
-      <PartPaintCard partId={partId} />
+      <PartPaintCard partId={partId} projectId={projectId} />
     </QueryClientProvider>
   )
   return {
@@ -262,6 +262,25 @@ describe('PartPaintCard', () => {
     expect(arg).toContain('at most 255 characters')
     // still rendered: nothing threw
     expect(screen.getByTestId('paint-layer-0')).toBeTruthy()
+  })
+
+  it('shows field history on the paint markers when a project id is given', async () => {
+    mockGet(setup({ paint_required: true }))
+    renderCard(1, 35)
+    fireEvent.click(await screen.findByTestId('note-marker-paint.painted'))
+    expect(await screen.findByTestId('note-history-toggle')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('note-marker-paint.painted'))
+
+    fireEvent.click(screen.getByTestId('note-marker-paint.colour'))
+    expect(await screen.findByTestId('note-history-toggle')).toBeTruthy()
+  })
+
+  it('has no field history without a project id', async () => {
+    mockGet(setup())
+    renderCard()
+    fireEvent.click(await screen.findByTestId('note-marker-paint.painted'))
+    await screen.findByTestId('note-popover-paint.painted')
+    expect(screen.queryByTestId('note-history-toggle')).toBeNull()
   })
 
   it('caps the layer area input at 255 characters', async () => {

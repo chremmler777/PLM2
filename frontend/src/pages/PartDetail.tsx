@@ -370,7 +370,7 @@ export default function PartDetail() {
           </div>
         </div>
 
-        <PartPaintCard key={part.id} partId={part.id} />
+        <PartPaintCard key={part.id} partId={part.id} projectId={part.project_id} />
 
         {usedIn && usedIn.length > 0 && (
           <div data-testid="used-in" className="bg-slate-800 rounded-lg border border-slate-700 p-4 mb-8 flex items-center gap-2 flex-wrap text-sm">

@@ -94,6 +94,15 @@ describe('ToolDetail', () => {
     expect(screen.getByTestId('toolmaker-select')).toBeTruthy()
   })
 
+  it('shows field history on the tool number, cavities and DFM status markers', async () => {
+    renderTool()
+    for (const fieldKey of ['tool.number', 'tool.cavities', 'dfm.status']) {
+      fireEvent.click(await screen.findByTestId(`note-marker-${fieldKey}`))
+      expect(await screen.findByTestId('note-history-toggle')).toBeTruthy()
+      fireEvent.click(screen.getByTestId(`note-marker-${fieldKey}`))
+    }
+  })
+
   it('mounts the DFM archive and no revision file list', async () => {
     renderTool()
     expect(await screen.findByTestId('dfm-archive')).toBeTruthy()

@@ -65,7 +65,7 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
             <div className="min-w-0">
               <h1 data-field-key="tool.number" className="text-4xl font-bold text-slate-100 mb-1">
                 {part.part_number}
-                <FieldNoteMarker partId={part.id} fieldKey="tool.number" label="Tool no." note={notes.get('tool.number')} />
+                <FieldNoteMarker partId={part.id} fieldKey="tool.number" label="Tool no." note={notes.get('tool.number')} projectId={part.project_id} />
               </h1>
               <p className="text-slate-300 mb-2">{part.name}</p>
               <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -95,7 +95,7 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
         <ToolFieldsCard partId={part.id}
           values={{ tool_cavities: part.tool_cavities, toolmaker_id: part.toolmaker_id,
             tool_tonnage_class: part.tool_tonnage_class, tool_cycle_time_s: part.tool_cycle_time_s }}
-          producedNotes={produced.map((a) => a.notes)} />
+          producedNotes={produced.map((a) => a.notes)} projectId={part.project_id} />
 
         {openDoc && (
           <div ref={paneRef} className="bg-slate-800 rounded-lg border border-slate-700 mb-8 overflow-hidden">
@@ -104,7 +104,7 @@ export default function ToolDetail({ part, onOpenPart, onBack }: Props) {
         )}
         <div data-field-key="dfm.status" className="flex items-center gap-1 mb-2 text-sm text-slate-400">
           DFM status notes
-          <FieldNoteMarker partId={part.id} fieldKey="dfm.status" label="DFM status" note={notes.get('dfm.status')} />
+          <FieldNoteMarker partId={part.id} fieldKey="dfm.status" label="DFM status" note={notes.get('dfm.status')} projectId={part.project_id} />
         </div>
         <DfmArchive partId={part.id} onOpenPdf={setOpenDoc} />
 

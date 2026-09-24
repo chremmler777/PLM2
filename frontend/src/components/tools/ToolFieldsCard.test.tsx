@@ -11,9 +11,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 const empty: ToolFieldValues = { tool_cavities: null, toolmaker_id: null, tool_tonnage_class: null, tool_cycle_time_s: null }
 
-function wrap(values: ToolFieldValues = empty, notes: (string | null)[] = []) {
+function wrap(values: ToolFieldValues = empty, notes: (string | null)[] = [], projectId: number | null = null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={qc}><ToolFieldsCard partId={7} values={values} producedNotes={notes} /></QueryClientProvider>)
+  render(<QueryClientProvider client={qc}><ToolFieldsCard partId={7} values={values} producedNotes={notes} projectId={projectId} /></QueryClientProvider>)
 }
 
 describe('ToolFieldsCard', () => {
@@ -79,6 +79,22 @@ describe('ToolFieldsCard', () => {
     const message = (toast.error as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(typeof message).toBe('string')
     expect(message).toContain('Input should be greater than 0')
+  })
+
+  it('shows field history on every tool field marker when a project id is given', async () => {
+    wrap(empty, [], 35)
+    for (const key of ['tool.cavities', 'tool.tonnage_class', 'tool.cycle_time_s', 'tool.toolmaker']) {
+      fireEvent.click(screen.getByTestId(`note-marker-${key}`))
+      expect(await screen.findByTestId('note-history-toggle')).toBeTruthy()
+      fireEvent.click(screen.getByTestId(`note-marker-${key}`))
+    }
+  })
+
+  it('has no field history without a project id', async () => {
+    wrap()
+    fireEvent.click(screen.getByTestId('note-marker-tool.cavities'))
+    await screen.findByTestId('note-popover-tool.cavities')
+    expect(screen.queryByTestId('note-history-toggle')).toBeNull()
   })
 
   it('puts a note marker on every tool field', async () => {

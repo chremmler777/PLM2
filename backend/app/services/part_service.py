@@ -50,6 +50,14 @@ class PartService:
             raise ValueError("Toolmaker not found: no supplier with that id")
 
     @staticmethod
+    async def _supplier_name(session: AsyncSession, supplier_id: Optional[int]) -> Optional[str]:
+        """The supplier's name for a changelog entry, falling back to the id when unresolvable."""
+        if supplier_id is None:
+            return None
+        supplier = await session.get(Supplier, supplier_id)
+        return supplier.name if supplier else str(supplier_id)
+
+    @staticmethod
     async def create_part(
         session: AsyncSession,
         project_id: int,
@@ -189,20 +197,42 @@ class PartService:
                         break
             part.parent_part_id = parent_part_id
 
+        async def _log_field_change(attr: str, old, new, old_text=None, new_text=None) -> None:
+            """One changelog entry for attr, only when the value actually changed."""
+            if old == new:
+                return
+            old_text = old if old_text is None else old_text
+            new_text = new if new_text is None else new_text
+            label = attr.replace("_", " ")
+            await ChangelogService.log_action(
+                session, part_id=part.id, action="field_updated",
+                action_description=f"{label.capitalize()}: {old_text or 'none'} -> {new_text or 'none'}",
+                performed_by=updated_by, field_name=attr,
+                old_value=None if old_text is None else str(old_text),
+                new_value=None if new_text is None else str(new_text))
+
         if name is not None:
+            old_name = part.name
             part.name = name
+            await _log_field_change("name", old_name, name)
         if description is not None:
             part.description = description
         if part_type is not None:
+            old_part_type = part.part_type
             part.part_type = part_type
+            await _log_field_change("part_type", old_part_type, part_type)
         if supplier is not None:
             part.supplier = supplier
         if update_supplier:
             part.supplier_id = supplier_id
         if update_customer_part_number:
+            old_customer_part_number = part.customer_part_number
             part.customer_part_number = customer_part_number
+            await _log_field_change("customer_part_number", old_customer_part_number, customer_part_number)
         if update_tier1_part_number:
+            old_tier1_part_number = part.tier1_part_number
             part.tier1_part_number = tier1_part_number
+            await _log_field_change("tier1_part_number", old_tier1_part_number, tier1_part_number)
 
         tool_updates = {
             "tool_cavities": (update_tool_cavities, tool_cavities),
@@ -217,7 +247,15 @@ class PartService:
                 await PartService._check_toolmaker(session, toolmaker_id)
             for attr, (flag, value) in tool_updates.items():
                 if flag:
-                    setattr(part, attr, value)
+                    old = getattr(part, attr)
+                    if attr == "toolmaker_id":
+                        old_text = await PartService._supplier_name(session, old)
+                        new_text = await PartService._supplier_name(session, value)
+                        setattr(part, attr, value)
+                        await _log_field_change(attr, old, value, old_text, new_text)
+                    else:
+                        setattr(part, attr, value)
+                        await _log_field_change(attr, old, value)
 
         article_updates = {name: clean_text(value) for name, flag, value in (
             ("colour_code", update_colour_code, colour_code), ("grain", update_grain, grain)) if flag}
@@ -228,11 +266,7 @@ class PartService:
             if old == value:
                 continue
             setattr(part, attr, value)
-            label = attr.replace("_", " ")
-            await ChangelogService.log_action(
-                session, part_id=part.id, action="field_updated",
-                action_description=f"{label.capitalize()}: {old or 'none'} -> {value or 'none'}",
-                performed_by=updated_by, field_name=attr, old_value=old, new_value=value)
+            await _log_field_change(attr, old, value)
 
         if item_category is not None:
             if item_category not in VALID_ITEM_CATEGORIES:

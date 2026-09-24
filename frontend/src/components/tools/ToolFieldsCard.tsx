@@ -33,9 +33,10 @@ interface Props {
   partId: number;
   values: ToolFieldValues;
   producedNotes: (string | null | undefined)[];
+  projectId?: number | null;
 }
 
-export default function ToolFieldsCard({ partId, values, producedNotes }: Props) {
+export default function ToolFieldsCard({ partId, values, producedNotes, projectId = null }: Props) {
   const queryClient = useQueryClient();
   const { data: suppliers } = useSuppliers();
   const notes = usePartFieldNoteIndex(partId);
@@ -73,7 +74,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes }: Props)
             <div key={field.key} data-field-key={field.fieldKey}>
               <div className="text-sm text-slate-400">
                 {field.label}{field.unit ? ` (${field.unit})` : ''}
-                <FieldNoteMarker partId={partId} fieldKey={field.fieldKey} label={field.label} note={notes.get(field.fieldKey)} />
+                <FieldNoteMarker partId={partId} fieldKey={field.fieldKey} label={field.label} note={notes.get(field.fieldKey)} projectId={projectId} />
               </div>
               {isEditing ? (
                 <div className="flex items-center gap-2 mt-1">
@@ -105,7 +106,7 @@ export default function ToolFieldsCard({ partId, values, producedNotes }: Props)
         <div data-field-key="tool.toolmaker">
           <div className="text-sm text-slate-400">
             Toolmaker
-            <FieldNoteMarker partId={partId} fieldKey="tool.toolmaker" label="Toolmaker" note={notes.get('tool.toolmaker')} />
+            <FieldNoteMarker partId={partId} fieldKey="tool.toolmaker" label="Toolmaker" note={notes.get('tool.toolmaker')} projectId={projectId} />
           </div>
           <select data-testid="toolmaker-select" value={values.toolmaker_id ?? ''} disabled={save.isPending}
             onChange={(e) => save.mutate({ toolmaker_id: e.target.value ? parseInt(e.target.value, 10) : null })}

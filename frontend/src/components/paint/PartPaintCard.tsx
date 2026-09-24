@@ -20,7 +20,7 @@ interface DraftLayer {
   paint: Paint;
 }
 
-export default function PartPaintCard({ partId }: { partId: number }) {
+export default function PartPaintCard({ partId, projectId = null }: { partId: number; projectId?: number | null }) {
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
@@ -137,13 +137,13 @@ export default function PartPaintCard({ partId }: { partId: number }) {
             />
             Paint required
           </label>
-          <FieldNoteMarker partId={partId} fieldKey="paint.painted" label="Painted" note={fieldNotes.get('paint.painted')} />
+          <FieldNoteMarker partId={partId} fieldKey="paint.painted" label="Painted" note={fieldNotes.get('paint.painted')} projectId={projectId} />
         </div>
       </div>
 
       <div data-field-key="paint.colour" className="flex items-center gap-1 text-sm text-slate-400 mb-2">
         Colour / paint system
-        <FieldNoteMarker partId={partId} fieldKey="paint.colour" label="Colour / paint system" note={fieldNotes.get('paint.colour')} />
+        <FieldNoteMarker partId={partId} fieldKey="paint.colour" label="Colour / paint system" note={fieldNotes.get('paint.colour')} projectId={projectId} />
       </div>
 
       {missingSpec && <p className="text-amber-400 text-sm mb-4">paint spec missing</p>}
