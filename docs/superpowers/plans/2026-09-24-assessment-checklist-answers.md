@@ -526,7 +526,7 @@ Change `check.hint` to:
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ActivityChecklist, { checklistProgress, riskKeyOf } from './ActivityChecklist'
+import ActivityChecklist, { checklistProgress } from './ActivityChecklist'
 
 const DEFS = [
   { key: 'cycle_time_change', label_de: 'Zykluszeit', label_en: 'Cycle time change', extra: false },
@@ -758,7 +758,7 @@ describe('ChecklistRiskForm', () => {
 })
 ```
 
-Extend `ActivityChecklist.test.tsx`. Its import line already pulls in `riskKeyOf` (Task 3 wrote it with `checklistProgress`; add `riskKeyOf` if it's missing). Make the mocked `listConcerns` controllable with `const listConcerns = vi.fn(() => Promise.resolve([] as unknown[]))` referenced in the mock factory, and add `riskTypes`/`raiseConcern` stubs. Then:
+Extend `ActivityChecklist.test.tsx`. Change its import to `import ActivityChecklist, { checklistProgress, riskKeyOf } from './ActivityChecklist'`. Make the mocked `listConcerns` controllable with `const listConcerns = vi.fn(() => Promise.resolve([] as unknown[]))` referenced in the mock factory, and add `riskTypes`/`raiseConcern` stubs. Then:
 ```tsx
 describe('ActivityChecklist risk flag', () => {
   afterEach(cleanup)
