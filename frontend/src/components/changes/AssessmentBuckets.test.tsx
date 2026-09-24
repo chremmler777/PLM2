@@ -241,6 +241,11 @@ describe('AssessmentBuckets', () => {
   })
 })
 
+// The submit waits for a loaded, fully answered checklist; one row keeps the
+// tests about other rules short.
+const ONE_ROW = [{ key: 'new_process', label_de: 'Neuer Prozess',
+  label_en: 'New process', extra: false }]
+
 describe('AssessmentBuckets department questionnaires', () => {
   beforeEach(() => {
     vi.mocked(changesApi.getRouting).mockResolvedValue({
@@ -251,6 +256,7 @@ describe('AssessmentBuckets department questionnaires', () => {
       ] }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue(ONE_ROW as never)
     vi.mocked(changesApi.submitAssessment).mockClear()
   })
   afterEach(cleanup)
@@ -291,6 +297,7 @@ describe('AssessmentBuckets department questionnaires', () => {
     await screen.findByTestId('bucket-6')
     fireEvent.click(screen.getByTestId('pkg-impacted-yes'))
     fireEvent.click(screen.getByTestId('pkg-layout_change'))
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -508,7 +515,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       ] }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
-    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue([] as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue(ONE_ROW as never)
     vi.mocked(changesApi.submitAssessment).mockClear()
   })
   afterEach(cleanup)
@@ -548,6 +555,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [changePpt] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -560,6 +568,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       assessments: [assessment({ id: 1, department_id: 2, has_change_ppt: true })],
       attachments: [] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -580,6 +589,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect(screen.queryByTestId('assessment-evidence-required')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)

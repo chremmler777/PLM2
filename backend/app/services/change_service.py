@@ -2050,10 +2050,14 @@ class ChangeService:
 
         # No is an answer, silence is not. Exempt: the department's own
         # questionnaire said "not impacted" (the form hides the checklist
-        # then), and old submissions made only of legacy rows.
-        keyed_or_empty = not impacts or any(
-            e.get("key") is not None for e in impacts)
-        if details.get("impacted") is not False and keyed_or_empty:
+        # then), and old submissions made only of legacy rows — an activity
+        # id, or a bare line with no answer. A new free line carries an
+        # answer, so it cannot stand in for the keyed rows.
+        legacy_only = bool(impacts) and all(
+            e.get("activity_id") is not None
+            or (e.get("key") is None and e.get("answer") is None)
+            for e in impacts)
+        if details.get("impacted") is not False and not legacy_only:
             missing = [i["label_en"] for i in checklist.items_for(dept_name)
                        if i["key"] not in answered]
             if missing:

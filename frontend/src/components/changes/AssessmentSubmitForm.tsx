@@ -45,13 +45,16 @@ export default function AssessmentSubmitForm({
   const notImpacted = !!Fields && details.impacted === false
   // Same query the checklist renders from (shared cache): the form needs the
   // count to hold the submit until every row is answered.
-  const { data: defs = [] } = useQuery({
+  const { data: defs = [], isSuccess: defsLoaded } = useQuery({
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
   const progress = checklistProgress(defs, details)
   const [showOpen, setShowOpen] = useState(false)
-  const checklistDone = notImpacted || progress.answered === progress.total
+  // An unloaded (or failed) checklist is not "0 of 0 done": every department
+  // has rows, so without them there is nothing to submit against.
+  const checklistDone = notImpacted
+    || (defsLoaded && defs.length > 0 && progress.answered === progress.total)
   const submit = useMutation({
     mutationFn: () => changesApi.submitAssessment(changeId, {
       department_id: departmentId,

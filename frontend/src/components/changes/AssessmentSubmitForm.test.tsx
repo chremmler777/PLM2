@@ -86,3 +86,17 @@ describe('AssessmentSubmitForm checklist gate', () => {
     expect(submitBtn().disabled).toBe(true)
   })
 })
+
+describe('AssessmentSubmitForm without a loaded checklist', () => {
+  afterEach(cleanup)
+
+  it('holds the submit when the checklist could not be loaded', async () => {
+    assessmentChecklist.mockImplementationOnce(() => Promise.reject(new Error('500')))
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={2}
+      departmentName="Quality" showEffort={false} onDone={() => {}} />))
+    fireEvent.change(screen.getByLabelText(/verdict/i), { target: { value: 'feasible' } })
+    await waitFor(() => expect(assessmentChecklist).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 20))
+    expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
+  })
+})

@@ -120,3 +120,12 @@ async def test_free_lines_are_yes(client, admin_auth, tab, session_factory):
     stored = await _stored(session_factory, tab)
     free = next(e for e in stored["impacts"] if e.get("label") == "Hot runner: zone 3")
     assert free["impacted"] is True and free["answer"] == "yes"
+
+
+async def test_free_lines_alone_do_not_skip_the_gate(client, admin_auth, tab):
+    """A new free line carries an answer — it is not a legacy row, so it
+    cannot stand in for the keyed rows nobody answered."""
+    res = await _submit(client, admin_auth, tab, {"impacts": [
+        {"label": "Foo", "answer": "yes", "impacted": True}]})
+    assert res.status_code == 400
+    assert res.json()["detail"].startswith("Checklist incomplete")
