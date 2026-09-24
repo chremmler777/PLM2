@@ -229,7 +229,7 @@ export default function PartDetail() {
   } else if (viewingFile) paneDoc = { fileId: viewingFile.id, filename: viewingFile.filename, kind: '3d', revisionName: revName };
 
   const marker = (fieldKey: string, label: string) => (
-    <FieldNoteMarker partId={part.id} fieldKey={fieldKey} label={label} note={fieldNotes.get(fieldKey)} />
+    <FieldNoteMarker partId={part.id} fieldKey={fieldKey} label={label} note={fieldNotes.get(fieldKey)} projectId={part.project_id} />
   );
 
   return (

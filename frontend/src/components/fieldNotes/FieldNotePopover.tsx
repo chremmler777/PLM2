@@ -5,21 +5,28 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useFieldNoteActions, useFieldNoteThread } from '../../hooks/queries/useFieldNotes';
+import { useFieldAudit } from '../../hooks/queries/useWorksheet';
+import { apiErrorMessage } from '../../lib/apiError';
+import { auditActionText, auditValueChange, excerpt } from '../worksheet/worksheetAudit';
 import { FLAG_BUTTON, FLAG_LABELS, FLAGS, MAX_COMMENT_LENGTH, localDate, localDateTime } from '../../lib/fieldNotes';
 
 export interface FieldNotePopoverProps {
   partId: number;
   fieldKey: string;
   label: string;
+  /** Set: a collapsible History lists the field's audit log entries. */
+  projectId?: number | null;
   position: { top: number; left: number };
   onClose(): void;
 }
 
-export default function FieldNotePopover({ partId, fieldKey, label, position, onClose }: FieldNotePopoverProps) {
+export default function FieldNotePopover({ partId, fieldKey, label, projectId = null, position, onClose }: FieldNotePopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState('');
   const { data: thread, isLoading } = useFieldNoteThread(partId, fieldKey, true);
   const { addComment, setFlag } = useFieldNoteActions(partId, fieldKey);
+  const [showHistory, setShowHistory] = useState(false);
+  const history = useFieldAudit(projectId, partId, fieldKey, showHistory);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -103,6 +110,34 @@ export default function FieldNotePopover({ partId, fieldKey, label, position, on
           ))
         )}
       </div>
+      {projectId ? (
+        <div className="mb-2">
+          <button type="button" data-testid="note-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}
+            className="text-[11px] text-slate-400 hover:text-slate-200">
+            {showHistory ? '▾' : '▸'} History
+          </button>
+          {showHistory && (
+            <div data-testid="note-history" className="max-h-32 overflow-y-auto mt-1 space-y-1 text-[11px] whitespace-normal break-words">
+              {history.isLoading ? (
+                <p className="text-slate-500">Loading...</p>
+              ) : history.isError ? (
+                <p className="text-red-400">{apiErrorMessage(history.error, 'Could not load the history')}</p>
+              ) : !history.data?.entries.length ? (
+                <p className="text-slate-500">No history yet</p>
+              ) : (
+                history.data.entries.map((e) => (
+                  <div key={e.id} className="text-slate-300">
+                    <span className="text-slate-500">{e.at ? localDateTime(e.at) : ''} {e.actor?.name ?? 'Unknown'}: </span>
+                    {auditActionText(e)}
+                    {auditValueChange(e) && <span className="text-slate-400"> {auditValueChange(e)}</span>}
+                    {e.action === 'field_comment_added' && e.new_value && <span className="text-slate-400"> {excerpt(e.new_value, 60)}</span>}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
       <textarea
         aria-label="New comment"
         data-testid="note-comment-input"

@@ -7,6 +7,7 @@ import {
 } from '../../api/fieldNotes';
 import { apiErrorMessage } from '../../lib/apiError';
 import { indexByField } from '../../lib/fieldNotes';
+import { WORKSHEET_AUDIT_KEY } from './useWorksheet';
 
 /** Every field note query starts with this key, so one invalidation refreshes markers everywhere. */
 export const FIELD_NOTES_KEY = 'field-notes';
@@ -42,7 +43,10 @@ export function useFieldNoteThread(partId: number, fieldKey: string, enabled: bo
 
 export function useFieldNoteActions(partId: number, fieldKey: string) {
   const qc = useQueryClient();
-  const refresh = () => qc.invalidateQueries({ queryKey: [FIELD_NOTES_KEY] });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: [WORKSHEET_AUDIT_KEY] });
+    return qc.invalidateQueries({ queryKey: [FIELD_NOTES_KEY] });
+  };
   const addComment = useMutation({
     mutationFn: (body: string) => addFieldComment(partId, fieldKey, body),
     onSuccess: refresh,

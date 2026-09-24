@@ -82,6 +82,53 @@ export interface WorksheetExportPayload {
   frozen_columns: number;
 }
 
+export type AuditGroup = 'comments' | 'flags' | 'material' | 'values' | 'other';
+
+/** One changelog entry of a project part that touches a worksheet field (backend services/worksheet_audit.py). */
+export interface WorksheetAuditEntry {
+  id: number;
+  /** Naive UTC. */
+  at: string | null;
+  actor: { id: number; name: string } | null;
+  part: { id: number; part_number: string; customer_part_number: string | null; item_category: string };
+  action: string;
+  action_group: AuditGroup;
+  /** The worksheet field key (worksheetColumns.ts), null where the changelog names none. */
+  field_key: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  description: string;
+}
+
+export interface WorksheetAuditPage {
+  entries: WorksheetAuditEntry[];
+  has_more: boolean;
+}
+
+export interface WorksheetAuditFilters {
+  action_group?: AuditGroup | '';
+  part_id?: number;
+  /** KTX or OEM number text. */
+  part?: string;
+  field_key?: string;
+}
+
+/** Only set filters, so an empty text box is no filter. */
+export function auditParams(filters: WorksheetAuditFilters): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(filters)) {
+    if (v !== undefined && v !== null && String(v).trim() !== '') out[k] = typeof v === 'string' ? v.trim() : v;
+  }
+  return out;
+}
+
+export const getWorksheetAudit = async (
+  projectId: number, filters: WorksheetAuditFilters, beforeId?: number, limit = 100,
+): Promise<WorksheetAuditPage> =>
+  (await client.get(`/v1/projects/${projectId}/worksheet/audit`, {
+    params: { ...auditParams(filters), limit, ...(beforeId ? { before_id: beforeId } : {}) },
+  })).data;
+
 export const getWorksheet = async (projectId: number): Promise<Worksheet> =>
   (await client.get(`/v1/projects/${projectId}/worksheet`)).data;
 

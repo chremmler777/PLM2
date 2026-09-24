@@ -36,6 +36,20 @@ describe('WorksheetView', () => {
   })
   afterEach(cleanup)
 
+  it('switches the table area to the audit log and back', async () => {
+    mount()
+    await screen.findByTestId('ws-row-1')
+    expect(screen.getByTestId('ws-audit-toggle').getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByTestId('ws-audit-toggle'))
+    expect(await screen.findByTestId('worksheet-audit')).toBeTruthy()
+    expect(screen.queryByTestId('ws-row-1')).toBeNull()
+    expect(screen.queryByTestId('ws-export')).toBeNull()
+    expect(clientMocks.get).toHaveBeenCalledWith('/v1/projects/35/worksheet/audit', expect.anything())
+    fireEvent.click(screen.getByTestId('ws-audit-toggle'))
+    expect(await screen.findByTestId('ws-row-1')).toBeTruthy()
+    expect(screen.queryByTestId('worksheet-audit')).toBeNull()
+  })
+
   it('lists articles sorted by part number, purchased rows only on request', async () => {
     mount()
     await screen.findByTestId('ws-row-1')

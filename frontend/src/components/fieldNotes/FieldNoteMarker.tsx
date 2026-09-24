@@ -14,6 +14,8 @@ export interface FieldNoteMarkerProps {
   fieldKey: string;
   label: string;
   note?: FieldNoteSummary;
+  /** The part's project: the popover then shows the field's history from the worksheet audit log. */
+  projectId?: number | null;
   /** Controlled open state (the worksheet's "Comment" menu item); omit for self-managed. */
   open?: boolean;
   onOpenChange?(open: boolean): void;
@@ -22,7 +24,7 @@ export interface FieldNoteMarkerProps {
 }
 
 export default function FieldNoteMarker({
-  partId, fieldKey, label, note, open, onOpenChange, quietWhenEmpty = false,
+  partId, fieldKey, label, note, projectId = null, open, onOpenChange, quietWhenEmpty = false,
 }: FieldNoteMarkerProps) {
   const button = useRef<HTMLButtonElement>(null);
   const [ownOpen, setOwnOpen] = useState(false);
@@ -68,7 +70,8 @@ export default function FieldNoteMarker({
         )}
       </button>
       {isOpen && position && (
-        <FieldNotePopover partId={partId} fieldKey={fieldKey} label={label} position={position} onClose={() => setOpen(false)} />
+        <FieldNotePopover partId={partId} fieldKey={fieldKey} label={label} projectId={projectId} position={position}
+          onClose={() => setOpen(false)} />
       )}
     </>
   );

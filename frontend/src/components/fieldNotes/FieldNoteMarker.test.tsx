@@ -82,4 +82,33 @@ describe('FieldNoteMarker', () => {
     fireEvent.change(screen.getByTestId('note-comment-input'), { target: { value: '   ' } })
     expect((screen.getByTestId('note-comment-add') as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('lists the field history from the audit log when opened in a project', async () => {
+    const history = { entries: [
+      { id: 12, at: '2026-09-24T14:56:37', actor: { id: 2, name: 'Engineer' }, part: { id: 7, part_number: '199401', customer_part_number: null, item_category: 'tool' },
+        action: 'field_flag_set', action_group: 'flags', field_key: 'tool.cavities', old_value: null, new_value: 'open', description: 'Flag on tool.cavities: none to open' },
+      { id: 11, at: '2026-09-23T08:00:00', actor: { id: 2, name: 'Engineer' }, part: { id: 7, part_number: '199401', customer_part_number: null, item_category: 'tool' },
+        action: 'metadata_updated', action_group: 'values', field_key: 'tool.cavities', old_value: '4', new_value: '2', description: 'Cavities 4 -> 2' },
+    ], has_more: false }
+    clientMocks.get.mockImplementation((url: string) => Promise.resolve(
+      { data: url === '/v1/projects/35/worksheet/audit' ? history : { ...note, comments: [comment] } }))
+    mount({ note, projectId: 35 })
+    fireEvent.click(screen.getByTestId('note-marker-tool.cavities'))
+    const toggle = await screen.findByTestId('note-history-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(clientMocks.get).not.toHaveBeenCalledWith('/v1/projects/35/worksheet/audit', expect.anything())
+    fireEvent.click(toggle)
+    const list = await screen.findByTestId('note-history')
+    await waitFor(() => expect(list.textContent).toContain('Flag set to Open'))
+    expect(list.textContent).toContain('4 -> 2')
+    expect(clientMocks.get).toHaveBeenCalledWith('/v1/projects/35/worksheet/audit',
+      { params: { part_id: 7, field_key: 'tool.cavities', limit: 50 } })
+  })
+
+  it('has no history section outside a project', async () => {
+    mount({ note })
+    fireEvent.click(screen.getByTestId('note-marker-tool.cavities'))
+    await screen.findByTestId('note-comments')
+    expect(screen.queryByTestId('note-history-toggle')).toBeNull()
+  })
 })

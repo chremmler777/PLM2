@@ -13,13 +13,15 @@ export interface WorksheetCellProps {
   ctx: WorksheetContext;
   note?: FieldNoteSummary;
   noteOpen: boolean;
+  /** For the note popover's History. */
+  projectId?: number | null;
   onNoteOpenChange(open: boolean): void;
   onMenu(rect: DOMRect): void;
 }
 
 const DFM_TONE: Record<string, string> = { waiting: 'text-amber-300', all_answered: 'text-emerald-300', finished: 'text-slate-400' };
 
-export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpenChange, onMenu }: WorksheetCellProps) {
+export default function WorksheetCell({ row, col, ctx, note, noteOpen, projectId = null, onNoteOpenChange, onMenu }: WorksheetCellProps) {
   const value = col.value(row, ctx);
   const partId = notePartId(col, row);
   const fieldKey = cellNoteKey(col, row);
@@ -68,7 +70,7 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpe
         ? <span className="min-w-0 truncate" title={value === null ? undefined : String(value)}>{body}</span>
         : body}
       {partId !== null && fieldKey !== null && (
-        <FieldNoteMarker partId={partId} fieldKey={fieldKey} label={col.label} note={note}
+        <FieldNoteMarker partId={partId} fieldKey={fieldKey} label={col.label} note={note} projectId={projectId}
           open={noteOpen} onOpenChange={onNoteOpenChange} quietWhenEmpty />
       )}
       {col.display !== 'thumbnail' && (
