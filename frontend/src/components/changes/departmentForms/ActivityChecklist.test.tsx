@@ -1,16 +1,19 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ActivityChecklist, { checklistProgress } from './ActivityChecklist'
+import ActivityChecklist, { checklistProgress, riskKeyOf } from './ActivityChecklist'
 
 const DEFS = [
   { key: 'cycle_time_change', label_de: 'Zykluszeit', label_en: 'Cycle time change', extra: false },
   { key: 'threed_change', label_de: '3D', label_en: '3D change necessary', extra: false },
 ]
+const listConcerns = vi.fn(() => Promise.resolve([] as unknown[]))
 vi.mock('../../../api/changes', () => ({
   changesApi: {
     assessmentChecklist: vi.fn(() => Promise.resolve(DEFS)),
-    listConcerns: vi.fn(() => Promise.resolve([])),
+    listConcerns: () => listConcerns(),
+    riskTypes: vi.fn(() => Promise.resolve({ items: [] })),
+    raiseConcern: vi.fn(),
   },
 }))
 
@@ -89,5 +92,48 @@ describe('ActivityChecklist answers', () => {
     fireEvent.blur(input, { target: { value: 'Hot runner: zone 3' } })
     expect(onChange).toHaveBeenLastCalledWith({ impacts: [
       { label: 'Hot runner: zone 3', answer: 'yes', impacted: true }] })
+  })
+})
+
+describe('ActivityChecklist risk flag', () => {
+  afterEach(cleanup)
+  const answeredNo = { impacts: [{ key: 'threed_change', answer: 'no', impacted: false }] }
+
+  it('offers ⚑ on an answered row, not on an open one', async () => {
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+    expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
+    expect(screen.queryByTestId('check-flag-cycle_time_change')).toBeNull()
+  })
+
+  it('opens the pre-filled form from ⚑', async () => {
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} onChange={() => {}}
+      value={{ impacts: [{ key: 'threed_change', answer: 'yes', impacted: true, remark: 'gate moves' }] }} />))
+    fireEvent.click(await screen.findByTestId('check-flag-threed_change'))
+    expect((screen.getByTestId('check-risk-note') as HTMLTextAreaElement).value)
+      .toBe('3D change necessary — gate moves')
+  })
+
+  it('shows the row as flagged while its risk is open, and ⚑ again once withdrawn', async () => {
+    listConcerns.mockResolvedValueOnce([{ id: 9, kind: 'risk', is_open: true, department_id: 4,
+      checklist_key: 'threed_change', severity: 3 }])
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+    expect((await screen.findByTestId('check-flagged-threed_change')).textContent).toContain('3')
+    cleanup()
+    listConcerns.mockResolvedValueOnce([{ id: 9, kind: 'risk', is_open: false, department_id: 4,
+      checklist_key: 'threed_change', severity: 3 }])
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+    expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
+  })
+
+  it("ignores another department's risk on the same key", async () => {
+    listConcerns.mockResolvedValueOnce([{ id: 9, kind: 'risk', is_open: true, department_id: 7,
+      checklist_key: 'threed_change', severity: 2 }])
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+    expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
+  })
+
+  it('a long free line gets a key capped at 120 chars', () => {
+    expect(riskKeyOf(`free:${'L'.repeat(200)}`)).toHaveLength(120)
+    expect(riskKeyOf('free:Hot runner: zone 3')).toBe('free:Hot runner: zone 3')
   })
 })

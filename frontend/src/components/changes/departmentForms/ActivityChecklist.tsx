@@ -16,7 +16,8 @@ import { changesApi } from '../../../api/changes'
 import AttachmentDropzone from '../AttachmentDropzone'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
-import type { Attachment, ChecklistItemDef } from '../../../types/change'
+import type { Attachment, ChangeConcern, ChecklistItemDef } from '../../../types/change'
+import ChecklistRiskForm from './ChecklistRiskForm'
 import type { DepartmentFieldsProps } from './types'
 
 /** Ticking this asks a supplier for money and dates — so it asks for the RFQ. */
@@ -55,6 +56,9 @@ export function checklistProgress(
            firstOpen: open[0]?.key ?? null }
 }
 
+/** Keys are capped where the backend caps them (change_concerns.checklist_key). */
+export const riskKeyOf = (id: string) => id.slice(0, 120)
+
 /** Rows written under the old activity-catalog shape — read-only history. */
 const isLegacy = (i: ImpactItem) => i.key === undefined && i.activity_id !== undefined
 
@@ -79,6 +83,17 @@ export default function ActivityChecklist({
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
   const [freeLines, setFreeLines] = useState<string[]>([])
+  // Same cache entry as the department's risk strip, so a risk raised or
+  // withdrawn in either place shows in both.
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', changeId, 'concerns'],
+    queryFn: () => changesApi.listConcerns(changeId!),
+    enabled: changeId != null,
+  })
+  const [flagging, setFlagging] = useState<string | null>(null)
+  const openRiskFor = (id: string) => (concerns as ChangeConcern[]).find((c) =>
+    c.kind === 'risk' && c.is_open && c.department_id === departmentId
+    && c.checklist_key === riskKeyOf(id))
   const impacts = impactsOf(value)
   const legacy = impacts.filter(isLegacy)
 
@@ -125,7 +140,29 @@ export default function ActivityChecklist({
           </span>
           <span className={item.answer === 'yes' ? 'text-slate-100'
             : item.answer === 'no' ? 'text-slate-500' : 'text-slate-300'}>{label}</span>
+          {/* A No can still carry a risk ("no 3D change, but the stack is
+              tight"), so any answered row may flag one. */}
+          {changeId != null && item.answer && (() => {
+            const risk = openRiskFor(id)
+            return risk ? (
+              <span data-testid={`check-flagged-${id}`} className="ml-auto text-[11px] text-amber-300">
+                {t('check.riskFlagged', lang).replace('{s}', String(risk.severity ?? '?'))}
+              </span>
+            ) : (
+              <button type="button" data-testid={`check-flag-${id}`}
+                onClick={() => setFlagging(id)}
+                className="ml-auto text-[11px] text-amber-300/80 hover:text-amber-200">
+                {t('check.flagRisk', lang)}
+              </button>
+            )
+          })()}
         </div>
+        {flagging === id && changeId != null && (
+          <ChecklistRiskForm changeId={changeId} departmentId={departmentId}
+            checklistKey={riskKeyOf(id)}
+            defaultNote={item.remark?.trim() ? `${label} — ${item.remark.trim()}` : label}
+            onDone={() => setFlagging(null)} />
+        )}
         {item.impacted && (
           <div className="mt-1 ml-6 space-y-1">
             {/* Some questions are only answered once you say which kind it is. */}
