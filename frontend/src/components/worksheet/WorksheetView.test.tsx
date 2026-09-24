@@ -87,4 +87,36 @@ describe('WorksheetView', () => {
     fireEvent.click(await screen.findByTestId('ws-close'))
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('keeps the frozen columns at their width, truncating long values', async () => {
+    mount()
+    const cell = await screen.findByTestId('ws-cell-1-part.part_number')
+    expect(cell.style.width).toBe('128px')
+    expect(cell.style.maxWidth).toBe('128px')
+    const inner = within(cell).getByTestId('ws-tint-1-part.part_number')
+    expect(inner.style.width).toBe('128px')
+    expect(inner.style.overflow).toBe('hidden')
+    expect(within(cell).getByTitle('20-1994-010-0').className).toContain('truncate')
+    const thumb = screen.getByTestId('ws-cell-1-part.thumbnail')
+    expect(within(thumb).getByTestId('ws-tint-1-part.thumbnail').style.width).toBe('44px')
+    expect(within(thumb).queryByTestId('cell-menu-1-part.thumbnail')).toBeNull()
+  })
+
+  it('clears an enum filter whose value is no longer offered', async () => {
+    mount()
+    await screen.findByTestId('ws-row-1')
+    fireEvent.click(screen.getByTestId('ws-kind-purchased'))
+    fireEvent.change(screen.getByTestId('filter-part.part_type'), { target: { value: 'purchased' } })
+    expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-2'])
+    fireEvent.click(screen.getByTestId('ws-kind-purchased'))
+    expect(screen.getAllByTestId(/^ws-row-/).map((r) => r.dataset.testid)).toEqual(['ws-row-3', 'ws-row-1'])
+    expect((screen.getByTestId('filter-part.part_type') as HTMLSelectElement).value).toBe('')
+  })
+
+  it('shows the error without a row count when the worksheet cannot load', async () => {
+    clientMocks.get.mockImplementation(() => Promise.reject({ response: { status: 404 } }))
+    mount()
+    await screen.findByText('Could not load the worksheet')
+    expect(screen.queryByTestId('ws-count')).toBeNull()
+  })
 })

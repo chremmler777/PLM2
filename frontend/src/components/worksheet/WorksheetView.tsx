@@ -10,7 +10,7 @@ import { useWorksheet } from '../../hooks/queries/useWorksheet';
 import { flagTint } from '../../lib/fieldNotes';
 import { WORKSHEET_COLUMNS, buildContext, noteFor, type WorksheetColumn } from './worksheetColumns';
 import {
-  applyFilters, enumOptions, frozenOffsets, loadHiddenColumns, rowKindVisible, saveHiddenColumns,
+  applyFilters, enumOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible, saveHiddenColumns,
   sortRows, visibleColumns, type RowKindFilter, type SortState,
 } from './worksheetTable';
 import WorksheetCell from './WorksheetCell';
@@ -37,11 +37,12 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
   const cols = useMemo(() => visibleColumns(hidden), [hidden]);
   const offsets = useMemo(() => frozenOffsets(cols), [cols]);
   const kindRows = useMemo(() => (data?.rows ?? []).filter((r) => rowKindVisible(r, kinds)), [data, kinds]);
+  const activeFilters = useMemo(() => offeredFilters(filters, cols, kindRows, ctx), [filters, cols, kindRows, ctx]);
   const shown = useMemo(() => {
-    const filtered = applyFilters(kindRows, cols, filters, ctx, onlyOpen);
+    const filtered = applyFilters(kindRows, cols, activeFilters, ctx, onlyOpen);
     const sortCol = sort ? cols.find((c) => c.key === sort.key) : undefined;
     return sortRows(filtered, sortCol, sort?.dir ?? 'asc', ctx);
-  }, [kindRows, cols, filters, ctx, onlyOpen, sort]);
+  }, [kindRows, cols, activeFilters, ctx, onlyOpen, sort]);
 
   const toggleHidden = (key: string) => {
     const next = new Set(hidden);
@@ -51,15 +52,19 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
   };
   const toggleSort = (key: string) =>
     setSort((s) => (!s || s.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
+  // Offsets assume exact widths, and table cells grow with their content: pin the cell and clip an inner box.
   const frozenStyle = (c: WorksheetColumn) =>
-    offsets.has(c.key) ? { left: offsets.get(c.key), minWidth: c.frozenWidth, maxWidth: c.frozenWidth } : undefined;
+    offsets.has(c.key) ? { left: offsets.get(c.key), width: c.frozenWidth, minWidth: c.frozenWidth, maxWidth: c.frozenWidth } : undefined;
+  const frozenBox = (c: WorksheetColumn) =>
+    offsets.has(c.key) ? { width: c.frozenWidth, overflow: 'hidden' as const } : undefined;
+  const cellPad = (c: WorksheetColumn) => (c.display === 'thumbnail' ? 'px-0.5' : 'px-2');
   const frozenClass = (c: WorksheetColumn) => (offsets.has(c.key) ? 'sticky z-10 bg-slate-900' : '');
 
   return (
     <div data-testid="worksheet-view" className="h-full flex flex-col min-h-0">
       <div className="flex-shrink-0 flex flex-wrap items-center gap-3 px-3 py-2 border-b border-slate-800 text-xs text-slate-300">
         <h2 className="font-semibold uppercase tracking-wide text-slate-300">Worksheet</h2>
-        <span data-testid="ws-count" className="text-slate-500">{shown.length} rows</span>
+        {data && !isError && <span data-testid="ws-count" className="text-slate-500">{shown.length} rows</span>}
         <label className="flex items-center gap-1">
           <input type="checkbox" data-testid="ws-only-open" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} />
           Only rows with open flags
@@ -108,31 +113,36 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
             <thead className="sticky top-0 z-20 bg-slate-900 text-left text-slate-400">
               <tr>
                 {cols.map((c) => (
-                  <th key={c.key} style={frozenStyle(c)} className={`px-2 py-1 font-medium whitespace-nowrap border-b border-slate-700 ${frozenClass(c)}`}>
-                    {c.display === 'thumbnail' ? <span className="sr-only">{c.label}</span> : (
-                      <button type="button" data-testid={`sort-${c.key}`} onClick={() => toggleSort(c.key)} className="hover:text-slate-100">
-                        {c.label}{sort?.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                      </button>
-                    )}
+                  <th key={c.key} style={frozenStyle(c)} className={`p-0 font-medium whitespace-nowrap border-b border-slate-700 ${frozenClass(c)}`}>
+                    <div style={frozenBox(c)} className={`${cellPad(c)} py-1 ${offsets.has(c.key) ? 'truncate' : ''}`}>
+                      {c.display === 'thumbnail' ? <span className="sr-only">{c.label}</span> : (
+                        <button type="button" data-testid={`sort-${c.key}`} onClick={() => toggleSort(c.key)} title={c.label}
+                          className="hover:text-slate-100">
+                          {c.label}{sort?.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                        </button>
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
               <tr>
                 {cols.map((c) => (
-                  <th key={c.key} style={frozenStyle(c)} className={`px-1 pb-1 border-b border-slate-700 ${frozenClass(c)}`}>
-                    {c.filter === 'text' && (
-                      <input data-testid={`filter-${c.key}`} aria-label={`Filter ${c.label}`} value={filters[c.key] ?? ''}
-                        onChange={(e) => setFilters((f) => ({ ...f, [c.key]: e.target.value }))}
-                        className="w-full min-w-[4rem] bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-100 font-normal" />
-                    )}
-                    {c.filter === 'enum' && (
-                      <select data-testid={`filter-${c.key}`} aria-label={`Filter ${c.label}`} value={filters[c.key] ?? ''}
-                        onChange={(e) => setFilters((f) => ({ ...f, [c.key]: e.target.value }))}
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-100 font-normal">
-                        <option value="">All</option>
-                        {enumOptions(c, kindRows, ctx).map((o) => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    )}
+                  <th key={c.key} style={frozenStyle(c)} className={`p-0 border-b border-slate-700 ${frozenClass(c)}`}>
+                    <div style={frozenBox(c)} className="px-1 pb-1">
+                      {c.filter === 'text' && (
+                        <input data-testid={`filter-${c.key}`} aria-label={`Filter ${c.label}`} value={activeFilters[c.key] ?? ''}
+                          onChange={(e) => setFilters((f) => ({ ...f, [c.key]: e.target.value }))}
+                          className="w-full min-w-[4rem] bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-100 font-normal" />
+                      )}
+                      {c.filter === 'enum' && (
+                        <select data-testid={`filter-${c.key}`} aria-label={`Filter ${c.label}`} value={activeFilters[c.key] ?? ''}
+                          onChange={(e) => setFilters((f) => ({ ...f, [c.key]: e.target.value }))}
+                          className="w-full bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-slate-100 font-normal">
+                          <option value="">All</option>
+                          {enumOptions(c, kindRows, ctx).map((o) => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      )}
+                    </div>
                   </th>
                 ))}
               </tr>
@@ -147,7 +157,8 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
                       <td key={c.key} data-testid={`ws-cell-${row.part_id}-${c.key}`} data-flag={note?.flag_status ?? ''}
                         style={frozenStyle(c)}
                         className={`group p-0 border-b border-slate-800 whitespace-nowrap ${frozenClass(c)}`}>
-                        <div data-testid={`ws-tint-${row.part_id}-${c.key}`} className={`px-2 py-1 ${flagTint(note?.flag_status)}`}>
+                        <div data-testid={`ws-tint-${row.part_id}-${c.key}`} style={frozenBox(c)}
+                          className={`${cellPad(c)} py-1 ${flagTint(note?.flag_status)}`}>
                           <WorksheetCell row={row} col={c} ctx={ctx} note={note}
                             noteOpen={openNote === id}
                             onNoteOpenChange={(open) => setOpenNote(open ? id : null)}

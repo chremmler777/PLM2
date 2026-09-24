@@ -88,6 +88,19 @@ export function enumOptions(col: WorksheetColumn, rows: WorksheetRow[], ctx: Wor
   return [...values].sort((x, y) => compareValues(x, y));
 }
 
+/** The filters without enum values the rows no longer offer, so a stale choice cannot hide every row behind "All". */
+export function offeredFilters(
+  filters: Record<string, string>, cols: WorksheetColumn[], rows: WorksheetRow[], ctx: WorksheetContext,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(filters)) {
+    const c = cols.find((x) => x.key === key);
+    if (c?.filter === 'enum' && value !== '' && !enumOptions(c, rows, ctx).includes(value)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export function frozenOffsets(cols: WorksheetColumn[]): Map<string, number> {
   const out = new Map<string, number>();
   let left = 0;

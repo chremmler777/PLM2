@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   HIDDEN_COLUMNS_KEY, applyFilters, compareValues, enumOptions, frozenOffsets, loadHiddenColumns,
-  rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
+  offeredFilters, rowKindVisible, saveHiddenColumns, sortRows, visibleColumns,
 } from './worksheetTable'
 import { WORKSHEET_COLUMNS, buildContext } from './worksheetColumns'
 import { row } from './worksheetFixtures'
@@ -69,5 +69,12 @@ describe('worksheet table helpers', () => {
     const offsets = frozenOffsets(visibleColumns(new Set()))
     expect([...offsets.entries()]).toEqual([['part.thumbnail', 0], ['part.part_number', 44], ['part.customer_part_number', 172]])
     expect([...frozenOffsets(visibleColumns(new Set(['part.thumbnail']))).entries()]).toEqual([['part.part_number', 0], ['part.customer_part_number', 128]])
+  })
+
+  it('drops enum filters whose value is no longer offered, keeps text filters', () => {
+    const cols = [col('part.name'), col('part.part_type')]
+    const filters = { 'part.name': 'side', 'part.part_type': 'purchased' }
+    expect(offeredFilters(filters, cols, [a, b], ctx)).toEqual(filters)
+    expect(offeredFilters(filters, cols, [a], ctx)).toEqual({ 'part.name': 'side' })
   })
 })

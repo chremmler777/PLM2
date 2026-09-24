@@ -46,22 +46,28 @@ export default function WorksheetCell({ row, col, ctx, note, noteOpen, onNoteOpe
         </span>
       );
   }
+  // Frozen columns have a fixed width: the value truncates (full text in the tooltip) so markers stay in view.
+  const frozen = !!col.frozenWidth;
   return (
-    <span className="inline-flex items-center gap-0.5">
-      {body}
+    <span className={frozen ? 'flex items-center gap-0.5 min-w-0' : 'inline-flex items-center gap-0.5'}>
+      {frozen && col.display !== 'thumbnail'
+        ? <span className="min-w-0 truncate" title={value === null ? undefined : String(value)}>{body}</span>
+        : body}
       {partId !== null && (
         <FieldNoteMarker partId={partId} fieldKey={col.key} label={col.label} note={note}
           open={noteOpen} onOpenChange={onNoteOpenChange} quietWhenEmpty />
       )}
-      <button
-        type="button"
-        aria-label={`Actions for ${col.label}`}
-        data-testid={`cell-menu-${row.part_id}-${col.key}`}
-        onClick={(e) => { e.stopPropagation(); onMenu((e.currentTarget as HTMLElement).getBoundingClientRect()); }}
-        className="ml-0.5 px-0.5 text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100"
-      >
-        ⋯
-      </button>
+      {col.display !== 'thumbnail' && (
+        <button
+          type="button"
+          aria-label={`Actions for ${col.label}`}
+          data-testid={`cell-menu-${row.part_id}-${col.key}`}
+          onClick={(e) => { e.stopPropagation(); onMenu((e.currentTarget as HTMLElement).getBoundingClientRect()); }}
+          className="ml-0.5 px-0.5 text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100"
+        >
+          ⋯
+        </button>
+      )}
     </span>
   );
 }
