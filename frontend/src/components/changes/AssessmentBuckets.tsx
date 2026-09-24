@@ -471,14 +471,10 @@ export default function AssessmentBuckets({
 
                 {/* What they ticked, for whoever may read the bucket. */}
                 {impactsOf(a?.details).filter((i) => i.impacted).length > 0 && (
-                  <ul className="text-xs text-slate-400 space-y-0.5"
-                    data-testid={`bucket-impacts-${row.id}`}>
-                    {impactsOf(a?.details).filter((i) => i.impacted).map((i) => (
-                      <li key={`${i.activity_id ?? 'free'}-${i.label}`}>
-                        ✓ {i.label}{i.remark ? ` — ${i.remark}` : ''}
-                      </li>
-                    ))}
-                  </ul>
+                  <ImpactAnswers departmentId={row.id} details={a?.details}
+                    riskKeys={new Set((concerns as ChangeConcern[]).filter((c) =>
+                      c.kind === 'risk' && c.is_open && c.department_id === row.id
+                      && !!c.checklist_key).map((c) => c.checklist_key!))} />
                 )}
                 {(() => {
                   const noRows = impactsOf(a?.details).filter((i) => i.answer === 'no')
@@ -510,5 +506,36 @@ export default function AssessmentBuckets({
         </p>
       )}
     </div>
+  )
+}
+
+/** A submitted department's Yes rows, named from its own checklist, with ⚑
+ *  where a row still carries an open risk. */
+function ImpactAnswers({ departmentId, details, riskKeys }: {
+  departmentId: number
+  details: Record<string, unknown> | null | undefined
+  riskKeys: Set<string>
+}) {
+  const { data: defs = [] } = useQuery({
+    queryKey: ['assessment-checklist', departmentId],
+    queryFn: () => changesApi.assessmentChecklist(departmentId),
+  })
+  const labelOf = (i: { key?: string; label?: string }) =>
+    i.label ?? defs.find((d) => d.key === i.key)?.label_en ?? i.key ?? ''
+  return (
+    <ul className="text-xs text-slate-400 space-y-0.5"
+      data-testid={`bucket-impacts-${departmentId}`}>
+      {impactsOf(details).filter((i) => i.impacted).map((i) => {
+        const id = i.key ?? `free:${i.label ?? ''}`
+        return (
+          <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}>
+            ✓ {labelOf(i)}{i.remark ? ` — ${i.remark}` : ''}
+            {riskKeys.has(id) && (
+              <span data-testid={`bucket-impact-risk-${id}`} className="ml-1 text-amber-300">⚑</span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

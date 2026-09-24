@@ -105,7 +105,7 @@ export default function ActivityChecklist({
     enabled: changeId != null,
   })
   const [flagging, setFlagging] = useState<string | null>(null)
-  const openRiskFor = (id: string) => (concerns as ChangeConcern[]).find((c) =>
+  const openRisksFor = (id: string) => (concerns as ChangeConcern[]).filter((c) =>
     c.kind === 'risk' && c.is_open && c.department_id === departmentId
     && c.checklist_key === riskKeyOf(id))
   const impacts = impactsOf(value)
@@ -158,22 +158,31 @@ export default function ActivityChecklist({
           <span className={item.answer === 'yes' ? 'text-slate-100'
             : item.answer === 'no' ? 'text-slate-500' : 'text-slate-300'}>{label}</span>
           {/* A No can still carry a risk ("no 3D change, but the stack is
-              tight"), so any answered row may flag one. */}
-          {changeId != null && item.answer && (() => {
-            const risk = openRiskFor(id)
-            return risk ? (
-              <span data-testid={`check-flagged-${id}`} className="ml-auto text-[11px] text-amber-300">
-                {t('check.riskFlagged', lang).replace('{s}', String(risk.severity ?? '?'))}
-              </span>
-            ) : (
-              <button type="button" data-testid={`check-flag-${id}`}
-                onClick={() => setFlagging(id)}
-                className="ml-auto text-[11px] text-amber-300/80 hover:text-amber-200">
-                {t('check.flagRisk', lang)}
-              </button>
-            )
-          })()}
+              tight"), so any answered row may flag one — and more than one. */}
+          {changeId != null && item.answer && (
+            <button type="button" data-testid={`check-flag-${id}`}
+              onClick={() => setFlagging(id)}
+              className="ml-auto text-[11px] text-amber-300/80 hover:text-amber-200">
+              {t('check.flagRisk', lang)}
+            </button>
+          )}
         </div>
+        {/* The row's risks, compact: the full card (proposal, resolve,
+            delete) lives in the department's risk panel — click to go there. */}
+        {openRisksFor(id).length > 0 && (
+          <ul className="mt-0.5 ml-6 space-y-0.5">
+            {openRisksFor(id).map((r) => (
+              <li key={r.id}>
+                <button type="button" data-testid={`check-risk-${r.id}`}
+                  onClick={() => document.getElementById(`concern-card-${r.id}`)
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  className="text-left text-[11px] text-amber-300 hover:underline decoration-dotted underline-offset-2">
+                  ⚑ {r.severity ?? '?'} · {r.risk_type ?? ''} · {r.note}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         {flagging === id && changeId != null && (
           <ChecklistRiskForm changeId={changeId} departmentId={departmentId}
             checklistKey={riskKeyOf(id)}

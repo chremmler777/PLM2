@@ -17,6 +17,8 @@ vi.mock('../../api/changes', () => ({
     raiseConcern: vi.fn().mockResolvedValue({}),
     withdrawConcern: vi.fn().mockResolvedValue({}),
     retractConcern: vi.fn().mockResolvedValue({}),
+    assessmentChecklist: vi.fn().mockResolvedValue([
+      { key: 'threed_change', label_de: '3D', label_en: '3D change necessary', extra: false }]),
     answerConcern: vi.fn().mockResolvedValue({}),
   },
 }))
@@ -214,7 +216,7 @@ describe('ConcernStrip in the assessment phase', () => {
     // The kind reads as a risk, not as "would reject".
     expect(note.closest('li')?.textContent).toContain(t('risk.kind'))
     expect(screen.getByTestId('concern-close-1').textContent).toBe(t('risk.resolved'))
-    expect(screen.getByRole('button', { name: new RegExp(t('risk.raise')) })).toBeTruthy()
+    expect(screen.getByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) })).toBeTruthy()
     // The scoping vocabulary stays out of this context.
     expect(screen.queryByText(t('concern.title'))).toBeNull()
     expect(screen.queryByText(t('concern.wouldReject'))).toBeNull()
@@ -223,7 +225,7 @@ describe('ConcernStrip in the assessment phase', () => {
   it('makes a non-Development member choose their department before flagging', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={depts} myDepartmentIds={[4]} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     // Nothing is guessed: the placeholder stands until the user picks.
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
     expect(picker.value).toBe('')
@@ -242,7 +244,7 @@ describe('ConcernStrip in the assessment phase', () => {
 
   it('will not send a risk whose type nobody picked', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'something is off' } })
     fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '4' } })
     // Nothing is guessed — an unpicked type is not silently 'other'.
@@ -254,7 +256,7 @@ describe('ConcernStrip in the assessment phase', () => {
 
   it('rates a risk in the middle until someone says otherwise', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[4]} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     expect(screen.getByTestId('risk-severity-pick-2').getAttribute('aria-pressed')).toBe('true')
     fireEvent.change(screen.getByLabelText(/Department/), { target: { value: '4' } })
     fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
@@ -272,7 +274,7 @@ describe('ConcernStrip in the assessment phase', () => {
     ]
     wrap(<ConcernStrip changeId={7} editable scoped
       departments={many} myDepartmentIds={[5, 6]} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     // Development is the master role, whichever membership comes first — and
     // being preselected, no placeholder is offered.
     expect((screen.getByLabelText(/Department/) as HTMLSelectElement).value).toBe('6')
@@ -282,7 +284,7 @@ describe('ConcernStrip in the assessment phase', () => {
   it('offers an admin every department, still unpicked', async () => {
     authState.current = { userId: 5, isAdmin: true }
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts} myDepartmentIds={[]} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     const picker = screen.getByLabelText(/Department/) as HTMLSelectElement
     // Placeholder + the two active departments; nothing preselected for an
     // admin who is in none of them.
@@ -565,7 +567,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
   it('asks for the vocabulary of the department and labels it from the server', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
       myDepartmentIds={[4]} onlyDepartmentId={4} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     await waitFor(() => expect(changesApi.riskTypes).toHaveBeenCalledWith(4))
     const select = await screen.findByTestId('risk-type-select') as HTMLSelectElement
     await waitFor(() => expect([...select.options].map((o) => o.text)).toContain('Not steel-safe'))
@@ -574,7 +576,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
   it('fills the form from a template, still lets the user edit, and can delete an accidental one', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
       myDepartmentIds={[4]} onlyDepartmentId={4} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     const picker = await screen.findByTestId('risk-template-select')
     fireEvent.change(picker, { target: { value: '31' } })
     expect((screen.getByTestId('risk-type-select') as HTMLSelectElement).value).toBe('not_steel_safe')
@@ -589,7 +591,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     }))
     // Not ticked: nothing written to the department's list.
     expect(changesApi.createRiskTemplate).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     fireEvent.change(await screen.findByTestId('risk-template-select'), { target: { value: '31' } })
     fireEvent.click(screen.getByTestId('risk-template-delete'))
     await waitFor(() => expect(changesApi.deleteRiskTemplate).toHaveBeenCalledWith(31))
@@ -598,7 +600,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
   it('lets the department add its own type to the dropdown and remove it again', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
       myDepartmentIds={[4]} onlyDepartmentId={4} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     const select = await screen.findByTestId('risk-type-select') as HTMLSelectElement
     await waitFor(() => expect([...select.options].map((o) => o.text)).toContain(t('risk.addType')))
     fireEvent.change(select, { target: { value: '__add_type__' } })
@@ -624,7 +626,7 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
   it('saves the raised risk as a template when ticked', async () => {
     wrap(<ConcernStrip changeId={7} editable scoped departments={depts}
       myDepartmentIds={[4]} onlyDepartmentId={4} />)
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raise')) }))
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('risk.raiseOffChecklist')) }))
     await screen.findByTestId('risk-form')
     fireEvent.change(screen.getByTestId('risk-type-select'), { target: { value: 'other' } })
     fireEvent.change(screen.getByTestId('risk-note'), { target: { value: 'keep this one' } })
@@ -683,5 +685,39 @@ describe('ConcernStrip deleting a risk raised by mistake', () => {
     fireEvent.click(await screen.findByTestId('concern-close-1'))
     expect(screen.getByTestId('concern-withdraw-note').getAttribute('placeholder'))
       .toBe(t('risk.resolutionPlaceholder'))
+  })
+})
+
+describe('ConcernStrip risks that came from a checklist row', () => {
+  const risk = (over = {}) => concern({ kind: 'risk', risk_type: 'timing', severity: 2,
+    department_id: 4, raised_by: 9, note: 'gate moves', ...over })
+  const strip = () => wrap(<ConcernStrip changeId={7} editable scoped
+    onlyDepartmentId={4} myDepartmentIds={[4]} departments={[{ id: 4, name: 'Tool Engineer' }]} />)
+  afterEach(cleanup)
+
+  it('says which row a risk came from', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      risk({ id: 1, checklist_key: 'threed_change' }),
+      risk({ id: 2, checklist_key: 'free:Hot runner: zone 3' }),
+      risk({ id: 3, checklist_key: null })] as never)
+    strip()
+    await screen.findByTestId('risk-origin-1')
+    await waitFor(() => expect(screen.getByTestId('risk-origin-1').textContent)
+      .toContain('3D change necessary'))
+    expect(screen.getByTestId('risk-origin-2').textContent).toContain('Hot runner: zone 3')
+    expect(screen.queryByTestId('risk-origin-3')).toBeNull()
+  })
+
+  it('gives every card an anchor the checklist can jump to', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk({ id: 5 })] as never)
+    strip()
+    await screen.findByText('gate moves')
+    expect(document.getElementById('concern-card-5')).not.toBeNull()
+  })
+
+  it('offers its own button only for risks the checklist does not cover', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    strip()
+    expect(await screen.findByText('+ ' + t('risk.raiseOffChecklist'))).toBeTruthy()
   })
 })

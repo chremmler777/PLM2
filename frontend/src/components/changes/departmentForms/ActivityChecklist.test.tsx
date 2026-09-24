@@ -113,16 +113,32 @@ describe('ActivityChecklist risk flag', () => {
       .toBe('3D change necessary — gate moves')
   })
 
-  it('shows the row as flagged while its risk is open, and ⚑ again once withdrawn', async () => {
+  it('lists the row\'s open risks under it and still offers ⚑ for another', async () => {
+    listConcerns.mockResolvedValueOnce([
+      { id: 9, kind: 'risk', is_open: true, department_id: 4, checklist_key: 'threed_change',
+        severity: 3, risk_type: 'fill_issue', note: 'gate moves' },
+      { id: 10, kind: 'risk', is_open: false, department_id: 4, checklist_key: 'threed_change',
+        severity: 1, risk_type: 'timing', note: 'old one' }])
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+    const item = await screen.findByTestId('check-risk-9')
+    expect(item.textContent).toContain('3')
+    expect(item.textContent).toContain('gate moves')
+    expect(screen.queryByTestId('check-risk-10')).toBeNull()
+    expect(screen.getByTestId('check-flag-threed_change')).toBeTruthy()
+  })
+
+  it('jumps to the risk card when a listed risk is clicked', async () => {
+    const card = document.createElement('div')
+    card.id = 'concern-card-9'
+    const scroll = vi.fn()
+    card.scrollIntoView = scroll
+    document.body.appendChild(card)
     listConcerns.mockResolvedValueOnce([{ id: 9, kind: 'risk', is_open: true, department_id: 4,
-      checklist_key: 'threed_change', severity: 3 }])
+      checklist_key: 'threed_change', severity: 3, note: 'gate moves' }])
     render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
-    expect((await screen.findByTestId('check-flagged-threed_change')).textContent).toContain('3')
-    cleanup()
-    listConcerns.mockResolvedValueOnce([{ id: 9, kind: 'risk', is_open: false, department_id: 4,
-      checklist_key: 'threed_change', severity: 3 }])
-    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
-    expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
+    fireEvent.click(await screen.findByTestId('check-risk-9'))
+    expect(scroll).toHaveBeenCalled()
+    card.remove()
   })
 
   it("ignores another department's risk on the same key", async () => {
@@ -130,6 +146,7 @@ describe('ActivityChecklist risk flag', () => {
       checklist_key: 'threed_change', severity: 2 }])
     render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
     expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
+    expect(screen.queryByTestId('check-risk-9')).toBeNull()
   })
 
   it('a long free line gets a key capped at 120 chars', () => {

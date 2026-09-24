@@ -483,6 +483,17 @@ describe('AssessmentBuckets checklist', () => {
       .toBe(t('check.summary').replace('{n}', '1').replace('{k}', '1')))
   })
 
+  it('names the Yes rows in the answer and marks the ones carrying a risk', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 1, kind: 'risk', is_open: true, department_id: 2, checklist_key: 'cycle_time_change', severity: 2 },
+    ] as never)
+    submittedWithAnswers()
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    const list = await screen.findByTestId('bucket-impacts-2')
+    await waitFor(() => expect(list.textContent).toContain('Cycle time change'))
+    expect(screen.getByTestId('bucket-impact-risk-cycle_time_change')).toBeTruthy()
+  })
+
   it('says how many No answers came from Rest → No', async () => {
     vi.mocked(changesApi.listConcerns).mockResolvedValue([])
     buckets({ canSeeAll: true, change: change({ assessments: [assessment({

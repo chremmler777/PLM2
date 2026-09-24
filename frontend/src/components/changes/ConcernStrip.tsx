@@ -275,6 +275,18 @@ export default function ConcernStrip({
   const docsOf = (concernId: number) =>
     attachments.filter((a) => a.concern_id === concernId)
 
+  // A risk raised from a checklist row says which row: the checklist is the
+  // department's own list, served per department.
+  const originDept = onlyDepartmentId ?? effectiveDept
+  const { data: checklistDefs = [] } = useQuery({
+    queryKey: ['assessment-checklist', originDept],
+    queryFn: () => changesApi.assessmentChecklist(originDept as number),
+    enabled: scoped && originDept != null
+      && concerns.some((c: ChangeConcern) => !!c.checklist_key),
+  })
+  const originLabel = (key: string) => key.startsWith('free:') ? key.slice(5)
+    : checklistDefs.find((d) => d.key === key)?.label_en ?? key
+
   // A risk raised by mistake: its raiser may delete it while nothing hangs off
   // it yet. Acting-as does not matter here — the raise carried their own id.
   const [retracting, setRetracting] = useState<number | null>(null)
@@ -334,7 +346,8 @@ export default function ConcernStrip({
         )}
         {editable && !adding && (
           <button className="ml-auto text-xs text-sky-300 hover:text-sky-200"
-            onClick={() => { setFailure(null); setAdding(true) }}>+ {w.raise}</button>
+            onClick={() => { setFailure(null); setAdding(true) }}>
+            + {scoped ? t('risk.raiseOffChecklist') : w.raise}</button>
         )}
       </div>
 
@@ -346,7 +359,7 @@ export default function ConcernStrip({
 
       <ul className="space-y-1">
         {[...open, ...settled].map((c: ChangeConcern) => (
-          <li key={c.id}
+          <li key={c.id} id={`concern-card-${c.id}`}
             className={`flex items-start gap-2 text-sm rounded border px-2 py-1.5 ${
               c.is_open ? KIND_STYLE[c.kind] : 'border-slate-700 bg-slate-900/40 text-slate-500'}`}>
             {/* A risk reads as "how bad / what kind"; a legacy flag keeps the
@@ -367,6 +380,12 @@ export default function ConcernStrip({
               {c.department_id != null && (
                 <span className="mr-1.5 rounded bg-slate-800/80 px-1 py-0 text-[10px] leading-tight align-middle">
                   {deptName(c.department_id)}
+                </span>
+              )}
+              {c.checklist_key && (
+                <span data-testid={`risk-origin-${c.id}`}
+                  className="mr-1.5 rounded border border-slate-600 px-1 py-0 text-[10px] leading-tight align-middle">
+                  {t('risk.from')}: {originLabel(c.checklist_key)}
                 </span>
               )}
               <span className={c.is_open ? '' : 'line-through'}>{c.note}</span>

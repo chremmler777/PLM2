@@ -263,6 +263,9 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
       + 'proposal. The verdict is the decision.',
   },
   'risk.raise': { de: 'Risiko melden', en: 'Flag risk' },
+  'risk.raiseOffChecklist': {
+    de: 'Risiko außerhalb der Checkliste', en: 'Risk not on the checklist' },
+  'risk.from': { de: 'aus', en: 'from' },
   'risk.kind': { de: 'Risiko', en: 'Risk' },
   'risk.question': { de: 'Offene Frage', en: 'Open question' },
   'risk.proposal': { de: 'Lösungsvorschlag', en: 'Mitigation proposal' },
@@ -409,7 +412,6 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Only unanswered rows become No; every row stays editable.' },
   'check.summary': { de: '{n} betroffen · {k} Risiken', en: '{n} impacted · {k} risks flagged' },
   'check.flagRisk': { de: '⚑ Risiko melden', en: '⚑ Flag risk' },
-  'check.riskFlagged': { de: '⚑ Risiko gemeldet (Sev {s})', en: '⚑ risk flagged (sev {s})' },
   'check.remark': { de: 'Bemerkung', en: 'Remark' },
   'check.remarkPlaceholder': { de: 'Was ist zu tun?', en: 'What has to be done?' },
   'check.addItem': { de: '+ Eigener Punkt', en: '+ Own item' },
