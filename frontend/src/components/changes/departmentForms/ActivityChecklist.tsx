@@ -1,8 +1,9 @@
 /**
  * The department's assessment checklist: the questions the business asks of
- * every department, plus the ones only that department is asked. Rows are off by
- * default; ticking one asks what has to be done, and a row that offers choices
- * asks which applies. Anything the list does not cover goes in as a free line,
+ * every department, plus the ones only that department is asked. Every row is
+ * answered No or Yes — nothing is pre-selected, because an unanswered row and a
+ * considered No must not look the same. Yes asks what has to be done, and a row
+ * that offers choices asks which applies. Anything the list does not cover goes in as a free line,
  * the way the paper form always allowed.
  *
  * The questions come from the backend so adding one is never a frontend change.
@@ -15,7 +16,8 @@ import { changesApi } from '../../../api/changes'
 import AttachmentDropzone from '../AttachmentDropzone'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
-import type { Attachment, ChecklistItemDef } from '../../../types/change'
+import type { Attachment, ChangeConcern, ChecklistItemDef } from '../../../types/change'
+import ChecklistRiskForm from './ChecklistRiskForm'
 import type { DepartmentFieldsProps } from './types'
 
 /** Ticking this asks a supplier for money and dates — so it asks for the RFQ. */
@@ -25,6 +27,10 @@ const RFQ_ITEM = 'modification_external'
 export interface ImpactItem {
   key?: string
   label?: string
+  /** The department's answer. `impacted` mirrors it (yes) for costing. */
+  answer?: 'yes' | 'no'
+  /** Answered by "Rest → No" rather than row by row — shown to reviewers. */
+  bulk?: boolean
   impacted: boolean
   remark?: string
   choice?: string
@@ -42,6 +48,31 @@ export function impactedCount(details: Record<string, unknown> | null | undefine
   return impactsOf(details).filter((i) => i.impacted).length
 }
 
+/** How far the department has got: keyed rows only (free lines are always Yes). */
+export function checklistProgress(
+  defs: ChecklistItemDef[], value: Record<string, unknown> | null | undefined,
+): { answered: number; total: number; firstOpen: string | null } {
+  const byKey = new Map(impactsOf(value).filter((i) => i.key).map((i) => [i.key!, i]))
+  const open = defs.filter((d) => !byKey.get(d.key)?.answer)
+  return { answered: defs.length - open.length, total: defs.length,
+           firstOpen: open[0]?.key ?? null }
+}
+
+/** "Rest → No": every keyed row still unanswered becomes a marked No. */
+export function restToNo(
+  defs: ChecklistItemDef[], value: Record<string, unknown>,
+): Record<string, unknown> {
+  const impacts = impactsOf(value)
+  const answered = new Set(impacts.filter((i) => i.key && i.answer).map((i) => i.key!))
+  const rest = impacts.filter((i) => !(i.key && !i.answer))
+  const filled = defs.filter((d) => !answered.has(d.key))
+    .map((d) => ({ key: d.key, answer: 'no' as const, impacted: false, bulk: true }))
+  return { ...value, impacts: [...rest, ...filled] }
+}
+
+/** Keys are capped where the backend caps them (change_concerns.checklist_key). */
+export const riskKeyOf = (id: string) => id.slice(0, 120)
+
 /** Rows written under the old activity-catalog shape — read-only history. */
 const isLegacy = (i: ImpactItem) => i.key === undefined && i.activity_id !== undefined
 
@@ -49,7 +80,7 @@ const idOf = (i: ImpactItem) => i.key ?? `free:${i.label ?? ''}`
 
 export default function ActivityChecklist({
   departmentId, value, onChange, lang = 'en',
-  changeId, assessmentId, attachments = [], onUploaded,
+  changeId, assessmentId, attachments = [], onUploaded, highlightOpen = false,
 }: DepartmentFieldsProps & {
   departmentId: number
   lang?: 'de' | 'en'
@@ -58,12 +89,25 @@ export default function ActivityChecklist({
   assessmentId?: number
   attachments?: Attachment[]
   onUploaded?: () => void
+  /** Mark the rows still unanswered (after the submit form's "jump to open"). */
+  highlightOpen?: boolean
 }) {
   const { data: items = [] } = useQuery({
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
   const [freeLines, setFreeLines] = useState<string[]>([])
+  // Same cache entry as the department's risk strip, so a risk raised or
+  // withdrawn in either place shows in both.
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', changeId, 'concerns'],
+    queryFn: () => changesApi.listConcerns(changeId!),
+    enabled: changeId != null,
+  })
+  const [flagging, setFlagging] = useState<string | null>(null)
+  const openRiskFor = (id: string) => (concerns as ChangeConcern[]).find((c) =>
+    c.kind === 'risk' && c.is_open && c.department_id === departmentId
+    && c.checklist_key === riskKeyOf(id))
   const impacts = impactsOf(value)
   const legacy = impacts.filter(isLegacy)
 
@@ -75,9 +119,10 @@ export default function ActivityChecklist({
 
   const put = (next: ImpactItem) => {
     const rest = impacts.filter((i) => isLegacy(i) || idOf(i) !== idOf(next))
-    // Untouched rows carry no weight: only answered ones are worth sending.
+    // Untouched rows carry no weight; a No is an answer and is kept.
     const kept = [...rest, next].filter(
-      (i) => isLegacy(i) || i.impacted || (i.remark ?? '').trim() !== '')
+      (i) => isLegacy(i) || i.answer !== undefined || i.impacted
+        || (i.remark ?? '').trim() !== '')
     onChange({ ...value, impacts: kept })
   }
 
@@ -86,14 +131,55 @@ export default function ActivityChecklist({
   const row = (id: string, label: string, def?: ChecklistItemDef) => {
     const item = answerFor(id)
     const wantsRfq = id === RFQ_ITEM && item.impacted
+    // Answering by hand drops the Rest → No mark: the row was now considered.
+    const { bulk: _bulk, ...own } = item
+    void _bulk
+    const setAnswer = (answer: 'yes' | 'no') => put(answer === 'yes'
+      ? { ...own, answer, impacted: true }
+      : { ...(item.key ? { key: item.key } : { label: item.label }), answer, impacted: false })
+    const open = !item.answer && !id.startsWith('free:')
     return (
-      <li key={id} className="py-1">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          <input type="checkbox" data-testid={`check-${id}`}
-            checked={item.impacted}
-            onChange={(e) => put({ ...item, impacted: e.target.checked })} />
-          <span className={item.impacted ? 'text-slate-100' : 'text-slate-400'}>{label}</span>
-        </label>
+      <li key={id} id={`check-row-${id}`} data-open={String(open)}
+        className={`py-1 ${highlightOpen && open ? 'border-l-2 border-amber-500 pl-2' : ''}`}>
+        <div className="flex items-center gap-2 text-sm">
+          <span role="group" aria-label={label}
+            className="flex rounded border border-slate-600 overflow-hidden flex-shrink-0">
+            {(['no', 'yes'] as const).map((ans) => (
+              <button key={ans} type="button" data-testid={`check-${ans}-${id}`}
+                aria-pressed={item.answer === ans}
+                onClick={() => setAnswer(ans)}
+                className={`px-2 py-0.5 text-xs ${item.answer === ans
+                  ? (ans === 'yes' ? 'bg-sky-700 text-white' : 'bg-slate-600 text-slate-100')
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                {t(`check.${ans}`, lang)}
+              </button>
+            ))}
+          </span>
+          <span className={item.answer === 'yes' ? 'text-slate-100'
+            : item.answer === 'no' ? 'text-slate-500' : 'text-slate-300'}>{label}</span>
+          {/* A No can still carry a risk ("no 3D change, but the stack is
+              tight"), so any answered row may flag one. */}
+          {changeId != null && item.answer && (() => {
+            const risk = openRiskFor(id)
+            return risk ? (
+              <span data-testid={`check-flagged-${id}`} className="ml-auto text-[11px] text-amber-300">
+                {t('check.riskFlagged', lang).replace('{s}', String(risk.severity ?? '?'))}
+              </span>
+            ) : (
+              <button type="button" data-testid={`check-flag-${id}`}
+                onClick={() => setFlagging(id)}
+                className="ml-auto text-[11px] text-amber-300/80 hover:text-amber-200">
+                {t('check.flagRisk', lang)}
+              </button>
+            )
+          })()}
+        </div>
+        {flagging === id && changeId != null && (
+          <ChecklistRiskForm changeId={changeId} departmentId={departmentId}
+            checklistKey={riskKeyOf(id)}
+            defaultNote={item.remark?.trim() ? `${label} — ${item.remark.trim()}` : label}
+            onDone={() => setFlagging(null)} />
+        )}
         {item.impacted && (
           <div className="mt-1 ml-6 space-y-1">
             {/* Some questions are only answered once you say which kind it is. */}
@@ -169,7 +255,7 @@ export default function ActivityChecklist({
                     const v = e.target.value.trim()
                     if (!v) return
                     setFreeLines((f) => f.map((x, j) => (j === idx ? v : x)))
-                    put({ label: v, impacted: true })
+                    put({ label: v, answer: 'yes', impacted: true })
                   }}
                   className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
               </li>

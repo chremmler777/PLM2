@@ -880,6 +880,8 @@ class ConcernCreate(BaseModel):
     # Required for kind "risk" — see RISK_TYPES / severity 1-3 in models.
     risk_type: Optional[str] = None
     severity: Optional[int] = None
+    # Set when the risk is raised from an assessment checklist row.
+    checklist_key: Optional[str] = Field(default=None, max_length=120)
 
 
 class CostLeadTimeIn(BaseModel):
@@ -950,6 +952,7 @@ class ConcernResponse(BaseModel):
     # Set on kind "risk" only; null on legacy kinds.
     risk_type: Optional[str] = None
     severity: Optional[int] = None
+    checklist_key: Optional[str] = None
     raised_by_meeting_id: Optional[int] = None
     answer_note: Optional[str] = None
     answered_at: Optional[datetime] = None

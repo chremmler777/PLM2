@@ -766,6 +766,15 @@ class ChangeConcern(Base):
     # change so the next department (and the customer conversation) can see it.
     risk_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     severity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The checklist row a risk was raised from ("threed_change", or
+    # "free:<label>" for a department's own line). Lets the row show that it
+    # is already flagged. No FK: the checklist lives in code.
+    checklist_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # A risk raised by mistake, deleted by its raiser. Hidden from the
+    # register, kept on the record: the changelog is hash-chained and the
+    # raise is already in it.
+    retracted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    retracted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     # In assessment: the department this concern soft-holds (required there).
     # In scoping: optional attribution — NULL means the whole team's point.
@@ -802,7 +811,8 @@ class ChangeConcern(Base):
 
     @property
     def is_open(self) -> bool:
-        return self.withdrawn_at is None and self.resolved_by_meeting_id is None
+        return (self.withdrawn_at is None and self.resolved_by_meeting_id is None
+                and self.retracted_at is None)
 
     @property
     def is_answered(self) -> bool:

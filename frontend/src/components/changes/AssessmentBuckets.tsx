@@ -20,6 +20,7 @@ import { impactedCount, impactsOf } from './departmentForms/ActivityChecklist'
 import { assessmentProgress } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import type {
+  ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
 } from '../../types/change'
 
@@ -152,6 +153,13 @@ export default function AssessmentBuckets({
   const changePptOf = (assessmentId?: number) =>
     evidenceOf(assessmentId).filter((a) => a.kind === 'change_ppt')
 
+  // Shared with the risk strip and the checklist rows.
+  const { data: concerns = [] } = useQuery({
+    queryKey: ['change', changeId, 'concerns'],
+    queryFn: () => changesApi.listConcerns(changeId),
+  })
+  const checklistRisks = (deptId: number) => (concerns as ChangeConcern[]).filter((c) =>
+    c.kind === 'risk' && c.is_open && c.department_id === deptId && !!c.checklist_key).length
   const { data: routing } = useQuery({
     queryKey: ['change-routing', changeId],
     queryFn: () => changesApi.getRouting(changeId),
@@ -255,6 +263,7 @@ export default function AssessmentBuckets({
         const mayOpen = isMine || canSeeAll
         const expanded = mayOpen && (autoOpen ? isMine : openDept === row.id)
         const areas = impactedCount(a?.details)
+        const risks = checklistRisks(row.id)
         const canSubmit = isMine && editable && a?.status === 'active'
         return (
           <section key={row.id} data-testid={`bucket-${row.id}`}
@@ -301,11 +310,13 @@ export default function AssessmentBuckets({
                   +{row.stale}
                 </span>
               )}
-              {areas > 0 && (
+              {(areas > 0 || risks > 0) && (
                 <span data-testid={`bucket-areas-${row.id}`}
                   className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
-                  {areas === 1 ? t('check.impactedOne')
-                    : t('check.impactedCount').replace('{n}', String(areas))}
+                  {risks > 0
+                    ? t('check.summary').replace('{n}', String(areas)).replace('{k}', String(risks))
+                    : areas === 1 ? t('check.impactedOne')
+                      : t('check.impactedCount').replace('{n}', String(areas))}
                 </span>
               )}
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs">
@@ -469,6 +480,18 @@ export default function AssessmentBuckets({
                     ))}
                   </ul>
                 )}
+                {(() => {
+                  const noRows = impactsOf(a?.details).filter((i) => i.answer === 'no')
+                  const nos = noRows.length
+                  const bulk = noRows.filter((i) => i.bulk).length
+                  return nos > 0 ? (
+                    <p className="text-xs text-slate-500" data-testid={`bucket-no-${row.id}`}>
+                      {bulk > 0
+                        ? t('check.noCountBulk').replace('{n}', String(nos)).replace('{b}', String(bulk))
+                        : t('check.noCount').replace('{n}', String(nos))}
+                    </p>
+                  ) : null
+                })()}
               </div>
             )}
           </section>

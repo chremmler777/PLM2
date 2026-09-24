@@ -16,6 +16,7 @@ vi.mock('../../api/changes', () => ({
     deleteRiskTemplate: vi.fn().mockResolvedValue({}),
     raiseConcern: vi.fn().mockResolvedValue({}),
     withdrawConcern: vi.fn().mockResolvedValue({}),
+    retractConcern: vi.fn().mockResolvedValue({}),
     answerConcern: vi.fn().mockResolvedValue({}),
   },
 }))
@@ -632,5 +633,55 @@ describe('ConcernStrip — department risk templates and vocabulary', () => {
     await waitFor(() => expect(changesApi.createRiskTemplate).toHaveBeenCalledWith({
       department_id: 4, risk_type: 'other', severity: 2, note: 'keep this one',
     }))
+  })
+})
+
+describe('ConcernStrip deleting a risk raised by mistake', () => {
+  const risk = (over = {}) => concern({ kind: 'risk', risk_type: 'timing', severity: 2,
+    department_id: 4, raised_by: 5, note: 'oops', ...over })
+  const strip = (attachments: unknown[] = []) => wrap(<ConcernStrip changeId={7} editable scoped
+    onlyDepartmentId={4} myDepartmentIds={[4]} departments={[{ id: 4, name: 'Tool Engineer' }]}
+    attachments={attachments as never} />)
+  beforeEach(() => {
+    authState.current = { userId: 5, isAdmin: false }
+    vi.mocked(changesApi.retractConcern).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('lets its raiser delete it after one confirm', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk()] as never)
+    strip()
+    fireEvent.click(await screen.findByTestId('concern-retract-1'))
+    expect(changesApi.retractConcern).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('concern-retract-confirm-1'))
+    await waitFor(() => expect(changesApi.retractConcern).toHaveBeenCalledWith(7, 1))
+  })
+
+  it("is not offered on someone else's risk", async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk({ raised_by: 9 })] as never)
+    strip()
+    await screen.findByText('oops')
+    expect(screen.queryByTestId('concern-retract-1')).toBeNull()
+  })
+
+  it('is not offered once a proposal or a document hangs off it', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      risk({ answer_note: 'move the gate', answered_at: '2026-09-24T10:00:00' })] as never)
+    strip()
+    await screen.findByText('oops')
+    expect(screen.queryByTestId('concern-retract-1')).toBeNull()
+    cleanup()
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk()] as never)
+    strip([{ id: 3, concern_id: 1, filename: 'p.pptx', kind: 'general' }])
+    await screen.findByText('oops')
+    expect(screen.queryByTestId('concern-retract-1')).toBeNull()
+  })
+
+  it('asks how a risk was addressed, not for a customer answer', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([risk({ raised_by: 9 })] as never)
+    strip()
+    fireEvent.click(await screen.findByTestId('concern-close-1'))
+    expect(screen.getByTestId('concern-withdraw-note').getAttribute('placeholder'))
+      .toBe(t('risk.resolutionPlaceholder'))
   })
 })

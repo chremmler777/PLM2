@@ -241,6 +241,11 @@ describe('AssessmentBuckets', () => {
   })
 })
 
+// The submit waits for a loaded, fully answered checklist; one row keeps the
+// tests about other rules short.
+const ONE_ROW = [{ key: 'new_process', label_de: 'Neuer Prozess',
+  label_en: 'New process', extra: false }]
+
 describe('AssessmentBuckets department questionnaires', () => {
   beforeEach(() => {
     vi.mocked(changesApi.getRouting).mockResolvedValue({
@@ -251,6 +256,7 @@ describe('AssessmentBuckets department questionnaires', () => {
       ] }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue(ONE_ROW as never)
     vi.mocked(changesApi.submitAssessment).mockClear()
   })
   afterEach(cleanup)
@@ -291,6 +297,7 @@ describe('AssessmentBuckets department questionnaires', () => {
     await screen.findByTestId('bucket-6')
     fireEvent.click(screen.getByTestId('pkg-impacted-yes'))
     fireEvent.click(screen.getByTestId('pkg-layout_change'))
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
@@ -341,47 +348,58 @@ describe('AssessmentBuckets checklist', () => {
   })
   afterEach(cleanup)
 
+  // The submit waits for every row: answer the ones a test does not care about.
+  const answerRestNo = () => CHECKLIST.forEach((i) => {
+    if (screen.getByTestId(`check-yes-${i.key}`).getAttribute('aria-pressed') !== 'true'
+      && screen.getByTestId(`check-no-${i.key}`).getAttribute('aria-pressed') !== 'true') {
+      fireEvent.click(screen.getByTestId(`check-no-${i.key}`))
+    }
+  })
+
   const open2 = async () => {
     buckets({ myDepartmentIds: [2] })
-    return screen.findByTestId('check-cycle_time_change')
+    return screen.findByTestId('check-yes-cycle_time_change')
   }
 
   it('asks the backend’s questions, whatever they are, and sends keyed answers', async () => {
     await open2()
     // Every served item renders — the list is the backend's business, not ours.
-    CHECKLIST.forEach((i) => expect(screen.getByTestId(`check-${i.key}`)).toBeTruthy())
+    CHECKLIST.forEach((i) => expect(screen.getByTestId(`check-yes-${i.key}`)).toBeTruthy())
     expect(screen.queryByTestId('check-remark-cycle_time_change')).toBeNull()
-    fireEvent.click(screen.getByTestId('check-cycle_time_change'))
+    fireEvent.click(screen.getByTestId('check-yes-cycle_time_change'))
     fireEvent.change(screen.getByTestId('check-remark-cycle_time_change'),
       { target: { value: '+2s per part' } })
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [
-          { key: 'cycle_time_change', impacted: true, remark: '+2s per part' },
-        ] },
+        details: { impacts: expect.arrayContaining([
+          { key: 'cycle_time_change', answer: 'yes', impacted: true, remark: '+2s per part' },
+          { key: 'sparepart_required', answer: 'no', impacted: false },
+        ]) },
       })))
   })
 
   it('asks for the RFQ where supplier work was ticked, and files it there', async () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
-    await screen.findByTestId('check-modification_external')
+    await screen.findByTestId('check-yes-modification_external')
     // Nothing asked until the box is ticked.
     expect(screen.queryByTestId('check-rfq-modification_external')).toBeNull()
-    fireEvent.click(screen.getByTestId('check-modification_external'))
+    fireEvent.click(screen.getByTestId('check-yes-modification_external'))
     const slot = screen.getByTestId('check-rfq-modification_external')
     expect(slot).toBeTruthy()
     // A hint, not a gate: a feasible verdict still submits without the RFQ.
     expect(screen.getByTestId('check-rfq-missing')).toBeTruthy()
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)
     const zone = screen.getAllByTestId('dropzone')
       .find((z) => z.getAttribute('data-kind') === 'rfq')
     expect(zone?.getAttribute('data-assessment')).toBe('1')
     // Internal modification is tickable on its own and asks for nothing.
-    fireEvent.click(screen.getByTestId('check-modification_internal'))
+    fireEvent.click(screen.getByTestId('check-yes-modification_internal'))
     expect(screen.queryByTestId('check-rfq-modification_internal')).toBeNull()
   })
 
@@ -391,7 +409,7 @@ describe('AssessmentBuckets checklist', () => {
       attachments: [{ id: 60, filename: 'rfq-supplier.pdf', content_type: 'application/pdf',
         size_bytes: 10, phase: 'baseline', created_at: '2026-08-01T00:00:00',
         kind: 'rfq', responds_to_id: null, concern_id: null, assessment_id: 1 }] }) })
-    fireEvent.click(await screen.findByTestId('check-modification_external'))
+    fireEvent.click(await screen.findByTestId('check-yes-modification_external'))
     expect(screen.getByTestId('check-rfq-modification_external').textContent)
       .toContain('rfq-supplier.pdf')
     expect(screen.queryByTestId('check-rfq-missing')).toBeNull()
@@ -401,15 +419,16 @@ describe('AssessmentBuckets checklist', () => {
 
   it('makes a choice-bearing item say which kind it is', async () => {
     await open2()
-    fireEvent.click(screen.getByTestId('check-article_design_update'))
+    fireEvent.click(screen.getByTestId('check-yes-article_design_update'))
     fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [
-          { key: 'article_design_update', impacted: true, choice: 'customer_given' },
-        ] },
+        details: { impacts: expect.arrayContaining([
+          { key: 'article_design_update', answer: 'yes', impacted: true, choice: 'customer_given' },
+        ]) },
       })))
   })
 
@@ -418,11 +437,13 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.click(screen.getByTestId('check-add-item'))
     fireEvent.blur(screen.getByTestId('check-free-input-0'),
       { target: { value: 'operator training' } })
+    answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     fireEvent.click(screen.getByTestId('assessment-submit'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
-        details: { impacts: [{ label: 'operator training', impacted: true }] },
+        details: { impacts: expect.arrayContaining([
+          { label: 'operator training', answer: 'yes', impacted: true }]) },
       })))
   })
 
@@ -438,6 +459,51 @@ describe('AssessmentBuckets checklist', () => {
       .toBe(t('check.impactedOne'))
     fireEvent.click(screen.getByTestId('bucket-toggle-2'))
     expect(screen.getByTestId('bucket-impacts-2').textContent).toContain('Tool rework — insert')
+  })
+
+  const submittedWithAnswers = () => buckets({ canSeeAll: true, change: change({
+    assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-09-24T00:00:00',
+      details: { impacts: [
+        { key: 'cycle_time_change', answer: 'yes', impacted: true },
+        { key: 'sparepart_required', answer: 'no', impacted: false },
+        { key: 'visual_risk', answer: 'no', impacted: false },
+      ] },
+    })] }) })
+
+  it('chip counts impacted rows and open checklist risks of that department', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([
+      { id: 1, kind: 'risk', is_open: true, department_id: 2, checklist_key: 'cycle_time_change', severity: 2 },
+      { id: 2, kind: 'risk', is_open: true, department_id: 2, checklist_key: null, severity: 1 },
+      { id: 3, kind: 'risk', is_open: false, department_id: 2, checklist_key: 'visual_risk', severity: 3 },
+      { id: 4, kind: 'risk', is_open: true, department_id: 4, checklist_key: 'visual_risk', severity: 3 },
+    ] as never)
+    submittedWithAnswers()
+    await waitFor(() => expect(screen.getByTestId('bucket-areas-2').textContent)
+      .toBe(t('check.summary').replace('{n}', '1').replace('{k}', '1')))
+  })
+
+  it('says how many No answers came from Rest → No', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
+      status: 'submitted', verdict: 'feasible', submitted_at: '2026-09-24T00:00:00',
+      details: { impacts: [
+        { key: 'cycle_time_change', answer: 'no', impacted: false },
+        { key: 'sparepart_required', answer: 'no', impacted: false, bulk: true },
+        { key: 'visual_risk', answer: 'no', impacted: false, bulk: true },
+      ] },
+    })] }) })
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-no-2').textContent)
+      .toBe(t('check.noCountBulk').replace('{n}', '3').replace('{b}', '2'))
+  })
+
+  it('lists No answers collapsed so a reviewer sees they were answered', async () => {
+    vi.mocked(changesApi.listConcerns).mockResolvedValue([])
+    submittedWithAnswers()
+    fireEvent.click(await screen.findByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-no-2').textContent)
+      .toBe(t('check.noCount').replace('{n}', '2'))
   })
 
   it('counts the impacted areas on the collapsed row once submitted', async () => {
@@ -464,7 +530,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       ] }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
-    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue([] as never)
+    vi.mocked(changesApi.assessmentChecklist).mockResolvedValue(ONE_ROW as never)
     vi.mocked(changesApi.submitAssessment).mockClear()
   })
   afterEach(cleanup)
@@ -504,6 +570,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [changePpt] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -516,6 +583,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       assessments: [assessment({ id: 1, department_id: 2, has_change_ppt: true })],
       attachments: [] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i),
       { target: { value: 'not_feasible' } })
     expect(screen.queryByTestId('bucket-evidence-required-2')).toBeNull()
@@ -536,6 +604,7 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
     buckets({ myDepartmentIds: [2], change: change({
       assessments: [assessment({ id: 1, department_id: 2 })], attachments: [] }) })
     await screen.findByTestId('bucket-2')
+    fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
     expect(screen.queryByTestId('assessment-evidence-required')).toBeNull()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(false)

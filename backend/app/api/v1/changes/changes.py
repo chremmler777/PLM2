@@ -2130,7 +2130,9 @@ async def list_concerns(
                 select(User.id, User.full_name).where(User.id.in_(user_ids))):
             names[uid] = full_name
     out = []
-    for c in change.concerns:
+    # A risk deleted by its raiser is gone from the register; the changelog
+    # keeps the record.
+    for c in (c for c in change.concerns if c.retracted_at is None):
         row = ConcernResponse.model_validate(c)
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
@@ -2151,7 +2153,8 @@ async def raise_concern(
         concern = await MeetingService.raise_concern(
             db, change, current_user, body.kind, body.note,
             department_id=body.department_id,
-            risk_type=body.risk_type, severity=body.severity)
+            risk_type=body.risk_type, severity=body.severity,
+            checklist_key=body.checklist_key)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -2207,6 +2210,26 @@ async def withdraw_concern_with_note(
     carry a resolution_note; DELETE below stays for note-less scoping ones."""
     return await _withdraw_concern(
         change_id, concern_id, body.resolution_note, current_user, db)
+
+
+@router.post("/{change_id}/concerns/{concern_id}/retract",
+             response_model=ConcernResponse)
+async def retract_concern(
+    change_id: int, concern_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Its raiser deletes a risk raised by mistake (hidden, kept on record)."""
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    try:
+        concern = await MeetingService.retract_concern(
+            db, change, concern_id, current_user)
+    except ChangeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.commit()
+    await db.refresh(concern)
+    return concern
 
 
 @router.delete("/{change_id}/concerns/{concern_id}", response_model=ConcernResponse)

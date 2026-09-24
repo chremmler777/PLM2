@@ -1992,7 +1992,12 @@ class ChangeService:
         Validated where it is written, because costing prices these rows later
         and a stray activity_id would price another department's work. Free
         text is allowed with a label only — the catalog is a starting list,
-        not a cage."""
+        not a cage.
+
+        Every checklist row must be answered yes or no: an unticked box used
+        to mean either "checked, not impacted" or "never looked at". The
+        answer is the truth; `impacted` is derived from it so costing keeps
+        reading what it always read."""
         impacts = details.get("impacts")
         if impacts is None:
             return
@@ -2001,10 +2006,16 @@ class ChangeService:
         dept = await session.get(Department, department_id)
         dept_name = dept.name if dept is not None else None
         allowed_keys = checklist.keys_for(dept_name)
+        answered: set[str] = set()
         catalog = None
         for entry in impacts:
             if not isinstance(entry, dict):
                 raise ChangeError("Each impacts entry must be an object")
+            answer = entry.get("answer")
+            if answer is not None and answer not in ("yes", "no"):
+                raise ChangeError(f"Invalid checklist answer '{answer}' — yes or no")
+            if answer is not None:
+                entry["impacted"] = answer == "yes"
             key = entry.get("key")
             if key is not None:
                 if key not in allowed_keys:
@@ -2016,6 +2027,8 @@ class ChangeService:
                     if choice not in valid:
                         raise ChangeError(
                             f"'{choice}' is not a valid choice for '{key}'")
+                if answer is not None:
+                    answered.add(key)
                 continue
             # Read-tolerant: rows stored before the checklist became a fixed
             # set still carry an activity id or a bare label. They are accepted
@@ -2034,6 +2047,22 @@ class ChangeService:
             if activity_id not in catalog:
                 raise ChangeError(
                     f"Activity {activity_id} is not in this department's catalog")
+
+        # No is an answer, silence is not. Exempt: the department's own
+        # questionnaire said "not impacted" (the form hides the checklist
+        # then), and old submissions made only of legacy rows — an activity
+        # id, or a bare line with no answer. A new free line carries an
+        # answer, so it cannot stand in for the keyed rows.
+        legacy_only = bool(impacts) and all(
+            e.get("activity_id") is not None
+            or (e.get("key") is None and e.get("answer") is None)
+            for e in impacts)
+        if details.get("impacted") is not False and not legacy_only:
+            missing = [i["label_en"] for i in checklist.items_for(dept_name)
+                       if i["key"] not in answered]
+            if missing:
+                raise ChangeError(
+                    "Checklist incomplete — unanswered: " + ", ".join(missing))
 
     @staticmethod
     async def assessment_objects(

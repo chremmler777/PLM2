@@ -266,6 +266,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risk.kind': { de: 'Risiko', en: 'Risk' },
   'risk.question': { de: 'Offene Frage', en: 'Open question' },
   'risk.proposal': { de: 'Lösungsvorschlag', en: 'Mitigation proposal' },
+  'risk.resolutionPlaceholder': { de: 'Wie wurde es gelöst?', en: 'How was it addressed?' },
+  'risk.retract': { de: 'Löschen (versehentlich angelegt)', en: 'Delete (added by mistake)' },
+  'risk.retractConfirm': { de: 'Dieses Risiko löschen?', en: 'Delete this risk?' },
+  'risk.retractYes': { de: 'Löschen', en: 'Delete' },
   'risk.resolved': { de: 'Risiko geklärt', en: 'Risk resolved' },
   'risk.open': { de: 'Offene Risiken', en: 'Open risks' },
   'risk.openCount': { de: '{n} offen', en: '{n} open' },
@@ -387,11 +391,25 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Attach the explanation (PPT) for the customer — sent by the responsible side.',
   },
   'check.hint': {
-    de: 'Was aus Ihrem Katalog ist betroffen? Angehakte Punkte werden in der '
-      + 'Kostenerfassung vorbelegt.',
-    en: 'What from your catalog is impacted? Ticked items are pre-seeded into '
-      + 'cost input.',
+    de: 'Jede Zeile mit Ja oder Nein beantworten. Ja wird in der Kostenerfassung '
+      + 'vorbelegt; wer ein Risiko sieht, meldet es direkt an der Zeile.',
+    en: 'Answer every row Yes or No. Yes is pre-seeded into cost input; if you '
+      + 'see a risk, flag it right on the row.',
   },
+  'check.yes': { de: 'Ja', en: 'Yes' },
+  'check.no': { de: 'Nein', en: 'No' },
+  'check.progress': { de: '{n} von {m} beantwortet', en: '{n} of {m} answered' },
+  'check.openRows': { de: '{n} Punkte offen', en: '{n} rows unanswered' },
+  'check.noCount': { de: '{n} × Nein', en: '{n} × No' },
+  'check.noCountBulk': {
+    de: '{n} × Nein ({b} per Rest → Nein)', en: '{n} × No ({b} set via Rest → No)' },
+  'check.restNo': { de: 'Rest → Nein', en: 'Rest → No' },
+  'check.restNoHint': {
+    de: 'Nur offene Zeilen werden Nein; jede Zeile bleibt änderbar.',
+    en: 'Only unanswered rows become No; every row stays editable.' },
+  'check.summary': { de: '{n} betroffen · {k} Risiken', en: '{n} impacted · {k} risks flagged' },
+  'check.flagRisk': { de: '⚑ Risiko melden', en: '⚑ Flag risk' },
+  'check.riskFlagged': { de: '⚑ Risiko gemeldet (Sev {s})', en: '⚑ risk flagged (sev {s})' },
   'check.remark': { de: 'Bemerkung', en: 'Remark' },
   'check.remarkPlaceholder': { de: 'Was ist zu tun?', en: 'What has to be done?' },
   'check.addItem': { de: '+ Eigener Punkt', en: '+ Own item' },

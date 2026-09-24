@@ -304,23 +304,40 @@ describe('CockpitSummary kickoff readiness at capture', () => {
   })
 })
 
-describe('CockpitSummary blocked departments', () => {
+describe('CockpitSummary waits', () => {
   afterEach(cleanup)
 
-  it('counts a held department among the blockers, leaving the wording to the banner', () => {
-    render(wrap(<CockpitSummary change={change({
-      status: 'in_assessment', blocked_department_ids: [2, 4], assessments: [],
-    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    // The wait itself is stated once, in the shared banner; the cockpit only
-    // stops claiming that nothing is blocking.
+  const waits = [
+    { key: 'assessment-round', text: 'Assessment: waiting on Development, Tool Engineer (1/3)',
+      tab: 'assessments' as const },
+  ]
+
+  it('lists what the change waits on under Blocked by, instead of nothing blocking', () => {
+    const onGo = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'in_assessment', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      waits={waits} onGo={onGo} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+    const row = screen.getByTestId('wait-assessment-round')
+    expect(row.textContent).toContain('waiting on Development, Tool Engineer (1/3)')
+    fireEvent.click(screen.getByRole('button', { name: /waiting on Development/ }))
+    expect(onGo).toHaveBeenCalledWith('assessments')
   })
 
-  it('says nothing when no department is blocked', () => {
+  it('names held departments through their wait line', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'in_assessment', blocked_department_ids: [2, 4], assessments: [],
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      waits={[{ key: 'blocked-departments', text: 'Held by own concern: Tool Engineer',
+        tab: 'assessments' }]} />))
+    expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+    expect(screen.getByTestId('wait-blocked-departments').textContent).toContain('Tool Engineer')
+  })
+
+  it('says nothing is blocking when there are no waits', () => {
     render(wrap(<CockpitSummary change={change({
       status: 'in_assessment', blocked_department_ids: [], assessments: [],
-    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    expect(screen.queryByText(/blocked by open concerns/)).toBeNull()
+    })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} waits={[]} />))
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
   })
 })
