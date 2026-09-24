@@ -28,6 +28,21 @@ export function indexByField(notes: FieldNoteSummary[] | undefined): Map<string,
   return map;
 }
 
+const VIEWPORT_MARGIN = 8;
+
+/** Keep a fixed-position menu on screen: flip to the other side of the click point when there is no room, then clamp. */
+export function clampMenuPosition(
+  x: number, y: number, size: { width: number; height: number }, viewport: { width: number; height: number },
+): { top: number; left: number } {
+  let left = x;
+  let top = y;
+  if (left + size.width > viewport.width - VIEWPORT_MARGIN) left = x - size.width;
+  if (top + size.height > viewport.height - VIEWPORT_MARGIN) top = y - size.height;
+  left = Math.max(VIEWPORT_MARGIN, Math.min(left, viewport.width - size.width - VIEWPORT_MARGIN));
+  top = Math.max(VIEWPORT_MARGIN, Math.min(top, viewport.height - size.height - VIEWPORT_MARGIN));
+  return { top, left };
+}
+
 export const POPOVER_SIZE = { width: 320, height: 360 };
 
 /** Below the anchor, above it when there is no room, never past the right edge. */

@@ -1,8 +1,8 @@
 /** Right-click (or "..." button) menu on a worksheet cell: Edit where the value lives, Comment, Flag. */
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FieldFlag } from '../../api/fieldNotes';
 import type { WorksheetRow } from '../../api/worksheet';
-import { FLAG_LABELS, FLAGS } from '../../lib/fieldNotes';
+import { FLAG_LABELS, FLAGS, clampMenuPosition } from '../../lib/fieldNotes';
 import { notePartId, type WorksheetColumn } from './worksheetColumns';
 
 export interface CellMenuState {
@@ -25,6 +25,16 @@ const item = 'w-full text-left px-3 py-1.5 text-sm text-slate-200 hover:bg-slate
 
 export default function WorksheetCellMenu({ menu, flag, onClose, onEdit, onComment, onFlag }: WorksheetCellMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Measure before paint so the menu never flashes at the raw click point when it would overflow.
+  useLayoutEffect(() => {
+    if (!menu || !ref.current) { setPos(null); return; }
+    const rect = ref.current.getBoundingClientRect();
+    setPos(clampMenuPosition(menu.x, menu.y, { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight }));
+  }, [menu]);
+
   useEffect(() => {
     if (!menu) return;
     const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
@@ -41,11 +51,12 @@ export default function WorksheetCellMenu({ menu, flag, onClose, onEdit, onComme
   const canEdit = !!menu.col.edit(menu.row);
   const canNote = notePartId(menu.col, menu.row) !== null;
   const act = (fn: () => void) => () => { fn(); onClose(); };
+  const style = pos ?? { top: menu.y, left: menu.x };
 
   return (
     <div ref={ref} role="menu" data-testid="ws-menu" aria-label={`${menu.col.label} actions`}
       className="fixed z-50 min-w-[11rem] bg-slate-700 border border-slate-600 rounded-lg shadow-lg py-1"
-      style={{ top: menu.y, left: menu.x }}>
+      style={style}>
       <button role="menuitem" type="button" data-testid="ws-menu-edit" disabled={!canEdit} onClick={act(onEdit)} className={item}
         title={canEdit ? 'Open the page where this value is changed' : 'This value is not changed on a page'}>
         Edit

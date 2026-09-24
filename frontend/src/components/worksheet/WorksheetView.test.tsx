@@ -202,4 +202,28 @@ describe('WorksheetView cell menu', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByTestId('ws-menu')).toBeNull()
   })
+
+  it('clamps the menu inside the viewport when opened near the edge', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 180, height: 200, top: 0, left: 0, right: 180, bottom: 200, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect)
+    mountRouted()
+    const cell = await screen.findByTestId('ws-cell-1-part.name')
+    fireEvent.contextMenu(cell, { clientX: window.innerWidth - 5, clientY: window.innerHeight - 5 })
+    const menu = screen.getByTestId('ws-menu')
+    const left = parseFloat(menu.style.left)
+    const top = parseFloat(menu.style.top)
+    expect(left).toBeGreaterThanOrEqual(0)
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(left + 180).toBeLessThanOrEqual(window.innerWidth)
+    expect(top + 200).toBeLessThanOrEqual(window.innerHeight)
+    rectSpy.mockRestore()
+  })
+
+  it('Flag on a tool field sends the PUT to the tool part, not the row', async () => {
+    mountRouted()
+    fireEvent.contextMenu(await screen.findByTestId('ws-cell-3-tool.cavities'))
+    fireEvent.click(screen.getByTestId('ws-menu-flag-confirmed'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/93/field-notes/tool.cavities/flag', { status: 'confirmed' }))
+  })
 })
