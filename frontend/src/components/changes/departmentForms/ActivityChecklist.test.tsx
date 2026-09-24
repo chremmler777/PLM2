@@ -12,7 +12,7 @@ vi.mock('../../../api/changes', () => ({
   changesApi: {
     assessmentChecklist: vi.fn(() => Promise.resolve(DEFS)),
     listConcerns: () => listConcerns(),
-    riskTypes: vi.fn(() => Promise.resolve({ items: [] })),
+    riskTypes: vi.fn(() => Promise.resolve({ items: [{ key: 'fill_issue', label_en: 'Fill issue' }] })),
     raiseConcern: vi.fn(),
   },
 }))
@@ -121,6 +121,7 @@ describe('ActivityChecklist risk flag', () => {
         severity: 1, risk_type: 'timing', note: 'old one' }])
     render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
     const item = await screen.findByTestId('check-risk-9')
+    await waitFor(() => expect(item.textContent).toContain('Fill issue'))
     expect(item.textContent).toContain('3')
     expect(item.textContent).toContain('gate moves')
     expect(screen.queryByTestId('check-risk-10')).toBeNull()

@@ -105,6 +105,18 @@ export default function ActivityChecklist({
     enabled: changeId != null,
   })
   const [flagging, setFlagging] = useState<string | null>(null)
+  // The department's risk vocabulary, for naming the row's risks (shared
+  // cache with the risk form).
+  const hasRowRisks = (concerns as ChangeConcern[]).some((c) =>
+    c.kind === 'risk' && c.department_id === departmentId && !!c.checklist_key)
+  const { data: riskTypeData } = useQuery({
+    queryKey: ['risk-types', departmentId],
+    queryFn: () => changesApi.riskTypes(departmentId),
+    enabled: changeId != null && hasRowRisks,
+    retry: false,
+  })
+  const riskTypeName = (k?: string | null) =>
+    (k && riskTypeData?.items?.find((i) => i.key === k)?.label_en) ?? k ?? ''
   const openRisksFor = (id: string) => (concerns as ChangeConcern[]).filter((c) =>
     c.kind === 'risk' && c.is_open && c.department_id === departmentId
     && c.checklist_key === riskKeyOf(id))
@@ -177,7 +189,7 @@ export default function ActivityChecklist({
                   onClick={() => document.getElementById(`concern-card-${r.id}`)
                     ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
                   className="text-left text-[11px] text-amber-300 hover:underline decoration-dotted underline-offset-2">
-                  ⚑ {r.severity ?? '?'} · {r.risk_type ?? ''} · {r.note}
+                  ⚑ {r.severity ?? '?'} · {riskTypeName(r.risk_type)} · {r.note}
                 </button>
               </li>
             ))}
