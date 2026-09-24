@@ -308,7 +308,7 @@ class MeetingService:
         if concern is None or concern.change_id != change.id:
             raise ChangeError("Concern not found on this change")
         if concern.kind != "risk":
-            raise ChangeError("Only a risk can be deleted — close other concerns instead")
+            raise ChangeError("Only a risk can be deleted; close other concerns instead")
         if not concern.is_open:
             raise ChangeError("This risk is no longer open")
         if concern.raised_by != user.id:
@@ -319,14 +319,14 @@ class MeetingService:
                 ChangeAttachment.concern_id == concern.id))).scalar() or 0
         if concern.answered_at is not None or docs:
             raise ChangeError(
-                "This risk already has a mitigation proposal or documents — "
+                "This risk already has a mitigation proposal or documents; "
                 "resolve it instead of deleting it")
         concern.retracted_at = datetime.utcnow()
         concern.retracted_by = user.id
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "concern_retracted",
-            f"Risk #{concern.id} deleted — raised by mistake: {concern.note}",
+            f"Risk #{concern.id} deleted, raised by mistake: {concern.note}",
             user.id, new_value={"concern_id": concern.id,
                                 "checklist_key": concern.checklist_key})
         return concern

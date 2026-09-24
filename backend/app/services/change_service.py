@@ -2013,7 +2013,7 @@ class ChangeService:
                 raise ChangeError("Each impacts entry must be an object")
             answer = entry.get("answer")
             if answer is not None and answer not in ("yes", "no"):
-                raise ChangeError(f"Invalid checklist answer '{answer}' — yes or no")
+                raise ChangeError(f"Invalid checklist answer '{answer}': yes or no")
             if answer is not None:
                 entry["impacted"] = answer == "yes"
             key = entry.get("key")
@@ -2062,7 +2062,7 @@ class ChangeService:
                        if i["key"] not in answered]
             if missing:
                 raise ChangeError(
-                    "Checklist incomplete — unanswered: " + ", ".join(missing))
+                    "Checklist incomplete, unanswered: " + ", ".join(missing))
 
     @staticmethod
     async def assessment_objects(

@@ -110,7 +110,7 @@ describe('ActivityChecklist risk flag', () => {
       value={{ impacts: [{ key: 'threed_change', answer: 'yes', impacted: true, remark: 'gate moves' }] }} />))
     fireEvent.click(await screen.findByTestId('check-flag-threed_change'))
     expect((screen.getByTestId('check-risk-note') as HTMLTextAreaElement).value)
-      .toBe('3D change necessary — gate moves')
+      .toBe('3D change necessary: gate moves')
   })
 
   it('lists the row\'s open risks under it and still offers ⚑ for another', async () => {

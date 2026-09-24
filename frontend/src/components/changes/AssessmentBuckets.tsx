@@ -529,7 +529,7 @@ function ImpactAnswers({ departmentId, details, riskKeys }: {
         const id = i.key ?? `free:${i.label ?? ''}`
         return (
           <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}>
-            ✓ {labelOf(i)}{i.remark ? ` — ${i.remark}` : ''}
+            ✓ {labelOf(i)}{i.remark ? `: ${i.remark}` : ''}
             {riskKeys.has(id) && (
               <span data-testid={`bucket-impact-risk-${id}`} className="ml-1 text-amber-300">⚑</span>
             )}

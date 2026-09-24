@@ -198,7 +198,7 @@ export default function ActivityChecklist({
         {flagging === id && changeId != null && (
           <ChecklistRiskForm changeId={changeId} departmentId={departmentId}
             checklistKey={riskKeyOf(id)}
-            defaultNote={item.remark?.trim() ? `${label} — ${item.remark.trim()}` : label}
+            defaultNote={item.remark?.trim() ? `${label}: ${item.remark.trim()}` : label}
             onDone={() => setFlagging(null)} />
         )}
         {item.impacted && (

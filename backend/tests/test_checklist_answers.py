@@ -46,7 +46,7 @@ async def test_incomplete_checklist_is_refused_naming_the_rows(client, admin_aut
     res = await _submit(client, admin_auth, tab, {"impacts": impacts})
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail.startswith("Checklist incomplete — unanswered: ")
+    assert detail.startswith("Checklist incomplete, unanswered: ")
     assert "Prototyping required" in detail and "Matching/sampling required" in detail
 
 

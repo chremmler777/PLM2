@@ -458,7 +458,7 @@ describe('AssessmentBuckets checklist', () => {
     expect((await screen.findByTestId('bucket-areas-2')).textContent)
       .toBe(t('check.impactedOne'))
     fireEvent.click(screen.getByTestId('bucket-toggle-2'))
-    expect(screen.getByTestId('bucket-impacts-2').textContent).toContain('Tool rework — insert')
+    expect(screen.getByTestId('bucket-impacts-2').textContent).toContain('Tool rework: insert')
   })
 
   const submittedWithAnswers = () => buckets({ canSeeAll: true, change: change({
