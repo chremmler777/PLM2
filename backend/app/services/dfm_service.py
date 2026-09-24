@@ -3,6 +3,7 @@ files on disk under uploads/dfm/<tool>/<entry>/. Nothing is deleted; an
 update is a new entry that supersedes the old one."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import mimetypes
@@ -19,6 +20,7 @@ from app.models.dfm import (
 )
 from app.models.entities import User
 from app.models.part import Part
+from app.services import dfm_audit
 from app.services.part_service import ChangelogService
 
 logger = logging.getLogger(__name__)
@@ -247,6 +249,8 @@ class DfmService:
         await ChangelogService.log_action(
             session, part_id=tool.id, action="dfm_topic_opened",
             action_description=f"DFM topic opened: {topic.title}", performed_by=user_id)
+        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_opened", actor_id=user_id,
+                                     topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
@@ -259,6 +263,8 @@ class DfmService:
         await ChangelogService.log_action(
             session, part_id=tool.id, action="dfm_topic_closed",
             action_description=f"DFM topic finished confirmed: {topic.title}", performed_by=user_id)
+        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_closed", actor_id=user_id,
+                                     topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
@@ -271,6 +277,8 @@ class DfmService:
         await ChangelogService.log_action(
             session, part_id=tool.id, action="dfm_topic_reopened",
             action_description=f"DFM topic reopened: {topic.title}", performed_by=user_id)
+        await dfm_audit.record_event(session, tool_part_id=tool.id, action="topic_reopened", actor_id=user_id,
+                                     topic_id=topic.id, details={"title": topic.title})
         return topic
 
     @staticmethod
@@ -323,6 +331,7 @@ class DfmService:
 
         target_dir = dfm_dir(tool.id, entry.id)
         written: list[str] = []
+        stored: list[DfmEntryFile] = []
         try:
             if files:
                 os.makedirs(target_dir, exist_ok=True)
@@ -330,15 +339,20 @@ class DfmService:
                 ext = os.path.splitext(name)[1].lower()
                 saved = f"{uuid.uuid4().hex}{ext}"
                 path = os.path.join(target_dir, saved)
+                digest = hashlib.sha256()
                 with open(path, "wb") as fh:
                     fh.write(contents)
+                    digest.update(contents)
                 written.append(path)
                 stored_type = (content_type or mimetypes.guess_type(name)[0] or "application/octet-stream")
-                session.add(DfmEntryFile(
+                row = DfmEntryFile(
                     entry_id=entry.id, original_filename=truncate_filename(name), saved_filename=saved,
                     file_size=len(contents),
                     content_type=stored_type[:MAX_CONTENT_TYPE_LEN],
-                    uploaded_by=user_id))
+                    sha256=digest.hexdigest(),
+                    uploaded_by=user_id)
+                session.add(row)
+                stored.append(row)
             await session.flush()
             await session.refresh(entry, attribute_names=["files"])
             what = "updated" if supersedes_id else "recorded"
@@ -347,6 +361,14 @@ class DfmService:
                 action_description=f"DFM entry ({kind}) {what} in {topic.title} by {party} to {', '.join(targets)}"
                                    + (f" with {len(files)} file(s)" if files else ""),
                 performed_by=user_id)
+            await dfm_audit.record_event(
+                session, tool_part_id=tool.id, action="entry_updated" if supersedes_id else "entry_recorded",
+                actor_id=user_id, topic_id=topic.id, entry_id=entry.id, details=dfm_audit.entry_details(entry))
+            for row in stored:
+                await dfm_audit.record_event(
+                    session, tool_part_id=tool.id, action="file_attached", actor_id=user_id, topic_id=topic.id,
+                    entry_id=entry.id, file_id=row.id, details=dfm_audit.file_details(row))
+            await session.flush()
         except Exception:
             for path in written:
                 try:
@@ -380,7 +402,7 @@ class DfmService:
     def file_dict(f: DfmEntryFile, names: dict) -> dict:
         return {
             "id": f.id, "entry_id": f.entry_id, "original_filename": f.original_filename,
-            "file_size": f.file_size, "content_type": f.content_type,
+            "file_size": f.file_size, "content_type": f.content_type, "sha256": f.sha256,
             "uploaded_by": f.uploaded_by, "uploaded_by_name": names.get(f.uploaded_by),
             "uploaded_at": _iso(f.uploaded_at),
         }

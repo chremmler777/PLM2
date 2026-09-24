@@ -72,7 +72,33 @@ class DfmEntryFile(Base):
     saved_filename: Mapped[str] = mapped_column(String(255))  # <uuid><ext> under uploads/dfm/<tool>/<entry>/
     file_size: Mapped[int] = mapped_column(Integer)
     content_type: Mapped[str] = mapped_column(String(100))
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)  # hex; NULL for files before 081
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     entry: Mapped["DfmEntry"] = relationship(back_populates="files")
+
+
+# Audit actions. Events are append-only: there is no update or delete path.
+DFM_AUDIT_ACTIONS = (
+    "topic_opened", "topic_closed", "topic_reopened",
+    "entry_recorded", "entry_updated",
+    "file_attached", "file_downloaded", "file_viewed",
+)
+
+
+class DfmAuditEvent(Base):
+    """One thing that happened in a tool's DFM archive: who, when, what, on
+    which topic / entry / file. Written in the same transaction as the change
+    it describes; file reads are written right after serving is authorised."""
+    __tablename__ = "dfm_audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tool_part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), index=True)
+    topic_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_topics.id"), nullable=True, index=True)
+    entry_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entries.id"), nullable=True)
+    file_id: Mapped[int | None] = mapped_column(ForeignKey("dfm_entry_files.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(40))
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
