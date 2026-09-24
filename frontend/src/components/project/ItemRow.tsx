@@ -5,7 +5,7 @@
  * block (revisions, linked items) and drag-to-restructure onto a
  * sub-assembly work as before.
  */
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import ColourSwatch from '../paint/ColourSwatch';
 import PartNumbers from '../parts/PartNumbers';
 import PartThumbnail from '../parts/PartThumbnail';
@@ -14,7 +14,26 @@ import { shortName, stripProjectCode } from '../../lib/partDisplay';
 import { articleOf, type ProjectStructure } from '../../hooks/queries/useProjectStructure';
 import type { PartPaintLayer } from '../../types/paint';
 import { CATEGORY_META, type TreeNode } from './projectTypes';
-import { MIRROR_LANE_WIDTH, type MirrorSegment } from './mirrorConnectors';
+import {
+  MIRROR_LANE_WIDTH, MIRROR_LINE, MIRROR_ROW_GAP, MIRROR_TICK_GAP, type MirrorSegment,
+} from './mirrorConnectors';
+
+/** Row-local x of the thumbnail's left edge at depth 0: chevron (16) + gap-1 (4) + button border (1) + px-2 (8). */
+const THUMB_OFFSET = 29;
+
+/**
+ * 2px dotted line in the mirror (red-300) colour. A viewport-anchored
+ * gradient instead of a dotted border keeps the dot rhythm unbroken where
+ * one row's piece meets the next.
+ */
+const DOT = `#fca5a5 0 ${MIRROR_LINE}px, transparent ${MIRROR_LINE}px ${MIRROR_LINE * 2}px`;
+const DOTS_V: React.CSSProperties = {
+  width: `${MIRROR_LINE}px`, backgroundImage: `repeating-linear-gradient(to bottom, ${DOT})`, backgroundAttachment: 'fixed',
+};
+const DOTS_H: React.CSSProperties = {
+  // Ticks are anchored to their own right end so a dot always meets the thumbnail edge.
+  height: `${MIRROR_LINE}px`, backgroundImage: `repeating-linear-gradient(to left, ${DOT})`,
+};
 
 export interface ItemRowProps {
   node: TreeNode;
@@ -75,43 +94,44 @@ export default function ItemRow(props: ItemRowProps) {
   const mirrorSegments = mirrorConnectors?.get(part.id) ?? [];
   const isMirrorHighlighted = mirrorSegments.some((s) => hoveredMirrorPairIds?.has(s.pairId));
 
+  // The dotted bracket sits between the chevron and the thumbnail. Rows
+  // get `mirrorGutterWidth` extra left padding in the row button so the
+  // lanes fit; ticks meet the thumbnail's left edge at its vertical centre,
+  // which is the header's centre (the thumbnail is centred in the button).
+  const thumbLeft = indent + THUMB_OFFSET + mirrorGutterWidth;
+  const laneLeft = (lane: number) => thumbLeft - MIRROR_TICK_GAP - MIRROR_LINE - lane * MIRROR_LANE_WIDTH;
+  const segClass = (pairId: string) =>
+    `pointer-events-none absolute ${hoveredMirrorPairIds?.has(pairId) ? 'opacity-100' : 'opacity-70'}`;
+
   return (
     <div
-      className="flex items-stretch"
       onMouseEnter={() => mirrorSegments.length > 0 && onHoverRow?.(part.id)}
       onMouseLeave={() => mirrorSegments.length > 0 && onHoverRow?.(null)}
     >
-      {mirrorGutterWidth > 0 && (
-        <div aria-hidden="true" className="relative flex-shrink-0" style={{ width: `${mirrorGutterWidth}px` }}>
-          {mirrorSegments.map((seg) => {
-            const active = hoveredMirrorPairIds?.has(seg.pairId) ?? false;
-            return (
-              <div
-                key={`${seg.lane}-${seg.kind}`}
-                data-testid={`mirror-seg-${part.id}-${seg.lane}-${seg.kind}`}
+      <div className="relative flex items-stretch gap-1" style={{ paddingLeft: `${indent}px` }}>
+        {mirrorSegments.map((seg) => (
+          <Fragment key={`${seg.lane}-${seg.kind}`}>
+            <span
+              aria-hidden="true"
+              data-testid={`mirror-seg-${part.id}-${seg.lane}-${seg.kind}`}
+              className={segClass(seg.pairId)}
+              style={{
+                ...DOTS_V,
+                left: `${laneLeft(seg.lane)}px`,
+                top: seg.kind === 'start' ? 'calc(50% - 1px)' : 0,
+                bottom: seg.kind === 'end' ? 'calc(50% - 1px)' : 0,
+              }}
+            />
+            {seg.kind !== 'middle' && (
+              <span
                 aria-hidden="true"
-                className={`absolute border-l-2 border-dotted border-red-300 ${active ? 'opacity-100' : 'opacity-70'}`}
-                style={{
-                  left: `${seg.lane * MIRROR_LANE_WIDTH}px`,
-                  width: `${MIRROR_LANE_WIDTH}px`,
-                  top: seg.kind === 'start' ? '50%' : 0,
-                  bottom: seg.kind === 'end' ? '50%' : 0,
-                }}
-              >
-                {seg.kind !== 'middle' && (
-                  <span
-                    aria-hidden="true"
-                    className={`absolute border-t-2 border-dotted border-red-300 ${active ? 'opacity-100' : 'opacity-70'}`}
-                    style={{ top: 0, left: 0, width: `${MIRROR_LANE_WIDTH}px` }}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-      <div className="flex items-stretch gap-1" style={{ paddingLeft: `${indent}px` }}>
+                data-testid={`mirror-tick-${part.id}-${seg.lane}`}
+                className={segClass(seg.pairId)}
+                style={{ ...DOTS_H, left: `${laneLeft(seg.lane)}px`, width: `${thumbLeft - laneLeft(seg.lane)}px`, top: 'calc(50% - 1px)' }}
+              />
+            )}
+          </Fragment>
+        ))}
         {expandable ? (
           <button
             type="button"
@@ -149,6 +169,7 @@ export default function ItemRow(props: ItemRowProps) {
             setDragOver(false);
             if (isDropTarget) onDropOnPart(part.id);
           }}
+          style={mirrorGutterWidth > 0 ? { paddingLeft: `${8 + mirrorGutterWidth}px` } : undefined}
           className={`flex-1 min-w-0 text-left px-2 py-1 rounded border transition ${
             dragOver && isDropTarget
               ? 'bg-green-900/40 border-green-500'
@@ -200,6 +221,17 @@ export default function ItemRow(props: ItemRowProps) {
         </button>
       </div>
 
+      {/* Everything below the header; carries the vertical line on to the next row, across the list's row gap. */}
+      <div className="relative flow-root">
+        {mirrorSegments.filter((seg) => seg.kind !== 'end').map((seg) => (
+          <span
+            key={`${seg.lane}-${seg.kind}`}
+            aria-hidden="true"
+            data-testid={`mirror-tail-${part.id}-${seg.lane}`}
+            className={segClass(seg.pairId)}
+            style={{ ...DOTS_V, left: `${laneLeft(seg.lane)}px`, top: 0, bottom: `-${MIRROR_ROW_GAP}px` }}
+          />
+        ))}
       {expanded && hasStructure && (
         <div className="my-1 space-y-1 text-xs" style={{ marginLeft: `${indent + 68}px` }}>
           {article!.revisions.length > 0 && (

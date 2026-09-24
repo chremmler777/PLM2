@@ -97,6 +97,11 @@ describe('ItemsPane', () => {
       mount({ parts: mirrorParts, structure: mirrorStructure })
       expect(screen.getByTestId('mirror-seg-2-0-start')).toBeTruthy()
       expect(screen.getByTestId('mirror-seg-3-0-end')).toBeTruthy()
+      // Both rows get a tick to the thumbnail; only the start row carries the line on past its row.
+      expect(screen.getByTestId('mirror-tick-2-0')).toBeTruthy()
+      expect(screen.getByTestId('mirror-tick-3-0')).toBeTruthy()
+      expect(screen.getByTestId('mirror-tail-2-0')).toBeTruthy()
+      expect(screen.queryByTestId('mirror-tail-3-0')).toBeNull()
     })
 
     it('draws no connectors when the partner is filtered out', () => {

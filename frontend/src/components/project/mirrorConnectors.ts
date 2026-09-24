@@ -7,6 +7,12 @@ import type { StructureArticle } from '../../hooks/queries/useProjectStructure';
 
 export const MIRROR_LANE_WIDTH = 6;
 export const MIRROR_MAX_LANES = 3;
+/** Dotted line thickness in px. */
+export const MIRROR_LINE = 2;
+/** Space between the innermost lane and the thumbnail's left edge. */
+export const MIRROR_TICK_GAP = 6;
+/** Vertical gap between rows in the list (space-y-0.5); the line bridges it. */
+export const MIRROR_ROW_GAP = 2;
 
 export interface MirrorSegment {
   lane: number;
