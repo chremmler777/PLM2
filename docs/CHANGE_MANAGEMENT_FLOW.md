@@ -192,8 +192,10 @@ Three typed containers, three responsibilities:
   member's assessment tab is their own department's bucket, auto-expanded,
   plus one slim progress line ("4/6 submitted — waiting on …"). The full
   per-department board belongs to PM, Sales, the change lead and admins.
-  A **team wait-banner line** during `in_assessment` tells every viewer who
-  is still owed ("Assessment: waiting on Development, APQP (4/6)").
+  Who is still owed ("Assessment: waiting on Development, APQP (4/6)") is a
+  ⏳ row in the cockpit's **Blocked by** card for every viewer (2026-09-24:
+  the separate wait banner above the cockpit is gone; `resolveWaitStates`
+  feeds `CockpitSummary`'s `waits` prop).
 - **A bucket binds to the row that matters now**: the active one, else the
   latest answer, else the earliest dormant one — a submitted verdict never
   disappears behind a not-yet-started later stage, which shows as "Later
@@ -224,6 +226,35 @@ Three typed containers, three responsibilities:
   Checked items seed the department's costing grid (cycle time → lifecycle
   line, rest one-time; remark travels as the line note; deliberate deletions
   are remembered).
+- **Every checklist row is answered (2026-09-24,
+  spec `docs/superpowers/specs/2026-09-24-assessment-checklist-answers-design.md`).**
+  Each `details.impacts` entry carries `answer: "yes" | "no"`; `impacted`
+  is derived from it server-side (`answer == "yes"`), so costing, the RFQ
+  hint and the cost-task skip read what they always read. No rows are
+  stored. `_validate_impacts` refuses a submit whose checklist is
+  incomplete and names the unanswered rows. Exempt: a
+  questionnaire "not impacted" (`details.impacted is False`), a submit
+  without `details.impacts` (API callers), and old submissions made only
+  of legacy rows (activity id, or a bare line with no answer). The form
+  holds the submit until the checklist has loaded and every row is
+  answered. **Rest → No** fills only unanswered rows and marks them
+  `bulk: true`; a row changed by hand drops the mark; the bucket shows
+  "n × No (b set via Rest → No)".
+- **Risks flagged from a row (2026-09-24).** `change_concerns.checklist_key`
+  (migration 085; a checklist key or `free:<label>`, ≤120 chars, risks
+  only, validated against the department's checklist) links a risk to the
+  row it was raised from. The row lists its open risks compactly and jumps
+  to the card; the card in the department's risk panel says "from: <row>"
+  and is the only place for proposal / resolve / delete. The panel's own
+  button is "+ Risk not on the checklist". Submitted answers name the Yes
+  rows and mark those with open risks (⚑).
+- **Delete a risk raised by mistake (2026-09-24).** `POST
+  /changes/{id}/concerns/{cid}/retract`: its raiser only, open risks only,
+  refused once a mitigation proposal (`answered_at`) or a document
+  (`concern_id` attachment) exists. Sets `retracted_at/by` (migration 086);
+  `is_open` is false, the concerns list omits it, the changelog records
+  `concern_retracted`. Nothing is erased; the changelog is hash-chained.
+  Resolving a risk ("Risk resolved") asks "How was it addressed?".
 
 ### Costing & timing shape (2026-08-11, in build; positions added 2026-08-12)
 

@@ -104,8 +104,10 @@ Open any change and you land on its cockpit. Three things orient you immediately
 2. **Three cards** right below the stepper:
    - **Status** — the current status pill, the lead, the deadline, and when the change was created/updated.
    - **Blocked by** — lists anything stopping the change moving forward: an open gate, pending
-     deviations, overdue assessments, an unconfirmed impact, or unclaimed tasks. If nothing is
-     blocking, it says "Nothing blocking".
+     deviations, overdue assessments, an unconfirmed impact, and everything the change is
+     waiting on (⏳ lines such as "Assessment: waiting on Development, Tool Engineer (1/5)", an
+     open customer question, missing costing input). Click a ⏳ line to jump to the tab where it
+     is done. If nothing is blocking, it says "Nothing blocking".
    - **Next step** — a button for each status the change could move to next. Click it to advance.
 3. **Tabs** below that: Overview · Scoping · Impacted · Assessments · Commercial · Implementation.
    These are the tabs everyone sees. If you're an admin, the change lead, or a member of Quality
