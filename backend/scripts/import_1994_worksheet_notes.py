@@ -18,12 +18,13 @@ Per Excel row (article by the OEM number in column D, tool by column B):
 - Proposed resin and resin status: a comment on part.material, flag from the colour.
 - Cavities differing from PLM (or marked yellow): open flag and a comment on the
   tool's tool.cavities; PLM cavities are never overwritten.
-- Painted (column L): a comment on paint.painted. Colour (column M): a comment on
-  paint.colour, always (see colour code above for the plain-code value action).
-  MIC / colour change (column N) and an open colour question/answer (QUESTION_FIELD
-  entries mapped to a colour, not a painted question): a comment on paint.colour for a
-  painted article, part.colour_code for an unpainted one - the same field the value and
-  the M comment already use for a painted article, but the MIC code field otherwise.
+- Painted (column L): a comment on paint.painted. Colour (column M), MIC / colour change
+  (column N) and an open colour question/answer (QUESTION_FIELD entries mapped to a
+  colour, not a painted question): a comment on paint.colour for a painted article,
+  part.colour_code for an unpainted one - the same field the plain-code value action
+  above uses. The first import put every one of these on paint.colour regardless, so
+  an unpainted article's legacy comment there still counts as imported (no duplicate
+  on part.colour_code).
 - Open question and answer: comments on the field they are about (QUESTION_FIELD);
   the first import put them all on paint.colour, where found they count as imported.
 - Grain (drawing, frozen RFQ, gloss, question, answer): one comment on part.grain,
@@ -207,12 +208,12 @@ async def plan_actions(session: AsyncSession, project_id: int, rows: list[dict])
             comment(article, "part.name", f"Designation on the drawing: {_s(cells, 'F')}", "open")
         if _f(cells, "L"):
             comment(article, "paint.painted", f"Painted: {_s(cells, 'L')}", _f(cells, "L"))
-        if _f(cells, "M"):
-            comment(article, "paint.colour", f"Colour: {_s(cells, 'M')}", _f(cells, "M"))
-        # The first import put every colour comment on paint.colour, painted or not: the legacy
-        # key is paint.colour whenever the current key ends up elsewhere.
+        # The first import put every colour comment (M, N, question/answer) on paint.colour,
+        # painted or not: the legacy key is paint.colour whenever the current key ends up elsewhere.
         colour_key = colour_field(painted)
         colour_legacy_key = "paint.colour" if colour_key != "paint.colour" else None
+        if _f(cells, "M"):
+            comment(article, colour_key, f"Colour: {_s(cells, 'M')}", _f(cells, "M"), legacy_key=colour_legacy_key)
         if _f(cells, "N"):
             comment(article, colour_key, f"MIC / colour change: {_s(cells, 'N')}", _f(cells, "N"),
                     legacy_key=colour_legacy_key)

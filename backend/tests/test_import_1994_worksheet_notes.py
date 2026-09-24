@@ -274,6 +274,45 @@ async def test_colour_comments_on_an_unpainted_article_dedupe_against_the_first_
     assert not any(a.part_id == ids["iso"] and a.field_key in ("part.colour_code", "paint.colour") for a in actions)
 
 
+async def test_colour_comment_column_m_routes_by_painted_status_with_legacy_dedupe(session_factory, seed, tmp_path):
+    """Column M (Colour) is about the article's own colour code on an unpainted article, the paint
+    otherwise - like N and the colour question/answer - and the first import's paint.colour wording
+    still dedupes it."""
+    from app.models.paint import PartPaint
+    from app.services.field_note_service import FieldNoteService
+    mod = _load()
+    ids = await _parts(session_factory, seed)
+    rows = mod.read_rows(_xlsx(tmp_path))
+    rows[0]["M"] = mod.Cell("NM0", "confirmed")  # lh (row 0) is unpainted in PLM and in the Excel
+
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    m_comment = [a for a in actions if a.kind == "comment" and a.part_id == ids["lh"] and a.text == PREFIX + "Colour: NM0"]
+    assert [a.field_key for a in m_comment] == ["part.colour_code"]
+    assert ("flag", ids["lh"], "part.colour_code", "confirmed") in [
+        (a.kind, a.part_id, a.field_key, a.flag) for a in actions]
+
+    async with session_factory() as s:
+        s.add(PartPaint(part_id=ids["lh"], paint_required=True))
+        await s.commit()
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    m_comment = [a for a in actions if a.kind == "comment" and a.part_id == ids["lh"] and a.text == PREFIX + "Colour: NM0"]
+    assert [a.field_key for a in m_comment] == ["paint.colour"]
+
+    # legacy dedupe: the first import wrote this wording to paint.colour even though lh is unpainted
+    async with session_factory() as s:
+        paint = (await s.execute(select(PartPaint).where(PartPaint.part_id == ids["lh"]))).scalar_one()
+        paint.paint_required = False  # back to unpainted
+        lh = await s.get(Part, ids["lh"])
+        await FieldNoteService.add_comment(s, lh, "paint.colour", "Colour: NM0", seed["engineer_id"])
+        await s.commit()
+    async with session_factory() as s:
+        actions, _ = await mod.plan_actions(s, seed["project_id"], rows)
+    assert not any(a.part_id == ids["lh"] and a.field_key in ("part.colour_code", "paint.colour")
+                   and a.kind == "comment" and "Colour: NM0" in (a.text or "") for a in actions)
+
+
 async def test_paint_questions_map_by_question_text():
     mod = _load()
     # "Painted or MIC?" and "Painted VM0 or chrome?" are about painted or not

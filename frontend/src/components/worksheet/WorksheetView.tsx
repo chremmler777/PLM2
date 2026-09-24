@@ -15,7 +15,7 @@ import { useWorksheet } from '../../hooks/queries/useWorksheet';
 import { FOCUS_PARAM } from '../../hooks/useFieldFocus';
 import { apiErrorMessage } from '../../lib/apiError';
 import { flagTint } from '../../lib/fieldNotes';
-import { WORKSHEET_COLUMNS, buildContext, cellNoteKey, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
+import { WORKSHEET_COLUMNS, activeNoteFor, buildContext, cellNoteKey, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
   applyFilters, buildExportPayload, filterOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible,
   saveHiddenColumns, sortRows, visibleColumns, type RowKindFilter, type SortState,
@@ -55,7 +55,10 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const ctx = useMemo(() => buildContext(notes, projectCode), [notes, projectCode]);
-  const menuNote = menu ? noteFor(menu.col, menu.row, ctx) : undefined;
+  // The menu's current flag and any flag/comment it writes both belong to the active key only -
+  // never the Colour column's combined note (that would show the other key's flag as if it were
+  // this one's, and "Clear flag" would clear a key that never had one).
+  const menuNote = menu ? activeNoteFor(menu.col, menu.row, ctx) : undefined;
   const cols = useMemo(() => visibleColumns(hidden), [hidden]);
   const offsets = useMemo(() => frozenOffsets(cols), [cols]);
   const kindRows = useMemo(() => (data?.rows ?? []).filter((r) => rowKindVisible(r, kinds)), [data, kinds]);
@@ -193,7 +196,10 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
                 {shown.map((row) => (
                   <tr key={row.part_id} data-testid={`ws-row-${row.part_id}`} className="hover:bg-slate-800/40">
                     {cols.map((c) => {
+                      // Tint and data-flag use the combined note (worst of both colour keys); the
+                      // marker itself gets only its own key's note - see noteFor / activeNoteFor.
                       const note = noteFor(c, row, ctx);
+                      const activeNote = activeNoteFor(c, row, ctx);
                       const id = `${row.part_id}|${c.key}`;
                       return (
                         <td key={c.key} data-testid={`ws-cell-${row.part_id}-${c.key}`} data-flag={note?.flag_status ?? ''}
@@ -202,7 +208,7 @@ export default function WorksheetView({ projectId, projectCode = null, onClose }
                           className={`group p-0 border-b border-slate-800 whitespace-nowrap ${frozenClass(c)}`}>
                           <div data-testid={`ws-tint-${row.part_id}-${c.key}`} style={frozenBox(c)}
                             className={`${cellPad(c)} py-1 ${flagTint(note?.flag_status)}`}>
-                            <WorksheetCell row={row} col={c} ctx={ctx} note={note}
+                            <WorksheetCell row={row} col={c} ctx={ctx} note={activeNote}
                               noteOpen={openNote === id}
                               projectId={projectId}
                               onNoteOpenChange={(open) => setOpenNote(open ? id : null)}
