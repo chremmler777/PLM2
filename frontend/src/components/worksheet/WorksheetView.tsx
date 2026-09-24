@@ -4,16 +4,23 @@
  * changed where they live (article, tool, paint); here a cell is only read,
  * commented and flagged. Full width while active; the detail pane is hidden.
  */
-import { useMemo, useState } from 'react';
-import { useProjectFieldNotes } from '../../hooks/queries/useFieldNotes';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { setFieldFlag, type FieldFlag } from '../../api/fieldNotes';
+import { useProjectFieldNotes, FIELD_NOTES_KEY } from '../../hooks/queries/useFieldNotes';
 import { useWorksheet } from '../../hooks/queries/useWorksheet';
+import { FOCUS_PARAM } from '../../hooks/useFieldFocus';
+import { apiErrorMessage } from '../../lib/apiError';
 import { flagTint } from '../../lib/fieldNotes';
-import { WORKSHEET_COLUMNS, buildContext, noteFor, type WorksheetColumn } from './worksheetColumns';
+import { WORKSHEET_COLUMNS, buildContext, noteFor, notePartId, type WorksheetColumn } from './worksheetColumns';
 import {
   applyFilters, enumOptions, frozenOffsets, loadHiddenColumns, offeredFilters, rowKindVisible, saveHiddenColumns,
   sortRows, visibleColumns, type RowKindFilter, type SortState,
 } from './worksheetTable';
 import WorksheetCell from './WorksheetCell';
+import WorksheetCellMenu, { type CellMenuState } from './WorksheetCellMenu';
 
 export interface WorksheetViewProps {
   projectId: number;
@@ -32,8 +39,18 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
   const [kinds, setKinds] = useState<RowKindFilter>({ purchased: false, toolOnly: false });
   const [showColumns, setShowColumns] = useState(false);
   const [openNote, setOpenNote] = useState<string | null>(null); // `${row.part_id}|${col.key}`
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [menu, setMenu] = useState<CellMenuState | null>(null);
+  const flagMutation = useMutation({
+    mutationFn: ({ partId, key, flag }: { partId: number; key: string; flag: FieldFlag | null }) => setFieldFlag(partId, key, flag),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [FIELD_NOTES_KEY] }),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not set the flag')),
+  });
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   const ctx = useMemo(() => buildContext(notes), [notes]);
+  const menuNote = menu ? noteFor(menu.col, menu.row, ctx) : undefined;
   const cols = useMemo(() => visibleColumns(hidden), [hidden]);
   const offsets = useMemo(() => frozenOffsets(cols), [cols]);
   const kindRows = useMemo(() => (data?.rows ?? []).filter((r) => rowKindVisible(r, kinds)), [data, kinds]);
@@ -156,13 +173,14 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
                     return (
                       <td key={c.key} data-testid={`ws-cell-${row.part_id}-${c.key}`} data-flag={note?.flag_status ?? ''}
                         style={frozenStyle(c)}
+                        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, row, col: c }); }}
                         className={`group p-0 border-b border-slate-800 whitespace-nowrap ${frozenClass(c)}`}>
                         <div data-testid={`ws-tint-${row.part_id}-${c.key}`} style={frozenBox(c)}
                           className={`${cellPad(c)} py-1 ${flagTint(note?.flag_status)}`}>
                           <WorksheetCell row={row} col={c} ctx={ctx} note={note}
                             noteOpen={openNote === id}
                             onNoteOpenChange={(open) => setOpenNote(open ? id : null)}
-                            onMenu={() => { /* Task 14 opens the cell menu */ }} />
+                            onMenu={(rect) => setMenu({ x: rect.left, y: rect.bottom, row, col: c })} />
                         </div>
                       </td>
                     );
@@ -176,6 +194,20 @@ export default function WorksheetView({ projectId, onClose }: WorksheetViewProps
           </table>
         )}
       </div>
+      <WorksheetCellMenu
+        menu={menu}
+        flag={menuNote?.flag_status ?? null}
+        onClose={closeMenu}
+        onEdit={() => {
+          const target = menu?.col.edit(menu.row);
+          if (target) navigate(`/parts/${target.partId}?${FOCUS_PARAM}=${encodeURIComponent(target.focus)}`);
+        }}
+        onComment={() => { if (menu) setOpenNote(`${menu.row.part_id}|${menu.col.key}`); }}
+        onFlag={(flag) => {
+          const partId = menu ? notePartId(menu.col, menu.row) : null;
+          if (menu && partId !== null) flagMutation.mutate({ partId, key: menu.col.key, flag });
+        }}
+      />
     </div>
   );
 }

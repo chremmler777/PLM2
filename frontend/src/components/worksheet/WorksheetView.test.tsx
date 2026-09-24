@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import WorksheetView from './WorksheetView'
 import { row } from './worksheetFixtures'
 
@@ -118,5 +118,75 @@ describe('WorksheetView', () => {
     mount()
     await screen.findByText('Could not load the worksheet')
     expect(screen.queryByTestId('ws-count')).toBeNull()
+  })
+
+})
+
+function Where() {
+  const loc = useLocation()
+  return <div data-testid="where">{loc.pathname}{loc.search}</div>
+}
+
+function mountRouted() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={['/projects/35?view=worksheet']}>
+    <Routes>
+      <Route path="/projects/:id" element={<WorksheetView projectId={35} onClose={vi.fn()} />} />
+      <Route path="/parts/:partId" element={<Where />} />
+    </Routes>
+  </MemoryRouter></QueryClientProvider>)
+}
+
+describe('WorksheetView cell menu', () => {
+  beforeEach(() => {
+    clientMocks.get.mockReset(); clientMocks.put.mockReset()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows } })
+      if (url === '/v1/projects/35/field-notes') return Promise.resolve({ data: notes })
+      return Promise.resolve({ data: { ...notes[0], comments: [] } })
+    })
+    clientMocks.put.mockResolvedValue({ data: {} })
+  })
+  afterEach(cleanup)
+
+  it('Edit on a tool field opens the tool page with the field focused', async () => {
+    mountRouted()
+    fireEvent.contextMenu(await screen.findByTestId('ws-cell-3-tool.cavities'), { clientX: 10, clientY: 10 })
+    fireEvent.click(screen.getByTestId('ws-menu-edit'))
+    expect((await screen.findByTestId('where')).textContent).toBe('/parts/93?focus=tool.cavities')
+  })
+
+  it('Edit on the material opens the article', async () => {
+    mountRouted()
+    fireEvent.contextMenu(await screen.findByTestId('ws-cell-1-part.material'))
+    fireEvent.click(screen.getByTestId('ws-menu-edit'))
+    expect((await screen.findByTestId('where')).textContent).toBe('/parts/1?focus=part.material')
+  })
+
+  it('Edit is disabled where no page changes the value', async () => {
+    mountRouted()
+    fireEvent.contextMenu(await screen.findByTestId('ws-cell-1-notes.summary'))
+    expect((screen.getByTestId('ws-menu-edit') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('ws-menu-comment') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Flag sets the flag on the owning part and Comment opens the popover', async () => {
+    mountRouted()
+    fireEvent.contextMenu(await screen.findByTestId('ws-cell-1-part.name'))
+    fireEvent.click(screen.getByTestId('ws-menu-flag-rejected'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/1/field-notes/part.name/flag', { status: 'rejected' }))
+    fireEvent.contextMenu(screen.getByTestId('ws-cell-3-tool.cavities'))
+    expect((screen.getByTestId('ws-menu-flag-clear') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByTestId('ws-menu-comment'))
+    expect(await screen.findByTestId('note-popover-tool.cavities')).toBeTruthy()
+  })
+
+  it('the hover button opens the same menu', async () => {
+    mountRouted()
+    await screen.findByTestId('ws-cell-1-part.name')
+    fireEvent.click(screen.getByTestId('cell-menu-1-part.name'))
+    expect(screen.getByTestId('ws-menu')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('ws-menu')).toBeNull()
   })
 })
