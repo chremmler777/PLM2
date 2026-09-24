@@ -326,6 +326,33 @@ describe('WorksheetView cell menu', () => {
     expect(within(cell).getByTestId('note-marker-paint.colour')).toBeTruthy()
   })
 
+  it('the cell menu on an unpainted Colour cell reads and writes the active key, not the other key\'s flag', async () => {
+    const mic = row({ part_id: 7, part_number: '20-1994-007-0', colour_code: 'NM0',
+      paint: { painted: false, colour: null, colour_hex: null, paint_system: null } })
+    const otherNote = { id: 2, part_id: 7, field_key: 'paint.colour', flag_status: 'open', flag_set_by: null, flag_set_by_name: null,
+      flag_set_at: null, created_at: null, comment_count: 1, last_comment: null }
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/projects/35/worksheet') return Promise.resolve({ data: { project_id: 35, rows: [mic] } })
+      if (url === '/v1/projects/35/field-notes') return Promise.resolve({ data: [otherNote] })
+      return Promise.resolve({ data: [] })
+    })
+    mount()
+    const cell = await screen.findByTestId('ws-cell-7-part.colour')
+    // the other key's marker still shows its own open flag
+    expect(within(cell).getByTestId('note-marker-paint.colour')).toBeTruthy()
+    expect(within(cell).getByTestId('note-dot-paint.colour').className).toContain('bg-yellow-400')
+    // the main marker (the active key, part.colour_code) has no flag or comment of its own
+    expect(within(cell).getByTestId('note-dot-part.colour_code').className).not.toContain('bg-yellow-400')
+    expect(within(cell).queryByTestId('note-count-part.colour_code')).toBeNull()
+    fireEvent.contextMenu(cell)
+    // the menu shows no current flag for the active key: Open is not disabled, Clear flag is
+    expect((screen.getByTestId('ws-menu-flag-open') as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByTestId('ws-menu-flag-clear') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('ws-menu-flag-open'))
+    await waitFor(() => expect(clientMocks.put).toHaveBeenCalledWith('/v1/parts/7/field-notes/part.colour_code/flag', { status: 'open' }))
+    expect(clientMocks.put).not.toHaveBeenCalledWith('/v1/parts/7/field-notes/paint.colour/flag', expect.anything())
+  })
+
   it('Flag on a tool field sends the PUT to the tool part, not the row', async () => {
     mountRouted()
     fireEvent.contextMenu(await screen.findByTestId('ws-cell-3-tool.cavities'))

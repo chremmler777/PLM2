@@ -74,18 +74,30 @@ export function notePartId(col: WorksheetColumn, row: WorksheetRow): number | nu
 }
 
 /**
- * The note driving a cell's marker, tint and export flag/comment count. For the Colour column this is the
- * combined note of both possible keys (part.colour_code and paint.colour), so a note on the key the cell is
- * not currently showing still tints the cell and counts toward the export - see otherColourKey.
+ * The active key's own note: what its marker's popover opens (a comment/flag write always targets
+ * this key) and what the main marker's dot, count and tooltip show. Never the Colour column's
+ * combined note - see noteFor for that.
  */
-export function noteFor(col: WorksheetColumn, row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary | undefined {
+export function activeNoteFor(col: WorksheetColumn, row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary | undefined {
   const partId = notePartId(col, row);
   const key = cellNoteKey(col, row);
-  if (partId === null || key === null) return undefined;
-  const primary = ctx.byKey.get(noteKey(partId, key));
+  return partId === null || key === null ? undefined : ctx.byKey.get(noteKey(partId, key));
+}
+
+/**
+ * The note driving a cell's tint and export flag/comment count (and the CSV/data-flag attribute).
+ * For the Colour column this is the combined note of both possible keys (part.colour_code and
+ * paint.colour), so a note on the key the cell is not currently showing still tints the cell and
+ * counts toward the export - see otherColourKey. Never used for a marker's own popover: a flag or
+ * comment written from a marker must land on the key whose thread it opened, so a marker's `note`
+ * prop and a menu's current flag must come from activeNoteFor, not this combined one.
+ */
+export function noteFor(col: WorksheetColumn, row: WorksheetRow, ctx: WorksheetContext): FieldNoteSummary | undefined {
+  const primary = activeNoteFor(col, row, ctx);
   if (col.key !== 'part.colour') return primary;
+  const partId = notePartId(col, row);
   const otherKey = otherColourKey(row);
-  const other = otherKey ? ctx.byKey.get(noteKey(partId, otherKey)) : undefined;
+  const other = partId !== null && otherKey ? ctx.byKey.get(noteKey(partId, otherKey)) : undefined;
   return combineNotes(primary, other);
 }
 

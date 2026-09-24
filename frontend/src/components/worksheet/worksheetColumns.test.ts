@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { WORKSHEET_COLUMNS, buildContext, cellNoteKey, colourSource, dfmLabel, noteFor, notePartId, notesSummary, rowNotes } from './worksheetColumns'
+import { WORKSHEET_COLUMNS, activeNoteFor, buildContext, cellNoteKey, colourSource, dfmLabel, noteFor, notePartId, notesSummary, rowNotes } from './worksheetColumns'
 import { FIELD_KEY_RE } from '../../lib/fieldNotes'
 import { row } from './worksheetFixtures'
 import type { FieldNoteSummary } from '../../api/fieldNotes'
@@ -159,6 +159,20 @@ describe('worksheet colour and grain columns', () => {
     expect(noteFor(col('part.colour'), mic, buildContext([note(2, 'part.colour_code', 'confirmed')]))?.comment_count).toBe(0)
     // neither key has a note: no note
     expect(noteFor(col('part.colour'), mic, empty)).toBeUndefined()
+  })
+
+  it('activeNoteFor is the active key alone, never the combined note a marker or menu would misattribute', () => {
+    // unpainted: only the other key (paint.colour) has a note - the active key's own note is undefined
+    const other = buildContext([note(2, 'paint.colour', 'open', 'wait, is this painted after all?')])
+    expect(activeNoteFor(col('part.colour'), mic, other)).toBeUndefined()
+    expect(noteFor(col('part.colour'), mic, other)?.flag_status).toBe('open') // combined still sees it
+    // both keys have a note: activeNoteFor reports only the active one (part.colour_code)
+    const both = buildContext([note(2, 'part.colour_code', 'confirmed'), note(2, 'paint.colour', 'open')])
+    expect(activeNoteFor(col('part.colour'), mic, both)?.flag_status).toBe('confirmed')
+    expect(noteFor(col('part.colour'), mic, both)?.flag_status).toBe('open') // combined: the worse of the two
+    // a non-colour column: activeNoteFor and noteFor agree
+    const grainCtx = buildContext([note(2, 'part.grain', 'rejected')])
+    expect(activeNoteFor(col('part.grain'), mic, grainCtx)).toEqual(noteFor(col('part.grain'), mic, grainCtx))
   })
 })
 
