@@ -37,11 +37,13 @@ export interface ItemsPaneProps {
   onContextMenu(e: React.MouseEvent, partId: number): void;
   /** 'table' while the detail is popped out: one flat row per item with the key columns. */
   mode?: 'list' | 'table';
+  /** Opens the project worksheet (full width). */
+  onShowWorksheet?: () => void;
 }
 
 export default function ItemsPane({
   projectId, projectCode, parts, partsLoading, structure, paintByPartId, paintedIds, paintedCount,
-  selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu, mode = 'list',
+  selectedPartId, onSelect, onOpenPart, onPickRevision, onContextMenu, mode = 'list', onShowWorksheet,
 }: ItemsPaneProps) {
   const queryClient = useQueryClient();
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -165,7 +167,15 @@ export default function ItemsPane({
           <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
             Items ({isTable ? tableParts.length : visibleNodes.length}{filtered ? ` of ${parts?.length ?? 0}` : ''})
           </h2>
-          <span className="text-[11px] text-slate-500">Drag onto a ★ sub-assembly to restructure</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-slate-500">Drag onto a ★ sub-assembly to restructure</span>
+            {onShowWorksheet && (
+              <button type="button" data-testid="show-worksheet" onClick={onShowWorksheet}
+                className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-700 hover:bg-slate-600 text-slate-100">
+                Worksheet
+              </button>
+            )}
+          </div>
         </div>
         <input
           type="search"

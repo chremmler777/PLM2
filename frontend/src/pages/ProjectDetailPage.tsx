@@ -25,6 +25,7 @@ import DetailPane from '../components/project/DetailPane';
 import SplitPane from '../components/project/SplitPane';
 import ProjectContextMenu from '../components/project/ProjectContextMenu';
 import ChangelogModal from '../components/project/ChangelogModal';
+import WorksheetView from '../components/worksheet/WorksheetView';
 import AddPartModal from '../components/project/AddPartModal';
 import type { DetailTab } from '../components/project/detailTabs';
 import type { ContextMenuState } from '../components/project/projectTypes';
@@ -47,8 +48,17 @@ function ProjectDetailView() {
   const id = projectId ? parseInt(projectId, 10) : 0;
   const navigate = useNavigate();
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialPartId = searchParams.get('part');
+  const showWorksheet = searchParams.get('view') === 'worksheet';
+  const setWorksheet = useCallback((on: boolean) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (on) next.set('view', 'worksheet');
+      else next.delete('view');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const { data: project, isLoading: projectLoading } = useProject(id);
   const { data: parts, isLoading: partsLoading } = useProjectParts(id);
@@ -187,42 +197,47 @@ function ProjectDetailView() {
       )}
 
       <div className="flex-1 min-h-0">
-        <SplitPane
-          storageKey={SPLIT_KEY}
-          rightHidden={popoutOpen}
-          left={
-            <ItemsPane
-              projectId={id}
-              projectCode={project.code}
-              parts={parts}
-              partsLoading={partsLoading}
-              structure={structure}
-              paintByPartId={paintByPartId}
-              paintedIds={paintedIds}
-              paintedCount={paintOverview?.length ?? 0}
-              selectedPartId={sel.partId}
-              onSelect={selectPart}
-              onOpenPart={openPart}
-              onPickRevision={pickRevision}
-              onContextMenu={handleContextMenu}
-              mode={popoutOpen ? 'table' : 'list'}
-            />
-          }
-          right={
-            <div data-testid="detail-column" className="h-full min-h-0" onClick={() => selectPart(null)}>
-              <DetailPane
+        {showWorksheet ? (
+          <WorksheetView projectId={id} onClose={() => setWorksheet(false)} />
+        ) : (
+          <SplitPane
+            storageKey={SPLIT_KEY}
+            rightHidden={popoutOpen}
+            left={
+              <ItemsPane
                 projectId={id}
-                project={project}
+                projectCode={project.code}
                 parts={parts}
+                partsLoading={partsLoading}
                 structure={structure}
-                sel={sel}
-                tab={detailTab}
-                onTabChange={setDetailTab}
-                onPopOut={selectionChannelSupported() ? openPopout : undefined}
+                paintByPartId={paintByPartId}
+                paintedIds={paintedIds}
+                paintedCount={paintOverview?.length ?? 0}
+                selectedPartId={sel.partId}
+                onSelect={selectPart}
+                onOpenPart={openPart}
+                onPickRevision={pickRevision}
+                onContextMenu={handleContextMenu}
+                mode={popoutOpen ? 'table' : 'list'}
+                onShowWorksheet={() => setWorksheet(true)}
               />
-            </div>
-          }
-        />
+            }
+            right={
+              <div data-testid="detail-column" className="h-full min-h-0" onClick={() => selectPart(null)}>
+                <DetailPane
+                  projectId={id}
+                  project={project}
+                  parts={parts}
+                  structure={structure}
+                  sel={sel}
+                  tab={detailTab}
+                  onTabChange={setDetailTab}
+                  onPopOut={selectionChannelSupported() ? openPopout : undefined}
+                />
+              </div>
+            }
+          />
+        )}
       </div>
 
       <ProjectContextMenu

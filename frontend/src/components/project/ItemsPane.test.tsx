@@ -125,4 +125,11 @@ describe('ItemsPane', () => {
       expect(screen.getByTestId('item-row-3').className).toContain('ring-1')
     })
   })
+
+  it('offers the worksheet when the page supports it', () => {
+    const onShowWorksheet = vi.fn()
+    mount({ onShowWorksheet })
+    fireEvent.click(screen.getByTestId('show-worksheet'))
+    expect(onShowWorksheet).toHaveBeenCalled()
+  })
 })
