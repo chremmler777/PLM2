@@ -24,8 +24,11 @@ import Viewer3D from '../components/Viewer3D';
 import { API_BASE_URL } from '../api/client';
 import type { RevisionFile } from '../components/project/projectTypes';
 import ToolDetail from './ToolDetail';
+import MaterialField from '../components/materials/MaterialField';
+import { materialOf } from '../lib/material';
+import type { PartMaterial } from '../api/materials';
 
-interface Part {
+interface Part extends Partial<PartMaterial> {
   id: number;
   part_number: string;
   customer_part_number?: string | null;
@@ -328,6 +331,12 @@ export default function PartDetail() {
           <div className="grid grid-cols-2 gap-4">
             <div><div className="text-sm text-slate-400">Type</div><div className="font-medium text-slate-100 capitalize">{part.part_type}</div></div>
             <div><div className="text-sm text-slate-400">Classification</div><div className="font-medium text-slate-100 capitalize">{part.data_classification}</div></div>
+            {part.item_category === 'article' && (
+              <div className="col-span-2" data-field-key="part.material">
+                <div className="text-sm text-slate-400">Material</div>
+                <MaterialField partId={part.id} material={materialOf(part)} />
+              </div>
+            )}
           </div>
         </div>
 
