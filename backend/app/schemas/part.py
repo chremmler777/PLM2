@@ -74,6 +74,12 @@ class PartResponse(PartBase):
     nominated_at: Optional[date] = None
     sop_at: Optional[date] = None
     thumbnail_url: Optional[str] = None
+    material_source: Optional[str] = None
+    materialdb_id: Optional[int] = None
+    material_ktx_number: Optional[str] = None
+    material_label: Optional[str] = None
+    material_synced_at: Optional[datetime] = None
+    material_new_text: Optional[str] = None
     created_by: int
     updated_by: Optional[int] = None
     created_at: datetime
