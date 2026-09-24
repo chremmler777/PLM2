@@ -62,7 +62,8 @@ def _identity(p: Part, kind: str) -> dict:
     return {"part_id": p.id, "row_kind": kind, "part_number": p.part_number,
             "customer_part_number": p.customer_part_number, "tier1_part_number": p.tier1_part_number,
             "name": p.name, "part_type": p.part_type, "item_category": p.item_category,
-            "thumbnail_url": p.thumbnail_url, "lifecycle_phase": p.lifecycle_phase}
+            "thumbnail_url": p.thumbnail_url, "lifecycle_phase": p.lifecycle_phase,
+            "colour_code": p.colour_code, "grain": p.grain}
 
 
 async def worksheet_rows(session: AsyncSession, project_id: int, today: Optional[date] = None) -> dict:

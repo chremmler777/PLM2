@@ -96,6 +96,7 @@ MaterialDB UI link (frontend only): `/materialdb/materials/{materialdb_id}` (Mat
   "part_number": "20-1994-001-0", "customer_part_number": "206.882.251", "tier1_part_number": null,
   "name": "206.882.251 Handle, manual lift, passenger", "part_type": "internal_mfg", "item_category": "article",
   "thumbnail_url": null, "lifecycle_phase": "rfq",
+  "colour_code": "NM0", "grain": "KF8",
   "mirror_of": null,
   "revision": {"revision_name": "E1", "customer_index": "001", "phase": "review"},
   "material": {"material_source": "new", "materialdb_id": null, "material_ktx_number": null,
@@ -107,7 +108,7 @@ MaterialDB UI link (frontend only): `/materialdb/materials/{materialdb_id}` (Mat
   "dfm": {"status": "waiting", "waiting_on": ["ktx"], "open_topics": 1}
 }]}
 ```
-`row_kind`: `article` | `purchased` (article with `part_type == "purchased"`) | `tool_only` (tool that produces no article of the project; then `tool` describes the row's own tool, `revision` is null, material all null, paint not painted). `mirror_of`: `{"part_id", "part_number", "customer_part_number"}` or null. `dfm`: null when the row has no tool; `status` one of `no_topic`, `waiting`, `all_answered`, `open`, `finished`; `waiting_on` ordered toolmaker, ktx, tier1.
+`colour_code`: the MIC colour of an unpainted article (e.g. `NM0`; a painted article's colour is in `paint`), `grain` (e.g. `KF8`): both article fields (`PUT /parts/{id}` with `colour_code` / `grain`, trimmed, empty clears, 400 on other categories, changelog `field_updated`), null when unset and on tool-only rows. `row_kind`: `article` | `purchased` (article with `part_type == "purchased"`) | `tool_only` (tool that produces no article of the project; then `tool` describes the row's own tool, `revision` is null, material all null, paint not painted). `mirror_of`: `{"part_id", "part_number", "customer_part_number"}` or null. `dfm`: null when the row has no tool; `status` one of `no_topic`, `waiting`, `all_answered`, `open`, `finished`; `waiting_on` ordered toolmaker, ktx, tier1.
 
 `POST /projects/{project_id}/worksheet/export`:
 ```json

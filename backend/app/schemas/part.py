@@ -32,6 +32,10 @@ class PartBase(BaseModel):
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
 
+    # Article fields
+    colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")
+    grain: Optional[str] = Field(None, max_length=80, description="Grain, e.g. KF8")
+
 
 class PartCreate(PartBase):
     """Create a new part."""
@@ -63,6 +67,10 @@ class PartUpdate(BaseModel):
     toolmaker_id: Optional[int] = Field(None, description="Supplier building the tool")
     tool_tonnage_class: Optional[int] = Field(None, ge=1, le=10000, description="Machine clamping force class, t")
     tool_cycle_time_s: Optional[float] = Field(None, gt=0, le=9999.9, description="Target cycle time, s")
+
+    # Article fields (item_category = article only); empty clears
+    colour_code: Optional[str] = Field(None, max_length=40, description="MIC colour of an unpainted article, e.g. NM0")
+    grain: Optional[str] = Field(None, max_length=80, description="Grain, e.g. KF8")
 
 
 class PartResponse(PartBase):

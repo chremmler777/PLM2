@@ -77,6 +77,11 @@ class Part(Base):
     material_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
     material_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     material_new_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Articles only: the colour code of an unpainted (moulded in colour, MIC)
+    # article, e.g. NM0 (a painted article's colour comes from its paint), and
+    # the grain, e.g. KF8.
+    colour_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    grain: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

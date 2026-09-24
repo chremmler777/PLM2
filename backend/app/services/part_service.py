@@ -21,6 +21,14 @@ VALID_ITEM_CATEGORIES = {"article", "tool", "assembly_equipment", "eoat", "gauge
 
 TOOL_FIELDS = ("tool_cavities", "toolmaker_id", "tool_tonnage_class", "tool_cycle_time_s")
 TOOL_FIELDS_ONLY_ON_TOOLS = "Tool fields (cavities, toolmaker, tonnage class, cycle time) only apply to tools"
+ARTICLE_FIELDS_ONLY_ON_ARTICLES = "Colour code and grain only apply to articles"
+ARTICLE_TEXT_FIELDS = ("colour_code", "grain")
+
+
+def clean_text(value: Optional[str]) -> Optional[str]:
+    """Trimmed; empty means none."""
+    value = (value or "").strip()
+    return value or None
 
 
 def compute_next_calibration(
@@ -63,6 +71,8 @@ class PartService:
         toolmaker_id: Optional[int] = None,
         tool_tonnage_class: Optional[int] = None,
         tool_cycle_time_s: Optional[float] = None,
+        colour_code: Optional[str] = None,
+        grain: Optional[str] = None,
     ) -> Part:
         """Create a new controlled item (article, tool, assembly equipment, gauge)."""
         if item_category not in VALID_ITEM_CATEGORIES:
@@ -75,6 +85,9 @@ class PartService:
         if item_category != "tool" and any(v is not None for v in tool_values.values()):
             raise ValueError(TOOL_FIELDS_ONLY_ON_TOOLS)
         await PartService._check_toolmaker(session, toolmaker_id)
+        article_values = {"colour_code": clean_text(colour_code), "grain": clean_text(grain)}
+        if item_category != "article" and any(article_values.values()):
+            raise ValueError(ARTICLE_FIELDS_ONLY_ON_ARTICLES)
 
         part = Part(
             project_id=project_id,
@@ -94,6 +107,7 @@ class PartService:
             last_calibrated_at=last_calibrated_at,
             next_calibration_due=compute_next_calibration(last_calibrated_at, calibration_interval_months),
             **tool_values,
+            **article_values,
         )
         session.add(part)
         await session.flush()
@@ -145,6 +159,10 @@ class PartService:
         update_tool_tonnage_class: bool = False,
         tool_cycle_time_s: Optional[float] = None,
         update_tool_cycle_time_s: bool = False,
+        colour_code: Optional[str] = None,
+        update_colour_code: bool = False,
+        grain: Optional[str] = None,
+        update_grain: bool = False,
     ) -> Optional[Part]:
         """Update a part. parent_part_id is only applied when update_parent is True
         (None then means: move to top level)."""
@@ -200,6 +218,21 @@ class PartService:
             for attr, (flag, value) in tool_updates.items():
                 if flag:
                     setattr(part, attr, value)
+
+        article_updates = {name: clean_text(value) for name, flag, value in (
+            ("colour_code", update_colour_code, colour_code), ("grain", update_grain, grain)) if flag}
+        if any(article_updates.values()) and (item_category or part.item_category) != "article":
+            raise ValueError(ARTICLE_FIELDS_ONLY_ON_ARTICLES)
+        for attr, value in article_updates.items():
+            old = getattr(part, attr)
+            if old == value:
+                continue
+            setattr(part, attr, value)
+            label = attr.replace("_", " ")
+            await ChangelogService.log_action(
+                session, part_id=part.id, action="field_updated",
+                action_description=f"{label.capitalize()}: {old or 'none'} -> {value or 'none'}",
+                performed_by=updated_by, field_name=attr, old_value=old, new_value=value)
 
         if item_category is not None:
             if item_category not in VALID_ITEM_CATEGORIES:
