@@ -895,7 +895,10 @@ def diff_versions(old: Optional[CostSheetVersion], new: CostSheetVersion) -> dic
                 va, vb = values(a[k]), values(r)
                 fields_changed = {c: {"old": va[c], "new": vb[c]} for c in vals if va[c] != vb[c]}
                 if fields_changed:
-                    entry = {**ident(r), "changes": fields_changed}
+                    # The row's currency (the new one when it changed) so a
+                    # rate change reads "65.00 -> 70.00 USD", not a bare number.
+                    entry = {**ident(r), "changes": fields_changed,
+                             "currency": vb.get("currency")}
                     if "hourly_rate" in fields_changed and va["hourly_rate"]:
                         entry["pct"] = round((vb["hourly_rate"] - va["hourly_rate"])
                                              / va["hourly_rate"] * 100, 1)

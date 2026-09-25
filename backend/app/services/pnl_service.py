@@ -417,7 +417,7 @@ class PnlService:
         # live, from the same book, where there is none)
         pos_cost, no_rate = await PnlService.positions_cost(session, changes, ctx)
 
-        extra = await PnlService.actual_cost_sums(session, ids)
+        extra = await PnlService.actual_cost_sums(session, ids, ctx["currency"])
         issues = await PnlService.issue_costs(session, ids)
 
         # timing: one query for both plans of every change
@@ -978,18 +978,30 @@ class PnlService:
         return out
 
     @staticmethod
-    async def actual_cost_sums(session, change_ids: list[int]) -> dict[int, dict]:
+    async def actual_cost_sums(session, change_ids: list[int],
+                               currency_of: Optional[dict] = None) -> dict[int, dict]:
+        """Per change: entered actual costs by category. With `currency_of`
+        ({change_id: costing currency}) only rows in that currency (or with
+        none, legacy) are summed; the rest go to the bucket's
+        `other_currency` ({currency: amount}), never added (no FX)."""
         from app.models.change_actual_cost import ChangeActualCost
         out: dict[int, dict] = {}
         if not change_ids:
             return out
         rows = (await session.execute(
             select(ChangeActualCost.change_id, ChangeActualCost.category,
+                   ChangeActualCost.currency,
                    func.coalesce(func.sum(ChangeActualCost.amount), 0.0))
             .where(ChangeActualCost.change_id.in_(change_ids))
-            .group_by(ChangeActualCost.change_id, ChangeActualCost.category))).all()
-        for cid, cat, amount in rows:
+            .group_by(ChangeActualCost.change_id, ChangeActualCost.category,
+                      ChangeActualCost.currency))).all()
+        for cid, cat, cur, amount in rows:
             bucket = out.setdefault(cid, {"external": 0.0, "scrap": 0.0, "other": 0.0})
+            want = (currency_of or {}).get(cid)
+            if want is not None and cur is not None and cur != want:
+                other = bucket.setdefault("other_currency", {})
+                other[cur] = other.get(cur, 0.0) + float(amount or 0.0)
+                continue
             bucket[cat if cat in bucket else "other"] += float(amount or 0.0)
         return out
 
@@ -1068,8 +1080,16 @@ class PnlService:
         if actuals["unrated_hours"]:
             warnings.append("Hours booked without a department rate are "
                             "counted at zero")
-        costs = (await PnlService.actual_cost_sums(session, [change.id])).get(
+        from app.services import costing_rates as _cr
+        cost_cur_now = await _cr.costing_currency(session, change)
+        costs = (await PnlService.actual_cost_sums(
+            session, [change.id], {change.id: cost_cur_now})).get(
             change.id, {"external": 0.0, "scrap": 0.0, "other": 0.0})
+        if costs.get("other_currency"):
+            warnings.append(
+                "Actual costs entered in "
+                + ", ".join(sorted(costs["other_currency"]))
+                + f" are not in the {cost_cur_now} actual cost (no conversion)")
         issues = (await PnlService.issue_costs(session, [change.id])).get(
             change.id, {"internal": 0.0, "supplier": 0.0, "customer": 0.0,
                         "customer_quoted": 0.0, "count": 0})
@@ -1139,6 +1159,11 @@ class PnlService:
                 "Booked amounts in " + ", ".join(actuals["other_currency"])
                 + " are not in the actual cost (no conversion)")
         if basis != "none":
+            # Named, not "a rate is missing" (final walk P2-6): the plan's
+            # hours of these departments are unpriced, never valued at an
+            # invented rate.
+            for u in await costing_rates.unpriced_departments(session, change):
+                warnings.append(u["message"])
             outdated = await costing_rates.version_warning(session, change)
             if outdated:
                 warnings.append(outdated)
@@ -1314,20 +1339,33 @@ class ActualCostService:
             select(User.id, User.full_name).where(
                 User.id.in_({r.created_by for r in rows} or {0})))).all())
         in_window = change.status in ACTUAL_COST_WINDOW
+        from app.services import costing_rates
+        currency = await costing_rates.costing_currency(session, change)
         items = [{
             "id": r.id, "change_id": r.change_id,
             "department_id": r.department_id,
             "department_name": names.get(r.department_id),
             "category": r.category, "vendor_name": r.vendor_name,
-            "amount": _round(r.amount), "cost_date": r.cost_date,
+            "amount": _round(r.amount), "currency": r.currency or currency,
+            "cost_date": r.cost_date,
             "note": r.note, "attachment_id": r.attachment_id,
             "created_by": r.created_by, "created_by_name": users.get(r.created_by),
             "created_at": r.created_at,
             "can_delete": in_window and (cost_role or r.created_by == user.id),
         } for r in rows]
+        by_cur: dict[str, float] = {}
+        for i in items:
+            by_cur[i["currency"]] = by_cur.get(i["currency"], 0.0) + (i["amount"] or 0.0)
         return {
             "items": items,
-            "total": _round(sum(i["amount"] or 0.0 for i in items)),
+            # The change's costing currency: the form's default and the
+            # currency of `total`. A line in another currency is not in the
+            # total (no FX); every currency is summed on its own in
+            # totals_by_currency.
+            "currency": currency,
+            "total": _round(sum(i["amount"] or 0.0 for i in items
+                                if i["currency"] == currency)),
+            "totals_by_currency": {c: _round(v) for c, v in sorted(by_cur.items())},
             "can_write": in_window and (cost_role or bool(own)),
             # None = any department (cost roles), else only these
             "writable_department_ids": None if cost_role else sorted(own),
@@ -1338,7 +1376,8 @@ class ActualCostService:
     async def add(session, change, user, *, category: str, amount: float,
                   cost_date: date, department_id: Optional[int] = None,
                   vendor_name: Optional[str] = None, note: Optional[str] = None,
-                  attachment_id: Optional[int] = None):
+                  attachment_id: Optional[int] = None,
+                  currency: Optional[str] = None):
         from app.models.change_actual_cost import (
             ACTUAL_COST_CATEGORIES, ChangeActualCost,
         )
@@ -1362,6 +1401,16 @@ class ActualCostService:
             att = await session.get(ChangeAttachment, attachment_id)
             if att is None or att.change_id != change.id:
                 raise ActualCostError("That attachment is not on this change")
+        from app.services import costing_rates
+        costing_cur = await costing_rates.costing_currency(session, change)
+        if currency:
+            from app.services.cost_sheet_service import CostSheetError, normalize_currency
+            try:
+                cur = normalize_currency(currency)
+            except CostSheetError as e:
+                raise ActualCostError(str(e))
+        else:
+            cur = costing_cur
         if not await ActualCostService.is_cost_role(session, change, user):
             own = await ActualCostService.own_department_ids(session, user)
             if department_id is None or department_id not in own:
@@ -1373,7 +1422,7 @@ class ActualCostService:
             vendor_name=(vendor_name or "").strip()[:120] or None,
             amount=round(float(amount), 2), cost_date=cost_date,
             note=(note or "").strip() or None, attachment_id=attachment_id,
-            created_by=user.id)
+            currency=cur, created_by=user.id)
         session.add(row)
         await session.flush()
         # No amount in the changelog: everybody on the change reads it.

@@ -154,6 +154,30 @@ def issued_by(org, plant_name, location) -> str:
     return ", ".join(out)
 
 
+#: The customer's CBD rows, in print order (offer_service.CBD_CATEGORIES).
+CBD_ORDER = ("Engineering", "Tooling", "Sampling and trials", "Machine time",
+             "Supplier parts", "Other")
+
+
+def customer_cbd_lines(lines: list[dict]) -> list[dict]:
+    """The included cost lines as the customer reads them (final walk
+    P2-7): summed per customer_category (Engineering, Tooling, Sampling and
+    trials, Machine time, Supplier parts, Other) in that order, so no
+    internal department name reaches the PDF. A line without a category (one
+    Sales typed in, or an offer seeded before categories existed) keeps its
+    own label, after the categories."""
+    sums: dict[str, float] = {}
+    own: list[dict] = []
+    for l in lines:
+        cat = l.get("customer_category")
+        if isinstance(cat, str) and cat.strip():
+            sums[cat.strip()] = sums.get(cat.strip(), 0.0) + _f(l.get("amount"))
+        else:
+            own.append(l)
+    order = [c for c in CBD_ORDER if c in sums] + sorted(c for c in sums if c not in CBD_ORDER)
+    return [{"label": c, "amount": round(sums[c], 2)} for c in order] + own
+
+
 # The line a hidden amount goes on when no cost line can carry it.
 EXTRA_CBD_LABEL = "Engineering and handling"
 
@@ -698,7 +722,10 @@ def render_offer_pdf(ctx: dict) -> bytes:
     meta.append(("Change", ctx["change_number"]))
     if offer.get("version", 1) >= 2:
         meta.append(("Version", str(offer["version"])))
-    issued = issued_by(org, ctx.get("plant_name"), ctx.get("plant_location"))
+    # The issuing company is the legal name of the company profile (the
+    # letterhead's), not the organisation's name in the database (final
+    # walk P2-7: "KTX Group US Corp.", not the DB org label).
+    issued = issued_by(legal, ctx.get("plant_name"), ctx.get("plant_location"))
     if issued:
         meta.append(("Issued by", issued))
     if ctx.get("project_name"):
@@ -810,8 +837,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
         hidden = sum(_f(f.get("amount")) for f in all_factors if not f.get("show", True))
         if not show_risk:
             hidden += _f(totals.get("risks_total"))
-        included = [l for l in data.get("cost_lines") or []
-                    if isinstance(l, dict) and l.get("include", True)]
+        included = customer_cbd_lines(
+            [l for l in data.get("cost_lines") or []
+             if isinstance(l, dict) and l.get("include", True)])
         # Every row below the cost basis is printed rounded to the cent; the
         # breakdown takes what the printed total leaves, so the page adds up.
         risks_row = (round(_f(totals.get("risks_total")), 2)

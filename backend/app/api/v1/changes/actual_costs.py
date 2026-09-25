@@ -30,6 +30,8 @@ class ActualCostIn(BaseModel):
     vendor_name: Optional[str] = Field(default=None, max_length=120)
     note: Optional[str] = Field(default=None, max_length=4000)
     attachment_id: Optional[int] = None
+    # ISO code; omitted = the change's costing currency (list: "currency").
+    currency: Optional[str] = Field(default=None, max_length=3)
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -38,7 +40,10 @@ class ActualCostIn(BaseModel):
         "1234.5", with an optional currency sign."""
         if isinstance(v, str):
             from app.services.offer_service import read_number
-            text = v.replace("\u20ac", "").replace("EUR", "").strip()
+            text = v
+            for sign in ("\u20ac", "EUR", "$", "USD", "\u00a3", "GBP"):
+                text = text.replace(sign, "")
+            text = text.strip()
             out = read_number(text)
             if out is None:
                 raise ValueError(f"'{v[:40]}' is not an amount")
@@ -90,7 +95,7 @@ async def add_actual_cost(
             db, change, current_user, category=body.category, amount=body.amount,
             cost_date=body.cost_date, department_id=body.department_id,
             vendor_name=body.vendor_name, note=body.note,
-            attachment_id=body.attachment_id)
+            attachment_id=body.attachment_id, currency=body.currency)
     except _ERRORS as e:
         raise _http(e)
     out = await ActualCostService.list_costs(db, change, current_user)

@@ -603,3 +603,48 @@ async def test_blank_training_gate_env_means_unset(monkeypatch):
     assert Settings().training_gate is False
     monkeypatch.setenv("TRAINING_GATE", "true")
     assert Settings().training_gate is True
+
+
+# --------------------------------------------------------------- robustness
+# Final walk: a hot reload once left the gate calling a helper the reloaded
+# service no longer had (AttributeError training.gate_may_be_on) and every
+# guarded save answered 500. The gate must never break a save.
+
+@pytest.mark.parametrize("setting", ["default", "org_off", "org_on", "env_off", "env_on"])
+async def test_guarded_write_succeeds_for_a_trained_user_in_every_gate_setting(
+        client, seed, eng_sales, monkeypatch, setting):
+    admin = await login(client, "admin@test.io")
+    await _pass_sales(client, eng_sales)
+    if setting.startswith("org_"):
+        res = await client.put("/api/v1/training/settings", headers=admin,
+                               json={"training_gate": setting == "org_on"})
+        assert res.status_code == 200, res.text
+    elif setting.startswith("env_"):
+        monkeypatch.setattr(get_settings(), "training_gate", setting == "env_on")
+    res = await _start_change(client, eng_sales, seed)
+    assert res.status_code in (200, 201), res.text
+
+
+@pytest.mark.parametrize("broken", ["gate_enabled", "blocking_roles"])
+async def test_a_broken_gate_lets_the_write_through(
+        client, seed, eng_sales, monkeypatch, broken):
+    """Whatever the gate trips over (a missing helper after a reload, a
+    failing read) the guarded write still goes through."""
+    admin = await login(client, "admin@test.io")
+    await client.put("/api/v1/training/settings", headers=admin,
+                     json={"training_gate": True})
+
+    async def boom(*a, **k):
+        raise AttributeError("module 'app.services.training' has no attribute "
+                             "'gate_may_be_on'")
+
+    monkeypatch.setattr(svc, broken, boom)
+    res = await _start_change(client, eng_sales, seed)
+    assert res.status_code in (200, 201), res.text
+
+
+async def test_a_missing_gate_helper_lets_the_write_through(
+        client, seed, eng_sales, monkeypatch):
+    monkeypatch.delattr(svc, "gate_enabled")
+    res = await _start_change(client, eng_sales, seed)
+    assert res.status_code in (200, 201), res.text

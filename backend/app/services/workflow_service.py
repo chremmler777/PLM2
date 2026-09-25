@@ -184,6 +184,7 @@ class WorkflowService:
         # selection, deviations). Skip template assignments absent from the
         # snapshot so engine tasks never outnumber the governed routing.
         allowed_pairs: set | None = None
+        snap_departments: list[dict] = []
         if instance.change_id is not None:
             from app.models.change import ChangeRouting
             routing = (await db.execute(
@@ -195,32 +196,58 @@ class WorkflowService:
                     (st for st in routing.standard_snapshot.get("stages", [])
                      if st["stage_order"] == stage.stage_order), None)
                 if snap_stage is not None:
+                    snap_departments = list(snap_stage["departments"])
                     allowed_pairs = {(d["department_id"], d["rasic_letter"])
-                                     for d in snap_stage["departments"]}
+                                     for d in snap_departments}
 
-        for step in sorted(stage.steps, key=lambda s: s.position_in_stage):
+        def _add_task(step_id, department_id: int, letter: str) -> None:
+            is_actionable = letter in ACTIONABLE_LETTERS
+            if is_actionable:
+                actionable_departments.add(department_id)
+            elif letter == "I":
+                fyi_departments.add(department_id)
+            task = WfInstanceTask(
+                instance_id=instance.id,
+                stage_order=stage.stage_order,
+                step_id=step_id,
+                department_id=department_id,
+                rasic_letter=letter,
+                status="active" if is_actionable else "noted",
+                is_actionable=is_actionable,
+                due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS))
+                if is_actionable else None,
+            )
+            db.add(task)
+            tasks_created.append(task)
+
+        steps = sorted(stage.steps, key=lambda s: s.position_in_stage)
+        produced: set = set()
+        for step in steps:
             for rasic in step.rasic_assignments:
                 if allowed_pairs is not None and \
                         (rasic.department_id, rasic.rasic_letter) not in allowed_pairs:
                     continue
-                is_actionable = rasic.rasic_letter in ACTIONABLE_LETTERS
-                if is_actionable:
-                    actionable_departments.add(rasic.department_id)
-                elif rasic.rasic_letter == "I":
-                    fyi_departments.add(rasic.department_id)
-                task = WfInstanceTask(
-                    instance_id=instance.id,
-                    stage_order=stage.stage_order,
-                    step_id=step.id,
-                    department_id=rasic.department_id,
-                    rasic_letter=rasic.rasic_letter,
-                    status="active" if is_actionable else "noted",
-                    is_actionable=is_actionable,
-                    due_date=(datetime.utcnow() + timedelta(days=DEFAULT_TASK_DUE_DAYS))
-                    if is_actionable else None,
-                )
-                db.add(task)
-                tasks_created.append(task)
+                _add_task(step.id, rasic.department_id, rasic.rasic_letter)
+                produced.add((rasic.department_id, rasic.rasic_letter))
+
+        # The snapshot is authoritative for a change (the scoping room decides
+        # who assesses, and with which letter): a department the room pulled
+        # in that the template's stage does not carry, or carries with another
+        # letter, still gets its task. Without this the row sat in the stage
+        # with no task, owed an answer nobody could give, and held the gate
+        # forever (final walk P1-1). Hung off the step that carries the
+        # department, else the stage's first step.
+        for d in snap_departments:
+            pair = (d["department_id"], d["rasic_letter"])
+            if pair in produced:
+                continue
+            produced.add(pair)
+            step_id = next(
+                (s.id for s in steps
+                 if any(r.department_id == d["department_id"]
+                        for r in s.rasic_assignments)),
+                steps[0].id if steps else None)
+            _add_task(step_id, d["department_id"], d["rasic_letter"])
         await db.flush()
 
         # Change-scoped instances: link this stage's assessment payload rows to the

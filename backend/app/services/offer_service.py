@@ -53,7 +53,27 @@ DEFAULT_FACTORS = [
     ("expedite", "Expedite surcharge", "pct", 1),
     ("discount", "Discount", "pct", -1),
 ]
-SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:")
+SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:", "dept_mt:", "dept_smp:")
+
+# What the customer reads in the cost breakdown (final walk P2-7): the kind
+# of work, never our department names. Each seeded line carries its
+# customer_category; the PDF sums the included lines per category in this
+# order. A line Sales adds by hand prints under its own label.
+CBD_CATEGORIES = ("Engineering", "Tooling", "Sampling and trials", "Machine time",
+                  "Supplier parts", "Other")
+
+
+def customer_category_for_external(department_name: Optional[str]) -> str:
+    """An external position's customer category, from the department that
+    owns it: tool shop work is Tooling, bought-in parts Supplier parts,
+    anything else outside work on the design (a mold-flow study, a
+    drawing office) Engineering."""
+    name = (department_name or "").lower()
+    if "tool" in name:
+        return "Tooling"
+    if any(w in name for w in ("purchas", "logistic", "packag", "supplier")):
+        return "Supplier parts"
+    return "Engineering"
 # Factors the customer does not see as a line by default: their amount is
 # folded into the cost lines on the PDF (the total is the same).
 HIDDEN_FACTOR_KEYS = ("overhead", "margin")
@@ -598,28 +618,56 @@ class OfferService:
                 ext_by_dept.get(p.department_id, 0.0) + float(p.quoted_cost or 0.0))
         lines = []
 
-        def line(key, label, dept, category, amount):
+        def line(key, label, dept, category, amount, customer_category):
             amount = round(float(amount or 0.0), 2)
             lines.append({"key": key, "label": label, "department": dept,
                           "category": category, "amount": amount,
-                          "source_amount": amount, "include": True})
+                          "source_amount": amount, "include": True,
+                          "customer_category": customer_category})
+
+        # Machine time and sampling are valued inside the department's
+        # internal money; the customer reads them as their own lines.
+        machine_by_dept: dict[int, float] = {}
+        sampling_by_dept: dict[int, float] = {}
+        for agg in summ.get("positions_by_department") or []:
+            for pos in agg.get("positions") or []:
+                value = pos.get("line_value") or 0.0
+                if pos.get("kind") == "machine_time":
+                    machine_by_dept[agg["department_id"]] = (
+                        machine_by_dept.get(agg["department_id"], 0.0) + value)
+                elif pos.get("kind") == "sampling":
+                    sampling_by_dept[agg["department_id"]] = (
+                        sampling_by_dept.get(agg["department_id"], 0.0) + value)
 
         for row in summ["by_department"]:
             did = row["department_id"]
             dname = names.get(did, f"Department {did}")
-            if row["one_time_internal"] > 0.004:
+            # never more than the department's internal money says (a
+            # value priced in another currency is not in it)
+            machine = min(machine_by_dept.get(did, 0.0), row["one_time_internal"])
+            sampling = min(sampling_by_dept.get(did, 0.0),
+                           row["one_time_internal"] - machine)
+            own = row["one_time_internal"] - machine - sampling
+            if own > 0.004:
                 line(f"dept:{did}", f"{dname} internal effort", dname,
-                     "internal", row["one_time_internal"])
+                     "internal", own, "Engineering")
+            if machine > 0.004:
+                line(f"dept_mt:{did}", f"{dname} machine time", dname,
+                     "internal", machine, "Machine time")
+            if sampling > 0.004:
+                line(f"dept_smp:{did}", f"{dname} sampling and trials", dname,
+                     "internal", sampling, "Sampling and trials")
             rest = row["one_time_external"] - ext_by_dept.get(did, 0.0)
             if rest > 0.004:
                 line(f"dept_ext:{did}", f"{dname} external costs", dname,
-                     "external", rest)
+                     "external", rest, "Other")
         for p in positions:
             offer = p.chosen_offer or p.favorite_offer
             vendor = offer.vendor_name if offer is not None else p.vendor_name
             dname = names.get(p.department_id, f"Department {p.department_id}")
             line(f"pos:{p.id}", p.label + (f" ({vendor})" if vendor else ""),
-                 dname, "external", p.quoted_cost)
+                 dname, "external", p.quoted_cost,
+                 customer_category_for_external(names.get(p.department_id)))
         return lines, float(summ["totals"]["grand_total"] or 0.0)
 
     @staticmethod
@@ -641,7 +689,10 @@ class OfferService:
                 "concern_id": c.id,
                 "label": labels.get(c.risk_type or "", c.risk_type or "Risk"),
                 "severity": c.severity, "department": names.get(c.department_id),
-                "show": c.severity == 3, "type": "pct", "value": 0,
+                # Sales opts a risk into the offer (final walk P2-7): a
+                # register entry is internal until somebody decides the
+                # customer reads it, whatever its severity.
+                "show": False, "type": "pct", "value": 0,
                 "note": c.note,
             })
         return out
@@ -1093,7 +1144,7 @@ class OfferService:
                         if current_v is not None and v != current_v]
         costing_issues = []
         for w in meta.get("warnings") or []:
-            if w.get("code") in ("mixed_currency", "no_rate"):
+            if w.get("code") in ("mixed_currency", "no_rate", "no_rate_department"):
                 costing_issues.append(_issue(w["code"], w["message"]))
         outdated = None
         if old_versions:
@@ -1184,12 +1235,28 @@ class OfferService:
                 "created_by_name": users.get(o.created_by),
                 "updated_at": o.updated_at,
                 "diff": diff, "warnings": warnings,
+                "issued_by": await OfferService._issued_by(session, change, o),
                 "costing_currency": cost_cur,
                 "costing_totals_by_currency": meta.get("totals_by_currency") or {},
                 "cost_sheet_versions_used": meta.get("versions_used") or [],
                 "cost_sheet_current_version": current_v,
             })
         return out
+
+    @staticmethod
+    async def _issued_by(session: AsyncSession, change: ChangeRequest,
+                         offer: ChangeOffer) -> str:
+        """The PDF's "Issued by" line: the company profile's legal name (as
+        frozen into a sent version, else today's), plant and location."""
+        from app.services.company_profile import company_profile
+        from app.services.offer_pdf import issued_by
+        snap = (offer.data or {}).get(SNAPSHOT_KEY) if offer.status != "draft" else None
+        if not isinstance(snap, dict):
+            snap = await OfferService._snapshot(session, change)
+        company = snap.get("company") if isinstance(snap.get("company"), dict) \
+            else company_profile(snap.get("org_name") or "")
+        legal = (company.get("legal_name") or snap.get("org_name") or "")
+        return issued_by(legal, snap.get("plant_name"), snap.get("plant_location"))
 
     @staticmethod
     async def _snapshot(session: AsyncSession, change: ChangeRequest) -> dict:

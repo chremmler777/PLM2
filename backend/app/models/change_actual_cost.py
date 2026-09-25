@@ -28,6 +28,10 @@ class ChangeActualCost(Base):
         String(12), default="external", server_default="external")
     vendor_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     amount: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False))
+    # The amount's currency (migration 101): the change's costing currency
+    # when it was entered, unless the invoice says otherwise. Sums never mix
+    # currencies (no FX); a row in another currency is reported beside them.
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     cost_date: Mapped[date] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     attachment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

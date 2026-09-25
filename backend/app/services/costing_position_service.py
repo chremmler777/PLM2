@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeAttachment, ChangeRequest
 from app.models.change_cost import (
-    COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS,
+    COSTING_POSITION_KINDS, COSTING_PRICINGS, LEAD_TIME_UNITS, STANDING_KINDS,
     CostingOffer, CostingPosition,
 )
 from app.models.entities import User
@@ -388,6 +388,16 @@ class CostingPositionService:
     # Writes
     # ------------------------------------------------------------------
     @staticmethod
+    async def _standing(session: AsyncSession, change_id: int,
+                        department_id: int, kind: str):
+        return (await session.execute(
+            select(CostingPosition).where(
+                CostingPosition.change_id == change_id,
+                CostingPosition.department_id == department_id,
+                CostingPosition.kind == kind)
+            .order_by(CostingPosition.id).limit(1))).scalar_one_or_none()
+
+    @staticmethod
     async def create_position(
         session: AsyncSession, change: ChangeRequest, spec: dict, actor: User,
     ) -> CostingPosition:
@@ -402,6 +412,18 @@ class CostingPositionService:
         if routed is None:
             raise CostingPositionError(
                 f"Department {department_id} has no assessment on this change")
+        kind = spec.get("kind") or "external"
+        if kind in STANDING_KINDS:
+            # One standing answer per department: a second save (the effort
+            # row fires on blur AND on the save click) updates the first
+            # instead of adding a duplicate line (final walk P2-1).
+            existing = await CostingPositionService._standing(
+                session, change.id, department_id, kind)
+            if existing is not None:
+                return await CostingPositionService.update_position(
+                    session, change, existing,
+                    {k: v for k, v in spec.items()
+                     if k in _POSITION_FIELDS and k != "kind"}, actor)
         position = CostingPosition(
             change_id=change.id, department_id=department_id,
             label=(spec.get("label") or "").strip(),
@@ -423,8 +445,26 @@ class CostingPositionService:
         # the line until its pricing inputs change.
         from app.services import costing_rates
         await costing_rates.snapshot_position(session, change, position)
-        session.add(position)
-        await session.flush()
+        if kind in STANDING_KINDS:
+            # Two saves racing past the lookup above: the unique index
+            # (migration 101) refuses the second insert; it merges then.
+            from sqlalchemy.exc import IntegrityError
+            try:
+                async with session.begin_nested():
+                    session.add(position)
+                    await session.flush()
+            except IntegrityError:
+                existing = await CostingPositionService._standing(
+                    session, change.id, department_id, kind)
+                if existing is None:
+                    raise
+                return await CostingPositionService.update_position(
+                    session, change, existing,
+                    {k: v for k, v in spec.items()
+                     if k in _POSITION_FIELDS and k != "kind"}, actor)
+        else:
+            session.add(position)
+            await session.flush()
         # A just-added row has no loaded `offers` collection, and effective_cost
         # reads it — an async lazy load here would raise MissingGreenlet.
         await session.refresh(position, ["offers"])
@@ -441,6 +481,13 @@ class CostingPositionService:
     ) -> CostingPosition:
         from app.services import costing_rates
         before = {f: getattr(position, f) for f in costing_rates.PRICING_FIELDS}
+        new_kind = spec.get("kind")
+        if (new_kind in STANDING_KINDS and new_kind != position.kind
+                and await CostingPositionService._standing(
+                    session, change.id, position.department_id, new_kind)):
+            raise CostingPositionError(
+                "This department already has that standing effort line: "
+                "edit it instead")
         for field in _POSITION_FIELDS:
             if field in spec:
                 setattr(position, field, spec[field])

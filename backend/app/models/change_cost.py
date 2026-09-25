@@ -7,6 +7,7 @@ from sqlalchemy import (
     String, Text, DateTime, Date, Float, Integer, Boolean, Numeric, ForeignKey, JSON,
 )
 from sqlalchemy import false as sa_false
+from sqlalchemy import Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -27,6 +28,11 @@ COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "own_time", "exte
 # The kinds whose hours are the department's own labour, priced at the
 # effective labour rate of the cost sheet.
 LABOUR_KINDS = ("internal_effort", "support_effort", "own_time", "external")
+# The standing answers: at most ONE row per change, department and kind (the
+# partial unique index below, migration 101). A second save of the same
+# answer (blur + click) merges into the first instead of adding a line.
+STANDING_KINDS = ("internal_effort", "support_effort")
+_STANDING_WHERE = text("kind IN ('internal_effort', 'support_effort')")
 # How an EXTERNAL position gets its number: a house estimate, or real vendor
 # offers. Effort positions are always estimates — the field is stored uniformly
 # so the column never has to be read conditionally, but only external positions
@@ -120,6 +126,11 @@ class CostingPosition(Base):
     Positions ADD to the cost-line math; they do not replace it.
     """
     __tablename__ = "costing_positions"
+    __table_args__ = (
+        Index("uq_costing_positions_standing", "change_id", "department_id", "kind",
+              unique=True, postgresql_where=_STANDING_WHERE,
+              sqlite_where=_STANDING_WHERE),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     change_id: Mapped[int] = mapped_column(

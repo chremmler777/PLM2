@@ -75,6 +75,11 @@ class TransitionRequest(BaseModel):
     # its alias so an older client keeps working.
     reason: Optional[str] = None
     escalation_reason: Optional[str] = None
+    # Final walk P2-3: when a soft guard refuses the hop and an approved
+    # deviation would lift it, the endpoint files the deviation request with
+    # this reason (or reuses the pending one) and answers 202 with it,
+    # instead of a bare 400. Ignored when the hop goes through.
+    deviation_reason: Optional[str] = None
 
 
 class CustomerResponseRequest(BaseModel):
@@ -328,6 +333,10 @@ class ChangeResponse(BaseModel):
     # Departments that found the change feasible but have priced nothing yet.
     # Populated only while the change is in costing (see the endpoint).
     costing_pending_department_ids: List[int] = []
+    # Departments with costing lines the cost sheet cannot price (no rate):
+    # [{department_id, department_name, count, message}], message = "No cost
+    # sheet rate for <department>: hours unpriced". In costing and quoting.
+    costing_unpriced: List[dict] = []
     release_due_date: Optional[datetime] = None
     release_due_reason: Optional[str] = None
     impact_confirmed_by: Optional[int] = None
@@ -1204,6 +1213,11 @@ class TransitionDeviationResponse(BaseModel):
     decided_by: Optional[int] = None
     decided_at: Optional[datetime] = None
     decision_note: Optional[str] = None
+    # Viewer-relative (GET /deviations): may this caller approve/reject it
+    # (4-eyes, engineer/admin, lead-or-admin), and the names to show.
+    can_decide: bool = False
+    proposed_by_name: Optional[str] = None
+    decided_by_name: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -950,3 +950,59 @@ async def test_partial_quotes_add_up_and_the_alternative_comes_on_top(
                            json={"favorite": True}, headers=admin_auth)
     assert res.status_code == 200 and res.json()["favorite"] is False
     assert pos["effective_cost"] == 1850.0
+
+
+# --- standing effort rows: one per department and kind (final walk P2-1) ---
+
+async def test_a_second_save_of_a_standing_row_merges_into_the_first(
+        client, admin_auth, costing):
+    """The effort row saved on blur and again on click: one line, the last
+    value, never a duplicate."""
+    first = await _add_position(client, admin_auth, costing,
+                                kind="support_effort", label="Support", hours=8.0)
+    assert first.status_code == 201, first.text
+    second = await _add_position(client, admin_auth, costing,
+                                 kind="support_effort", label="Support", hours=12.0)
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["hours"] == 12.0
+    rows = (await client.get(_positions_url(costing), headers=admin_auth)).json()
+    assert [(r["kind"], r["hours"]) for r in rows] == [("support_effort", 12.0)]
+
+
+async def test_standing_rows_stay_one_per_department_and_kind_only(
+        client, admin_auth, costing):
+    for kind, dept in (("internal_effort", "tool"), ("support_effort", "tool"),
+                       ("internal_effort", "dev")):
+        res = await _add_position(client, admin_auth, costing, kind=kind,
+                                  department_id=costing[dept], hours=1.0)
+        assert res.status_code == 201, res.text
+    # Other kinds may repeat freely.
+    for _ in range(2):
+        res = await _add_position(client, admin_auth, costing, kind="own_time",
+                                  hours=2.0, label="Drawing")
+        assert res.status_code == 201, res.text
+    rows = (await client.get(_positions_url(costing), headers=admin_auth)).json()
+    assert len(rows) == 5
+
+
+async def test_a_line_cannot_be_turned_into_a_second_standing_row(
+        client, admin_auth, costing):
+    await _add_position(client, admin_auth, costing, kind="internal_effort", hours=1.0)
+    other = (await _add_position(client, admin_auth, costing, kind="own_time",
+                                 hours=2.0)).json()
+    res = await client.put(f"{_positions_url(costing)}/{other['id']}",
+                           json={"kind": "internal_effort"}, headers=admin_auth)
+    assert res.status_code == 400, res.text
+
+
+async def test_the_database_refuses_a_duplicate_standing_row(session_factory, costing, seed):
+    from sqlalchemy.exc import IntegrityError
+    from app.models.change_cost import CostingPosition
+    async with session_factory() as s:
+        for _ in range(2):
+            s.add(CostingPosition(change_id=costing["change_id"],
+                                  department_id=costing["tool"], label="x",
+                                  kind="internal_effort", created_by=seed["admin_id"]))
+        with pytest.raises(IntegrityError):
+            await s.flush()

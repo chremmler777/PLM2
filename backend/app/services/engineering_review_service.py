@@ -303,6 +303,7 @@ class EngineeringReviewService:
                             for r in impacts)
         change.origin = "customer"
         change.customer_relevant = True
+        await EngineeringReviewService._as_full_ecr(session, change, user.id)
         now = datetime.utcnow()
         for intake in (await session.execute(
                 select(RevisionIntake).where(RevisionIntake.change_id == change.id))).scalars():
@@ -317,6 +318,30 @@ class EngineeringReviewService:
             old_value={"origin": ORIGIN}, new_value={"origin": "customer",
                                                      "impacts": summary or None})
         return change
+
+    @staticmethod
+    async def _as_full_ecr(session: AsyncSession, change: ChangeRequest,
+                           user_id: int) -> None:
+        """An escalated review reads like any ECR (final walk P2-8): the
+        title follows the lead item (the normal composed ECR title, while
+        the title is automatic), and the lead is the project's Project
+        Manager responsible, when the project names one (else unchanged).
+        Both audited by the helpers / here."""
+        from app.services.change_service import ChangeService
+        from app.services.early_stage_service import EarlyStageService
+        from app.services.project_team_service import ProjectTeamService
+        await EarlyStageService.recompose_title(session, change, user_id)
+        pm = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, "Project Manager")
+        if pm is not None and pm != change.lead_id:
+            old = change.lead_id
+            change.lead_id = pm
+            await session.flush()
+            await ChangeService.append_changelog(
+                session, change, "lead_changed",
+                "Lead set to the project's Project Manager responsible on "
+                "escalation to a full ECR", user_id,
+                field_name="lead_id", old_value=old, new_value=pm)
 
     # ------------------------------------------------------------------
     # Reads

@@ -31,6 +31,52 @@ from app.services import cost_sheet_service as cs
 from app.utils.clock import business_today
 
 NO_RATE = "No rate in the cost sheet"
+def unpriced_department_messages(unpriced: list[dict],
+                                 names: dict) -> list[tuple[str, int]]:
+    """One "No cost sheet rate for <department>: hours unpriced" per
+    department with an unpriced line (department order of first
+    appearance), as (message, department_id). The same words in the
+    costing, the close-costing dialog and the P&L."""
+    seen: list[int] = []
+    for u in unpriced:
+        if u["department_id"] not in seen:
+            seen.append(u["department_id"])
+    return [(f"No cost sheet rate for "
+             f"{names.get(d) or f'department {d}'}: hours unpriced", d) for d in seen]
+
+
+async def unpriced_departments(db: AsyncSession, change) -> list[dict]:
+    """[{department_id, department_name, count, message}] for the costing
+    positions of `change` that cannot be priced from the cost sheet (no
+    rate: never counted as 0). Read-only; what the close-costing dialog and
+    the P&L card name."""
+    from app.models.change_cost import CostingPosition
+    from app.models.workflow import Department
+    positions = (await db.execute(select(CostingPosition).where(
+        CostingPosition.change_id == change.id))).scalars().all()
+    if not positions:
+        return []
+    plant_id = await costing_plant_id(db, change)
+    org_id = (await org_id_of_plant(db, plant_id)) or await change_org_id(db, change)
+    book = RateBook(db)
+    unpriced: list[dict] = []
+    for p in positions:
+        price = await position_price(db, change, p, org_id=org_id,
+                                     plant_id=plant_id, book=book)
+        if line_value(p, price) is None:
+            unpriced.append({"department_id": p.department_id, "position_id": p.id})
+    if not unpriced:
+        return []
+    names = dict((await db.execute(select(Department.id, Department.name).where(
+        Department.id.in_({u["department_id"] for u in unpriced})))).all())
+    counts: dict[int, int] = {}
+    for u in unpriced:
+        counts[u["department_id"]] = counts.get(u["department_id"], 0) + 1
+    return [{"department_id": d, "department_name": names.get(d),
+             "count": counts[d], "message": m}
+            for m, d in unpriced_department_messages(unpriced, names)]
+
+
 NO_RATE_WARNING = ("Costing lines without a rate in the cost sheet are not counted: "
                    "the cost is too low")
 

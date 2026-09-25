@@ -10,7 +10,8 @@ from typing import Optional, List
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, status,
 )
-from fastapi.responses import FileResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,7 +24,7 @@ from app.models.change import (
 )
 from app.models.workflow import UserDepartment, Department
 from app.services.change_service import (
-    ALLOWED_TRANSITIONS, ChangeService, ChangeError, _org_scope,
+    ALLOWED_TRANSITIONS, ChangeService, ChangeError, DeviationRequired, _org_scope,
 )
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingForbidden, MeetingService
@@ -1227,6 +1228,10 @@ async def get_change(
     change.deadline_state = await ChangeService.deadline_state(db, change)
     change.costing_pending_department_ids = (
         await ChangeService.costing_pending_department_ids(db, change))
+    change.costing_unpriced = []
+    if change.status in ("costing", "quoting"):
+        from app.services import costing_rates
+        change.costing_unpriced = await costing_rates.unpriced_departments(db, change)
     evidence = await ChangeService.assessment_evidence_state(db, change)
     for a in change.assessments:
         state = evidence.get(a.id, {})
@@ -1378,6 +1383,12 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
+    # Self-healing read (final walk P1-1): a stage row without its engine
+    # task (room-added department, legacy data) gets it here, idempotently.
+    from app.services.change_routing_service import ChangeRoutingService
+    if await ChangeRoutingService.repair_stage_tasks(db, change, current_user.id):
+        await db.commit()
+        change = await ChangeService.get_change(db, change_id, viewer=current_user)
     routing = change.routing
     # Key by (department, stage): departments appear in multiple stages of the
     # seeded templates, and each stage owns its own assessment row.
@@ -1406,6 +1417,23 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
         deviation_note=(routing.deviation_note if routing else None),
         deviation_proposed_by=(routing.deviation_proposed_by if routing else None),
         stages=stages)
+
+
+@router.post("/{change_id}/routing/repair")
+async def repair_routing(change_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Admin: give every assessment row of a started stage its missing engine
+    task (see ChangeRoutingService.repair_stage_tasks). Idempotent; returns
+    the repaired assessment ids (empty when nothing was missing)."""
+    if current_user.effective_role != "admin":
+        raise HTTPException(403, "Only an admin may repair a change's routing")
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if change is None:
+        raise HTTPException(404, "Change not found")
+    from app.services.change_routing_service import ChangeRoutingService
+    repaired = await ChangeRoutingService.repair_stage_tasks(db, change, current_user.id)
+    await db.commit()
+    return {"change_id": change_id, "repaired_assessment_ids": repaired}
 
 
 @router.post("/{change_id}/routing/deviation", response_model=RoutingResponse)
@@ -1556,6 +1584,47 @@ async def transition_change(
             reopen_reason=body.reopen_reason,
             reason=body.reason or body.escalation_reason,
         )
+    except DeviationRequired as e:
+        # An approved deviation would lift this refusal. With a
+        # deviation_reason the request is filed right here (final walk P2-3):
+        # 202 and the deviation, for the lead (or an admin) to decide.
+        # Without one: the 400 as before, plus headers saying a deviation
+        # would do (and which one is already waiting).
+        # The rollback expires every loaded object, the user included: read
+        # what the rest needs first, and reload the user afterwards.
+        await db.rollback()
+        await db.refresh(current_user)
+        dev_reason = (body.deviation_reason or "").strip()
+        if not dev_reason:
+            headers = {"X-Deviation-Required": e.to_status}
+            if e.pending_deviation_id is not None:
+                headers["X-Deviation-Pending"] = str(e.pending_deviation_id)
+            raise HTTPException(status_code=400, detail=str(e), headers=headers)
+        change = await ChangeService.get_change(db, change_id, viewer=current_user)
+        dev = next((d for d in change.transition_deviations
+                    if d.id == e.pending_deviation_id), None)
+        created = dev is None
+        if created:
+            try:
+                dev = await ChangeService.propose_transition_deviation(
+                    db, change, e.to_status, dev_reason, current_user.id)
+            except ChangeError as err:
+                raise HTTPException(status_code=400, detail=str(err))
+            await db.commit()
+            await db.refresh(dev)
+        row = (await _deviation_rows(db, change, [dev], current_user))[0]
+        return JSONResponse(status_code=202, content=jsonable_encoder({
+            "deviation_requested": True,
+            "created": created,
+            "to_status": e.to_status,
+            "blocked_by": e.guard_reason,
+            "detail": (f"{e.guard_reason}. Deviation #{dev.id} requested: the "
+                       "change lead or an admin decides it"
+                       if created else
+                       f"{e.guard_reason}. Deviation #{dev.id} is already "
+                       "waiting for its decision"),
+            "deviation": row,
+        }))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -2729,7 +2798,21 @@ async def list_deviations(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    return change.transition_deviations
+    return await _deviation_rows(db, change, change.transition_deviations, current_user)
+
+
+async def _deviation_rows(db, change, devs, user) -> list[dict]:
+    from app.services.change_plan_service import ChangePlanService
+    names = await ChangePlanService._user_names(
+        db, [d.proposed_by for d in devs] + [d.decided_by for d in devs])
+    return [{
+        **TransitionDeviationResponse.model_validate(d).model_dump(),
+        "can_decide": (d.status == "pending"
+                       and ChangeService.transition_deviation_refusal(
+                           change, d, user) is None),
+        "proposed_by_name": names.get(d.proposed_by),
+        "decided_by_name": names.get(d.decided_by),
+    } for d in devs]
 
 
 @router.post("/{change_id}/deviations", response_model=TransitionDeviationResponse)

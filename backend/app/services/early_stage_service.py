@@ -153,6 +153,52 @@ class EarlyStageService:
         return out
 
     @staticmethod
+    async def transition_blocks(session: AsyncSession,
+                                change: ChangeRequest) -> dict:
+        """{to_status: block} for every forward hop that would be refused
+        today (final walk P2-5), so the cockpit disables its next step with
+        the reason instead of offering a button that answers 400.
+
+        block = {kind: 'hard' | 'gate' | 'guard', reason, gate_key,
+        target_tab, deviation_possible, pending_deviation_id}. 'hard' is a
+        rule no deviation lifts; 'gate' a D1 gate not answered Yes (target
+        tab 'd1'); 'guard' any other soft guard. A hop an approved deviation
+        already covers is not blocked and not listed. Reject, cancel and hold
+        are never listed: they are not the next step."""
+        from app.models.change_cost import GATE_TARGET_STATUS
+        out: dict = {}
+        for to_status in sorted(ALLOWED_TRANSITIONS.get(change.status, set())):
+            if to_status in RUN_TEAM_TARGETS:
+                continue
+            hard = await EarlyStageService.hard_refusal(session, change, to_status)
+            if hard is not None:
+                out[to_status] = {"kind": "hard", "reason": hard, "gate_key": None,
+                                  "target_tab": None, "deviation_possible": False,
+                                  "pending_deviation_id": None}
+                continue
+            reason = await ChangeService._guard(session, change, to_status)
+            if reason is None:
+                continue
+            devs = [d for d in change.transition_deviations if d.to_status == to_status]
+            if any(d.status == "approved" for d in devs):
+                continue
+            pending = next((d for d in devs if d.status == "pending"), None)
+            gate = next((g for g in change.gates
+                         if GATE_TARGET_STATUS.get(g.gate_key) == to_status
+                         and g.decision != "yes"), None)
+            is_gate = gate is not None and reason == ChangeService.gate_message(
+                gate.gate_key, gate.decision)
+            out[to_status] = {
+                "kind": "gate" if is_gate else "guard",
+                "reason": reason,
+                "gate_key": gate.gate_key if is_gate else None,
+                "target_tab": "d1" if is_gate else None,
+                "deviation_possible": True,
+                "pending_deviation_id": pending.id if pending else None,
+            }
+        return out
+
+    @staticmethod
     async def hard_refusal(session: AsyncSession, change: ChangeRequest,
                            to_status: str) -> Optional[str]:
         """The HARD rules of ChangeService.transition that no deviation
@@ -774,6 +820,8 @@ class EarlyStageService:
             "status_label": cm_labels.label("status", change.status),
             "can_transition": await EarlyStageService.transition_rights(
                 session, change, user),
+            "transition_blocks": (await EarlyStageService.transition_blocks(
+                session, change) if live else {}),
             "can_edit_impact": (
                 change.status not in IMPACT_LOCKED_STATUSES
                 and await EarlyStageService.impact_edit_refusal(

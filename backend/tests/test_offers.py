@@ -109,7 +109,7 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     assert next(f for f in d["factors"] if f["key"] == "discount")["sign"] == -1
     risk = d["risks"][0]
     assert (risk["label"], risk["severity"], risk["show"], risk["value"]) == \
-        ("Fill issue", 3, True, 0)
+        ("Fill issue", 3, False, 0)  # Sales opts in (final walk P2-7)
     assert d["changeover"]["mode"] == "running_change"
     assert d["timing"]["include"] is True
     assert d["timing"]["weeks_from_order"] >= 1
@@ -117,7 +117,8 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     assert d["terms"]["payment"] == "30 days net"
     assert o["totals"]["base"] == 1000 and o["totals"]["internal_cost"] == 1000
     assert o["diff"] is None
-    assert "high_risk_unpriced" in {w["code"] for w in o["warnings"]}
+    # not shown by default, so no "shown without a surcharge" warning yet
+    assert "high_risk_unpriced" not in {w["code"] for w in o["warnings"]}
 
 
 async def test_one_draft_at_a_time_and_rights(client, offer_world):

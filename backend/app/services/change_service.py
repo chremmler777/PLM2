@@ -109,6 +109,20 @@ class ChangeError(ValueError):
     """Raised for invalid change operations; mapped to HTTP 400 in the router."""
 
 
+class DeviationRequired(ChangeError):
+    """A soft guard refused the hop and no approved transition deviation
+    covers it: an approved deviation WOULD let it through. Still a 400, but
+    the router can offer (or create) the deviation request instead of a bare
+    refusal (final walk P2-3)."""
+
+    def __init__(self, message: str, *, to_status: str, guard_reason: str,
+                 pending_deviation_id: Optional[int] = None):
+        super().__init__(message)
+        self.to_status = to_status
+        self.guard_reason = guard_reason
+        self.pending_deviation_id = pending_deviation_id
+
+
 class ChangeService:
 
     @staticmethod
@@ -244,6 +258,20 @@ class ChangeService:
         return dev
 
     @staticmethod
+    def transition_deviation_refusal(change: ChangeRequest, dev, user) -> Optional[str]:
+        """None when `user` may decide the pending deviation `dev`, else why
+        not. One rule for the decide endpoint, the deviation list's
+        can_decide and the cockpit's 'Decide deviation #n' action."""
+        if dev.proposed_by == user.id:
+            return "Cannot decide your own deviation (4-eyes rule)"
+        if user.effective_role not in ("admin", "engineer"):
+            return "Deviation decisions require an engineer or admin role"
+        if (user.effective_role != "admin" and user.id != change.lead_id
+                and dev.proposed_by != change.lead_id):
+            return "Only the change lead or an admin may decide this deviation"
+        return None
+
+    @staticmethod
     async def decide_transition_deviation(
         session: AsyncSession, change: ChangeRequest, deviation_id: int,
         decision: str, actor: User, *, note: Optional[str] = None,
@@ -255,13 +283,9 @@ class ChangeService:
             raise ChangeError("Deviation not found")
         if dev.status != "pending":
             raise ChangeError(f"Deviation is '{dev.status}', not pending")
-        if dev.proposed_by == actor.id:
-            raise ChangeError("Cannot decide your own deviation (4-eyes rule)")
-        if actor.effective_role not in ("admin", "engineer"):
-            raise ChangeError("Deviation decisions require an engineer or admin role")
-        if (actor.effective_role != "admin" and actor.id != change.lead_id
-                and dev.proposed_by != change.lead_id):
-            raise ChangeError("Only the change lead or an admin may decide this deviation")
+        refusal = ChangeService.transition_deviation_refusal(change, dev, actor)
+        if refusal:
+            raise ChangeError(refusal)
         dev.status = decision
         dev.decided_by = actor.id
         dev.decided_at = datetime.utcnow()
@@ -547,6 +571,11 @@ class ChangeService:
                 "has_cad_file": False,
                 "no_geometry_change": False,
                 "ready": False,
+                # Who still owes a task in the revision's check workflow:
+                # the departments (with the task owner, when one accepted
+                # it) of the open actionable tasks of its current stage.
+                "waiting_on": [],
+                "waiting_on_detail": [],
             }
             if item.resulting_revision_id is not None:
                 rev = await session.get(PartRevision, item.resulting_revision_id)
@@ -573,6 +602,29 @@ class ChangeService:
                         select(func.count()).select_from(WfStage).where(
                             WfStage.template_id == inst.template_id))).scalar()
                     entry["ready"] = inst.status == "completed"
+                    if inst.status == "active":
+                        from app.models.workflow import WfInstanceTask
+                        open_tasks = (await session.execute(
+                            select(WfInstanceTask).where(
+                                WfInstanceTask.instance_id == inst.id,
+                                WfInstanceTask.stage_order == inst.current_stage_order,
+                                WfInstanceTask.is_actionable.is_(True),
+                                WfInstanceTask.status.in_(("pending", "active")))
+                            .order_by(WfInstanceTask.id))).scalars().all()
+                        dept_names = dict((await session.execute(
+                            select(Department.id, Department.name).where(
+                                Department.id.in_({t.department_id for t in open_tasks}
+                                                  or {0})))).all())
+                        for t in open_tasks:
+                            name = dept_names.get(t.department_id) or f"Department {t.department_id}"
+                            if name not in entry["waiting_on"]:
+                                entry["waiting_on"].append(name)
+                            entry["waiting_on_detail"].append({
+                                "task_id": t.id, "department_id": t.department_id,
+                                "department_name": name,
+                                "owner_id": t.owner_id,
+                                "owner_name": t.owner_name if t.owner_id else None,
+                            })
             items.append(entry)
         return {
             "ready_to_go": bool(items) and all(e["ready"] for e in items),
@@ -605,6 +657,17 @@ class ChangeService:
         if change.lead_id is None:
             missing.append("change lead")
         return missing
+
+    #: The D1 sheet's questions, as the D1 tab labels them.
+    GATE_LABELS = {"feasibility": "Feasible?", "budget": "Budget checked?",
+                   "release": "Technical release?"}
+    GATE_DECISION_LABELS = {"no": "No", "na": "n/a", None: "not decided"}
+
+    @staticmethod
+    def gate_message(gate_key: str, decision: Optional[str]) -> str:
+        label = ChangeService.GATE_LABELS.get(gate_key, gate_key)
+        answer = ChangeService.GATE_DECISION_LABELS.get(decision, decision)
+        return f"D1 gate '{label}' is not answered Yes (it is {answer})"
 
     @staticmethod
     async def _guard(session: AsyncSession, change: ChangeRequest, to_status: str):
@@ -736,7 +799,7 @@ class ChangeService:
         # row exists. Changes with no gate rows behave exactly as before.
         for gate in change.gates:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
-                return f"Gate '{gate.gate_key}' is not approved ('{gate.decision}')"
+                return ChangeService.gate_message(gate.gate_key, gate.decision)
         return None
 
     @staticmethod
@@ -805,6 +868,56 @@ class ChangeService:
                 f"{len(instances)} workflow instance(s) canceled with the "
                 "change; open tasks waived", user_id,
                 new_value={"instance_ids": [i.id for i in instances]})
+
+    @staticmethod
+    async def close_engine_work(session: AsyncSession, change: ChangeRequest,
+                                user_id: int, *, why: str) -> list[int]:
+        """After release (or close): no workflow of this change stays open.
+
+        The revisions' check workflows are through once the change released
+        them, even when a deviation let the release go ahead of them: left
+        active, their tasks stayed on dashboards and My Tasks for work that
+        no longer gates anything (final walk P2-4). Each still-active
+        instance (the revisions' ECN flows and the change's own
+        assessment/costing flow) is closed: open tasks waived with `why` as
+        their note; a revision flow is canceled (its checks were not all
+        done: the record says so), the change's own flow completed. Returns
+        the closed instance ids."""
+        from app.models.workflow import WfInstance, WfInstanceTask
+        instances = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.status == "active",
+                (WfInstance.change_id == change.id)
+                | WfInstance.part_revision_id.in_(
+                    select(PartRevision.id).where(
+                        PartRevision.originating_change_id == change.id)),
+            ))).scalars().all()
+        now = datetime.utcnow()
+        for inst in instances:
+            open_tasks = (await session.execute(
+                select(WfInstanceTask).where(
+                    WfInstanceTask.instance_id == inst.id,
+                    WfInstanceTask.status.in_(("pending", "active", "noted"))
+                ))).scalars().all()
+            for t in open_tasks:
+                t.status = "waived"
+                t.notes = (f"{t.notes}\n{why}" if t.notes else why)
+            if inst.change_id is not None:
+                inst.status = "completed"
+                inst.completed_at = now
+            else:
+                inst.status = "canceled"
+                inst.canceled_at = now
+                inst.canceled_by = user_id
+                inst.cancel_reason = why
+        await session.flush()
+        if instances:
+            await ChangeService.append_changelog(
+                session, change, "engine_work_closed",
+                f"{len(instances)} workflow instance(s) closed: {why}; open "
+                "tasks waived", user_id,
+                new_value={"instance_ids": [i.id for i in instances]})
+        return [i.id for i in instances]
 
     @staticmethod
     async def transition(
@@ -950,8 +1063,15 @@ class ChangeService:
                 (d for d in change.transition_deviations
                  if d.to_status == to_status and d.status == "approved"), None)
             if deviation is None:
-                raise ChangeError(
-                    f"{reason}. An approved deviation is required to proceed.")
+                pending = next(
+                    (d for d in change.transition_deviations
+                     if d.to_status == to_status and d.status == "pending"), None)
+                raise DeviationRequired(
+                    f"{reason}. An approved deviation is required to proceed."
+                    + (f" Deviation #{pending.id} is waiting for its decision."
+                       if pending is not None else ""),
+                    to_status=to_status, guard_reason=reason,
+                    pending_deviation_id=pending.id if pending else None)
 
         # HARD gate: assessment cannot start on an unlocked impacted set. Not in
         # _guard, so no approved transition deviation can bypass it — defining and
@@ -999,8 +1119,15 @@ class ChangeService:
             await ChangeService.spawn_ecn_revisions(session, change, user_id)
         if to_status == "released":
             await ChangeService.release(session, change, user_id)
+            await ChangeService.close_engine_work(
+                session, change, user_id,
+                why=(f"Released by {change.change_number}"
+                     + (f" on deviation #{deviation.id}" if deviation else "")))
         if to_status == "closed":
             change.closed_at = datetime.utcnow()
+            await ChangeService.close_engine_work(
+                session, change, user_id,
+                why=f"{change.change_number} closed")
         if to_status == "quoted" and change.quoted_at is None:
             change.quoted_at = datetime.utcnow()
 
@@ -1876,18 +2003,16 @@ class ChangeService:
         for dev in change.transition_deviations:
             if dev.status != "pending":
                 continue
-            if dev.proposed_by == user.id:
-                continue
-            if user.effective_role not in ("admin", "engineer"):
-                continue
-            if (user.effective_role != "admin" and user.id != change.lead_id
-                    and dev.proposed_by != change.lead_id):
+            if ChangeService.transition_deviation_refusal(change, dev, user):
                 continue
             actions.append({
                 "kind": "deviation_decision",
                 "label": f"Decide deviation #{dev.id}",
                 "target_tab": "overview",
                 "deviation_id": dev.id,
+                # what the decide panel shows without another request
+                "to_status": dev.to_status,
+                "reason": dev.reason,
             })
 
         # kind "routing_deviation_decision": somebody added a department to

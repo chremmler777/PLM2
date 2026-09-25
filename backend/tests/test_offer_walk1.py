@@ -349,11 +349,13 @@ async def test_sent_version_renders_from_its_snapshot(client, offer_world,
         snap = row.data["_snapshot"]
         assert snap["change_number"] == "C-O-1" and "tasks" in snap
         data = dict(row.data)
-        data["_snapshot"] = {**snap, "org_name": "Snapshot Org GmbH"}
+        # "Issued by" prints the profile's legal name (final walk P2-7), so
+        # the snapshot is proven through the plant it froze instead.
+        data["_snapshot"] = {**snap, "plant_name": "Snapshot Plant Dallas"}
         row.data = data
         await s.commit()
     pdf = (await client.get(_url(cid, f"/{v1['id']}/pdf"), headers=sales)).content
-    assert "Snapshot Org GmbH" in _pdf_text(pdf)
+    assert "Snapshot Plant Dallas" in _pdf_text(pdf)
     v2 = await _create(client, sales, cid)
     assert "_snapshot" not in v2["data"]
     await client.patch(_url(cid, f"/{v2['id']}"), json={"data": {"intro": "v2"}},

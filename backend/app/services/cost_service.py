@@ -411,6 +411,20 @@ class CostService:
                 "message": (f"{what} no rate in the cost sheet and "
                             f"{'is' if n == 1 else 'are'} not counted: "
                             "the total is too low")})
+            # Named per department (final walk P2-6): "the total is too low"
+            # does not say whose rate is missing; Finance fixes it by name.
+            # Never an invented rate: the hours stay unpriced until the cost
+            # sheet has one.
+            from app.models.workflow import Department
+            dept_names = dict((await session.execute(
+                select(Department.id, Department.name).where(
+                    Department.id.in_({u["department_id"] for u in unpriced})))).all())
+            for u in unpriced:
+                u["department_name"] = dept_names.get(u["department_id"])
+            for message, did in costing_rates.unpriced_department_messages(
+                    unpriced, dept_names):
+                warnings.append({"code": "no_rate_department",
+                                 "department_id": did, "message": message})
         if version_ids_used:
             from app.models.cost_sheet import CostSheetVersion
             versions_used = {v for (v,) in (await session.execute(

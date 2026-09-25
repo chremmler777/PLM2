@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 from datetime import date, datetime
 from typing import Annotated, Optional
 
@@ -43,6 +44,8 @@ from app.models.training import (
 from app.services import training as svc
 from app.services.audit_service import AuditService
 from app.version import SOFTWARE_VERSION
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -1037,6 +1040,9 @@ GUARDED_WRITES: frozenset[tuple[str, str]] = frozenset({
 GATE_EXEMPT_WRITES: frozenset[tuple[str, str]] = frozenset({
     # a read shaped as a POST (the body carries a part list)
     ("POST", "/changes/{change_id}/impact-tree/suggest"),
+    # admin data repair (engine tasks missing on a routed row), not a
+    # business act of the change
+    ("POST", "/changes/{change_id}/routing/repair"),
     # admin reference data, not a change
     ("PUT", "/changes/routing-standards"),
     ("PUT", "/changes/check-standards"),
@@ -1082,9 +1088,22 @@ async def enforce_training_gate(
     """
     if _route_key(request) not in GUARDED_WRITES:
         return
-    if not await svc.gate_enabled(db, user.organization_id):
+    try:
+        # A savepoint: a gate read that fails at the database leaves the
+        # route's transaction usable (Postgres aborts the whole transaction
+        # on an error otherwise), and rolling it back does not expire the
+        # objects the request already loaded (the user).
+        async with db.begin_nested():
+            blocking = (await svc.blocking_roles(db, user)
+                        if await svc.gate_enabled(db, user.organization_id)
+                        else [])
+    except Exception:  # noqa: BLE001 - the gate must never break a save
+        # Training is recorded, not blocking (ruling 2026-09-25): a gate that
+        # cannot be evaluated (a half-reloaded module missing a helper, a
+        # settings read that failed) lets the write through rather than
+        # turning every save into a 500. Logged, so the broken gate is seen.
+        _log.exception("training gate could not be evaluated; write allowed")
         return
-    blocking = await svc.blocking_roles(db, user)
     if not blocking:
         return
     labels = ", ".join(rc.label for rc in blocking)

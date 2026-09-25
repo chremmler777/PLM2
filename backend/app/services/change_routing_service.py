@@ -222,6 +222,93 @@ class ChangeRoutingService:
         return routing
 
     @staticmethod
+    async def repair_stage_tasks(session: AsyncSession, change: ChangeRequest,
+                                 user_id: Optional[int] = None) -> list[int]:
+        """Give every assessment row of a started stage its engine task.
+
+        Before the snapshot-driven task creation (final walk P1-1), a
+        department the scoping room added to stage 1 (or re-lettered away
+        from the template's letter) got an assessment row but no task: the
+        UI showed "Later stage / nothing to submit" while the gate kept
+        waiting on it. This links or creates the missing task, idempotently:
+        a row that already has one is untouched, so running it twice changes
+        nothing. A row that was answered anyway (payload submit) gets an
+        approved task mirroring the answer; an unanswered R/A row of a
+        change that is already finished gets a waived task, so it lands on
+        nobody's list. Returns the repaired assessment ids."""
+        inst = (await session.execute(
+            select(WfInstance).where(
+                WfInstance.change_id == change.id,
+                WfInstance.status == "active")
+        )).scalar_one_or_none()
+        if inst is None:
+            return []
+        rows = (await session.execute(
+            select(ChangeAssessment).where(
+                ChangeAssessment.change_id == change.id,
+                ChangeAssessment.wf_instance_task_id.is_(None),
+                ChangeAssessment.rasic_letter.in_(TASK_LETTERS),
+                ChangeAssessment.stage_order <= inst.current_stage_order)
+            .order_by(ChangeAssessment.id)
+        )).scalars().all()
+        if not rows:
+            return []
+        linked = set((await session.execute(
+            select(ChangeAssessment.wf_instance_task_id).where(
+                ChangeAssessment.change_id == change.id,
+                ChangeAssessment.wf_instance_task_id.isnot(None))
+        )).scalars().all())
+        tasks = (await session.execute(
+            select(WfInstanceTask).where(WfInstanceTask.instance_id == inst.id)
+        )).scalars().all()
+        finished = change.status in ("released", "closed", "rejected", "cancelled")
+        repaired: list[int] = []
+        for a in rows:
+            task = next((t for t in tasks
+                         if t.id not in linked and t.stage_order == a.stage_order
+                         and t.department_id == a.department_id
+                         and t.rasic_letter == a.rasic_letter), None)
+            if task is None:
+                is_blocking = a.rasic_letter in BLOCKING_LETTERS
+                task = WfInstanceTask(
+                    instance_id=inst.id, stage_order=a.stage_order,
+                    step_id=await _match_step_id(
+                        session, inst.template_id, a.stage_order,
+                        a.department_id, a.rasic_letter),
+                    department_id=a.department_id, rasic_letter=a.rasic_letter,
+                    status="active" if is_blocking else "noted",
+                    is_actionable=is_blocking,
+                    due_date=(a.due_date or datetime.utcnow()
+                              + timedelta(days=DEFAULT_TASK_DUE_DAYS))
+                    if is_blocking else None,
+                )
+                if is_blocking and a.submitted_at is not None:
+                    task.status = "approved"
+                    task.decision = "approved"
+                    task.completed_by = a.submitted_by
+                    task.completed_at = a.submitted_at
+                    task.owner_id = a.owner_id or a.submitted_by
+                    task.accepted_at = a.accepted_at or a.submitted_at
+                elif is_blocking and finished:
+                    task.status = "waived"
+                    task.notes = (f"Created by the routing repair after the "
+                                  f"change was {change.status}; nothing owed")
+                session.add(task)
+                await session.flush()
+                tasks = list(tasks) + [task]
+            a.wf_instance_task_id = task.id
+            linked.add(task.id)
+            repaired.append(a.id)
+        await session.flush()
+        from app.services.change_service import ChangeService
+        await ChangeService.append_changelog(
+            session, change, "routing_repaired",
+            f"Routing repair: {len(repaired)} assessment row(s) got their "
+            "missing workflow task", user_id,
+            new_value={"assessment_ids": repaired})
+        return repaired
+
+    @staticmethod
     async def teardown_routing(session: AsyncSession, change: ChangeRequest,
                                user_id: int) -> None:
         """Remove all assessment scaffolding built on entry to assessment, so a
