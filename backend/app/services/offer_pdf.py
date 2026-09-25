@@ -680,8 +680,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
                            ("", "website")):
             if profile.get(key):
                 right.append(_p(f"{label} {profile[key]}".strip(), tight_m))
-    letter = Table([[left or [Spacer(1, 1)], right or [Spacer(1, 1)]]],
-                   colWidths=[width - 62 * mm, 62 * mm])
+    # A 6 mm empty column keeps a long recipient line off the sender block.
+    letter = Table([[left or [Spacer(1, 1)], "", right or [Spacer(1, 1)]]],
+                   colWidths=[width - 68 * mm, 6 * mm, 62 * mm])
     letter.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
