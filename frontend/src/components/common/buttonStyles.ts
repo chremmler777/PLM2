@@ -2,7 +2,7 @@
  * Button class strings: the one source for button looks.
  *
  * Rules (UI polish plan, section 1):
- * - sky-600 is the only primary. One primary per view.
+ * - sky-700 is the only primary (white on sky-700 passes WCAG AA). One primary per view.
  * - emerald means "done", amber means "needs attention": neither is a button colour.
  * - red is only for destructive actions.
  *
@@ -27,7 +27,7 @@ export const btnSizes: Record<ButtonSize, string> = {
 }
 
 export const btnVariants: Record<ButtonVariant, string> = {
-  primary: 'bg-sky-600 text-white font-semibold hover:bg-sky-500 disabled:hover:bg-sky-600',
+  primary: 'bg-sky-700 text-white font-semibold hover:bg-sky-600 disabled:hover:bg-sky-700',
   secondary:
     'border border-slate-600 bg-slate-800/40 text-slate-200 hover:border-slate-500 hover:bg-slate-700/60 ' +
     'disabled:hover:bg-slate-800/40',
