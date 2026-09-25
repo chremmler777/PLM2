@@ -200,7 +200,7 @@ function OpenDialog({
       data-testid={testId}
       onKeyDown={onKeyDown}
       onMouseDown={onMouseDown}
-      className={`m-auto w-[calc(100vw-2rem)] ${WIDTH[size]} max-h-[calc(100dvh-2rem)] overflow-visible border-0 bg-transparent p-0 text-slate-100 backdrop:bg-slate-950/70 open:flex motion-safe:animate-dialog-in ${className}`}
+      className={`m-auto w-[calc(100vw-2rem)] ${WIDTH[size]} max-h-[calc(100dvh-2rem)] overflow-visible border-0 bg-transparent p-0 text-left text-sm font-normal normal-case tracking-normal whitespace-normal break-words text-slate-100 backdrop:bg-slate-950/70 open:flex motion-safe:animate-dialog-in ${className}`}
     >
       <div ref={panelRef} tabIndex={-1} className="flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-lift outline-none">
         <header className="flex items-start gap-3 px-5 pb-2 pt-4">
