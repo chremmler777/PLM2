@@ -280,6 +280,10 @@ class ReleaseService:
         blocker = await ValidationService.release_blocker(session, change)
         if blocker:
             out.append(blocker)
+        from app.services.validation_issue_service import ValidationIssueService
+        blocker = await ValidationIssueService.release_blocker(session, change)
+        if blocker:
+            out.append(blocker)
         not_ready = ReleaseService.not_ready_message(
             await ChangeService.implementation_progress(session, change))
         if not_ready:

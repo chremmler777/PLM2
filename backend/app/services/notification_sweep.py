@@ -146,4 +146,11 @@ async def run_notification_sweep(session: AsyncSession) -> dict:
         )
         counts[f"deadline_{state}"] += n
 
+    # Validation issues (spec §12a): the time-based escalation triggers
+    # (overdue fix action, no route after 2 working days, an unacknowledged
+    # level 2, the plan moving past the baseline or the release deadline).
+    from app.services.validation_issue_service import ValidationIssueService
+    counts["validation_issue_escalated"] = \
+        await ValidationIssueService.reevaluate_all(session)
+
     return counts

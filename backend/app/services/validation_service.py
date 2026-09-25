@@ -426,6 +426,11 @@ class ValidationService:
         if check_key == catalog.WEIGHT_KEY and status == "passed":
             await ValidationService._stamp_validated_weight(
                 session, change, row.value, actor)
+        # Validation issues (spec §12): a passed re-answer closes the issue
+        # linked to this check; a new failure sends one waiting for
+        # re-validation back to fixing.
+        from app.services.validation_issue_service import ValidationIssueService
+        await ValidationIssueService.on_check_answered(session, change, row, actor)
         return row
 
     @staticmethod

@@ -1286,6 +1286,27 @@ class ChangePlanService:
             new_value={"plan": plan, "task_ids": moved})
 
     @staticmethod
+    def _record_moved(change, ids) -> None:
+        """Blocks the server moved by itself in this request (automatic
+        push, cascade, schedule): the routes answer them as `moved_ids`."""
+        got = getattr(change, "_plan_moved_ids", None)
+        if got is None:
+            got = []
+            change._plan_moved_ids = got
+        for i in ids:
+            if i not in got:
+                got.append(i)
+
+    @staticmethod
+    def take_moved(change, exclude=()) -> list[int]:
+        """The blocks the server moved in this request, minus those the
+        client sent; resets the record."""
+        got = getattr(change, "_plan_moved_ids", None) or []
+        change._plan_moved_ids = []
+        skip = set(exclude)
+        return [i for i in got if i not in skip]
+
+    @staticmethod
     async def _auto_push(change, plan, tasks: list, links: list, sources,
                          also, user: User) -> list[int]:
         """Automatic scheduling before the baseline: what the edit drives
@@ -1308,6 +1329,7 @@ class ChangePlanService:
                 t.start_date = res.tasks[tid].start
                 t.updated_by = user.id
                 moved.append(tid)
+        ChangePlanService._record_moved(change, moved)
         return moved
 
     @staticmethod
@@ -1365,6 +1387,7 @@ class ChangePlanService:
             # a block the user moved AND its moved predecessor pushed keeps
             # its one deviation (old dates from before the edit)
         pushed = [t.id for t in siblings if t.id in caused]   # outline order
+        ChangePlanService._record_moved(change, pushed)
         finish_after = plan_finish([t for t in siblings if t.id not in summaries])
         impact = ((finish_after - finish_before).days
                   if finish_after and finish_before else 0)
@@ -1453,6 +1476,7 @@ class ChangePlanService:
                 session, change, plan, tasks,
                 {tid: {"start_date": res.tasks[tid].start} for tid in res.moved},
                 user, reason=reason)
+            ChangePlanService._record_moved(change, moved)
             await ChangePlanService._rollup(session, change, plan)
             return moved
         moved = []
@@ -1461,6 +1485,7 @@ class ChangePlanService:
             t.start_date = res.tasks[tid].start
             t.updated_by = user.id
             moved.append(tid)
+        ChangePlanService._record_moved(change, moved)
         await ChangePlanService._rollup(session, change, plan)
         if moved:
             await ChangePlanService._bump(change, plan)
@@ -1947,6 +1972,162 @@ class ChangePlanService:
                        "removed": sorted(del_ids), "links_set": len(lups),
                        "links_removed": len(ldels)})
         return {"id_map": id_map, "link_id_map": link_id_map}
+
+    # ------------------------------------------------------------------
+    # System path: new blocks in a baselined detailed plan
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def add_blocks_after_baseline(
+            session: AsyncSession, change: ChangeRequest, user: User,
+            changeset: dict, reason: str, caused_by_task_id=None, *,
+            label: Optional[str] = None, extra: Optional[dict] = None) -> dict:
+        """Insert new blocks (and links) into the baselined detailed plan.
+        The structure is frozen for people; this is the one system path that
+        may add to it (a validation issue's recovery group). What the new
+        blocks push along their links moves (the post-baseline cascade) and
+        every such move is a deviation with `reason`, caused by
+        `caused_by_task_id` (an existing id or a temp id of the set; None:
+        the new block that pushed it). Each new top-level block is a
+        deviation too (it was not in the promise). Revision bump as any
+        detailed edit (none after the baseline).
+
+        changeset: {"tasks_upsert": [new blocks with temp ids, parent_id may
+        be a temp id], "links_upsert": [{from_task_id, to_task_id, type,
+        lag_days}, ids temp or existing]}. Returns PlanOut + id_map +
+        link_id_map + moved_ids (the existing blocks it moved)."""
+        plan = "detailed"
+        if not ChangePlanService.baselined(change, plan):
+            raise ChangeError("The detailed plan has no baseline: edit it directly")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ChangeError("A reason is required to change a validated plan")
+        cal = ChangePlanService.calendar(change, plan)
+        links = await ChangePlanService.links(session, change, plan)
+        tasks = await ChangePlanService.tasks(session, change, plan)
+        by_id = {t.id: t for t in tasks}
+        before_issues = ChangePlanService._structure_issues(tasks, links)
+        summaries = eng.summary_ids(e_tasks(tasks))
+        finish_before = plan_finish([t for t in tasks if t.id not in summaries])
+        ups = list(changeset.get("tasks_upsert") or [])
+        lups = list(changeset.get("links_upsert") or [])
+        if not ups:
+            raise ChangeError("No blocks to add")
+        temp = []
+        for u in ups:
+            tid = u.get("id")
+            if tid is None or (isinstance(tid, int) and not isinstance(tid, bool)):
+                raise ChangeError("New blocks carry a temporary id (a string)")
+            temp.append(str(tid))
+        if len(set(temp)) != len(temp):
+            raise ChangeError("A temporary block id is used twice in one change set")
+        next_sort = max((t.sort_order for t in tasks), default=0) + 1
+        made = []
+        for u in ups:
+            spec = {k: v for k, v in u.items() if k in WRITABLE_FIELDS
+                    and k not in ("parent_id", "predecessors")}
+            spec.setdefault("kind", "work")
+            for required in ("name", "start_date"):
+                if spec.get(required) in (None, ""):
+                    raise ChangeError(f"'{required}' is required for a new block")
+            await ChangePlanService._check_fields(session, spec, set(), None)
+            t = ChangePlanService._new_task(change, plan, spec, next_sort,
+                                            user.id, cal)
+            next_sort += 1
+            session.add(t)
+            made.append((u, t))
+        await session.flush()
+        id_map = {str(u["id"]): t.id for u, t in made}
+        for _u, t in made:
+            by_id[t.id] = t
+            tasks.append(t)
+
+        def ref(v):
+            if isinstance(v, int) and not isinstance(v, bool) and v in by_id:
+                return v
+            if v is not None and str(v) in id_map:
+                return id_map[str(v)]
+            raise ChangeError(f"Unknown block reference {v!r}")
+        for u, t in made:
+            if u.get("parent_id") is not None:
+                t.parent_id = ref(u["parent_id"])
+                ChangePlanService._check_parent(by_id, t.id, t.parent_id)
+        link_id_map: dict = {}
+        for item in lups:
+            frm, to = ref(item.get("from_task_id")), ref(item.get("to_task_id"))
+            typ = (item.get("type") or "FS").upper()
+            lag = int(item.get("lag_days") or 0)
+            ChangePlanService._check_link(by_id, links, frm, to, typ, lag)
+            lk = ChangePlanLink(change_id=change.id, plan=plan, from_task_id=frm,
+                                to_task_id=to, type=typ, lag_days=lag,
+                                created_by=user.id)
+            session.add(lk)
+            links.append(lk)
+            await ChangePlanService._flush_links(session)
+            if item.get("id") is not None:
+                link_id_map[str(item["id"])] = lk.id
+        ChangePlanService._check_structure(before_issues, tasks, links)
+
+        new_ids = {t.id for _u, t in made}
+        parents = {t.parent_id for t in tasks if t.parent_id is not None}
+        leaves_new = [t.id for _u, t in made if t.id not in parents]
+        res, cause = eng.push(e_tasks(tasks), e_links(links), cal, leaves_new)
+        cause_id = ref(caused_by_task_id) if caused_by_task_id is not None else None
+        olds: dict = {}
+        caused: dict = {}
+        for tid in res.moved:
+            t = by_id[tid]
+            if t.start_date == res.tasks[tid].start:
+                continue
+            if tid not in new_ids:
+                olds[tid] = (t.start_date, t.end_date)
+                caused[tid] = cause_id if cause_id is not None else cause.get(tid)
+            t.start_date = res.tasks[tid].start
+            t.updated_by = user.id
+        await ChangePlanService._rollup(session, change, plan)
+        summaries = eng.summary_ids(e_tasks(tasks))
+        finish_after = plan_finish([t for t in tasks if t.id not in summaries])
+        impact = ((finish_after - finish_before).days
+                  if finish_after and finish_before else 0)
+        devs = []
+        for _u, t in made:
+            if t.parent_id in new_ids:
+                continue                  # the top-level new block stands for it
+            devs.append(ChangePlanDeviation(
+                change_id=change.id, task_id=t.id, caused_by_task_id=None,
+                old_start=t.start_date, old_end=t.start_date,
+                new_start=t.start_date, new_end=t.end_date,
+                slip_days=(t.end_date - t.start_date).days,
+                finish_impact_days=impact, reason=reason, status="open",
+                created_by=user.id))
+        pushed = [t.id for t in tasks if t.id in olds]          # outline order
+        for tid in pushed:
+            t = by_id[tid]
+            old_start, old_end = olds[tid]
+            base_end = t.baseline_finish or old_end
+            devs.append(ChangePlanDeviation(
+                change_id=change.id, task_id=tid, caused_by_task_id=caused[tid],
+                old_start=old_start, old_end=old_end,
+                new_start=t.start_date, new_end=t.end_date,
+                slip_days=(t.end_date - base_end).days,
+                finish_impact_days=impact, reason=reason, status="open",
+                created_by=user.id))
+        for d in devs:
+            session.add(d)
+        await session.flush()
+        ChangePlanService._record_moved(change, pushed)
+        await ChangePlanService._bump(change, plan)
+        await ChangeService.append_changelog(
+            session, change, "plan_deviation",
+            (label or f"{len(made)} block(s) added to the validated plan")
+            + f": {len(devs)} deviation(s), finish impact {impact:+d} days: "
+            f"{reason}", user.id, notes=reason,
+            new_value={"deviation_ids": [d.id for d in devs],
+                       "task_ids": [d.task_id for d in devs],
+                       "added": sorted(new_ids), "finish_impact_days": impact,
+                       **(extra or {})})
+        out = await ChangePlanService.get_plan(session, change, plan, user)
+        return {**out, "id_map": id_map, "link_id_map": link_id_map,
+                "moved_ids": ChangePlanService.take_moved(change)}
 
     # ------------------------------------------------------------------
     # MSPDI import

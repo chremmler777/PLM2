@@ -594,6 +594,10 @@ class ChangeAttachment(Base):
     # with the other two — a quote PDF is evidence for exactly one offer.
     costing_offer_id: Mapped[int | None] = mapped_column(
         ForeignKey("costing_offers.id"), nullable=True, index=True)
+    # The validation issue this document is filed into (evidence, customer
+    # mails; spec §12, migration 090). Exclusive with the containers above.
+    validation_issue_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_validation_issues.id"), nullable=True, index=True)
 
     uploaded_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

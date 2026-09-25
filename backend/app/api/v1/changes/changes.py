@@ -27,6 +27,7 @@ from app.services.change_service import (
 )
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingService
+from app.services.validation_issue_service import IssueForbidden, IssueNotFound
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -70,6 +71,27 @@ def _tier(letter: str) -> str:
     return "info"
 
 
+async def _project_org_id(db: AsyncSession, project_id) -> Optional[int]:
+    """The organization a project belongs to (project -> plant -> org)."""
+    from app.models.entities import Plant, Project
+    if project_id is None:
+        return None
+    project = await db.get(Project, project_id)
+    plant = await db.get(Plant, project.plant_id) if project else None
+    return plant.organization_id if plant else None
+
+
+async def _require_org_user(db: AsyncSession, user_id: int,
+                            org_id: Optional[int]) -> User:
+    """An active user of `org_id` (any org when the change has no project),
+    else 400 - a lead from another organization would see nothing of it."""
+    u = await db.get(User, user_id)
+    if u is None or not u.is_active or (
+            org_id is not None and u.organization_id != org_id):
+        raise HTTPException(status_code=400, detail="Lead user not found")
+    return u
+
+
 @router.post("", response_model=ChangeResponse)
 async def create_change(
     body: ChangeCreate,
@@ -91,6 +113,14 @@ async def create_change(
             status_code=400,
             detail="Internal changes are not enabled yet — this system "
                    "currently runs the customer (external) change flow")
+    # The project must be one the caller can see (their organization; an
+    # admin sees all), and the lead a live user of the project's organization.
+    project_org = await _project_org_id(db, body.project_id)
+    if project_org is None or (current_user.effective_role != "admin"
+                               and project_org != current_user.organization_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    if body.lead_id is not None:
+        await _require_org_user(db, body.lead_id, project_org)
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,
@@ -193,6 +223,10 @@ async def my_change_tasks(
                        department has not confirmed at the current revision
       release_check    in_validation with open release-checklist items owned
                        by this caller's department
+      validation_issue_* an open validation issue waits on this caller:
+                       _contain, _root_cause, _route, _action, _customer,
+                       _quote, _close, _escalation (acknowledge); with
+                       issue_id, label, target_tab "release"
 
     Departments come from the EFFECTIVE actor, so an admin acting as Sales
     sees Sales' queue rather than everything.
@@ -286,6 +320,18 @@ async def my_change_tasks(
 
     def _ids(*statuses):
         return [c.id for c in open_changes if c.status in statuses]
+
+    # Changes with an open validation issue (spec §12), once for the list.
+    from app.models.change_validation_issue import (
+        ISSUE_DONE_STATUSES, ValidationIssue,
+    )
+    from app.services.validation_issue_service import ValidationIssueService
+    vi_ids = _ids("approved", "in_implementation", "in_validation")
+    issue_change_ids = set((await db.execute(
+        select(ValidationIssue.change_id).where(
+            ValidationIssue.change_id.in_(vi_ids),
+            ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)).distinct()
+    )).scalars().all()) if vi_ids else set()
 
     drafts: dict = {}
     latest_sent: dict = {}
@@ -476,6 +522,17 @@ async def my_change_tasks(
                     **await _base(c), "kind": "escalate_risk",
                     "department_ids": flagged,
                     "hint": "Take it to the customer, or escalate internally",
+                })
+
+        # Validation issues (spec §12): contain / root cause / fix actions for
+        # the owner department, the route for PM / lead, the customer
+        # decision and "quote the fix" for Sales, and every unacknowledged
+        # escalation the caller was notified of. Same rights as the cockpit
+        # (ValidationIssueService.my_actions).
+        if c.id in issue_change_ids:
+            for item in await ValidationIssueService.my_actions(db, c, current_user):
+                tasks.append({
+                    **await _base(c), **item, "hint": item["label"],
                 })
 
         # Stage 9's one commercial errand: the sampled part came off the scale
@@ -1556,9 +1613,8 @@ async def update_change(
     await _require_patch_rights(db, change, fields, current_user)
     if "lead_id" in fields and fields["lead_id"] is not None \
             and fields["lead_id"] != change.lead_id:
-        new_lead = await db.get(User, fields["lead_id"])
-        if new_lead is None or not new_lead.is_active:
-            raise HTTPException(status_code=400, detail="Lead user not found")
+        new_lead = await _require_org_user(
+            db, fields["lead_id"], await _project_org_id(db, change.project_id))
         await ChangeService.append_changelog(
             db, change, "lead_changed",
             f"Change lead {change.lead_id} -> {new_lead.id}", current_user.id,
@@ -1796,6 +1852,10 @@ async def upload_attachment(
     # The vendor offer this document IS (kind='vendor_quote'). Third container,
     # exclusive with the other two; written by whoever may write the position.
     costing_offer_id: Optional[int] = Form(None),
+    # The validation issue this evidence or customer mail is filed into
+    # (spec §12; kinds general / customer_email; owner department, PM,
+    # lead, Sales, admin while the issue is open).
+    validation_issue_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1819,15 +1879,21 @@ async def upload_attachment(
             user_id=current_user.id, kind=kind, responds_to_id=responds_to_id,
             concern_id=concern_id, assessment_id=assessment_id,
             costing_offer_id=costing_offer_id, actor=current_user,
+            validation_issue_id=validation_issue_id,
         )
     except ChangeError as e:
         os.remove(stored_path)      # do not leave an orphan on a rejected upload
         raise HTTPException(status_code=400, detail=str(e))
+    except (IssueForbidden, IssueNotFound) as e:
+        os.remove(stored_path)
+        raise HTTPException(
+            status_code=403 if isinstance(e, IssueForbidden) else 404, detail=str(e))
     await db.commit()
     return {"id": att.id, "filename": att.filename, "size_bytes": att.size_bytes,
             "kind": att.kind, "responds_to_id": att.responds_to_id,
             "concern_id": att.concern_id, "assessment_id": att.assessment_id,
-            "costing_offer_id": att.costing_offer_id}
+            "costing_offer_id": att.costing_offer_id,
+            "validation_issue_id": att.validation_issue_id}
 
 
 @router.get("/{change_id}/attachments/{attachment_id}/download")
@@ -1858,39 +1924,55 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
                                      user: User) -> None:
     """Who may remove a (non-quote) document.
 
-    Evidence filed on an assessment goes with the right to file it
-    (_may_attach_evidence), and once that assessment is submitted its
-    post-scoping evidence is the record the verdict stands on: frozen (409)
-    for everyone but an admin. Customer mail and general documents: the
-    uploader, the change lead, Project Management or an admin."""
+    Every kind defaults to: the uploader, the change lead, Project Management
+    or an admin. Evidence filed on an (existing) assessment follows the right
+    to file it instead (_may_attach_evidence); once that assessment is
+    submitted its post-scoping evidence is the record the verdict stands on.
+    Decision records freeze the same way: the rejection letter once the
+    rejection is sent, anything filed into a concern once it is settled.
+    Frozen means 409 for everyone but an admin (not one acting as a
+    department). Vendor quotes are checked by the caller (position write)."""
+    from app.models.change import ChangeConcern
     is_admin = user.effective_role == "admin"
-    if att.assessment_id is not None:
-        a = await db.get(ChangeAssessment, att.assessment_id)
-        if a is not None:
-            if not await ChangeService._may_attach_evidence(db, change, a, user):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only a member of the assessed department, the "
-                           "change lead, Project Management, Sales or an "
-                           "admin may remove that assessment's evidence")
-            submitted = (a.submitted_at is not None
-                         or a.effective_status == "submitted")
-            if submitted and att.phase == "post_scoping" and not is_admin:
-                raise HTTPException(
-                    status_code=409,
-                    detail="The assessment is submitted: its evidence is the "
-                           "record the verdict stands on and cannot be "
-                           "removed")
+
+    def frozen(detail: str):
+        if not is_admin:
+            raise HTTPException(status_code=409, detail=detail)
+
+    if att.kind == "rejection_letter" and change.rejection_sent_at is not None:
+        frozen("The rejection was sent: its letter is the record and cannot "
+               "be removed")
+    if att.concern_id is not None:
+        concern = await db.get(ChangeConcern, att.concern_id)
+        if concern is not None and not concern.is_open:
+            frozen("That concern is settled: the documents it was settled on "
+                   "cannot be removed")
+    a = (await db.get(ChangeAssessment, att.assessment_id)
+         if att.assessment_id is not None else None)
+    if a is not None and a.change_id == change.id:
+        if not await ChangeService._may_attach_evidence(db, change, a, user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only a member of the assessed department, the "
+                       "change lead, Project Management, Sales or an "
+                       "admin may remove that assessment's evidence")
+        submitted = (a.submitted_at is not None
+                     or a.effective_status == "submitted")
+        if submitted and att.phase == "post_scoping":
+            frozen("The assessment is submitted: its evidence is the record "
+                   "the verdict stands on and cannot be removed")
         return
-    if att.kind in ("customer_email", "general"):
-        if (is_admin or att.uploaded_by == user.id
-                or (change.lead_id is not None and change.lead_id == user.id)
-                or await MeetingService.user_is_pm_member(db, user)):
-            return
-        raise HTTPException(
-            status_code=403,
-            detail="Only the uploader, the change lead, Project Management or "
-                   "an admin may remove that document")
+    if att.kind == "vendor_quote":
+        return      # the position write rule, checked by the caller
+    # Everything else, and evidence whose assessment is gone: the default.
+    if (is_admin or att.uploaded_by == user.id
+            or (change.lead_id is not None and change.lead_id == user.id)
+            or await MeetingService.user_is_pm_member(db, user)):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Only the uploader, the change lead, Project Management or "
+               "an admin may remove that document")
 
 
 @router.delete("/{change_id}/attachments/{attachment_id}", status_code=204)

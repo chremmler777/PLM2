@@ -86,3 +86,24 @@ async def change_actuals(
                    "admin may read a change's actuals")
     summation = await CostService.summation(db, change)
     return {"change_id": change.id, "actuals": summation["actuals"]}
+
+
+@router.get("/changes/{change_id}/offer-vs-actual")
+async def change_offer_vs_actual(
+    change_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Offer versus doing for one change (spec §13): the plan frozen at
+    customer acceptance against booked hours, supplier invoices, scrap and
+    validation issue costs, with margins, slip and warnings. Cost roles."""
+    from app.services.change_service import ChangeService
+    from app.services.negotiation_service import NegotiationService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if change is None:
+        raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_read(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Project Management, Sales, the change lead or an "
+                   "admin may read a change's P&L")
+    return await PnlService.offer_vs_actual(db, change)

@@ -33,6 +33,10 @@ from app.models.change_plan import (
     ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation, ChangePlanLink,
 )
 from app.models.change_offer import ChangeOffer
+from app.models.change_validation_issue import (
+    ValidationIssue, ValidationIssueAction, ValidationIssueEscalation,
+)
+from app.models.change_actual_cost import ChangeActualCost
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
     WfInstance, WfInstanceTask, CheckWorkflowStandard,
@@ -104,6 +108,7 @@ __all__ = [
     "ChangePlanFeedback",
     "ChangePlanDeviation",
     "ChangeOffer",
+    "ChangeActualCost",
     "FormDefinition",
     "FormInstance",
     "FormEvent",

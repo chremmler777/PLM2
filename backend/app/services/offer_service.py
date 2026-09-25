@@ -993,6 +993,7 @@ class OfferService:
         await session.flush()
         if response == "accepted":
             await OfferService._bank_build_from_offer(session, change, offer, user_id)
+            await OfferService.freeze_pnl(session, change, offer)
         reason = (override_reason or "").strip() or None
         await ChangeService.append_changelog(
             session, change, f"offer_{response}",
@@ -1002,6 +1003,25 @@ class OfferService:
             new_value={"offer_id": offer.id, "version": offer.version,
                        "expired": expired,
                        "expired_override_reason": reason if expired else None})
+
+    @staticmethod
+    async def freeze_pnl(session: AsyncSession, change: ChangeRequest,
+                         offer: ChangeOffer) -> dict:
+        """Freeze the planned P&L figures (offer revenue, costing internal
+        and external, scrap, piece price, offered finish) into the offer's
+        `_snapshot.pnl` at customer acceptance, so the P&L compares what was
+        really doing against the plan as it stood when the customer said yes
+        (spec §13). Idempotent: a frozen plan is never overwritten."""
+        from app.services.pnl_service import PnlService
+        data = copy.deepcopy(offer.data or {})
+        snap = dict(data.get(SNAPSHOT_KEY) or {})
+        if snap.get("pnl"):
+            return snap["pnl"]
+        snap["pnl"] = await PnlService.planned_figures(session, change, offer)
+        data[SNAPSHOT_KEY] = snap
+        offer.data = data                    # a new dict: JSON change tracked
+        await session.flush()
+        return snap["pnl"]
 
     @staticmethod
     async def _bank_build_from_offer(session: AsyncSession, change: ChangeRequest,

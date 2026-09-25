@@ -649,6 +649,12 @@ class ChangeService:
             blocker = await ValidationService.release_blocker(session, change)
             if blocker is not None:
                 return blocker
+            # Validation issues (spec §12): open ones hold the release; a
+            # transferred issue does not (the follow-up change carries it).
+            from app.services.validation_issue_service import ValidationIssueService
+            blocker = await ValidationIssueService.release_blocker(session, change)
+            if blocker is not None:
+                return blocker
             from app.services.release_service import ReleaseService
             not_ready = ReleaseService.not_ready_message(
                 await ChangeService.implementation_progress(session, change))
@@ -1760,6 +1766,14 @@ class ChangeService:
         actions += await ChangeService._costing_to_close_actions(
             session, change, user, dept_ids)
 
+        # Validation issues (spec §12): contain / root cause / fix actions
+        # for the owner department, the route for PM/lead, the customer
+        # decision and "quote the fix" for Sales, and every unacknowledged
+        # escalation the user was notified of. Rights mirror the issue
+        # endpoints (validation_issues.py).
+        from app.services.validation_issue_service import ValidationIssueService
+        actions += await ValidationIssueService.my_actions(session, change, user)
+
         # kind "gate": a gate that guards the currently-reachable transition,
         # not yet decided 'yes', decidable by this user. Mirrors put_gate's
         # authz exactly (changes.py put_gate: admin or the change lead).
@@ -2690,7 +2704,16 @@ class ChangeService:
         # of the plain-attribute `allowed` whitelist) so an explicit null
         # (clear the deadline) is honored rather than skipped by the `v is
         # not None` guard below.
+        # A PATCH that moves nothing writes nothing: no changelog, no audit.
+        changed = False
+        if ("required_by_date" in fields
+                and fields["required_by_date"] == change.required_by_date
+                and fields.get("required_by_reason",
+                               change.required_by_reason) == change.required_by_reason):
+            fields.pop("required_by_date")
+            fields.pop("required_by_reason", None)
         if "required_by_date" in fields:
+            changed = True
             new_date = fields.pop("required_by_date")
             old = change.required_by_date
             # The quote deadline is a capture-time commitment. Once the change
@@ -2721,7 +2744,14 @@ class ChangeService:
 
         # Release deadline: born at acceptance / internal approval (Tasks 3-4);
         # PATCH only ever *moves* it, with the same audited-set pattern.
+        if ("release_due_date" in fields
+                and fields["release_due_date"] == change.release_due_date
+                and fields.get("release_due_reason",
+                               change.release_due_reason) == change.release_due_reason):
+            fields.pop("release_due_date")
+            fields.pop("release_due_reason", None)
         if "release_due_date" in fields:
+            changed = True
             new_date = fields.pop("release_due_date")
             if change.release_due_date is None:
                 raise ChangeError(
@@ -2734,18 +2764,31 @@ class ChangeService:
             await ChangeService._apply_release_deadline(
                 session, change, new_date, reason, user_id)
 
+        plain_changed = False
         for k, v in fields.items():
-            if k in allowed and v is not None:
+            if k in allowed and v is not None and getattr(change, k) != v:
                 setattr(change, k, v)
+                plain_changed = True
 
         # Handle affected_plant_ids (replace-set semantics; [] clears all)
-        if "affected_plant_ids" in fields and fields["affected_plant_ids"] is not None:
+        if ("affected_plant_ids" in fields and fields["affected_plant_ids"] is not None
+                and sorted(fields["affected_plant_ids"])
+                != sorted(p.id for p in change.affected_plants)):
             from app.models.entities import Plant
+            changed = True
             plant_ids = fields["affected_plant_ids"]
+            # Only the change's own organization's plants: a foreign plant id
+            # is refused as if it did not exist.
+            org_id = None
+            if change.project_id is not None:
+                project = await session.get(Project, change.project_id)
+                owner = await session.get(Plant, project.plant_id) if project else None
+                org_id = owner.organization_id if owner else None
             plants = []
             for pid in plant_ids:
                 plant = await session.get(Plant, pid)
-                if plant is None:
+                if plant is None or (org_id is not None
+                                     and plant.organization_id != org_id):
                     raise ChangeError(f"Plant {pid} not found")
                 plants.append(plant)
             old_ids = sorted(p.id for p in change.affected_plants)
@@ -2759,11 +2802,15 @@ class ChangeService:
                 old_value=old_ids, new_value=new_ids,
             )
 
+        if not (changed or plain_changed):
+            return change
         change.updated_at = datetime.utcnow()
         await session.flush()
-        await ChangeService.append_changelog(
-            session, change, "metadata_updated", "Change metadata updated", user_id,
-        )
+        if plain_changed:
+            await ChangeService.append_changelog(
+                session, change, "metadata_updated", "Change metadata updated",
+                user_id,
+            )
         return change
 
     @staticmethod
@@ -2910,6 +2957,7 @@ class ChangeService:
         concern_id: Optional[int] = None, assessment_id: Optional[int] = None,
         costing_offer_id: Optional[int] = None,
         actor: Optional[User] = None,
+        validation_issue_id: Optional[int] = None,
     ) -> ChangeAttachment:
         # Documents uploaded during capture/scoping are the baseline a decision
         # is made on; later ones are tracked separately as post_scoping changes.
@@ -2961,7 +3009,15 @@ class ChangeService:
                     "instead")
         # A document belongs to ONE container: filing it into both a question
         # and an assessment would make "where does this live" unanswerable.
-        if sum(1 for c in (concern_id, assessment_id, costing_offer_id)
+        # A validation issue (spec §12) is the fourth container: its
+        # evidence and the customer's mails about it (general or
+        # customer_email), filed by whoever works on the issue.
+        if validation_issue_id is not None:
+            from app.services.validation_issue_service import ValidationIssueService
+            await ValidationIssueService.check_attach(
+                session, change, validation_issue_id, kind, actor)
+        if sum(1 for c in (concern_id, assessment_id, costing_offer_id,
+                           validation_issue_id)
                if c is not None) > 1:
             raise ChangeError(
                 "An attachment belongs to a concern, an assessment or a "
@@ -3002,6 +3058,7 @@ class ChangeService:
             uploaded_by=user_id, phase=phase, kind=kind,
             responds_to_id=responds_to_id, concern_id=concern_id,
             assessment_id=assessment_id, costing_offer_id=costing_offer_id,
+            validation_issue_id=validation_issue_id,
         )
         session.add(att)
         await session.flush()
@@ -3012,7 +3069,8 @@ class ChangeService:
                        "responds_to_id": responds_to_id,
                        "concern_id": concern_id,
                        "assessment_id": assessment_id,
-                       "costing_offer_id": costing_offer_id},
+                       "costing_offer_id": costing_offer_id,
+                       "validation_issue_id": validation_issue_id},
         )
         return att
 

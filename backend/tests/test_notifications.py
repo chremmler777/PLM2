@@ -336,7 +336,8 @@ async def test_sweep_due_soon_overdue_and_at_risk_dedup(session_factory, seed):
         counts2 = await run_notification_sweep(session)
         await session.commit()
         assert counts2 == {"due_soon": 0, "overdue": 0,
-                           "deadline_at_risk": 0, "deadline_overdue": 0}
+                           "deadline_at_risk": 0, "deadline_overdue": 0,
+                           "validation_issue_escalated": 0}
 
 
 @pytest.mark.asyncio

@@ -704,7 +704,9 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'd1' && (
-        <D1MasterPanel changeId={changeId} />
+        <D1MasterPanel changeId={changeId}
+          canEditD1={isAdmin || isChangeLead || isQualityMember || isPmMember}
+          canEditCustomerRelevant={isAdmin || isChangeLead} />
       )}
 
       {effectiveTab === 'audit' && (

@@ -23,6 +23,8 @@ PRICE_KEYS = frozenset((
     "grand_total", "quoted_cost", "est_cost", "amount", "source_amount",
     "unit_price", "scrap_unit_price", "delta_per_piece", "internal_cost_total",
     "external_cost", "hourly_rate", "rate_snapshot", "price", "total",
+    # validation issues (spec §12): the fix's extra cost
+    "extra_cost",
 ))
 
 # Actions whose logged value IS a price (a bare number, no key to go by).
@@ -212,57 +214,73 @@ async def price_scope(session, viewer, stmt):
     return stmt.where(ChangeRequest.lead_id == viewer.id)
 
 
-# --- vendor quote documents ------------------------------------------------
+# --- costing names: vendor quotes, supplier offers, positions -------------
 # A vendor quote's filename usually names the supplier and the offer ("Hasco
-# 987.65.pdf"): its attachment_added / attachment_removed entries follow the
-# costing-position read rule (CostingPositionService.readable_department_ids),
-# not the price rule, so the department that owns the position still reads
-# its own.
+# 987.65.pdf"); the offer rows name the vendor and the position; the position
+# rows name the position. All of them follow the costing-position read rule
+# (CostingPositionService.readable_department_ids) - the same rule as the
+# quote download - not the price rule, so the department that owns the
+# position still reads its own.
 QUOTE_ATTACHMENT_ACTIONS = frozenset(("attachment_added", "attachment_removed"))
+COSTING_NAME_ACTIONS = {
+    "costing_offer_added": "Supplier offer added",
+    "costing_offer_updated": "Supplier offer updated",
+    "costing_offer_deleted": "Supplier offer removed",
+    "vendor_chosen": "Vendor chosen",
+    "costing_position_added": "Costing position added",
+    "costing_position_updated": "Costing position updated",
+    "costing_position_deleted": "Costing position removed",
+}
+# Keys that name the supplier, the document or the position.
+NAME_KEYS = frozenset(("filename", "vendor_name", "recommended_vendor", "label"))
 
 
-def _quote_payload(text: Optional[str]) -> Optional[dict]:
+def _payload(text: Optional[str]) -> Optional[dict]:
     if not text:
         return None
     try:
         value = json.loads(text)
     except (TypeError, ValueError):
         return None
-    if isinstance(value, dict) and (value.get("kind") == "vendor_quote"
-                                    or value.get("costing_offer_id") is not None):
+    return value if isinstance(value, dict) else None
+
+
+def _quote_payload(text: Optional[str]) -> Optional[dict]:
+    value = _payload(text)
+    if value is not None and (value.get("kind") == "vendor_quote"
+                              or value.get("costing_offer_id") is not None):
         return value
     return None
 
 
 def blank_quote_json(text: Optional[str]) -> Optional[str]:
-    value = _quote_payload(text)
-    if value is None:
+    """A logged JSON value with every naming key blanked (structure kept)."""
+    value = _payload(text)
+    if value is None or not (NAME_KEYS & value.keys()):
         return text
-    value = dict(value)
-    value["filename"] = None
-    return json.dumps(value)
+    return json.dumps({k: (None if k in NAME_KEYS else v)
+                       for k, v in value.items()})
 
 
 class QuoteReader:
-    """Decides, per logged row, whether the viewer may read a vendor quote's
-    name. One instance per request; department lookups are cached."""
+    """Decides, per logged row, whether the viewer may read the costing names
+    in it. One instance per request; department lookups are cached."""
 
     def __init__(self, session, user):
         self.session, self.user = session, user
         self._visible: dict[int, Optional[set]] = {}
         self._dept_by_offer: dict[int, Optional[int]] = {}
+        self._dept_by_position: dict[int, Optional[int]] = {}
 
-    async def _may_read(self, change, offer_id: Optional[int]) -> bool:
+    async def _visible_for(self, change) -> Optional[set]:
         from app.services.costing_position_service import CostingPositionService
         if change.id not in self._visible:
             self._visible[change.id] = (
                 await CostingPositionService.readable_department_ids(
                     self.session, change, self.user))
-        visible = self._visible[change.id]
-        if visible is None:
-            return True
-        if offer_id is None:
-            return False
+        return self._visible[change.id]
+
+    async def _offer_dept(self, offer_id: int) -> Optional[int]:
         if offer_id not in self._dept_by_offer:
             from sqlalchemy import select
             from app.models.change_cost import CostingOffer, CostingPosition
@@ -270,27 +288,63 @@ class QuoteReader:
                 select(CostingPosition.department_id)
                 .join(CostingOffer, CostingOffer.position_id == CostingPosition.id)
                 .where(CostingOffer.id == offer_id))).scalar_one_or_none()
-        dept = self._dept_by_offer[offer_id]
-        return dept is not None and dept in visible
+        return self._dept_by_offer[offer_id]
+
+    async def _position_dept(self, position_id: int) -> Optional[int]:
+        if position_id not in self._dept_by_position:
+            from app.models.change_cost import CostingPosition
+            p = await self.session.get(CostingPosition, position_id)
+            self._dept_by_position[position_id] = p.department_id if p else None
+        return self._dept_by_position[position_id]
+
+    async def _department(self, action, old, new) -> tuple[bool, Optional[int]]:
+        """(is a costing-name row, owning department or None if unknown)."""
+        if action in QUOTE_ATTACHMENT_ACTIONS:
+            value = _quote_payload(new) or _quote_payload(old)
+            if value is None:
+                return False, None
+            oid = value.get("costing_offer_id")
+            return True, (await self._offer_dept(oid) if oid is not None else None)
+        if action in COSTING_NAME_ACTIONS:
+            for value in (_payload(new), _payload(old)):
+                if not value:
+                    continue
+                if value.get("department_id") is not None:
+                    return True, value["department_id"]
+                if value.get("position_id") is not None:
+                    return True, await self._position_dept(value["position_id"])
+                if value.get("offer_id") is not None:
+                    return True, await self._offer_dept(value["offer_id"])
+            return True, None
+        return False, None
 
     async def hides(self, change, action: Optional[str],
                     old_text: Optional[str], new_text: Optional[str]) -> bool:
-        """True when this row names a vendor quote the viewer may not read."""
-        if change is None or action not in QUOTE_ATTACHMENT_ACTIONS:
+        """True when this row names a costing item the viewer may not read.
+        An owner that cannot be resolved any more hides the row."""
+        if change is None:
             return False
-        value = _quote_payload(new_text) or _quote_payload(old_text)
-        if value is None:
+        is_costing, dept = await self._department(action, old_text, new_text)
+        if not is_costing:
             return False
-        return not await self._may_read(change, value.get("costing_offer_id"))
+        visible = await self._visible_for(change)
+        if visible is None:
+            return False
+        return dept is None or dept not in visible
 
 
 def blank_quote_changelog(out: dict) -> dict:
-    """A (redacted or plain) changelog dict with the quote's name removed."""
+    """A (redacted or plain) changelog dict with the costing names removed."""
     out = dict(out)
-    if out.get("action") == "attachment_added":
+    action = out.get("action")
+    if action == "attachment_added":
         out["action_description"] = "Attached a vendor quote"
-    else:
+    elif action == "attachment_removed":
         out["action_description"] = "Removed a vendor quote"
+    else:
+        out["action_description"] = COSTING_NAME_ACTIONS.get(
+            action, out.get("action_description"))
+    out["notes"] = None
     out["old_value"] = blank_quote_json(out.get("old_value"))
     out["new_value"] = blank_quote_json(out.get("new_value"))
     return out

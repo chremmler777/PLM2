@@ -1700,3 +1700,77 @@ async def test_import_clears_the_idea_flag_on_summaries(client, world):
     assert res.status_code == 200, res.text
     assert _by_name(res.json())["Phase"]["is_idea"] is False
     assert any("idea flag was cleared" in w for w in res.json()["import_warnings"])
+
+
+async def test_write_responses_name_what_the_server_moved(client, world,
+                                                          session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    url = f"/api/v1/changes/{cid}/plan"
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-07", 2, predecessors=[a["id"]])
+    c = await _task(client, sales, cid, "C", "2026-11-09", 1, predecessors=[b["id"]])
+    res = await client.patch(f"{url}/tasks/{a['id']}", json={"duration_days": 7},
+                             headers=sales)
+    assert res.json()["moved_ids"] == [b["id"], c["id"]]
+    res = await client.patch(f"{url}/tasks", json={"plan": "quote", "updates": [
+        {"id": a["id"], "start_date": "2026-11-03"},
+        {"id": b["id"], "start_date": "2026-11-20"}]}, headers=sales)
+    assert res.json()["moved_ids"] == [c["id"]]                 # not A, B: sent
+    d = await _task(client, sales, cid, "D", "2026-11-02", 1)
+    res = await client.post(f"{url}/links", json={
+        "plan": "quote", "from_task_id": c["id"], "to_task_id": d["id"]},
+        headers=sales)
+    assert res.json()["moved_ids"] == [d["id"]]
+    lid = next(lk["id"] for lk in res.json()["links"] if lk["to_task_id"] == d["id"])
+    res = await client.patch(f"{url}/links/{lid}", json={"lag_days": 1}, headers=sales)
+    assert res.json()["moved_ids"] == [d["id"]]
+    res = await client.post(f"{url}/changes", json={"plan": "quote", "changes": {
+        "tasks_upsert": [{"id": a["id"], "duration_days": 20}]}}, headers=sales)
+    assert set(res.json()["moved_ids"]) == {b["id"], c["id"], d["id"]}
+    assert a["id"] not in res.json()["moved_ids"]
+    res = await client.put(f"{url}/calendar?plan=quote", json={"mode": "working"},
+                           headers=sales)
+    assert "moved_ids" in res.json()
+    res = await client.post(f"{url}/schedule", json={"plan": "quote"}, headers=sales)
+    assert res.json()["moved_ids"] == []
+
+
+async def test_add_blocks_after_baseline_system_path(client, world, session_factory):
+    from app.models.entities import User
+    from app.services.change_plan_service import ChangePlanService
+    from app.services.change_service import ChangeError
+    cid, sales = await _baselined(client, world, session_factory)
+    t = _by_name(await _plan(client, sales, cid, "detailed"))
+    impl, samp = t["Implementation"], t["Sampling / trial"]
+    changeset = {"tasks_upsert": [{"id": "x1", "name": "Extra trial",
+                                   "start_date": impl["end_date"],
+                                   "duration_days": 4, "lane": "APQP"}],
+                 "links_upsert": [{"from_task_id": impl["id"], "to_task_id": "x1"},
+                                  {"from_task_id": "x1", "to_task_id": samp["id"]}]}
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        user = await s.get(User, world["users"]["sales"])
+        with pytest.raises(ChangeError):
+            await ChangePlanService.add_blocks_after_baseline(
+                s, change, user, changeset, "")
+        out = await ChangePlanService.add_blocks_after_baseline(
+            s, change, user, changeset, "extra trial requested")
+        await s.commit()
+    new_id = out["id_map"]["x1"]
+    by = _by_name(out)
+    assert by["Extra trial"]["id"] == new_id
+    assert by["Sampling / trial"]["start_date"] == by["Extra trial"]["end_date"]
+    assert samp["id"] in out["moved_ids"] and new_id not in out["moved_ids"]
+    devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
+                             headers=sales)).json()
+    added = [d for d in devs if d["task_id"] == new_id]
+    assert len(added) == 1 and added[0]["caused_by_task_id"] is None
+    pushed = [d for d in devs if d["task_id"] != new_id]
+    assert pushed and {d["caused_by_task_id"] for d in pushed} == {new_id}
+    assert {d["reason"] for d in devs} == {"extra trial requested"}
+    assert {d["finish_impact_days"] for d in devs} == {4}
+    # people still cannot add blocks after the baseline
+    res = await client.post(f"/api/v1/changes/{cid}/plan/tasks", json={
+        "plan": "detailed", "name": "x", "start_date": "2026-11-01"}, headers=sales)
+    assert res.status_code == 400

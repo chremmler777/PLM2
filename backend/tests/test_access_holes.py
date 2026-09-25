@@ -270,7 +270,9 @@ async def test_changelog_notes_redacted_for_non_cost_roles(
         url, headers=await _auth(client, "q"))).json()}
     vc = rows["vendor_chosen"]
     assert vc["notes"] is None and "400" not in vc["action_description"]
-    assert vc["action_description"].endswith("on 'Insert rework'")
+    # no position on the row: its owner is unknown, so the vendor and the
+    # position are hidden too (the costing-name rule, round 3)
+    assert vc["action_description"] == "Vendor chosen"
     assert rows["costing_reopened"]["action_description"] == "Costing reopened"
     assert rows["costing_reopened"]["notes"] is None
     assert rows["internal_costs_approved"]["notes"] is None
@@ -575,3 +577,237 @@ async def test_acting_admin_is_org_scoped(client, offer_world, session_factory, 
     acting = await _admin(client, offer_world["depts"]["Tool Engineer"])
     assert (await client.get(url, headers=acting)).status_code == 404
     assert (await client.get(url, headers=await _admin(client))).status_code == 200
+
+
+# ===========================================================================
+# Round 3 (re-review of 3a1be470)
+# ===========================================================================
+
+async def _loose(session_factory, cid, kind, by, **kw):
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    os.write(fd, b"doc")
+    os.close(fd)
+    async with session_factory() as s:
+        att = ChangeAttachment(change_id=cid, filename=f"{kind}.pdf", stored_path=path,
+                               content_type="application/pdf", size_bytes=3,
+                               sha256="z" * 64, phase="post_scoping", kind=kind,
+                               uploaded_by=by, **kw)
+        s.add(att)
+        await s.commit()
+        return att.id
+
+
+async def _org2(session_factory):
+    from app.models.entities import Plant
+    async with session_factory() as s:
+        org = Organization(name="Org2", code="org2", is_active=True)
+        s.add(org)
+        await s.flush()
+        pl = Plant(organization_id=org.id, name="P2", code="p2", location="US",
+                   is_active=True)
+        s.add(pl)
+        await s.flush()
+        pr = Project(plant_id=pl.id, name="Proj2", code="pj2", status="active")
+        s.add(pr)
+        await s.commit()
+        return org.id, pl.id, pr.id
+
+
+# --- HIGH: every attachment kind defaults to uploader / lead / PM / admin ---
+
+async def test_every_attachment_kind_defaults_to_uploader_lead_pm_admin(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    tool_id = offer_world["users"]["tool"]
+    await _user(session_factory, seed, "q", "Quality")
+    q = await _auth(client, "q")
+    tool = await _off(client, "tool")
+    for kind in ("rejection_letter", "rfq", "change_ppt", "info_request",
+                 "info_response", "general", "customer_email"):
+        aid = await _loose(session_factory, cid, kind, tool_id)
+        url = f"/api/v1/changes/{cid}/attachments/{aid}"
+        res = await client.delete(url, headers=q)
+        assert res.status_code == 403, (kind, res.text)
+        res = await client.delete(url, headers=tool)
+        assert res.status_code == 204, (kind, res.text)
+
+
+async def test_concern_documents_default_rule_and_freeze_when_settled(
+        client, offer_world, session_factory, seed):
+    from datetime import datetime
+    from app.models.change import ChangeConcern
+    cid = offer_world["change_id"]
+    tool_id = offer_world["users"]["tool"]
+    await _user(session_factory, seed, "q", "Quality")
+    async with session_factory() as s:
+        open_c = ChangeConcern(change_id=cid, kind="needs_info", note="q?",
+                               raised_by=tool_id)
+        closed_c = ChangeConcern(change_id=cid, kind="needs_info", note="q2?",
+                                 raised_by=tool_id, withdrawn_at=datetime.utcnow())
+        s.add_all([open_c, closed_c])
+        await s.commit()
+        open_id, closed_id = open_c.id, closed_c.id
+    aid = await _loose(session_factory, cid, "info_response", tool_id,
+                       concern_id=open_id)
+    url = f"/api/v1/changes/{cid}/attachments/{aid}"
+    assert (await client.delete(url, headers=await _auth(client, "q"))).status_code == 403
+    assert (await client.delete(url, headers=await _off(client, "tool"))).status_code == 204
+    aid = await _loose(session_factory, cid, "info_response", tool_id,
+                       concern_id=closed_id)
+    url = f"/api/v1/changes/{cid}/attachments/{aid}"
+    assert (await client.delete(url, headers=await _off(client, "tool"))).status_code == 409
+    assert (await client.delete(url, headers=await _admin(
+        client, offer_world["depts"]["Tool Engineer"]))).status_code == 409
+    assert (await client.delete(url, headers=await _admin(client))).status_code == 204
+
+
+async def test_sent_rejection_letter_is_frozen(
+        client, offer_world, session_factory, seed):
+    from datetime import datetime
+    cid = offer_world["change_id"]
+    sales_id = offer_world["users"]["sales"]
+    aid = await _loose(session_factory, cid, "rejection_letter", sales_id)
+    async with session_factory() as s:
+        (await s.get(ChangeRequest, cid)).rejection_sent_at = datetime.utcnow()
+        await s.commit()
+    url = f"/api/v1/changes/{cid}/attachments/{aid}"
+    assert (await client.delete(url, headers=await _off(client, "sales"))).status_code == 409
+    assert (await client.delete(url, headers=await _off(client, "pm"))).status_code == 409
+    assert (await client.delete(url, headers=await _admin(client))).status_code == 204
+
+
+async def test_evidence_with_missing_assessment_falls_back_to_default(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    tool_id = offer_world["users"]["tool"]
+    await _user(session_factory, seed, "q", "Quality")
+    aid = await _loose(session_factory, cid, "change_ppt", tool_id,
+                       assessment_id=99999)
+    url = f"/api/v1/changes/{cid}/attachments/{aid}"
+    assert (await client.delete(url, headers=await _auth(client, "q"))).status_code == 403
+    assert (await client.delete(url, headers=await _off(client, "tool"))).status_code == 204
+
+
+# --- vendor / position names in the offer rows of changelog and audit ------
+
+async def test_vendor_names_hidden_in_offer_rows(
+        client, offer_world, session_factory, seed):
+    cid = offer_world["change_id"]
+    pid = offer_world["position_id"]
+    await _user(session_factory, seed, "q", "Quality")
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        uid = offer_world["users"]["tool"]
+        await ChangeService.append_changelog(
+            s, c, "costing_offer_added", "Offer from Meusburger on 'Insert rework': 1234.5",
+            uid, new_value={"position_id": pid, "offer_id": 1,
+                            "vendor_name": "Meusburger", "total_cost": 1234.5})
+        await ChangeService.append_changelog(
+            s, c, "costing_offer_deleted", "Offer from Meusburger on 'Insert rework' removed",
+            uid, old_value={"position_id": pid, "vendor_name": "Meusburger"})
+        await ChangeService.append_changelog(
+            s, c, "vendor_chosen", "Vendor chosen: Meusburger on 'Insert rework'",
+            offer_world["users"]["sales"],
+            new_value={"position_id": pid, "offer_id": 1,
+                       "vendor_name": "Meusburger", "recommended_vendor": "Hasco"})
+        await s.commit()
+    names = ("Meusburger", "Hasco", "Insert rework")
+    q = await _auth(client, "q")
+    tool = await _off(client, "tool")
+    url = f"/api/v1/changes/{cid}/changelog"
+    rows = [r for r in (await client.get(url, headers=q)).json()
+            if r["action"] in ("costing_offer_added", "costing_offer_deleted",
+                               "vendor_chosen")]
+    assert len(rows) == 3
+    for r in rows:
+        text = f"{r['action_description']} {r['old_value']} {r['new_value']}"
+        assert not any(n in text for n in names), text
+    own = [r for r in (await client.get(url, headers=tool)).json()
+           if r["action"] == "costing_offer_added"]
+    assert "Meusburger" in own[0]["action_description"]
+    audit = (await client.get("/api/v1/audit?correlation_id=C-O-1", headers=q)).json()
+    for r in audit:
+        if r["action"] in ("costing_offer_added", "costing_offer_deleted",
+                           "vendor_chosen"):
+            assert not any(n in f"{r['old_values']} {r['new_values']}"
+                           for n in names), r
+    csv = (await client.get("/api/v1/audit/export?correlation_id=C-O-1",
+                            headers=q)).text
+    assert "Meusburger" not in csv
+    audit_tool = (await client.get("/api/v1/audit?correlation_id=C-O-1",
+                                   headers=tool)).json()
+    assert any("Meusburger" in (r["new_values"] or "") for r in audit_tool
+               if r["action"] == "costing_offer_added")
+
+
+# --- organization boundaries on create / lead / plants ----------------------
+
+async def test_create_change_is_org_bound(client, offer_world, session_factory, seed):
+    _, _, pr2 = await _org2(session_factory)
+    sales = await _off(client, "sales")
+    res = await client.post("/api/v1/changes", headers=sales, json={
+        "project_id": pr2, "title": "x-org", "reason": "r",
+        "change_type": "physical_part"})
+    assert res.status_code == 404, res.text
+    org2 = (await _org2_id(session_factory))
+    stranger = await _user(session_factory, seed, "stranger", org_id=org2)
+    res = await client.post("/api/v1/changes", headers=sales, json={
+        "project_id": seed["project_id"], "title": "x-lead", "reason": "r",
+        "change_type": "physical_part", "lead_id": stranger})
+    assert res.status_code == 400, res.text
+    res = await client.post("/api/v1/changes", headers=sales, json={
+        "project_id": seed["project_id"], "title": "ok", "reason": "r",
+        "change_type": "physical_part", "lead_id": offer_world["users"]["sales"]})
+    assert res.status_code == 200, res.text
+
+
+async def _org2_id(session_factory):
+    from sqlalchemy import select
+    async with session_factory() as s:
+        return (await s.execute(select(Organization.id).where(
+            Organization.code == "org2"))).scalar_one()
+
+
+async def test_patch_lead_and_plants_stay_in_the_org(
+        client, offer_world, session_factory, seed):
+    org2, pl2, _ = await _org2(session_factory)
+    stranger = await _user(session_factory, seed, "stranger", org_id=org2)
+    cid = offer_world["change_id"]
+    url = f"/api/v1/changes/{cid}"
+    pm = await _off(client, "pm")
+    res = await client.patch(url, headers=pm, json={"lead_id": stranger})
+    assert res.status_code == 400, res.text
+    res = await client.patch(url, headers=pm, json={"affected_plant_ids": [pl2]})
+    assert res.status_code == 400, res.text
+    async with session_factory() as s:
+        own_plant = (await s.get(Project, seed["project_id"])).plant_id
+    res = await client.patch(url, headers=pm, json={"affected_plant_ids": [own_plant]})
+    assert res.status_code == 200, res.text
+
+
+async def test_noop_patch_writes_no_history(client, offer_world, session_factory, seed):
+    from sqlalchemy import func, select
+    from app.models.change import ChangeChangelog
+    from app.models.entities import AuditLog
+    cid = offer_world["change_id"]
+    url = f"/api/v1/changes/{cid}"
+    admin = await _admin(client)
+    cur = (await client.get(url, headers=admin)).json()
+
+    async def counts():
+        async with session_factory() as s:
+            return ((await s.execute(select(func.count()).select_from(
+                ChangeChangelog).where(ChangeChangelog.change_id == cid))).scalar(),
+                (await s.execute(select(func.count()).select_from(AuditLog))).scalar())
+    before = await counts()
+    res = await client.patch(url, headers=admin, json={
+        "title": cur["title"], "priority": cur["priority"],
+        "customer_relevant": cur["customer_relevant"],
+        "affected_plant_ids": cur.get("affected_plant_ids") or [],
+        "required_by_date": cur["required_by_date"]})
+    assert res.status_code == 200, res.text
+    assert await counts() == before
+    res = await client.patch(url, headers=admin, json={"title": "moved"})
+    assert res.status_code == 200
+    after = await counts()
+    assert after[0] == before[0] + 1

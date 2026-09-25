@@ -90,21 +90,21 @@ describe('D1MasterPanel', () => {
   afterEach(() => { cleanup(); });
 
   it('renders all three gate labels', () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
     expect(screen.getByText(/Feasible\?/i)).toBeDefined();
     expect(screen.getByText(/Budget checked\?/i)).toBeDefined();
     expect(screen.getByText(/Technical release\?/i)).toBeDefined();
   });
 
   it('renders yes/no/na buttons for each gate', () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
     const yesBtns = screen.getAllByRole('button', { name: 'yes' });
     expect(yesBtns.length).toBe(3);
   });
 
   it('calls putGate when a decision button is clicked', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
     const noBtns = screen.getAllByRole('button', { name: 'no' });
     await act(async () => { fireEvent.click(noBtns[0]); });
     await waitFor(() => {
@@ -113,7 +113,7 @@ describe('D1MasterPanel', () => {
   });
 
   it('renders D1 header fields pre-filled', async () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => {
       const issuerInput = screen.getByDisplayValue('Alice');
       expect(issuerInput).toBeDefined();
@@ -123,7 +123,7 @@ describe('D1MasterPanel', () => {
 
   it('calls changesApi.update with edited field', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => screen.getByDisplayValue('Alice'));
     const issuerInput = screen.getByDisplayValue('Alice');
     await act(async () => {
@@ -136,9 +136,36 @@ describe('D1MasterPanel', () => {
     });
   });
 
+  it('sends only the fields that changed', async () => {
+    const { changesApi } = await import('../../api/changes');
+    render(<D1MasterPanel changeId={1} canEditD1 />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    await act(async () => {
+      fireEvent.change(screen.getByDisplayValue('Alice'), { target: { value: 'Bob' } });
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save/i })); });
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(1, { issuer: 'Bob' }));
+  });
+
+  it('lets a D1 editor without the lead right leave customer relevance alone', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    const box = screen.getByLabelText(t('customer_relevant')) as HTMLInputElement;
+    expect(box.disabled).toBe(true);
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('is read-only without any right: disabled fields, no save', async () => {
+    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/Plant B/i) as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
+  });
+
   it('calls changesApi.update with affected_plant_ids on plant toggle', async () => {
     const { changesApi } = await import('../../api/changes');
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => screen.getByLabelText(/Plant B/i));
     const plantBCheckbox = screen.getByLabelText(/Plant B/i);
     await act(async () => { fireEvent.click(plantBCheckbox); });
@@ -164,14 +191,14 @@ describe('D1MasterPanel', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
-    render(<D1MasterPanel changeId={1} />, { wrapper });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
     await waitFor(() => {
       expect(screen.getByText(/#42/)).toBeDefined();
     });
   });
 
   it('renders lead part indicator', async () => {
-    render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => {
       expect(screen.getByText('Lead part')).toBeDefined();
     });

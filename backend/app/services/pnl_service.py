@@ -1,7 +1,7 @@
 """P&L (Profit & Loss) read model: per-change and portfolio-level margin views.
 
-Computed live from existing change-management data (no new tables, no
-migration). Revenue is `quoted_price` for customer-relevant changes or
+Computed live from change-management data; the only table of its own is
+change_actual_costs (supplier invoice lines, migration 091). Revenue is `quoted_price` for customer-relevant changes or
 `internal_approved_amount` (the PM-approved summation snapshot) for internal
 changes. Cost is the sum of AssessmentCostLine actuals joined through
 ChangeAssessment. Only changes in status 'costing' or beyond are in scope -
@@ -10,7 +10,7 @@ mirrors ReportService's org-scoping via `_org_scope`.
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import false as sa_false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.change import ChangeAssessment, ChangeRequest
@@ -122,6 +122,8 @@ class PnlService:
                 select(Project.id, Project.name).where(Project.id.in_(project_ids))
             )).all())
 
+        ova = await PnlService._offer_vs_actual_batch(session, changes, costs)
+
         rows = []
         for c in changes:
             internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
@@ -147,8 +149,160 @@ class PnlService:
                 "effort_hours": _round(efforts.get(c.id, 0.0)),
                 "pending_price": revenue is None,
                 "realized": c.status in REALIZED_STATUSES,
+                # offer versus doing (spec §13)
+                **ova.get(c.id, {}),
             })
         return rows
+
+    @staticmethod
+    async def _offer_vs_actual_batch(session, changes, costs: dict) -> dict[int, dict]:
+        """The list's offer-vs-actual columns, a fixed number of grouped
+        queries for the whole portfolio (the card's per-change version would
+        be an N+1 across it). Planned figures come from the accepted offer's
+        frozen snapshot; without one the offer total (or quoted price) and
+        the cost lines stand in."""
+        from app.models.change import change_affected_plants
+        from app.models.change_impl import ImplementationBooking
+        from app.models.change_offer import ChangeOffer
+        from app.models.change_plan import ChangePlanTask
+        from app.services.change_plan_service import ChangePlanService
+        from app.services.offer_service import SNAPSHOT_KEY
+        ids = [c.id for c in changes]
+        offers = list((await session.execute(
+            select(ChangeOffer).where(
+                ChangeOffer.change_id.in_(ids),
+                ChangeOffer.status.in_(("sent", "accepted"))))).scalars().all())
+        by_change: dict[int, ChangeOffer] = {}
+        for o in sorted(offers, key=lambda o: o.version):
+            by_change[o.change_id] = o            # latest sent/accepted
+        for o in offers:
+            if o.status == "accepted":
+                by_change[o.change_id] = o        # the accepted one wins
+
+        # booked hours x the department's rate at the change's rate plant
+        booked = (await session.execute(
+            select(ImplementationBooking.change_id, ImplementationBooking.department_id,
+                   func.sum(ImplementationBooking.hours))
+            .where(ImplementationBooking.change_id.in_(ids))
+            .group_by(ImplementationBooking.change_id,
+                      ImplementationBooking.department_id))).all()
+        plants: dict[int, list] = {}
+        for cid, pid in (await session.execute(
+                select(change_affected_plants.c.change_id,
+                       change_affected_plants.c.plant_id)
+                .where(change_affected_plants.c.change_id.in_(ids)))).all():
+            plants.setdefault(cid, []).append(pid)
+        project_plant = dict((await session.execute(
+            select(Project.id, Project.plant_id).where(Project.id.in_(
+                {c.project_id for c in changes if c.project_id})))).all())
+        by_id = {c.id: c for c in changes}
+
+        def rate_plant(cid):
+            ps = plants.get(cid) or []
+            if len(ps) == 1:
+                return ps[0]
+            return project_plant.get(by_id[cid].project_id)
+        rates: dict[tuple, Optional[float]] = {}
+        internal_actual: dict[int, float] = {}
+        for cid, dept, hours in booked:
+            key = (dept, rate_plant(cid))
+            if key not in rates:
+                rates[key] = await _rate_at(session, key)
+            if not hours:
+                continue
+            internal_actual[cid] = internal_actual.get(cid, 0.0) + (
+                float(hours or 0.0) * (rates[key] or 0.0))
+
+        # costing positions belong to the plan exactly as in the summation:
+        # quoted cost by kind, their own hours at the department rate
+        from app.models.change_cost import CostingPosition
+        pos_cost: dict[int, list] = {}
+        for p in (await session.execute(select(CostingPosition).where(
+                CostingPosition.change_id.in_(ids)))).scalars().all():
+            bucket = pos_cost.setdefault(p.change_id, [0.0, 0.0])
+            bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
+            if p.hours:
+                key = (p.department_id, rate_plant(p.change_id))
+                if key not in rates:
+                    rates[key] = (await _rate_at(session, key))
+                bucket[0] += float(p.hours) * (rates[key] or 0.0)
+
+        extra = await PnlService.actual_cost_sums(session, ids)
+        issues = await PnlService.issue_costs(session, ids)
+
+        # timing: one query for both plans of every change
+        tasks = list((await session.execute(
+            select(ChangePlanTask).where(
+                ChangePlanTask.change_id.in_(ids),
+                ChangePlanTask.is_idea.is_(False)))).scalars().all())
+        plan_tasks: dict[tuple, list] = {}
+        for t in tasks:
+            plan_tasks.setdefault((t.change_id, t.plan), []).append(t)
+
+        out = {}
+        for c in changes:
+            o = by_change.get(c.id)
+            snap = (((o.data or {}).get(SNAPSHOT_KEY) or {}).get("pnl")
+                    if o is not None and o.status == "accepted" else None)
+            internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
+            if snap:
+                planned = {k: snap.get(k) for k in
+                           ("revenue", "internal", "external", "scrap")}
+            else:
+                revenue = (o.total_one_time if o is not None else
+                           c.quoted_price if c.customer_relevant
+                           else c.internal_approved_amount)
+                pi, pe = pos_cost.get(c.id, (0.0, 0.0))
+                planned = {"revenue": revenue, "internal": internal_cost + pi,
+                           "external": external_cost + pe, "scrap": 0.0}
+            e = extra.get(c.id, {})
+            i = issues.get(c.id, {})
+            fig = compose(planned, {
+                "revenue": (None if planned["revenue"] is None else
+                            planned["revenue"] + i.get("customer_quoted", 0.0)),
+                "internal": internal_actual.get(c.id, 0.0),
+                "external": e.get("external", 0.0), "scrap": e.get("scrap", 0.0),
+                "other": e.get("other", 0.0),
+                "issues_internal": i.get("internal", 0.0),
+                "issues_customer": i.get("customer", 0.0),
+                "issues_supplier": i.get("supplier", 0.0)},
+                in_progress=c.status in IN_PROGRESS_STATUSES)
+            # nothing booked, invoiced or raised yet: there is no actual to
+            # compare, and a zero would read as a saving
+            recorded = (c.id in internal_actual or bool(e) or bool(i))
+            phase = ("actual" if c.status in ACTUAL_STATUSES and recorded
+                     else "plan")
+
+            # slip against the detailed baseline, else the offered finish
+            detailed = plan_tasks.get((c.id, "detailed"), [])
+            cal = ChangePlanService.calendar(c, "detailed")
+            ChangePlanService._attach(detailed, cal)
+            baseline = max((t.baseline_finish for t in detailed if t.baseline_finish),
+                           default=None)
+            if baseline is None and snap and snap.get("quote_finish"):
+                baseline = date.fromisoformat(snap["quote_finish"])
+            if baseline is None:
+                quote = plan_tasks.get((c.id, "quote"), [])
+                ChangePlanService._attach(quote, ChangePlanService.calendar(c, "quote"))
+                baseline = max((t.end_date for t in quote), default=None)
+            forecast = max((t.end_date for t in detailed), default=None)
+            slip = (cal.idx(forecast) - cal.idx(baseline)
+                    if baseline is not None and forecast is not None else None)
+            out[c.id] = {
+                "phase": phase,
+                "basis": ("accepted_offer" if o is not None and o.status == "accepted"
+                          else "sent_offer" if o is not None else "costing"),
+                "offer_revenue": fig["planned_revenue"],
+                "planned_cost": fig["planned_cost"],
+                "planned_margin": fig["planned_margin"],
+                "actual_cost": fig["actual_cost"] if phase == "actual" else None,
+                "actual_margin": fig["actual_margin"] if phase == "actual" else None,
+                "forecast_margin": fig["forecast_margin"] if phase == "actual" else None,
+                "variance": fig["variance"] if phase == "actual" else None,
+                "slip_days": slip,
+                "slip_unit": "working days" if cal.working else "calendar days",
+            }
+        return out
 
     @staticmethod
     async def summary(
@@ -169,7 +323,19 @@ class PnlService:
             total_cost = sum(r["total_cost"] for r in subset)
             margin = revenue - total_cost
             margin_pct = (margin / revenue * 100) if revenue else None
+            actual_rows = [r for r in subset if r.get("phase") == "actual"]
+            slips = [r["slip_days"] for r in subset if r.get("slip_days") is not None]
             return {
+                "offer_revenue": _round(sum(r.get("offer_revenue") or 0.0 for r in subset)),
+                "planned_cost": _round(sum(r.get("planned_cost") or 0.0 for r in subset)),
+                "planned_margin": _round(sum(r.get("planned_margin") or 0.0 for r in subset)),
+                "actual_cost": _round(sum(r.get("actual_cost") or 0.0 for r in actual_rows)),
+                "actual_margin": _round(sum(r.get("actual_margin") or 0.0 for r in actual_rows)),
+                "forecast_margin": _round(sum(r.get("forecast_margin") or 0.0 for r in actual_rows)),
+                "actual_count": len(actual_rows),
+                "variance": _round(sum(r.get("variance") or 0.0 for r in actual_rows)),
+                "late_count": sum(1 for x in slips if x > 0),
+                "max_slip_days": max(slips, default=None),
                 "revenue": _round(revenue),
                 "internal_cost": _round(internal_cost),
                 "external_cost": _round(external_cost),
@@ -344,3 +510,451 @@ class PnlService:
             "rate_plant_id": plant_id,
             "variance": _round(total_actual - total_plan),
         }
+
+    # ------------------------------------------------------------------
+    # Offer versus doing (spec §13): what we offered and planned when the
+    # customer said yes, against what the change really cost.
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def planned_figures(session: AsyncSession, change, offer=None) -> dict:
+        """The plan side as it stands NOW: revenue from the offer (or the
+        internal approval), internal and external cost from the costing
+        summation, scrap from the offer's changeover. Frozen into the accepted
+        offer's `_snapshot.pnl` at acceptance (OfferService.freeze_pnl); read
+        live only for changes that have no frozen plan."""
+        from app.services.cost_service import CostService
+        from app.services.offer_service import compute_totals, normalise
+        summ = await CostService.summation(session, change)
+        t = summ["totals"]
+        internal = float(t["one_time_internal"] + t["lifecycle_internal"])
+        external = float(t["one_time_external"] + t["lifecycle_external"])
+        revenue = scrap = None
+        piece = None
+        currency = "EUR"
+        if offer is not None:
+            data = normalise(offer.data)
+            totals = compute_totals(data, internal + external)
+            revenue = float(offer.total_one_time
+                            if offer.total_one_time is not None
+                            else totals["total_one_time"])
+            scrap = float(totals["scrap"] or 0.0)
+            currency = offer.currency or "EUR"
+            if totals.get("piece_price_delta") is not None:
+                piece = {
+                    "delta_per_piece": totals["piece_price_delta"],
+                    "annual_volume": _num_or_none(
+                        (data.get("piece_price") or {}).get("annual_volume")),
+                    "annual_effect": totals["annual_effect"],
+                }
+        elif change.customer_relevant:
+            revenue = change.quoted_price
+        else:
+            revenue = change.internal_approved_amount
+        if scrap is None:
+            scrap = (float(change.scrap_quote_price)
+                     if change.bank_build_mode == "planned_scrap"
+                     and change.scrap_quote_price is not None else 0.0)
+        quote_finish = await PnlService._plan_finish(session, change, "quote")
+        return {
+            "taken_at": datetime.utcnow().isoformat(),
+            "currency": currency,
+            "offer_version": offer.version if offer is not None else None,
+            "revenue": _round(revenue),
+            "internal": _round(internal),
+            "external": _round(external),
+            "scrap": _round(scrap),
+            "piece_price": piece,
+            # the finish the customer was offered: the timing baseline until
+            # the detailed plan has its own
+            "quote_finish": quote_finish.isoformat() if quote_finish else None,
+        }
+
+    @staticmethod
+    async def _plan_finish(session, change, plan: str) -> Optional[date]:
+        from app.services.change_plan_service import ChangePlanService
+        tasks = [t for t in await ChangePlanService.tasks(session, change, plan)
+                 if not t.is_idea]
+        return max((t.end_date for t in tasks), default=None)
+
+    @staticmethod
+    async def _basis_offer(session, change):
+        """(basis, offer): the accepted offer, else the latest sent one."""
+        from app.models.change_offer import ChangeOffer
+        if change.accepted_offer_id is not None:
+            offer = await session.get(ChangeOffer, change.accepted_offer_id)
+            if offer is not None:
+                return "accepted_offer", offer
+        offer = (await session.execute(
+            select(ChangeOffer).where(ChangeOffer.change_id == change.id,
+                                      ChangeOffer.status.in_(("sent", "accepted")))
+            .order_by(ChangeOffer.version.desc()).limit(1))).scalar_one_or_none()
+        if offer is not None:
+            return ("accepted_offer" if offer.status == "accepted"
+                    else "sent_offer"), offer
+        if not change.customer_relevant and change.internal_approved_amount is not None:
+            return "internal_approval", None
+        return "costing", None
+
+    @staticmethod
+    async def issue_costs(session, change_ids: list[int]) -> dict[int, dict]:
+        """Validation issue extra costs by bearer, per change. The issue table
+        arrives with migration 090; before it exists (model not registered)
+        every change simply has none."""
+        from app.models.database import Base
+        out: dict[int, dict] = {}
+        tbl = Base.metadata.tables.get("change_validation_issues")
+        if tbl is None or not change_ids or "extra_cost" not in tbl.c \
+                or "cost_bearer" not in tbl.c:
+            return out
+        quoted = (tbl.c.fix_quoted_at.is_not(None) if "fix_quoted_at" in tbl.c
+                  else sa_false())
+        rows = (await session.execute(
+            select(tbl.c.change_id, tbl.c.cost_bearer, tbl.c.extra_cost, quoted)
+            .where(tbl.c.change_id.in_(change_ids),
+                   tbl.c.extra_cost.is_not(None)))).all()
+        for cid, bearer, amount, is_quoted in rows:
+            bucket = out.setdefault(cid, {"internal": 0.0, "supplier": 0.0,
+                                          "customer": 0.0, "customer_quoted": 0.0,
+                                          "count": 0})
+            key = bearer if bearer in ("supplier", "customer") else "internal"
+            bucket[key] += float(amount or 0.0)
+            if key == "customer" and is_quoted:
+                # billed to the customer once Sales quoted the fix: revenue
+                bucket["customer_quoted"] += float(amount or 0.0)
+            bucket["count"] += 1
+        return out
+
+    @staticmethod
+    async def actual_cost_sums(session, change_ids: list[int]) -> dict[int, dict]:
+        from app.models.change_actual_cost import ChangeActualCost
+        out: dict[int, dict] = {}
+        if not change_ids:
+            return out
+        rows = (await session.execute(
+            select(ChangeActualCost.change_id, ChangeActualCost.category,
+                   func.coalesce(func.sum(ChangeActualCost.amount), 0.0))
+            .where(ChangeActualCost.change_id.in_(change_ids))
+            .group_by(ChangeActualCost.change_id, ChangeActualCost.category))).all()
+        for cid, cat, amount in rows:
+            bucket = out.setdefault(cid, {"external": 0.0, "scrap": 0.0, "other": 0.0})
+            bucket[cat if cat in bucket else "other"] += float(amount or 0.0)
+        return out
+
+    @staticmethod
+    async def timing(session, change, quote_finish: Optional[str] = None) -> dict:
+        """Baseline against forecast (or actual) finish of the detailed plan,
+        the slip counted in the plan's own units (working or calendar days).
+        Without a detailed baseline the offered (quote plan) finish is the
+        baseline: that is the date the customer was told."""
+        from app.services.change_plan_service import ChangePlanService
+        cal = ChangePlanService.calendar(change, "detailed")
+        tasks = [t for t in await ChangePlanService.tasks(session, change, "detailed")
+                 if not t.is_idea]
+        parents = {t.parent_id for t in tasks if t.parent_id is not None}
+        leaves = [t for t in tasks if t.id not in parents]
+        baseline = max((t.baseline_finish for t in tasks if t.baseline_finish),
+                       default=None)
+        source = "detailed_baseline"
+        if baseline is None and quote_finish:
+            baseline = date.fromisoformat(quote_finish)
+            source = "offer"
+        if baseline is None:
+            quote = await PnlService._plan_finish(session, change, "quote")
+            if quote is not None:
+                baseline, source = quote, "quote_plan"
+        forecast = max((t.end_date for t in tasks), default=None)
+        actual = None
+        if leaves and all(t.actual_finish for t in leaves):
+            # actual_finish is the last worked day: exclusive like the rest
+            actual = max(t.actual_finish for t in leaves) + timedelta(days=1)
+        against = actual or forecast
+        slip = (cal.idx(against) - cal.idx(baseline)
+                if baseline is not None and against is not None else None)
+
+        def last(d):
+            return (d - timedelta(days=1)).isoformat() if d else None
+        return {
+            "baseline_finish": last(baseline), "forecast_finish": last(forecast),
+            "actual_finish": last(actual), "slip_days": slip,
+            "unit": "working days" if cal.working else "calendar days",
+            "baseline_source": source if baseline is not None else None,
+        }
+
+    @staticmethod
+    async def offer_vs_actual(session: AsyncSession, change) -> dict:
+        from app.services.offer_service import SNAPSHOT_KEY
+        warnings: list[str] = []
+        basis, offer = await PnlService._basis_offer(session, change)
+        frozen = None
+        if offer is not None and offer.status == "accepted":
+            frozen = ((offer.data or {}).get(SNAPSHOT_KEY) or {}).get("pnl")
+        if frozen:
+            planned = frozen
+        else:
+            planned = await PnlService.planned_figures(session, change, offer)
+            if basis == "accepted_offer":
+                warnings.append("The plan was not frozen at acceptance: "
+                                "planned costs are the current costing")
+                basis = "costing"
+        if basis == "costing" and offer is None:
+            warnings.append("No accepted offer: revenue is the quoted price")
+        elif basis == "sent_offer":
+            warnings.append(f"Offer v{offer.version} is not accepted yet")
+
+        phase = "actual" if change.status in ACTUAL_STATUSES else "plan"
+        actuals = await PnlService.change_actuals(session, change)
+        if actuals["unrated_hours"]:
+            warnings.append("Hours booked without a department rate are "
+                            "counted at zero")
+        costs = (await PnlService.actual_cost_sums(session, [change.id])).get(
+            change.id, {"external": 0.0, "scrap": 0.0, "other": 0.0})
+        issues = (await PnlService.issue_costs(session, [change.id])).get(
+            change.id, {"internal": 0.0, "supplier": 0.0, "customer": 0.0,
+                        "customer_quoted": 0.0, "count": 0})
+        supplement = issues.get("customer_quoted", 0.0)
+        if issues["customer"] - supplement > 0.004:
+            warnings.append("Customer-borne issue costs are not quoted yet")
+        recorded = bool(actuals["total_booked_hours"] or any(costs.values())
+                        or issues["count"])
+        if phase == "actual" and not recorded:
+            warnings.append("No actuals recorded yet: no hours booked, no "
+                            "invoice or issue cost entered")
+        elif phase == "actual" and not costs["external"] and (planned.get("external") or 0) > 0:
+            warnings.append("No supplier invoice entered yet")
+
+        planned_revenue = planned.get("revenue")
+        figures = compose(
+            {"revenue": planned_revenue, "internal": planned.get("internal"),
+             "external": planned.get("external"), "scrap": planned.get("scrap")},
+            {"revenue": (None if planned_revenue is None
+                         else planned_revenue + supplement),
+             "internal": actuals["total_actual"], "external": costs["external"],
+             "scrap": costs["scrap"], "other": costs["other"],
+             "issues_internal": issues["internal"],
+             "issues_supplier": issues["supplier"],
+             "issues_customer": issues["customer"]},
+            in_progress=change.status in IN_PROGRESS_STATUSES)
+        if planned_revenue is None:
+            warnings.append("No price yet: margins cannot be computed")
+
+        timing = await PnlService.timing(session, change, planned.get("quote_finish"))
+        if timing["baseline_finish"] is None:
+            warnings.append("No timing baseline")
+        return {
+            "change_id": change.id, "currency": planned.get("currency") or "EUR",
+            "basis": basis, "phase": phase,
+            "offer_version": planned.get("offer_version"),
+            "frozen_at": planned.get("taken_at") if frozen else None,
+            **figures,
+            "booked_hours": actuals["total_booked_hours"],
+            "recorded": recorded,
+            "issue_count": issues["count"],
+            "timing": timing,
+            "piece_price": planned.get("piece_price"),
+            "warnings": warnings,
+        }
+
+
+ACTUAL_STATUSES = ("in_implementation", "in_validation", "released", "closed")
+# until release, open cost lines are forecast at plan
+IN_PROGRESS_STATUSES = ("in_implementation", "in_validation")
+
+LINE_LABELS = (
+    ("revenue", "Revenue (offer)", "revenue"),
+    ("internal", "Internal effort (hours x rate)", "cost"),
+    ("external", "External (supplier)", "cost"),
+    ("scrap", "Scrap", "cost"),
+    ("other", "Other costs", "cost"),
+    ("issues_internal", "Validation issues, borne by us", "cost"),
+    ("issues_customer", "Validation issues, billed to customer", "cost"),
+    ("issues_supplier", "Validation issues, recoverable from supplier", "info"),
+)
+
+
+async def _rate_at(session, key) -> Optional[float]:
+    """Department rate at a plant, None without a plant or a rate."""
+    from app.services.cost_service import CostService
+    dept, plant = key
+    return (await CostService.rate_for(session, dept, plant)
+            if plant is not None else None)
+
+
+def _num_or_none(v) -> Optional[float]:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def compose(planned: dict, actual: dict, *, in_progress: bool = False) -> dict:
+    """Lines, margins and the variance from plan and actual figures. Pure, so
+    the list and the card count the same way. Costs in `info` lines are
+    shown but stay out of the margin (a supplier's recoverable fix).
+
+    While the change is still running (in_progress) a cost line that has not
+    reached its plan yet is not a saving: its forecast is the plan, so the
+    forecast margin and the variance only move on overruns. After release the
+    forecast is the actual."""
+    lines = []
+    for key, label, kind in LINE_LABELS:
+        p = planned.get(key)
+        p = 0.0 if p is None and key != "revenue" else p
+        a = actual.get(key) or 0.0
+        if key in ("other",) and not a and not p:
+            continue
+        f = max(a, p or 0.0) if in_progress and kind == "cost" else a
+        lines.append({"key": key, "label": label, "kind": kind,
+                      "planned": _round(p), "actual": _round(a),
+                      "forecast": _round(f),
+                      "variance": _round(f - (p or 0.0)),
+                      "in_margin": kind != "info"})
+    cost_p = sum(l["planned"] or 0.0 for l in lines if l["kind"] == "cost")
+    cost_a = sum(l["actual"] or 0.0 for l in lines if l["kind"] == "cost")
+    cost_f = sum(l["forecast"] or 0.0 for l in lines if l["kind"] == "cost")
+    rev_p = planned.get("revenue")
+    rev_a = actual.get("revenue") if rev_p is not None else None
+    pm = None if rev_p is None else rev_p - cost_p
+    am = None if rev_a is None else rev_a - cost_a
+    fm = None if rev_a is None else rev_a - cost_f
+    return {
+        "lines": lines, "in_progress": in_progress,
+        "planned_revenue": _round(rev_p), "actual_revenue": _round(rev_a),
+        "planned_cost": _round(cost_p), "actual_cost": _round(cost_a),
+        "forecast_cost": _round(cost_f),
+        "planned_margin": _round(pm), "actual_margin": _round(am),
+        "forecast_margin": _round(fm),
+        "planned_margin_pct": _round(pm / rev_p * 100) if pm is not None and rev_p else None,
+        "actual_margin_pct": _round(am / rev_a * 100) if am is not None and rev_a else None,
+        "forecast_margin_pct": _round(fm / rev_a * 100) if fm is not None and rev_a else None,
+        "variance": _round(fm - pm) if fm is not None and pm is not None else None,
+    }
+
+
+# ----------------------------------------------------------------------
+# Actual costs that are not hours (supplier invoice lines, scrap, other)
+# ----------------------------------------------------------------------
+ACTUAL_COST_WINDOW = ("approved", "in_implementation", "in_validation", "released")
+
+
+class ActualCostError(ValueError):
+    """Refused actual-cost write; mapped to HTTP 400."""
+
+
+class ActualCostForbidden(PermissionError):
+    """Mapped to HTTP 403."""
+
+
+class ActualCostService:
+
+    @staticmethod
+    async def is_cost_role(session, change, user) -> bool:
+        from app.services.negotiation_service import NegotiationService
+        return await NegotiationService.may_read(session, change, user)
+
+    @staticmethod
+    async def own_department_ids(session, user) -> set[int]:
+        from app.services.workflow_service import WorkflowService
+        return set(await WorkflowService.effective_department_ids(session, user))
+
+    @staticmethod
+    async def list_costs(session, change, user) -> dict:
+        """Cost roles read every line; a department member reads the lines
+        booked to their own departments (what they entered themselves)."""
+        from app.models.change_actual_cost import ChangeActualCost
+        from app.models.workflow import Department
+        cost_role = await ActualCostService.is_cost_role(session, change, user)
+        own = set() if cost_role else await ActualCostService.own_department_ids(
+            session, user)
+        rows = list((await session.execute(
+            select(ChangeActualCost).where(ChangeActualCost.change_id == change.id)
+            .order_by(ChangeActualCost.cost_date.desc(), ChangeActualCost.id.desc())
+        )).scalars().all())
+        if not cost_role:
+            rows = [r for r in rows if r.department_id in own]
+        names = dict((await session.execute(select(Department.id, Department.name))).all())
+        users = dict((await session.execute(
+            select(User.id, User.full_name).where(
+                User.id.in_({r.created_by for r in rows} or {0})))).all())
+        in_window = change.status in ACTUAL_COST_WINDOW
+        items = [{
+            "id": r.id, "change_id": r.change_id,
+            "department_id": r.department_id,
+            "department_name": names.get(r.department_id),
+            "category": r.category, "vendor_name": r.vendor_name,
+            "amount": _round(r.amount), "cost_date": r.cost_date,
+            "note": r.note, "attachment_id": r.attachment_id,
+            "created_by": r.created_by, "created_by_name": users.get(r.created_by),
+            "created_at": r.created_at,
+            "can_delete": in_window and (cost_role or r.created_by == user.id),
+        } for r in rows]
+        return {
+            "items": items,
+            "total": _round(sum(i["amount"] or 0.0 for i in items)),
+            "can_write": in_window and (cost_role or bool(own)),
+            # None = any department (cost roles), else only these
+            "writable_department_ids": None if cost_role else sorted(own),
+            "cost_role": cost_role,
+        }
+
+    @staticmethod
+    async def add(session, change, user, *, category: str, amount: float,
+                  cost_date: date, department_id: Optional[int] = None,
+                  vendor_name: Optional[str] = None, note: Optional[str] = None,
+                  attachment_id: Optional[int] = None):
+        from app.models.change_actual_cost import (
+            ACTUAL_COST_CATEGORIES, ChangeActualCost,
+        )
+        from app.models.workflow import Department
+        from app.services.change_service import ChangeService
+        if change.status not in ACTUAL_COST_WINDOW:
+            raise ActualCostError(
+                "Actual costs are entered from approval until release")
+        if category not in ACTUAL_COST_CATEGORIES:
+            raise ActualCostError(
+                f"Unknown category '{category}' - one of external, scrap, other")
+        if amount is None or amount <= 0:
+            raise ActualCostError("The amount must be greater than zero")
+        if department_id is not None and await session.get(Department, department_id) is None:
+            raise ActualCostError("Unknown department")
+        if not await ActualCostService.is_cost_role(session, change, user):
+            own = await ActualCostService.own_department_ids(session, user)
+            if department_id is None or department_id not in own:
+                raise ActualCostForbidden(
+                    "Only Project Management, Sales, the change lead, an admin "
+                    "or a member of the named department may enter its costs")
+        row = ChangeActualCost(
+            change_id=change.id, department_id=department_id, category=category,
+            vendor_name=(vendor_name or "").strip()[:120] or None,
+            amount=round(float(amount), 2), cost_date=cost_date,
+            note=(note or "").strip() or None, attachment_id=attachment_id,
+            created_by=user.id)
+        session.add(row)
+        await session.flush()
+        # No amount in the changelog: everybody on the change reads it.
+        await ChangeService.append_changelog(
+            session, change, "actual_cost_added",
+            f"Actual cost entered ({category}"
+            + (f", {row.vendor_name}" if row.vendor_name else "") + ")",
+            user.id, new_value={"actual_cost_id": row.id, "category": category})
+        return row
+
+    @staticmethod
+    async def delete(session, change, user, cost_id: int) -> None:
+        from app.models.change_actual_cost import ChangeActualCost
+        from app.services.change_service import ChangeService
+        row = await session.get(ChangeActualCost, cost_id)
+        if row is None or row.change_id != change.id:
+            raise LookupError("Actual cost not found on this change")
+        if change.status not in ACTUAL_COST_WINDOW:
+            raise ActualCostError(
+                "Actual costs are changed from approval until release")
+        if not (row.created_by == user.id
+                or await ActualCostService.is_cost_role(session, change, user)):
+            raise ActualCostForbidden(
+                "Only whoever entered it or the cost roles may delete it")
+        await session.delete(row)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "actual_cost_deleted",
+            f"Actual cost removed ({row.category})", user.id,
+            old_value={"actual_cost_id": cost_id, "category": row.category})

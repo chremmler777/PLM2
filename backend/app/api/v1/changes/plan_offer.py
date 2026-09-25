@@ -319,9 +319,11 @@ async def bulk_update_plan_tasks(
             current_user, reason=body.reason)
     except _ERRORS as e:
         raise _http(e)
+    # moved_ids: what the server moved by itself, not the blocks sent
+    moved = ChangePlanService.take_moved(change, [u.id for u in body.updates])
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.patch("/{change_id}/plan/tasks/{task_id}")
@@ -337,9 +339,10 @@ async def update_plan_task(
             db, change, task_id, spec, current_user, reason=reason)
     except _ERRORS as e:
         raise _http(e)
+    moved = ChangePlanService.take_moved(change, [task_id])
     out = await _plan_out(db, change, task.plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.delete("/{change_id}/plan/tasks/{task_id}")
@@ -370,9 +373,10 @@ async def schedule_plan(
                                          reason=body.reason)
     except _ERRORS as e:
         raise _http(e)
+    moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.post("/{change_id}/plan/links")
@@ -386,9 +390,10 @@ async def add_plan_link(
             db, change, body.plan, body.model_dump(exclude={"plan"}), current_user)
     except _ERRORS as e:
         raise _http(e)
+    moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.patch("/{change_id}/plan/links/{link_id}")
@@ -402,9 +407,10 @@ async def update_plan_link(
             db, change, link_id, body.model_dump(exclude_unset=True), current_user)
     except _ERRORS as e:
         raise _http(e)
+    moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, link.plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.delete("/{change_id}/plan/links/{link_id}")
@@ -436,9 +442,10 @@ async def set_plan_calendar(
             db, change, body.model_dump(exclude_unset=True), current_user, plan=plan)
     except _ERRORS as e:
         raise _http(e)
+    moved = ChangePlanService.take_moved(change)
     out = await _plan_out(db, change, plan, current_user)
     await db.commit()
-    return out
+    return {**out, "moved_ids": moved}
 
 
 @router.post("/{change_id}/plan/changes")
@@ -462,9 +469,13 @@ async def apply_plan_changes(
     except _ERRORS as e:
         await db.rollback()
         raise _http(e)
+    # moved_ids: what the server moved by itself, not the blocks sent
+    sent = [u["id"] for u in changes["tasks_upsert"]
+            if isinstance(u.get("id"), int) and not isinstance(u.get("id"), bool)]
+    moved = ChangePlanService.take_moved(change, sent + list(maps["id_map"].values()))
     out = await _plan_out(db, change, body.plan, current_user)
     await db.commit()
-    return {**out, **maps}
+    return {**out, **maps, "moved_ids": moved}
 
 
 MAX_IMPORT_BYTES = 10 * 1024 * 1024

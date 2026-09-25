@@ -30,7 +30,18 @@ function fieldsFromChange(c: ChangeDetail): D1Fields {
   };
 }
 
-export default function D1MasterPanel({ changeId }: { changeId: number }) {
+/**
+ * Rights mirror the backend PATCH gate: the D1 master data is the lead's,
+ * Quality's and Project Management's (plus admin); customer relevance is the
+ * lead's (plus admin). Without a right the field is shown read-only.
+ */
+export default function D1MasterPanel({
+  changeId, canEditD1 = false, canEditCustomerRelevant = false,
+}: {
+  changeId: number;
+  canEditD1?: boolean;
+  canEditCustomerRelevant?: boolean;
+}) {
   const qc = useQueryClient();
 
   const { data: change } = useQuery({
@@ -84,18 +95,33 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
     });
   };
 
+  // Only what actually changed, and only what this user may change: a stale
+  // or untouched field (say customer_relevant) must not 403 the whole save.
   const handleSave = () => {
-    updateChange.mutate({
-      issuer: fields.issuer || null,
-      car_line: fields.car_line || null,
-      is_series: fields.is_series,
-      cm_internal: fields.cm_internal,
-      cm_external: fields.cm_external,
-      implementation_mode: fields.implementation_mode || null,
-      customer_relevant: fields.customer_relevant,
-      affected_plant_ids: fields.affected_plant_ids,
-    });
+    if (!change) return;
+    const base = fieldsFromChange(change);
+    const body: Record<string, unknown> = {};
+    if (canEditD1) {
+      if (fields.issuer !== base.issuer) body.issuer = fields.issuer || null;
+      if (fields.car_line !== base.car_line) body.car_line = fields.car_line || null;
+      if (fields.is_series !== base.is_series) body.is_series = fields.is_series;
+      if (fields.cm_internal !== base.cm_internal) body.cm_internal = fields.cm_internal;
+      if (fields.cm_external !== base.cm_external) body.cm_external = fields.cm_external;
+      if (fields.implementation_mode !== base.implementation_mode) {
+        body.implementation_mode = fields.implementation_mode || null;
+      }
+      const sorted = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',');
+      if (sorted(fields.affected_plant_ids) !== sorted(base.affected_plant_ids)) {
+        body.affected_plant_ids = fields.affected_plant_ids;
+      }
+    }
+    if (canEditCustomerRelevant && fields.customer_relevant !== base.customer_relevant) {
+      body.customer_relevant = fields.customer_relevant;
+    }
+    if (Object.keys(body).length === 0) return;
+    updateChange.mutate(body);
   };
+  const canSave = canEditD1 || canEditCustomerRelevant;
 
   const leadItem = change?.impacted_items?.find((i) => i.is_lead);
 
@@ -110,6 +136,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
             <input
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
               value={fields.issuer}
+              disabled={!canEditD1}
               onChange={(e) => setFields((f) => ({ ...f, issuer: e.target.value }))}
             />
           </label>
@@ -118,6 +145,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
             <input
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
               value={fields.car_line}
+              disabled={!canEditD1}
               onChange={(e) => setFields((f) => ({ ...f, car_line: e.target.value }))}
             />
           </label>
@@ -126,6 +154,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
             <select
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
               value={fields.implementation_mode}
+              disabled={!canEditD1}
               onChange={(e) => setFields((f) => ({ ...f, implementation_mode: e.target.value as D1Fields['implementation_mode'] }))}
             >
               <option value="">-</option>
@@ -145,6 +174,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
                   type="checkbox"
                   className="accent-sky-500"
                   checked={fields[key]}
+                  disabled={key === 'customer_relevant' ? !canEditCustomerRelevant : !canEditD1}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.checked }))}
                 />
                 {t(labelKey)}
@@ -164,6 +194,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
                 type="checkbox"
                 className="accent-sky-500"
                 checked={fields.affected_plant_ids.includes(p.id)}
+                disabled={!canEditD1}
                 onChange={() => togglePlant(p.id)}
               />
               {p.name} ({p.code})
@@ -195,8 +226,8 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
         )}
       </div>
 
-      {/* Save button */}
-      <div className="flex justify-end">
+      {/* Save button: only for someone who may change something here */}
+      {canSave && <div className="flex justify-end">
         <button
           onClick={handleSave}
           disabled={updateChange.isPending}
@@ -204,7 +235,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
         >
           {updateChange.isPending ? t('saving') : t('save')}
         </button>
-      </div>
+      </div>}
 
       {/* Gates */}
       <div>
