@@ -116,14 +116,16 @@ function MyTraining({ data }: { data: TrainingStatus }) {
     <div className="space-y-6">
       <GateLine data={data} />
       {data.acting_as && (
-        <Notice tone="info" title={`Acting as ${data.acting_as}`}>
-          You see the training this department owes. Anything you record is recorded for you.
+        <Notice tone="info" title={`Acting as ${data.acting_as}: practice only`}>
+          You see the training this department owes and can walk its tasks. Nothing is
+          recorded, for you or for the department. Stop acting as the department to record
+          your own training.
         </Notice>
       )}
       {data.has_roles ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {data.roles.map((r) => (
-            <RoleCard key={r.role} role={r} />
+            <RoleCard key={r.role} role={r} practiceOnly={data.practice_only} />
           ))}
         </div>
       ) : (
@@ -161,11 +163,12 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
-function RoleCard({ role }: { role: RoleState }) {
+function RoleCard({ role, practiceOnly }: { role: RoleState; practiceOnly: boolean }) {
   const stage = stageOf(role)
   const passed = role.tasks.filter((t) => t.passed).length
-  const action =
-    stage === 'signed_off'
+  const action = practiceOnly
+    ? 'Practise'
+    : stage === 'signed_off'
       ? null
       : stage === 'not_started'
         ? 'Confirm your training'
@@ -227,7 +230,10 @@ function RoleCard({ role }: { role: RoleState }) {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {action && (
-          <Link to={`/training/run/${role.role}`} className={BUTTON_PRIMARY}>
+          <Link
+            to={`/training/run/${role.role}${practiceOnly ? '?practice=1' : ''}`}
+            className={BUTTON_PRIMARY}
+          >
             {action}
           </Link>
         )}
@@ -379,6 +385,11 @@ function Records({ data }: { data: TrainingStatus }) {
 
   return (
     <div className="space-y-8">
+      <p className="text-[13px] text-slate-500" data-testid="records-scoring-note">
+        As in TWOS, the practical tasks are checked in the trainee's browser against a training
+        copy that never reaches the server; the record keeps the result the browser reports,
+        with who trained the person and when.
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <Tile label="Signed off" value={roster.data?.active ?? '-'} />
         <Tile label="Tasks open" value={roster.data?.pending ?? '-'} />
@@ -566,7 +577,8 @@ function RecordAttendance({
         className={INPUT}
       >
         <option value="">Person</option>
-        {people.map((p) => (
+        {/* Four eyes: your own attendance is recorded by somebody else. */}
+        {people.filter((p) => p.user_id !== data.user_id).map((p) => (
           <option key={p.user_id} value={p.user_id}>
             {p.name} ({p.email})
           </option>

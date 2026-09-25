@@ -52,6 +52,10 @@ describe('TrainingSandbox with a real screen', () => {
     const { state } = mount({ kind: 'start-change' })
     fireEvent.click(await screen.findByTestId('start-change'))
     expect(await screen.findByRole('option', { name: /T100/ })).toBeTruthy()
+    // The training banner sits above the modal layer (z-50) while it is open.
+    const banner = screen.getByTestId('training-banner')
+    expect(banner.className).toMatch(/\bfixed\b/)
+    expect(banner.className).toMatch(/z-\[60\]/)
     expect(state().misses).toEqual([])
   })
 

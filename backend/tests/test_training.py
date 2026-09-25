@@ -271,7 +271,9 @@ async def test_publish_refuses_unknown_role_and_empty_summary(client, seed):
 
 # --------------------------------------------------------------- roster
 
-async def test_roster_records_attendance_lists_and_exports(client, seed, depts):
+async def test_roster_records_attendance_lists_and_exports(
+        client, session_factory, seed, depts):
+    await _join(session_factory, seed["engineer_id"], depts["Quality"])
     admin = await login(client, "admin@test.io")
     res = await client.post("/api/v1/training/roster", headers=admin, json={
         "user_id": seed["engineer_id"], "role": "quality",
@@ -396,3 +398,208 @@ async def test_status_transitions_are_a_pure_function_of_the_stamps():
     assert svc.recompute_status(row) == "active"
     row.superseded_at = datetime.utcnow()
     assert svc.recompute_status(row) == "superseded"
+
+
+# --------------------------------------------------------------- review fixes
+
+async def test_roster_csv_neutralises_formulas(client, seed, eng_sales):
+    evil = '=HYPERLINK("http://evil","x")'
+    assert (await _attest(client, eng_sales, trainer_name=evil)).status_code == 201
+    admin = await login(client, "admin@test.io")
+    text = (await client.get("/api/v1/training/roster.csv", headers=admin)).text
+    import csv as _csv, io as _io
+    rows = list(_csv.DictReader(_io.StringIO(text)))
+    assert rows[0]["trainer"] == "'" + evil
+    from app.api.v1.training import _csv_cell
+    for lead in ("=", "+", "-", "@", "\t", "\r"):
+        assert _csv_cell(lead + "x") == "'" + lead + "x"
+    assert _csv_cell("C. Demmler") == "C. Demmler"
+    assert _csv_cell(3) == 3
+
+
+async def test_attempt_detail_is_capped(client, eng_sales):
+    await _attest(client, eng_sales)
+    big = {"hint": "x" * 5000}
+    res = await client.post("/api/v1/training/attempts", headers=eng_sales, json={
+        "role": "sales", "task_key": "sales_start_change", "result": "failed",
+        "detail": big})
+    assert res.status_code == 422 and "KB" in res.text
+    ok = await client.post("/api/v1/training/attempts", headers=eng_sales, json={
+        "role": "sales", "task_key": "sales_start_change", "result": "failed",
+        "detail": {"hint": "x" * 1000}})
+    assert ok.status_code == 201, ok.text
+
+
+async def test_attest_trainer_user_must_be_an_active_colleague(client, seed, eng_sales):
+    assert (await _attest(client, eng_sales, trainer_user_id=987654)).status_code == 400
+    assert (await _attest(client, eng_sales, trainer_user_id=seed["inactive_id"])
+            ).status_code == 400
+    # Whitespace is no name.
+    assert (await _attest(client, eng_sales, trainer_name="   ")).status_code == 422
+    # Named by id only: the name defaults to that user's.
+    res = await _attest(client, eng_sales, trainer_name=None,
+                        trainer_user_id=seed["admin_id"])
+    assert res.status_code == 201, res.text
+    assert res.json()["trainer_name"] == "Admin"
+
+
+async def test_attest_trainer_from_another_org_is_refused(
+        client, session_factory, seed, eng_sales):
+    from app.models.entities import Organization, User as _User
+    async with session_factory() as s:
+        other = Organization(name="Other", code="other", is_active=True)
+        s.add(other)
+        await s.flush()
+        stranger = _User(organization_id=other.id, username="x", email="x@other.io",
+                         full_name="Stranger", hashed_password="!", role="engineer",
+                         is_active=True, mfa_enabled=False)
+        s.add(stranger)
+        await s.commit()
+        sid = stranger.id
+    assert (await _attest(client, eng_sales, trainer_user_id=sid)).status_code == 400
+    admin = await login(client, "admin@test.io")
+    # ...and a manager cannot roster somebody outside the organisation.
+    res = await client.post("/api/v1/training/roster", headers=admin, json={
+        "user_id": sid, "role": "sales", "training_date": date.today().isoformat(),
+        "trainer_name": "QA Lead"})
+    assert res.status_code == 404
+
+
+async def test_roster_checks_the_trainee_and_the_trainer(client, seed, depts, eng_sales):
+    admin = await login(client, "admin@test.io")
+
+    def entry(**over):
+        return {"user_id": seed["engineer_id"], "role": "sales",
+                "training_date": date.today().isoformat(), "trainer_name": "QA Lead",
+                **over}
+
+    post = lambda body: client.post("/api/v1/training/roster", headers=admin, json=body)  # noqa: E731
+    assert (await post(entry(trainer_name="   "))).status_code == 422
+    # eng sits in Sales only: Finance is not owed.
+    res = await post(entry(role="finance"))
+    assert res.status_code == 400 and "owes" in res.text
+    assert (await post(entry(user_id=seed["inactive_id"]))).status_code == 400
+    # Four eyes: nobody rosters themselves.
+    res = await post(entry(user_id=seed["admin_id"]))
+    assert res.status_code == 403 and "Four eyes" in res.text
+    assert (await post(entry())).status_code == 201
+
+
+async def test_concurrent_publish_is_a_conflict_not_a_500(client, seed, monkeypatch):
+    admin = await login(client, "admin@test.io")
+    assert (await client.post("/api/v1/training/versions", headers=admin,
+                              json={"role": "sales", "summary": "v2"})).status_code == 201
+
+    # The second publisher read the required version before the first committed.
+    async def stale(db):
+        return {r: 1 for r in svc.CURRICULA}
+    monkeypatch.setattr(svc, "required_versions", stale)
+    res = await client.post("/api/v1/training/versions", headers=admin,
+                            json={"role": "sales", "summary": "also v2"})
+    assert res.status_code == 409, res.text
+
+
+async def test_acting_as_is_practice_only(client, seed, depts):
+    admin = await login(client, "admin@test.io")
+    acting = {**admin, ACTS_AS: str(depts["Sales"])}
+    st = await _status(client, acting)
+    assert st["practice_only"] is True
+    res = await _attest(client, acting)
+    assert res.status_code == 403 and "practice only" in res.text
+    res = await _attempt(client, acting, "sales_start_change")
+    assert res.status_code == 403 and "practice only" in res.text
+    assert (await _status(client, admin))["practice_only"] is False
+
+
+# ---- the gate as an allowlist
+
+def _gated_writes() -> set[tuple[str, str]]:
+    import importlib
+    from fastapi.routing import APIRoute
+    mods = [f"app.api.v1.changes.{m}" for m in (
+        "changes", "plan_offer", "validation_issues", "actual_costs", "mother_plant",
+        "early_stage", "engineering_review", "costing_context")] + ["app.api.v1.items.intakes"]
+    out = set()
+    for mod in mods:
+        for r in importlib.import_module(mod).router.routes:
+            if isinstance(r, APIRoute):
+                out |= {(m, r.path) for m in r.methods - {"GET", "HEAD", "OPTIONS"}}
+    return out
+
+
+async def test_every_gated_write_is_classified():
+    from app.api.v1.training import GATE_EXEMPT_WRITES, GUARDED_WRITES
+    writes = _gated_writes()
+    assert not (GUARDED_WRITES & GATE_EXEMPT_WRITES)
+    unclassified = writes - GUARDED_WRITES - GATE_EXEMPT_WRITES
+    assert not unclassified, f"decide guard or exempt: {sorted(unclassified)}"
+    stale = (GUARDED_WRITES | GATE_EXEMPT_WRITES) - writes
+    assert not stale, f"no such route: {sorted(stale)}"
+
+
+async def _gate_on(client):
+    admin = await login(client, "admin@test.io")
+    res = await client.put("/api/v1/training/settings", headers=admin,
+                           json={"training_gate": True})
+    assert res.status_code == 200
+    return admin
+
+
+async def test_gate_never_refuses_read_style_posts_or_reference_data(
+        client, seed, depts, eng_sales, session_factory):
+    await _gate_on(client)
+    res = await client.post("/api/v1/changes/999999/impact-tree/suggest",
+                            headers=eng_sales, json={"part_ids": []})
+    assert not _refused_by_training(res), res.text
+    # a Sales member who is also Quality still reaches the reference lists
+    res = await client.post("/api/v1/changes/reference/risk-types", headers=eng_sales,
+                            json={"key": "x", "name": "X"})
+    assert not _refused_by_training(res), res.text
+    # ...while the guarded writes on the same routers are refused
+    assert _refused_by_training(await client.patch(
+        "/api/v1/changes/999999", headers=eng_sales, json={"priority": "high"}))
+    assert _refused_by_training(await client.post(
+        "/api/v1/changes/999999/transition", headers=eng_sales, json={"to": "x"}))
+    assert _refused_by_training(await client.post(
+        "/api/v1/intakes/999999/decide", headers=eng_sales,
+        json={"route": "administrative", "reason": "r"}))
+
+
+async def test_gate_costs_nothing_on_unguarded_routes_and_authenticates_once(
+        client, seed, eng_sales):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    stmts: list[str] = []
+
+    def cb(conn, cursor, statement, params, context, executemany):
+        stmts.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", cb)
+    try:
+        await client.post("/api/v1/changes/999999/impact-tree/suggest",
+                          headers=eng_sales, json={"part_ids": []})
+        unguarded = list(stmts)
+        stmts.clear()
+        await client.patch("/api/v1/changes/999999", headers=eng_sales,
+                           json={"priority": "high"})
+        guarded = list(stmts)
+    finally:
+        event.remove(Engine, "before_cursor_execute", cb)
+    assert not [s for s in unguarded if "org_settings" in s]
+    assert len([s for s in guarded if "org_settings" in s]) == 1
+    # get_current_user ran once: one lookup of the user by email.
+    by_email = [s for s in guarded if "FROM users" in s and "users.email" in s]
+    assert len(by_email) == 1, by_email
+
+
+async def test_blank_training_gate_env_means_unset(monkeypatch):
+    from app.core.config import Settings
+    monkeypatch.setenv("TRAINING_GATE", "")
+    assert Settings().training_gate is None
+    monkeypatch.setenv("TRAINING_GATE", "  ")
+    assert Settings().training_gate is None
+    monkeypatch.setenv("TRAINING_GATE", "0")
+    assert Settings().training_gate is False
+    monkeypatch.setenv("TRAINING_GATE", "true")
+    assert Settings().training_gate is True

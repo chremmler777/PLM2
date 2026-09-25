@@ -59,6 +59,8 @@ export interface TrainingStatus {
   gate_source: 'env' | 'org' | 'default'
   can_manage: boolean
   acting_as: string | null
+  //: Acting as a department: the tasks can be walked, nothing is recorded.
+  practice_only: boolean
   attestation_notice: string
   assessment_notice: string
 }

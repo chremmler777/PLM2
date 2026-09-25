@@ -22,7 +22,8 @@ import { BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT } from '../training/uiTokens'
 //: Two modes. Recorded: a role the user's departments owe; the attestation and
 //: every attempt reach the training record. Practice (?practice=1, or any role
 //: the user does not owe): the same tasks, checked in the browser, nothing
-//: recorded. Practice is how a trainer or an admin walks a role.
+//: recorded. Practice is how a trainer or an admin walks a role; an admin
+//: acting as a department is always in practice (the API refuses the record).
 
 export default function TrainingRunPage() {
   const { role = '' } = useParams()
@@ -50,7 +51,9 @@ export default function TrainingRunPage() {
     )
   }
   const owed = status.data.roles.find((r) => r.role === role) ?? null
-  const practice = params.get('practice') === '1' || owed === null
+  //: Acting as a department is practice only: the API refuses the record.
+  const practice =
+    params.get('practice') === '1' || owed === null || status.data.practice_only
   return (
     <Shell roleLabel={catalog.label} practice={practice}>
       {practice ? (

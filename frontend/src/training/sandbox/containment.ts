@@ -47,8 +47,46 @@ export function stripQuery(url: string): string {
   return (i === -1 ? url : url.slice(0, i)).replace(/\/+$/, '') || '/'
 }
 
+const BASE = 'http://sandbox.invalid'
+
+/**
+ * The path a passthrough decision is made on, or null when the URL is one no
+ * allowlist should reason about.
+ *
+ * A prefix match on the raw string is a hole: `/v1/training/../changes/1`
+ * starts with `/v1/training/` and the browser resolves it to `/v1/changes/1`.
+ * So the URL is decoded once and refused outright if it carries a dot
+ * segment (`.`, `..`, also as `%2e`), an empty segment (`//`, which a URL
+ * parser may read as a host), a backslash, anything still percent-encoded
+ * after one decode (`%252e`), or its own origin. What survives is compared
+ * exactly.
+ */
+export function passthroughPath(url: string): string | null {
+  const raw = url.split('#')[0].split('?')[0]
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+  if (/%[0-9a-f]{2}/i.test(decoded) || decoded.includes('\\')) return null
+  const path = decoded.replace(/\/+$/, '')
+  if (!path.startsWith('/')) return null
+  const segments = path.split('/').slice(1)
+  if (segments.some((seg) => seg === '' || seg === '.' || seg === '..')) return null
+  let parsed: URL
+  try {
+    parsed = new URL(path, BASE)
+  } catch {
+    return null
+  }
+  if (parsed.origin !== BASE || parsed.pathname !== path) return null
+  return path
+}
+
 export function isPassthrough(url: string): boolean {
-  const path = stripQuery(url)
+  const path = passthroughPath(url)
+  if (path === null) return false
   //: With the slash, plus the bare path: a plain startsWith would also let
   //: `/v1/trainingish` through, which is exactly the hole an allowlist must
   //: not have.

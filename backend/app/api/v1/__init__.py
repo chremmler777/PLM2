@@ -67,9 +67,10 @@ from app.api.v1.cost_sheet import router as cost_sheet_router
 # Module: training (ECR training record; the gate below is off by default)
 from app.api.v1.training import router as training_router, enforce_training_gate
 
-#: Wired onto every change router, off unless TRAINING_GATE or the org
-#: setting 'training_gate' switches it on (ruling 2026-09-25: training is
-#: recorded, it does not block). Reads always pass.
+#: Wired onto the change routers and the revision intake, off unless
+#: TRAINING_GATE or the org setting 'training_gate' switches it on (ruling
+#: 2026-09-25: training is recorded, it does not block). Only the writes in
+#: training.GUARDED_WRITES are ever refused; reads always pass.
 _TRAINING_GATE = [Depends(enforce_training_gate)]
 
 api_router = APIRouter(prefix="/v1")
@@ -87,7 +88,7 @@ api_router.include_router(dfm_router)
 api_router.include_router(field_notes_router)
 api_router.include_router(materials_router)
 api_router.include_router(worksheet_router)
-api_router.include_router(intakes_router)
+api_router.include_router(intakes_router, dependencies=_TRAINING_GATE)
 api_router.include_router(equipment_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)

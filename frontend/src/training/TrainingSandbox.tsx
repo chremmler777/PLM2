@@ -93,6 +93,16 @@ export default function TrainingSandbox({ resetKey, children }: Props) {
           </div>
           <div className="p-4">{children(state)}</div>
         </div>
+        {/* Fixed and above the app's modal layer (z-50): the start form opens
+            as a modal whose backdrop covers the frame above, and the trainee
+            must still see that this is the training copy. */}
+        <div
+          data-testid="training-banner"
+          role="status"
+          className="pointer-events-none fixed left-1/2 top-2 z-[60] -translate-x-1/2 rounded-full border border-amber-400/70 bg-amber-500 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-900 shadow-lg"
+        >
+          Training copy · nothing reaches the live system
+        </div>
       </QueryClientProvider>
     </InTrainingSandbox.Provider>
   )

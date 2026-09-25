@@ -88,6 +88,41 @@ describe('containment', () => {
     expect(isPassthrough('/v1/changes')).toBe(false)
   })
 
+  it('refuses passthrough to any path that is not literally an allowed one', async () => {
+    for (const url of [
+      '/v1/training/../changes/1',
+      '/v1/training/./../changes/1',
+      '/v1/training/%2e%2e/changes/1',
+      '/v1/training/%2E%2E/changes/1',
+      '/v1/training/.%2e/changes/1',
+      '/v1/training/%252e%252e/changes/1',
+      '/v1/training/..%2fchanges/1',
+      '/v1/training/..\\changes/1',
+      '/v1/training//../changes/1',
+      '//evil.example/v1/training/status',
+      '/v1//training/status',
+      '/v1/auth/me/..',
+      '/v1/auth/me/../../changes',
+      'http://evil.example/v1/training/status',
+      '/v1/training/%zz',
+    ]) {
+      expect(isPassthrough(url), url).toBe(false)
+    }
+    expect(isPassthrough('/v1/auth/me')).toBe(true)
+    expect(isPassthrough('/v1/auth/me/')).toBe(true)
+    expect(isPassthrough('/v1/training/attempts')).toBe(true)
+    expect(isPassthrough('/v1/training/status?role=a/../b')).toBe(true)
+
+    // And through the adapter: the escape attempt is answered (or missed) by
+    // the sandbox, never sent.
+    const real = network()
+    const s = createSandbox()
+    const adapter = createTrainingAdapter(s, real)
+    await expect(adapter({ method: 'delete', url: '/v1/training/../changes/1' })).rejects
+      .toBeInstanceOf(SandboxMiss)
+    expect(real).not.toHaveBeenCalled()
+  })
+
   it('marks its adapter so the client can tell it from the network', () => {
     expect(isTrainingAdapter(createTrainingAdapter(createSandbox(), network()))).toBe(true)
     expect(isTrainingAdapter(['xhr', 'http'])).toBe(false)

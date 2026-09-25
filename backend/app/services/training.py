@@ -26,6 +26,17 @@ A user owes the roles their departments map to. While a real admin acts as a
 department (X-Acts-As-Department) they owe exactly that department's role, so
 the switch is also how an admin walks a role's training.
 
+Task results are scored in the browser, as in TWOS. A practical task runs
+the real screens against a training copy that lives only in the trainee's
+browser (frontend/src/training/sandbox), so only the browser can see whether
+the work was done; the server records the verdict it is sent. The record says
+that a named person, trained by a named trainer, sat the tasks; it is not
+proof against somebody forging requests to the attempts endpoint.
+
+While a real admin acts as a department the training is practice only: the
+API refuses attestations and attempts (see app/api/v1/training.py), so the
+record never carries an entry that was really an admin walking a view.
+
 No blocking (ruling 2026-09-25): the record is kept, but the gate that would
 refuse ECR actions to an untrained user is OFF unless switched on (env
 TRAINING_GATE or the org setting 'training_gate'). See gate_enabled and
@@ -158,6 +169,23 @@ def roles_for_departments(names: list[str] | set[str]) -> list[str]:
 async def roles_for_user(db: AsyncSession, user) -> list[str]:
     """The training roles this user owes (acts-as honoured)."""
     return roles_for_departments(await _department_names(db, user))
+
+
+async def roles_held(db: AsyncSession, user_id: int) -> list[str]:
+    """The roles a user owes through their real memberships (acts-as ignored).
+
+    What a roster entry is checked against: attendance is only recorded for
+    a role the trainee's own departments owe.
+    """
+    from app.services.workflow_service import WorkflowService
+
+    ids = await WorkflowService.get_user_department_ids(db, user_id)
+    if not ids:
+        return []
+    rows = (await db.execute(
+        select(Department.name).where(Department.id.in_(ids))
+    )).all()
+    return roles_for_departments([n for (n,) in rows])
 
 
 async def can_manage(db: AsyncSession, user) -> bool:
@@ -340,23 +368,6 @@ async def gate_state(db: AsyncSession, org_id: Optional[int]) -> tuple[bool, str
         if raw is not None:
             return raw.strip().lower() in ("1", "true", "on", "yes"), "org"
     return False, "default"
-
-
-async def gate_may_be_on(db: AsyncSession) -> bool:
-    """Cheap pre-check before any user is resolved: is the gate on anywhere?
-
-    False when the environment pins it off, or when no organisation has
-    switched it on. Only when this is True does the gate resolve the user and
-    ask for their organisation's setting.
-    """
-    env = get_settings().training_gate
-    if env is not None:
-        return bool(env)
-    from app.models.cost_sheet import OrgSetting
-
-    values = (await db.execute(select(OrgSetting.value).where(
-        OrgSetting.key == GATE_SETTING_KEY))).scalars().all()
-    return any((v or "").strip().lower() in ("1", "true", "on", "yes") for v in values)
 
 
 async def gate_enabled(db: AsyncSession, org_id: Optional[int]) -> bool:

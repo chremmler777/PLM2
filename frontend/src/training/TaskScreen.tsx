@@ -27,6 +27,14 @@ export default function TaskScreen({ screen }: { screen: Screen }) {
   return (
     // A router inside the app's router: react-router refuses that unless the
     // outer location context is hidden. Scoped to the sandbox only.
+    //
+    // No supported API does this in react-router 6.30: every router
+    // (MemoryRouter, and RouterProvider over createMemoryRouter) renders
+    // <Router>, which asserts !useInRouterContext() in production too, and
+    // there is no public way to leave the outer context. A separate React
+    // root (createRoot) would drop the app's providers the real screens need.
+    // Revisit on the move to react-router 7; TrainingSandbox.test.tsx mounts
+    // the real start form through this and fails if the export disappears.
     <UNSAFE_LocationContext.Provider value={null as never}>
       <MemoryRouter initialEntries={['/']}>
         <Routes>
