@@ -91,6 +91,9 @@ describe('issue stepper', () => {
   it('renders data-state per step', () => {
     wrap(<IssueCard changeId={7} changeStatus="in_validation" issue={issue()} viewer={{}} departments={departments} />)
     expect(screen.getByTestId('issue-step-11-contained').getAttribute('data-state')).toBe('current')
+    expect(screen.getByTestId('issue-step-11-contained').getAttribute('aria-current')).toBe('step')
+    expect(screen.getByTestId('issue-step-11-raised').getAttribute('aria-current')).toBeNull()
+    expect(screen.getByTestId('issue-stepper-11').getAttribute('aria-label')).toMatch(/^Progress of issue VI-\d+$/)
   })
 })
 

@@ -6,18 +6,20 @@
  * One move usually pushes its successors along, and the server records a
  * deviation per task. They are shown as one group (the move, then what it
  * pushed) with one Lock / Escalate on the group: the pushed rows follow the
- * move's decision. Until the server keeps groups itself, the group decision
- * is sent as one call per open row.
+ * move's decision. Until the server decides a group in one call, the group
+ * decision is sent as one call per open row by `decideGroup`, the one place
+ * to swap for a group endpoint.
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { CornerDownRight } from 'lucide-react'
 import { planApi } from '../../../api/changePlan'
 import type { DeviationStatus, PlanDeviation } from '../../../types/changePlan'
 import ReasonDialog from '../ReasonDialog'
 import { toDay } from '../plan/ganttMath'
 import { formatDateShort } from '../../../lib/format'
-import { toastError } from '../../../lib/apiError'
+import { apiErrorMessage, toastError } from '../../../lib/apiError'
 import { btnSm } from '../../common/buttonStyles'
 
 /** "25 Sep 26" from a day number (days since 1970-01-01, UTC). */
@@ -66,12 +68,100 @@ export function groupDeviations(list: PlanDeviation[]): DeviationGroup[] {
     .map((root) => ({ root, pushed: byId.filter((c) => parent.get(c.id)?.id === root.id) }))
 }
 
+/** Rows of a group still waiting for a decision, the move first. */
+const openOf = (g: DeviationGroup) => [g.root, ...g.pushed].filter((d) => d.status === 'open')
+
+/** Lock note of a row pushed by an escalated move: says where the decision went. */
+export const pushedEscalatedNote = (root: PlanDeviation, escalationId?: number | null) =>
+  `Pushed by the move of ${root.task_name}, which was escalated to the customer${
+    escalationId != null ? ` (escalation #${escalationId})` : ''}`
+
+export type GroupAction = 'lock' | 'escalate'
+
+/** What a group decision did, so the message can say exactly that. */
+export interface GroupOutcome {
+  action: GroupAction
+  /** The move itself went to the customer in this call. */
+  escalated: boolean
+  /** Rows locked in this call, out of `toLock` open rows asked for. */
+  locked: number
+  toLock: number
+  /** Why the rest stayed open, when a row was refused. */
+  error?: unknown
+}
+
+/**
+ * Decides one deviation group. `escalate` sends the move (which must be open)
+ * to the customer, then locks the rows it pushed with a note naming the
+ * escalation. `lock` locks every open row; rows pushed by an already
+ * escalated move get that same note. One call per row, the move first; a
+ * refused row stops the rest and is reported, not thrown, so the caller can
+ * tell what did happen. A failed escalation is thrown: nothing changed.
+ *
+ * The one place a server-side group endpoint would plug in.
+ */
+export async function decideGroup(
+  changeId: number, group: DeviationGroup, action: GroupAction, note?: string,
+): Promise<GroupOutcome> {
+  const { root } = group
+  const openPushed = group.pushed.filter((d) => d.status === 'open')
+  let escalationId = root.escalation_id ?? null
+  let escalated = false
+  let rows: PlanDeviation[]
+  if (action === 'escalate') {
+    if (root.status !== 'open') throw new Error('This move is already decided')
+    const res = await planApi.escalateDeviation(changeId, root.id, note ?? '') as Partial<PlanDeviation> | undefined
+    escalated = true
+    escalationId = res?.escalation_id ?? null
+    rows = openPushed
+  } else {
+    rows = openOf(group)
+  }
+  const afterEscalation = escalated || root.status === 'escalated'
+  const noteFor = (d: PlanDeviation) => {
+    if (d.id === root.id || !afterEscalation) return note
+    const auto = pushedEscalatedNote(root, escalationId)
+    return action === 'lock' && note ? `${auto}. ${note}` : auto
+  }
+  let locked = 0
+  for (const d of rows) {
+    try {
+      await planApi.lockDeviation(changeId, d.id, noteFor(d))
+      locked += 1
+    } catch (error) {
+      return { action, escalated, locked, toLock: rows.length, error }
+    }
+  }
+  return { action, escalated, locked, toLock: rows.length }
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** The toast for a group decision: what happened, and what is left to retry. */
+export function outcomeMessage(o: GroupOutcome): { ok: boolean; text: string } {
+  const all = o.locked === o.toLock
+  if (o.action === 'escalate') {
+    if (o.toLock === 0) return { ok: true, text: 'Escalated to the customer' }
+    if (all) return { ok: true, text: `Escalated to the customer; ${plural(o.locked, 'pushed row')} locked` }
+    return { ok: false, text: `Escalated; ${o.locked} of ${plural(o.toLock, 'pushed row')} locked, retry to lock the rest` }
+  }
+  if (all) return { ok: true, text: `Locked ${plural(o.locked, 'deviation')}` }
+  return { ok: false, text: `Locked ${o.locked} of ${plural(o.toLock, 'deviation')}, retry to lock the rest` }
+}
+
+function report(o: GroupOutcome) {
+  const m = outcomeMessage(o)
+  if (m.ok) toast.success(m.text)
+  else toast.error(`${m.text}. ${apiErrorMessage(o.error, 'The server refused a row')}`)
+}
+
 export default function DeviationsPanel({ changeId, deviations, canDecide: mayDecide, status }: Props) {
   const canDecide = mayDecide && (status == null || DECIDING.includes(status))
   const qc = useQueryClient()
   const [lockFor, setLockFor] = useState<number | null>(null)
   const [lockNote, setLockNote] = useState('')
-  const [escalateFor, setEscalateFor] = useState<DeviationGroup | null>(null)
+  /** Only the move's id: the group is rebuilt from the current rows each render. */
+  const [escalateRoot, setEscalateRoot] = useState<number | null>(null)
 
   const done = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
@@ -79,29 +169,19 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
     qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
-  const openOf = (g: DeviationGroup) => [g.root, ...g.pushed].filter((d) => d.status === 'open')
   const lock = useMutation({
-    // One after the other, the move first: a refusal stops the rest.
-    mutationFn: async (v: { ids: number[]; note?: string }) => {
-      for (const id of v.ids) await planApi.lockDeviation(changeId, id, v.note)
-    },
-    onSuccess: () => { setLockFor(null); setLockNote('') },
+    mutationFn: (v: { group: DeviationGroup; note?: string }) => decideGroup(changeId, v.group, 'lock', v.note),
+    onSuccess: (o) => { report(o); if (o.locked === o.toLock) { setLockFor(null); setLockNote('') } },
     onError: (e: unknown) => toastError(e, 'Could not lock the deviation'),
     onSettled: done,
   })
   const escalate = useMutation({
     // The move goes to the customer; what it pushed is part of that story
     // and is locked with a note pointing at it, not escalated a second time.
-    mutationFn: async (v: { group: DeviationGroup; note: string }) => {
-      const { root } = v.group
-      if (root.status === 'open') await planApi.escalateDeviation(changeId, root.id, v.note)
-      for (const d of v.group.pushed.filter((x) => x.status === 'open')) {
-        await planApi.lockDeviation(changeId, d.id, `Escalated to the customer with the move of ${root.task_name}`)
-      }
-    },
-    onSuccess: () => setEscalateFor(null),
+    mutationFn: (v: { group: DeviationGroup; note: string }) => decideGroup(changeId, v.group, 'escalate', v.note),
+    onSuccess: report,
     onError: (e: unknown) => toastError(e, 'Could not escalate the deviation'),
-    onSettled: done,
+    onSettled: () => { setEscalateRoot(null); done() },
   })
 
   const groups = groupDeviations(deviations)
@@ -116,6 +196,11 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
     const open = openOf(g)
     const isRoot = pushedBy == null
     const n = open.length
+    // Once the move is decided, only its leftover pushed rows can be locked;
+    // escalating is offered only while the move itself is open.
+    const rootOpen = g.root.status === 'open'
+    const lockLabel = rootOpen ? (n > 1 ? `Lock all ${n}` : 'Lock') : 'Lock remaining'
+    const submitLock = () => { if (!busy) lock.mutate({ group: g, note: lockNote.trim() || undefined }) }
     return (
       <tr key={d.id} className={`align-top ${pushedBy ? 'bg-slate-900/40' : ''}`} data-testid={`deviation-${d.id}`}
         data-pushed-by={pushedBy?.id}>
@@ -168,13 +253,17 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
             {isRoot && n > 0 && lockFor !== d.id && (
               <div className="flex justify-end gap-1.5">
                 <button type="button" data-testid={`deviation-lock-${d.id}`} disabled={busy}
-                  aria-label={n > 1 ? `Lock the ${n} open deviations of the move on ${d.task_name}` : `Lock deviation on ${d.task_name}`}
+                  aria-label={rootOpen
+                    ? (n > 1 ? `Lock the ${n} open deviations of the move on ${d.task_name}` : `Lock deviation on ${d.task_name}`)
+                    : `Lock the ${n} remaining pushed deviation${n === 1 ? '' : 's'} of the move on ${d.task_name}`}
                   className={btnSm.secondary}
-                  onClick={() => { setLockFor(d.id); setLockNote('') }}>{n > 1 ? `Lock all ${n}` : 'Lock'}</button>
-                <button type="button" data-testid={`deviation-escalate-${d.id}`} disabled={busy}
-                  aria-label={`Escalate deviation on ${d.task_name} to the customer`}
-                  className={`${btnSm.secondary} border-rose-800 text-rose-200 hover:border-rose-700 hover:bg-rose-950/50`}
-                  onClick={() => setEscalateFor(g)}>Escalate to customer</button>
+                  onClick={() => { setLockFor(d.id); setLockNote('') }}>{lockLabel}</button>
+                {rootOpen && (
+                  <button type="button" data-testid={`deviation-escalate-${d.id}`} disabled={busy}
+                    aria-label={`Escalate deviation on ${d.task_name} to the customer`}
+                    className={`${btnSm.secondary} border-rose-800 text-rose-200 hover:border-rose-700 hover:bg-rose-950/50`}
+                    onClick={() => setEscalateRoot(g.root.id)}>Escalate to customer</button>
+                )}
               </div>
             )}
             {isRoot && lockFor === d.id && (
@@ -183,14 +272,13 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
                   placeholder="Note (optional)" aria-label="Lock note"
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') setLockFor(null)
-                    if (e.key === 'Enter') lock.mutate({ ids: open.map((x) => x.id), note: lockNote.trim() || undefined })
+                    if (e.key === 'Enter') submitLock()
                   }}
                   className="w-40 rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100 placeholder-slate-500" />
                 <button type="button" className={btnSm.ghost} onClick={() => setLockFor(null)}>Cancel</button>
                 <button type="button" disabled={busy} data-testid={`deviation-lock-confirm-${d.id}`}
-                  className={btnSm.primary}
-                  onClick={() => lock.mutate({ ids: open.map((x) => x.id), note: lockNote.trim() || undefined })}>
-                  {n > 1 ? `Lock all ${n}` : 'Lock'}
+                  className={btnSm.primary} onClick={submitLock}>
+                  {lockLabel}
                 </button>
               </div>
             )}
@@ -200,7 +288,10 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
     )
   }
 
-  const pushedOpen = escalateFor ? escalateFor.pushed.filter((d) => d.status === 'open').length : 0
+  // Rebuilt from the current rows: a refetch that decided the move elsewhere
+  // closes the dialog instead of escalating a stale group.
+  const escalateGroup = groups.find((g) => g.root.id === escalateRoot && g.root.status === 'open') ?? null
+  const pushedOpen = escalateGroup ? escalateGroup.pushed.filter((d) => d.status === 'open').length : 0
 
   return (
     <section className="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-4" data-testid="deviations-panel">
@@ -237,13 +328,13 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
           </table>
         </div>
       )}
-      <ReasonDialog open={escalateFor != null} title="Escalate to the customer"
+      <ReasonDialog open={escalateGroup != null} title="Escalate to the customer"
         label="What does Sales tell the customer?"
         warning={`This opens a customer escalation for the implementation and marks the move escalated.${pushedOpen > 0
           ? ` The ${pushedOpen} task${pushedOpen === 1 ? '' : 's'} it pushed ${pushedOpen === 1 ? 'is' : 'are'} locked with it, noting the escalation.` : ''}`}
         submitLabel="Escalate" danger
-        onSubmit={(note) => { if (escalateFor != null) escalate.mutate({ group: escalateFor, note }) }}
-        onClose={() => setEscalateFor(null)} />
+        onSubmit={(note) => { if (escalateGroup != null && !busy) escalate.mutate({ group: escalateGroup, note }) }}
+        onClose={() => setEscalateRoot(null)} />
     </section>
   )
 }

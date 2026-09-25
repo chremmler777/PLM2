@@ -94,11 +94,24 @@ describe('TaskEditor', () => {
     expect(screen.getByText('Idea block')).toBeTruthy()
   })
 
-  it('says why actual dates cannot be saved: a finish before the start, a date in the future', () => {
+  it('says why an edited actual finish cannot be saved: before the start', () => {
     const tracking = { ...base, canEdit: false, canDates: false, canProgress: true, track: true }
-    const { rerender } = render(<TaskEditor {...tracking} task={task({ actual_start: '2026-01-10', actual_finish: '2026-01-05' })} onSave={vi.fn()} />)
+    render(<TaskEditor {...tracking} task={task({ actual_start: '2026-01-10' })} onSave={vi.fn()} />)
+    const finish = screen.getByLabelText('Actual finish') as HTMLInputElement
+    fireEvent.change(finish, { target: { value: '5 Jan 2026' } })
+    fireEvent.blur(finish)
     expect(screen.getByTestId('te-actual-error').textContent).toBe('The actual finish cannot be before the actual start.')
-    rerender(<TaskEditor {...tracking} task={task({ id: 2, actual_start: '2099-01-10', actual_finish: null })} onSave={vi.fn()} />)
-    expect(screen.getByTestId('te-actual-error').textContent).toBe('Actual dates cannot lie in the future.')
+    expect((screen.getByTestId('task-editor-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('stored actuals that look wrong here do not block an unrelated edit', () => {
+    const onSave = vi.fn()
+    const tracking = { ...base, canEdit: false, canDates: false, canProgress: true, track: true }
+    // "Tomorrow" in this time zone, and out of order from an older save.
+    render(<TaskEditor {...tracking} task={task({ actual_start: '2099-01-10', actual_finish: '2099-01-05' })} onSave={onSave} />)
+    expect(screen.queryByTestId('te-actual-error')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Progress'), { target: { value: '40' } })
+    fireEvent.click(screen.getByTestId('task-editor-save'))
+    expect(onSave).toHaveBeenCalledWith({ progress_pct: 40 })
   })
 })

@@ -60,12 +60,16 @@ export default function DeviationDialog({ open, changed, moved, onSubmit, onClos
   const [reason, setReason] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const count = changed.length + moved.length
+  // Matches the deviations list: one group per task you moved, the tasks it pushed under it.
+  const grouping = count <= 1 ? ''
+    : changed.length > 1 ? ` on all ${count} tasks; each task you moved becomes its own group, with the tasks it pushed under it`
+      : ` on all ${count} tasks, as one group: your move and the tasks it pushed`
   const submit = () => { if (reason.trim()) { const r = reason.trim(); setReason(''); onSubmit(r) } }
   const close = () => { setReason(''); onClose() }
   return (
     <Dialog open={open} onClose={close} title="Record a deviation" size="lg" initialFocus={ref}
       closeOnBackdrop={false}
-      description={`Timing is validated, so the move is recorded with your reason${count > 1 ? ` on all ${count} tasks, listed as one group` : ''}. PM or Sales then lock it or escalate it to the customer.`}
+      description={`Timing is validated, so the move is recorded with your reason${grouping}. PM or Sales then decide each group: lock it or escalate it to the customer.`}
       footer={(
         <>
           <Button onClick={close}>Cancel</Button>

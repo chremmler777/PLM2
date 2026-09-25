@@ -143,8 +143,14 @@ export default function TaskEditor(p: Props) {
   const milestone = f.kind === 'milestone'
   const dur = milestone ? 0 : Math.max(0, Math.floor(Number(f.duration) || 0))
   const startOk = /^\d{4}-\d{2}-\d{2}$/.test(f.start_date) && inYearRange(f.start_date)
-  const actualFuture = [f.actual_start, f.actual_finish].some((a) => !!a && a > maxActual)
-  const actualOrder = !!f.actual_start && !!f.actual_finish && f.actual_finish < f.actual_start
+  // Only the actuals changed in this edit are checked: stored ones (maybe
+  // "tomorrow" here, or out of order from before) never block other edits.
+  const startEdited = (f.actual_start || null) !== (task.actual_start ?? null)
+  const finishEdited = (f.actual_finish || null) !== (task.actual_finish ?? null)
+  const actualFuture = (startEdited && !!f.actual_start && f.actual_start > maxActual)
+    || (finishEdited && !!f.actual_finish && f.actual_finish > maxActual)
+  const actualOrder = (startEdited || finishEdited)
+    && !!f.actual_start && !!f.actual_finish && f.actual_finish < f.actual_start
   const actualsOk = !actualFuture && !actualOrder
   const endIncl = startOk ? toIso(lastDay(cal, toDay(f.start_date), dur)) : ''
   const constraintOk = f.constraint_type === 'asap' || (/^\d{4}-\d{2}-\d{2}$/.test(f.constraint_date) && inYearRange(f.constraint_date))

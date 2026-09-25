@@ -42,7 +42,8 @@ export interface GridProps {
 
 export function GridHeader({ columns, height = HEADER_H, extra }: { columns: GanttColumn[]; height?: number; extra?: ReactNode }) {
   // All short or none: "Base start" next to "B. finish" reads as two things.
-  const abbreviate = columns.some((c) => c.short && textWidth(c.title.toUpperCase(), 10) + 12 > c.width)
+  // Measured at the header's own 11 px.
+  const abbreviate = columns.some((c) => c.short && textWidth(c.title.toUpperCase(), 11) + 12 > c.width)
   return (
     <div className="relative flex items-end border-b text-[11px] uppercase tracking-wide"
       style={{ height, width: gridWidth(columns), background: v('headerBg'), borderColor: v('gridLine'), color: v('textFaint') }}

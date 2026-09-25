@@ -4,6 +4,7 @@
 
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { OpenChangeBridge } from './components/changes/plan/openChange';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -283,6 +284,7 @@ export default function App() {
         <AuthProvider>
           <BrowserRouter basename="/plm2">
             <AppRoutes />
+            <OpenChangeBridge />
             <Toaster position="bottom-right" theme="dark" richColors closeButton />
           </BrowserRouter>
         </AuthProvider>

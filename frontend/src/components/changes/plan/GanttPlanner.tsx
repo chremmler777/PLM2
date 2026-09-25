@@ -89,6 +89,7 @@ export default function GanttPlanner({
   defaultZoom,
 }: GanttPlannerProps) {
   const qc = useQueryClient()
+  // The main window answers a plan pop-out's "Open change" through its router.
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
   // Each save bumps this. A GET that started before a save answered carries
   // the old plan: the cache (the save's answer) wins over it.
@@ -571,7 +572,6 @@ export default function GanttPlanner({
 
   return (
     <div ref={plannerRef} className="space-y-2" data-testid="gantt-planner">
-
       <Gantt ref={ganttRef} tasks={model.tasks} links={model.links} calendar={model.calendar}
         rights={rights} readOnly={compact} compact={compact}
         onChange={onChange} beforeChange={beforeChange}

@@ -14,10 +14,11 @@ const SR: Record<StepState, string> = { done: 'done', current: 'next', todo: 'to
 export default function IssueStepper({ issue }: { issue: IssueOut }) {
   const steps = issueSteps(issue)
   return (
-    <ol data-testid={`issue-stepper-${issue.id}`} aria-label={`Progress of the issue`}
+    <ol data-testid={`issue-stepper-${issue.id}`} aria-label={`Progress of issue VI-${issue.number}`}
       className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
       {steps.map((s, i) => (
         <li key={s.key} data-testid={`issue-step-${issue.id}-${s.key}`} data-state={s.state}
+          aria-current={s.state === 'current' ? 'step' : undefined}
           title={s.note} className="flex items-center gap-1">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] ${
             s.state === 'done' ? 'bg-emerald-950/50 text-emerald-300'

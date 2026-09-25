@@ -5,7 +5,7 @@
  * window, refetches on focus, and hears saves from other windows through the
  * planner's BroadcastChannel, so both windows stay current.
  */
-import { useEffect, type MouseEvent } from 'react';
+import { useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
@@ -14,29 +14,13 @@ import { ExternalLink, X } from 'lucide-react';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import GanttPlanner from '../components/changes/plan/GanttPlanner';
+import { changeTimingHref, openChangeInOpener } from '../components/changes/plan/openChange';
 import { btnSm } from '../components/common/buttonStyles';
 
 const phase = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const statusOf = (e: unknown) => (e as { response?: { status?: number } })?.response?.status;
 /** A plan that does not exist or is not ours to see stays so: no retries. */
 const retry = (count: number, e: unknown) => ![401, 403, 404].includes(statusOf(e) ?? 0) && count < 2;
-
-/**
- * "Open change" brings the window that opened this one to the change (its
- * Timing tab) instead of loading the whole app in the small window; without
- * an opener it is a plain link.
- */
-function openInMain(e: MouseEvent<HTMLAnchorElement>, href: string) {
-  const opener = window.opener as Window | null;
-  if (!opener || opener.closed) return;
-  try {
-    opener.location.href = href;
-    opener.focus();
-    e.preventDefault();
-  } catch {
-    // Another origin: let the link open normally.
-  }
-}
 
 export default function PlanPopout() {
   const params = useParams<{ changeId: string; plan: string }>();
@@ -87,8 +71,9 @@ export default function PlanPopout() {
           </span>
         )}
         <span className="min-w-0 flex-1 truncate text-slate-300" title={change?.title}>{change?.title}</span>
-        <a href={`/changes/${id}?tab=timing`} data-testid="plan-popout-open-change"
-          onClick={(e) => openInMain(e, `/changes/${id}?tab=timing`)} className={btnSm.secondary}>
+        {/* The opener's router shows the change (no reload); a plain link without an opener. */}
+        <a href={changeTimingHref(id)} data-testid="plan-popout-open-change"
+          onClick={(e) => { if (openChangeInOpener(id)) e.preventDefault(); }} className={btnSm.secondary}>
           <ExternalLink aria-hidden="true" size={14} />Open change
         </a>
         <button type="button" data-testid="plan-popout-close" onClick={() => window.close()}

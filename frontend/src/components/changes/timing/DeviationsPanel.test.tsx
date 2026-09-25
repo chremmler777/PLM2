@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DeviationsPanel from './DeviationsPanel'
 import type { PlanDeviation } from '../../../types/changePlan'
 import { planApi } from '../../../api/changePlan'
+import { toast } from 'sonner'
 
 vi.mock('../../../api/changePlan', () => ({ planApi: { lockDeviation: vi.fn(), escalateDeviation: vi.fn() } }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
@@ -55,7 +56,7 @@ describe('DeviationsPanel grouped by cause (G18)', () => {
 
   it('escalating the move locks what it pushed with a note, and escalates once', async () => {
     vi.mocked(planApi.lockDeviation).mockReset().mockResolvedValue({})
-    vi.mocked(planApi.escalateDeviation).mockResolvedValue({})
+    vi.mocked(planApi.escalateDeviation).mockResolvedValue({ id: 20, escalation_id: 55 })
     mount()
     fireEvent.click(screen.getByTestId('deviation-escalate-20'))
     const dialog = screen.getByRole('dialog')
@@ -64,6 +65,58 @@ describe('DeviationsPanel grouped by cause (G18)', () => {
     await waitFor(() => expect(planApi.lockDeviation).toHaveBeenCalledTimes(2))
     expect(planApi.escalateDeviation).toHaveBeenCalledTimes(1)
     expect(planApi.escalateDeviation).toHaveBeenCalledWith(7, 20, 'SOP moves a week')
-    expect(vi.mocked(planApi.lockDeviation).mock.calls[0][2]).toBe('Escalated to the customer with the move of Tool rework')
+    expect(vi.mocked(planApi.lockDeviation).mock.calls[0][2])
+      .toBe('Pushed by the move of Tool rework, which was escalated to the customer (escalation #55)')
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Escalated to the customer; 2 pushed rows locked'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('says exactly what happened when a pushed row is refused after the escalation', async () => {
+    vi.mocked(planApi.escalateDeviation).mockReset().mockResolvedValue({ id: 20, escalation_id: 55 })
+    vi.mocked(planApi.lockDeviation).mockReset().mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('no'))
+    vi.mocked(toast.error).mockClear()
+    mount()
+    fireEvent.click(screen.getByTestId('deviation-escalate-20'))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'SOP moves a week' } })
+    fireEvent.click(within(dialog).getByText('Escalate'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toMatch(/^Escalated; 1 of 2 pushed rows locked, retry to lock the rest\./)
+  })
+
+  it('a decided move with open pushed rows offers only "Lock remaining", with an honest note', async () => {
+    vi.mocked(planApi.lockDeviation).mockReset().mockResolvedValue({})
+    vi.mocked(planApi.escalateDeviation).mockReset()
+    const [a, b, root] = slip()
+    render(<QueryClientProvider client={new QueryClient()}>
+      <DeviationsPanel changeId={7} canDecide status="in_implementation"
+        deviations={[a, { ...b, status: 'locked' }, { ...root, status: 'escalated', escalation_id: 55 }]} />
+    </QueryClientProvider>)
+    expect(screen.queryByTestId('deviation-escalate-20')).toBeNull()
+    expect(screen.getByTestId('deviation-lock-20').textContent).toBe('Lock remaining')
+    fireEvent.click(screen.getByTestId('deviation-lock-20'))
+    fireEvent.click(screen.getByTestId('deviation-lock-confirm-20'))
+    await waitFor(() => expect(planApi.lockDeviation).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(planApi.lockDeviation).mock.calls[0])
+      .toEqual([7, 22, 'Pushed by the move of Tool rework, which was escalated to the customer (escalation #55)'])
+    expect(planApi.escalateDeviation).not.toHaveBeenCalled()
+  })
+
+  it('a double Enter on the lock note starts one lock run', async () => {
+    let release: () => void = () => {}
+    vi.mocked(planApi.lockDeviation).mockReset().mockImplementation(() => new Promise((r) => { release = () => r({}) }))
+    mount()
+    fireEvent.click(screen.getByTestId('deviation-lock-20'))
+    const note = screen.getByLabelText('Lock note')
+    fireEvent.keyDown(note, { key: 'Enter' })
+    await waitFor(() => expect(planApi.lockDeviation).toHaveBeenCalledTimes(1))
+    fireEvent.keyDown(note, { key: 'Enter' })
+    release()
+    await waitFor(() => expect(planApi.lockDeviation).toHaveBeenCalledTimes(2))
+    release()
+    await waitFor(() => expect(planApi.lockDeviation).toHaveBeenCalledTimes(3))
+    release()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(planApi.lockDeviation).toHaveBeenCalledTimes(3)
   })
 })
