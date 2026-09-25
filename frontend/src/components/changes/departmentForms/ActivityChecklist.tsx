@@ -287,7 +287,7 @@ export default function ActivityChecklist({
             <li key={`legacy-${i.activity_id}-${i.label}`} className="py-1 text-xs text-slate-500">
               <span data-testid={`check-legacy-${i.activity_id ?? 'free'}`}>
                 {i.impacted ? '✓' : '·'} {i.label}
-                {i.remark ? ` — ${i.remark}` : ''}
+                {i.remark ? `: ${i.remark}` : ''}
               </span>
               <span className="ml-2 opacity-70">({t('check.legacy', lang)})</span>
             </li>

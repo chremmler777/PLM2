@@ -55,7 +55,7 @@ describe('ConcernStrip', () => {
     wrap(<ConcernStrip changeId={7} editable />)
     expect(await screen.findByText('Tool cannot hold tolerance')).toBeDefined()
     expect(screen.getByText(/Rita RD/)).toBeDefined()
-    expect(screen.getByText(/1 open — blocks proceed/)).toBeDefined()
+    expect(screen.getByText(/1 open, blocks proceed/)).toBeDefined()
   })
 
   it('offers withdraw only on your own flag', async () => {
@@ -527,7 +527,7 @@ describe('ConcernStrip risk rows', () => {
   it('still counts a legacy flag as blocking, alongside the risks', async () => {
     await show([riskRow(),
       concern({ id: 9, kind: 'needs_info', department_id: 4, note: 'price unknown' })])
-    expect(screen.getByText(/1 open — blocks proceed/)).toBeTruthy()
+    expect(screen.getByText(/1 open, blocks proceed/)).toBeTruthy()
     expect(screen.getByTestId('risk-open-count').textContent)
       .toBe(t('risk.openCount').replace('{n}', '1'))
   })

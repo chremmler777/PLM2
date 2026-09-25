@@ -46,6 +46,6 @@ describe('ChangesPage project column', () => {
       row({ project_number: null, project_name: null })] as never)
     wrap()
     await screen.findByText('GB-CM-0001')
-    expect(screen.getByText('—')).toBeDefined()
+    expect(screen.getByText('-')).toBeDefined()
   })
 })

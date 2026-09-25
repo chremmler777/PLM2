@@ -50,7 +50,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
   if (!editable) {
     return (
       <>
-        <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '—'}</p>
+        <p><span className="text-slate-400">Quoted price:</span> {change.quoted_price ?? '-'}</p>
         {negotiated}
       </>
     )

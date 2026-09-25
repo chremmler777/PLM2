@@ -7,6 +7,7 @@ import {
   alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, salesEffectiveOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
+import { addDaysIso, daysUntil, formatDate, todayIso } from '../../lib/format';
 import type { CostPosition } from '../../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -57,7 +58,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
     <div data-testid={`vendor-decision-${p.id}`}
       className="mt-1 ml-2 border-l border-slate-700 pl-2 space-y-1">
       <div className="text-[11px] text-slate-500">
-        {t('vendor.decision')} — {t('vendor.decisionHint')}
+        {t('vendor.decision')}: {t('vendor.decisionHint')}
       </div>
       <div data-testid={`vendor-recommended-${p.id}`} className="text-xs text-slate-400">
         {fav
@@ -70,8 +71,8 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
           {t('vendor.chosen')}: <span className="font-semibold">{chosen.vendor_name}</span>
           {(chosen.chosen_by_name || chosen.chosen_at) && (
             <span className="text-slate-500">
-              {' — '}{chosen.chosen_by_name ?? ''}
-              {chosen.chosen_at && `${chosen.chosen_by_name ? ', ' : ''}${new Date(chosen.chosen_at).toLocaleDateString()}`}
+              {', '}{chosen.chosen_by_name ?? ''}
+              {chosen.chosen_at && `${chosen.chosen_by_name ? ', ' : ''}${formatDate(chosen.chosen_at)}`}
             </span>
           )}
           {diverges && (
@@ -185,7 +186,7 @@ export default function SummationView({
 
   const breakdownHeaders = (
     <tr className="text-xs text-slate-400 border-b border-slate-700">
-      <th className="text-left pb-1">—</th>
+      <th className="text-left pb-1">-</th>
       <th className="text-right pb-1">{t('one_time')} {t('internal')}</th>
       <th className="text-right pb-1">{t('one_time')} {t('external')}</th>
       <th className="text-right pb-1">{t('lifecycle')} {t('internal')}</th>
@@ -313,7 +314,7 @@ export default function SummationView({
           <table className="w-full text-xs">
             <thead>
               <tr className="text-xs text-slate-400 border-b border-slate-700">
-                <th className="text-left pb-1">—</th>
+                <th className="text-left pb-1">-</th>
                 <th className="text-right pb-1">{t('one_time')} {t('internal')}</th>
                 <th className="text-right pb-1">{t('one_time')} {t('external')}</th>
                 <th className="text-right pb-1">{t('lifecycle')} {t('internal')}</th>
@@ -385,11 +386,10 @@ export default function SummationView({
                     {deadline?.date && (
                       <span className="block text-slate-500">
                         {t('summation.earliestDone')}:{' '}
-                        {new Date(Date.now() + data.max_lead_time_days * 864e5).toLocaleDateString()}
+                        {formatDate(addDaysIso(todayIso(), data.max_lead_time_days))}
                         {' · '}{deadline.label}:{' '}
-                        {new Date(deadline.date).toLocaleDateString()}
-                        {Date.now() + data.max_lead_time_days * 864e5
-                          > new Date(deadline.date).getTime() && (
+                        {formatDate(deadline.date)}
+                        {data.max_lead_time_days > daysUntil(deadline.date) && (
                           <span className="text-red-400"> ⚠ {t('summation.pastDeadline')}</span>
                         )}
                       </span>

@@ -1,4 +1,5 @@
 import { t } from '../../i18n/cmLabels'
+import { daysUntil, formatDate } from '../../lib/format'
 import type { ChangeRequest } from '../../types/change'
 
 const STATE_CLASS: Record<string, string> = {
@@ -9,12 +10,12 @@ const STATE_CLASS: Record<string, string> = {
 
 export function DeadlineChip({ date, state }: { date: string | null; state: string | null }) {
   if (!date) return null
-  const days = Math.ceil((new Date(date).getTime() - Date.now()) / 864e5)
+  const days = daysUntil(date)
   const label = days >= 0 ? `${days}d` : `${Math.abs(days)}d over`
   return (
     <span data-testid="deadline-chip"
       className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${STATE_CLASS[state ?? 'on_track']}`}
-      title={new Date(date).toLocaleDateString()}>
+      title={formatDate(date)}>
       ⏱ {label}
     </span>
   )
@@ -30,7 +31,7 @@ export function QuotedFactChip({ change }: { change: ChangeRequest }) {
       className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${
         ok ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
            : 'bg-red-500/10 text-red-300 border-red-500/30'}`}
-      title={change.required_by_date ? new Date(change.required_by_date).toLocaleDateString() : undefined}>
+      title={change.required_by_date ? formatDate(change.required_by_date) : undefined}>
       {ok ? `✓ ${t('deadline.quotedOnTime')}` : t('deadline.quotedLate')}
     </span>
   )

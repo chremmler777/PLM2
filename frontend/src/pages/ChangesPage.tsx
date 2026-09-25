@@ -79,7 +79,7 @@ export default function ChangesPage() {
                         title={projectLabel(c.project_number, c.project_name) ?? undefined}>
                         {projectLabel(c.project_number, c.project_name)}
                       </span>
-                    ) : <span className="text-slate-600">—</span>}
+                    ) : <span className="text-slate-600">-</span>}
                   </td>
                   <td className="px-4 py-3 font-mono">
                     <Link className="text-blue-600 hover:underline" to={`/changes/${c.id}`}>

@@ -239,9 +239,13 @@ function OfferWorkspace({ props, offers, offer }: {
     .includes(change.status) || !!latestSent
 
   const refresh = useMutation({
-    mutationFn: async () => { await flush(); return changeOfferApi.refresh(change.id, offer.id) },
-    onSuccess: (o) => qc.setQueryData<OfferOut[]>(offersKey(change.id),
-      (old) => (old ?? []).map((x) => (x.id === o.id ? o : x))),
+    // Save what was typed first; if that save failed (already reported), do
+    // not refresh over the unsaved edits.
+    mutationFn: async () => ((await flush()) ? changeOfferApi.refresh(change.id, offer.id) : null),
+    onSuccess: (o) => {
+      if (!o) return
+      qc.setQueryData<OfferOut[]>(offersKey(change.id), (old) => (old ?? []).map((x) => (x.id === o.id ? o : x)))
+    },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not refresh from costing'),
   })
   const newVersion = useMutation({
@@ -294,6 +298,9 @@ function OfferWorkspace({ props, offers, offer }: {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 space-y-4">
+          {/* While a refresh runs the server rewrites the draft: no typing into it meanwhile. */}
+          <fieldset disabled={refresh.isPending} aria-busy={refresh.isPending} data-testid="offer-edit-fieldset"
+            className="m-0 min-w-0 space-y-4 border-0 p-0">
           <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
             <OfferTimingSection changeId={change.id} data={data} update={update} editable={editable} />
           </StepSection>
@@ -312,6 +319,7 @@ function OfferWorkspace({ props, offers, offer }: {
               changeNumber={change.change_number}
               onPreview={() => { void pdf.open() }} previewing={pdf.busy} />
           </StepSection>
+          </fieldset>
           {showNegotiation && (
             <StepSection id="offer-negotiation" n={5} title="Negotiation" done={done['offer-negotiation']}
               hint="Every version sent and every round with the customer, in order. A new version needs a note on what changed.">

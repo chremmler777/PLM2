@@ -12,6 +12,7 @@ import NeedsInfoCard from './NeedsInfoCard'
 import ConcernStrip from './ConcernStrip'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 import type { Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, RasicLetter } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -198,7 +199,7 @@ export default function ScopingPanel(
     id == null ? undefined : meetings.find((m: ChangeMeeting) => m.id === id)
   const originOf = (c: ChangeConcern) => {
     const m = meetingOf(c.raised_by_meeting_id)
-    return m ? `${t('concern.fromMeeting')} ${new Date(m.meeting_date).toLocaleDateString()}` : undefined
+    return m ? `${t('concern.fromMeeting')} ${formatDate(m.meeting_date)}` : undefined
   }
   const latestMeeting: ChangeMeeting | null =
     meetings.length > 0 ? meetings[meetings.length - 1] : null
@@ -239,8 +240,8 @@ export default function ScopingPanel(
           <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
             {t(`channel.${m.channel ?? 'meeting'}`)}
           </span>
-          {new Date(m.meeting_date).toLocaleDateString()} — {' '}
-          {m.participants.map((p) => p.name).join(', ') || '—'}
+          {formatDate(m.meeting_date)}:{' '}
+          {m.participants.map((p) => p.name).join(', ') || '-'}
         </span>
         {m.decision ? (
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
@@ -330,7 +331,7 @@ export default function ScopingPanel(
                 label={t('attach.rejectionSlot')} onUploaded={invalidate} />
               {change.rejection_sent_at ? (
                 <p className="text-xs text-emerald-300">
-                  ✓ {t('reject.sent')} · {new Date(change.rejection_sent_at).toLocaleDateString()}
+                  ✓ {t('reject.sent')} · {formatDate(change.rejection_sent_at)}
                 </p>
               ) : (
                 <button type="button" data-testid="rejection-sent"
@@ -409,7 +410,7 @@ export default function ScopingPanel(
                       {t(`channel.${m.channel ?? 'meeting'}`)}
                     </span>
                     <span className="text-slate-400">
-                      {new Date(m.meeting_date).toLocaleDateString()}
+                      {formatDate(m.meeting_date)}
                     </span>
                     {m.decision && (
                       <span className="px-1.5 py-0 rounded-full bg-slate-700 text-slate-300">

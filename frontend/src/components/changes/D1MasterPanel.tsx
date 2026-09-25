@@ -4,6 +4,7 @@ import { changesApi } from '../../api/changes';
 import { plantsApi } from '../../api/plants';
 import type { GateKey, ChangeDetail } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
+import { formatDate } from '../../lib/format';
 
 interface D1Fields {
   issuer: string;
@@ -127,7 +128,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
               value={fields.implementation_mode}
               onChange={(e) => setFields((f) => ({ ...f, implementation_mode: e.target.value as D1Fields['implementation_mode'] }))}
             >
-              <option value="">—</option>
+              <option value="">-</option>
               <option value="integrated">{t('integrated')}</option>
               <option value="separational">{t('separational')}</option>
             </select>
@@ -185,7 +186,7 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
                     {t('lead_part')}
                   </span>
                 )}
-                {item.impact_note && <span className="text-slate-500">— {item.impact_note}</span>}
+                {item.impact_note && <span className="text-slate-500">- {item.impact_note}</span>}
               </li>
             ))}
           </ul>
@@ -212,9 +213,9 @@ export default function D1MasterPanel({ changeId }: { changeId: number }) {
           {gates.map((g) => {
             const key = g.gate_key;
             const decidedAt = g?.decided_at
-              ? new Date(g.decided_at).toLocaleDateString()
-              : '—';
-            const decidedBy = g?.decided_by != null ? `#${g.decided_by}` : '—';
+              ? formatDate(g.decided_at)
+              : '-';
+            const decidedBy = g?.decided_by != null ? `#${g.decided_by}` : '-';
             return (
               <div key={key} className="text-sm">
                 <div className="flex items-center justify-between">

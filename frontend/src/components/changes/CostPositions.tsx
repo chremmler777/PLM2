@@ -514,9 +514,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const amount = (
     <span data-testid={`costpos-cost-${p.id}`} className="text-slate-200 tabular-nums">
       {type === 'time'
-        ? (p.hours != null ? `${p.hours} h` : '—')
+        ? (p.hours != null ? `${p.hours} h` : '-')
         : <>
-            {cost != null ? money(cost) : '—'}
+            {cost != null ? money(cost) : '-'}
             {p.hours != null && ` + ${p.hours} h`}
           </>}
     </span>
@@ -532,7 +532,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
             <span data-testid={`costpos-tag-${p.id}`} className="text-slate-200">
               {tagLabel(p.tag, categories)}
             </span>
-          ) : <span className="text-slate-600">—</span>}
+          ) : <span className="text-slate-600">-</span>}
         </td>
         <td className={`${cellCls} min-w-[12rem]`}>
           {editing ? (
@@ -741,7 +741,7 @@ function EffortRow({
         ) : (
           <span data-testid={`costpos-effort-value-${kind}-${departmentId}`}
             className="tabular-nums text-slate-200">
-            {position?.hours != null ? position.hours : '—'}
+            {position?.hours != null ? position.hours : '-'}
           </span>
         )}
       </td>
@@ -796,7 +796,7 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
           </span>
         ) : (
           <span data-testid={`costpos-weight-value-${departmentId}`} className="tabular-nums text-slate-200">
-            {weightG != null ? weightG : '—'}
+            {weightG != null ? weightG : '-'}
           </span>
         )}
       </td>

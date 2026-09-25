@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
 import { t } from '../../i18n/cmLabels'
+import { parseApiDateTime } from '../../lib/format'
 
 // Turn a stored JSON value into a plain phrase — no braces, quotes or keys-as-noise.
 const humanValue = (v: unknown): string => {
-  if (v === null || v === undefined) return '—'
+  if (v === null || v === undefined) return '-'
   if (Array.isArray(v)) return v.length ? v.map(humanValue).join(', ') : '(none)'
   if (typeof v === 'object') {
     return Object.entries(v as Record<string, unknown>)
@@ -65,7 +66,7 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
       // Day grouping is computed in UTC (not the browser's local timezone) so
       // the heading is stable across viewers - suffixed "(UTC)" so it reads
       // unambiguously either way.
-      const day = `${new Date(e.timestamp).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+      const day = `${parseApiDateTime(e.timestamp).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
       if (!groups.has(day)) groups.set(day, [])
       groups.get(day)!.push(e)
     }
@@ -120,11 +121,11 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
               return (
                 <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono text-xs text-slate-500">
-                    {new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {parseApiDateTime(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <span className="font-medium text-slate-200">{e.user_name ?? t('audit.system')}</span>
                   <span className="text-slate-300">{e.action.replace(/_/g, ' ')}</span>
-                  {detail && <span className="text-slate-400">— {detail}</span>}
+                  {detail && <span className="text-slate-400">: {detail}</span>}
                   <span className="text-xs text-slate-600">{e.entity_type}#{e.entity_id}</span>
                 </li>
               )

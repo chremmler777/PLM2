@@ -195,7 +195,7 @@ export default function CostingBuckets({
                   <div className="text-sm space-y-3" data-testid={`costing-readonly-${id}`}>
                     <p className="text-slate-300">
                       {t('costing.deptTotal')}: <span className="tabular-nums">
-                        {total != null ? total.toFixed(2) : '—'}
+                        {total != null ? total.toFixed(2) : '-'}
                       </span>
                     </p>
                     {leadTimeOf(id) != null && (

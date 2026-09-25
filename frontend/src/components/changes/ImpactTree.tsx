@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import type { ChangeStatus, ImpactTreeNode } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
+import { formatDateTime } from '../../lib/format'
 import { groupItems } from '../../lib/itemCategory'
 
 const LOCKED: ChangeStatus[] = [
@@ -122,7 +123,7 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
             reading order as the change title and the start dialog. */}
         <span className="font-mono text-slate-100 text-sm flex-shrink-0">{node.part_number}</span>
         <span className="font-mono text-sky-300/80 text-xs flex-shrink-0 w-32">
-          {node.customer_part_number ?? <span className="text-slate-600">—</span>}
+          {node.customer_part_number ?? <span className="text-slate-600">-</span>}
         </span>
         <span className="text-slate-400 text-sm truncate min-w-0">{node.name}</span>
         {node.is_lead && (
@@ -168,7 +169,7 @@ export default function ImpactTree({ changeId, status, impactConfirmedByName, im
         <div className="flex items-center gap-2">
           {impactConfirmedAt ? (
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
-              ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '—'} · {new Date(impactConfirmedAt).toLocaleString()}
+              ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '-'} · {formatDateTime(impactConfirmedAt)}
             </span>
           ) : (
             // Shown to everyone, actionable only by Development: a greyed button

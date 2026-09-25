@@ -18,6 +18,12 @@ describe('parseNum (German input)', () => {
     ['1.23.4', null],
     ['1.23,4', null],
     ['1,2,3', null],
+    ['0.125', 0.125],
+    ['-0.125', -0.125],
+    ['0.500', 0.5],
+    ['1.2345', 1.2345],
+    ['1.234,56', 1234.56],
+    ['0.125,5', null],
   ] as const)('%s -> %s', (input, out) => {
     expect(parseNum(input)).toBe(out)
   })
@@ -42,7 +48,8 @@ describe('lib/format', () => {
     expect(formatDate('2026-10-05')).toBe('05.10.2026')
     expect(formatDate('2026-10-05T12:00:00')).toBe('05.10.2026')
     expect(formatDate(null)).toBe('-')
-    expect(formatDateTime('2026-10-05T08:07:00')).toBe('05.10.2026 08:07')
+    // Naive backend datetimes are UTC; tests run in Europe/Berlin (CEST, +2).
+    expect(formatDateTime('2026-10-05T08:07:00')).toBe('05.10.2026 10:07')
     expect(formatMoney(1234.5)).toBe('1.234,50 EUR')
     expect(formatMoney(10, 'USD')).toBe('10,00 USD')
     expect(formatMoney(undefined)).toBe('-')

@@ -58,7 +58,7 @@ function AddDepartmentDialog({ open, candidates, onSubmit, onClose }: {
                 className="mt-1 w-full border border-slate-600 bg-slate-900 text-slate-100 rounded-lg p-2 text-sm"
                 value={departmentId}
                 onChange={(e) => setDepartmentId(e.target.value === '' ? '' : Number(e.target.value))}>
-                <option value="">—</option>
+                <option value="">-</option>
                 {candidates.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </label>

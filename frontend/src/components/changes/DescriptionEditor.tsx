@@ -32,7 +32,7 @@ export function DescriptionEditor({ change, canEdit = true }:
     return (
       <p>
         <span className="text-slate-400">{t('description.label')}:</span>{' '}
-        <span className="whitespace-pre-wrap">{change.description ?? '—'}</span>
+        <span className="whitespace-pre-wrap">{change.description ?? '-'}</span>
       </p>
     )
   }

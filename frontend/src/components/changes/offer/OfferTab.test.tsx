@@ -235,6 +235,45 @@ describe('OfferTab', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('refresh does not run when the save before it fails', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockRejectedValue(new Error('boom'))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('risk-show-32'))
+    await waitFor(() => expect(screen.getByTestId('offer-save-state').textContent).toContain('Not saved'),
+      { timeout: 2000 })
+    fireEvent.click(screen.getByTestId('offer-refresh'))
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(2))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(changeOfferApi.refresh).not.toHaveBeenCalled()
+  })
+
+  it('locks the draft inputs while a refresh is running', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    let resolveRefresh: (o: OfferOut) => void = () => {}
+    vi.mocked(changeOfferApi.refresh).mockImplementation(() => new Promise<OfferOut>((r) => { resolveRefresh = r }))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('offer-refresh'))
+    const fs = screen.getByTestId('offer-edit-fieldset') as HTMLFieldSetElement
+    await waitFor(() => expect(fs.disabled).toBe(true))
+    expect(fs.contains(screen.getByTestId('risk-show-32'))).toBe(true)
+    resolveRefresh(offer())
+    await waitFor(() => expect(fs.disabled).toBe(false))
+  })
+
+  it('leaving the tab retries keys left over from a failed save', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockRejectedValueOnce(new Error('boom'))
+      .mockImplementation(async () => offer())
+    const { unmount } = renderTab(props())
+    fireEvent.click(await screen.findByTestId('risk-show-32'))
+    await waitFor(() => expect(screen.getByTestId('offer-save-state').textContent).toContain('Not saved'),
+      { timeout: 2000 })
+    unmount()
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(changeOfferApi.patch).mock.calls[1][2].data?.risks).toBeDefined()
+  })
+
   it('PM reads the negotiation but records no customer answer', async () => {
     const v1 = offer({ status: 'sent', valid_until: '2026-10-20', days_left: 26 })
     vi.mocked(changeOfferApi.list).mockResolvedValue([v1])

@@ -85,9 +85,11 @@ export function useOfferDraft(changeId: number, offer: OfferOut | undefined, del
     timer.current = setTimeout(() => { timer.current = null; void flush() }, delay)
   }, [delay, flush])
 
-  // Leaving the tab saves what was typed.
+  // Leaving the tab saves what was typed, including keys a failed save put
+  // back (no timer is armed for those until the next edit).
   useEffect(() => () => {
-    if (timer.current) { clearTimeout(timer.current); timer.current = null; void flush() }
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    if (Object.keys(pending.current).length > 0) void flush()
   }, [flush])
 
   /** Something typed is not on the server yet: totals shown may be stale. */

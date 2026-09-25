@@ -308,7 +308,7 @@ describe('CostPositions', () => {
     expect(screen.getByTestId('costpos-needs-favorite-11').textContent)
       .toContain(t('costpos.pickFavorite'))
     // No vote, no price and no date — the job is not finished.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('— + 6 h')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('- + 6 h')
     expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 
@@ -366,7 +366,7 @@ describe('CostPositions', () => {
       .toBe(`30 ${t('costpos.unitShort.business_days')}`)
     // The effort answers read as plain text for someone who may not write them.
     expect(screen.getByTestId('costpos-effort-value-internal_effort-2').textContent).toBe('12')
-    expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('—')
+    expect(screen.getByTestId('costpos-effort-value-support_effort-2').textContent).toBe('-')
     expect(screen.queryByTestId('costpos-effort-internal_effort-2')).toBeNull()
     // Tags read as words, in the labelled vocabulary.
     expect(screen.getByTestId('costpos-tag-11').textContent).toBe(t('costtag.equipment_change'))

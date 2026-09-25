@@ -19,6 +19,7 @@ import { AttachmentRow } from './AttachmentRow'
 import { impactedCount, impactsOf } from './departmentForms/ActivityChecklist'
 import { assessmentProgress } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 import type {
   ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
@@ -327,7 +328,7 @@ export default function AssessmentBuckets({
                 )}
                 {a?.due_date && (
                   <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                    {new Date(a.due_date).toLocaleDateString()}
+                    {formatDate(a.due_date)}
                     {a.overdue && ` ⚠ ${t('tasks.overdue')}`}
                   </span>
                 )}

@@ -46,7 +46,7 @@ describe('ScopingMappingHint', () => {
     expect(await screen.findByText(/From scoping:/)).toBeDefined()
     expect(screen.getByText(/Development ✓/)).toBeDefined()
     expect(screen.getByText(/Sales ✓/)).toBeDefined()
-    expect(screen.getByText(/Tool Engineer has no blocking role in the routing template — no assessment task/)).toBeDefined()
+    expect(screen.getByText(/Tool Engineer has no blocking role in the routing template, so no assessment task/)).toBeDefined()
   })
 
   it('reads the room\'s letter next to the name when the meeting recorded one', async () => {

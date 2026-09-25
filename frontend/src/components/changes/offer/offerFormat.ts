@@ -19,19 +19,7 @@ export function fmtPct(v: number | null | undefined): string {
 /** dd.mm.yyyy from an ISO date or datetime. */
 export const fmtDate = formatDate
 
-/** Today as YYYY-MM-DD in local time. */
-export function todayIso(): string {
-  const n = new Date()
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`
-}
-
-/** ISO day plus n calendar days. */
-export function addDaysIso(iso: string, n: number): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d + n))
-  return dt.toISOString().slice(0, 10)
-}
+export { todayIso, addDaysIso } from '../../../lib/format'
 
 /** green > 10 days, amber <= 10, red when expired. */
 export function daysLeftTone(daysLeft: number | null | undefined, expired?: boolean): string {
@@ -44,7 +32,8 @@ export function daysLeftTone(daysLeft: number | null | undefined, expired?: bool
  * Parse a user-typed number the German way: comma is the decimal separator,
  * dot groups thousands. "1.234" is 1234 (a dot followed by exactly three
  * digits, no comma), "1.234,5" is 1234.5, "1,5" is 1.5. A lone dot that is
- * not a thousands group ("1.5") is still read as a decimal point. Returns
+ * not a thousands group ("1.5", "0.125", "1.2345") is still read as a decimal
+ * point: a group never starts with 0. Returns
  * null for anything else ("1.23.4", "abc").
  */
 export function parseNum(s: string): number | null {
@@ -55,9 +44,9 @@ export function parseNum(s: string): number | null {
     // Dots before the comma must be thousands groups.
     const [int, ...rest] = t.split(',')
     if (rest.length !== 1) return null
-    if (int.includes('.') && !/^[+-]?\d{1,3}(\.\d{3})+$/.test(int)) return null
+    if (int.includes('.') && !/^[+-]?[1-9]\d{0,2}(\.\d{3})+$/.test(int)) return null
     norm = `${int.replace(/\./g, '')}.${rest[0]}`
-  } else if (/^[+-]?\d{1,3}(\.\d{3})+$/.test(t)) {
+  } else if (/^[+-]?[1-9]\d{0,2}(\.\d{3})+$/.test(t)) {
     norm = t.replace(/\./g, '')
   } else {
     norm = t

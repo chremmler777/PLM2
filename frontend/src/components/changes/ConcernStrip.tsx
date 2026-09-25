@@ -395,7 +395,7 @@ export default function ConcernStrip({
                     with the hat they wear. */}
                 {(c.raised_by_departments?.length ?? 0) > 0
                   && ` (${c.raised_by_departments!.join(', ')})`}
-                {!c.is_open && ` — ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
+                {!c.is_open && `, ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
               </span>
               {!c.is_open && c.resolution_note && (
                 <span className="block text-xs opacity-70">
@@ -417,7 +417,7 @@ export default function ConcernStrip({
                         {w.proposal}: {c.answer_note}
                         <span className="block opacity-70">
                           {t('concern.proposalBy')}{' '}
-                          {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '—')}
+                          {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '-')}
                         </span>
                       </span>
                     </>
@@ -593,7 +593,7 @@ export default function ConcernStrip({
                 <option value="">{t('risk.pickTemplate')}</option>
                 {templates.map((x) => (
                   <option key={x.id} value={x.id}>
-                    {`[${x.severity}] ${riskTypeLabel(x.risk_type)} — ${x.note}`}
+                    {`[${x.severity}] ${riskTypeLabel(x.risk_type)}: ${x.note}`}
                   </option>
                 ))}
               </select>

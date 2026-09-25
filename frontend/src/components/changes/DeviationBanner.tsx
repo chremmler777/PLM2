@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
@@ -22,6 +22,17 @@ const STATUS_STYLE: Record<string, string> = {
 export default function DeviationBanner({ changeId, blockedTo, blockedReason, onRetry, onClose }: Props) {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // The banner sits above the tabs while the button that raised the block
+  // (e.g. Release at the bottom of the Release tab) can be far below: bring
+  // it into view and move focus to it whenever a new block is reported.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    el.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    el.focus({ preventScroll: true });
+  }, [blockedTo, blockedReason]);
 
   const { data: deviations = [] } = useQuery({
     queryKey: ['change', changeId, 'deviations'],
@@ -45,7 +56,9 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
   const hasPending = relevant.some((d) => d.status === 'pending');
 
   return (
-    <div className="border border-amber-700 bg-amber-900/30 rounded-xl p-4 my-3 text-sm" data-testid="deviation-banner">
+    <div ref={rootRef} tabIndex={-1} role="alert" aria-label="Transition blocked"
+         className="border border-amber-700 bg-amber-900/30 rounded-xl p-4 my-3 text-sm scroll-mt-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+         data-testid="deviation-banner">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-medium text-amber-200">Transition blocked</p>

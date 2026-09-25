@@ -153,7 +153,7 @@ describe('ImpactTree', () => {
     expect(screen.getByText('RR Cladding')).toBeDefined()
     // The tool has no customer number; the column holds its place rather than
     // collapsing and knocking the names out of alignment.
-    expect(screen.getAllByText('\u2014').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(2)
   })
 
   it('groups the top level by controlled-item class, articles first', async () => {

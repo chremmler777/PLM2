@@ -125,9 +125,12 @@ export default function TimingTab({
   }
   const canValidate = canEditPlan || canPublish
   const timingValidated = !!change.timing_validated_at || !!feedback?.validated_at
+  const internal = !change.customer_relevant
 
   const step1: 'done' | 'current' = tasks.length > 0 ? 'done' : 'current'
-  const step2 = tasks.length === 0 ? 'todo' : baseline || required.length === 0 || waiting.length === 0 ? 'done' : 'current'
+  // Until the feedback arrives the confirmations are unknown: keep step 2 open.
+  const feedbackLoading = feedback === undefined
+  const step2 = tasks.length === 0 ? 'todo' : baseline ? 'done' : feedbackLoading || waiting.length > 0 ? 'current' : 'done'
   const step3 = baseline ? 'done' : step2 === 'done' ? 'current' : 'todo'
 
   return (
@@ -154,7 +157,8 @@ export default function TimingTab({
           <Step n={1} title="Detailed plan" state={step1}
             detail={tasks.length > 0 ? `${tasks.length} task${tasks.length === 1 ? '' : 's'}` : 'Copy the quote plan and refine it'} />
           <Step n={2} title="Team confirmation" state={step2}
-            detail={required.length > 0 ? `${confirmed} of ${required.length} confirmed` : 'Every responsible team confirms'} />
+            detail={feedbackLoading && !baseline ? 'Loading confirmations'
+              : required.length > 0 ? `${confirmed} of ${required.length} confirmed` : 'Every responsible team confirms'} />
           <Step n={3} title={baseline ? 'Timing validated' : 'Validate timing'} state={step3}
             detail={baseline
               ? `${formatDate(feedback?.validated_at ?? change.timing_validated_at)}${feedback?.validated_by_name ? `, ${feedback.validated_by_name}` : ''}`
@@ -200,8 +204,13 @@ export default function TimingTab({
                 <p className="text-sm text-slate-400">Timing validated. Track progress below.</p>
               ) : !change.bank_build_mode ? (
                 <p className="text-sm text-amber-200/90" data-testid="timing-publish-needs-mode">
-                  Set how the change reaches the line first (bank build below), then the plan can go to the customer.
+                  {internal
+                    ? 'Set how the change reaches the line (bank build below) before implementation starts.'
+                    : 'Set how the change reaches the line first (bank build below), then the plan can go to the customer.'}
                 </p>
+              ) : internal ? (
+                // Internal changes have no customer to publish to.
+                <p className="text-sm text-slate-300" data-testid="timing-validated-internal">Timing validated. Track progress below.</p>
               ) : !timingValidated ? null : canPublish ? (
                 <>
                   <button type="button" className={primary} disabled={publish.isPending}

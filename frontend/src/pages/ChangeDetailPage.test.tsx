@@ -7,6 +7,7 @@ import { changesApi } from '../api/changes'
 import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
 import { t } from '../i18n/cmLabels'
+import { ACTS_AS_KEY } from '../lib/actsAs'
 
 // ChangeDetailPage fetches via changesApi (get/getImplementation/getGates/listDeviations),
 // plantsApi.list, and useDepartments (workflowApi.getDepartments). Heavy tab-content
@@ -383,6 +384,34 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     wrap('/changes/1?tab=timing')
     await waitFor(() => expect(screen.getByTestId('timing-rights-2').textContent)
       .toBe('bank=true decide=true admin=true'))
+  })
+
+  it('treats an admin acting as a department as that department, not as admin', async () => {
+    sessionStorage.setItem(ACTS_AS_KEY, '44')
+    try {
+      vi.mocked(useDepartments).mockReturnValue({
+        data: [{ id: 44, name: 'Tool Engineer', flow_type: 'action', is_active: true, sort_order: 1 }],
+      } as unknown as ReturnType<typeof useDepartments>)
+      vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [44] })
+      authState.current = { isAdmin: true, role: 'admin', userId: 1 }
+      change.status = 'approved' as ChangeDetail['status']
+      wrap('/changes/1?tab=timing')
+      await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
+        .toBe('edit=false publish=false'))
+      expect(screen.getByTestId('timing-rights-2').textContent).toBe('bank=false decide=false admin=false')
+      cleanup()
+      change.status = 'in_validation' as ChangeDetail['status']
+      wrap('/changes/1?tab=release')
+      await waitFor(() => expect(screen.getByTestId('mock-release-tab').textContent).toBe('manage=false'))
+      cleanup()
+      change.status = 'quoted' as ChangeDetail['status']
+      change.customer_relevant = true
+      wrap('/changes/1?tab=offer')
+      await waitFor(() => expect(screen.getByTestId('mock-offer-tab').textContent)
+        .toContain('write=false prices=false pm=false quality=false'))
+    } finally {
+      sessionStorage.removeItem(ACTS_AS_KEY)
+    }
   })
 
   it('marks the Approval tab active for an internal change at costing', async () => {

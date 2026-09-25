@@ -50,7 +50,7 @@ const fb = (over: Partial<PlanFeedback> = {}): PlanFeedback => ({
 })
 
 const change = (over: Record<string, unknown> = {}) => ({
-  id: 7, status: 'approved', plan_published_at: null, plan_published_by_name: null, ...over,
+  id: 7, status: 'approved', customer_relevant: true, plan_published_at: null, plan_published_by_name: null, ...over,
 }) as never
 
 const renderTab = (props: Partial<Parameters<typeof TimingTab>[0]> = {}) => render(
@@ -197,6 +197,31 @@ describe('TimingTab', () => {
     expect((await screen.findByTestId('timing-publish-needs-mode')).textContent)
       .toContain('Set how the change reaches the line first')
     expect(screen.queryByTestId('timing-publish')).toBeNull()
+  })
+
+  it('never offers to publish an internal change: a neutral line instead', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
+    vi.mocked(planApi.feedback).mockResolvedValue(fb({ validated_at: '2026-09-22T10:00:00', all_confirmed: true }))
+    renderTab({
+      change: change({ customer_relevant: false, bank_build_mode: 'running_change', timing_validated_at: '2026-09-22T10:00:00' }),
+      canPublish: true,
+    })
+    expect((await screen.findByTestId('timing-validated-internal')).textContent).toContain('Timing validated')
+    expect(screen.queryByTestId('timing-publish')).toBeNull()
+    cleanup()
+    renderTab({ change: change({ customer_relevant: false, timing_validated_at: '2026-09-22T10:00:00' }), canPublish: true })
+    const hint = (await screen.findByTestId('timing-publish-needs-mode')).textContent ?? ''
+    expect(hint).toContain('before implementation starts')
+    expect(hint).not.toContain('customer')
+  })
+
+  it('keeps team confirmation open while the feedback is still loading', async () => {
+    vi.mocked(planApi.feedback).mockReturnValue(new Promise(() => {}))
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('timing-step-1').dataset.state).toBe('done'))
+    expect(screen.getByTestId('timing-step-2').dataset.state).toBe('current')
+    expect(screen.getByTestId('timing-step-2').textContent).toContain('Loading confirmations')
+    expect(screen.getByTestId('timing-step-3').dataset.state).toBe('todo')
   })
 
   it('gives the bank-build mode to canSetBankBuild, not to every plan editor (Sales)', async () => {

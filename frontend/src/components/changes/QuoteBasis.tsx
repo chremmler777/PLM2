@@ -86,7 +86,7 @@ export default function QuoteBasis({
                 </span>
                 <span className="min-w-0">
                   {deptName(c.department_id) && (
-                    <span className="text-slate-400">{deptName(c.department_id)} — </span>
+                    <span className="text-slate-400">{deptName(c.department_id)}: </span>
                   )}
                   <span className="text-slate-200">
                     {c.risk_type ? t(`risktype.${c.risk_type}`) : t('risk.kind')}

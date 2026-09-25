@@ -37,6 +37,22 @@ describe('DeviationBanner', () => {
     expect(await screen.findByText(/No impacted items/)).toBeDefined();
   });
 
+  it('scrolls itself into view and takes focus when a block is reported', async () => {
+    const targets: Element[] = [];
+    const scroll = vi.fn(function (this: Element) { targets.push(this); });
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      renderBanner();
+      const banner = await screen.findByTestId('deviation-banner');
+      expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+      expect(targets[0]).toBe(banner);
+      expect(document.activeElement).toBe(banner);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
+  });
+
   it('proposes a deviation with the entered reason', async () => {
     renderBanner();
     fireEvent.click(await screen.findByRole('button', { name: /request deviation/i }));

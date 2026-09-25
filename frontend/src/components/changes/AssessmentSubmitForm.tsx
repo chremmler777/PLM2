@@ -117,7 +117,7 @@ export default function AssessmentSubmitForm({
           <select id={`verdict-${departmentId}`} value={verdict}
             onChange={(e) => { setVerdict(e.target.value); onVerdictChange?.(e.target.value) }}
             className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100">
-            <option value="">—</option>
+            <option value="">-</option>
             {VERDICTS.map((v) => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>

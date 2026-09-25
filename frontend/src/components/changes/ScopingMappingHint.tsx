@@ -39,7 +39,7 @@ export function ScopingMappingHint({ changeId, assessments, departments }: {
       From scoping: {matched.map((id) => `${labelOf(id)} ✓`).join(', ')}
       {matched.length > 0 && missing.length > 0 && ' · '}
       {missing
-        .map((id) => `${deptName(id)} has no blocking role in the routing template — no assessment task`)
+        .map((id) => `${deptName(id)} has no blocking role in the routing template, so no assessment task`)
         .join('; ')}
     </p>
   )

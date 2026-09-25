@@ -201,7 +201,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
       }
       if (failed.length > 0) {
         toast.error(
-          `Could not attach ${failed.join(', ')} — add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
+          `Could not attach ${failed.join(', ')}. Add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
         );
       }
       onClose();
@@ -266,7 +266,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 setPicked([]);
               }}
             >
-              <option value="">—</option>
+              <option value="">-</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {projectLabel(p)}
@@ -320,7 +320,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 >
                   <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
                   <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
-                    {p.customer_part_number ?? <span className="text-slate-600">—</span>}
+                    {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                   </span>
                   <span className="text-slate-400 truncate min-w-0">{p.name}</span>
                   {i === 0 ? (
@@ -384,7 +384,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     >
                       <span className="font-mono text-slate-100 flex-shrink-0 w-36">{p.part_number}</span>
                       <span className="font-mono text-sky-300/80 flex-shrink-0 w-32">
-                        {p.customer_part_number ?? <span className="text-slate-600">—</span>}
+                        {p.customer_part_number ?? <span className="text-slate-600">-</span>}
                       </span>
                       <span className="text-slate-400 truncate min-w-0">{p.name}</span>
                     </button>

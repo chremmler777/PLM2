@@ -18,6 +18,7 @@ import { changesApi } from '../../api/changes'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 import type { Attachment, ChangeConcern } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -84,7 +85,7 @@ export default function NeedsInfoCard({
         <span className="text-sm text-slate-400 truncate">{c.note}</span>
         {trailing && (
           <span className="text-xs text-slate-500 truncate flex-shrink-0">
-            — {solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
+            , {solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
           </span>
         )}
         <span className="ml-auto text-xs text-slate-600 flex-shrink-0">
@@ -124,7 +125,7 @@ export default function NeedsInfoCard({
               one from Logistics, so the hat stands next to the name. */}
           {(c.raised_by_departments?.length ?? 0) > 0
             && ` (${c.raised_by_departments!.join(', ')})`}
-          {' · '}{new Date(c.raised_at).toLocaleDateString()}
+          {' · '}{formatDate(c.raised_at)}
           {origin && ` · ${origin}`}
         </span>
         <button type="button" data-testid={`needs-info-collapse-${c.id}`}
@@ -173,8 +174,8 @@ export default function NeedsInfoCard({
           <p className="text-sm" data-testid={`needs-info-answer-${c.id}`}>
             {c.answer_note}
             <span className="block text-xs text-slate-500">
-              {t('concern.answeredBy')} {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '—')}
-              {c.answered_at && ` · ${new Date(c.answered_at).toLocaleDateString()}`}
+              {t('concern.answeredBy')} {c.answered_by_name ?? (c.answered_by != null ? `#${c.answered_by}` : '-')}
+              {c.answered_at && ` · ${formatDate(c.answered_at)}`}
             </span>
           </p>
         )}
