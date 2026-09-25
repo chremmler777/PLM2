@@ -9,7 +9,8 @@
  *   date       25 Sep 2026          compact      25 Sep 26 (tables, Gantt grid, chips)
  *   date+time  25 Sep 2026, 14:05   missing      -
  *   calendar day (due / target dates): formatCalendarDate, never shifted
- *   typed numbers: parseNumberInput ("." decimals, "," only in 3-digit groups)
+ *   typed numbers: parseNumberInput ("." decimals, "," only in 3-digit groups),
+ *                  numberEditText for the edit text of a stored number
  *
  * The customer offer PDF keeps its own per-currency locale (backend).
  */
@@ -38,11 +39,19 @@ export function parseApiDateTime(iso: string): Date {
 
 const MS_DAY = 86_400_000
 
+/** True when year, month (1-12) and day name a real calendar day (no "31 Feb"). */
+function realDay(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1) return false
+  const dt = new Date(Date.UTC(2000, m - 1, d))
+  dt.setUTCFullYear(y)
+  return dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+}
+
 /** Year, month (0-11) and day of an ISO date or datetime; null when unreadable. */
 function partsOf(iso: string): { y: number; m: number; d: number; dt: Date | null } | null {
   if (DATE_ONLY.test(iso)) {
     const [y, m, d] = iso.split('-').map(Number)
-    return { y, m: m - 1, d, dt: null }
+    return realDay(y, m, d) ? { y, m: m - 1, d, dt: null } : null
   }
   const dt = parseApiDateTime(iso)
   if (Number.isNaN(dt.getTime())) return null
@@ -86,7 +95,7 @@ function calendarParts(iso: string): { y: number; m: number; d: number } | null 
   const day = iso.slice(0, 10)
   if (!DATE_ONLY.test(day) || (iso.length > 10 && !/^[T ]/.test(iso.slice(10)))) return null
   const [y, m, d] = day.split('-').map(Number)
-  if (m < 1 || m > 12 || d < 1 || d > 31) return null
+  if (!realDay(y, m, d)) return null
   return { y, m: m - 1, d }
 }
 
@@ -237,24 +246,42 @@ export function formatDays(v: number | null | undefined, { sign = false }: { sig
 /** How a typed number was read: the value, or why it was not taken. */
 export interface NumberInputRead {
   value: number | null
-  /** 'invalid': not a number; 'ambiguous': a comma that is not a thousands group ("12,5"). */
+  /**
+   * 'invalid': not a number; 'ambiguous': a comma that is not a thousands
+   * group ("12,5") or a dot that looks like German thousands ("1.234").
+   */
   error: 'invalid' | 'ambiguous' | null
 }
 
 const COMMA_GROUPED = /^[+-]?[1-9]\d{0,2}(,\d{3})+$/
+/** "1.234", "12.500": German thousands, or a decimal? Refused as ambiguous. */
+const DOT_GROUPED = /^[+-]?[1-9]\d{0,2}(\.\d{3})+$/
+/** An integer part grouped by spaces: "12 500", "1 234 567" (also no-break spaces). */
+const SPACE_GROUPED = /^[+-]?[1-9]\d{0,2}([ \u00A0\u202F]\d{3})+$/
+const SPACES = /[ \u00A0\u202F]/g
 const PLAIN_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/
 
 /**
  * A typed number, read en-US like it is shown: "." is the decimal point and
  * "," only groups thousands, every group exactly three digits ("12,500",
- * "1,234,567.5"). Any other comma ("12,5", "1,2345", "0,500", "1,") is
- * ambiguous: German for a decimal, so it is refused rather than guessed.
- * Spaces are dropped ("1 234.5"). Empty text is { value: null, error: null }.
- * Same rule as the backend's offer_service.read_number.
+ * "1,234,567.5"). Refused as ambiguous rather than guessed: any other comma
+ * ("12,5", "1,2345", "0,500", "1,"; German for a decimal) and a dot that
+ * looks like German thousands ("1.234", "12.500"; "1.2345", "0.500" and
+ * "12.5" are decimals). A space only groups thousands the same way
+ * ("12 500", "1 234.5"); any other space ("12 5") is not a number. Empty
+ * text is { value: null, error: null }. Same rule as the backend's
+ * offer_service.read_number.
  */
 export function readNumberInput(s: string): NumberInputRead {
-  const t = s.trim().replace(/\s/g, '')
+  let t = s.trim()
   if (t === '') return { value: null, error: null }
+  if (/\s/.test(t)) {
+    const dot = t.indexOf('.')
+    const int = dot < 0 ? t : t.slice(0, dot)
+    if (!SPACE_GROUPED.test(int)) return { value: null, error: 'invalid' }
+    t = int.replace(SPACES, '') + (dot < 0 ? '' : t.slice(dot))
+  }
+  if (DOT_GROUPED.test(t)) return { value: null, error: 'ambiguous' }
   let norm = t
   if (t.includes(',')) {
     const dot = t.indexOf('.')
@@ -272,5 +299,20 @@ export function parseNumberInput(s: string): number | null {
   return readNumberInput(s).value
 }
 
-/** The message for a refused number input. */
-export const NUMBER_INPUT_HINT = 'Use a dot for decimals: 12.5, or 12,500 for twelve thousand five hundred'
+const plainNf = new Intl.NumberFormat(LOCALE, { useGrouping: false, maximumFractionDigits: 20 })
+
+/**
+ * A stored number as edit text that readNumberInput reads back to the same
+ * number: no grouping, dot decimals, never exponent form ("1e-7" is
+ * "0.0000001"), and never a German-thousands look ("1.234" is "1.2340").
+ */
+export function numberEditText(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return ''
+  const s = /e/i.test(String(v)) ? plainNf.format(v) : String(v)
+  return DOT_GROUPED.test(s) ? `${s}0` : s
+}
+
+/** The message for a refused, ambiguous number input. */
+export const NUMBER_INPUT_HINT = 'Use a dot for decimals and a comma only for thousands, e.g. 12,500.5'
+/** The message for typed text that is not a number. */
+export const NUMBER_INPUT_INVALID = 'Not a number. For example 1234.5 or 1,234.50'

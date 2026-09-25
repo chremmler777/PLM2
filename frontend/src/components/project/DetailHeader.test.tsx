@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { addDaysIso, todayIso } from '../../lib/format'
+import { formatDate } from '../../lib/format'
 import { render, screen, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -58,15 +58,17 @@ describe('DetailHeader', () => {
     expect(screen.queryByTestId('detail-no-active-revision')).toBeNull()
   })
 
-  it('shows the calibration due day unshifted and calls it overdue only after that day', () => {
-    mount({ ...base, item_category: 'gauge', next_calibration_due: '2026-10-05T00:00:00' })
-    expect(screen.getByText(/Calibration due/).textContent).toContain('5 Oct 2026')
+  it('shows the calibration due instant and calls it overdue once it has passed', () => {
+    // A naive backend datetime (UTC), shown as the local calendar day like every timestamp.
+    mount({ ...base, item_category: 'gauge', next_calibration_due: '2026-10-05T12:00:00' })
+    expect(screen.getByText(/Calibration due/).textContent).toContain(formatDate('2026-10-05T12:00:00'))
     cleanup()
-    // Due today (a midnight datetime) is not overdue yet; yesterday is.
-    mount({ ...base, item_category: 'gauge', next_calibration_due: `${todayIso()}T00:00:00` })
+    // Instant comparison with now, as the dashboard does (due < now).
+    const naiveUtc = (ms: number) => new Date(ms).toISOString().slice(0, 19)
+    mount({ ...base, item_category: 'gauge', next_calibration_due: naiveUtc(Date.now() + 3_600_000) })
     expect(screen.getByText(/Calibration due/).textContent).not.toContain('overdue')
     cleanup()
-    mount({ ...base, item_category: 'gauge', next_calibration_due: `${addDaysIso(todayIso(), -1)}T00:00:00` })
+    mount({ ...base, item_category: 'gauge', next_calibration_due: naiveUtc(Date.now() - 3_600_000) })
     expect(screen.getByText(/Calibration due/).textContent).toContain('(overdue)')
   })
 })

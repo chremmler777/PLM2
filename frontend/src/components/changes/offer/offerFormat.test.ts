@@ -6,7 +6,7 @@ import {
 
 describe('parseNum (en-US input: dot decimals, comma thousands groups only)', () => {
   it.each([
-    ['1.234', 1.234],
+    ['1.234', null], // looks like German thousands: ambiguous, refused
     ['12,500', 12500],
     ['1,234,567.5', 1234567.5],
     ['1,234.50', 1234.5],

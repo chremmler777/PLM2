@@ -9,7 +9,7 @@ import SheetCell from '../components/costSheet/SheetCell'
 import { COLUMNS, sortRows, type SheetContext } from '../components/costSheet/columns'
 import { diffCount } from '../components/costSheet/DiffPanel'
 import { costSheetApi } from '../api/costSheet'
-import { addDaysIso, formatDate, todayIso } from '../lib/format'
+import { NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, addDaysIso, formatDate, todayIso } from '../lib/format'
 
 vi.mock('../api/costSheet', () => ({
   costSheetApi: {
@@ -81,6 +81,21 @@ describe('PublishDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
     expect(onPublish).toHaveBeenCalledWith(future, '', false)
   })
+
+  it('updates its hints while the date is typed, and tells the truth about backdating', () => {
+    const past = addDaysIso(todayIso(), -3)
+    const future = addDaysIso(todayIso(), 10)
+    render(<PublishDialog open version={3} defaultValidFrom={future} defaultNote={null}
+                          latestValidFrom="2026-01-01" latestVersion={2} changeCount={1} busy={false}
+                          onCancel={() => {}} onPublish={() => {}} />)
+    expect(screen.getByTestId('publish-ends-on').textContent).toContain(formatDate(addDaysIso(future, -1)))
+    // Typed, not blurred: the hint follows at once.
+    fireEvent.change(screen.getByLabelText('Valid from'), { target: { value: past } })
+    expect(screen.getByTestId('publish-ends-on').textContent).toContain(formatDate(addDaysIso(past, -1)))
+    const warn = screen.getByTestId('publish-backdated').textContent ?? ''
+    expect(warn).toContain('already priced keep the rate')
+    expect(warn).not.toMatch(/will be priced with this version\.$/)
+  })
 })
 
 describe('cost sheet pieces', () => {
@@ -111,6 +126,41 @@ describe('cost sheet pieces', () => {
     fireEvent.change(input, { target: { value: '12,500' } })
     fireEvent.blur(input)
     expect(onCommit).toHaveBeenLastCalledWith(12500)
+  })
+
+  it('says visibly why a typed number was refused: ambiguous or not a number', () => {
+    const onCommit = vi.fn()
+    const col = COLUMNS.rates.find((c) => c.key === 'hourly_rate')!
+    render(<SheetCell col={col} row={{ id: 1, hourly_rate: 5, currency: 'EUR' }} ctx={ctx} editable
+                      onCommit={onCommit} />)
+    const input = screen.getByLabelText('Rate / h')
+    fireEvent.change(input, { target: { value: '1.234' } })
+    fireEvent.blur(input)
+    expect(screen.getByTestId('sheet-cell-refused').textContent).toBe(`Not saved. ${NUMBER_INPUT_HINT}`)
+    expect(input.getAttribute('title')).toBe(`Not saved. ${NUMBER_INPUT_HINT}`)
+    fireEvent.change(input, { target: { value: 'abc' } })
+    expect(screen.queryByTestId('sheet-cell-refused')).toBeNull()
+    fireEvent.blur(input)
+    expect(screen.getByTestId('sheet-cell-refused').textContent).toBe(`Not saved. ${NUMBER_INPUT_INVALID}`)
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it.each([1.234, 1e-7, 2e21])('never refuses a stored %s on a plain focus and blur', (v) => {
+    const onCommit = vi.fn()
+    const col = COLUMNS.machines.find((c) => c.key === 'tonnage_min')!
+    render(<SheetCell col={col} row={{ id: 1, [col.key]: v }} ctx={ctx} editable onCommit={onCommit} />)
+    const input = screen.getByLabelText(col.label) as HTMLInputElement
+    fireEvent.focus(input)
+    fireEvent.blur(input)
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+    expect(screen.queryByTestId('sheet-cell-refused')).toBeNull()
+    expect(onCommit).not.toHaveBeenCalled()
+    // The edit text itself reads back to the stored number.
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: `${input.value} ` } })
+    fireEvent.blur(input)
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+    expect(onCommit).not.toHaveBeenCalled()
   })
 
   it('flags plant currencies Finance has not confirmed', () => {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   addDaysIso, daysUntil, formatCalendarDate, formatCalendarDateShort, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatHours, formatMoney,
-  formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice, formatTime, parseApiDateTime, todayIso,
+  formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice, formatTime, numberEditText, parseApiDateTime,
+  readNumberInput, todayIso,
 } from './format'
 
 // vitest pins TZ=Europe/Berlin (see vitest.config).
@@ -137,5 +138,64 @@ describe('formatCalendarDate (due and target days, never shifted)', () => {
     expect(formatCalendarDate('soon')).toBe('soon')
     expect(formatCalendarDate('2026-13-01')).toBe('2026-13-01')
     expect(formatCalendarDate('2026-10-05x')).toBe('2026-10-05x')
+  })
+
+  it('refuses a day the month does not have, like other unreadable text', () => {
+    expect(formatCalendarDate('2026-02-31')).toBe('2026-02-31')
+    expect(formatCalendarDate('2026-02-29T00:00:00')).toBe('2026-02-29T00:00:00')
+    expect(formatCalendarDateShort('2026-04-31')).toBe('2026-04-31')
+    expect(formatCalendarDate('2028-02-29')).toBe('29 Feb 2028')
+    expect(formatCalendarDate('2026-00-10')).toBe('2026-00-10')
+    expect(formatDate('2026-02-31')).toBe('2026-02-31')
+  })
+})
+
+describe('readNumberInput (en-US: dot decimals, comma or space only as thousands groups)', () => {
+  it.each([
+    ['1.234', 'ambiguous'],
+    ['12.500', 'ambiguous'],
+    ['-1.234', 'ambiguous'],
+    ['1.234.567', 'ambiguous'],
+    ['12,5', 'ambiguous'],
+    ['12 5', 'invalid'],
+    ['1 2', 'invalid'],
+    ['12 50', 'invalid'],
+    ['1 234,5', 'invalid'],
+    ['1.5 0', 'invalid'],
+    ['1e5', 'invalid'],
+  ] as const)('refuses %s as %s', (t, error) => {
+    expect(readNumberInput(t)).toEqual({ value: null, error })
+  })
+
+  it.each([
+    ['1.2345', 1.2345],
+    ['0.500', 0.5],
+    ['12.5', 12.5],
+    ['1.23', 1.23],
+    ['1234.500', 1234.5],
+    ['12 500', 12500],
+    ['1 234 567.25', 1234567.25],
+    ['12\u00A0500', 12500],
+    ['12\u202F500', 12500],
+    [' 42 ', 42],
+    ['1,234.5', 1234.5],
+  ] as const)('reads %s as %s', (t, v) => {
+    expect(readNumberInput(t)).toEqual({ value: v, error: null })
+  })
+})
+
+describe('numberEditText', () => {
+  it.each([1.234, -12.5, 12.5, 1234.5, 0.5, 0, 1e-7, -3e-9, 1e21, 999.999, 123.456, 12345.678, 0.1 + 0.2])(
+    'reads %s back to the same number', (v) => {
+      const t = numberEditText(v)
+      expect(t).not.toMatch(/e|,| /i)
+      expect(readNumberInput(t)).toEqual({ value: v, error: null })
+    })
+
+  it('pads a German-thousands look and writes no exponent', () => {
+    expect(numberEditText(1.234)).toBe('1.2340')
+    expect(numberEditText(1e-7)).toBe('0.0000001')
+    expect(numberEditText(null)).toBe('')
+    expect(numberEditText(NaN)).toBe('')
   })
 })

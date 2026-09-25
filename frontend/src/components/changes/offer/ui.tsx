@@ -1,28 +1,28 @@
 /** Small controls the offer and release workspaces share. */
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { Check } from 'lucide-react'
-import { NUMBER_INPUT_HINT, formatNumber, readNumberInput } from '../../../lib/format'
+import {
+  NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, formatNumber, numberEditText, readNumberInput,
+} from '../../../lib/format'
 import { inputCls, sectionLabel } from './offerFormat'
 
 /** How a number reads at rest: en-US, "13,200", "4.2" (lib/format). */
 const shownNum = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? '' : formatNumber(v, { max: 4 })
-/**
- * How it reads while editing: no grouping, dot decimals ("13200", "4.2",
- * "1.234"); readNumberInput reads "." as the decimal point, so an unedited
- * focus and blur keeps the number.
- */
-const editNum = (v: number | null | undefined): string =>
-  v == null || !Number.isFinite(v) ? '' : String(v)
 
 /**
  * A number input that keeps what is typed ("12." mid-entry) and reports a
  * parsed number or null for empty: "." is the decimal point, "," only groups
- * thousands in 3-digit groups ("12,500"); "12,5" is refused as ambiguous with
- * a hint, never read as 12.5 (lib/format readNumberInput). Focus selects the
- * whole value, so typing replaces it rather than appending to it; while the
- * typed text reads differently from the number it stands for ("12500",
- * "1,234.50") the parsed value is shown next to it.
+ * thousands in 3-digit groups ("12,500"); "12,5" or "1.234" is refused as
+ * ambiguous with a hint, never guessed (lib/format readNumberInput). Focus
+ * selects the whole value, so typing replaces it rather than appending to it;
+ * while the typed text reads differently from the number it stands for
+ * ("12500", "1,234.50") the parsed value is shown next to it.
+ *
+ * Every cleanly read keystroke is reported, so typing "0,5" reports 0 on the
+ * way. Leaving the field with refused text therefore puts back the number
+ * from before focus (reported again if an intermediate keystroke changed it)
+ * and says, next to the field, that the typed text was not saved.
  */
 export function NumField({
   value, onChange, disabled, className = '', ariaLabel, testId, placeholder, step,
@@ -39,17 +39,27 @@ export function NumField({
 }) {
   const [text, setText] = useState(shownNum(value))
   const [focused, setFocused] = useState(false)
+  // The refused text the last blur threw away, shown until the next focus.
+  const [dropped, setDropped] = useState<{ text: string; error: 'invalid' | 'ambiguous' } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   // The click that focused the field must not drop the selection again.
   const keepSelection = useRef(false)
-  const previewId = useId()
-  const read = readNumberInput(text)
+  // The value and edit text at focus: blur restores the value, and text that
+  // is still the focus text is never re-read.
+  const atFocus = useRef<{ value: number | null; text: string }>({ value: null, text: '' })
+  // The last number reported since focus (the parent may apply it later).
+  const reported = useRef<number | null | undefined>(undefined)
+  const messageId = useId()
+  const edited = focused && text !== atFocus.current.text
+  const read = edited ? readNumberInput(text) : { value: null, error: null }
   const parsed = read.value
   const invalid = read.error !== null
-  const ambiguous = read.error === 'ambiguous'
-  const preview = focused && parsed !== null && shownNum(parsed) !== text.trim() ? shownNum(parsed) : null
+  const preview = edited && parsed !== null && shownNum(parsed) !== text.trim() ? shownNum(parsed) : null
   // "12,5": German for 12.5, but a comma only groups thousands here. Say so while typing.
-  const hint = focused && ambiguous ? NUMBER_INPUT_HINT : null
+  const hint = read.error === 'ambiguous' ? NUMBER_INPUT_HINT : read.error === 'invalid' ? NUMBER_INPUT_INVALID : null
+  const droppedMsg = !focused && dropped
+    ? `"${dropped.text}" not saved. ${dropped.error === 'ambiguous' ? NUMBER_INPUT_HINT : NUMBER_INPUT_INVALID}`
+    : null
   // Formatted (en-US grouping) at rest; the rest text is never parsed: focus
   // swaps in the plain edit text first. While typing the text stays as typed.
   useEffect(() => {
@@ -59,35 +69,56 @@ export function NumField({
   useLayoutEffect(() => {
     if (focused && inputRef.current === document.activeElement) inputRef.current?.select()
   }, [focused])
+  const bubble = 'pointer-events-none absolute right-0 top-full z-10 mt-0.5 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[11px] shadow'
   return (
     <span className={`relative inline-block align-middle ${className}`}>
       <input ref={inputRef} type="text" inputMode="decimal" aria-label={ariaLabel} data-testid={testId}
         disabled={disabled} placeholder={placeholder} data-step={step}
-        aria-invalid={invalid || undefined}
-        aria-describedby={preview || hint ? previewId : undefined}
-        title={ambiguous ? NUMBER_INPUT_HINT : invalid ? 'Not a number. For example 1234.5 or 1,234.50' : undefined}
+        aria-invalid={invalid || !!droppedMsg || undefined}
+        aria-describedby={preview || hint || droppedMsg ? messageId : undefined}
+        title={hint ?? undefined}
         value={text}
         onMouseDown={() => { keepSelection.current = document.activeElement !== inputRef.current }}
-        onFocus={() => { setFocused(true); setText(editNum(value)) }}
+        onFocus={() => {
+          const t = numberEditText(value)
+          atFocus.current = { value: value ?? null, text: t }
+          reported.current = undefined
+          setFocused(true); setDropped(null); setText(t)
+        }}
         onMouseUp={(e) => { if (keepSelection.current) { e.preventDefault(); keepSelection.current = false } }}
-        onBlur={() => { keepSelection.current = false; setFocused(false) }}
+        onBlur={() => {
+          keepSelection.current = false
+          setFocused(false)
+          if (read.error !== null) {
+            // Refused text is never saved; undo what its keystrokes reported on the way.
+            setDropped({ text: text.trim(), error: read.error })
+            const last = reported.current === undefined ? value ?? null : reported.current
+            if (last !== atFocus.current.value) onChange(atFocus.current.value)
+          }
+        }}
         onChange={(e) => {
           keepSelection.current = false
           setText(e.target.value)
           const r = readNumberInput(e.target.value)
-          if (r.error === null) onChange(r.value)
+          if (r.error === null) { reported.current = r.value; onChange(r.value) }
         }}
-        className={`${inputCls} w-full text-right tabular-nums ${invalid ? '!border-rose-500' : ''}`} />
+        className={`${inputCls} w-full text-right tabular-nums ${invalid || droppedMsg ? '!border-rose-500' : ''}`} />
       {preview && (
-        <span id={previewId} data-testid={testId ? `${testId}-preview` : undefined} aria-live="polite"
-          className="pointer-events-none absolute right-0 top-full z-10 mt-0.5 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[11px] tabular-nums text-sky-200 shadow">
+        <span id={messageId} data-testid={testId ? `${testId}-preview` : undefined} aria-live="polite"
+          className={`${bubble} tabular-nums text-sky-200`}>
           = {preview}
         </span>
       )}
       {hint && (
-        <span id={previewId} data-testid={testId ? `${testId}-hint` : undefined} aria-live="polite"
-          className="pointer-events-none absolute right-0 top-full z-10 mt-0.5 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-rose-200 shadow">
+        <span id={messageId} data-testid={testId ? `${testId}-hint` : undefined} aria-live="polite"
+          className={`${bubble} text-rose-200`}>
           {hint}
+        </span>
+      )}
+      {droppedMsg && (
+        <span id={messageId} role="alert" data-testid={testId ? `${testId}-dropped` : undefined}
+          className={`${bubble} text-rose-200`}>
+          {droppedMsg}
         </span>
       )}
     </span>

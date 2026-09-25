@@ -3,8 +3,10 @@
  * an input or select that commits on blur / Enter / change (selects) and only
  * when the value really changed. Escape restores the saved value.
  */
-import { useEffect, useState } from 'react'
-import { NUMBER_INPUT_HINT, formatMoney, formatNumber, readNumberInput } from '../../lib/format'
+import { useEffect, useId, useRef, useState } from 'react'
+import {
+  NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, formatMoney, formatNumber, numberEditText, readNumberInput,
+} from '../../lib/format'
 import type { CostSheetRow } from '../../types/costSheet'
 import { type Column, type SheetContext, deptName, plantName } from './columns'
 
@@ -13,23 +15,31 @@ const INPUT =
   'placeholder:text-slate-600 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/40 ' +
   'disabled:opacity-40 disabled:cursor-not-allowed'
 
-/** The raw edit value: no grouping, dot decimals, so it reads back through parse() unchanged. */
+/**
+ * The raw edit value: no grouping, dot decimals, no exponent, so it reads
+ * back through parse() unchanged (lib/format numberEditText).
+ */
 function toInput(v: unknown, money = false): string {
   if (v === null || v === undefined) return ''
-  return money && typeof v === 'number' ? v.toFixed(2) : String(v)
+  if (typeof v !== 'number') return String(v)
+  return money && Number.isFinite(v) ? v.toFixed(2) : numberEditText(v)
 }
 
-/** The typed value to save; undefined when refused (not a number, or "7,5": see readNumberInput). */
-function parse(col: Column, raw: string): unknown {
+type Refusal = 'invalid' | 'ambiguous'
+
+/** The typed value to save, or why it was refused (not a number, or "7,5": see readNumberInput). */
+function parse(col: Column, raw: string): { value: unknown } | { refused: Refusal } {
   const t = raw.trim()
   if (col.kind === 'money' || col.kind === 'number') {
-    if (!t) return null
+    if (!t) return { value: null }
     const r = readNumberInput(t)
-    return r.error ? undefined : r.value
+    return r.error ? { refused: r.error } : { value: r.value }
   }
-  if (col.kind === 'currency') return t.toUpperCase() || 'EUR'
-  return t || null
+  if (col.kind === 'currency') return { value: t.toUpperCase() || 'EUR' }
+  return { value: t || null }
 }
+
+const REFUSAL_MSG: Record<Refusal, string> = { ambiguous: NUMBER_INPUT_HINT, invalid: NUMBER_INPUT_INVALID }
 
 export function displayValue(col: Column, row: CostSheetRow, ctx: SheetContext): string {
   const v = row[col.key]
@@ -67,8 +77,12 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
   const money = col.kind === 'money'
   const [draft, setDraft] = useState(toInput(value, money))
   // A refused number stays as typed and is flagged, never silently converted.
-  const [refused, setRefused] = useState(false)
-  useEffect(() => { setDraft(toInput(value, money)); setRefused(false) }, [value, money])
+  const [refused, setRefused] = useState<Refusal | null>(null)
+  // The edit text at focus: left unchanged, it is never re-read (so a stored
+  // value is never refused just by focusing and leaving the cell).
+  const focusDraft = useRef<string | null>(null)
+  const msgId = useId()
+  useEffect(() => { setDraft(toInput(value, money)); setRefused(null) }, [value, money])
   const inactive = col.inactive?.(row) ?? false
 
   if (col.kind === 'computed') {
@@ -146,27 +160,41 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
     )
   }
 
+  const message = refused ? `Not saved. ${REFUSAL_MSG[refused]}` : null
   return (
-    <input
-      aria-label={label}
-      className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${refused ? '!border-rose-500' : ''}`}
-      inputMode={col.kind === 'money' || col.kind === 'number' ? 'decimal' : undefined}
-      value={draft}
-      disabled={inactive}
-      placeholder={col.empty ?? ''}
-      aria-invalid={refused || undefined}
-      title={refused ? `Not saved. ${NUMBER_INPUT_HINT}` : undefined}
-      onChange={(e) => { setDraft(e.target.value); setRefused(false) }}
-      onBlur={() => {
-        const next = parse(col, draft)
-        if (next === undefined) { setRefused(true); return }
-        setRefused(false)
-        if (next !== value) onCommit(next)
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') { setDraft(toInput(value, money)); setRefused(false) }
-      }}
-    />
+    <>
+      <input
+        aria-label={label}
+        className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${refused ? '!border-rose-500' : ''}`}
+        inputMode={col.kind === 'money' || col.kind === 'number' ? 'decimal' : undefined}
+        value={draft}
+        disabled={inactive}
+        placeholder={col.empty ?? ''}
+        aria-invalid={refused ? true : undefined}
+        aria-describedby={message ? msgId : undefined}
+        title={message ?? undefined}
+        onFocus={() => { focusDraft.current = draft }}
+        onChange={(e) => { setDraft(e.target.value); setRefused(null) }}
+        onBlur={() => {
+          const untouched = draft === focusDraft.current
+          focusDraft.current = null
+          if (untouched) return
+          const next = parse(col, draft)
+          if ('refused' in next) { setRefused(next.refused); return }
+          setRefused(null)
+          if (next.value !== value) onCommit(next.value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') { setDraft(toInput(value, money)); setRefused(null) }
+        }}
+      />
+      {message && (
+        <p id={msgId} role="alert" data-testid="sheet-cell-refused"
+           className="mt-0.5 text-left text-[11px] leading-tight text-rose-300">
+          {message}
+        </p>
+      )}
+    </>
   )
 }
