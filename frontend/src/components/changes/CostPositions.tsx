@@ -27,7 +27,7 @@
  * the lead and admins read. Sales has nothing to fill in here — they get the
  * picture and put a price on it later.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
@@ -818,6 +818,11 @@ function EffortRow({
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
   const [labourPos, setLabourPos] = useState(position?.labour_position ?? '')
   const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
+  // Single flight: blur and the Save click (or Enter, then blur) arrive in the
+  // same moment, and isPending is only true after a render. The first save
+  // holds the row; a create keeps holding it until the new position arrives
+  // (the row remounts on it), so a second create can never follow.
+  const inFlight = useRef(false)
   const save = useMutation({
     mutationFn: (override?: { labour_position: string | null }) => position
       ? changesApi.updateCostPosition(changeId, position.id, override ?? { hours: num(hours) })
@@ -825,16 +830,27 @@ function EffortRow({
         department_id: departmentId, label: t(labelKey), kind, hours: num(hours),
         labour_position: (override ? override.labour_position : labourPos) || null,
       }),
-    onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the effort'),
+    onSuccess: () => {
+      if (position) inFlight.current = false
+      toast.success(t('costpos.saved')); onChanged()
+    },
+    onError: (e: unknown) => {
+      inFlight.current = false
+      toast.error(errDetail(e) ?? 'Could not save the effort')
+    },
   })
   const dirty = num(hours) !== (position?.hours ?? null)
-  const commit = () => { if (dirty && !save.isPending) save.mutate(undefined) }
+  const run = (override?: { labour_position: string | null }) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    save.mutate(override)
+  }
+  const commit = () => { if (dirty) run(undefined) }
   // The position re-prices a saved row at once; before the first save it
   // rides along with the hours.
   const pickPosition = (v: string) => {
     setLabourPos(v)
-    if (position) save.mutate({ labour_position: v || null })
+    if (position) run({ labour_position: v || null })
   }
   return (
     <tr className="border-t border-slate-700/70">

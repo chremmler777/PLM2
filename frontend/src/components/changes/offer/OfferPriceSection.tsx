@@ -41,6 +41,9 @@ export default function OfferPriceSection({
 }) {
   const priceWarnings = warnings.filter((w) => PRICE_WARNING_CODES.includes(w.code))
   const lines = data.cost_lines ?? []
+  // The customer's CBD groups lines by its own categories, not by our
+  // departments: shown once the backend names them.
+  const customerView = lines.some((l) => !!l.customer_category)
   const factors = data.factors ?? []
   const changeover: OfferChangeover = data.changeover ?? { mode: 'running_change' }
   const piece: OfferPiecePrice = data.piece_price ?? { enabled: false, rows: [] }
@@ -89,6 +92,7 @@ export default function OfferPriceSection({
                   <th className="px-2 py-2 text-left font-medium">Line</th>
                   <th className="px-2 py-2 text-left font-medium">Department</th>
                   <th className="px-2 py-2 text-left font-medium">Type</th>
+                  {customerView && <th className="px-2 py-2 text-left font-medium">Customer reads</th>}
                   <th className="whitespace-nowrap px-2 py-2 text-right font-medium">Source</th>
                   <th className="w-40 px-2 py-2 text-right font-medium">Offer amount</th>
                 </tr>
@@ -112,6 +116,11 @@ export default function OfferPriceSection({
                           {l.category}
                         </span>
                       </td>
+                      {customerView && (
+                        <td data-testid={`cost-line-customer-${l.key}`} className="px-2 py-1.5 text-slate-300">
+                          {l.customer_category ?? 'Other'}
+                        </td>
+                      )}
                       <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-slate-500">
                         {changed ? <s data-testid={`cost-line-source-${l.key}`}>{fmtMoney(l.source_amount, currency)}</s>
                           : fmtMoney(l.source_amount, currency)}

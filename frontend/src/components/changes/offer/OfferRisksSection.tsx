@@ -37,6 +37,9 @@ export default function OfferRisksSection({
   }
   return (
     <div className="space-y-3">
+      <p data-testid="risk-opt-in" className="text-[11px] text-slate-500">
+        Risks stay off the offer until you switch them on: the customer reads only the ones shown.
+      </p>
       {hiddenSevere.length > 0 && (
         <p data-testid="risk-severe-hidden" role="alert"
           className="rounded-lg border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">

@@ -24,6 +24,10 @@ export interface OfferCostLine {
   amount: number
   source_amount?: number | null
   include: boolean
+  /** Where the customer reads this line in the CBD (Engineering, Tooling,
+   *  Sampling and trials, Machine time, Supplier parts, Other), when the
+   *  backend names it. Internal department labels never reach the customer. */
+  customer_category?: string | null
 }
 
 export interface OfferFactor {
@@ -156,6 +160,9 @@ export interface OfferOut {
   created_at: string
   created_by_name?: string | null
   diff?: OfferDiffRow[] | null
+  /** The sender as the PDF prints it ("Issued by"): the company profile's
+   *  legal name, when the backend sends it. */
+  issued_by?: string | null
   warnings?: OfferIssue[]
   /** Spec §15 phase 2: the costing's currency and the cost sheet versions it used. */
   costing_currency?: string | null

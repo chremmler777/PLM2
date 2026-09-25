@@ -126,6 +126,9 @@ export default function CostingBuckets({
         const expanded = openDept === id
         const total = deptTotal(id)
         const filled = total != null ? total !== 0 : null
+        // Entered, but no cost sheet rate: not "Empty" (the department did
+        // its part), and not a price either.
+        const noRate = !filled && (summation?.unpriced_lines ?? []).some((l) => l.department_id === id)
         return (
           <section key={id} data-testid={`costing-bucket-${id}`}
             className={`rounded-lg border ${
@@ -145,11 +148,12 @@ export default function CostingBuckets({
               )}
               <span data-testid={`costing-state-${id}`}
                 className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium flex-shrink-0 ${
-                  filled === null ? 'bg-slate-700 text-slate-400'
+                  noRate ? 'bg-amber-900/70 text-amber-200'
+                  : filled === null ? 'bg-slate-700 text-slate-400'
                   : filled ? 'bg-emerald-900/70 text-emerald-200'
                   : 'bg-slate-700 text-slate-300'}`}
-                title={filled === null ? t('costing.hiddenHint') : undefined}>
-                {filled === null ? t('costing.hidden')
+                title={noRate ? t('costing.noRateHint') : filled === null ? t('costing.hiddenHint') : undefined}>
+                {noRate ? t('costing.noRate') : filled === null ? t('costing.hidden')
                   : filled ? t('costing.filled') : t('costing.empty')}
               </span>
               <span className="ml-auto flex items-center gap-3 flex-shrink-0 text-xs text-slate-400">

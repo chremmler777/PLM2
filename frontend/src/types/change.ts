@@ -686,6 +686,9 @@ export interface ImplementationItem {
   has_cad_file: boolean;
   no_geometry_change: boolean;
   ready: boolean;
+  /** Who still owes a task in the check workflow (department or user names),
+      when the backend names them. */
+  waiting_on?: string[] | null;
 }
 
 export interface ImplementationProgress {

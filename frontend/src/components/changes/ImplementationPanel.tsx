@@ -98,6 +98,12 @@ export default function ImplementationPanel({ changeId }: Props) {
               </span>
             </div>
 
+            {!item.ready && (item.waiting_on?.length ?? 0) > 0 && (
+              <p data-testid={`impl-needs-${item.item_id}`} className="mt-2 text-xs text-amber-300">
+                Needs: {item.waiting_on!.join(', ')}
+              </p>
+            )}
+
             {!evidenceOk && item.revision_id !== null && (
               <div className="mt-3 flex items-center gap-2">
                 <button

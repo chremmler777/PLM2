@@ -493,6 +493,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.title': { de: 'Kostenerfassung', en: 'Cost input' },
   'costing.filled': { de: 'Erfasst', en: 'Filled' },
   'costing.empty': { de: 'Offen', en: 'Empty' },
+  'costing.noRate': { de: 'Ohne Satz', en: 'No rate' },
+  'costing.noRateHint': {
+    de: 'Stunden erfasst, aber kein Satz im Kostenblatt: nicht bepreist, die Summe ist zu niedrig',
+    en: 'Hours entered, but no rate in the cost sheet: unpriced, the total is too low',
+  },
   'costing.hidden': { de: 'Nicht sichtbar', en: 'Not shared' },
   'costing.hiddenHint': {
     de: 'Zahlen anderer Fachbereiche sind nicht sichtbar',
@@ -1883,6 +1888,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'cockpit.gateWord': { de: "Gate", en: "gate" },
   'cockpit.gateNo': { de: "mit Nein beantwortet (D1)", en: "answered No (D1)" },
   'cockpit.gateOpen': { de: "noch nicht entschieden (D1)", en: "not decided yet (D1)" },
+  'cockpit.gateHolds': { de: "{gate}-Gate {state}: erst auf D1 entscheiden", en: "{gate} gate {state}: decide it on D1 first" },
+  'cockpit.gateHoldsNotYours': { de: "{gate}-Gate {state}: die Änderungsleitung entscheidet es auf D1", en: "{gate} gate {state}: the change lead decides it on D1" },
+  'cockpit.gateStateNo': { de: "mit Nein beantwortet", en: "answered No" },
+  'cockpit.gateStateOpen': { de: "noch nicht entschieden", en: "not decided yet" },
+  'cockpit.decideDeviations': { de: "Abweichung entscheiden", en: "Decide the deviation" },
   'cockpit.noLead': { de: "Keine Leitung zugewiesen", en: "No lead assigned" },
   'cockpit.created': { de: "Erfasst", en: "Created" },
   'cockpit.updated': { de: "zuletzt geändert", en: "last change" },

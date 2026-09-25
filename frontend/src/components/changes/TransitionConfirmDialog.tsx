@@ -28,6 +28,12 @@ export interface TransitionConfirm {
   /** The step is refused while anything is still open: the confirm button
       stays disabled until `open` is empty. */
   holdWhileOpen?: boolean
+  /** The step cannot be taken right now for a reason stated here (e.g. its
+      deviation is still waiting for the approver): shown, confirm disabled. */
+  holdNote?: string
+  /** Confirming asks for a deviation instead of taking the step (the page
+      files it with the reason); the step itself follows once approved. */
+  asksDeviation?: boolean
 }
 
 export default function TransitionConfirmDialog({
@@ -49,7 +55,7 @@ export default function TransitionConfirmDialog({
   useEffect(() => { if (open) setReason('') }, [open])
   useDialogFocus(panelRef, open, onClose)
   if (!confirm) return null
-  const held = !!confirm.holdWhileOpen && (confirm.loading || confirm.open.length > 0)
+  const held = (!!confirm.holdWhileOpen && (confirm.loading || confirm.open.length > 0)) || !!confirm.holdNote
   const needsReason = !!confirm.reason && !reason.trim()
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog"
@@ -80,6 +86,9 @@ export default function TransitionConfirmDialog({
           </ul>
         )}
         {children}
+        {confirm.holdNote && (
+          <p data-testid="confirm-hold" className="mt-3 text-sm text-amber-200">⏳ {confirm.holdNote}</p>
+        )}
         {confirm.reason && (
           <div className="mt-3">
             <label htmlFor={reasonId} className="mb-1 block text-sm text-slate-300">{confirm.reason.label}</label>
@@ -95,7 +104,7 @@ export default function TransitionConfirmDialog({
             Not yet
           </button>
           <button type="button" data-testid="confirm-go" disabled={busy || held || needsReason}
-            title={held ? 'Complete what is still open first' : needsReason ? 'Give a reason first' : undefined}
+            title={held ? confirm.holdNote ?? 'Complete what is still open first' : needsReason ? 'Give a reason first' : undefined}
             onClick={() => onConfirm(confirm.reason ? reason.trim() : undefined)}
             className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
             {confirm.confirmLabel}

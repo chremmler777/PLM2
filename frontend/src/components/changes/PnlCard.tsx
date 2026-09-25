@@ -4,6 +4,7 @@ import { formatMoney } from '../../lib/format';
 import type { ChangeDetail, ChangeStatus } from '../../types/change';
 import OfferVsActualSection from './pnl/OfferVsActualSection';
 import ActualCostsPanel from './pnl/ActualCostsPanel';
+import { unpricedByDepartment } from '../../lib/unpriced';
 
 const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment'];
 /** Stages where there is doing: offer vs actual and actual costs. */
@@ -76,6 +77,15 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
     : undefined;
   const marginLabel = change.customer_relevant ? 'Margin' : 'vs. approved budget';
 
+  // Hours with no cost sheet rate, said per department with how many (never
+  // priced with an invented rate). The booked side is the offer-vs-actual
+  // section's to say. The backend's per-department line for the same
+  // department ("... hours unpriced") gives way to the one with the hours.
+  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`;
+  const unpriced = unpricedByDepartment(data?.unpriced_lines, deptName);
+  const unpricedLines = unpriced.map((u) => u.message);
+  const covered = (msg: string) => unpriced.some((u) => msg.startsWith(`No cost sheet rate for ${u.name}:`));
+
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
       <div>
@@ -93,10 +103,13 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
         </div>
         {/* The costing's own warnings (spec §15 phase 2): currencies it did
             not add, lines without a rate. Shown here only, once. */}
-        {(data?.warnings ?? []).length > 0 && (
+        {((data?.warnings ?? []).length > 0 || unpricedLines.length > 0) && (
           <ul data-testid="pnl-costing-warnings" className="mt-1 space-y-0.5">
-            {(data?.warnings ?? []).map((w) => (
+            {(data?.warnings ?? []).filter((w) => !covered(w.message)).map((w) => (
               <li key={w.code} className="text-[11px] text-amber-300">{w.message}</li>
+            ))}
+            {unpricedLines.map((m) => (
+              <li key={m} data-testid="pnl-unpriced" className="text-[11px] text-amber-300">{m}</li>
             ))}
           </ul>
         )}

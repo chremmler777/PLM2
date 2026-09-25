@@ -70,7 +70,14 @@ vi.mock('../api/changes', () => ({
     approveInternalCosts: vi.fn().mockResolvedValue({}),
     transition: vi.fn().mockResolvedValue({}),
     changelog: vi.fn().mockResolvedValue([]),
+    proposeDeviation: vi.fn().mockResolvedValue({ id: 9 }),
+    decideDeviation: vi.fn().mockResolvedValue({}),
+    getSummation: vi.fn().mockRejectedValue(new Error('not in this test')),
   },
+}))
+const releaseMock = vi.hoisted(() => ({ blockers: [] as string[] }))
+vi.mock('../api/changeRelease', () => ({
+  changeReleaseApi: { get: vi.fn(async () => ({ blockers: releaseMock.blockers, checks: [], lessons: [] })) },
 }))
 vi.mock('../components/changes/PnlCard', () => ({
   default: ({ canSeeCosts }: { canSeeCosts?: boolean }) =>
@@ -126,10 +133,11 @@ vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>m
 // probing it for the keys these tests care about.
 const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
-  default: ({ waits = [], needs, onAdvance }: {
+  default: ({ waits = [], needs, onAdvance, onDecideDeviation }: {
     waits?: { key: string; text: string }[]
     needs?: (step: string) => string | null
     onAdvance?: (to: string) => void
+    onDecideDeviation?: (id?: number) => void
   }) => (
     <div>mock-cockpit-summary
       {waits.map((w) => <p key={w.key} data-testid={`wait-${w.key}`}>{w.text}</p>)}
@@ -139,6 +147,8 @@ vi.mock('../components/changes/CockpitSummary', () => ({
       {/* Drives the confirm dialogs the same way the real advance buttons would. */}
       <button type="button" onClick={() => onAdvance?.('in_validation')}>mock-advance-in_validation</button>
       <button type="button" onClick={() => onAdvance?.('scoping')}>mock-advance-scoping</button>
+      <button type="button" onClick={() => onAdvance?.('quoting')}>mock-advance-quoting</button>
+      <button type="button" onClick={() => onDecideDeviation?.(5)}>mock-decide-deviation</button>
     </div>
   ),
 }))
@@ -164,6 +174,7 @@ vi.mock('../components/changes/release/ReleaseTab', () => ({
       <div data-testid="mock-release-tab">manage={String(p.canManage)}</div>
       <div data-testid="mock-release-focus">focus={String(p.focusIssueId)}</div>
       <button type="button" onClick={() => p.onAdvance?.('closed')}>mock-close</button>
+      <button type="button" onClick={() => p.onAdvance?.('released')}>mock-release</button>
     </div>
   ),
 }))
@@ -1174,5 +1185,109 @@ describe('ChangeDetailPage validation issues after the loop back (review F1)', (
     await screen.findByTestId('mock-issues-panel')
     fireEvent.click(screen.getByRole('button', { name: 'mock-advance-in_validation' }))
     expect((await screen.findByTestId('confirm-info')).textContent).toContain('Still fixing: VI-1 Clip hole out of tolerance')
+  })
+})
+
+describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-4, P2-6)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    releaseMock.blockers = []
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([])
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] } as never)
+    vi.mocked(changesApi.getImplementation).mockResolvedValue({ ready_to_go: false } as never)
+    vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('release with open guards asks for a deviation with the reason instead of a bare refusal', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    releaseMock.blockers = ['Not ready to go: 4 impacted revisions have not completed their check workflow']
+    vi.mocked(changesApi.transition).mockClear()
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-release'))
+    const dialog = await screen.findByTestId('confirm-released')
+    await waitFor(() => expect(dialog.textContent).toContain('Release with a deviation'))
+    expect(dialog.textContent).toContain('4 impacted revisions')
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.textContent).toBe('Ask for a deviation')
+    expect(go.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: 'ECN runs in the DMS track' } })
+    fireEvent.click(go)
+    await waitFor(() => expect(changesApi.proposeDeviation).toHaveBeenCalledWith(
+      1, { to_status: 'released', reason: 'ECN runs in the DMS track' }))
+    expect(changesApi.transition).not.toHaveBeenCalled()
+  })
+
+  it('a pending release deviation holds the dialog and says whose decision it waits on', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    releaseMock.blockers = ['6 plan deviations still open']
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([
+      { id: 7, to_status: 'released', reason: 'x', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+    ] as never)
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-release'))
+    expect((await screen.findByTestId('confirm-hold')).textContent).toContain('Deviation #7')
+    expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('an approved release deviation lets the release go ahead as a transition', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    releaseMock.blockers = ['6 plan deviations still open']
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([
+      { id: 7, to_status: 'released', reason: 'x', status: 'approved', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+    ] as never)
+    vi.mocked(changesApi.transition).mockClear()
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-release'))
+    expect((await screen.findByTestId('confirm-info')).textContent).toContain('Deviation #7 is approved')
+    fireEvent.click(screen.getByTestId('confirm-go'))
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'released', { to: 'released' }))
+  })
+
+  it('"Decide deviation #n" opens the decision panel on Overview, where the approver decides', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_validation' as ChangeDetail['status']
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([
+      { id: 5, to_status: 'released', reason: 'Covered by the customer timing', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+    ] as never)
+    vi.mocked(changesApi.myActions).mockResolvedValue({
+      actions: [{ kind: 'deviation_decision', label: 'Decide deviation #5', target_tab: 'overview', deviation_id: 5 }],
+      memberships: [],
+    } as never)
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-decide-deviation'))
+    expect((await screen.findByTestId('deviation-5')).textContent).toContain('Covered by the customer timing')
+    fireEvent.click(await screen.findByTestId('deviation-approve-5'))
+    await waitFor(() => expect(changesApi.decideDeviation).toHaveBeenCalledWith(1, 5, { decision: 'approved' }))
+  })
+
+  it('close costing names hours without a cost sheet rate instead of "every department entered"', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'costing' as ChangeDetail['status']
+    change.customer_relevant = true
+    vi.mocked(changesApi.getSummation).mockResolvedValue({ unpriced_lines: [
+      { position_id: 54, department_id: 6, label: 'Internal effort', kind: 'internal_effort', quantity: 3, unit: 'h', message: 'No rate' },
+      { position_id: 55, department_id: 6, label: 'Support', kind: 'support_effort', quantity: 10, unit: 'h', message: 'No rate' },
+    ] } as never)
+    wrap('/changes/1?tab=overview')
+    fireEvent.click(await screen.findByText('mock-advance-quoting'))
+    const open = await screen.findByTestId('confirm-open')
+    expect(open.textContent).toContain('No cost sheet rate for #6: 13 h unpriced')
+    expect(screen.queryByTestId('confirm-clear')).toBeNull()
+  })
+
+  it('names the revisions still in their check workflow while implementing', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    vi.mocked(changesApi.getImplementation).mockResolvedValue({ ready_to_go: false, items: [
+      { item_id: 1, revision_id: 3, instance_id: 4, instance_status: 'active', ready: false, waiting_on: ['Development'] },
+      { item_id: 2, revision_id: 5, instance_id: 6, instance_status: 'completed', ready: true },
+    ] } as never)
+    wrap('/changes/1?tab=timing')
+    expect((await screen.findByTestId('wait-revisions-in-check')).textContent)
+      .toBe('1 revision still in its check workflow; needs Development')
   })
 })

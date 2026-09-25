@@ -182,6 +182,10 @@ export function resolveWaitStates(
     openPlanDeviations?: number; releaseBlockers?: string[] | null
     /** GET /validation/issues: open ones block the release (spec §12). */
     validationIssues?: IssueLite[] | null
+    /** GET /implementation: the impacted revisions whose check (ECN)
+        workflow has not completed. The release waits on them, so they are
+        named while the work runs, not first at release. */
+    revisionsInCheck?: RevisionsInCheck | null
   } = {},
 ): WaitState[] {
   const waits: WaitState[] = []
@@ -308,6 +312,18 @@ export function resolveWaitStates(
     }
   }
 
+  // The revisions' check workflows: the release refuses while one runs, so
+  // they are said early, with who still has to act on them.
+  const rc = more.revisionsInCheck
+  if (change.status === 'in_implementation' && rc && rc.count > 0) {
+    waits.push({
+      key: 'revisions-in-check',
+      text: revisionsInCheckText(rc),
+      tab: 'timing',
+      info: true,
+    })
+  }
+
   // While the results are being checked: the departments that have not answered
   // their checks, and — separately, because it is a different desk and a
   // different consequence — a validated weight the quote has not caught up with.
@@ -403,6 +419,27 @@ export function resolveWaitStates(
   }
 
   return waits
+}
+
+/** Impacted revisions still in their check workflow, and who owes a task. */
+export interface RevisionsInCheck { count: number; needs: string[] }
+
+/** From GET /implementation: items whose workflow runs (or never started). */
+export function revisionsInCheckOf(items: {
+  revision_id: number | null; instance_id: number | null; instance_status: string | null; ready: boolean
+  waiting_on?: string[] | null
+}[] | null | undefined): RevisionsInCheck {
+  const open = (items ?? []).filter((i) => i.revision_id != null && !i.ready
+    // The engine spells it "canceled"; accept the other spelling too.
+    && i.instance_status !== 'canceled' && i.instance_status !== 'cancelled')
+  const needs = [...new Set(open.flatMap((i) => i.waiting_on ?? []))]
+  return { count: open.length, needs }
+}
+
+/** "2 revisions still in their check workflow; needs Development, Quality". */
+export function revisionsInCheckText(rc: RevisionsInCheck): string {
+  return `${rc.count} revision${rc.count === 1 ? '' : 's'} still in ${rc.count === 1 ? 'its' : 'their'} check workflow`
+    + (rc.needs.length ? `; needs ${rc.needs.join(', ')}` : '')
 }
 
 /** The tabs a wait row may point at. */

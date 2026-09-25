@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '../../lib/apiError';
 import { LoadingSkeleton } from '../common/LoadingSkeleton';
 import ConfirmModal from '../common/ConfirmModal';
 import StartWorkflowModal from './StartWorkflowModal';
@@ -41,7 +42,8 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
                 ? 'Task waived'
                 : 'Task rejected',
           ),
-        onError: () => toast.error('Failed to complete task'),
+        // The backend says why (not your department, a later stage, ...).
+        onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to complete task')),
       },
     );
   };
@@ -54,7 +56,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
           setConfirmCancel(false);
           toast.success('Workflow canceled');
         },
-        onError: () => toast.error('Failed to cancel workflow'),
+        onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to cancel workflow')),
       },
     );
   };

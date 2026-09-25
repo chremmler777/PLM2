@@ -25,15 +25,22 @@ export default function OfferDocumentSection({
   const cur = offer.currency || 'EUR'
   const included = (data.cost_lines ?? []).filter((l) => l.include).length
   const shownRisks = (data.risks ?? []).filter((r) => r.show).length
+  // The CBD as the customer reads it: included lines grouped by the
+  // customer-facing category, when the backend names it.
+  const cbd = [...(data.cost_lines ?? []).filter((l) => l.include && l.customer_category)
+    .reduce((m, l) => m.set(l.customer_category!, (m.get(l.customer_category!) ?? 0) + (l.amount ?? 0)),
+      new Map<string, number>())]
   const changeover = data.changeover?.mode === 'customer_pays_scrap' ? 'Customer pays scrap' : 'Running change'
 
   const outline: [string, string][] = [
     ['Letterhead', `OFFER ${changeNumber}-Q${offer.version}${offer.valid_until ? `, valid until ${fmtDate(offer.valid_until)}` : ''}`],
+    ...(offer.issued_by ? [['Issued by', offer.issued_by] as [string, string]] : []),
     ['Recipient', [recipient.company, recipient.contact].filter(Boolean).join(', ') || 'Not set'],
     ['Subject', data.subject || 'Not set'],
     ['1 Scope of change', data.scope_text?.trim() ? data.scope_text.trim() : 'Not written yet'],
     ['2 Price', mode === 'detailed'
-      ? `Detailed CBD, ${included} line${included === 1 ? '' : 's'}, total ${fmtMoney(offer.totals.total_one_time, cur)}`
+      ? `Detailed CBD, ${cbd.length > 0 ? cbd.map(([k, v]) => `${k} ${fmtMoney(v, cur)}`).join('; ')
+        : `${included} line${included === 1 ? '' : 's'}`}, total ${fmtMoney(offer.totals.total_one_time, cur)}`
       : `Rough description, total ${fmtMoney(offer.totals.total_one_time, cur)}`],
     ['3 Changeover', changeover],
     ['4 Timing', data.timing?.include === false ? 'Not included'

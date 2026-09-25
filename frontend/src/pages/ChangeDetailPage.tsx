@@ -7,7 +7,7 @@ import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import { planApi } from '../api/changePlan';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
-import { resolveWaitStates, earlyStageWaits, deriveAssessmentState } from '../lib/waitStates';
+import { resolveWaitStates, earlyStageWaits, deriveAssessmentState, revisionsInCheckOf } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
 import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
 import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
@@ -16,6 +16,7 @@ import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
 import QuoteBasis from '../components/changes/QuoteBasis';
 import DeviationBanner from '../components/changes/DeviationBanner';
+import TransitionDeviationsPanel from '../components/changes/TransitionDeviationsPanel';
 import ReasonDialog from '../components/changes/ReasonDialog';
 import ImpactTree from '../components/changes/ImpactTree';
 import OfferTab from '../components/changes/offer/OfferTab';
@@ -51,6 +52,7 @@ import {
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
+import { unpricedByDepartment } from '../lib/unpriced';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -117,6 +119,9 @@ export default function ChangeDetailPage() {
   const [confirmTo, setConfirmTo] = useState<string | null>(null);
   // Not feasible, and still going on: a transition deviation with a reason.
   const [overrideOpen, setOverrideOpen] = useState(false);
+  // "Decide deviation #n": the Overview's decision panel scrolls to it once
+  // (null: the panel itself; undefined: nothing to focus).
+  const [focusDeviation, setFocusDeviation] = useState<number | null | undefined>(undefined);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -333,6 +338,26 @@ export default function ChangeDetailPage() {
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Proposing the deviation failed'),
   });
 
+  // Close costing names the hours nobody can price (no cost sheet rate): the
+  // summation lists them. Cost roles only, like every figure.
+  const { data: closingSummation, isLoading: closingSummationLoading } = useQuery({
+    queryKey: ['change-summation', changeId],
+    queryFn: () => changesApi.getSummation(changeId),
+    enabled: confirmTo === 'quoting' && canSeeCosts,
+  });
+  // Releasing past open guards asks for a deviation with the reason, here and
+  // now, instead of a bare refusal and a second dialog.
+  const askDeviation = useMutation({
+    mutationFn: (v: { to: string; reason: string }) =>
+      changesApi.proposeDeviation(changeId, { to_status: v.to, reason: v.reason }),
+    onSuccess: (d) => {
+      toast.success(`Deviation #${d.id} asked. Someone other than you approves it; then the step can be taken.`);
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Asking for the deviation failed'),
+  });
+
   const transition = useMutation({
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
@@ -503,13 +528,20 @@ export default function ChangeDetailPage() {
       };
     }
     if (confirmTo === 'quoting') {
+      // Truthful: a department still owing its input, and hours that were
+      // entered but have no rate (not counted, the total is too low).
+      const unpriced = unpricedByDepartment(closingSummation?.unpriced_lines, deptName);
       return {
         to: confirmTo, title: 'Close costing',
         consequence: 'Closing costing freezes every department\'s numbers and hands the change to Sales for the offer. '
           + 'Reopening costing later needs a reason and is recorded.',
-        open: (change.costing_pending_department_ids ?? []).map((d) => `${deptName(d)}: cost input not entered`),
-        allClear: 'Every department has entered its cost input.',
+        open: [
+          ...(change.costing_pending_department_ids ?? []).map((d) => `${deptName(d)}: cost input not entered`),
+          ...unpriced.map((u) => `${u.message}: the total is too low`),
+        ],
+        allClear: 'Every department has entered its cost input, and every line has a rate.',
         confirmLabel: 'Close costing',
+        loading: canSeeCosts && closingSummationLoading,
       };
     }
     if (confirmTo === 'in_validation') {
@@ -538,14 +570,37 @@ export default function ChangeDetailPage() {
       };
     }
     if (confirmTo === 'released') {
-      return {
+      const blockers = releaseState?.blockers ?? [];
+      const approved = deviations.find((d) => d.to_status === 'released' && d.status === 'approved');
+      const pending = deviations.find((d) => d.to_status === 'released' && d.status === 'pending');
+      const base = {
         to: confirmTo, title: 'Release the change',
         consequence: 'Releasing puts the change live. It cannot be moved back; after release it can only be closed.',
-        open: releaseState?.blockers ?? [],
+        open: blockers,
         allClear: 'Validation, checklist and lessons are done.',
         confirmLabel: 'Release change',
         final: true,
         loading: !releaseState,
+      };
+      if (blockers.length === 0 || approved) {
+        return approved && blockers.length > 0
+          ? { ...base, info: [`Deviation #${approved.id} is approved: releasing uses it.`] }
+          : base;
+      }
+      // Still open and no approved deviation: the dialog asks for one with the
+      // reason (4-eyes), or says whose decision it now waits on.
+      if (pending) {
+        return { ...base, holdNote: `Deviation #${pending.id} is asked and waits for its approver. Release once it is approved.` };
+      }
+      return {
+        ...base,
+        title: 'Release with a deviation',
+        consequence: 'Releasing puts the change live although the points below are still open. That needs a deviation: '
+          + 'give the reason, someone other than you approves it, then the change can be released.',
+        final: false,
+        confirmLabel: 'Ask for a deviation',
+        reason: { label: 'Why release anyway? (required, recorded)', placeholder: 'What covers the open points' },
+        asksDeviation: true,
       };
     }
     return {
@@ -652,10 +707,11 @@ export default function ChangeDetailPage() {
         onSubmit={(reason) => { setReopenCostingOpen(false); transition.mutate({ to: 'costing', reason }); }}
         onClose={() => setReopenCostingOpen(false)}
       />
-      <TransitionConfirmDialog confirm={confirm} busy={transition.isPending}
+      <TransitionConfirmDialog confirm={confirm} busy={transition.isPending || askDeviation.isPending}
         onClose={() => setConfirmTo(null)}
         onConfirm={(reason) => {
           const to = confirmTo!; setConfirmTo(null);
+          if (confirm?.asksDeviation && reason) { askDeviation.mutate({ to, reason }); return; }
           transition.mutate(reason ? { to, reason } : { to });
         }}>
         {motherPlant && change.status === 'captured' && confirmTo === 'scoping'
@@ -703,7 +759,8 @@ export default function ChangeDetailPage() {
         waits={earlyStageWaits(change, resolveWaitStates(change, concerns, deptName, change.assessments,
           { state: implState, escalations: implEscalations }, validation,
           change.status === 'approved' ? planFeedback : null,
-          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues }),
+          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues,
+            revisionsInCheck: revisionsInCheckOf(impl?.items) }),
           stage?.waits, { concerns, assessments: change.assessments, departmentName: deptName })}
         onGo={goTab}
         needs={needs}
@@ -712,6 +769,7 @@ export default function ChangeDetailPage() {
         onStepAction={(key) => {
           if (key === 'override-costing') setOverrideOpen(true);
         }}
+        onDecideDeviation={(id) => { setTab('overview'); setFocusDeviation(id ?? null); }}
         leadSlot={<LeadPicker change={change}
           canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
             && (isAdmin || isChangeLead || isPmMember)}
@@ -767,6 +825,10 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
+          <TransitionDeviationsPanel changeId={changeId} deviations={deviations}
+            decidableIds={(myActions?.actions ?? []).filter((a) => a.kind === 'deviation_decision')
+              .map((a) => a.deviation_id).filter((x): x is number => x != null)}
+            focusId={focusDeviation} onFocused={() => setFocusDeviation(undefined)} />
           <p><span className="text-slate-400">Type:</span> {changeTypeLabel(change.change_type)}</p>
           <p className="flex items-center gap-2">
             <span className="text-slate-400">Priority:</span>

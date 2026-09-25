@@ -51,6 +51,14 @@ describe('ImplementationPanel', () => {
     expect(screen.getByRole('button', { name: /Sign no geometry change/ })).toBeDefined()
   })
 
+  it('names who a running check workflow still needs (final walk P2-4)', async () => {
+    vi.mocked(changesApi.getImplementation).mockResolvedValue({
+      ...progress, items: [{ ...progress.items[0], waiting_on: ['Development', 'Quality'] }],
+    })
+    wrap(<ImplementationPanel changeId={7} />)
+    expect((await screen.findByTestId('impl-needs-1')).textContent).toBe('Needs: Development, Quality')
+  })
+
   it('signs no-geometry-change with a reason', async () => {
     wrap(<ImplementationPanel changeId={7} />)
     await screen.findByText(/ECR1\.1/)

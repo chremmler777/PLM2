@@ -26,8 +26,10 @@ const state = (over: Partial<ReviewState> = {}): ReviewState => ({
 })
 const change = { id: 9, status: 'scoping', origin: 'engineering_review' } as unknown as ChangeRequest
 
+let lastQc: QueryClient
 function wrap(onGoImpact = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  lastQc = qc
   return render(<QueryClientProvider client={qc}><MemoryRouter>
     <ReviewTab change={change} onGoImpact={onGoImpact} />
   </MemoryRouter></QueryClientProvider>)
@@ -69,6 +71,17 @@ describe('ReviewTab', () => {
     fireEvent.click(screen.getByTestId('review-escalate'))
     fireEvent.click(screen.getByTestId('escalate-confirm'))
     await waitFor(() => expect(api.escalate).toHaveBeenCalledWith(9, undefined))
+  })
+
+  it('escalation refreshes the change and every list naming it (new title and lead, final walk P2-8)', async () => {
+    api.review.mockResolvedValue(state({ impact_count: 1, can_escalate: true, answers: [] }))
+    api.escalate.mockResolvedValue(state({ escalated: true, escalated_at: '2026-09-25T10:00:00', is_review: false }))
+    wrap()
+    const spy = vi.spyOn(lastQc, 'invalidateQueries')
+    fireEvent.click(await screen.findByTestId('review-escalate'))
+    fireEvent.click(screen.getByTestId('escalate-confirm'))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['changes'] }))
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 9] })
   })
 
   it('needs a note to escalate without a reported impact', async () => {

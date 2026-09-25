@@ -14,6 +14,7 @@ import { planApi } from '../../../api/changePlan'
 import { CHANGE_STATUS_ORDER, type ChangeRequest, type ChangeStatus } from '../../../types/change'
 import BankBuildCard from '../BankBuildCard'
 import ImplementationTracking from '../ImplementationTracking'
+import ImplementationPanel from '../ImplementationPanel'
 import GanttPlanner from '../plan/GanttPlanner'
 import { formatDate } from '../../../lib/format'
 import DeviationsPanel from './DeviationsPanel'
@@ -252,6 +253,21 @@ export default function TimingTab({
           )}
         </div>
       </section>
+
+      {/* The impacted revisions' check (ECN) workflows run during the work,
+          and the release waits on them: they are done here, not first found
+          on the Release tab (locked until validation). */}
+      {status === 'in_implementation' && (
+        <details open data-testid="timing-revisions" className="rounded-lg border border-slate-700 bg-slate-800">
+          <summary className="cursor-pointer px-4 py-2.5 text-sm text-slate-200">
+            Revisions (ECN): check workflows
+            <span className="ml-2 text-xs text-slate-500">the release waits until every one is complete</span>
+          </summary>
+          <div className="border-t border-slate-700 p-4">
+            <ImplementationPanel changeId={id} />
+          </div>
+        </details>
+      )}
 
       {issues && (
         <section data-testid="timing-issues" className="rounded-lg border border-amber-900/60 bg-slate-800 p-4">

@@ -608,3 +608,59 @@ describe('CockpitSummary end states (spec §16 P1 7)', () => {
     expect(screen.getByText('Ended: no further step')).toBeDefined()
   })
 })
+
+describe('CockpitSummary gate holds the next step (final walk P2-5)', () => {
+  afterEach(cleanup)
+
+  it('disables the step a gate holds, with the reason and the way to D1', () => {
+    const onResolveGate = vi.fn()
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary
+      change={change({ status: 'approved', timing_validated_at: '2026-09-20T00:00:00', customer_relevant: true })}
+      gates={[{ gate_key: 'release', decision: 'na' }]} pendingDeviations={0}
+      onAdvance={onAdvance} advancing={false} onResolveGate={onResolveGate} />))
+    const step = screen.getByTestId('next-to-in_implementation') as HTMLButtonElement
+    expect(step.disabled).toBe(true)
+    expect(step.title).toBe('Release gate not decided yet: decide it on D1 first')
+    fireEvent.click(step)
+    expect(onAdvance).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('next-gate-release').querySelector('button')!)
+    expect(onResolveGate).toHaveBeenCalledWith('release')
+  })
+
+  it('a decided gate leaves the step live', () => {
+    render(wrap(<CockpitSummary
+      change={change({ status: 'approved', timing_validated_at: '2026-09-20T00:00:00', customer_relevant: true })}
+      gates={[{ gate_key: 'release', decision: 'yes' }]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
+    expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByTestId('next-gate-release')).toBeNull()
+  })
+
+  it('without the governance tabs the reason names who decides, no dead-end jump', () => {
+    render(wrap(<CockpitSummary
+      change={change({ status: 'approved', timing_validated_at: '2026-09-20T00:00:00', customer_relevant: true })}
+      gates={[{ gate_key: 'release', decision: 'no' }]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onResolveGate={() => {}} canSeeGovernance={false} />))
+    const line = screen.getByTestId('next-gate-release')
+    expect(line.textContent).toContain('Release gate answered No: the change lead decides it on D1')
+    expect(line.querySelector('button')).toBeNull()
+  })
+})
+
+describe('CockpitSummary deviation decisions (final walk P2-3)', () => {
+  afterEach(cleanup)
+
+  it('"Decide deviation #n" opens the decision panel on that deviation', () => {
+    const onDecideDeviation = vi.fn()
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change()} gates={[]} pendingDeviations={1}
+      onAdvance={() => {}} advancing={false} onAction={onAction} onDecideDeviation={onDecideDeviation}
+      actions={[{ kind: 'deviation_decision', label: 'Decide deviation #12', target_tab: 'overview', deviation_id: 12 }]} />))
+    fireEvent.click(screen.getByRole('button', { name: 'Decide deviation #12' }))
+    expect(onDecideDeviation).toHaveBeenCalledWith(12)
+    expect(onAction).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('blocked-pending-deviations').querySelector('button')!)
+    expect(onDecideDeviation).toHaveBeenLastCalledWith()
+  })
+})

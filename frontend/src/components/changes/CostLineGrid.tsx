@@ -8,7 +8,7 @@
  * presentation. Rows arrive pre-seeded from what the department ticked in its
  * assessment; anything else is added here.
  */
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import type { CostLine, CostLineIn, DepartmentRateRef } from '../../types/change';
@@ -216,13 +216,13 @@ export default function CostLineGrid({
           </tr>
           <tr className="text-[11px] text-slate-500">
             {columns.map((p) => (
-              <>
-                <th key={`${p.id}-h`} className="pb-1 px-1 text-right border-l border-slate-700">
+              <Fragment key={p.id}>
+                <th className="pb-1 px-1 text-right border-l border-slate-700">
                   {t('hours')}
                 </th>
-                <th key={`${p.id}-i`} className="pb-1 px-1 text-right">{t('internal')}</th>
-                <th key={`${p.id}-e`} className="pb-1 px-1 text-right">{t('external')}</th>
-              </>
+                <th className="pb-1 px-1 text-right">{t('internal')}</th>
+                <th className="pb-1 px-1 text-right">{t('external')}</th>
+              </Fragment>
             ))}
           </tr>
         </thead>
@@ -241,22 +241,22 @@ export default function CostLineGrid({
               {columns.map((p) => {
                 const c = cellOf(r, p.id);
                 return (
-                  <>
-                    <td key={`${p.id}-h`} className="py-1 px-1 text-right border-l border-slate-700">
+                  <Fragment key={p.id}>
+                    <td className="py-1 px-1 text-right border-l border-slate-700">
                       {numberCell(`hours-${rowKey(r)}-${p.id}`, c.hours,
                         (v) => setCell(r, p.id, { hours: v }), { min: 0, label: t('hours') })}
                     </td>
-                    <td key={`${p.id}-i`}
+                    <td
                       data-testid={`internal-${rowKey(r)}-${p.id}`}
                       className="py-1 px-1 text-right text-slate-400 text-xs tabular-nums">
                       {internalCost(rates, departmentId, p.id, c.hours).toFixed(2)}
                     </td>
-                    <td key={`${p.id}-e`} className="py-1 px-1 text-right">
+                    <td className="py-1 px-1 text-right">
                       {numberCell(`external-${rowKey(r)}-${p.id}`, c.external,
                         (v) => setCell(r, p.id, { external: v }),
                         { min: 0, step: 0.01, label: t('external'), width: 'w-20' })}
                     </td>
-                  </>
+                  </Fragment>
                 );
               })}
               <td className="py-1 pl-1">

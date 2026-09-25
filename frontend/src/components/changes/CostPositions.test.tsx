@@ -111,6 +111,30 @@ describe('CostPositions', () => {
     expect(changesApi.updateCostPosition).not.toHaveBeenCalled()
   })
 
+  it('saves a standing row once when blur and the Save click arrive together (final walk P2-1)', async () => {
+    // The create is still in flight (and the position not yet listed) when the
+    // click lands: a second create would be a duplicate standing row.
+    let resolve!: (v: unknown) => void
+    vi.mocked(changesApi.createCostPosition).mockImplementationOnce(
+      () => new Promise((r) => { resolve = r }) as never)
+    positions()
+    await screen.findByTestId('costpos-row-11')
+    const support = screen.getByTestId('costpos-effort-support_effort-2')
+    fireEvent.change(support, { target: { value: '16' } })
+    fireEvent.blur(support)
+    fireEvent.click(screen.getByTestId('costpos-effort-save-support_effort-2'))
+    fireEvent.keyDown(support, { key: 'Enter' })
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalled())
+    resolve({ id: 77 })
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1))
+    // Even after the create answered, the row holds until the new position
+    // arrives: no second create from a late click.
+    fireEvent.click(screen.getByTestId('costpos-effort-save-support_effort-2'))
+    fireEvent.blur(support)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(changesApi.createCostPosition).toHaveBeenCalledTimes(1)
+  })
+
   it('edits that same position on every save after the first', async () => {
     positions()
     // Once the answered position has arrived, the field is bound to it.

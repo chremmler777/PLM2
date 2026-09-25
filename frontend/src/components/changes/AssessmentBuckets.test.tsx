@@ -104,6 +104,22 @@ describe('AssessmentBuckets dormant stages', () => {
     expect(screen.queryByText(t('tasks.unclaimed'))).toBeNull()
   })
 
+  it('a department the meeting put on the hook is owed work, not a later stage (final walk P1-1)', async () => {
+    // The room marked Quality R in stage 1, but its row was never activated
+    // (no engine task): the round waits on it, so the bucket says so and
+    // Quality can answer right here.
+    vi.mocked(changesApi.getRouting).mockResolvedValue({ stages: [] } as never)
+    vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] } as never)
+    wrap(<AssessmentBuckets departments={DEPTS} myDepartmentIds={[2]} editable
+      round={{ first_stage: 1, total: 1, submitted: 0, all_submitted: false,
+        waiting_on: [{ department_id: 2, department_name: 'Development', assessment_id: 1, rasic_letter: 'R' }],
+        not_feasible: [], declined_pending: [], verdicts: [], open_risks: [] } as never}
+      change={change({ assessments: [assessment({ department_id: 2, status: 'pending', stage_order: 1 })] })} />)
+    expect((await screen.findByTestId('bucket-state-2')).textContent).not.toBe(t('bucket.queued'))
+    expect(screen.queryByTestId('bucket-readonly-2')).toBeNull()
+    expect(await screen.findByTestId('assessment-submit')).toBeDefined()
+  })
+
   it('keeps later-stage departments off the assessment board entirely', async () => {
     // Sales is exempt from assessing — its rows belong to the customer-
     // activities stage and must not appear here as if Sales owed an answer.

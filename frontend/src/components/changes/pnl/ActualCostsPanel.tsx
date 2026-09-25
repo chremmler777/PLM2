@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { actualCostsApi } from '../../../api/actualCosts'
+import { changesApi } from '../../../api/changes'
 import { formatDate, formatMoney, todayIso } from '../../../lib/format'
 import type { ActualCostCategory } from '../../../types/pnl'
 
@@ -31,6 +32,13 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   const { data } = useQuery({
     queryKey: ['actual-costs', changeId],
     queryFn: () => actualCostsApi.list(changeId),
+    retry: false,
+  })
+  // The change's costing currency (its costing plant's): what a new line is
+  // entered in and what the list is stated in. Same cache as the costing tab.
+  const { data: ctx } = useQuery({
+    queryKey: ['costing-context', changeId],
+    queryFn: () => changesApi.costingContext(changeId),
     retry: false,
   })
   const [open, setOpen] = useState(false)
@@ -66,6 +74,12 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   if (!data) return null
   const allowed = data.writable_department_ids
   const deptOptions = allowed === null ? departments : departments.filter((d) => allowed.includes(d.id))
+  const currency = data.currency ?? ctx?.currency ?? data.items.find((c) => c.currency)?.currency ?? 'EUR'
+  const curOf = (c: { currency?: string | null }) => c.currency ?? currency
+  // Never added across currencies: one total per currency.
+  const totals = data.totals_by_currency && Object.keys(data.totals_by_currency).length > 0
+    ? Object.entries(data.totals_by_currency)
+    : [...data.items.reduce((m, c) => m.set(curOf(c), (m.get(curOf(c)) ?? 0) + c.amount), new Map<string, number>())]
   const amountOk = Number(amount.replace(',', '.')) > 0
   const deptOk = allowed === null || dept !== ''
 
@@ -75,7 +89,10 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
         <span className="text-xs text-slate-400 uppercase tracking-wide">
           {data.cost_role ? 'Actual costs' : 'Actual costs of your department'}
         </span>
-        <span className="text-xs text-slate-500 tabular-nums">{formatMoney(data.total)}</span>
+        <span data-testid="actual-cost-total" className="text-xs text-slate-500 tabular-nums">
+          {totals.length === 0 ? formatMoney(data.total, currency)
+            : totals.map(([cur, v]) => formatMoney(v, cur)).join(' · ')}
+        </span>
         {data.can_write && !open && (
           <button type="button" data-testid="actual-cost-open"
             className="ml-auto border border-slate-600 text-slate-200 hover:bg-slate-700 px-2.5 py-1 rounded-lg text-xs"
@@ -97,7 +114,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Amount (EUR)
+          <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">Amount ({currency})
             <input aria-label="Amount" className={input} inputMode="decimal" value={amount}
               onChange={(e) => setAmount(e.target.value)} />
           </label>
@@ -147,7 +164,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
                 {[c.vendor_name, c.department_name, c.note].filter(Boolean).join(', ') || '-'}
                 {c.created_by_name && <span className="text-slate-500"> ({c.created_by_name})</span>}
               </span>
-              <span className="tabular-nums text-slate-100">{formatMoney(c.amount)}</span>
+              <span className="tabular-nums text-slate-100">{formatMoney(c.amount, curOf(c))}</span>
               {c.can_delete && (
                 <button type="button" data-testid={`actual-cost-delete-${c.id}`}
                   className="text-[11px] text-slate-500 hover:text-rose-300"

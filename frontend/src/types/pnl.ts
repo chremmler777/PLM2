@@ -206,11 +206,17 @@ export interface ActualCost {
   created_by_name: string | null;
   created_at: string;
   can_delete: boolean;
+  /** The amount's currency (the change's costing currency when entered). */
+  currency?: string | null;
 }
 
 export interface ActualCostList {
   items: ActualCost[];
   total: number;
+  /** The change's costing currency: new lines are entered in it. */
+  currency?: string | null;
+  /** Per currency when lines differ; never added across currencies. */
+  totals_by_currency?: Record<string, number> | null;
   can_write: boolean;
   writable_department_ids: number[] | null;
   cost_role: boolean;

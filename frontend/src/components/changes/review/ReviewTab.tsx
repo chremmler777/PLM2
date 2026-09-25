@@ -34,7 +34,14 @@ export default function ReviewTab({ change, onGoImpact }: { change: ChangeReques
   const [escalateNote, setEscalateNote] = useState('')
   const escalate = useMutation({
     mutationFn: () => intakesApi.escalate(change.id, escalateNote.trim() || undefined),
-    onSuccess: (next) => { refresh(next); setEscalating(false); toast.success('Escalated to a full ECR') },
+    onSuccess: (next) => {
+      refresh(next); setEscalating(false)
+      // Escalation gives the change the ordinary ECR title and the project's
+      // PM as lead: every list naming it must re-read, not only this page.
+      qc.invalidateQueries({ queryKey: ['changes'] })
+      qc.invalidateQueries({ queryKey: ['my-tasks'] })
+      toast.success('Escalated to a full ECR')
+    },
     onError: (e) => toast.error(errDetail(e) ?? 'Could not escalate'),
   })
 

@@ -23,6 +23,9 @@ vi.mock('../BankBuildCard', () => ({
 vi.mock('../ImplementationTracking', () => ({
   default: (p: { canEscalate?: boolean }) => <div data-testid="impl-stub" data-escalate={String(p.canEscalate)} />,
 }))
+vi.mock('../ImplementationPanel', () => ({
+  default: (p: { changeId: number }) => <div data-testid="ecn-stub">{`ecn-${p.changeId}`}</div>,
+}))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const task = (over: Partial<TaskOut> & { id: number }): TaskOut => ({
@@ -92,6 +95,17 @@ describe('TimingTab', () => {
     renderTab({ change: change({ status: 'in_implementation' }) })
     await screen.findByTestId('gantt-stub')
     expect(screen.queryByTestId('timing-issues')).toBeNull()
+  })
+
+  it('carries the revisions\' check workflows while implementing, not first at release (final walk P2-4)', async () => {
+    renderTab({ change: change({ status: 'in_implementation' }) })
+    const section = await screen.findByTestId('timing-revisions')
+    expect(section.textContent).toContain('the release waits until every one is complete')
+    expect(within(section).getByTestId('ecn-stub').textContent).toBe('ecn-7')
+    cleanup()
+    renderTab({ change: change({ status: 'approved' }) })
+    await screen.findByTestId('gantt-stub')
+    expect(screen.queryByTestId('timing-revisions')).toBeNull()
   })
 
   it('shows a retryable error when the confirmations fail to load', async () => {

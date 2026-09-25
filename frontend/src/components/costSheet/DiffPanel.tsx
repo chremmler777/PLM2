@@ -34,19 +34,33 @@ function rowLabel(section: CostSheetSection, r: Record<string, unknown>, ctx: Sh
   }
 }
 
-function fmt(field: string, v: unknown, ctx: SheetContext): string {
+/**
+ * The row's own currency: the row says it, else a currency change on the row
+ * (old or new side), else its plant's currency. Never a blanket EUR: a USA
+ * Toccoa rate is in USD.
+ */
+function rowCurrency(r: Record<string, unknown>, ctx: SheetContext, side: 'old' | 'new' = 'new'): string {
+  const change = (r.changes as Record<string, { old: unknown; new: unknown }> | undefined)?.currency
+  if (change && typeof change[side] === 'string' && change[side]) return change[side] as string
+  if (typeof r.currency === 'string' && r.currency) return r.currency
+  const plant = ctx.plants.find((p) => p.id === r.plant_id)
+  return plant?.currency || 'EUR'
+}
+
+function fmt(field: string, v: unknown, ctx: SheetContext, currency?: string): string {
   if (v === null || v === undefined || v === '') return '-'
-  if (MONEY.has(field)) return formatMoney(v as number)
+  if (MONEY.has(field)) return formatMoney(v as number, currency)
   if (field === 'labour_department_id') return deptName(ctx, v)
   return String(v)
 }
 
 function addedValue(r: Record<string, unknown>, ctx: SheetContext): string {
-  if ('hourly_rate' in r) return fmt('hourly_rate', r.hourly_rate, ctx)
-  if (r.mode === 'flat') return fmt('flat_price', r.flat_price, ctx)
+  const cur = rowCurrency(r, ctx)
+  if ('hourly_rate' in r) return fmt('hourly_rate', r.hourly_rate, ctx, cur)
+  if (r.mode === 'flat') return fmt('flat_price', r.flat_price, ctx, cur)
   if (r.mode === 'components') return 'components'
   if (r.kind === 'percent') return `+${r.value} %`
-  if (r.kind === 'per_hour') return `+${fmt('hourly_rate', r.value, ctx)}/h`
+  if (r.kind === 'per_hour') return `+${fmt('hourly_rate', r.value, ctx, cur)}/h`
   return ''
 }
 
@@ -64,8 +78,8 @@ function Section({ section, data, ctx }: { section: CostSheetSection; data: Diff
               <span className="text-slate-200">{rowLabel(section, c, ctx)}</span>
               {Object.entries(c.changes).map(([f, ch]) => (
                 <span key={f} className="text-slate-400">
-                  {FIELD_LABELS[f] ?? f}: <span className="text-slate-500 line-through">{fmt(f, ch.old, ctx)}</span>
-                  {' '}<span className="text-sky-300">{fmt(f, ch.new, ctx)}</span>
+                  {FIELD_LABELS[f] ?? f}: <span className="text-slate-500 line-through">{fmt(f, ch.old, ctx, rowCurrency(c, ctx, 'old'))}</span>
+                  {' '}<span className="text-sky-300">{fmt(f, ch.new, ctx, rowCurrency(c, ctx, 'new'))}</span>
                   {f === 'hourly_rate' && c.pct !== undefined && (
                     <span className={`ml-1 text-xs ${c.pct >= 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
                       {c.pct >= 0 ? '+' : ''}{c.pct.toLocaleString('de-DE')} %

@@ -81,7 +81,7 @@ export function pickAssessment(list: Assessment[], stage?: number): Assessment |
     ?? byStage[0]
 }
 
-function stateOf(a: Assessment | undefined, onHold: boolean, declined = false): State {
+function stateOf(a: Assessment | undefined, onHold: boolean, declined = false, owed = false): State {
   if (a?.status === 'waived') return 'waived'
   if (a?.submitted_at || (a?.verdict && a.verdict !== 'pending')) return 'submitted'
   // "Not our responsibility" waits on the lead: the letter stays, the row is
@@ -89,7 +89,10 @@ function stateOf(a: Assessment | undefined, onHold: boolean, declined = false): 
   if (declined) return 'declined'
   // A pending row belongs to a stage that has not started — the department is
   // not on the hook yet, so no hold, no owner, no "waiting" urgency.
-  if (a?.status === 'pending') return 'queued'
+  // ... unless the round says it owes its answer now: a department the scoping
+  // meeting put on the hook (R/A) whose row has not been activated yet is
+  // owed work, not a later stage.
+  if (a?.status === 'pending' && !owed) return 'queued'
   if (onHold) return 'on_hold'
   if (a?.owner_id != null || a?.accepted_at) return 'in_work'
   return 'waiting'
@@ -280,6 +283,10 @@ export default function AssessmentBuckets({
   // Every first-stage R/A department, the viewer's own included, counted the
   // way "Blocked by" counts them, so the two never disagree.
   const roundState = round ?? deriveAssessmentState(change.assessments, deptName)
+  // Owed now: the round the page hands in (stage-state) waits on this
+  // department, whatever its row's engine status says.
+  const owedIds = new Set(change.status !== 'in_assessment' ? []
+    : (round?.waiting_on ?? []).map((d) => d.department_id))
   const progress = roundState ? {
     done: roundState.submitted, total: roundState.total,
     waiting: roundState.waiting_on.map((d) => d.department_id),
@@ -298,7 +305,8 @@ export default function AssessmentBuckets({
       {deviationPanel}
       {visible.map((row) => {
         const a = row.assessment
-        const state = stateOf(a, row.onHold, row.declined)
+        const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
+        const state = stateOf(a, row.onHold, row.declined, owed)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
@@ -306,7 +314,7 @@ export default function AssessmentBuckets({
         const expanded = mayOpen && (autoOpen ? isMine : openDept === row.id)
         const areas = impactedCount(a?.details)
         const risks = checklistRisks(row.id)
-        const canSubmit = isMine && editable && a?.status === 'active'
+        const canSubmit = isMine && editable && (a?.status === 'active' || (owed && a?.status === 'pending'))
         return (
           <section key={row.id} data-testid={`bucket-${row.id}`}
             className={`rounded-lg border ${
