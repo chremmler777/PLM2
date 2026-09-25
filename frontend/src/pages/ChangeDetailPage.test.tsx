@@ -66,6 +66,7 @@ vi.mock('../api/changes', () => ({
     customerResponse: vi.fn().mockResolvedValue({}),
     listConcerns: vi.fn().mockResolvedValue([]),
     approveInternalCosts: vi.fn().mockResolvedValue({}),
+    transition: vi.fn().mockResolvedValue({}),
   },
 }))
 vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
@@ -122,7 +123,12 @@ vi.mock('../components/changes/timing/TimingTab', () => ({
   ),
 }))
 vi.mock('../components/changes/release/ReleaseTab', () => ({
-  default: (p: { canManage: boolean }) => <div data-testid="mock-release-tab">manage={String(p.canManage)}</div>,
+  default: (p: { canManage: boolean; onAdvance?: (to: string) => void }) => (
+    <div>
+      <div data-testid="mock-release-tab">manage={String(p.canManage)}</div>
+      <button type="button" onClick={() => p.onAdvance?.('closed')}>mock-close</button>
+    </div>
+  ),
 }))
 
 function wrap(initialPath: string) {
@@ -152,11 +158,20 @@ describe('ChangeDetailPage URL-driven tabs', () => {
     expect(screen.getByText('mock-d1-panel')).toBeDefined()
   })
 
-  it('falls back to overview when ?tab is invalid', async () => {
+  it('falls back to the phase tab when ?tab is invalid', async () => {
     wrap('/changes/1?tab=bogus')
-    const overviewButton = await screen.findByRole('button', { name: 'Overview' })
-    expect(overviewButton.className).toContain('border-b-2')
+    // in_assessment works on the Assessments tab.
+    const phaseButton = await screen.findByRole('button', { name: /Assessments/ })
+    expect(phaseButton.className).toContain('border-b-2')
     expect(screen.queryByText('mock-d1-panel')).toBeNull()
+  })
+
+  it('F8: opens on the tab of the current phase without ?tab, and Overview stays reachable', async () => {
+    wrap('/changes/1')
+    const phaseButton = await screen.findByRole('button', { name: /Assessments/ })
+    expect(phaseButton.className).toContain('border-b-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Overview' }).className).toContain('border-b-2'))
   })
 })
 
@@ -423,16 +438,16 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     change.customer_relevant = true
   })
 
-  it('widens the page for the offer, timing and release work', async () => {
+  it('F15: one page width for every tab', async () => {
     change.customer_relevant = true
     change.status = 'quoted' as ChangeDetail['status']
     const { container } = wrap('/changes/1?tab=offer')
     await screen.findByTestId('mock-offer-tab')
     expect((container.firstChild as HTMLElement).className).toContain('max-w-[1400px]')
     cleanup()
-    const r = wrap('/changes/1')
+    const r = wrap('/changes/1?tab=overview')
     await screen.findByRole('button', { name: /Overview/ })
-    expect((r.container.firstChild as HTMLElement).className).toContain('max-w-5xl')
+    expect((r.container.firstChild as HTMLElement).className).toContain('max-w-[1400px]')
   })
 
   it('gives PM the release management rights', async () => {
@@ -763,5 +778,32 @@ describe('ChangeDetailPage wait banner', () => {
     wrap('/changes/1')
     expect(await screen.findAllByTestId('wait-sales-info-1')).toHaveLength(1)
     expect(screen.queryByTestId('wait-banner')).toBeNull()
+  })
+})
+
+describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
+  afterEach(() => { cleanup(); change.status = 'in_assessment' as ChangeDetail['status'] })
+
+  it('asks before closing and only then moves the change', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'released' as ChangeDetail['status']
+    wrap('/changes/1?tab=release')
+    fireEvent.click(await screen.findByText('mock-close'))
+    const dialog = await screen.findByTestId('confirm-closed')
+    expect(dialog.textContent).toContain('Closing is final')
+    expect(changesApi.transition).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('confirm-go'))
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'closed', { to: 'closed' }))
+  })
+
+  it('offers no Cancel once the change is released or closed', async () => {
+    change.status = 'released' as ChangeDetail['status']
+    wrap('/changes/1')
+    await screen.findByText('mock-cockpit-summary')
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    wrap('/changes/1')
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeDefined()
   })
 })

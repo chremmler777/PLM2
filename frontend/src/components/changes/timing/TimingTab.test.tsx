@@ -13,7 +13,7 @@ vi.mock('../../../api/changePlan', () => ({
   },
 }))
 vi.mock('../plan/GanttPlanner', () => ({
-  default: (p: { mode?: string }) => <div data-testid="gantt-stub" data-mode={p.mode} />,
+  default: (p: { mode?: string; hideSeed?: boolean }) => <div data-testid="gantt-stub" data-mode={p.mode} data-hide-seed={String(!!p.hideSeed)} />,
 }))
 vi.mock('../BankBuildCard', () => ({
   default: (p: { canSetMode?: boolean; canPublish?: boolean; hidePublish?: boolean }) =>
@@ -123,7 +123,7 @@ describe('TimingTab', () => {
     expect(screen.getByTestId('feedback-confirm-12')).toBeTruthy()
     expect(screen.queryByTestId('feedback-confirm-11')).toBeNull()
     expect(screen.queryByTestId('feedback-concern-13')).toBeNull()
-    expect(screen.getByTestId('feedback-chip-13').textContent).toBe('Plan changed since')
+    expect(screen.getByTestId('feedback-chip-13').textContent).toBe('Plan changed after this confirmation')
     expect(screen.getByTestId('feedback-chip-12').textContent).toBe('Waiting')
 
     fireEvent.click(screen.getByTestId('feedback-confirm-12'))
@@ -279,5 +279,24 @@ describe('TimingTab', () => {
     await screen.findByTestId('deviation-5')
     expect(screen.queryByTestId('deviation-lock-5')).toBeNull()
     expect(screen.queryByTestId('impl-stub')).toBeNull() // still approved
+  })
+
+  it('F18: no lock or escalate once the change is released', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
+    vi.mocked(planApi.deviations).mockResolvedValue([{
+      id: 5, task_id: 1, task_name: 'Tool rework', old_start: '2026-10-05', old_end: '2026-10-10',
+      new_start: '2026-10-05', new_end: '2026-10-13', slip_days: 3, finish_impact_days: 0,
+      reason: 'x', status: 'open',
+    }])
+    renderTab({ change: change({ status: 'released' }), canDecideDeviation: true })
+    await screen.findByTestId('deviation-5')
+    expect(screen.queryByTestId('deviation-lock-5')).toBeNull()
+    expect(screen.queryByTestId('deviation-escalate-5')).toBeNull()
+  })
+
+  it('F19: the Gantt hides its own seed button (the card above creates the plan)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(plan())
+    renderTab({ canEditPlan: true })
+    expect((await screen.findByTestId('gantt-stub')).dataset.hideSeed).toBe('true')
   })
 })

@@ -20,6 +20,9 @@ import ReleaseTab from '../components/changes/release/ReleaseTab';
 import TimingTab from '../components/changes/timing/TimingTab';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
+import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
+import { changeReleaseApi } from '../api/changeRelease';
+import { releaseKey } from '../components/changes/release/releaseKeys';
 import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import ChangeAttachments from '../components/changes/ChangeAttachments';
@@ -33,7 +36,7 @@ import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import {
-  STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS,
+  STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, type ChangeTab,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
@@ -47,9 +50,15 @@ type Tab = ChangeTab;
 // F2: before costing there's no cost basis yet: the costing tab is locked and
 // PnlCard hides itself for the same statuses.
 const BEFORE_COSTING: string[] = ['captured', 'scoping', 'in_assessment'];
-// Tabs that carry wide content (the Gantt, the offer workspace with its sum
-// card, the costing buckets): the page widens for them, header included.
-const WIDE_TABS: Tab[] = ['costing', 'offer', 'timing', 'release'];
+// Statuses from which a change can still be cancelled (mirrors the backend's
+// allowed transitions): released only closes, closed/cancelled/rejected are done.
+const CANCELLABLE: string[] = [
+  'captured', 'scoping', 'in_assessment', 'costing', 'quoting', 'quoted',
+  'approved', 'in_implementation', 'in_validation', 'on_hold',
+];
+/** Where a change opens without ?tab: the tab its current phase is worked on. */
+const defaultTabFor = (status: string): Tab =>
+  STATUS_ACTIVE_TAB[status as ChangeStatus] ?? (status === 'closed' ? 'release' : 'overview');
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
   const from = TAB_UNLOCK_STATUS[tb];
@@ -72,7 +81,8 @@ export default function ChangeDetailPage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab');
-  const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
+  // Always explicit: without ?tab the page opens on the phase's tab.
+  const setTab = (t: Tab) => setSearchParams({ tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   // Bumped on every reported block, even an identical one, so the banner's
   // scroll-into-view effect re-fires on a second, otherwise-unchanged block.
@@ -85,6 +95,8 @@ export default function ChangeDetailPage() {
   // Pulling a change from quote creation back into costing: same people who
   // may close costing (PM, Sales, lead, admin), always with a reason.
   const [reopenCostingOpen, setReopenCostingOpen] = useState(false);
+  // F4: the last look before a step that cannot simply be undone.
+  const [confirmTo, setConfirmTo] = useState<string | null>(null);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -136,6 +148,27 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'plan-feedback'],
     queryFn: () => planApi.feedback(changeId),
     enabled: !!change && change.status === 'approved',
+  });
+  // After the baseline, open plan deviations are named in "Blocked by"; same
+  // key as the Timing tab's panel.
+  const tracking = !!change && ['approved', 'in_implementation', 'in_validation'].includes(change.status);
+  const { data: planDeviations = [] } = useQuery({
+    queryKey: ['change', changeId, 'plan-deviations'],
+    queryFn: () => planApi.deviations(changeId),
+    enabled: tracking && !!change?.timing_validated_at,
+  });
+  const openPlanDeviations = planDeviations.filter((d) => d.status === 'open').length;
+  // The release guard's reasons (same key as the Release tab).
+  const { data: releaseState } = useQuery({
+    queryKey: releaseKey(changeId),
+    queryFn: () => changeReleaseApi.get(changeId),
+    enabled: !!change && change.status === 'in_validation',
+  });
+  // The detailed plan's progress, for the "end implementation" confirmation.
+  const { data: detailedPlan } = useQuery({
+    queryKey: ['change', changeId, 'plan', 'detailed'],
+    queryFn: () => planApi.get(changeId, 'detailed'),
+    enabled: confirmTo === 'in_validation',
   });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
@@ -245,24 +278,93 @@ export default function ChangeDetailPage() {
   // falls back to overview rather than rendering a blank/forbidden tab.
   // Old names (?tab=commercial, ?tab=implementation) land on the tab for the
   // change's stage; anything unknown is overview.
-  const tab: Tab = resolveChangeTab(rawTab, change.status) ?? 'overview';
+  const tab: Tab = resolveChangeTab(rawTab, change.status) ?? defaultTabFor(change.status);
   const effectiveTab: Tab =
     (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || isTabLocked(change.status, tab)
       ? 'overview' : tab;
   // Actions and waits may still name old tabs; resolve them the same way.
   const goTab = (raw: string) => setTab(resolveChangeTab(raw, change.status) ?? 'overview');
-  const wide = WIDE_TABS.includes(effectiveTab);
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
     if (to === 'rejected') { setRejectOpen(true); return; }
     // Leaving a rejected change is a reopen, wherever the button lives.
     if (change.status === 'rejected') { setReopenOpen(true); return; }
+    // Closing costing, ending implementation, releasing and closing are asked once more.
+    if ((change.status === 'costing' && to === 'quoting')
+      || ['in_validation', 'released', 'closed'].includes(to)) { setConfirmTo(to); return; }
     transition.mutate({ to });
   };
 
+  // F10: who may take which next step, mirroring the backend's 403 gates.
+  const needs = (step: string): string | null => {
+    switch (step) {
+      case 'to:quoting': return isAdmin || isChangeLead || isSalesMember || isPmMember ? null
+        : 'Needs Sales, the Project Manager or the change lead';
+      case 'offer':
+      case 'answer': return canEditQuotedPrice ? null : 'Needs Sales or the change lead';
+      case 'signoff': return canSignPm || canSignQuality ? null : 'Needs the Project Manager and Quality';
+      case 'validate-timing': return canEditPlan || canPublishTiming ? null
+        : 'Needs the Project Manager, Scheduling or Sales';
+      case 'to:released':
+      case 'to:closed': return canManageRelease ? null : 'Needs the Project Manager or the change lead';
+      default: return null;
+    }
+  };
+
+  const confirm: TransitionConfirm | null = (() => {
+    if (!confirmTo) return null;
+    if (confirmTo === 'quoting') {
+      return {
+        to: confirmTo, title: 'Close costing',
+        consequence: 'Closing costing freezes every department\'s numbers and hands the change to Sales for the offer. '
+          + 'Reopening costing later needs a reason and is recorded.',
+        open: (change.costing_pending_department_ids ?? []).map((d) => `${deptName(d)}: cost input not entered`),
+        allClear: 'Every department has entered its cost input.',
+        confirmLabel: 'Close costing',
+      };
+    }
+    if (confirmTo === 'in_validation') {
+      const tasks = (detailedPlan?.tasks ?? []).filter((x) => !x.is_idea && !x.is_summary);
+      const notDone = tasks.filter((x) => (x.progress_pct ?? 0) < 100 && !x.actual_finish);
+      const avg = tasks.length ? Math.round(tasks.reduce((a, x) => a + (x.actual_finish ? 100 : x.progress_pct ?? 0), 0) / tasks.length) : 0;
+      const implRows = Array.isArray(implState) ? implState : implState.departments ?? [];
+      const owing = implRows.filter((r) => r.owes_report).map((r) => deptName(r.department_id));
+      return {
+        to: confirmTo, title: 'End implementation',
+        consequence: 'Implementation ends and the departments start validating. Sending the change back to '
+          + 'implementation later needs a reason and is recorded.',
+        open: [
+          ...(notDone.length ? [`${notDone.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'} not finished (plan ${avg} % done)`] : []),
+          ...(owing.length ? [`Progress report due: ${owing.join(', ')}`] : []),
+          ...(openPlanDeviations ? [`${openPlanDeviations} plan deviation${openPlanDeviations === 1 ? '' : 's'} open`] : []),
+        ],
+        allClear: 'Every task is finished and reported.',
+        confirmLabel: 'Move to validation',
+        loading: !detailedPlan,
+      };
+    }
+    if (confirmTo === 'released') {
+      return {
+        to: confirmTo, title: 'Release the change',
+        consequence: 'Releasing puts the change live. It cannot be moved back; after release it can only be closed.',
+        open: releaseState?.blockers ?? [],
+        allClear: 'Validation, checklist and lessons are done.',
+        confirmLabel: 'Release change',
+        final: true,
+        loading: !releaseState,
+      };
+    }
+    return {
+      to: confirmTo, title: 'Close the change',
+      consequence: 'Closing is final. The change and its records become read only.',
+      open: [], confirmLabel: 'Close change', final: true,
+    };
+  })();
+
   return (
-    <div className={`${wide ? 'max-w-[1400px]' : 'max-w-5xl'} mx-auto p-6`}>
+    // One width for every tab, so switching tabs never moves the header.
+    <div className="max-w-[1400px] mx-auto p-6">
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-semibold flex items-center gap-3">
           <span>
@@ -291,8 +393,10 @@ export default function ChangeDetailPage() {
             <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
                     onClick={() => advance('in_assessment')}>Resume</button>
           )}
-          <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
-                  onClick={() => advance('cancelled')}>Cancel</button>
+          {CANCELLABLE.includes(change.status) && (
+            <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
+                    onClick={() => advance('cancelled')}>Cancel</button>
+          )}
         </div>
       </div>
 
@@ -351,6 +455,9 @@ export default function ChangeDetailPage() {
         onSubmit={(reason) => { setReopenCostingOpen(false); transition.mutate({ to: 'costing', reason }); }}
         onClose={() => setReopenCostingOpen(false)}
       />
+      <TransitionConfirmDialog confirm={confirm} busy={transition.isPending}
+        onClose={() => setConfirmTo(null)}
+        onConfirm={() => { const to = confirmTo!; setConfirmTo(null); transition.mutate({ to }); }} />
       <ReasonDialog
         open={cancelOpen}
         title="Cancel change"
@@ -376,8 +483,10 @@ export default function ChangeDetailPage() {
         // owns the next move.
         waits={resolveWaitStates(change, concerns, deptName, change.assessments,
           { state: implState, escalations: implEscalations }, validation,
-          change.status === 'approved' ? planFeedback : null)}
+          change.status === 'approved' ? planFeedback : null,
+          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null })}
         onGo={goTab}
+        needs={needs}
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">

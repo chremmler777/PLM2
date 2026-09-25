@@ -50,6 +50,7 @@ export default function LessonsStep({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: releaseKey(changeId) })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
   }
   const add = useMutation({
     mutationFn: () => changeReleaseApi.addLesson(changeId, {

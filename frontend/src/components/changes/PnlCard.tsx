@@ -7,12 +7,14 @@ const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment']
 /** Stages where booked hours exist, so an actuals block is expected. */
 const ACTUALS_STATUSES: ChangeStatus[] = ['in_implementation', 'in_validation', 'released', 'closed'];
 
+const moneyFmt = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** "13.629,50": always two decimals, de-DE grouping. */
 const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined || !Number.isFinite(v) ? '-' : v.toLocaleString('de-DE');
+  v === null || v === undefined || !Number.isFinite(v) ? '-' : moneyFmt.format(v);
 
 function marginAccent(v: number | null | undefined): string {
-  if (v === null || v === undefined) return 'text-slate-400';
-  return v >= 0 ? 'text-emerald-400' : 'text-red-400';
+  if (v === null || v === undefined || Math.abs(v) < 0.005) return 'text-slate-400';
+  return v > 0 ? 'text-emerald-400' : 'text-red-400';
 }
 
 /**
@@ -80,7 +82,9 @@ function normalizeActuals(raw: PnlActuals | Record<string, unknown>) {
   const extraCost = num(a.extra_cost) ?? num(a.total_extras) ?? extraSum
   const total = num(a.total_cost) ?? internal + extraCost
   const plan = num(a.plan_internal_cost) ?? num(a.total_plan)
-  const delta = num(a.delta) ?? num(a.variance)
+  // Actual minus plan, on the same total the card shows (extras included):
+  // the backend's variance leaves the extras out.
+  const delta = plan !== null ? total - plan : num(a.delta) ?? num(a.variance)
   const unrated = typeof a.unrated === 'boolean' ? a.unrated
     : typeof a.unrated_hours === 'boolean' ? a.unrated_hours
     : rows.some((r) => r.unrated)
@@ -169,7 +173,8 @@ function ActualsSection({
         {actuals.delta !== null && (
           <span data-testid="pnl-actuals-delta"
             className={`text-xs font-medium tabular-nums ${
-              actuals.delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+              Math.abs(actuals.delta) < 0.005 ? 'text-slate-400'
+              : actuals.delta > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
             {t('actuals.delta')} {actuals.delta > 0 ? '+' : ''}{fmtMoney(actuals.delta)}
           </span>
         )}

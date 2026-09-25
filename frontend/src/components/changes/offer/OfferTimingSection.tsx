@@ -43,17 +43,18 @@ export default function OfferTimingSection({
       </div>
       {data && update && (
         <fieldset disabled={fieldsDisabled} aria-busy={fieldsDisabled}
-          className="m-0 grid gap-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3 sm:grid-cols-[auto_10rem_minmax(0,1fr)]">
-          <label className="flex items-center gap-2 self-end pb-1.5 text-sm text-slate-200">
+          className="m-0 grid items-start gap-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3 sm:grid-cols-[auto_12rem_minmax(0,1fr)]">
+          <label className="flex items-center gap-2 self-center whitespace-nowrap pt-4 text-sm text-slate-200">
             <Toggle checked={timing.include !== false} disabled={!editable} label="Include timing in the offer"
               testId="timing-include" onChange={(v) => set({ include: v })} />
             Include in offer
           </label>
           <Field label={auto != null ? `Weeks from order (plan: ${auto})` : 'Weeks from order'}>
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <NumField value={timing.weeks_from_order} disabled={!editable || timing.include === false}
-                ariaLabel="Weeks from order" testId="timing-weeks"
+                ariaLabel="Weeks from order" testId="timing-weeks" className="w-20 min-w-0"
                 onChange={(v) => set({ weeks_from_order: v })} />
+              <span className="text-xs text-slate-500">weeks</span>
               {editable && auto != null && auto !== timing.weeks_from_order && (
                 <button type="button" title="Take the weeks from the plan"
                   className="text-xs text-sky-300 hover:text-sky-200"

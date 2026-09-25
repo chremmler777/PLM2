@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { addDaysIso, todayIso } from '../../../lib/format'
 import OfferTab, { type OfferTabProps } from './OfferTab'
 import { changeOfferApi } from '../../../api/changeOffer'
 import type { ChangeDetail } from '../../../types/change'
@@ -9,7 +10,7 @@ import type { OfferOut } from '../../../types/changeOffer'
 vi.mock('../../../api/changeOffer', () => ({
   changeOfferApi: {
     list: vi.fn(), create: vi.fn(), patch: vi.fn(), refresh: vi.fn(),
-    send: vi.fn(), received: vi.fn(), pdf: vi.fn(),
+    send: vi.fn(), received: vi.fn(), pdf: vi.fn(), discard: vi.fn(),
   },
 }))
 vi.mock('../../../api/changePlan', () => ({
@@ -140,12 +141,60 @@ describe('OfferTab', () => {
     vi.mocked(changeOfferApi.send).mockResolvedValue(offer({ status: 'sent' }))
     renderTab(props())
     fireEvent.click(await screen.findByTestId('offer-send'))
-    fireEvent.change(await screen.findByTestId('send-received'), { target: { value: '2026-09-24' } })
+    const day = addDaysIso(todayIso(), -1)
+    fireEvent.change(await screen.findByTestId('send-received'), { target: { value: day } })
     expect(screen.getByTestId('send-valid-until').textContent)
-      .toBe('The offer is valid 30 days from receipt, until 24.10.2026.')
+      .toBe(`The offer is valid 30 days from receipt, until ${addDaysIso(day, 30).split('-').reverse().join('.')}.`)
     expect(screen.queryByTestId('send-note')).toBeNull()
     fireEvent.click(screen.getByTestId('send-confirm'))
-    await waitFor(() => expect(changeOfferApi.send).toHaveBeenCalledWith(7, 11, { received_at: '2026-09-24' }))
+    await waitFor(() => expect(changeOfferApi.send).toHaveBeenCalledWith(7, 11, { received_at: day }))
+    expect(changeOfferApi.patch).not.toHaveBeenCalled()
+  })
+
+  it('send dialog: no receipt date in the future or older than 60 days; the customer note is saved first', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))
+    vi.mocked(changeOfferApi.send).mockResolvedValue(offer({ status: 'sent' }))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('offer-send'))
+    const date = await screen.findByTestId('send-received') as HTMLInputElement
+    expect(date.max).toBe(todayIso())
+    expect(date.min).toBe(addDaysIso(todayIso(), -60))
+    const confirm = screen.getByTestId('send-confirm') as HTMLButtonElement
+    fireEvent.change(date, { target: { value: addDaysIso(todayIso(), 1) } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(date, { target: { value: addDaysIso(todayIso(), -61) } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(date, { target: { value: todayIso() } })
+    fireEvent.change(screen.getByTestId('send-customer-note'), { target: { value: 'Bank build included' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(changeOfferApi.send).toHaveBeenCalled())
+    expect(changeOfferApi.patch).toHaveBeenCalledWith(7, 11, { data: { customer_note: 'Bank build included' } })
+  })
+
+  it('discards a draft after asking once', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.discard).mockResolvedValue(undefined)
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('offer-discard'))
+    expect(changeOfferApi.discard).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('offer-discard-yes'))
+    await waitFor(() => expect(changeOfferApi.discard).toHaveBeenCalledWith(7, 11))
+  })
+
+  it('factor and risk surcharge "show on offer" toggles patch the draft', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))
+    renderTab(props())
+    const show = await screen.findByTestId('factor-show-margin')
+    // Margin is hidden by default (spread over the cost lines).
+    expect(show.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(show)
+    fireEvent.click(screen.getByTestId('risk-surcharge-show'))
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalled(), { timeout: 2000 })
+    const body = vi.mocked(changeOfferApi.patch).mock.calls[0][2]
+    expect(body.data?.factors?.[0].show).toBe(true)
+    expect(body.data?.show_risk_surcharge).toBe(true)
   })
 
   it('send dialog: from v2 the change note is required and the diff shown', async () => {
@@ -170,16 +219,27 @@ describe('OfferTab', () => {
   })
 
   it('shows the validity chip of the sent version and offers a new version', async () => {
-    const v1 = offer({ status: 'sent', valid_until: '2026-10-01', days_left: 7 })
+    const until = addDaysIso(todayIso(), 7)
+    const v1 = offer({ status: 'sent', valid_until: until, days_left: 7 })
     vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
     vi.mocked(changeOfferApi.create).mockResolvedValue(offer({ id: 12, version: 2 }))
     renderTab(props({ change: change({ status: 'quoted' }) }))
     const chip = await screen.findByTestId('offer-valid-chip')
-    expect(chip.textContent).toContain('01.10.2026')
+    expect(chip.textContent).toContain(until.split('-').reverse().join('.'))
+    expect(chip.textContent).toContain('7 d left')
     expect(chip.className).toContain('amber')
     fireEvent.click(screen.getByTestId('offer-new-version'))
     await waitFor(() => expect(changeOfferApi.create).toHaveBeenCalled())
     expect(screen.getByTestId('offer-negotiation')).toBeDefined()
+  })
+
+  it('shows Accepted, not a countdown, once the customer accepted', async () => {
+    const v2 = offer({ status: 'accepted', valid_until: '2026-10-25', days_left: null })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v2])
+    renderTab(props({ change: change({ status: 'approved', customer_response: 'accepted' }) }))
+    expect((await screen.findByTestId('offer-status')).textContent).toBe('Accepted v1')
+    expect(screen.queryByTestId('offer-valid-chip')).toBeNull()
+    expect(screen.getByTestId('offer-header').textContent).not.toContain('null')
   })
 
   it('serializes saves: an edit during a PATCH waits for it and goes out alone', async () => {

@@ -5,7 +5,7 @@
  * here: the business rule lives in one place.
  */
 import type { OfferOut } from '../../../types/changeOffer'
-import { fmtMoney, fmtPct, fmtPiece, sectionLabel } from './offerFormat'
+import { fmtMoney, fmtPct, fmtPiece, resultTone, sectionLabel } from './offerFormat'
 import type { SaveState } from './useOfferDraft'
 
 function Row({ label, value, muted, testId, strong }: {
@@ -62,9 +62,9 @@ export default function OfferSumCard({ offer, saveState, stale }: {
       <div className="space-y-1.5">
         <Row label="Internal cost" value={fmtMoney(tot.internal_cost, cur)} muted testId="sum-internal" />
         <div className="flex items-baseline justify-between text-xs">
-          <span className="text-slate-500">Margin</span>
+          <span className="text-slate-500">Result vs internal cost</span>
           <span data-testid="sum-margin"
-            className={`tabular-nums ${margin == null ? 'text-slate-500' : margin >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            className={`tabular-nums ${resultTone(margin)}`}>
             {fmtMoney(margin, cur)}{tot.margin_pct != null && <span className="ml-1 text-slate-500">({fmtPct(tot.margin_pct)})</span>}
           </span>
         </div>

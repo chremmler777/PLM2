@@ -40,4 +40,12 @@ describe('DeadlineChip', () => {
     const [y, m, d] = tomorrow.split('-')
     expect(chip.getAttribute('title')).toBe(`${d}.${m}.${y}`)
   })
+  it('reads as a sentence for a named deadline', () => {
+    render(<DeadlineChip date={addDaysIso(todayIso(), 5)} state="on_track" kind="release" />)
+    expect(screen.getByTestId('deadline-chip').textContent).toBe('Release in 5 d')
+  })
+  it('names an overdue release deadline', () => {
+    render(<DeadlineChip date={addDaysIso(todayIso(), -2)} state="overdue" kind="release" />)
+    expect(screen.getByTestId('deadline-chip').textContent).toBe('Release 2 d overdue')
+  })
 })

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ReleaseTab from './ReleaseTab'
+import ReleaseTab, { closingFigures } from './ReleaseTab'
 import ReleaseChecklist from './ReleaseChecklist'
 import LessonsStep from './LessonsStep'
 import { changeReleaseApi } from '../../../api/changeRelease'
@@ -21,8 +21,10 @@ vi.mock('../../../api/changePlan', () => ({
   planApi: {
     get: vi.fn().mockResolvedValue({
       tasks: [
-        { id: 1, is_idea: false, baseline_finish: '2026-10-11', actual_finish: '2026-10-14' },
-        { id: 2, is_idea: false, baseline_finish: '2026-10-01', actual_finish: '2026-10-02' },
+        { id: 1, is_idea: false, start_date: '2026-10-01', duration_days: 14, progress_pct: 100,
+          baseline_start: '2026-10-01', baseline_finish: '2026-10-11', actual_finish: '2026-10-14' },
+        { id: 2, is_idea: false, start_date: '2026-09-25', duration_days: 7, progress_pct: 100,
+          baseline_start: '2026-09-25', baseline_finish: '2026-10-02', actual_finish: '2026-10-02' },
       ],
       summary: { finish: '2026-10-14' },
     }),
@@ -183,8 +185,33 @@ describe('ReleaseTab', () => {
     // Baseline finish is exclusive 2026-10-11 -> last day 10.10.2026; actual 14.10.2026.
     expect((await screen.findByTestId('summary-baseline-finish')).textContent).toBe('10.10.2026')
     await waitFor(() => expect(screen.getByTestId('summary-actual-finish').textContent).toBe('14.10.2026'))
-    expect(screen.getByTestId('summary-against-baseline').textContent).toBe('+4 d')
+    expect(screen.getByTestId('summary-against-baseline').textContent).toBe('4 d late')
+    expect(screen.getByTestId('summary-against-baseline-detail').textContent).toBe('1 task slipped')
     fireEvent.click(screen.getByTestId('close-change'))
     expect(onAdvance).toHaveBeenCalledWith('closed')
+  })
+})
+
+describe('closingFigures', () => {
+  const task = (over: Record<string, unknown>) => ({
+    id: 1, is_idea: false, start_date: '2026-12-14', duration_days: 7, progress_pct: 0,
+    baseline_start: null, baseline_finish: null, actual_finish: null, ...over,
+  }) as never
+
+  it('reads finishes like the Timing tab: a milestone sits on its day, open tasks are counted', () => {
+    const f = closingFigures([
+      task({ id: 1, start_date: '2026-12-14', duration_days: 7,
+        baseline_start: '2026-12-07', baseline_finish: '2026-12-14', actual_finish: null }),
+      // SOP milestone on 21.12: the finish is 21.12, not 20.12.
+      task({ id: 2, start_date: '2026-12-21', duration_days: 0,
+        baseline_start: '2026-12-21', baseline_finish: '2026-12-21' }),
+      task({ id: 3, is_idea: true, start_date: '2027-01-10', duration_days: 5 }),
+    ])
+    expect(f.planned).toBe('2026-12-21')
+    expect(f.baseline).toBe('2026-12-21')
+    expect(f.actual).toBeNull()
+    expect(f.open).toBe(2)
+    expect(f.slipped).toBe(1)
+    expect(f.slip).toBe(0)
   })
 })

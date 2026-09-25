@@ -34,7 +34,15 @@ export interface OfferFactor {
   sign: 1 | -1
   enabled: boolean
   note?: string | null
+  /** Printed as its own line on the offer. Hidden factors are spread over the
+   *  included cost lines in the PDF; the total is the same either way.
+   *  Backend default: false for overhead and margin. */
+  show?: boolean
 }
+
+/** A factor's "show on offer" with the backend's default when absent. */
+export const factorShown = (f: Pick<OfferFactor, 'key' | 'show'>): boolean =>
+  f.show ?? (f.key !== 'overhead' && f.key !== 'margin')
 
 export interface OfferRisk {
   concern_id: number
@@ -102,6 +110,13 @@ export interface OfferData {
   timing?: OfferTiming
   free_fields?: OfferFreeField[]
   terms?: OfferTerms
+  /** Risk surcharges as their own lines on the offer; folded into the cost
+   *  lines otherwise (default). */
+  show_risk_surcharge?: boolean
+  /** PDF section 1, as the customer reads it (seeded from the change description). */
+  scope_text?: string | null
+  /** Printed on the offer: a word to the customer about this version. */
+  customer_note?: string | null
 }
 
 export interface OfferTotals {

@@ -807,6 +807,9 @@ export type ValidationCheckStatus = 'open' | 'passed' | 'failed';
 
 export interface ValidationCheck {
   check_key: ValidationCheckKey | (string & {});
+  /** The catalog's labels (backend validation_checklist). */
+  label_en?: string | null;
+  label_de?: string | null;
   status: ValidationCheckStatus;
   /** Seconds for `cycle_time`, grams for `weight`; null for the yes/no checks. */
   value?: number | null;

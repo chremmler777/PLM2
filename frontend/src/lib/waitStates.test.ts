@@ -313,3 +313,24 @@ describe('resolveWaitStates', () => {
     expect(waits.map((w) => w.key)).toEqual(['sales-info-1', 'review-2', 'blocked-departments'])
   })
 })
+
+describe('resolveWaitStates: deviations and release blockers', () => {
+  const deptName = (id: number) => `#${id}`
+  it('names open plan deviations as information while the work runs', () => {
+    const waits = resolveWaitStates(change({ status: 'in_implementation' }), [], deptName, [], {}, null, null,
+      { openPlanDeviations: 2 })
+    expect(waits).toEqual([expect.objectContaining({ key: 'plan-deviations', info: true, tab: 'timing' })])
+    expect(waits[0].text).toContain('2 plan deviations')
+  })
+  it('lists the release guard reasons at validation, once each', () => {
+    const waits = resolveWaitStates(change({ status: 'in_validation' }), [], deptName, [], {}, null, null, {
+      openPlanDeviations: 1,
+      releaseBlockers: ['Not ready to go: 2 revisions open', 'Lessons learned step not done',
+        '1 plan deviation still open: lock or escalate them first'],
+    })
+    expect(waits.map((w) => w.text)).toEqual(['Not ready to go: 2 revisions open', 'Lessons learned step not done',
+      '1 plan deviation still open: lock or escalate them first'])
+    expect(waits.every((w) => !w.info)).toBe(true)
+    expect(waits[2].tab).toBe('timing')
+  })
+})

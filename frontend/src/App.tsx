@@ -218,7 +218,7 @@ export default function App() {
         <AuthProvider>
           <BrowserRouter basename="/plm2">
             <AppRoutes />
-            <Toaster position="top-right" />
+            <Toaster position="bottom-right" />
           </BrowserRouter>
         </AuthProvider>
       </ThemeProvider>

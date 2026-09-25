@@ -14,6 +14,10 @@ export const changeOfferApi = {
   patch: (changeId: number, offerId: number, body: { data?: OfferData; currency?: string }) =>
     client.patch<OfferOut>(`/v1/changes/${changeId}/offers/${offerId}`, body).then((r) => r.data),
 
+  /** Draft only: throws the draft away (Sales, the change lead, admin). */
+  discard: (changeId: number, offerId: number) =>
+    client.delete(`/v1/changes/${changeId}/offers/${offerId}`).then(() => undefined),
+
   /** Re-seeds cost lines and risks from costing, keeping overrides by key. */
   refresh: (changeId: number, offerId: number) =>
     client.post<OfferOut>(`/v1/changes/${changeId}/offers/${offerId}/refresh`).then((r) => r.data),

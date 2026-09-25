@@ -8,16 +8,23 @@ const STATE_CLASS: Record<string, string> = {
   overdue: 'bg-red-500/10 text-red-300 border-red-500/30',
 }
 
-export function DeadlineChip({ date, state }: { date: string | null; state: string | null }) {
+export function DeadlineChip({ date, state, kind }: {
+  date: string | null; state: string | null
+  /** Named deadlines read as a sentence ("Release in 114 d"); lists keep the short chip. */
+  kind?: 'quote' | 'release'
+}) {
   if (!date) return null
   const days = daysUntil(date)
   if (Number.isNaN(days)) return null
-  const label = days >= 0 ? `${days}d` : `${Math.abs(days)}d over`
+  const what = kind === 'release' ? 'Release' : kind === 'quote' ? 'Quote' : null
+  const label = what
+    ? (days >= 0 ? `${what} in ${days} d` : `${what} ${Math.abs(days)} d overdue`)
+    : (days >= 0 ? `${days}d` : `${Math.abs(days)}d over`)
   return (
     <span data-testid="deadline-chip"
       className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs ${STATE_CLASS[state ?? 'on_track']}`}
       title={formatDate(date)}>
-      ⏱ {label}
+      {what ? label : `⏱ ${label}`}
     </span>
   )
 }

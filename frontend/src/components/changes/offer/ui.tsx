@@ -1,6 +1,14 @@
 /** Small controls the offer and release workspaces share. */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { inputCls, parseNum, sectionLabel } from './offerFormat'
+
+const restFmt = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 })
+/** How a number reads at rest: "13.200", "4,2". */
+const shownNum = (v: number | null | undefined): string =>
+  v == null || !Number.isFinite(v) ? '' : restFmt.format(v)
+/** How it reads while editing: no grouping, comma decimals ("13200", "4,2"). */
+const editNum = (v: number | null | undefined): string =>
+  v == null || !Number.isFinite(v) ? '' : String(v).replace('.', ',')
 
 /**
  * A number input that keeps what is typed ("12," mid-entry) and reports a
@@ -18,11 +26,12 @@ export function NumField({
   placeholder?: string
   step?: string
 }) {
-  const [text, setText] = useState(value == null ? '' : String(value).replace('.', ','))
+  const [text, setText] = useState(shownNum(value))
   const [focused, setFocused] = useState(false)
   const invalid = text.trim() !== '' && parseNum(text) === null
+  // Formatted (de-DE grouping) at rest; while typing the text stays as typed.
   useEffect(() => {
-    if (!focused) setText(value == null ? '' : String(value).replace('.', ','))
+    if (!focused) setText(shownNum(value))
   }, [value, focused])
   return (
     <input type="text" inputMode="decimal" aria-label={ariaLabel} data-testid={testId}
@@ -30,7 +39,7 @@ export function NumField({
       aria-invalid={invalid || undefined}
       title={invalid ? 'Not a number. Use a comma for decimals, e.g. 1.234,50' : undefined}
       value={text}
-      onFocus={() => setFocused(true)}
+      onFocus={() => { setFocused(true); setText(editNum(value)) }}
       onBlur={() => setFocused(false)}
       onChange={(e) => {
         setText(e.target.value)
@@ -133,4 +142,17 @@ export function Field({ label, children, className = '' }: {
       {children}
     </label>
   )
+}
+
+/** A textarea that grows with its text (never shorter than `rows`). */
+export function AutoGrowTextarea({ rows = 4, className = '', value, ...rest }:
+  TextareaHTMLAttributes<HTMLTextAreaElement> & { rows?: number }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    if (el.scrollHeight > el.clientHeight) el.style.height = `${el.scrollHeight + 2}px`
+  }, [value])
+  return <textarea ref={ref} rows={rows} value={value} className={`resize-y ${className}`} {...rest} />
 }

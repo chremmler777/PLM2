@@ -6,7 +6,7 @@
  */
 import type { OfferData, OfferOut } from '../../../types/changeOffer'
 import { fmtDate, fmtMoney, inputCls, sectionLabel } from './offerFormat'
-import { Field, Segmented, SubLabel } from './ui'
+import { AutoGrowTextarea, Field, Segmented, SubLabel } from './ui'
 
 export default function OfferDocumentSection({
   offer, data, update, editable, changeNumber, onPreview, previewing,
@@ -31,7 +31,7 @@ export default function OfferDocumentSection({
     ['Letterhead', `OFFER ${changeNumber}-Q${offer.version}${offer.valid_until ? `, valid until ${fmtDate(offer.valid_until)}` : ''}`],
     ['Recipient', [recipient.company, recipient.contact].filter(Boolean).join(', ') || 'Not set'],
     ['Subject', data.subject || 'Not set'],
-    ['1 Scope of change', 'Reason, description and impacted items'],
+    ['1 Scope of change', data.scope_text?.trim() ? data.scope_text.trim() : 'Not written yet'],
     ['2 Price', mode === 'detailed'
       ? `Detailed CBD, ${included} line${included === 1 ? '' : 's'}, total ${fmtMoney(offer.totals.total_one_time, cur)}`
       : `Rough description, total ${fmtMoney(offer.totals.total_one_time, cur)}`],
@@ -40,7 +40,9 @@ export default function OfferDocumentSection({
       : `${data.timing?.weeks_from_order ?? '-'} weeks from order, draft disclaimer`],
     ['5 Risks and assumptions', shownRisks ? `${shownRisks} risk${shownRisks === 1 ? '' : 's'} shown` : 'None shown'],
     ['6 Terms', [terms.payment, terms.incoterms].filter(Boolean).join(', ') || 'Validity 30 days from receipt'],
+    ...(data.customer_note?.trim() ? [['Note to the customer', data.customer_note.trim()] as [string, string]] : []),
   ]
+  const recipientMissing = (offer.warnings ?? []).find((w) => w.code === 'recipient_missing')
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_17rem]">
@@ -50,15 +52,21 @@ export default function OfferDocumentSection({
           <div className="grid gap-2 sm:grid-cols-2">
             <Field label="Company">
               <input className={`${inputCls} w-full`} value={recipient.company ?? ''} disabled={!editable}
-                data-testid="doc-company"
+                data-testid="doc-company" aria-invalid={recipientMissing && !recipient.company?.trim() ? true : undefined}
                 onChange={(e) => update('recipient', { ...recipient, company: e.target.value })} />
+              {recipientMissing && !recipient.company?.trim() && (
+                <span data-testid="doc-recipient-missing" className="mt-1 block text-[11px] text-amber-300">
+                  ⚠ {recipientMissing.message || 'No customer company yet: the offer would go out without a recipient.'}
+                </span>
+              )}
             </Field>
             <Field label="Contact">
               <input className={`${inputCls} w-full`} value={recipient.contact ?? ''} disabled={!editable}
                 onChange={(e) => update('recipient', { ...recipient, contact: e.target.value })} />
             </Field>
             <Field label="Address" className="sm:col-span-2">
-              <textarea rows={2} className={`${inputCls} w-full`} value={recipient.address ?? ''} disabled={!editable}
+              <AutoGrowTextarea rows={4} className={`${inputCls} w-full`} value={recipient.address ?? ''} disabled={!editable}
+                data-testid="doc-address"
                 onChange={(e) => update('recipient', { ...recipient, address: e.target.value })} />
             </Field>
           </div>
@@ -71,6 +79,18 @@ export default function OfferDocumentSection({
           <Field label="Intro">
             <textarea rows={3} className={`${inputCls} w-full`} value={data.intro ?? ''} disabled={!editable}
               onChange={(e) => update('intro', e.target.value)} />
+          </Field>
+          <Field label="Scope of change as the customer reads it (printed as section 1)">
+            <AutoGrowTextarea rows={4} data-testid="doc-scope" className={`${inputCls} w-full`}
+              value={data.scope_text ?? ''} disabled={!editable}
+              placeholder="What changes on the part, in the customer's words. Internal reasons stay out."
+              onChange={(e) => update('scope_text', e.target.value)} />
+          </Field>
+          <Field label="Note to the customer about this version (optional, printed on the offer)">
+            <textarea rows={2} data-testid="doc-customer-note" className={`${inputCls} w-full`}
+              value={data.customer_note ?? ''} disabled={!editable}
+              placeholder="e.g. This version includes the bank build you asked for."
+              onChange={(e) => update('customer_note', e.target.value)} />
           </Field>
         </div>
         <div>

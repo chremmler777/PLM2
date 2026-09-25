@@ -234,7 +234,16 @@ export default function TimingTab({
         </div>
       </section>
 
-      <GanttPlanner changeId={id} plan="detailed" mode={mode} />
+      {plan && tasks.length > 0 && !plan.can_edit && !plan.can_edit_dates && (
+        <p data-testid="timing-readonly"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800 px-2.5 py-0.5 text-[11px] text-slate-400"
+          title="PM, Scheduling, Sales, the change lead and admins edit the plan; teams update the progress of their own tasks.">
+          Read only{plan.progress_department_ids?.length ? ': you update the progress of your own tasks' : ''}
+        </p>
+      )}
+      {/* The detailed plan is created by the "Create detailed plan" button in
+          the card above; the Gantt's own seed button would be a second way in. */}
+      <GanttPlanner changeId={id} plan="detailed" mode={mode} hideSeed />
 
       {tasks.length > 0 && (
         <TeamFeedbackPanel changeId={id} feedback={feedback} myDepartmentIds={myDepartmentIds}
@@ -242,7 +251,7 @@ export default function TimingTab({
       )}
 
       {baseline && (
-        <DeviationsPanel changeId={id} deviations={deviations} canDecide={canDecideDeviation} />
+        <DeviationsPanel changeId={id} deviations={deviations} canDecide={canDecideDeviation} status={status} />
       )}
 
       {/* Publishing lives in the Timing card above: only a validated timing goes to the customer. */}

@@ -1080,8 +1080,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'deadline.release': { de: 'Freigabetermin', en: 'Release deadline' },
   'deadline.quotedOnTime': { de: 'Fristgerecht angeboten', en: 'Quoted on time' },
   'deadline.quotedLate': { de: 'Verspätet angeboten', en: 'Quoted late' },
-  'customer.releaseDue': { de: 'Freigabe bis', en: 'Release by' },
-  'customer.releaseDueReason': { de: 'Begründung', en: 'Reason' },
+  'customer.releaseDue': { de: 'Freigabetermin', en: 'Release deadline' },
+  'customer.releaseDueReason': { de: 'Notiz (optional)', en: 'Note (optional)' },
   'customer.confirmAccept': { de: 'Annahme bestätigen', en: 'Confirm acceptance' },
   'reports.title': { de: 'Reports', en: 'Reports' },
   'reports.pipeline': { de: 'Pipeline', en: 'Pipeline' },
@@ -1289,12 +1289,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
 
   // Stage 8 — how the work is going while it is being done.
-  'impl2.title': { de: 'Umsetzungsstand', en: 'Implementation tracking' },
+  'impl2.title': { de: 'Meldungen und Zeitbuchung', en: 'Reports and time booking' },
   'impl2.intro': {
-    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat - und was davon '
-      + 'eskaliert werden muss.',
-    en: 'What each department has booked and last reported - and what of it has '
-      + 'to be escalated.',
+    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat, und was davon '
+      + 'eskaliert werden muss. Der Fortschritt je Aufgabe steht im Gantt oben.',
+    en: 'What each department has booked and last reported, and what of it has '
+      + 'to be escalated. Progress per task lives in the Gantt above.',
   },
   'impl2.none': {
     de: 'Noch kein Fachbereich in der Umsetzung.',
@@ -1323,6 +1323,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl2.reports': { de: 'Fortschrittsmeldungen', en: 'Progress reports' },
   'impl2.noReports': { de: 'Noch keine Meldung.', en: 'No report yet.' },
   'impl2.reported': { de: 'gemeldet', en: 'reported' },
+  'impl2.noReportChip': { de: 'noch keine Meldung', en: 'no report yet' },
   'impl2.reportDue': { de: 'Meldung fällig', en: 'report due' },
   'impl2.lastReport': { de: 'Zuletzt gemeldet am {d}', en: 'Last reported on {d}' },
   'impl2.reportNote': { de: 'Was ist passiert?', en: 'What happened?' },
@@ -1402,11 +1403,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
 
   // The five checks, and the one that needs saying out loud.
-  'validation.check.sampled': { de: 'Bemusterung erfolgt', en: 'Sampling done' },
-  'validation.check.measured': { de: 'Vermessung erfolgt', en: 'Measurement done' },
-  'validation.check.cycle_time': { de: 'Taktzeit geprüft', en: 'Cycle time checked' },
-  'validation.check.weight': { de: 'Gewicht geprüft', en: 'Weight checked' },
+  // Fallbacks only: the backend sends each check's label (validation_checklist.py).
+  'validation.check.sampled': { de: 'Werkzeug abgemustert', en: 'Tool sampled' },
+  'validation.check.measured': { de: 'Teil vermessen', en: 'Part measured' },
+  'validation.check.cycle_time': { de: 'Zykluszeit gemessen', en: 'Measured cycle time' },
+  'validation.check.weight': { de: 'Teilegewicht validiert', en: 'Part weight validated' },
   'validation.check.revision_bump': { de: 'Indexstände angehoben', en: 'Revision levels raised' },
+  'validation.check.packaging_validated': {
+    de: 'Verpackung mit dem geänderten Teil validiert', en: 'Packaging validated with the changed part',
+  },
   'validation.hint.revision_bump': {
     de: 'Indexstände gemäß Kundenaussage angehoben und geprüft',
     en: 'Revision levels raised per customer statement and verified',

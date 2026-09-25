@@ -25,6 +25,8 @@ export interface WaitState {
   text: string
   /** Where the work happens, for the "take me there" affordance. */
   tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'costing' | 'offer' | 'timing' | 'release'
+  /** Worth knowing, not holding anything up yet (shown muted). */
+  info?: boolean
 }
 
 /** Long reasons are a banner, not an essay. */
@@ -100,8 +102,15 @@ export function resolveWaitStates(
    * query ['change', id, 'plan-feedback'] holds it.
    */
   planFeedback?: PlanFeedbackLite | null,
+  /**
+   * After the baseline: open plan deviations (a note while the work runs, a
+   * blocker at release), and at validation the release guard's own reasons
+   * (GET /release blockers) in its words.
+   */
+  more: { openPlanDeviations?: number; releaseBlockers?: string[] | null } = {},
 ): WaitState[] {
   const waits: WaitState[] = []
+  const releaseBlockers = change.status === 'in_validation' ? more.releaseBlockers ?? null : null
 
   // Customer questions: first nobody has answered, then nobody has closed it.
   // Same predicate the backend uses for the Sales task — open and needs-info,
@@ -244,6 +253,38 @@ export function resolveWaitStates(
         tab: 'release',
       })
     }
+  }
+
+  // Open plan deviations: PM/Sales lock or escalate them. Worth knowing while
+  // the work runs; at validation the release guard names them itself.
+  const devs = more.openPlanDeviations ?? 0
+  if (devs > 0 && ['approved', 'in_implementation'].includes(change.status)) {
+    waits.push({
+      key: 'plan-deviations',
+      text: `${devs} plan deviation${devs === 1 ? '' : 's'} open: lock or escalate`,
+      tab: 'timing',
+      info: true,
+    })
+  }
+  if (devs > 0 && change.status === 'in_validation' && !releaseBlockers?.some((b) => /plan deviation/i.test(b))) {
+    waits.push({
+      key: 'plan-deviations',
+      text: `${devs} plan deviation${devs === 1 ? '' : 's'} still open: lock or escalate them first`,
+      tab: 'timing',
+    })
+  }
+  // What the release guard would refuse on today. The validation checks are
+  // already listed above (with their count), so the guard's version of that
+  // one is left out.
+  if (releaseBlockers) {
+    releaseBlockers.forEach((b, i) => {
+      if (/^validation (incomplete|failed)/i.test(b) && waits.some((w) => w.key === 'validation-checks')) return
+      waits.push({
+        key: `release-${i}`,
+        text: b,
+        tab: /plan deviation/i.test(b) ? 'timing' : 'release',
+      })
+    })
   }
 
   // A rejected customer change is not finished until the customer has been told.

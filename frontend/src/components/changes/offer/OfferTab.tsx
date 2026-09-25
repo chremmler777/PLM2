@@ -20,7 +20,9 @@ import OfferRisksSection from './OfferRisksSection'
 import OfferSumCard from './OfferSumCard'
 import OfferTimingSection from './OfferTimingSection'
 import SendOfferDialog from './SendOfferDialog'
-import { daysLeftTone, fmtDate, fmtMoney, fmtPct, fmtPiece, quotePlanKey, sectionLabel } from './offerFormat'
+import {
+  daysLeftTone, fmtDate, fmtMoney, fmtPct, fmtPiece, offerDaysLeft, quotePlanKey, resultTone, sectionLabel, validityText,
+} from './offerFormat'
 import { offersKey, useOfferDraft } from './useOfferDraft'
 import { StepSection } from './ui'
 import { planApi } from '../../../api/changePlan'
@@ -101,6 +103,7 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
 
 function OfferHeader({
   change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
+  onDiscard, discarding,
 }: {
   change: ChangeDetail
   offer: OfferOut
@@ -115,7 +118,11 @@ function OfferHeader({
   /** A save is pending or running: Send waits for it. */
   sendBlocked?: boolean
   sending?: boolean
+  /** Throw the draft away (draft only). */
+  onDiscard?: () => void
+  discarding?: boolean
 }) {
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
   const tot = offer.totals
   const cur = offer.currency || 'EUR'
   const statusLabel = offer.status === 'draft' ? 'Draft' : offer.status[0].toUpperCase() + offer.status.slice(1)
@@ -132,12 +139,20 @@ function OfferHeader({
                 : offer.status === 'declined' ? 'bg-rose-900 text-rose-100' : 'bg-sky-800 text-sky-100'}`}>
               {statusLabel} v{offer.version}
             </span>
-            {validRef?.valid_until && (
+            {validRef?.status === 'accepted' ? (
+              // The accepted offer's own pill already says it; a newer draft names it.
+              validRef.id !== offer.id && (
+                <span data-testid="offer-valid-chip"
+                  className="rounded-full border border-emerald-800 bg-emerald-950/60 px-2 py-0.5 text-[11px] text-emerald-200">
+                  v{validRef.version} accepted
+                </span>
+              )
+            ) : validRef?.valid_until && (
               <span data-testid="offer-valid-chip"
-                className={`rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${daysLeftTone(validRef.days_left, validRef.expired)}`}>
+                className={`rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${daysLeftTone(offerDaysLeft(validRef), validRef.expired)}`}>
                 {validRef.status === offer.status ? '' : `v${validRef.version} `}
                 valid until {fmtDate(validRef.valid_until)}
-                {' · '}{validRef.expired || (validRef.days_left ?? 0) < 0 ? 'expired' : `${validRef.days_left} d left`}
+                {validityText(validRef) && <>{' · '}{validityText(validRef)}</>}
               </span>
             )}
           </div>
@@ -158,10 +173,9 @@ function OfferHeader({
           </div>
         </div>
         <div>
-          <div className={sectionLabel}>Margin vs internal cost</div>
+          <div className={sectionLabel}>Result vs internal cost</div>
           <div data-testid="offer-margin"
-            className={`mt-0.5 text-lg font-semibold tabular-nums ${tot.margin_abs == null ? 'text-slate-500'
-              : tot.margin_abs >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            className={`mt-0.5 text-lg font-semibold tabular-nums ${resultTone(tot.margin_abs)}`}>
             {fmtMoney(tot.margin_abs, cur)}
             {tot.margin_pct != null && <span className="ml-1 text-xs text-slate-500">{fmtPct(tot.margin_pct)}</span>}
           </div>
@@ -177,6 +191,24 @@ function OfferHeader({
               {sending ? 'Saving' : 'Send offer'}
             </button>
           )}
+          {onDiscard && offer.status === 'draft' && (confirmDiscard ? (
+            <span data-testid="offer-discard-confirm" role="alertdialog" aria-label="Confirm discarding the draft"
+              className="flex items-center gap-1.5 rounded-lg border border-rose-900/70 bg-rose-950/30 px-2 py-1 text-xs text-rose-200">
+              Discard draft v{offer.version}? This cannot be undone.
+              <button type="button" onClick={() => setConfirmDiscard(false)}
+                className="rounded border border-slate-600 px-2 py-0.5 text-slate-300 hover:bg-slate-700">Keep</button>
+              <button type="button" data-testid="offer-discard-yes" disabled={discarding}
+                onClick={onDiscard}
+                className="rounded bg-rose-700 px-2 py-0.5 font-medium text-white hover:bg-rose-600 disabled:opacity-50">
+                Discard
+              </button>
+            </span>
+          ) : (
+            <button type="button" data-testid="offer-discard" onClick={() => setConfirmDiscard(true)}
+              className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:border-rose-700 hover:text-rose-200">
+              Discard draft
+            </button>
+          ))}
           {onNewVersion && (
             <button type="button" data-testid="offer-new-version" disabled={creating} onClick={onNewVersion}
               className="rounded-lg border border-sky-700 px-3 py-1.5 text-sm text-sky-200 hover:bg-sky-900/40 disabled:opacity-50">
@@ -253,6 +285,16 @@ function OfferWorkspace({ props, offers, offer }: {
     onSuccess: () => qc.invalidateQueries({ queryKey: offersKey(change.id) }),
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not create a new version'),
   })
+  const discard = useMutation({
+    mutationFn: () => changeOfferApi.discard(change.id, offer.id),
+    onSuccess: () => {
+      toast.success(`Draft v${offer.version} discarded`)
+      qc.invalidateQueries({ queryKey: offersKey(change.id) })
+      qc.invalidateQueries({ queryKey: ['change', change.id] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', change.id] })
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not discard the draft'),
+  })
 
   const done: Record<SectionId, boolean> = {
     'offer-timing': data.timing?.include === false
@@ -274,7 +316,9 @@ function OfferWorkspace({ props, offers, offer }: {
         sending={preparingSend}
         onSend={() => { void openSend() }}
         onNewVersion={canWrite && !hasDraft && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
-        creating={newVersion.isPending} />
+        creating={newVersion.isPending}
+        onDiscard={editable ? () => discard.mutate() : undefined}
+        discarding={discard.isPending} />
 
       <nav data-testid="offer-nav"
         className="sticky top-0 z-20 -mx-1 flex flex-wrap items-center gap-1 rounded-lg border border-slate-700/80 bg-slate-900/90 px-2 py-1.5 backdrop-blur">

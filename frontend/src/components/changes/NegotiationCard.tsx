@@ -69,6 +69,7 @@ export default function NegotiationCard({
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId, 'negotiations'] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
   }
 
   // Negotiating is only open while the offer is out. Later the log is history.

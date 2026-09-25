@@ -35,7 +35,7 @@ const CHIP: Record<Chip, { label: string; cls: string }> = {
   confirmed: { label: 'Confirmed', cls: 'border-emerald-700 bg-emerald-950/50 text-emerald-200' },
   concern: { label: 'Concern', cls: 'border-rose-700 bg-rose-950/50 text-rose-200' },
   waiting: { label: 'Waiting', cls: 'border-slate-600 bg-slate-800 text-slate-300' },
-  stale: { label: 'Plan changed since', cls: 'border-amber-700 bg-amber-950/40 text-amber-200' },
+  stale: { label: 'Plan changed after this confirmation', cls: 'border-amber-700 bg-amber-950/40 text-amber-200' },
 }
 
 export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds, isAdmin = false, canRespond }: Props) {
@@ -50,6 +50,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
       setConcernFor(null); setNote('')
       qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save your answer'),
   })

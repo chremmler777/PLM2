@@ -206,4 +206,15 @@ describe('ValidationPanel', () => {
     expect(screen.queryByTestId('validation-pass-4-sampled')).toBeNull()
     expect(screen.queryByTestId('validation-escalate')).toBeNull()
   })
+
+  it('F17: uses the backend label and offers no escalation once every check passed', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [
+        check({ status: 'passed', label_en: 'Tool sampled' }),
+      ] }],
+    }) as never)
+    render_({ canEscalate: true })
+    expect(await screen.findByText('Tool sampled')).toBeDefined()
+    expect(screen.queryByTestId('validation-escalate')).toBeNull()
+  })
 })

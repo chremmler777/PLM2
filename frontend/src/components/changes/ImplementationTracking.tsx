@@ -164,6 +164,8 @@ function DepartmentBlock({
   const qc = useQueryClient()
   const { userId } = useAuth()
   const id = state.department_id
+  // Not owed and never said anything: that is not "reported".
+  const neverReported = !state.last_report_at && reports.length === 0
 
   const [hours, setHours] = useState('')
   const [bookingNote, setBookingNote] = useState('')
@@ -240,8 +242,10 @@ function DepartmentBlock({
           className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${
             state.owes_report
               ? 'bg-amber-900/70 text-amber-200'
+              : neverReported ? 'bg-slate-700 text-slate-300'
               : 'bg-emerald-900/70 text-emerald-200'}`}>
-          {state.owes_report ? t('impl2.reportDue') : t('impl2.reported')}
+          {state.owes_report ? t('impl2.reportDue')
+            : neverReported ? t('impl2.noReportChip') : t('impl2.reported')}
         </span>
         {state.at_risk_open && (
           <span data-testid={`impl-atrisk-${id}`}

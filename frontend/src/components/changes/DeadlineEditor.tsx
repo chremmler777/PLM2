@@ -36,7 +36,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
   })
   return (
     <span className="inline-flex items-center gap-1.5">
-      <DeadlineChip date={curDate} state={change.deadline_state} />
+      <DeadlineChip date={curDate} state={change.deadline_state} kind={kind} />
       <button type="button" title={pushback ? t('deadline.pushback') : t('deadline.set')}
         data-testid="deadline-edit"
         onClick={() => setOpen((o) => {

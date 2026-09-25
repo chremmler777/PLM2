@@ -175,6 +175,14 @@ describe('ImplementationTracking progress reports', () => {
     expect(ok.className).toContain('emerald')
   })
 
+  it('says no report yet, not reported, when nothing was ever reported', async () => {
+    setData({ state: [stateRow({ owes_report: false, last_report_at: null })] })
+    render_()
+    const chip = await screen.findByTestId('impl-cadence-2')
+    expect(chip.textContent).toBe(t('impl2.noReportChip'))
+    expect(chip.className).not.toContain('emerald')
+  })
+
   it('shows the history with its author, the red chip and the risk note', async () => {
     setData({
       state: [stateRow({ at_risk_open: true })],

@@ -22,7 +22,12 @@ interface Props {
   changeId: number
   deviations: PlanDeviation[]
   canDecide: boolean
+  /** The change status: deviations are decided only while the work runs. */
+  status?: string
 }
+
+/** Lock / escalate exist while the plan is live: approved to validation. */
+const DECIDING: string[] = ['approved', 'in_implementation', 'in_validation']
 
 /** Inclusive last day of an exclusive [start, end) span; a milestone sits on its start. */
 const lastDay = (start: number, end: number) => (end > start ? end - 1 : end)
@@ -35,7 +40,8 @@ const STATUS: Record<DeviationStatus, { label: string; cls: string }> = {
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n))
 
-export default function DeviationsPanel({ changeId, deviations, canDecide }: Props) {
+export default function DeviationsPanel({ changeId, deviations, canDecide: mayDecide, status }: Props) {
+  const canDecide = mayDecide && (status == null || DECIDING.includes(status))
   const qc = useQueryClient()
   const [lockFor, setLockFor] = useState<number | null>(null)
   const [lockNote, setLockNote] = useState('')
@@ -45,6 +51,7 @@ export default function DeviationsPanel({ changeId, deviations, canDecide }: Pro
     qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
     qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-escalations'] })
     qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+    qc.invalidateQueries({ queryKey: ['change', changeId] })
   }
   const lock = useMutation({
     mutationFn: (v: { id: number; note?: string }) => planApi.lockDeviation(changeId, v.id, v.note),

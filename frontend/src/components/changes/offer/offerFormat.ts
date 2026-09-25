@@ -1,5 +1,5 @@
 /** Number, date and chip helpers shared by the offer workspace. */
-import { formatDate, formatMoney } from '../../../lib/format'
+import { daysUntil, formatDate, formatMoney } from '../../../lib/format'
 
 /** 2 decimals + currency code, de-DE grouping: "12.345,50 EUR". */
 export const fmtMoney = formatMoney
@@ -20,6 +20,32 @@ export function fmtPct(v: number | null | undefined): string {
 export const fmtDate = formatDate
 
 export { todayIso, addDaysIso } from '../../../lib/format'
+
+/** A result: green above zero, red below, neutral at zero or unknown. */
+export function resultTone(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v) || Math.abs(v) < 0.005) return 'text-slate-400'
+  return v > 0 ? 'text-emerald-400' : 'text-rose-400'
+}
+
+/**
+ * How long a sent offer still holds, counted here from valid_until (local
+ * calendar days), so a null days_left from the server never reads "null d".
+ * Accepted and declined offers do not count down: null.
+ */
+export function offerDaysLeft(o: { status: string; valid_until?: string | null; days_left?: number | null }): number | null {
+  if (o.status !== 'sent' || !o.valid_until) return null
+  const d = daysUntil(o.valid_until.slice(0, 10))
+  return Number.isNaN(d) ? (o.days_left ?? null) : d
+}
+
+/** The validity chip's words: "Accepted", "12 d left", "expired". */
+export function validityText(o: { status: string; valid_until?: string | null; days_left?: number | null; expired?: boolean }): string {
+  if (o.status === 'accepted') return 'accepted'
+  if (o.status === 'declined') return 'declined'
+  const d = offerDaysLeft(o)
+  if (o.expired || (d != null && d < 0)) return 'expired'
+  return d == null ? '' : `${d} d left`
+}
 
 /** green > 10 days, amber <= 10, red when expired. */
 export function daysLeftTone(daysLeft: number | null | undefined, expired?: boolean): string {

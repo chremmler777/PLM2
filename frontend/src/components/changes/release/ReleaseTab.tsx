@@ -10,6 +10,7 @@ import { changesApi } from '../../../api/changes'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import { planApi } from '../../../api/changePlan'
 import type { ChangeDetail } from '../../../types/change'
+import type { TaskOut } from '../../../types/changePlan'
 import ValidationPanel from '../ValidationPanel'
 import ImplementationPanel from '../ImplementationPanel'
 import PnlCard from '../PnlCard'
@@ -33,30 +34,60 @@ export interface ReleaseTabProps {
 
 const AFTER: string[] = ['released', 'closed']
 
-/** Inclusive last day from an exclusive end date. */
-const lastDay = (iso: string | null | undefined): string | null => {
-  if (!iso) return null
+const DAY = 86_400_000
+const dayOf = (iso: string) => {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10)
+  return Math.round(Date.UTC(y, m - 1, d) / DAY)
 }
-const maxIso = (xs: (string | null | undefined)[]): string | null => {
-  const sorted = xs.filter((x): x is string => !!x).sort()
-  return sorted.length ? sorted[sorted.length - 1] : null
+const isoOf = (day: number) => new Date(day * DAY).toISOString().slice(0, 10)
+/** The last day a span occupies, as the Timing grid shows it: a milestone sits on its start. */
+const lastDayOf = (start: number, endExcl: number) => (endExcl > start ? endExcl - 1 : start)
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+
+/**
+ * Plan against baseline and actual, read the way the Timing tab reads it:
+ * finishes are the inclusive last day of the latest real task.
+ */
+export function closingFigures(tasks: TaskOut[]) {
+  const real = tasks.filter((t) => !t.is_idea && !t.is_summary)
+  const planEnds = real.map((t) => lastDayOf(dayOf(t.start_date), dayOf(t.start_date) + t.duration_days))
+  const baseEnds = real.filter((t) => t.baseline_start && t.baseline_finish)
+    .map((t) => lastDayOf(dayOf(t.baseline_start!), dayOf(t.baseline_finish!)))
+  const planned = planEnds.length ? Math.max(...planEnds) : null
+  const baseline = baseEnds.length ? Math.max(...baseEnds) : null
+  const open = real.filter((t) => !t.actual_finish && (t.progress_pct ?? 0) < 100).length
+  const finished = real.filter((t) => !!t.actual_finish).map((t) => dayOf(t.actual_finish!))
+  const actual = real.length > 0 && open === 0 && finished.length ? Math.max(...finished) : null
+  const slipped = real.filter((t) => t.baseline_finish
+    && dayOf(t.start_date) + t.duration_days > dayOf(t.baseline_finish)).length
+  const against = actual ?? planned
+  const slip = baseline != null && against != null ? against - baseline : null
+  return {
+    planned: planned != null ? isoOf(planned) : null,
+    baseline: baseline != null ? isoOf(baseline) : null,
+    actual: actual != null ? isoOf(actual) : null,
+    open, slipped, slip, count: real.length,
+  }
 }
-const daysBetween = (a: string, b: string) =>
-  Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000)
 
 function ClosingSummary({ change, departments }: { change: ChangeDetail; departments: { id: number; name: string }[] }) {
   const { data: plan } = useQuery({
     queryKey: ['change', change.id, 'plan', 'detailed'],
     queryFn: () => planApi.get(change.id, 'detailed'),
   })
-  const tasks = (plan?.tasks ?? []).filter((t) => !t.is_idea)
-  const baseline = lastDay(maxIso(tasks.map((t) => t.baseline_finish)))
-  const planned = lastDay(plan?.summary?.finish ?? null)
-  const allFinished = tasks.length > 0 && tasks.every((t) => !!t.actual_finish)
-  const actual = allFinished ? maxIso(tasks.map((t) => t.actual_finish)) : null
-  const slip = baseline && (actual ?? planned) ? daysBetween(baseline, (actual ?? planned)!) : null
+  const f = closingFigures(plan?.tasks ?? [])
+  const slipText = f.slip == null ? '-' : f.slip === 0 ? 'on time'
+    : f.slip > 0 ? `${f.slip} d late` : `${-f.slip} d early`
+  const detail = [
+    f.slipped ? `${plural(f.slipped, 'task')} slipped` : null,
+    f.open ? `${plural(f.open, 'task')} open` : null,
+  ].filter(Boolean).join(', ')
+  const cells: [string, string, string, string?][] = [
+    ['Baseline finish', 'baseline-finish', fmtDate(f.baseline)],
+    ['Planned finish', 'planned-finish', fmtDate(f.planned)],
+    ['Actual finish', 'actual-finish', f.actual ? fmtDate(f.actual) : f.open ? plural(f.open, 'open task') : '-'],
+    ['Against baseline', 'against-baseline', slipText, detail || undefined],
+  ]
   return (
     <section data-testid="release-summary" className="rounded-xl border border-emerald-900/70 bg-emerald-950/10 p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -65,19 +96,16 @@ function ClosingSummary({ change, departments }: { change: ChangeDetail; departm
           {change.status === 'closed' ? 'Change closed' : 'Change released'}
         </h3>
       </div>
-      {tasks.length > 0 && (
+      {f.count > 0 && (
         <div className="grid gap-3 sm:grid-cols-4">
-          {([
-            ['Baseline finish', fmtDate(baseline)],
-            ['Planned finish', fmtDate(planned)],
-            ['Actual finish', actual ? fmtDate(actual) : 'open tasks'],
-            ['Against baseline', slip == null ? '-' : slip === 0 ? 'on time' : `${slip > 0 ? '+' : ''}${slip} d`],
-          ] as [string, string][]).map(([k, v]) => (
+          {cells.map(([k, id, v, sub]) => (
             <div key={k}>
               <div className={sectionLabel}>{k}</div>
-              <div data-testid={`summary-${k.toLowerCase().replace(/ /g, '-')}`}
-                className={`mt-0.5 text-lg font-semibold tabular-nums ${k === 'Against baseline' && slip != null
-                  ? slip > 0 ? 'text-rose-400' : 'text-emerald-400' : 'text-slate-100'}`}>{v}</div>
+              <div data-testid={`summary-${id}`}
+                className={`mt-0.5 text-lg font-semibold tabular-nums ${id === 'against-baseline' && f.slip != null
+                  ? f.slip > 0 ? 'text-rose-400' : f.slip < 0 ? 'text-emerald-400' : 'text-slate-100'
+                  : id === 'actual-finish' && !f.actual ? 'text-amber-300' : 'text-slate-100'}`}>{v}</div>
+              {sub && <div data-testid={`summary-${id}-detail`} className="text-[11px] text-slate-400">{sub}</div>}
             </div>
           ))}
         </div>

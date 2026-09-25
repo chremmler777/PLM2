@@ -73,9 +73,20 @@ export default function OfferRisksSection({
           </li>
         ))}
       </ul>
-      <div className="flex justify-end text-xs text-slate-400">
-        Risk surcharge total
-        <span data-testid="risk-total" className="ml-2 tabular-nums text-slate-100">{fmtMoney(risksTotal, currency)}</span>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+        <label className="flex items-center gap-2"
+          title="Hidden amounts are spread over the cost lines; the total stays the same.">
+          <Toggle checked={!!data.show_risk_surcharge} disabled={!editable} label="Show risk surcharges as a line on the offer"
+            testId="risk-surcharge-show" onChange={(v) => update('show_risk_surcharge', v)} />
+          <span>
+            Show risk surcharges as a line on the offer
+            <span className="block text-[11px] text-slate-500">Hidden amounts are spread over the cost lines; the total stays the same.</span>
+          </span>
+        </label>
+        <span>
+          Risk surcharge total
+          <span data-testid="risk-total" className="ml-2 tabular-nums text-slate-100">{fmtMoney(risksTotal, currency)}</span>
+        </span>
       </div>
     </div>
   )

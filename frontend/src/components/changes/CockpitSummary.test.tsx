@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import CockpitSummary from './CockpitSummary'
+import CockpitSummary, { nextStepFor, pluralizeLabel } from './CockpitSummary'
 import type { ChangeDetail } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
 
@@ -23,12 +23,12 @@ describe('CockpitSummary', () => {
   it('shows lead, blockers, and one primary next action', () => {
     const onAdvance = vi.fn()
     render(wrap(<CockpitSummary
-      change={change({ assessments: [
+      change={change({ customer_response: 'accepted', pm_signed_by: 1, quality_signed_by: 2, assessments: [
         { id: 1, department_id: 2, verdict: 'pending', stage_order: 1,
           rasic_letter: 'R', status: 'active', owner_id: null, owner_name: null,
           accepted_at: null, due_date: '2026-06-01T00:00:00', overdue: true },
       ] as ChangeDetail['assessments'] })}
-      // status 'quoted' -> next is 'approved'/'rejected'. Neither gate below
+      // status 'quoted', accepted and signed -> next is 'approved' -> next is 'approved'/'rejected'. Neither gate below
       // guards that transition (feasibility guards in_assessment, budget guards
       // costing, release guards in_implementation), so none should be amber.
       gates={[
@@ -339,5 +339,46 @@ describe('CockpitSummary waits', () => {
       status: 'in_assessment', blocked_department_ids: [], assessments: [],
     })} gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} waits={[]} />))
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+  })
+
+  it('F3: a dedicated act drives quoting, quoted and approved; no raw transition buttons', () => {
+    const base = { customer_relevant: true, pm_signed_by: null, quality_signed_by: null, timing_validated_at: null }
+    expect(nextStepFor({ ...base, status: 'quoting', customer_response: 'pending' } as never))
+      .toEqual([{ kind: 'go', key: 'offer', label: 'Build and send the offer', tab: 'offer' }])
+    expect(nextStepFor({ ...base, status: 'quoted', customer_response: 'pending' } as never)[0])
+      .toMatchObject({ kind: 'go', key: 'answer', tab: 'offer' })
+    expect(nextStepFor({ ...base, status: 'quoted', customer_response: 'accepted' } as never)[0])
+      .toMatchObject({ kind: 'go', key: 'signoff' })
+    expect(nextStepFor({ ...base, status: 'approved', customer_response: 'accepted' } as never)[0])
+      .toMatchObject({ kind: 'go', key: 'validate-timing', tab: 'timing' })
+    expect(nextStepFor({ ...base, status: 'approved', customer_response: 'accepted',
+      timing_validated_at: '2026-09-20' } as never)).toEqual([{ kind: 'advance', to: 'in_implementation' }])
+    expect(nextStepFor({ ...base, status: 'in_validation', customer_response: 'accepted' } as never))
+      .toEqual([{ kind: 'advance', to: 'released' }])
+  })
+
+  it('F3: at quoting the next step jumps to the offer tab, no Quoted/Approved/Rejected buttons', () => {
+    const onGo = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'quoting', customer_relevant: true })}
+      gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false} onGo={onGo} />))
+    expect(screen.queryByRole('button', { name: /Quoted|Approved|Rejected/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Build and send the offer' }))
+    expect(onGo).toHaveBeenCalledWith('offer')
+  })
+
+  it('F10: a step the viewer may not take is disabled and says who may', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'released' })}
+      gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false}
+      needs={(k) => (k === 'to:closed' ? 'Needs the Project Manager or the change lead' : null)} />))
+    const btn = screen.getByRole('button', { name: /Closed/ }) as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.title).toBe('Needs the Project Manager or the change lead')
+    expect(screen.getByTestId('next-needs').textContent).toContain('Needs the Project Manager')
+  })
+
+  it('pluralizes the backend action labels', () => {
+    expect(pluralizeLabel('Decide 1 plan deviation(s): lock or escalate')).toBe('Decide 1 plan deviation: lock or escalate')
+    expect(pluralizeLabel('Decide 3 plan deviation(s): lock or escalate')).toBe('Decide 3 plan deviations: lock or escalate')
   })
 })

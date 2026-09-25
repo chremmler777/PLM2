@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { addDaysIso, todayIso } from '../../../lib/format'
 import CustomerDecision from './CustomerDecision'
 import InternalApproval from './InternalApproval'
 import { changesApi } from '../../../api/changes'
@@ -64,7 +65,7 @@ describe('CustomerDecision', () => {
   })
 
   it('asks for no override reason on a valid offer', () => {
-    wrap(<CustomerDecision change={change()} latestSent={sent({ expired: false, days_left: 12 })} canRespond
+    wrap(<CustomerDecision change={change()} latestSent={sent({ expired: false, days_left: 12, valid_until: addDaysIso(todayIso(), 12) })} canRespond
       canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
     expect(screen.queryByTestId('accept-override')).toBeNull()
@@ -139,5 +140,23 @@ describe('InternalApproval', () => {
     wrap(<InternalApproval change={change({ status: 'costing', customer_relevant: false })} canApprove={false} />)
     expect(screen.getByText(/Project Manager department member/)).toBeDefined()
     expect(screen.queryByText(t('internal.approve'))).toBeNull()
+  })
+
+  it('takes the customer answer only at quoted, and never again once accepted', () => {
+    wrap(<CustomerDecision change={change({ status: 'quoting' })} canRespond
+      canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.queryByTestId('customer-accepted')).toBeNull()
+    cleanup()
+    wrap(<CustomerDecision change={change({ status: 'quoted', customer_response: 'accepted' })} canRespond
+      canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.queryByTestId('customer-accepted')).toBeNull()
+    expect(screen.queryByTestId('customer-declined')).toBeNull()
+  })
+
+  it('labels the accept box Release deadline and Note (optional)', () => {
+    wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer accepted'))
+    expect(screen.getByText('Release deadline')).toBeDefined()
+    expect(screen.getByText('Note (optional)')).toBeDefined()
   })
 })

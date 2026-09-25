@@ -46,7 +46,9 @@ const fieldCls =
 /** The two checks that are a measurement rather than a yes/no. */
 const VALUE_CHECKS = new Set(['cycle_time', 'weight'])
 
-const checkLabel = (key: string): string => {
+/** The backend's own label first (it owns the catalog), then ours, then the key. */
+const checkLabel = (key: string, given?: string | null): string => {
+  if (given) return given
   const label = t(`validation.check.${key}`)
   return label === `validation.check.${key}` ? key : label
 }
@@ -92,6 +94,8 @@ function CheckRow({
     onSuccess: () => {
       setFailing(false); setNote('')
       qc.invalidateQueries({ queryKey: ['change', changeId, 'validation'] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the check'),
   })
@@ -113,7 +117,7 @@ function CheckRow({
     <li data-testid={`validation-check-${id}`}
       className="rounded border border-slate-700 bg-slate-900/40 px-2 py-1.5 space-y-1">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-slate-200 text-sm">{checkLabel(key)}</span>
+        <span className="text-slate-200 text-sm">{checkLabel(key, check.label_en)}</span>
         <span data-testid={`validation-status-${id}`}
           className={`rounded px-1.5 py-0 text-[10px] leading-tight font-semibold ${chip}`}>
           {t(`validation.status.${check.status}`)}
@@ -129,7 +133,7 @@ function CheckRow({
 
       {/* Development's row says what "raised" is supposed to mean, so the box is
           not ticked against somebody's private definition of it. */}
-      {key === 'revision_bump' && (
+      {key === 'revision_bump' && checkLabel(key, check.label_en) !== t('validation.hint.revision_bump') && (
         <p data-testid={`validation-hint-${id}`} className="text-xs text-slate-500">
           {t('validation.hint.revision_bump')}
         </p>
@@ -293,6 +297,8 @@ export default function ValidationPanel({
     onSuccess: () => {
       setAckNote('')
       qc.invalidateQueries({ queryKey: ['change', changeId, 'validation'] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not acknowledge the delta'),
   })
@@ -304,6 +310,8 @@ export default function ValidationPanel({
       setEscalateOpen(false)
       qc.invalidateQueries({ queryKey: ['change', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'validation'] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not return the change'),
   })
@@ -312,6 +320,9 @@ export default function ValidationPanel({
 
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`
   const all = state.departments ?? []
+  // Nothing to send back once every check has passed.
+  const allPassed = all.length > 0 && all.every((d) => d.checks.length > 0
+    && d.checks.every((c) => c.status === 'passed'))
   const visible = canSeeAll
     ? all
     : all.filter((d) => myDepartmentIds.includes(d.department_id))
@@ -382,7 +393,7 @@ export default function ValidationPanel({
 
       {/* Sending the change back is a decision with a bill attached, so it is
           made in writing and nowhere else. */}
-      {canEscalate && editable && (
+      {canEscalate && editable && !allPassed && (
         <button type="button" data-testid="validation-escalate"
           onClick={() => setEscalateOpen(true)}
           className="border border-amber-700 text-amber-200 hover:bg-amber-950/40 px-2.5 py-1 rounded text-xs">

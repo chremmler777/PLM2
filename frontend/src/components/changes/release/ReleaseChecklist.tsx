@@ -33,6 +33,7 @@ function CheckRow({ changeId, check, canEdit }: {
       setEditing(null); setNote('')
       qc.invalidateQueries({ queryKey: releaseKey(changeId) })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+      qc.invalidateQueries({ queryKey: ['change', changeId] })
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the check'),
   })

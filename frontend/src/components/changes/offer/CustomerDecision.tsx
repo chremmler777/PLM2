@@ -12,7 +12,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import type { ChangeDetail } from '../../../types/change'
 import type { OfferOut } from '../../../types/changeOffer'
-import { fmtDate, inputCls, sectionLabel } from './offerFormat'
+import { fmtDate, inputCls, offerDaysLeft, sectionLabel } from './offerFormat'
 import { offersKey } from './useOfferDraft'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -49,11 +49,13 @@ export default function CustomerDecision({
   const [due, setDue] = useState('')
   const [reason, setReason] = useState('')
   const [override, setOverride] = useState('')
-  const expired = !!latestSent && (latestSent.expired || (latestSent.days_left != null && latestSent.days_left < 0))
+  const left = latestSent ? offerDaysLeft(latestSent) : null
+  const expired = !!latestSent && latestSent.status === 'sent' && (!!latestSent.expired || (left != null && left < 0))
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change', change.id] })
     qc.invalidateQueries({ queryKey: offersKey(change.id) })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', change.id] })
   }
   const respond = useMutation({
     mutationFn: (vars: { response: string; body?: Parameters<typeof changesApi.customerResponse>[2] }) =>
@@ -72,7 +74,9 @@ export default function CustomerDecision({
   const samePersonBlocksQuality = !change.quality_signed_by
     && !!change.pm_signed_by && userId != null && userId === change.pm_signed_by
   const decided = change.customer_response === 'accepted' || change.customer_response === 'declined'
-  const open = change.status === 'quoted' || change.status === 'quoting'
+  // The backend takes the customer's answer only at quoted, and once accepted
+  // nothing about it changes any more.
+  const open = change.status === 'quoted'
 
   return (
     <div data-testid="customer-decision" className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 space-y-3">
@@ -130,7 +134,7 @@ export default function CustomerDecision({
             onChange={(e) => setDue(e.target.value)} className={`${inputCls} w-44`} />
           <label className="text-xs text-slate-400 self-center">{t('customer.releaseDueReason')}</label>
           <input type="text" value={reason} onChange={(e) => setReason(e.target.value)}
-            placeholder="optional" className={inputCls} />
+            aria-label={t('customer.releaseDueReason')} className={inputCls} />
           {expired && (
             <>
               <p data-testid="accept-expired" className="text-xs text-rose-300 sm:col-span-2">

@@ -4,8 +4,10 @@
  * factors sit on top, then the changeover, the piece-price effect and any free
  * items. The sum card on the right shows the server's arithmetic.
  */
-import type {
-  OfferCostLine, OfferData, OfferFactor, OfferFreeField, OfferPiecePrice, OfferChangeover,
+import {
+  factorShown,
+  type OfferCostLine, type OfferData, type OfferFactor, type OfferFreeField, type OfferPiecePrice,
+  type OfferChangeover,
 } from '../../../types/changeOffer'
 import { fmtMoney, inputCls } from './offerFormat'
 import { Field, NumField, Segmented, SubLabel, Toggle } from './ui'
@@ -72,7 +74,7 @@ export default function OfferPriceSection({
                   <th className="px-2 py-2 text-left font-medium">Line</th>
                   <th className="px-2 py-2 text-left font-medium">Department</th>
                   <th className="px-2 py-2 text-left font-medium">Type</th>
-                  <th className="px-2 py-2 text-right font-medium">Source</th>
+                  <th className="whitespace-nowrap px-2 py-2 text-right font-medium">Source</th>
                   <th className="w-40 px-2 py-2 text-right font-medium">Offer amount</th>
                 </tr>
               </thead>
@@ -95,7 +97,7 @@ export default function OfferPriceSection({
                           {l.category}
                         </span>
                       </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-slate-500">
                         {changed ? <s data-testid={`cost-line-source-${l.key}`}>{fmtMoney(l.source_amount, currency)}</s>
                           : fmtMoney(l.source_amount, currency)}
                       </td>
@@ -116,10 +118,13 @@ export default function OfferPriceSection({
       {/* Factors */}
       <div>
         <SubLabel>Factors</SubLabel>
+        <p className="mb-1.5 text-[11px] text-slate-500">
+          Show on offer prints a factor as its own line. Hidden amounts are spread over the cost lines; the total stays the same.
+        </p>
         <div className="space-y-1.5">
           {factors.map((f, i) => (
             <div key={f.key} data-testid={`factor-${f.key}`}
-              className={`grid grid-cols-[auto_minmax(0,1.4fr)_auto_7rem_auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-2 py-1.5 ${
+              className={`grid grid-cols-[auto_minmax(0,1.4fr)_auto_7rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2 py-1.5 ${
                 f.enabled ? 'border-slate-600 bg-slate-900/60' : 'border-slate-800 bg-slate-900/20'}`}>
               <Toggle checked={f.enabled} disabled={!editable} label={`Enable ${f.label}`}
                 testId={`factor-toggle-${f.key}`} onChange={(v) => setFactor(i, { enabled: v })} />
@@ -137,6 +142,12 @@ export default function OfferPriceSection({
                 onChange={(v) => setFactor(i, { sign: v === 'minus' ? -1 : 1 })} />
               <input className={inputCls} placeholder="Note" value={f.note ?? ''} disabled={!editable}
                 aria-label={`Note ${f.label}`} onChange={(e) => setFactor(i, { note: e.target.value })} />
+              <label className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-slate-400"
+                title="Shown: its own line on the offer. Hidden: spread over the cost lines in the PDF; the total stays the same.">
+                <Toggle checked={factorShown(f)} disabled={!editable} label={`Show ${f.label} on offer`}
+                  testId={`factor-show-${f.key}`} onChange={(v) => setFactor(i, { show: v })} />
+                Show on offer
+              </label>
               {editable && f.key.startsWith('custom') ? (
                 <button type="button" aria-label={`Remove ${f.label}`}
                   className="px-1 text-slate-500 hover:text-rose-300"
@@ -150,7 +161,7 @@ export default function OfferPriceSection({
             className="mt-2 text-xs text-sky-300 hover:text-sky-200"
             onClick={() => update('factors', [...factors, {
               key: `custom_${Date.now().toString(36)}`, label: 'Custom factor', type: 'amount',
-              value: 0, sign: 1, enabled: true, note: '',
+              value: 0, sign: 1, enabled: true, note: '', show: true,
             }])}>
             + Add factor
           </button>
