@@ -57,6 +57,7 @@ cycle stops the pass: blocks keep their dates, slack null.
 from __future__ import annotations
 
 import heapq
+import math
 import re
 from bisect import bisect_left
 from collections import defaultdict
@@ -716,11 +717,13 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             continue
         rs = [res.tasks[k] for k in kids]
         weight = sum(max(r.end_idx - r.start_idx, 0) for r in rs)
+        # weights: each child's span (a nested summary's rolled-up span);
+        # half-up rounding, the same in the browser (not banker's round())
         if weight > 0:
-            prog = round(sum(r.progress * max(r.end_idx - r.start_idx, 0)
-                             for r in rs) / weight)
+            prog = math.floor(sum(r.progress * max(r.end_idx - r.start_idx, 0)
+                                  for r in rs) / weight + 0.5)
         else:
-            prog = round(sum(r.progress for r in rs) / len(rs))
+            prog = math.floor(sum(r.progress for r in rs) / len(rs) + 0.5)
         slacks = [r.total_slack for r in rs if r.total_slack is not None]
         frees = [r.free_slack for r in rs if r.free_slack is not None]
         res.tasks[tid] = TaskResult(

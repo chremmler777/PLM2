@@ -752,3 +752,23 @@ def test_migration_089_dedupes_and_indexes():
         mod.op = Operations(MigrationContext.configure(c))
         mod.downgrade()
         c.execute(sa.text("insert into change_plan_links values (4, 1, 'q', 1, 2)"))
+
+
+def test_summary_progress_rounds_half_up_and_weights_nested_spans():
+    cal = Calendar()
+    d = date(2026, 10, 5)
+    # 1 day at 25% + 1 day at 100% = 62.5 -> 63 (round() would give 62)
+    two = [ETask("S", d, 0), ETask("A", d, 1, parent_id="S", progress=25),
+           ETask("B", d, 1, parent_id="S", progress=100)]
+    assert analyse(two, [], cal).tasks["S"].progress == 63
+    # 0.5 -> 1, not 0
+    half = [ETask("S", d, 0), ETask("A", d, 1, parent_id="S", progress=1),
+            ETask("B", d, 1, parent_id="S", progress=0)]
+    assert analyse(half, [], cal).tasks["S"].progress == 1
+    # a nested summary weighs its rolled-up span (6 days: 2 + gap + 2), not
+    # the sum of its blocks' durations (4)
+    nested = [ETask("T", d, 0), ETask("S", d, 0, parent_id="T"),
+              ETask("A", d, 2, parent_id="S", progress=100),
+              ETask("B", d + timedelta(days=4), 2, parent_id="S", progress=100),
+              ETask("C", d, 2, parent_id="T", progress=0)]
+    assert analyse(nested, [], cal).tasks["T"].progress == 75    # 6*100/(6+2)

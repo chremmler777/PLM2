@@ -428,7 +428,7 @@ class ChangePlanService:
     def link_out(lk: ChangePlanLink) -> dict:
         return {"id": lk.id, "from_task_id": lk.from_task_id,
                 "to_task_id": lk.to_task_id, "type": lk.type,
-                "lag_days": int(lk.lag_days or 0)}
+                "lag_days": int(lk.lag_days or 0), "legacy": False}
 
     @staticmethod
     def task_out(t: ChangePlanTask, res: eng.PlanResult, dept_names: dict,
@@ -530,7 +530,12 @@ class ChangePlanService:
             "tasks": [ChangePlanService.task_out(
                 t, res, names, preds=preds.get(t.id, []), wbs=wbs.get(t.id, ""),
                 is_summary=t.id in summaries) for t in tasks],
-            "links": [ChangePlanService.link_out(lk) for lk in links],
+            # stored links, then legacy predecessor links the math also uses
+            # (id null, read-only) so the browser schedules the same plan
+            "links": [ChangePlanService.link_out(lk) for lk in links] + [
+                {"id": None, "from_task_id": lk.from_id, "to_task_id": lk.to_id,
+                 "type": "FS", "lag_days": 0, "legacy": True}
+                for lk in math_links[len(links):]],
             "calendar": cal.to_json(),
             "revision": int(change.plan_revision or 0),
             "baseline_set": any(t.baseline_start is not None for t in tasks),

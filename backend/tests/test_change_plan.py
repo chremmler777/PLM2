@@ -1043,7 +1043,10 @@ async def test_legacy_predecessors_are_shown_not_written(client, world,
     out = await _plan(client, sales, cid)
     # used for the math and shown, but a GET writes nothing
     assert _by_name(out)["B"]["predecessors"] == [a["id"]]
-    assert out["links"] == []
+    # served as a read-only legacy link so the browser schedules the same
+    assert out["links"] == [{"id": None, "from_task_id": a["id"],
+                             "to_task_id": b["id"], "type": "FS", "lag_days": 0,
+                             "legacy": True}]
     assert _by_name(out)["A"]["free_slack"] == 2      # B binds it (4 without)
     async with session_factory() as s:
         assert (await s.get(ChangePlanTask, b["id"])).predecessors == \
