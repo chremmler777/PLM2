@@ -41,6 +41,8 @@ export function displayValue(col: Column, row: CostSheetRow, ctx: SheetContext):
       return deptName(ctx, v) || col.empty || '-'
     case 'plant':
       return plantName(ctx, v) || col.empty || '-'
+    case 'machine_class':
+      return (row.machine_class as string) || ctx.machineClasses.find((c) => c.id === v)?.name || '-'
     case 'sampling_mode':
       return v === 'components' ? 'Components' : 'Flat'
     case 'overhead_kind':
@@ -120,29 +122,31 @@ export default function SheetCell({ col, row, ctx, editable, onCommit }: Props) 
     )
   }
   if (col.kind === 'machine_class') {
-    const names = ctx.machineClasses.map((c) => c.name)
-    const listId = 'cost-sheet-machine-classes'
     return (
-      <>
-        <input aria-label={label} className={INPUT} list={listId} value={draft}
-               placeholder="e.g. 200-450 t"
-               onChange={(e) => setDraft(e.target.value)}
-               onBlur={() => { const n = parse(col, draft); if (n !== value) onCommit(n) }}
-               onKeyDown={(e) => {
-                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                 if (e.key === 'Escape') setDraft(toInput(value))
-               }} />
-        <datalist id={listId}>{names.map((n) => <option key={n} value={n} />)}</datalist>
-      </>
+      <select aria-label={label} className={INPUT} value={toInput(value)}
+              onChange={(e) => commitSelect(e.target.value)}>
+        {value == null && <option value="">Pick a class</option>}
+        {ctx.machineClasses.filter((c) => c.is_active || c.id === value).map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+    )
+  }
+  if (col.kind === 'currency') {
+    return (
+      <select aria-label={label} className={INPUT} value={toInput(value)} disabled={inactive}
+              onChange={(e) => commitSelect(e.target.value)}>
+        {!value && <option value="">{inactive ? '' : 'Plant'}</option>}
+        {ctx.currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+      </select>
     )
   }
 
   return (
     <input
       aria-label={label}
-      className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''} ${col.kind === 'currency' ? 'uppercase' : ''}`}
+      className={`${INPUT} ${col.numeric ? 'text-right tabular-nums' : ''}`}
       inputMode={col.kind === 'money' || col.kind === 'number' ? 'decimal' : undefined}
-      maxLength={col.kind === 'currency' ? 3 : undefined}
       value={draft}
       disabled={inactive}
       placeholder={col.empty ?? ''}

@@ -20,6 +20,7 @@ export interface OverheadRef {
   id: number
   kind: 'percent' | 'per_hour'
   value: number
+  currency: string | null
   department_id: number | null
   plant_id: number | null
 }
@@ -33,13 +34,15 @@ export interface PositionRate {
   currency: string
   min_factor: number | null
   note: string | null
-  effective_rate: number
+  /** null: a per-hour overhead in another currency makes it undefined. */
+  effective_rate: number | null
   overhead: OverheadRef | null
 }
 
 export interface MachineRate {
   id: number
   plant_id: number | null
+  machine_class_id: number | null
   machine_class: string
   machine_ref: string | null
   tonnage_min: number | null
@@ -61,11 +64,13 @@ export interface SamplingBreakdown {
   labour_cost?: number
   handling_cost?: number
   missing?: string[]
+  complete?: boolean
 }
 
 export interface SamplingRate {
   id: number
   plant_id: number | null
+  machine_class_id: number | null
   machine_class: string
   mode: 'flat' | 'components'
   flat_price: number | null
@@ -87,6 +92,7 @@ export interface Overhead {
   department_id: number | null
   kind: 'percent' | 'per_hour'
   value: number
+  currency: string | null
   note: string | null
 }
 
@@ -115,6 +121,16 @@ export interface MachineClass {
   is_active: boolean
 }
 
+export interface PlantCurrency {
+  id: number
+  name: string
+  code: string
+  is_active: boolean
+  currency: string
+  /** false: set from the location by the migration, Finance has not confirmed. */
+  currency_confirmed: boolean
+}
+
 export interface CostSheetOverview {
   versions: CostSheetVersionSummary[]
   current_version_id: number | null
@@ -122,7 +138,8 @@ export interface CostSheetOverview {
   can_edit: boolean
   stale: StaleStatus
   departments: { id: number; name: string; is_active: boolean }[]
-  plants: { id: number; name: string; code: string; is_active: boolean }[]
+  plants: PlantCurrency[]
+  currencies: string[]
   machine_classes: MachineClass[]
 }
 

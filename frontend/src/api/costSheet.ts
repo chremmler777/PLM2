@@ -1,7 +1,7 @@
 import client, { API_BASE_URL } from './client';
 import type {
   CostSheetDiff, CostSheetOverview, CostSheetRow, CostSheetSection, CostSheetVersionDetail,
-  MachineClass,
+  MachineClass, PlantCurrency,
 } from '../types/costSheet';
 
 const base = '/v1/cost-sheet';
@@ -26,7 +26,7 @@ export const costSheetApi = {
   deleteDraft: (id: number): Promise<void> =>
     client.delete(`${base}/versions/${id}`).then(() => undefined),
 
-  publish: (id: number, body: { valid_from: string; note?: string | null }):
+  publish: (id: number, body: { valid_from: string; note?: string | null; confirm_backdated?: boolean }):
     Promise<CostSheetVersionDetail> =>
     client.post(`${base}/versions/${id}/publish`, body).then((r) => r.data),
 
@@ -44,6 +44,12 @@ export const costSheetApi = {
 
   addMachineClass: (body: Partial<MachineClass>): Promise<MachineClass> =>
     client.post(`${base}/machine-classes`, body).then((r) => r.data),
+
+  updateMachineClass: (id: number, body: Partial<MachineClass>): Promise<MachineClass> =>
+    client.patch(`${base}/machine-classes/${id}`, body).then((r) => r.data),
+
+  setPlantCurrency: (plantId: number, currency: string): Promise<PlantCurrency[]> =>
+    client.put(`${base}/plants/${plantId}/currency`, { currency }).then((r) => r.data),
 
   setReviewMonths: (months: number): Promise<{ review_months: number }> =>
     client.put(`${base}/settings`, { review_months: months }).then((r) => r.data),

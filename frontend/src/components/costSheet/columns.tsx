@@ -34,6 +34,7 @@ export interface SheetContext {
   departments: CostSheetOverview['departments']
   plants: CostSheetOverview['plants']
   machineClasses: CostSheetOverview['machine_classes']
+  currencies: string[]
 }
 
 export const SECTION_LABELS: Record<CostSheetSection, string> = {
@@ -57,6 +58,13 @@ export const SECTION_BLURB: Record<CostSheetSection, string> = {
   overheads: 'Personnel overhead on top of the position rate. Most specific wins: department + plant, then department, then plant, then the whole organization.',
 }
 
+const MISSING_LABEL: Record<string, string> = {
+  machine_rate: 'no machine rate',
+  labour_rate: 'no labour rate',
+  machine_rate_currency: 'machine rate in other currency',
+  labour_rate_currency: 'labour rate in other currency',
+}
+
 function overheadLabel(kind: string, value: number, currency = 'EUR'): string {
   return kind === 'percent'
     ? `+${value.toLocaleString('de-DE', { maximumFractionDigits: 2 })} %`
@@ -78,8 +86,11 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
           <span className="inline-flex flex-col items-end leading-tight">
             <span className="whitespace-nowrap text-slate-100 tabular-nums">{formatMoney(r.effective_rate, r.currency)}</span>
             {r.overhead && (
-              <span className="whitespace-nowrap text-[11px] text-slate-500">
-                {overheadLabel(r.overhead.kind, r.overhead.value, r.currency)}
+              <span className={`whitespace-nowrap text-[11px] ${r.effective_rate === null ? 'text-amber-400' : 'text-slate-500'}`}
+                    title={r.effective_rate === null ? 'The per-hour overhead is in another currency than this rate' : undefined}>
+                {r.effective_rate === null
+                  ? `overhead in ${r.overhead.currency}`
+                  : overheadLabel(r.overhead.kind, r.overhead.value, r.overhead.currency ?? r.currency)}
               </span>
             )}
           </span>
@@ -89,7 +100,7 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
     { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[10rem]' },
   ],
   machines: [
-    { key: 'machine_class', label: 'Machine class', kind: 'machine_class', width: 'min-w-[9rem]' },
+    { key: 'machine_class_id', label: 'Machine class', kind: 'machine_class', width: 'min-w-[9rem]' },
     { key: 'machine_ref', label: 'Machine', kind: 'text', empty: 'Class rate', width: 'min-w-[9rem]',
       title: 'Empty = the rate for the whole class; a name = one specific press' },
     { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[9rem]' },
@@ -99,40 +110,46 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
     { key: 'currency', label: 'Cur.', kind: 'currency', width: 'w-20 min-w-[4.75rem]' },
     { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[10rem]' },
   ],
+  // Compact: fits a 1500 px window next to the sidebar. The currency follows
+  // the plant and is shown with the price instead of in its own column.
   sampling: [
-    { key: 'machine_class', label: 'Machine class', kind: 'machine_class', width: 'min-w-[9rem]' },
-    { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[8rem]' },
-    { key: 'mode', label: 'Pricing', kind: 'sampling_mode', width: 'min-w-[9rem]' },
-    { key: 'flat_price', label: 'Flat price', kind: 'money', numeric: true, width: 'min-w-[7rem]',
+    { key: 'machine_class_id', label: 'Class', kind: 'machine_class', width: 'min-w-[7rem]' },
+    { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[7.5rem]' },
+    { key: 'mode', label: 'Pricing', kind: 'sampling_mode', width: 'min-w-[8rem]' },
+    { key: 'flat_price', label: 'Flat', kind: 'money', numeric: true, width: 'min-w-[5.75rem]',
       inactive: (r) => r.mode !== 'flat' },
-    { key: 'setup_hours', label: 'Setup h', kind: 'number', numeric: true, width: 'min-w-[5rem]',
+    { key: 'setup_hours', label: 'Setup h', kind: 'number', numeric: true, width: 'min-w-[4rem]',
       inactive: (r) => r.mode !== 'components' },
-    { key: 'run_hours_default', label: 'Run h', kind: 'number', numeric: true, width: 'min-w-[5rem]',
+    { key: 'run_hours_default', label: 'Run h', kind: 'number', numeric: true, width: 'min-w-[4rem]',
       inactive: (r) => r.mode !== 'components' },
-    { key: 'labour_hours', label: 'Labour h', kind: 'number', numeric: true, width: 'min-w-[5rem]',
-      inactive: (r) => r.mode !== 'components' },
+    { key: 'labour_hours', label: 'Lab. h', kind: 'number', numeric: true, width: 'min-w-[4rem]',
+      title: 'Labour hours per trial', inactive: (r) => r.mode !== 'components' },
     { key: 'labour_department_id', label: 'Labour dept.', kind: 'department_optional', empty: '-',
-      width: 'min-w-[9rem]', inactive: (r) => r.mode !== 'components' },
-    { key: 'handling_cost', label: 'Handling', kind: 'money', numeric: true, width: 'min-w-[7rem]',
+      width: 'min-w-[8rem]', inactive: (r) => r.mode !== 'components' },
+    { key: 'labour_position', label: 'Position', kind: 'text', empty: 'Default',
+      width: 'min-w-[6rem]', title: 'Which position rate prices the labour hours',
       inactive: (r) => r.mode !== 'components' },
-    { key: 'computed_price', label: 'Per trial', kind: 'computed', numeric: true, derived: true, width: 'min-w-[8.5rem]',
-      title: 'Flat price, or (setup + run h) x machine rate + labour h x effective labour rate + handling',
+    { key: 'handling_cost', label: 'Handling', kind: 'money', numeric: true, width: 'min-w-[5.75rem]',
+      inactive: (r) => r.mode !== 'components' },
+    { key: 'computed_price', label: 'Per trial', kind: 'computed', numeric: true, derived: true, width: 'min-w-[7.5rem]',
+      title: 'Flat price, or (setup + run h) x machine rate + labour h x effective labour rate + handling. Empty when a part is missing.',
       render: (row) => {
         const r = row as unknown as SamplingRate
         const missing = r.breakdown?.missing ?? []
         return (
           <span className="inline-flex flex-col items-end leading-tight">
-            <span className="whitespace-nowrap text-slate-100 tabular-nums">{formatMoney(r.computed_price, r.currency)}</span>
+            <span className="whitespace-nowrap text-slate-100 tabular-nums">
+              {r.computed_price === null ? 'incomplete' : formatMoney(r.computed_price, r.currency)}
+            </span>
             {missing.length > 0 && (
               <span className="whitespace-nowrap text-[11px] text-amber-400">
-                no {missing.map((m) => m.replace('_', ' ')).join(', ')}
+                {missing.map((m) => MISSING_LABEL[m] ?? m).join(', ')}
               </span>
             )}
           </span>
         )
       } },
-    { key: 'currency', label: 'Cur.', kind: 'currency', width: 'w-20 min-w-[4.75rem]' },
-    { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[8rem]' },
+    { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[5rem]' },
   ],
   overheads: [
     { key: 'department_id', label: 'Department', kind: 'department_optional', empty: 'All departments',
@@ -140,7 +157,10 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
     { key: 'plant_id', label: 'Plant', kind: 'plant', empty: 'All plants', width: 'min-w-[9rem]' },
     { key: 'kind', label: 'Kind', kind: 'overhead_kind', width: 'w-32' },
     { key: 'value', label: 'Value', kind: 'number', numeric: true, width: 'w-28',
-      title: 'Percent: 25 = +25 %. Per hour: added to the rate' },
+      title: 'Percent: 25 = +25 % (0 to 300). Per hour: added to the rate' },
+    { key: 'currency', label: 'Cur.', kind: 'currency', width: 'w-20 min-w-[4.75rem]',
+      title: 'Per hour only; must match the rates it is added to',
+      inactive: (r) => r.kind !== 'per_hour' },
     { key: 'note', label: 'Note', kind: 'text', width: 'min-w-[12rem]' },
   ],
 }
@@ -148,14 +168,14 @@ export const COLUMNS: Record<CostSheetSection, Column[]> = {
 /** The row a fresh "add" line starts from. */
 export function blankRow(section: CostSheetSection, ctx: SheetContext): CostSheetRow {
   const firstDept = ctx.departments.find((d) => d.is_active)?.id ?? null
-  const firstClass = ctx.machineClasses[0]?.name ?? ''
+  const firstClass = ctx.machineClasses.find((c) => c.is_active)?.id ?? null
   switch (section) {
     case 'rates':
-      return { department_id: firstDept, position: null, plant_id: null, hourly_rate: null, currency: 'EUR' }
+      return { department_id: firstDept, position: null, plant_id: null, hourly_rate: null }
     case 'machines':
-      return { machine_class: firstClass, plant_id: null, hourly_rate: null, currency: 'EUR' }
+      return { machine_class_id: firstClass, plant_id: null, hourly_rate: null }
     case 'sampling':
-      return { machine_class: firstClass, plant_id: null, mode: 'flat', flat_price: null, currency: 'EUR' }
+      return { machine_class_id: firstClass, plant_id: null, mode: 'flat', flat_price: null }
     case 'overheads':
       return { department_id: null, plant_id: null, kind: 'percent', value: null }
   }
@@ -175,10 +195,10 @@ export function plantName(ctx: SheetContext, id: unknown): string {
  * position (default first), then plant (all plants first). */
 export function sortRows(rows: CostSheetRow[], ctx: SheetContext): CostSheetRow[] {
   const dIdx = new Map(ctx.departments.map((d, i) => [d.id, i]))
-  const cIdx = new Map(ctx.machineClasses.map((c, i) => [c.name.toLowerCase(), i]))
+  const cIdx = new Map(ctx.machineClasses.map((c, i) => [c.id, i]))
   const key = (r: CostSheetRow): (string | number)[] => [
     r.department_id == null ? -1 : (dIdx.get(r.department_id as number) ?? 999),
-    r.machine_class == null ? -1 : (cIdx.get(String(r.machine_class).toLowerCase()) ?? 999),
+    r.machine_class_id == null ? -1 : (cIdx.get(r.machine_class_id as number) ?? 999),
     String(r.position ?? r.machine_ref ?? ''),
     r.plant_id == null ? '' : plantName(ctx, r.plant_id),
     r.id as number,

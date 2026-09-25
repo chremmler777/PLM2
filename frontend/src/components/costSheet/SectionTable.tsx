@@ -21,6 +21,8 @@ interface Props {
 
 export default function SectionTable({ section, rows, ctx, editable, busy, onUpdate, onDelete, onAdd }: Props) {
   const cols = COLUMNS[section]
+  // Sampling has the most columns: tighter cell padding keeps it on screen.
+  const px = section === 'sampling' ? 'px-1.5 first:pl-3' : 'px-3'
   const [adding, setAddingState] = useState<CostSheetRow | null>(null)
   // The add button is clicked right after an input's blur wrote its value;
   // the ref holds that value before React re-renders the click handler.
@@ -46,7 +48,7 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
           <tr>
             {cols.map((c) => (
               <th key={c.key} title={c.title}
-                  className={`px-3 py-2 font-medium whitespace-nowrap ${c.width ?? ''} ${c.numeric ? 'text-right' : 'text-left'}`}>
+                  className={`${px} py-2 font-medium whitespace-nowrap ${c.width ?? ''} ${c.numeric ? 'text-right' : 'text-left'}`}>
                 {c.label}
               </th>
             ))}
@@ -64,7 +66,7 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
           {rows.map((row) => (
             <tr key={row.id as number} className="group hover:bg-slate-800/40">
               {cols.map((c) => (
-                <td key={c.key} className={`px-3 ${editable ? 'py-1.5' : 'py-2'} align-middle ${c.numeric ? 'text-right' : ''}`}>
+                <td key={c.key} className={`${px} ${editable ? 'py-1.5' : 'py-2'} align-middle ${c.numeric ? 'text-right' : ''}`}>
                   <SheetCell col={c} row={row} ctx={ctx} editable={editable}
                              onCommit={(v) => onUpdate(row.id as number, { [c.key]: v })} />
                 </td>
@@ -83,7 +85,7 @@ export default function SectionTable({ section, rows, ctx, editable, busy, onUpd
           {editable && adding && (
             <tr className="bg-sky-500/5">
               {cols.map((c) => (
-                <td key={c.key} className={`px-3 py-1.5 ${c.numeric ? 'text-right' : ''}`}>
+                <td key={c.key} className={`${px} py-1.5 ${c.numeric ? 'text-right' : ''}`}>
                   {c.derived ? <span className="text-slate-600">-</span> : (
                     <SheetCell col={c} row={adding} ctx={ctx} editable
                                onCommit={(v) => setAdding((a) => ({ ...(a ?? {}), [c.key]: v }))} />

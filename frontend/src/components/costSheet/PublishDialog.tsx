@@ -1,8 +1,10 @@
 /**
  * Publish a draft: valid-from date and a note. The previous version then ends
- * the day before. The date must lie after the latest published version's.
+ * the day before. The date must lie after the latest published version's; a
+ * date in the past needs an explicit confirmation (it re-prices bookings).
  */
 import { useEffect, useState } from 'react'
+import DateInput from '../gantt/DateInput'
 import { addDaysIso, formatDate, todayIso } from '../../lib/format'
 
 interface Props {
@@ -16,7 +18,7 @@ interface Props {
   changeCount: number | null
   busy: boolean
   onCancel: () => void
-  onPublish: (validFrom: string, note: string) => void
+  onPublish: (validFrom: string, note: string, confirmBackdated: boolean) => void
 }
 
 export default function PublishDialog({
@@ -26,6 +28,7 @@ export default function PublishDialog({
   const minDate = latestValidFrom ? addDaysIso(latestValidFrom, 1) : undefined
   const [validFrom, setValidFrom] = useState('')
   const [note, setNote] = useState('')
+  const [backdatedOk, setBackdatedOk] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -33,6 +36,7 @@ export default function PublishDialog({
     const start = defaultValidFrom ?? (minDate && minDate > today ? minDate : today)
     setValidFrom(start)
     setNote(defaultNote ?? '')
+    setBackdatedOk(false)
   }, [open, defaultValidFrom, defaultNote, minDate])
 
   useEffect(() => {
@@ -44,6 +48,7 @@ export default function PublishDialog({
 
   if (!open) return null
   const tooEarly = !!(minDate && validFrom && validFrom < minDate)
+  const backdated = !!validFrom && validFrom < todayIso()
   const endsOn = validFrom ? addDaysIso(validFrom, -1) : null
 
   return (
@@ -61,9 +66,9 @@ export default function PublishDialog({
         <div className="space-y-4 px-5 py-4">
           <label className="block">
             <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Valid from</span>
-            <input type="date" value={validFrom} min={minDate}
-                   onChange={(e) => setValidFrom(e.target.value)}
-                   className="mt-1 w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100 [color-scheme:dark] focus:border-sky-500 focus:outline-none" />
+            <DateInput value={validFrom} min={minDate} aria-label="Valid from" required
+                       onChange={(iso) => { setValidFrom(iso); setBackdatedOk(false) }}
+                       className="mt-1 w-full rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-slate-100 focus:border-sky-500 focus:outline-none" />
             {tooEarly && (
               <span className="mt-1 block text-xs text-red-300">
                 Must be after {formatDate(latestValidFrom)} (version {latestVersion}).
@@ -75,6 +80,19 @@ export default function PublishDialog({
               </span>
             )}
           </label>
+          {backdated && !tooEarly && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              <p>
+                {formatDate(validFrom)} lies in the past. Costing lines and bookings dated since then
+                will be priced with this version.
+              </p>
+              <label className="mt-2 flex items-center gap-2">
+                <input type="checkbox" checked={backdatedOk} onChange={(e) => setBackdatedOk(e.target.checked)}
+                       className="h-4 w-4 accent-amber-500" />
+                <span>Publish backdated anyway</span>
+              </label>
+            </div>
+          )}
           <label className="block">
             <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Note</span>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3}
@@ -94,8 +112,8 @@ export default function PublishDialog({
                   className="rounded-md px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700">
             Cancel
           </button>
-          <button type="button" disabled={busy || !validFrom || tooEarly}
-                  onClick={() => onPublish(validFrom, note.trim())}
+          <button type="button" disabled={busy || !validFrom || tooEarly || (backdated && !backdatedOk)}
+                  onClick={() => onPublish(validFrom, note.trim(), backdated)}
                   className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
             {busy ? 'Publishing' : 'Publish'}
           </button>

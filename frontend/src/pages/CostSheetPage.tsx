@@ -9,13 +9,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { costSheetApi } from '../api/costSheet'
 import { apiErrorMessage } from '../lib/apiError'
-import { formatDate, formatDateTime } from '../lib/format'
+import { formatDate, formatDateTime, todayIso } from '../lib/format'
 import ConfirmModal from '../components/common/ConfirmModal'
 import SectionTable from '../components/costSheet/SectionTable'
 import PublishDialog from '../components/costSheet/PublishDialog'
 import DiffPanel, { diffCount } from '../components/costSheet/DiffPanel'
 import StaleBanner from '../components/costSheet/StaleBanner'
 import MachineClassStrip from '../components/costSheet/MachineClassStrip'
+import PlantCurrencies from '../components/costSheet/PlantCurrencies'
 import {
   SECTION_BLURB, SECTION_EXPORT, SECTION_LABELS, sortRows, type SheetContext,
 } from '../components/costSheet/columns'
@@ -92,6 +93,7 @@ export default function CostSheetPage() {
     departments: ov?.departments ?? [],
     plants: ov?.plants ?? [],
     machineClasses: ov?.machine_classes ?? [],
+    currencies: ov?.currencies ?? ['EUR'],
   }), [ov])
 
   const latestPublished = useMemo(() => {
@@ -132,13 +134,18 @@ export default function CostSheetPage() {
   })
 
   const publishMut = useMutation({
-    mutationFn: (b: { validFrom: string; note: string }) =>
-      costSheetApi.publish(selectedId as number, { valid_from: b.validFrom, note: b.note || null }),
+    mutationFn: (b: { validFrom: string; note: string; confirmBackdated: boolean }) =>
+      costSheetApi.publish(selectedId as number, {
+        valid_from: b.validFrom, note: b.note || null, confirm_backdated: b.confirmBackdated,
+      }),
     onSuccess: (d) => {
       onDetail(d)
       qc.invalidateQueries({ queryKey: ['cost-sheet'] })
       setPublishOpen(false)
-      toast.success(`Version ${d.version} published, valid from ${formatDate(d.valid_from)}`)
+      const vf = d.valid_from ?? ''
+      toast.success(vf > todayIso()
+        ? `Version ${d.version} published. It takes over on ${formatDate(vf)}; until then the current version stays in use.`
+        : `Version ${d.version} published and in use from ${formatDate(vf)}`)
     },
     onError: fail,
   })
@@ -160,6 +167,23 @@ export default function CostSheetPage() {
       setEditingCycle(false)
       qc.invalidateQueries({ queryKey: ['cost-sheet'], exact: true })
     },
+    onError: fail,
+  })
+
+  const renameClass = async (id: number, name: string) => {
+    try {
+      await costSheetApi.updateMachineClass(id, { name })
+      qc.invalidateQueries({ queryKey: ['cost-sheet'] })
+      return true
+    } catch (e) {
+      fail(e)
+      return false
+    }
+  }
+
+  const plantCurrencyMut = useMutation({
+    mutationFn: (a: { plantId: number; currency: string }) => costSheetApi.setPlantCurrency(a.plantId, a.currency),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cost-sheet'], exact: true }),
     onError: fail,
   })
 
@@ -224,6 +248,8 @@ export default function CostSheetPage() {
       </div>
 
       <StaleBanner stale={ov.stale} canEdit={ov.can_edit} />
+      <PlantCurrencies plants={ov.plants} currencies={ov.currencies} canEdit={ov.can_edit}
+                       onSet={(plantId, currency) => plantCurrencyMut.mutate({ plantId, currency })} />
 
       {/* Version bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3">
@@ -324,10 +350,24 @@ export default function CostSheetPage() {
             )}
           </div>
           {(tab === 'machines' || tab === 'sampling') && (
-            <MachineClassStrip classes={ov.machine_classes} canEdit={ov.can_edit} onAdd={addClass} />
+            <MachineClassStrip classes={ov.machine_classes} canEdit={ov.can_edit} onAdd={addClass}
+                               onRename={renameClass} />
           )}
           {version.isLoading ? (
             <div className="rounded-lg border border-slate-700 px-4 py-8 text-center text-slate-500">Loading version</div>
+          ) : version.isError ? (
+            <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-6 text-sm text-red-200">
+              <p className="font-medium">This version could not be loaded.</p>
+              <p className="mt-1 text-red-200/80">{apiErrorMessage(version.error, 'The server refused the request.')}</p>
+              <div className="mt-3 flex gap-2">
+                <button type="button" onClick={() => version.refetch()}
+                        className={`${BTN} bg-slate-700 text-slate-100 hover:bg-slate-600`}>Try again</button>
+                {ov.can_edit && summary?.status === 'draft' && (
+                  <button type="button" onClick={() => setDiscardOpen(true)}
+                          className={`${BTN} bg-red-600 text-white hover:bg-red-500`}>Discard draft</button>
+                )}
+              </div>
+            </div>
           ) : v ? (
             <SectionTable
               section={tab}
@@ -361,12 +401,12 @@ export default function CostSheetPage() {
           changeCount={diffCount(diff.data)}
           busy={publishMut.isPending}
           onCancel={() => setPublishOpen(false)}
-          onPublish={(validFrom, note) => publishMut.mutate({ validFrom, note })}
+          onPublish={(validFrom, note, confirmBackdated) => publishMut.mutate({ validFrom, note, confirmBackdated })}
         />
       )}
       <ConfirmModal
         isOpen={discardOpen}
-        title={`Discard draft version ${v?.version ?? ''}?`}
+        title={`Discard draft version ${v?.version ?? summary?.version ?? ''}?`}
         message="All changes in this draft are lost. Published versions are not touched."
         confirmText="Discard draft"
         isDangerous
