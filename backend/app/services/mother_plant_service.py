@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change import ChangeAttachment, ChangeRequest
 from app.models.change_info import ChangeInfoReceipt
 from app.models.entities import User
-from app.models.workflow import Department, UserDepartment
+from app.models.workflow import Department
 from app.services import mother_plants as cfg
 from app.services.change_service import ChangeError, ChangeService
 
@@ -52,7 +52,8 @@ class MotherPlantNotFound(LookupError):
 
 def _require_mother_plant(change: ChangeRequest) -> None:
     if not cfg.is_mother_plant(change):
-        raise ChangeError("This is not a change from the mother plant")
+        raise ChangeError(
+            f"This is not a change from {cfg.FALLBACK_NAME}")
 
 
 class MotherPlantService:
@@ -69,15 +70,15 @@ class MotherPlantService:
         name = (name or "").strip() or cfg.DEFAULT_MOTHER_PLANT
         if name not in cfg.MOTHER_PLANTS:
             raise ChangeError(
-                f"Unknown mother plant '{name}' - one of "
+                f"Unknown plant '{name}' - one of "
                 + ", ".join(cfg.MOTHER_PLANTS))
         if sop is None:
             raise ChangeError(
-                "The mother plant's SOP date is required: it becomes the "
+                f"The SOP date of {name} is required: it becomes the "
                 "release deadline")
         ref = (ref or "").strip() or None
         if ref is not None and len(ref) > 120:
-            raise ChangeError("The mother plant reference is at most 120 characters")
+            raise ChangeError(f"The reference of {name} is at most 120 characters")
         return name, ref, sop
 
     @staticmethod
@@ -98,8 +99,8 @@ class MotherPlantService:
         to approved and stamping "Inform mother plant" are the PM's acts."""
         # An admin acting as a department is that department here: the
         # personal lead privilege steps aside (same as the change page).
-        acting = getattr(user, "acts_as_department_id", None) is not None
-        if not acting and change.lead_id is not None and change.lead_id == user.id:
+        from app.services.change_people import holds_lead
+        if holds_lead(change, user):
             return True
         return await ChangeService._user_in_department(session, user, PM_DEPARTMENT)
 
@@ -250,17 +251,17 @@ class MotherPlantService:
             "Information sent to " + ", ".join(dept_names), user.id,
             new_value={"department_ids": new, "message": message},
             notes=message)
-        members = set((await session.execute(
-            select(UserDepartment.user_id).where(
-                UserDepartment.department_id.in_(new)))).scalars().all())
+        # the members of the change's organization only (change_people)
+        from app.services.change_people import department_members_of_change_org
+        members = set(await department_members_of_change_org(session, change, new))
         members.discard(user.id)
         if members:
             from app.services.notification_service import NotificationService
             await NotificationService.notify_once(
                 session, sorted(members), kind="change_info_sent",
                 subject_key=f"change:{change.id}:info",
-                title=(f"{change.change_number}: change from the mother plant "
-                       f"({change.mother_plant_name}), read and confirm")[:255],
+                title=(f"{change.change_number}: change from "
+                       f"{cfg.plant_name(change)}, read and confirm")[:255],
                 body=message or change.title,
                 link=f"/changes/{change.id}?tab=mother")
         return rows
@@ -317,7 +318,7 @@ class MotherPlantService:
         if not await MotherPlantService.receipts(session, change):
             return "The team is not informed yet - send the information first"
         if change.mother_plant_sop is None:
-            return "The mother plant's SOP date is missing"
+            return f"The SOP date of {cfg.plant_name(change)} is missing"
         return None
 
     @staticmethod
@@ -329,7 +330,7 @@ class MotherPlantService:
         from app.services.change_plan_service import ChangePlanService
         sop = change.mother_plant_sop
         await ChangeService._apply_release_deadline(
-            session, change, datetime.combine(sop, time()), cfg.SOP_REASON,
+            session, change, datetime.combine(sop, time()), cfg.sop_reason(change),
             user_id)
         user = await session.get(User, user_id)
         if await ChangePlanService.tasks(session, change, "detailed"):
@@ -343,7 +344,8 @@ class MotherPlantService:
                     session, change, "detailed", content, user)
                 await ChangeService.append_changelog(
                     session, change, "mother_plant_timing_imported",
-                    f"Detailed plan seeded from the mother plant's timing "
+                    f"Detailed plan seeded from the timing of "
+                    f"{cfg.plant_name(change)} "
                     f"({att.filename}, {result['tasks']} blocks)", user_id,
                     new_value={"attachment_id": att.id, "tasks": result["tasks"],
                                "warnings": result.get("warnings") or []})
@@ -354,12 +356,12 @@ class MotherPlantService:
                 logger.warning("mother-plant timing import failed: %s", e)
                 await ChangeService.append_changelog(
                     session, change, "mother_plant_timing_import_failed",
-                    f"The mother plant's timing ({att.filename}) could not be "
-                    f"imported: {e}", user_id,
+                    f"The timing of {cfg.plant_name(change)} ({att.filename}) "
+                    f"could not be imported: {e}", user_id,
                     new_value={"attachment_id": att.id})
         await ChangePlanService.add_task(session, change, "detailed", {
-            "name": "SOP (mother plant)", "kind": "milestone",
-            "lane": "Mother plant", "start_date": sop, "duration_days": 0,
+            "name": f"SOP ({cfg.plant_name(change)})", "kind": "milestone",
+            "lane": cfg.plant_name(change), "start_date": sop, "duration_days": 0,
         }, user)
 
     # ------------------------------------------------------------------
@@ -375,22 +377,22 @@ class MotherPlantService:
         if not await MotherPlantService.may_send(session, change, user):
             raise MotherPlantForbidden(
                 "Only Project Management, the change lead or an admin may "
-                "inform the mother plant")
+                f"inform {cfg.plant_name(change)}")
         if change.status not in INFORM_WINDOW:
             raise ChangeError(
-                "The mother plant is informed of the timing while the change "
-                "is approved or in implementation")
+                f"{cfg.plant_name(change)} is informed of the timing while the "
+                "change is approved or in implementation")
         if change.timing_validated_at is None:
             raise ChangeError(
-                "Validate the timing first: the mother plant is told the "
-                "baseline every team confirmed")
+                f"Validate the timing first: {cfg.plant_name(change)} is told "
+                "the baseline every team confirmed")
         previous = change.plan_published_at
         change.plan_published_by = user.id
         change.plan_published_at = datetime.utcnow()
         await ChangeService.append_changelog(
             session, change, "mother_plant_informed",
-            ("Mother plant informed again of the timing" if previous
-             else "Mother plant informed of the validated timing"),
+            (f"{cfg.plant_name(change)} informed again of the timing" if previous
+             else f"{cfg.plant_name(change)} informed of the validated timing"),
             user.id, field_name="plan_published_at",
             old_value={"published_at": previous.isoformat()} if previous else None,
             new_value={"published_at": change.plan_published_at.isoformat(),
@@ -427,7 +429,8 @@ class MotherPlantService:
         if (change.status in INFORM_WINDOW and change.timing_validated_at
                 and change.plan_published_at is None and may_send):
             out.append({"kind": "inform_mother_plant",
-                        "label": "Inform the mother plant of the validated timing",
+                        "label": (f"Inform {cfg.plant_name(change)} of the "
+                                  "validated timing"),
                         "target_tab": "timing"})
         return out
 

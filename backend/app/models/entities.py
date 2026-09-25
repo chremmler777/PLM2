@@ -121,6 +121,11 @@ class Project(Base):
 
     plant: Mapped["Plant"] = relationship(back_populates="projects")
     files: Mapped[list["CADFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    # One responsible (main owner) per department, per project -- the project
+    # team (spec 2026-09-25). Everyone else active in that department is a
+    # backup: they still see and can act, but it is not "theirs" for counting.
+    responsibles: Mapped[list["ProjectResponsible"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan")
 
 
 class CADFile(Base):

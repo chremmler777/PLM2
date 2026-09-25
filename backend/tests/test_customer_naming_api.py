@@ -1,5 +1,6 @@
 """HTTP flow: parse endpoint for upload filenames, and package preview
 reading the project's customer naming convention."""
+from tests.conftest import post_active
 
 
 async def _mk_part(client, auth, seed, number, customer_number):
@@ -48,7 +49,7 @@ async def test_parse_rejects_unknown_convention(client, eng_auth, seed):
 async def test_package_preview_reads_vw_index_when_project_set(client, eng_auth, seed):
     top = await _mk_part(client, eng_auth, seed, "20-10", "206.881.971")
     child = await _mk_part(client, eng_auth, seed, "20-11", "206.881.479")
-    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
+    r = await post_active(client, f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
                           json={"statement": "review", "received_at": "2026-05-01", "customer_index": "A"})
     assert r.status_code == 201, r.text
     top_rev = r.json()["id"]

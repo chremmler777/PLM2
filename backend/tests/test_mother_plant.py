@@ -178,7 +178,8 @@ async def test_patch_cannot_make_it_customer_relevant(client, session_factory, m
     r = await client.patch(f"{URL}/{cid}", headers=await _auth(client, "admin"),
                            json={"customer_relevant": True})
     assert r.status_code == 400
-    assert "mother plant" in r.json()["detail"]
+    assert "KTX Weissenburg (WUG)" in r.json()["detail"]
+    assert "mother plant" not in r.json()["detail"].lower()
 
 
 # ----------------------------------------------------------------------
@@ -224,7 +225,7 @@ async def test_scoping_to_approved_is_only_for_mother_plant(client, session_fact
     await _set(session_factory, cid, status="scoping",
                impact_confirmed_at=datetime.utcnow())
     r = await _approve(client, cid, key="admin")
-    assert r.status_code == 400 and "Only a change from the mother plant" in r.json()["detail"]
+    assert r.status_code == 400 and "Only a change from KTX Weissenburg / Solingen" in r.json()["detail"]
 
 
 async def test_scoping_to_approved_is_the_pms_call(client, session_factory, mp):
@@ -241,7 +242,7 @@ async def test_entering_approved_sets_release_deadline_and_sop_milestone(
     c = r.json()
     assert c["status"] == "approved"
     assert c["release_due_date"].startswith(SOP.isoformat())
-    assert c["release_due_reason"] == "Mother plant timing"
+    assert c["release_due_reason"] == "KTX Weissenburg (WUG) timing"
     assert c["active_deadline"] == "release"
     async with session_factory() as s:
         tasks = (await s.execute(select(ChangePlanTask).where(
@@ -250,7 +251,7 @@ async def test_entering_approved_sets_release_deadline_and_sop_milestone(
         log = (await s.execute(select(ChangeChangelog.action).where(
             ChangeChangelog.change_id == cid))).scalars().all()
     assert [(t.name, t.kind, t.start_date, t.duration_days) for t in tasks] == [
-        ("SOP (mother plant)", "milestone", SOP, 0)]
+        ("SOP (KTX Weissenburg (WUG))", "milestone", SOP, 0)]
     assert "release_deadline_set" in log
 
 
@@ -438,7 +439,7 @@ async def test_inform_mother_plant_stamp_instead_of_customer_publish(
     # the customer publish does not exist for it
     await _set(session_factory, cid, bank_build_mode="running_change")
     r = await client.post(f"{URL}/{cid}/bank-build/publish", headers=await _auth(client, "admin"))
-    assert r.status_code == 400 and "inform the mother plant" in r.json()["detail"]
+    assert r.status_code == 400 and "inform KTX Weissenburg (WUG)" in r.json()["detail"]
 
 
 async def test_walk_to_implementation_with_informed_departments_implementing(
@@ -470,7 +471,8 @@ async def test_pnl_basis_none(client, session_factory, mp):
         batch = await PnlService._offer_vs_actual_batch(s, [change], {})
     assert out["basis"] == "none"
     assert out["planned_revenue"] is None and out["planned_cost"] == 0
-    assert any("mother plant" in w for w in out["warnings"])
+    assert any("KTX Weissenburg (WUG)" in w for w in out["warnings"])
+    assert not any("mother plant" in w.lower() for w in out["warnings"])
     assert not any("No price yet" in w for w in out["warnings"])
     assert batch[cid]["basis"] == "none"
 
@@ -492,11 +494,11 @@ async def test_level_3_escalation_informs_the_mother_plant_contact_via_pm(
         esc = await ValidationIssueService._record_escalation(
             s, change, issue, 3, "manual", "Line down", mp["users"]["pm"])
         await s.commit()
-        assert "mother plant contact (KTX Weissenburg (WUG)) via PM" in esc.notified
+        assert "KTX Weissenburg (WUG) contact via PM" in esc.notified
         assert issue.customer_inform is False
         bodies = set((await s.execute(select(Notification.body).where(
             Notification.subject_key == f"vi:{issue.id}:esc:{esc.id}"))).scalars().all())
-    assert bodies and all(b.startswith("PM: inform the mother plant contact") for b in bodies)
+    assert bodies and all(b.startswith("PM: inform the KTX Weissenburg (WUG) contact") for b in bodies)
 
 
 # ----------------------------------------------------------------------

@@ -306,12 +306,21 @@ async def test_revalidation_and_refixing_have_an_owner(client, vi, session_facto
     aid = out["actions"][0]["id"]
     tool = await _auth(client, vi, "tool")
     await client.post(_url(vi, f"/{iid}/actions/{aid}/done"), headers=tool)
-    view = (await client.get(_url(vi, f"/{iid}"), headers=tool)).json()
-    assert view["status"] == "revalidation" and view["primary_act"] == "recheck"
-    rows = (await client.get(f"/api/v1/changes/{vi['change_id']}/my-actions",
-                             headers=tool)).json()
-    rows = rows if isinstance(rows, list) else rows.get("actions", [])
-    assert "validation_issue_recheck" in [a["kind"] for a in rows]
+    # the check is answered again in validation, not while implementing
+    from app.models.change import ChangeRequest
+    for status, offered in (("in_implementation", False), ("in_validation", True)):
+        async with session_factory() as s:
+            (await s.get(ChangeRequest, vi["change_id"])).status = status
+            await s.commit()
+        view = (await client.get(_url(vi, f"/{iid}"), headers=tool)).json()
+        assert view["status"] == "revalidation"
+        assert (view["primary_act"] == "recheck") is offered
+        assert ("recheck" in view["next_acts"]) is offered
+        assert (view["step_note"] is None) is offered
+        rows = (await client.get(f"/api/v1/changes/{vi['change_id']}/my-actions",
+                                 headers=tool)).json()
+        rows = rows if isinstance(rows, list) else rows.get("actions", [])
+        assert ("validation_issue_recheck" in [a["kind"] for a in rows]) is offered
     # the re-check fails again with every action done: a new action is next
     await _answer(session_factory, vi, "failed")
     view = (await client.get(_url(vi, f"/{iid}"), headers=tool)).json()

@@ -1,4 +1,5 @@
 """HTTP flow of the customer package receive."""
+from tests.conftest import post_active
 import json
 
 from app.models.part import Part
@@ -16,7 +17,7 @@ async def _mk_part(client, auth, seed, number, customer_number=None, part_type="
             part = await s.get(Part, pid)
             part.customer_part_number = customer_number
             await s.commit()
-    r = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
+    r = await post_active(client, f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
                           json={"statement": "review", "received_at": "2026-09-01", "customer_index": "A"})
     assert r.status_code == 201, r.text
     return pid, r.json()["id"]

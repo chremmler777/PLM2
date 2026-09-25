@@ -33,6 +33,7 @@ from app.models.cost_sheet import (
 )
 from app.models.entities import Plant
 from app.models.workflow import Department
+from app.utils.clock import business_today
 
 
 class CostSheetError(Exception):
@@ -145,7 +146,7 @@ async def version_on(db: AsyncSession, org_id: int,
                      on_date: Optional[date] = None) -> Optional[CostSheetVersion]:
     """The published version valid on on_date (default today). None before
     the first version's valid_from or when nothing is published."""
-    on_date = on_date or date.today()
+    on_date = on_date or business_today()
     return (await db.execute(select(CostSheetVersion).where(
         CostSheetVersion.organization_id == org_id,
         CostSheetVersion.status == "published",
@@ -264,7 +265,7 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
             f"(version {latest.version})", 422)
     if not v.rates:
         raise CostSheetError("A version needs at least one position rate", 422)
-    if valid_from < (today or date.today()) and not confirm_backdated:
+    if valid_from < (today or business_today()) and not confirm_backdated:
         raise CostSheetError(
             "Valid from lies in the past: costs booked since then would be re-priced. "
             "Confirm the backdated publish to go ahead", 422)
@@ -783,7 +784,7 @@ async def stale_status(db: AsyncSession, org_id: int, today: Optional[date] = No
     """Whether Finance owes a review: the latest published version was last
     touched (the later of valid_from and published_at) more than
     cost_sheet_review_months ago, or nothing is published at all."""
-    today = today or date.today()
+    today = today or business_today()
     months = await review_months(db, org_id)
     latest = await latest_published(db, org_id)
     if latest is None:

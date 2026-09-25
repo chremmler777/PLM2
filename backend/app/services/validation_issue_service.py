@@ -130,7 +130,9 @@ class Viewer:
         self.user = user
         self.id = user.id
         self.admin = user.effective_role == "admin"
-        self.lead = change.lead_id == user.id
+        # acting as a department drops the personal lead privilege
+        from app.services.change_people import holds_lead
+        self.lead = holds_lead(change, user)
         self.dept_ids = dept_ids
         mine = {names.get(i) for i in dept_ids}
         self.pm = PM_DEPARTMENT in mine
@@ -441,8 +443,7 @@ class ValidationIssueService:
             # informs the mother plant contact instead.
             from app.services import mother_plants as mp
             if mp.is_mother_plant(change):
-                words.append(f"mother plant contact "
-                              f"({change.mother_plant_name or 'mother plant'}) via PM")
+                words.append(f"{mp.plant_name(change)} contact via PM")
         return users, ", ".join(words)
 
     @staticmethod
@@ -473,8 +474,7 @@ class ValidationIssueService:
             issue.customer_inform = True
         body = reason
         if level >= 3 and trigger != "deescalate" and mother_plant:
-            body = (f"PM: inform the mother plant contact "
-                    f"({change.mother_plant_name or 'mother plant'}). {reason}")
+            body = f"PM: inform the {mp.plant_name(change)} contact. {reason}"
         await session.flush()
         from app.services.notification_service import NotificationService
         await NotificationService.notify_once(
@@ -1727,6 +1727,16 @@ class ValidationIssueService:
             return "contained"
         return "raised"
 
+    @staticmethod
+    def _step_note(change: ChangeRequest, issue: ValidationIssue) -> Optional[str]:
+        """Why the next step waits, when it waits on the change and not on
+        anybody's act."""
+        if issue.is_open and issue.status == "revalidation" and \
+                issue.check_id is not None and change.status != "in_validation":
+            return ("Re-check after implementation, when the change is back "
+                    "in validation")
+        return None
+
     # Acts that are not a step of the issue: never the primary button (the
     # frontend's QUIET list), add_action excepted when it is the only way on.
     QUIET_ACTS = ("edit", "attach", "escalate", "add_action")
@@ -1789,7 +1799,10 @@ class ValidationIssueService:
             acts.append("customer")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
             acts.append("action_done")
-        if issue.status == "revalidation" and issue.check_id is not None:
+        # the check is answered again in validation only: while the change is
+        # back in implementation the re-check waits (step_note says so)
+        if issue.status == "revalidation" and issue.check_id is not None \
+                and change.status == "in_validation":
             chk = await session.get(ValidationCheck, issue.check_id)
             if v.admin or v.pm or v.in_dept(chk.department_id if chk else
                                             issue.department_id):
@@ -1931,6 +1944,7 @@ class ValidationIssueService:
                 "follow_up_change_id": i.follow_up_change_id,
                 "follow_up_change_number": follows.get(i.follow_up_change_id),
                 "status": i.status, "step": svc._step(i), "is_open": i.is_open,
+                "step_note": svc._step_note(change, i),
                 "closed_at": i.closed_at, "closed_by": i.closed_by,
                 "closed_by_name": users.get(i.closed_by),
                 "closure_note": i.closure_note,

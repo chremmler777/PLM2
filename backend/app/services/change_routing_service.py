@@ -455,34 +455,37 @@ class ChangeRoutingService:
 
     @staticmethod
     def user_can_decide_deviation(change: ChangeRequest, routing: ChangeRouting,
-                                  user_id: int) -> bool:
+                                  user_id: int, *, acting: bool = False) -> bool:
         """Who may approve or reject a pending routing deviation. No
         self-decision. If a non-lead proposed it, only the lead decides. If the
         lead proposed it, anyone-but-the-proposer (i.e. the PM) decides. Shared
-        by the endpoints and my_actions so the plate and the gate agree."""
+        by the endpoints and my_actions so the plate and the gate agree.
+        acting: the caller acts as a department, which drops the personal
+        lead privilege (change_people.holds_lead)."""
         if routing.deviation_status != "pending_approval":
             return False
         if routing.deviation_proposed_by == user_id:
             return False
         if (change.lead_id is not None
                 and routing.deviation_proposed_by != change.lead_id
-                and user_id != change.lead_id):
+                and (acting or user_id != change.lead_id)):
             return False
         return True
 
     @staticmethod
     def _check_decide(change: ChangeRequest, routing: ChangeRouting, user_id: int,
-                      verb: str) -> None:
+                      verb: str, acting: bool = False) -> None:
         if routing.deviation_status != "pending_approval":
             raise ValueError("No deviation pending approval")
         if routing.deviation_proposed_by == user_id:
             raise ValueError(f"Cannot {verb} your own routing deviation")
-        if not ChangeRoutingService.user_can_decide_deviation(change, routing, user_id):
+        if not ChangeRoutingService.user_can_decide_deviation(
+                change, routing, user_id, acting=acting):
             raise ValueError(f"Only the change lead may {verb} this deviation")
 
     @staticmethod
     async def reject_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
-                               reason: str) -> ChangeRouting:
+                               reason: str, *, acting: bool = False) -> ChangeRouting:
         """Reject the pending deviation and undo what it added.
 
         Undo covers the 'add' op, the only one the UI offers: every assessment
@@ -492,7 +495,7 @@ class ChangeRoutingService:
         instead; by then the department's work is a fact of the record."""
         from app.services.change_service import ChangeService
         routing = await ChangeRoutingService._routing(session, change)
-        ChangeRoutingService._check_decide(change, routing, user_id, "reject")
+        ChangeRoutingService._check_decide(change, routing, user_id, "reject", acting)
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to reject a routing deviation")
         standard = {(d["department_id"], st["stage_order"]): d["rasic_letter"]
@@ -562,10 +565,11 @@ class ChangeRoutingService:
         return routing
 
     @staticmethod
-    async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int) -> ChangeRouting:
+    async def approve_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
+                                *, acting: bool = False) -> ChangeRouting:
         from app.services.change_service import ChangeService
         routing = await ChangeRoutingService._routing(session, change)
-        ChangeRoutingService._check_decide(change, routing, user_id, "approve")
+        ChangeRoutingService._check_decide(change, routing, user_id, "approve", acting)
         # A pending "not our responsibility" re-letters only now (§16 P1-3),
         # and only if the department has not answered in the meantime (then
         # its answer stands and the decline is moot).

@@ -67,6 +67,9 @@ services:
       KTX_COMPANY_FOOTER: ${KTX_COMPANY_FOOTER:-}
       KTX_COMPANY_SIGNATURE_NAME: ${KTX_COMPANY_SIGNATURE_NAME:-}
       KTX_COMPANY_SIGNATURE_TITLE: ${KTX_COMPANY_SIGNATURE_TITLE:-}
+      # The business date's timezone (deadlines, plan dates, offers): an IANA
+      # name. Empty = America/New_York (Toccoa), see backend/app/utils/clock.py.
+      PLM_BUSINESS_TZ: ${PLM_BUSINESS_TZ:-}
     volumes:
       - upload_data:/app/storage/uploads
       - gltf_data:/app/storage/gltf

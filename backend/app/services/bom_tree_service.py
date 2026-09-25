@@ -45,9 +45,13 @@ class BomTreeService:
             rev = await session.get(PartRevision, part.active_revision_id)
             if rev is not None:
                 return rev
+        # A customer major still pending triage is not shown as current
+        # (spec §17a): fall back to the newest major that is not waiting.
+        from app.models.revision_intake import waiting_revision_ids
         return (await session.execute(
             select(PartRevision)
-            .where((PartRevision.part_id == part.id) & (PartRevision.parent_revision_id.is_(None)))
+            .where((PartRevision.part_id == part.id) & (PartRevision.parent_revision_id.is_(None))
+                   & PartRevision.id.not_in(waiting_revision_ids()))
             .order_by(PartRevision.created_at.desc()).limit(1))).scalar_one_or_none()
 
     @staticmethod

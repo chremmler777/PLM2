@@ -1,3 +1,4 @@
+from tests.conftest import post_active
 import pytest
 from sqlalchemy import select
 
@@ -74,8 +75,7 @@ async def test_sign_404_on_unknown_or_mismatched_revision(client, eng_auth, part
     assert res2.status_code in (200, 201), res2.text
     other_part_id = res2.json()["id"]
 
-    res3 = await client.post(
-        f"/api/v1/parts/{other_part_id}/revisions/customer-data",
+    res3 = await post_active(client, f"/api/v1/parts/{other_part_id}/revisions/customer-data",
         json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"},
         headers=eng_auth,
     )

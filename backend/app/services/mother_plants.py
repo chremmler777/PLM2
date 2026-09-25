@@ -35,8 +35,23 @@ MOTHER_PLANT_SKIPPED = ("in_assessment", "costing", "quoting", "quoted")
 # seeds the detailed plan when the change enters `approved`.
 TIMING_ATTACHMENT_KIND = "mother_plant_timing"
 
-# The release deadline's reason when it is taken from the mother plant's SOP.
-SOP_REASON = "Mother plant timing"
+# User-visible texts never say "mother plant": they name the plant (the
+# change's mother_plant_name), or, where no change is at hand, this.
+FALLBACK_NAME = "KTX Weissenburg / Solingen"
+
+
+def plant_name(change=None) -> str:
+    """The plant a user-visible text names: the change's mother plant (or the
+    name itself when a string is passed), else FALLBACK_NAME."""
+    name = (change if isinstance(change, str)
+            else getattr(change, "mother_plant_name", None)) or ""
+    name = name.strip()
+    return name or FALLBACK_NAME
+
+
+def sop_reason(change=None) -> str:
+    """The release deadline's reason when it is taken from the plant's SOP."""
+    return f"{plant_name(change)} timing"
 
 
 def is_mother_plant(change) -> bool:

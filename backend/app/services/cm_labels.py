@@ -95,7 +95,8 @@ TASK_KIND = {
     "release_check": ("Release checklist", "Freigabe-Checkliste"),
     "info_ack": ("Read and understood", "Gelesen und verstanden"),
     "info_send": ("Send the information", "Information senden"),
-    "inform_mother_plant": ("Inform the mother plant", "Mutterwerk informieren"),
+    "inform_mother_plant": ("Inform KTX Weissenburg / Solingen",
+                            "KTX Weissenburg / Solingen informieren"),
 }
 
 GROUPS = {

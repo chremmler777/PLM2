@@ -338,25 +338,42 @@ class RevisionService:
         created_by: int = None,
         copy_bom_from: Optional[int] = None,
         major: Optional[int] = None,
+        intake_source: Optional[str] = None,
+        batch_id: Optional[str] = None,
+        promoted_from_revision_id: Optional[int] = None,
     ) -> PartRevision:
         """Create the next major from a customer statement. This — and
         promote_revision, which delegates here — is the only way a major
         revision comes into existence. The BOM is copied forward from
         ``copy_bom_from`` (a revision id) or, by default, the previous major.
         ``major`` lets the caller choose the major number (see
-        ``next_major_name``)."""
+        ``next_major_name``).
+
+        The intake gate (spec §17): with an ``intake_source`` (package,
+        customer_data, upload, promote) the new major is PENDING: status
+        in_review, the part's active revision is not moved, and a revision
+        intake waits for Development's triage. ``batch_id`` groups a
+        package's intakes. Without one (import scripts: WinCarat, Brose, the
+        1994 resets) the major is active at once, as before."""
         if statement not in CUSTOMER_STATEMENTS:
             raise ValueError(f"statement must be one of {CUSTOMER_STATEMENTS}")
         part = await session.get(Part, part_id)
         if part is None:
             raise ValueError("Part not found")
+        gated = intake_source is not None
+        superseded = None
+        if gated:
+            from app.services.revision_intake_service import RevisionIntakeService
+            # Refuses before anything is written when the waiting index is
+            # already linked to a live change (spec §17a decision 8).
+            superseded = await RevisionIntakeService.supersedable(session, part_id)
         majors = await RevisionService._majors(session, part_id)
         name = next_major_name([m.revision_name for m in majors], statement, requested=major)
         revision = PartRevision(
             part_id=part_id,
             revision_name=name,
             phase=statement,
-            status=RevisionStatus.APPROVED.value,
+            status=(RevisionStatus.IN_REVIEW.value if gated else RevisionStatus.APPROVED.value),
             source="customer",
             customer_statement=statement,
             customer_index=customer_index,
@@ -367,7 +384,8 @@ class RevisionService:
         )
         session.add(revision)
         await session.flush()
-        part.active_revision_id = revision.id
+        if not gated:
+            part.active_revision_id = revision.id
         from app.services.bom_tree_service import BomTreeService
         source_rev_id = copy_bom_from if copy_bom_from is not None else (majors[-1].id if majors else None)
         if source_rev_id is not None:
@@ -375,9 +393,16 @@ class RevisionService:
         await ChangelogService.log_action(
             session=session, part_id=part_id, revision_id=revision.id, action="created",
             action_description=(f"Customer {statement} data received as {name}"
-                                + (f" (customer index {customer_index})" if customer_index else "")),
+                                + (f" (customer index {customer_index})" if customer_index else "")
+                                + (", pending triage" if gated else "")),
             performed_by=created_by,
         )
+        if gated:
+            await RevisionIntakeService.create(
+                session, part, revision, intake_source, received_at=received_at,
+                user_id=created_by, batch_id=batch_id,
+                promoted_from_revision_id=promoted_from_revision_id,
+                supersedes=superseded)
         logger.info(f"Customer {statement} data {name} on part {part_id}")
         return revision
 
@@ -424,10 +449,14 @@ class RevisionService:
         customer_index: Optional[str] = None,
         created_by: int = None,
         major: Optional[int] = None,
+        intake_source: Optional[str] = None,
     ) -> PartRevision:
         """The customer adopted one of our proposals as their next data state.
         Creates the next major (per statement), marks the proposal approved
-        and its siblings rejected."""
+        and its siblings rejected. Through the intake gate (``intake_source``
+        "promote") the new major is pending and the proposal's approval and
+        its siblings' rejection wait for the activation (spec §17a
+        decision 6)."""
         revision = await session.get(PartRevision, revision_id)
         if revision is None:
             raise ValueError("Revision not found")
@@ -437,11 +466,22 @@ class RevisionService:
         new_revision = await RevisionService.receive_customer_data(
             session, revision.part_id, statement, received_at,
             customer_index=customer_index, summary=summary, created_by=created_by,
-            copy_bom_from=revision.id, major=major)
+            copy_bom_from=revision.id, major=major, intake_source=intake_source,
+            promoted_from_revision_id=revision.id if intake_source else None)
+        if intake_source is None:
+            await RevisionService.apply_promotion(
+                session, revision, new_revision.revision_name, created_by)
+        return new_revision
+
+    @staticmethod
+    async def apply_promotion(
+        session: AsyncSession, revision: PartRevision, new_name: str, created_by: int = None,
+    ) -> None:
+        """The adopted proposal is approved, its siblings rejected."""
         revision.status = RevisionStatus.APPROVED.value
         await ChangelogService.log_action(
             session=session, part_id=revision.part_id, revision_id=revision.id, action="promoted",
-            action_description=f"Promoted to {new_revision.revision_name}", performed_by=created_by)
+            action_description=f"Promoted to {new_name}", performed_by=created_by)
         if revision.parent_revision_id:
             siblings = (await session.execute(
                 select(PartRevision).where(
@@ -453,7 +493,6 @@ class RevisionService:
                     session=session, part_id=revision.part_id, revision_id=sibling.id, action="rejected",
                     action_description=f"Rejected due to promotion of {revision.revision_name}",
                     performed_by=created_by)
-        return new_revision
 
     @staticmethod
     async def set_lifecycle_phase(

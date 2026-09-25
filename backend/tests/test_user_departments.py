@@ -1,5 +1,6 @@
 """Department membership admin (Task 17): GET/PUT /v1/users/{id}/departments,
 dev-seed idempotence, and the complete_task department-membership guard."""
+from tests.conftest import post_active
 import pytest_asyncio
 import pytest
 from sqlalchemy import select
@@ -173,8 +174,7 @@ async def guard_part(client, eng_auth, seed):
     )
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
-    res = await client.post(
-        f"/api/v1/parts/{part_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"}, headers=eng_auth)
+    res = await post_active(client, f"/api/v1/parts/{part_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"}, headers=eng_auth)
     assert res.status_code == 201, res.text
     return {"part_id": part_id, "revision_id": res.json()["id"]}
 

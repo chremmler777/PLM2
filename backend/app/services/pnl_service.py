@@ -742,8 +742,9 @@ class PnlService:
             # no plan side; the card shows the actual local costs only.
             planned = {"revenue": None, "internal": 0.0, "external": 0.0,
                        "scrap": 0.0, "currency": "EUR"}
-            warnings.append("Change from the mother plant: no offer, actual "
-                            "local costs only")
+            from app.services import mother_plants as mp
+            warnings.append(f"Change from {mp.plant_name(change)}: no offer, "
+                            "actual local costs only")
         elif frozen:
             planned = frozen
         else:

@@ -1,4 +1,5 @@
 """Shared test fixtures: isolated SQLite DB per test, app client, seeded users."""
+import re
 from datetime import datetime, timedelta
 
 import pytest_asyncio
@@ -137,6 +138,40 @@ def _mint_cookie(email: str, admin: bool = True) -> dict:
 async def login(client, email: str, password: str | None = None, admin: bool = True) -> dict:
     # SSO mode: password ignored; returns a Cookie header for the shared JWT.
     return _mint_cookie(email, admin=admin)
+
+
+async def activate_pending(client, part_id: int) -> None:
+    """Spec §17: a new customer major waits for Development's triage. Test
+    setups that just need an active index decide it administratively (as
+    admin), which activates it."""
+    admin = await login(client, "admin@test.io")
+    r = await client.get("/api/v1/intakes", params={"part_id": part_id, "waiting": True},
+                         headers=admin)
+    assert r.status_code == 200, r.text
+    for i in r.json()["intakes"]:
+        if i["needs_triage"]:
+            d = await client.post(f"/api/v1/intakes/{i['id']}/decide", headers=admin,
+                                  json={"route": "administrative", "reason": "test setup"})
+            assert d.status_code == 200, d.text
+
+
+async def receive_active(client, part_id: int, headers: dict, **body):
+    """POST customer-data, then activate the pending index (activate_pending)."""
+    res = await client.post(f"/api/v1/parts/{part_id}/revisions/customer-data",
+                            json=body, headers=headers)
+    if res.status_code == 201:
+        await activate_pending(client, part_id)
+    return res
+
+
+async def post_active(client, url: str, **kwargs):
+    """client.post on .../parts/{id}/revisions/customer-data, then activate
+    the pending index (activate_pending). Same arguments as client.post."""
+    res = await client.post(url, **kwargs)
+    if res.status_code == 201:
+        m = re.search(r"/parts/(\d+)/revisions/customer-data", url)
+        await activate_pending(client, int(m.group(1)))
+    return res
 
 
 async def record_proceed_meeting(session_factory, change_id: int,
@@ -367,11 +402,9 @@ async def part(client, eng_auth, seed):
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
 
-    res = await client.post(
-        f"/api/v1/parts/{part_id}/revisions/customer-data",
-        json={"statement": "review", "received_at": "2026-09-01", "summary": "initial"},
-        headers=eng_auth,
-    )
+    res = await receive_active(
+        client, part_id, eng_auth,
+        statement="review", received_at="2026-09-01", summary="initial")
     assert res.status_code == 201, res.text
     return {"part_id": part_id, "revision_id": res.json()["id"]}
 

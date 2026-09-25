@@ -37,6 +37,27 @@ class UserDepartment(Base):
     department: Mapped["Department"] = relationship()
 
 
+class ProjectResponsible(Base):
+    """The project team (spec 2026-09-25): one responsible (main owner) user
+    per department per project. Everyone else active in that department on
+    the project's organization is a backup for that role -- they still see
+    and can act on the department's tasks there, but the task is not
+    counted as theirs. No row for a department -> today's behaviour: every
+    active member of the department counts as main."""
+    __tablename__ = "project_responsibles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("wf_departments.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    set_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    set_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    project: Mapped["Project"] = relationship(back_populates="responsibles")
+    department: Mapped["Department"] = relationship()
+    user: Mapped["User"] = relationship(foreign_keys=[user_id])
+
+
 class WfTemplate(Base):
     """Workflow template - stage-based with RASIC matrix."""
     __tablename__ = "wf_templates"

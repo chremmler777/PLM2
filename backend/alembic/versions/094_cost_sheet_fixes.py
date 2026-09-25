@@ -13,7 +13,19 @@
   actually changed, so validity follows the real history. Only done while
   that version is still the org's only one and untouched.
 
-Dialect-neutral (Core statements), same file on Postgres and SQLite.
+Dialect-neutral (Core statements), same file on Postgres and SQLite. The
+columns with a foreign key go through batch mode: on Postgres that emits the
+same ALTER TABLE ADD COLUMN / ADD FOREIGN KEY / DROP COLUMN as plain
+op.add_column/op.drop_column, on SQLite (no ALTER of constraints) it
+recreates the table.
+
+Downgrade restores what it can: the columns and the index go, and the
+rebuilt migration chain collapses back into 092's single version (the
+latest rates, valid from the first date, currency EUR as 092 wrote it). It
+cannot restore: the currency of rows Finance wrote or that were moved to the
+plant's currency outside the migration chain (the old value is not kept),
+and the machine classes the backfill created (they stay; harmless without
+machine_class_id).
 
 Revision ID: 094
 Revises: 093
@@ -85,9 +97,15 @@ def upgrade() -> None:
                        sa.column("sort_order", sa.Integer), sa.column("is_active", sa.Boolean))
     for table in ("cost_sheet_machine_rates", "cost_sheet_sampling_rates"):
         if "machine_class_id" not in _cols(bind, table):
-            op.add_column(table, sa.Column(
-                "machine_class_id", sa.Integer(),
-                sa.ForeignKey("cost_sheet_machine_classes.id"), nullable=True))
+            # batch mode wants a named foreign key: the name Postgres gives
+            # an unnamed one (<table>_<column>_fkey), so Postgres ends up
+            # exactly as before
+            with op.batch_alter_table(table) as batch:
+                batch.add_column(sa.Column(
+                    "machine_class_id", sa.Integer(),
+                    sa.ForeignKey("cost_sheet_machine_classes.id",
+                                  name=f"{table}_machine_class_id_fkey"),
+                    nullable=True))
         rows_t = sa.table(table, sa.column("id", sa.Integer), sa.column("version_id", sa.Integer),
                           sa.column("machine_class", sa.String),
                           sa.column("machine_class_id", sa.Integer))
@@ -190,13 +208,44 @@ def _rebuild_migrated_chain(bind, versions, plant_cur) -> None:
             published = dict(state)
 
 
+def _collapse_migrated_chain(bind) -> None:
+    """Undo _rebuild_migrated_chain: an org whose versions are all the
+    migration's published chain gets 092's single version back."""
+    versions = VERSIONS
+    rates = sa.table("cost_sheet_rates", sa.column("version_id", sa.Integer),
+                     sa.column("currency", sa.String))
+    orgs = sorted({r.organization_id for r in bind.execute(
+        sa.select(versions.c.organization_id)).all()})
+    for org_id in orgs:
+        chain = bind.execute(
+            sa.select(versions.c.id, versions.c.version, versions.c.status,
+                      versions.c.note, versions.c.valid_from)
+            .where(versions.c.organization_id == org_id)
+            .order_by(versions.c.version)).all()
+        if not chain or any(v.status != "published"
+                            or not (v.note or "").startswith(MIGRATED_NOTE)
+                            for v in chain):
+            continue          # Finance's work: left as it is
+        first, last = chain[0], chain[-1]
+        for v in chain[:-1]:
+            bind.execute(rates.delete().where(rates.c.version_id == v.id))
+            bind.execute(versions.delete().where(versions.c.id == v.id))
+        bind.execute(versions.update().where(versions.c.id == last.id).values(
+            version=1, valid_from=first.valid_from, note=MIGRATED_NOTE))
+        bind.execute(rates.update().where(rates.c.version_id == last.id)
+                     .values(currency="EUR"))
+
+
 def downgrade() -> None:
     bind = op.get_bind()
+    if "cost_sheet_versions" in set(inspect(bind).get_table_names()):
+        _collapse_migrated_chain(bind)
     if "currency" in _cols(bind, "cost_sheet_overheads"):
         op.drop_column("cost_sheet_overheads", "currency")
     for table in ("cost_sheet_sampling_rates", "cost_sheet_machine_rates"):
         if "machine_class_id" in _cols(bind, table):
-            op.drop_column(table, "machine_class_id")
+            with op.batch_alter_table(table) as batch:
+                batch.drop_column("machine_class_id")
     existing_ix = {ix["name"] for ix in inspect(bind).get_indexes("cost_sheet_versions")}
     if "uq_cost_sheet_one_draft" in existing_ix:
         op.drop_index("uq_cost_sheet_one_draft", table_name="cost_sheet_versions")

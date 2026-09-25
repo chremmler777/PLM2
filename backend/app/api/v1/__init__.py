@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 from app.api.v1.health import router as health_router
 from app.api.v1.plants import router as plants_router
+from app.api.v1.project_team import router as project_team_router
 from app.api.v1.catalog_parts import router as catalog_parts_router
 from app.api.v1.paints import router as paints_router
 
@@ -22,6 +23,7 @@ from app.api.v1.items.dfm import router as dfm_router
 from app.api.v1.items.field_notes import router as field_notes_router
 from app.api.v1.items.materials import router as materials_router
 from app.api.v1.items.worksheet import router as worksheet_router
+from app.api.v1.items.intakes import router as intakes_router
 from app.api.v1.equipment import router as equipment_router
 
 # Module: workflows (RASIC templates and instances)
@@ -55,6 +57,7 @@ from app.api.v1.changes.validation_issues import router as change_validation_iss
 from app.api.v1.changes.actual_costs import router as change_actual_costs_router
 from app.api.v1.changes.mother_plant import router as change_mother_plant_router
 from app.api.v1.changes.early_stage import router as change_early_stage_router
+from app.api.v1.changes.engineering_review import router as change_engineering_review_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
@@ -75,6 +78,7 @@ api_router.include_router(dfm_router)
 api_router.include_router(field_notes_router)
 api_router.include_router(materials_router)
 api_router.include_router(worksheet_router)
+api_router.include_router(intakes_router)
 api_router.include_router(equipment_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
@@ -93,8 +97,10 @@ api_router.include_router(change_validation_issues_router)
 api_router.include_router(change_actual_costs_router)
 api_router.include_router(change_mother_plant_router)
 api_router.include_router(change_early_stage_router)
+api_router.include_router(change_engineering_review_router)
 api_router.include_router(audit_router)
 api_router.include_router(plants_router)
+api_router.include_router(project_team_router)
 api_router.include_router(workflow_templates_router)
 api_router.include_router(workflow_instances_router)
 api_router.include_router(catalog_parts_router)

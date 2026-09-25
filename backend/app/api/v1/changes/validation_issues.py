@@ -84,7 +84,7 @@ class CustomerIn(BaseModel):
 
 
 class CostIn(BaseModel):
-    extra_cost: Optional[float] = Field(default=None, ge=0, le=1e10)
+    extra_cost: Optional[float] = Field(default=None, ge=0, le=9_999_999_999.99)  # fits Numeric(12,2)
     cost_bearer: Optional[str] = None
 
 

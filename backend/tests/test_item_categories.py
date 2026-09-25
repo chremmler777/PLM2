@@ -1,4 +1,5 @@
 """Controlled item categories (tools, assembly equipment, gauges) tests."""
+from tests.conftest import post_active
 
 
 async def _create_item(client, eng_auth, seed, **overrides):
@@ -62,8 +63,7 @@ async def test_tool_inherits_revision_machinery(client, eng_auth, seed):
     res = await _create_item(client, eng_auth, seed, part_number="T-001", name="Die", item_category="tool")
     tool_id = res.json()["id"]
 
-    res = await client.post(
-        f"/api/v1/parts/{tool_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "tool rev"}, headers=eng_auth
+    res = await post_active(client, f"/api/v1/parts/{tool_id}/revisions/customer-data", json={"statement": "review", "received_at": "2026-09-01", "summary": "tool rev"}, headers=eng_auth
     )
     assert res.status_code == 201
     assert res.json()["revision_name"] == "E1"

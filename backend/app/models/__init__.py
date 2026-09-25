@@ -38,13 +38,14 @@ from app.models.change_validation_issue import (
 )
 from app.models.change_actual_cost import ChangeActualCost
 from app.models.change_info import ChangeInfoReceipt
+from app.models.revision_intake import RevisionIntake, ChangeReviewAnswer
 from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineClass, CostSheetMachineRate,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
 )
 from app.models.workflow import (
     Department, UserDepartment, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
-    WfInstance, WfInstanceTask, CheckWorkflowStandard,
+    WfInstance, WfInstanceTask, CheckWorkflowStandard, ProjectResponsible,
 )
 from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
 from app.models.field_note import FieldNote, FieldNoteComment
@@ -88,6 +89,7 @@ __all__ = [
     "WfStepRasic",
     "WfTemplateHistory",
     "CheckWorkflowStandard",
+    "ProjectResponsible",
     # New workflow instance models (Phase 3c)
     "WfInstance",
     "WfInstanceTask",
@@ -115,6 +117,7 @@ __all__ = [
     "ChangeOffer",
     "ChangeActualCost",
     "ChangeInfoReceipt",
+    "RevisionIntake", "ChangeReviewAnswer",
     "CostSheetVersion", "CostSheetRate", "CostSheetMachineClass", "CostSheetMachineRate",
     "CostSheetSamplingRate", "CostSheetOverhead", "OrgSetting",
     "FormDefinition",

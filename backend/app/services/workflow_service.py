@@ -1,5 +1,6 @@
 """Workflow instance execution service (Phase 3c)."""
 from datetime import datetime, timedelta
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -736,12 +737,29 @@ class WorkflowService:
         )
         tasks = result.scalars().all()
 
+        # Project team (spec 2026-09-25): a task's department may have a
+        # responsible on the task's project -- everyone else active in the
+        # department is a backup there. Cached per (project_id, department_id)
+        # since many tasks share the same pair.
+        from app.services.project_team_service import ProjectTeamService
+        role_cache: dict[tuple[int, int], tuple[str, Optional[str]]] = {}
+
+        async def _role(project_id: int, department_id: int) -> tuple[str, Optional[str]]:
+            key = (project_id, department_id)
+            if key not in role_cache:
+                role = await ProjectTeamService.role_for_user(
+                    db, project_id, department_id, user_id)
+                main_name = await ProjectTeamService.main_name(db, project_id, department_id)
+                role_cache[key] = (role, main_name)
+            return role_cache[key]
+
         results = []
         for t in tasks:
             instance = t.instance
             revision = instance.part_revision
             part = revision.part
             stage = t.step.stage
+            role, main_name = await _role(part.project_id, t.department_id)
             results.append({
                 "task_id": t.id,
                 "instance_id": t.instance_id,
@@ -765,6 +783,11 @@ class WorkflowService:
                 "due_date": t.due_date,
                 "overdue": t.overdue,
                 "mine": t.owner_id == user_id,
+                # Project team (spec 2026-09-25): "main" (counts) or "backup"
+                # (visible, actionable, not counted); main_name only set when
+                # this task's role is "backup".
+                "role": role,
+                "main_name": main_name if role == "backup" else None,
             })
 
         results.sort(key=lambda d: (

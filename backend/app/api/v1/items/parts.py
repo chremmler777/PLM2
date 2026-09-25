@@ -26,6 +26,7 @@ from app.schemas.part import (
     RejectMajorRevisionRequest, SetLifecyclePhaseRequest,
 )
 from app.services.revision_naming import RevisionRuleViolation
+from app.services.revision_intake_service import IntakeError
 
 logger = logging.getLogger(__name__)
 
@@ -280,10 +281,10 @@ async def receive_customer_data(
         revision = await RevisionService.receive_customer_data(
             db, part_id, body.statement, body.received_at,
             customer_index=body.customer_index, summary=body.summary, created_by=current_user.id,
-            major=body.major)
+            major=body.major, intake_source=body.source)
         await db.commit()
         return revision
-    except RevisionRuleViolation as e:
+    except (RevisionRuleViolation, IntakeError) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:
@@ -322,10 +323,11 @@ async def promote_revision(
     try:
         new_revision = await RevisionService.promote_revision(
             db, revision_id, body.statement, body.received_at,
-            customer_index=body.customer_index, created_by=current_user.id, major=body.major)
+            customer_index=body.customer_index, created_by=current_user.id, major=body.major,
+            intake_source="promote")
         await db.commit()
         return new_revision
-    except RevisionRuleViolation as e:
+    except (RevisionRuleViolation, IntakeError) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:

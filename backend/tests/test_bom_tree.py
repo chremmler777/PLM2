@@ -1,4 +1,5 @@
 """BOM follows the revision; tree explosion and where-used."""
+from tests.conftest import post_active
 from datetime import date
 
 from sqlalchemy import select
@@ -16,7 +17,7 @@ async def _mk_part(client, auth, seed, number, part_type="internal_mfg", with_e1
     pid = res.json()["id"]
     rid = None
     if with_e1:
-        r = await client.post(f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
+        r = await post_active(client, f"/api/v1/parts/{pid}/revisions/customer-data", headers=auth,
                               json={"statement": "review", "received_at": "2026-09-01"})
         assert r.status_code == 201, r.text
         rid = r.json()["id"]
@@ -49,7 +50,7 @@ async def test_bom_copies_forward_to_new_major_proposal_and_promotion(client, en
     e1_lines = await _lines(session_factory, e1)
 
     # new customer major copies from the previous major
-    e2 = (await client.post(f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
+    e2 = (await post_active(client, f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
                             json={"statement": "review", "received_at": "2026-09-02"})).json()
     assert await _lines(session_factory, e2["id"]) == e1_lines
 
@@ -146,7 +147,7 @@ async def test_project_assemblies_lists_self_made_roots_even_without_lines(clien
 
 async def test_tree_assemblies_and_where_used_carry_customer_index(client, eng_auth, seed):
     top, top_rev = await _mk_part(client, eng_auth, seed, "IDX-TOP", with_e1=False)
-    r = await client.post(f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
+    r = await post_active(client, f"/api/v1/parts/{top}/revisions/customer-data", headers=eng_auth,
                           json={"statement": "review", "received_at": "2026-09-01", "customer_index": "B"})
     top_rev = r.json()["id"]
     sub, _ = await _mk_part(client, eng_auth, seed, "IDX-SUB")

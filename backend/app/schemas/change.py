@@ -295,8 +295,11 @@ class ChangeResponse(BaseModel):
     scope_changed_after_quote: bool = False
     # Set by the list endpoint: the caller leads or raised the change.
     is_mine: bool = False
-    # customer | internal | mother_plant (migration 093, spec §14).
+    # customer | internal | mother_plant (migration 093, spec §14) |
+    # engineering_review (spec §17, the light track of a new index).
     origin: str = "customer"
+    # Spec §17: the change was started by (or took) a revision intake.
+    from_intake: bool = False
     mother_plant_name: Optional[str] = None
     mother_plant_ref: Optional[str] = None
     mother_plant_sop: Optional[date] = None

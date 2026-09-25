@@ -28,6 +28,7 @@ from app.services.change_service import (
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingForbidden, MeetingService
 from app.services.validation_issue_service import IssueForbidden, IssueNotFound
+from app.services.change_people import is_acting
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
     TransitionRequest, ImpactedItemCreate, ImpactedItemResponse,
@@ -108,7 +109,7 @@ async def create_change(
             status_code=403,
             detail=("Only an admin, Project Management or a member of a "
                     "department allowed to start changes may raise a change "
-                    "from the mother plant" if mother_plant else
+                    f"from {mp.plant_name(body)}" if mother_plant else
                     "Only an admin or a member of a department allowed to start "
                     "changes (e.g. Sales) may raise a change"))
     # The system currently runs the customer (external) change flow only, so
@@ -131,8 +132,9 @@ async def create_change(
         raise HTTPException(status_code=404, detail="Project not found")
     # Spec §16: the capturer does not make themselves (or anybody) the lead.
     # Naming the lead is Project Management's call (or an admin's); for
-    # everybody else lead_id is ignored and the change starts without one
-    # (no project-PM concept exists to default to).
+    # everybody else lead_id is ignored. Either way, ChangeService.create_change
+    # falls back to the project's standard PM (project.pm_user_id) when no
+    # explicit lead survives here.
     lead_id = body.lead_id
     if lead_id is not None and not await MeetingService.user_is_pm(db, current_user):
         lead_id = None
@@ -187,9 +189,14 @@ async def list_changes(
     viewer = PriceViewer(db, current_user)
     out = []
     acting = getattr(current_user, "acts_as_department_id", None) is not None
+    from app.models.revision_intake import RevisionIntake
+    from_intake = set((await db.execute(
+        select(RevisionIntake.change_id).where(
+            RevisionIntake.change_id.is_not(None)))).scalars().all())
     for change in changes:
         change.deadline_state = await ChangeService.deadline_state(db, change)
         row = ChangeResponse.model_validate(change)
+        row.from_intake = change.id in from_intake
         # "Mine" filter (spec §16): the caller leads or raised it.
         row.is_mine = not acting and current_user.id in (change.lead_id, change.raised_by)
         if not await viewer.may_read(change):
@@ -449,7 +456,9 @@ async def my_change_tasks(
             release_rows.setdefault(r.change_id, {})[r.check_key] = r
 
     for c in open_changes:
-        if c.status == "captured" and can_capture:
+        if c.status == "captured" and (
+                can_capture or (is_pm and mp.is_mother_plant(c))):
+            # a mother-plant change is captured by Project Management
             tasks.append({**await _base(c), "kind": "kickoff",
                           "missing": await ChangeService.kickoff_missing(db, c)})
         elif c.status == "scoping":
@@ -535,8 +544,8 @@ async def my_change_tasks(
                     **await _base(c), "kind": "info_ack",
                     "department_id": r.department_id, "receipt_id": r.id,
                     "target_tab": "mother",
-                    "hint": "Read the mother plant's change and confirm: "
-                            "read and understood",
+                    "hint": (f"Read the change from {mp.plant_name(c)} and "
+                             "confirm: read and understood"),
                 })
             if (c.status == "scoping" and c.id not in informed_ids
                     and await MotherPlantService.may_send(db, c, current_user)):
@@ -552,7 +561,8 @@ async def my_change_tasks(
                 tasks.append({
                     **await _base(c), "kind": "inform_mother_plant",
                     "target_tab": "timing",
-                    "hint": "Inform the mother plant of the validated timing",
+                    "hint": (f"Inform {mp.plant_name(c)} of the validated "
+                             "timing"),
                 })
 
         # The detailed plan waits on every responsible team's confirmation;
@@ -1170,6 +1180,27 @@ async def reference_activities(department_id: Optional[int] = Query(None),
              "sort_order": r.sort_order} for r in rows]
 
 
+async def _hide_foreign_drafts(db: AsyncSession, user: User, assessments) -> None:
+    """details.draft is a department's unfinished answer: only who may keep
+    it (its members, admin; EarlyStageService._draft_row) reads it."""
+    if user.effective_role == "admin":
+        return
+    mine = None
+    for a in assessments:
+        if not (isinstance(a.details, dict) and "draft" in a.details):
+            continue
+        if mine is None:
+            mine = set(await WorkflowService.effective_department_ids(db, user))
+        if a.department_id not in mine:
+            a.details = {k: v for k, v in a.details.items() if k != "draft"}
+
+
+async def _assessment_out(db: AsyncSession, a, user: User) -> AssessmentResponse:
+    out = AssessmentResponse.model_validate(a)
+    await _hide_foreign_drafts(db, user, [out])
+    return out
+
+
 @router.get("/{change_id}", response_model=ChangeDetailResponse)
 async def get_change(
     change_id: int,
@@ -1190,12 +1221,17 @@ async def get_change(
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
     out = await _price_safe(db, change, current_user, ChangeDetailResponse)
+    await _hide_foreign_drafts(db, current_user, out.assessments)
     # Vendor quotes follow their costing position's read rule here too.
     from app.services.costing_position_service import CostingPositionService
     hidden = await CostingPositionService.unreadable_attachment_ids(
         db, change, current_user, change.attachments)
     if hidden:
         out.attachments = [a for a in out.attachments if a.id not in hidden]
+    from app.models.revision_intake import RevisionIntake
+    out.from_intake = (await db.execute(
+        select(RevisionIntake.id).where(RevisionIntake.change_id == change.id)
+        .limit(1))).scalar_one_or_none() is not None
     return out
 
 
@@ -1386,7 +1422,9 @@ async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
         raise HTTPException(404, "Change not found")
     from app.services.change_routing_service import ChangeRoutingService
     try:
-        await ChangeRoutingService.reject_deviation(db, change, current_user.id, body.reason)
+        await ChangeRoutingService.reject_deviation(
+            db, change, current_user.id, body.reason,
+            acting=is_acting(current_user))
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
@@ -1401,7 +1439,9 @@ async def approve_deviation(change_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(404, "Change not found")
     from app.services.change_routing_service import ChangeRoutingService
     try:
-        await ChangeRoutingService.approve_deviation(db, change, current_user.id)
+        await ChangeRoutingService.approve_deviation(
+            db, change, current_user.id,
+            acting=is_acting(current_user))
     except ValueError as e:
         raise HTTPException(400, str(e))
     await db.commit()
@@ -1493,7 +1533,7 @@ async def transition_change(
             raise HTTPException(
                 status_code=403,
                 detail="Only Project Management, the change lead or an admin "
-                       "may approve a change from the mother plant")
+                       f"may approve a change from {mp.plant_name(change)}")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
@@ -1686,7 +1726,7 @@ async def submit_assessment(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)
-    return a
+    return await _assessment_out(db, a, current_user)
 
 
 @router.post("/{change_id}/assessments/{assessment_id}/accept",
@@ -1704,7 +1744,7 @@ async def accept_assessment(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)
-    return a
+    return await _assessment_out(db, a, current_user)
 
 
 @router.post("/{change_id}/assessments/{assessment_id}/assign",
@@ -1723,7 +1763,7 @@ async def assign_assessment(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)
-    return a
+    return await _assessment_out(db, a, current_user)
 
 
 @router.put("/{change_id}/assessments/{assessment_id}/due-date",
@@ -1742,7 +1782,7 @@ async def set_assessment_due_date(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)
-    return a
+    return await _assessment_out(db, a, current_user)
 
 
 # Who may change which header field through PATCH. Mirrors the editors the
@@ -1758,10 +1798,12 @@ _PATCH_RIGHTS = {
     # the lead steers the change
     "priority": ("lead",),
     "customer_relevant": ("lead",),
-    # capture fields: Sales writes the request, the lead owns it
-    "title": ("lead", "sales"),
-    "reason": ("lead", "sales"),
-    "description": ("lead", "sales"),
+    # capture fields: Sales writes the request, the lead owns it. PM writes
+    # them too where it is who captures (a mother-plant change) or
+    # while nobody leads the change yet (captured/scoping): "pm_capture".
+    "title": ("lead", "sales", "pm_capture"),
+    "reason": ("lead", "sales", "pm_capture"),
+    "description": ("lead", "sales", "pm_capture"),
     "change_type": ("lead", "sales"),
     # deadlines: whoever owns the quote / release date
     "required_by_date": ("lead", "sales", "pm"),
@@ -1808,9 +1850,17 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
     async def has(role: str) -> bool:
         if role not in held:
             if role == "lead":
-                held[role] = change.lead_id is not None and change.lead_id == user.id
+                # acting as a department drops the personal lead privilege
+                from app.services.change_people import holds_lead
+                held[role] = holds_lead(change, user)
             elif role == "pm":
                 held[role] = await MeetingService.user_is_pm_member(db, user)
+            elif role == "pm_capture":
+                from app.services import mother_plants as mp
+                pm_window = mp.is_mother_plant(change) or (
+                    change.status in ("captured", "scoping")
+                    and change.lead_id is None)
+                held[role] = pm_window and await has("pm")
             else:
                 held[role] = await ChangeService._user_in_department(
                     db, user, _PATCH_ROLE_DEPT[role])
@@ -1823,10 +1873,12 @@ async def _require_patch_rights(db: AsyncSession, change, fields: dict,
                 allowed = True
                 break
         if not allowed:
-            who = ", ".join({"lead": "the change lead", "pm": "Project Management",
-                             "sales": "Sales", "quality": "Quality",
-                             "scheduling": "Scheduling"}[r]
-                            for r in _PATCH_RIGHTS[key])
+            who = ", ".join(dict.fromkeys(
+                {"lead": "the change lead", "pm": "Project Management",
+                 "pm_capture": "Project Management",
+                 "sales": "Sales", "quality": "Quality",
+                 "scheduling": "Scheduling"}[r]
+                for r in _PATCH_RIGHTS[key]))
             raise HTTPException(
                 status_code=403,
                 detail=f"Only {who} or an admin may change {key}")
@@ -2113,8 +2165,8 @@ async def upload_attachment(
         if not mp.is_mother_plant(change):
             raise HTTPException(
                 status_code=400,
-                detail="A mother-plant timing file belongs to a change from "
-                       "the mother plant")
+                detail="This timing file belongs to a change from "
+                       f"{mp.FALLBACK_NAME}")
         try:
             check_timing_file(contents)
         except ChangeError as e:
@@ -2603,7 +2655,7 @@ async def set_cost_lead_time(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(a)
-    return a
+    return await _assessment_out(db, a, current_user)
 
 
 @router.get("/{change_id}/summation", response_model=SummationResponse)

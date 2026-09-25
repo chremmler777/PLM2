@@ -35,6 +35,8 @@ class PackageRow:
     suggested_name: Optional[str] = None
     major: Optional[int] = None
     error: Optional[str] = None
+    current_pending: bool = False
+    pending_note: Optional[str] = None
 
 
 class PackageError(ValueError):
@@ -67,6 +69,14 @@ class CustomerPackageService:
 
     @staticmethod
     async def _current(session: AsyncSession, part_id: int) -> Optional[PartRevision]:
+        """What a new file is compared against: the newest major still
+        pending triage, else the displayed (active) one (spec §17a)."""
+        from app.services.revision_intake_service import RevisionIntakeService
+        waiting = await RevisionIntakeService.waiting_for_part(session, part_id)
+        if waiting is not None:
+            rev = await session.get(PartRevision, waiting.revision_id)
+            if rev is not None:
+                return rev
         part = await session.get(Part, part_id)
         return await BomTreeService._display_revision(session, part) if part else None
 
@@ -81,6 +91,16 @@ class CustomerPackageService:
         current = await CustomerPackageService._current(session, row.part_id)
         row.current_revision = current.revision_name if current else None
         row.current_index = current.customer_index if current else None
+        from app.services.revision_intake_service import RevisionIntakeService
+        waiting = await RevisionIntakeService.waiting_for_part(session, row.part_id)
+        row.current_pending = waiting is not None
+        if waiting is not None:
+            block = await RevisionIntakeService.link_block_message(session, waiting)
+            if block:
+                row.action, row.error = ACTION_ERROR, block
+                return row
+            row.pending_note = (f"{row.current_revision} is still pending triage; "
+                                f"a new index supersedes it")
         try:
             classify(row.filename)
             majors = await RevisionService._majors(session, row.part_id)
@@ -115,6 +135,8 @@ class CustomerPackageService:
             await CustomerPackageService._fill_row(session, row, statement)
             if row.action != ACTION_ERROR:
                 row.action = decide_action(row.customer_index, row.current_index)
+                if row.action != ACTION_NEW:
+                    row.pending_note = None
             rows.append(row)
         return rows
 
@@ -160,6 +182,9 @@ class CustomerPackageService:
 
         created, kept, skipped = [], [], []
         written: list[str] = []
+        # One package, one batch: its intakes are grouped for the triage.
+        import uuid
+        batch_id = str(uuid.uuid4())
         try:
             # children first, the assembly last; harmless today, matters if BOM
             # copies ever snapshot child revisions instead of child part ids
@@ -167,14 +192,16 @@ class CustomerPackageService:
             for row in ordered:
                 rev = await RevisionService.receive_customer_data(
                     session, row.part_id, statement, received_at, customer_index=row.customer_index,
-                    summary=f"Customer package {received_at.isoformat()}", created_by=created_by, major=row.major)
+                    summary=f"Customer package {received_at.isoformat()}", created_by=created_by, major=row.major,
+                    intake_source="package", batch_id=batch_id)
                 contents, ctype = files[row.filename]
                 f = await store_revision_file(session, rev, row.filename, contents, created_by, content_type=ctype)
                 written.append(f.file_path)
                 if f.viewer_file_path:
                     written.append(f.viewer_file_path)
                 created.append({"part_id": row.part_id, "part_number": row.part_number,
-                                "revision_name": rev.revision_name, "file_id": f.id, "filename": row.filename})
+                                "revision_name": rev.revision_name, "file_id": f.id, "filename": row.filename,
+                                "pending": True})
             for row in rows:
                 if row.action == ACTION_UNCHANGED and row.part_id is not None:
                     current = await CustomerPackageService._current(session, row.part_id)
@@ -200,4 +227,6 @@ class CustomerPackageService:
                 except OSError:
                     pass
             raise
-        return {"created": created, "kept": kept, "skipped": skipped}
+        return {"created": created, "kept": kept, "skipped": skipped,
+                "batch_id": batch_id if created else None,
+                "pending_count": len(created)}

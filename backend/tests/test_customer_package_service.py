@@ -82,6 +82,20 @@ async def test_confirm_creates_only_changed_majors_and_copies_bom(session_factor
     assert [c["revision_name"] for c in out["created"]] == ["E2"]
     assert {k["part_id"] for k in out["kept"]} == {sub_id, clamp_id}
     assert out["skipped"] == ["stranger.stp"]
+    assert out["created"][0]["pending"] is True and out["batch_id"] and out["pending_count"] == 1
+    async with session_factory() as s:
+        # spec §17: the new major waits for triage; the active one is unchanged
+        top = await s.get(Part, top_id)
+        assert top.active_revision_id == ids["1994-100"][1]
+        assert (await BomTreeService.tree(s, top_id))["revision_name"] == "E1"
+        from app.models.revision_intake import RevisionIntake
+        from app.services.revision_intake_service import RevisionIntakeService
+        intake = (await s.execute(select(RevisionIntake).where(RevisionIntake.part_id == top_id))).scalar_one()
+        assert intake.source == "package" and intake.batch_id == out["batch_id"] and intake.status == "pending"
+        e2 = await s.get(PartRevision, intake.revision_id)
+        assert e2.status == "in_review"
+        await RevisionIntakeService.activate(s, e2, seed["admin_id"])
+        await s.commit()
     async with session_factory() as s:
         top = await s.get(Part, top_id)
         e2 = await s.get(PartRevision, top.active_revision_id)

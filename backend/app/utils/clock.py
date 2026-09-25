@@ -6,8 +6,8 @@ the past, an offer's validity, an overdue fix action). Audit timestamps are
 NOT business dates: they stay datetime.utcnow().
 
 The date is taken in the business timezone: the PLM_BUSINESS_TZ environment
-variable (an IANA name such as "Europe/Berlin") when set, else the server's
-local timezone. Plants and organizations carry no timezone yet; when they
+variable (an IANA name such as "Europe/Berlin") when set, else
+America/New_York (the Toccoa plant; DEFAULT_TZ). Plants and organizations carry no timezone yet; when they
 do, pass it as `tz` and it wins. Mixing utcnow().date() with date.today()
 gives two different days for several hours around midnight, which is how a
 block "started today" ended up a day off in the tests.
@@ -17,6 +17,9 @@ from datetime import date, datetime
 from typing import Optional
 
 ENV_TZ = "PLM_BUSINESS_TZ"
+# Unset (or empty, or an unknown name): the Toccoa plant's timezone, not the
+# server's, which is UTC in the containers.
+DEFAULT_TZ = "America/New_York"
 
 
 def _zone(name: Optional[str]):
@@ -31,8 +34,8 @@ def _zone(name: Optional[str]):
 
 def business_today(tz: Optional[str] = None) -> date:
     """Today's date in the business timezone (tz, else PLM_BUSINESS_TZ,
-    else the server's local timezone)."""
-    zone = _zone(tz) or _zone(os.environ.get(ENV_TZ))
+    else DEFAULT_TZ)."""
+    zone = _zone(tz) or _zone(os.environ.get(ENV_TZ)) or _zone(DEFAULT_TZ)
     if zone is not None:
         return datetime.now(zone).date()
     return date.today()

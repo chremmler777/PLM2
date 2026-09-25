@@ -56,7 +56,8 @@ class MeetingService:
 
     @staticmethod
     async def _authz(session: AsyncSession, change: ChangeRequest, user: User):
-        if user.id == change.lead_id:
+        from app.services.change_people import holds_lead
+        if holds_lead(change, user):
             return
         if not await MeetingService.user_is_pm(session, user):
             raise MeetingForbidden(
@@ -172,8 +173,10 @@ class MeetingService:
             select(Department.id).where(Department.name == "Sales"))).scalar_one_or_none()
         if sales is not None:
             from app.services.notification_service import NotificationService
-            await NotificationService.notify_departments(
-                session, [sales],
+            from app.services.change_people import department_members_of_change_org
+            await NotificationService.notify_users(
+                session, await department_members_of_change_org(
+                    session, change, [sales]),
                 title=f"Cost carrier changed: {change.change_number}",
                 body=(f"The scoping meeting set '{change.title}' to "
                       f"{label('cost_carrier', meeting.cost_carrier).lower()}."),

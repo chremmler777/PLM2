@@ -312,6 +312,7 @@ class ReleaseService:
         hints = {}
         if weight is not None:
             hints["weight_measured"] = f"Validated part weight on file: {float(weight):g} g"
+        hints.update(await ReleaseService.revision_hints(session, change))
         blockers = await ReleaseService.blockers(session, change)
         return {
             "checks": [{
@@ -333,6 +334,41 @@ class ReleaseService:
             "can_release": change.status == "in_validation" and not blockers,
             "blockers": blockers,
         }
+
+    @staticmethod
+    async def revision_hints(session: AsyncSession, change: ChangeRequest) -> dict:
+        """Spec §17: "index updated" and "drawing and 3D data released" read
+        the linked revisions: which index each part gets (activated on
+        release, or already active) and whether its drawing / 3D files are
+        on file."""
+        from app.models.part import Part, PartRevision, RevisionFile
+        lines_index, lines_files = [], []
+        for item in change.impacted_items:
+            if item.resulting_revision_id is None:
+                continue
+            rev = await session.get(PartRevision, item.resulting_revision_id)
+            part = await session.get(Part, item.part_id)
+            if rev is None or part is None:
+                continue
+            active = part.active_revision_id == rev.id
+            lines_index.append(
+                f"{part.part_number} index {rev.revision_name}"
+                + (" active" if active else " activated on release"))
+            types = set((await session.execute(
+                select(RevisionFile.file_type).where(
+                    RevisionFile.revision_id == rev.id,
+                    RevisionFile.is_deleted.is_(False)))).scalars().all())
+            has = [t for t in ("drawing", "cad") if t in types]
+            lines_files.append(
+                f"{part.part_number} {rev.revision_name}: "
+                + (" and ".join({"drawing": "drawing", "cad": "3D"}[t] for t in has)
+                   + " on file" if has else ("files on file" if types else "no files yet")))
+        out = {}
+        if lines_index:
+            out["index_updated"] = "; ".join(lines_index)
+        if lines_files:
+            out["drawing_released"] = "; ".join(lines_files)
+        return out
 
     @staticmethod
     def lesson_out(l: LessonLearned, users: dict) -> dict:

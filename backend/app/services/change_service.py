@@ -277,13 +277,21 @@ class ChangeService:
         if origin is not None and origin not in mp.ORIGINS:
             raise ChangeError(
                 f"Invalid origin '{origin}' - one of {', '.join(mp.ORIGINS)}")
+        if lead_id is None:
+            # Standard PM: the project's Project Manager responsible is the
+            # default lead of every new change on it, when nobody named an
+            # explicit one.
+            from app.services.project_team_service import ProjectTeamService
+            lead_id = await ProjectTeamService.responsible_user_id(
+                session, project_id, "Project Manager")
         if origin == mp.MOTHER_PLANT:
             # The mother plant sold it: never customer relevant here (no quote
             # deadline, no offer).
             if customer_relevant:
+                name = mp.plant_name(mother_plant_name or mp.DEFAULT_MOTHER_PLANT)
                 raise ChangeError(
-                    "A change from the mother plant is not customer relevant "
-                    "here: the mother plant handles the customer")
+                    f"A change from {name} is not customer relevant "
+                    f"here: {name} handles the customer")
             from app.services.mother_plant_service import MotherPlantService
             mother_plant_name, mother_plant_ref, mother_plant_sop = \
                 MotherPlantService.check_capture(
@@ -570,8 +578,11 @@ class ChangeService:
                 ChangeAttachment.change_id == change.id))).scalar() or 0
         if att_count == 0:
             missing.append("at least one attachment")
-        # Internal changes have no quote deadline in the two-phase model.
-        if change.customer_relevant and change.required_by_date is None:
+        # Internal changes have no quote deadline in the two-phase model, and
+        # a mother-plant change has no quote at all.
+        from app.services import mother_plants as mp
+        if (change.customer_relevant and not mp.is_mother_plant(change)
+                and change.required_by_date is None):
             missing.append("quote deadline")
         # Somebody has to own what is handed over (spec §16 P1-5).
         if change.lead_id is None:
@@ -799,12 +810,18 @@ class ChangeService:
         mother_plant = mp.is_mother_plant(change)
         if mother_plant and to_status in mp.MOTHER_PLANT_SKIPPED:
             raise ChangeError(
-                "A change from the mother plant has no assessment, costing or "
-                "quote: it goes from scoping to approved")
+                f"A change from {mp.plant_name(change)} has no assessment, "
+                "costing or quote: it goes from scoping to approved")
+        # Engineering review (spec §17): the review answers release it; a full
+        # ECR is reached by escalating, never by a status hop.
+        from app.services.engineering_review_service import review_refusal
+        refusal = review_refusal(change, to_status)
+        if refusal is not None:
+            raise ChangeError(refusal)
         if change.status == "scoping" and to_status == "approved":
             if not mother_plant:
                 raise ChangeError(
-                    "Only a change from the mother plant goes from scoping "
+                    f"Only a change from {mp.FALLBACK_NAME} goes from scoping "
                     "straight to approved")
             from app.services.mother_plant_service import MotherPlantService
             blocker = await MotherPlantService.approval_blocker(session, change)
@@ -1035,10 +1052,14 @@ class ChangeService:
                 if part is not None and part.active_revision_id:
                     parent = await session.get(PartRevision, part.active_revision_id)
                 if parent is None or parent.parent_revision_id is not None:
+                    # A customer major still pending triage is not the base
+                    # of anything yet (spec §17a decision 4).
+                    from app.models.revision_intake import waiting_revision_ids
                     parent = (await session.execute(
                         select(PartRevision)
                         .where((PartRevision.part_id == item.part_id)
-                               & (PartRevision.parent_revision_id.is_(None)))
+                               & (PartRevision.parent_revision_id.is_(None))
+                               & PartRevision.id.not_in(waiting_revision_ids()))
                         .order_by(PartRevision.created_at.desc()).limit(1))).scalar_one_or_none()
                 if parent is None:
                     raise ValueError(f"Part {item.part_id} has no revision to change")
@@ -1111,13 +1132,13 @@ class ChangeService:
             part = await session.get(Part, item.part_id)
             if rev is None or part is None:
                 continue
-            prior = part.active_revision_id
-            if prior is not None and prior != rev.id:
-                rev.supersedes_revision_id = prior
-            rev.status = "approved"
-            rev.approved_at = datetime.utcnow()
-            rev.approved_by = user_id
-            part.active_revision_id = rev.id
+            # Shared with the revision intake routes (spec §17a decision 5):
+            # pointer, approved, supersedes, and a pending customer major's
+            # intake side effects.
+            from app.services.revision_intake_service import RevisionIntakeService
+            await RevisionIntakeService.activate(
+                session, rev, user_id,
+                note=f"Released by {change.change_number}", change=change)
             # stamp engineering level
             item.eng_level_after = rev.revision_name
             await session.flush()
@@ -1359,6 +1380,10 @@ class ChangeService:
             session, change, "impact_confirmed",
             "Impacted-item set confirmed by Development", user_id,
         )
+        # Engineering review (spec §17): the lock opens the review; the
+        # departments serving the locked parts are asked.
+        from app.services.engineering_review_service import EngineeringReviewService
+        await EngineeringReviewService.on_impact_locked(session, change, user_id)
         return change
 
     @staticmethod
@@ -1680,8 +1705,8 @@ class ChangeService:
         from app.services import mother_plants as mp
         if mp.is_mother_plant(change):
             raise ChangeError(
-                "A change from the mother plant has no customer publish: "
-                "inform the mother plant instead")
+                f"A change from {mp.plant_name(change)} has no customer publish: "
+                f"inform {mp.plant_name(change)} instead")
         if change.status != "approved" and user.effective_role != "admin":
             raise ChangeError(
                 "The bank build plan is published while the change is approved")
@@ -1813,11 +1838,14 @@ class ChangeService:
         if change.status == "in_assessment":
             from app.models.change import ChangeRouting
             from app.services.change_routing_service import ChangeRoutingService
+            from app.services.change_people import is_acting
             routing = (await session.execute(
                 select(ChangeRouting).where(ChangeRouting.change_id == change.id)
             )).scalar_one_or_none()
             if (routing is not None
-                    and ChangeRoutingService.user_can_decide_deviation(change, routing, user.id)):
+                    and ChangeRoutingService.user_can_decide_deviation(
+                        change, routing, user.id,
+                        acting=is_acting(user))):
                 actions.append({
                     "kind": "routing_deviation_decision",
                     "label": "Decide added department",
@@ -1863,6 +1891,11 @@ class ChangeService:
         # understood, inform the mother plant of the validated timing.
         from app.services.mother_plant_service import MotherPlantService
         actions += await MotherPlantService.my_actions(
+            session, change, user, dept_ids)
+
+        # Engineering review (spec §17): answer for your department, escalate.
+        from app.services.engineering_review_service import EngineeringReviewService
+        actions += await EngineeringReviewService.my_actions(
             session, change, user, dept_ids)
 
         # Validation issues (spec §12): contain / root cause / fix actions
@@ -2355,26 +2388,15 @@ class ChangeService:
                     "Checklist incomplete, unanswered: " + ", ".join(missing))
 
     @staticmethod
-    async def assessment_objects(
-        session: AsyncSession, change: ChangeRequest,
-    ) -> list[dict]:
-        """Per-routed-department buckets of the objects that department
-        assesses, derived from the impacted set. Four queries regardless of how
-        many parts or departments are involved."""
-        from app.models.workflow import Department
-
-        # Routed departments = the ones carrying an assessment row on this
-        # change. Ordered by stage then name so the buckets read like the
-        # routing does.
-        routed = {}
-        for a in change.assessments:
-            routed.setdefault(a.department_id, a.stage_order or 0)
-        if not routed:
-            return []
-        names = {d.id: d.name for d in (await session.execute(
-            select(Department).where(Department.id.in_(routed)))).scalars().all()}
-
-        impacted_ids = [i.part_id for i in change.impacted_items]
+    async def served_objects(
+        session: AsyncSession, part_ids: list[int],
+    ) -> dict[str, list[tuple]]:
+        """item_category -> [(part, via_part_id)]: the given parts themselves
+        plus everything serving them through part relations (tools, and one
+        hop further through the tools: stations, EOAT, gauges). Shared by
+        the assessment object buckets and the engineering review's
+        department list (spec §17a decision 3)."""
+        impacted_ids = list(dict.fromkeys(part_ids))
 
         async def _step(part_ids: list[int]) -> dict[int, set[int]]:
             """part_id -> everything related to it, in either direction. A tool
@@ -2435,6 +2457,31 @@ class ChangeService:
             if other is not None:
                 by_category.setdefault(other.item_category, []).append(
                     (other, found[other_id]))
+
+        return by_category
+
+    @staticmethod
+    async def assessment_objects(
+        session: AsyncSession, change: ChangeRequest,
+    ) -> list[dict]:
+        """Per-routed-department buckets of the objects that department
+        assesses, derived from the impacted set. Four queries regardless of how
+        many parts or departments are involved."""
+        from app.models.workflow import Department
+
+        # Routed departments = the ones carrying an assessment row on this
+        # change. Ordered by stage then name so the buckets read like the
+        # routing does.
+        routed = {}
+        for a in change.assessments:
+            routed.setdefault(a.department_id, a.stage_order or 0)
+        if not routed:
+            return []
+        names = {d.id: d.name for d in (await session.execute(
+            select(Department).where(Department.id.in_(routed)))).scalars().all()}
+
+        by_category = await ChangeService.served_objects(
+            session, [i.part_id for i in change.impacted_items])
 
         out = []
         for dept_id in sorted(routed, key=lambda d: (routed[d], names.get(d, ""))):
@@ -2804,8 +2851,8 @@ class ChangeService:
         from app.services import mother_plants as mp
         if cust_rel and mp.is_mother_plant(change):
             raise ChangeError(
-                "A change from the mother plant is not customer relevant here: "
-                "the mother plant handles the customer")
+                f"A change from {mp.plant_name(change)} is not customer relevant "
+                f"here: {mp.plant_name(change)} handles the customer")
         if (
             cust_rel is not None
             and cust_rel != change.customer_relevant

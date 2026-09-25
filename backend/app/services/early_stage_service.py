@@ -32,6 +32,7 @@ from app.models.entities import User
 from app.models.part import Part
 from app.models.workflow import Department
 from app.services import cm_labels
+from app.services.change_people import is_acting
 from app.services.change_service import (
     ALLOWED_TRANSITIONS, IMPACT_LOCKED_STATUSES, ChangeError, ChangeService,
 )
@@ -57,9 +58,8 @@ class EarlyStageService:
         admin = user.effective_role == "admin"
         # Acting as a department is being exactly that department: the
         # personal lead privilege steps aside, like the admin bypass.
-        acting = getattr(user, "acts_as_department_id", None) is not None
-        lead = (not acting and change.lead_id is not None
-                and change.lead_id == user.id)
+        from app.services.change_people import holds_lead
+        lead = holds_lead(change, user)
         pm = await MeetingService.user_is_pm_member(session, user)
         sales = await EarlyStageService._member_of(session, user, "Sales")
         return {"admin": admin, "lead": lead, "pm": pm, "sales": sales,
@@ -133,6 +133,11 @@ class EarlyStageService:
                     session, user, change, to_status=to_status)
             if ok and (change.status, to_status) == ChangeService.COSTING_REOPEN:
                 ok = await ChangeService.user_can_reopen_costing(session, user, change)
+            if ok and change.status == "scoping" and to_status == "approved":
+                # the mother plant's side track: the same right as the
+                # endpoint (PM, the change lead, admin)
+                from app.services.mother_plant_service import MotherPlantService
+                ok = await MotherPlantService.may_send(session, change, user)
             if ok and change.status == "in_validation" and to_status == "in_implementation":
                 from app.services.validation_service import ValidationService
                 ok = await ValidationService.may_escalate(session, change, user)
@@ -157,10 +162,16 @@ class EarlyStageService:
         from app.services import mother_plants as mp
         mother_plant = mp.is_mother_plant(change)
         if mother_plant and to_status in mp.MOTHER_PLANT_SKIPPED:
-            return "A change from the mother plant has no assessment, costing or quote"
+            return (f"A change from {mp.plant_name(change)} has no assessment, "
+                    "costing or quote")
+        from app.services.engineering_review_service import review_refusal
+        refusal = review_refusal(change, to_status)
+        if refusal is not None:
+            return refusal
         if change.status == "scoping" and to_status == "approved":
             if not mother_plant:
-                return "Only a change from the mother plant goes from scoping to approved"
+                return (f"Only a change from {mp.FALLBACK_NAME} goes from "
+                        "scoping to approved")
             from app.services.mother_plant_service import MotherPlantService
             return await MotherPlantService.approval_blocker(session, change)
         if to_status == "approved" and not mother_plant:
@@ -477,7 +488,8 @@ class EarlyStageService:
         await ChangeService.append_changelog(
             session, change, "back_to_scoping",
             f"Back to scoping after 'not feasible': {reason}", user_id,
-            new_value={"superseded_assessment_ids": [a.id for a in done]},
+            new_value={"reason": reason,
+                       "superseded_assessment_ids": [a.id for a in done]},
             notes=reason)
 
     # ------------------------------------------------------------------
@@ -610,7 +622,8 @@ class EarlyStageService:
             "decider_user_id": decider_id,
             "decider_name": names.get(decider_id) if decider_id else None,
             "can_decide": ChangeRoutingService.user_can_decide_deviation(
-                change, routing, user.id),
+                change, routing, user.id,
+                acting=is_acting(user)),
             "text": text,
         }
 
@@ -707,6 +720,15 @@ class EarlyStageService:
                           "text": f"Waiting on Sales to answer {len(unanswered)} question(s)",
                           "concern_ids": [c.id for c in unanswered],
                           "target_tab": "scoping"})
+        if change.status == "scoping" and change.impact_confirmed_at is None:
+            from app.services import mother_plants as mp
+            if mp.is_mother_plant(change):
+                # no proceed meeting on this track: the lock is what
+                # scoping -> approved waits on (approval_blocker)
+                waits.append({"kind": "impact_not_locked",
+                              "text": ("Impacted set is not locked: Development "
+                                       "confirms the impacted items"),
+                              "target_tab": "impacted"})
         if change.status == "scoping":
             open_meetings = [m for m in change.meetings if m.decision is None]
             if open_meetings and all(m.cost_carrier is None for m in open_meetings):
@@ -773,7 +795,8 @@ class EarlyStageService:
     async def _may_record_meeting(session, change, user) -> bool:
         """Mirrors MeetingService._authz: the change lead, PM, admin."""
         from app.services.meeting_service import MeetingService
-        if user.id == change.lead_id:
+        from app.services.change_people import holds_lead
+        if holds_lead(change, user):
             return True
         return await MeetingService.user_is_pm(session, user)
 
@@ -785,17 +808,20 @@ class EarlyStageService:
                               change: ChangeRequest) -> list[dict]:
         """[{id, name, department, is_default}]: active users of the change's
         organization in the Project Manager department, plus the current
-        lead. is_default marks the project's PM; there is no project-PM
-        concept yet, so it is always false. Duplicate names get the username
-        added so two people never read the same."""
+        lead. is_default marks the project's Project Manager responsible
+        (the project team's standard PM), sorted first. Duplicate names get
+        the username added so two people never read the same."""
         from app.models.entities import Plant, Project
         from app.models.workflow import UserDepartment
+        from app.services.project_team_service import ProjectTeamService
         org_id = (await session.execute(
             select(Plant.organization_id).join(Project, Project.plant_id == Plant.id)
             .where(Project.id == change.project_id))).scalar_one_or_none()
         pm_id = (await session.execute(
             select(Department.id).where(Department.name == "Project Manager")
         )).scalar_one_or_none()
+        default_id = await ProjectTeamService.responsible_user_id(
+            session, change.project_id, "Project Manager")
         users: dict[int, tuple] = {}
         if pm_id is not None:
             q = (select(User).join(UserDepartment, UserDepartment.user_id == User.id)
@@ -824,9 +850,10 @@ class EarlyStageService:
             if counts[name.lower()] > 1 and u.username and u.username != name:
                 name = f"{name} ({u.username})"
             out.append({"id": uid, "name": name, "department": dept,
-                        "is_default": False,
+                        "is_default": uid == default_id,
                         "is_current": uid == change.lead_id})
-        return sorted(out, key=lambda r: (not r["is_current"], r["name"].lower()))
+        return sorted(out, key=lambda r: (
+            not r["is_current"], not r["is_default"], r["name"].lower()))
 
     # ------------------------------------------------------------------
     # Served-by objects for parts, before routing exists

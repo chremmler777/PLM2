@@ -1,3 +1,4 @@
+from tests.conftest import post_active
 # backend/tests/test_changes.py
 import pytest
 from datetime import datetime, timedelta
@@ -114,7 +115,7 @@ async def _make_part(client, auth, project_id, number, category="article"):
     assert res.status_code in (200, 201), res.text
     part_id = res.json()["id"]
     # a change needs customer data to hang its ECN proposal off
-    res = await client.post(f"/api/v1/parts/{part_id}/revisions/customer-data",
+    res = await post_active(client, f"/api/v1/parts/{part_id}/revisions/customer-data",
                             json={"statement": "review", "received_at": "2026-09-01"}, headers=auth)
     assert res.status_code == 201, res.text
     return part_id
