@@ -505,6 +505,8 @@ export interface SummationPositionRollup {
 export interface Summation {
   /** The costing currency (the costing plant's): totals and by_department are in it. */
   currency?: string;
+  /** The revenue's currency (the accepted or latest sent offer's, else the costing's). No margin when it differs. */
+  revenue_currency?: string;
   /** Every currency's own sums; never added together, never converted. */
   totals_by_currency?: Record<string, SummationTotals>;
   mixed_currency?: boolean;

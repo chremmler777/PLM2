@@ -40,7 +40,14 @@ function Chip({ line, currency }: { line: OvaLine; currency: string }) {
  * Once released the forecast is the actual, and the column goes.
  */
 export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
-  const cur = data.currency
+  // Revenue in the offer's currency, cost lines in the costing's; each line
+  // names its own (older payloads: by kind).
+  const cur = data.revenue_currency ?? data.currency
+  const costCur = data.costing_currency ?? cur
+  const lineCur = (l: OvaLine) => l.currency ?? (l.kind === 'revenue' ? cur : costCur)
+  // No margin across currencies (no FX): the server nulls every margin field.
+  const mismatch = data.currency_mismatch
+    ?? (data.basis !== 'none' && !!data.costing_currency && data.costing_currency !== cur)
   const running = !!data.in_progress
   // The server's margin row wins; older payloads carry only the flat fields.
   const mr = data.margin_row ?? {
@@ -66,10 +73,10 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
           </>}
         </span>
         {/* Currencies are compared, never converted (spec §15 phase 2). */}
-        {data.basis !== 'none' && data.costing_currency && data.costing_currency !== cur && (
+        {mismatch && (
           <span data-testid="ova-currency-mismatch"
             className="rounded bg-amber-950/60 border border-amber-800/60 px-1.5 py-0 text-[11px] text-amber-200">
-            Offer {cur}, costing {data.costing_currency}: not converted
+            No margin: {cur} revenue vs {costCur} costs
           </span>
         )}
       </div>
@@ -93,14 +100,17 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
                   {l.label}
                   {!l.in_margin && <span className="ml-1 text-[10px] text-slate-500">(not in margin)</span>}
                 </td>
-                <td className="py-1 px-2 text-right tabular-nums">{money(l.planned, cur)}</td>
-                <td className="py-1 px-2 text-right tabular-nums">{money(l.actual, cur)}</td>
-                {running && <td className="py-1 px-2 text-right tabular-nums text-slate-300">{money(l.forecast ?? l.actual, cur)}</td>}
-                <td className="py-1 pl-2 text-right"><Chip line={l} currency={cur} /></td>
+                <td className="py-1 px-2 text-right tabular-nums">{money(l.planned, lineCur(l))}</td>
+                <td className="py-1 px-2 text-right tabular-nums">{money(l.actual, lineCur(l))}</td>
+                {running && <td className="py-1 px-2 text-right tabular-nums text-slate-300">{money(l.forecast ?? l.actual, lineCur(l))}</td>}
+                <td className="py-1 pl-2 text-right"><Chip line={l} currency={lineCur(l)} /></td>
               </tr>
             ))}
             <tr className="border-t border-slate-600 font-semibold text-slate-100">
-              <td className="py-1.5 pr-2">Margin</td>
+              <td className="py-1.5 pr-2">
+                Margin
+                {mismatch && <span className="ml-1 text-[10px] font-normal text-slate-500">(not across currencies)</span>}
+              </td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-planned-margin">
                 {money(mr.planned, cur)}
                 <span className="font-normal text-slate-500">{pct(mr.planned_pct)}</span>

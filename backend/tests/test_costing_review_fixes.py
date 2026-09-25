@@ -19,12 +19,15 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import event, select
 
-from app.models.change import ChangeAssessment, ChangeChangelog, ChangeRequest
+from app.models.change import (
+    ChangeAssessment, ChangeChangelog, ChangeImpactedItem, ChangeRequest,
+)
 from app.models.change_cost import AssessmentCostLine, CostingPosition
 from app.models.change_impl import ImplementationBooking
 from app.models.change_offer import ChangeOffer
 from app.models.cost_sheet import CostSheetVersion
 from app.models.entities import User
+from app.models.part import Part
 from app.services.cost_service import CostService
 from app.services.offer_service import default_data
 from app.services.pnl_service import PnlService
@@ -253,7 +256,11 @@ async def test_pnl_rows_carry_currency_and_no_margin_across_currencies(
         summary = await PnlService.summary(s, admin)
     a = rows["C-PNL-1"]
     assert a["currency"] == "USD" and a["revenue_currency"] == "USD"
-    assert a["margin"] == 950 and a["planned_margin"] is not None
+    # the row's cost is the summation's: the 50 cost line plus the costing
+    # position (2 h x 50), not the cost line alone
+    assert a["internal_cost"] == 150 and a["total_cost"] == 150
+    assert a["margin"] == 850 and a["planned_margin"] is not None
+    assert "position_cost" not in a
     b = rows["C-PNL-2"]
     assert b["revenue_currency"] == "EUR" and b["currency_mismatch"]
     assert b["margin"] is None and b["margin_pct"] is None and b["planned_margin"] is None
@@ -265,6 +272,8 @@ async def test_pnl_rows_carry_currency_and_no_margin_across_currencies(
     assert usd["mismatch_count"] == 1 and usd["no_rate_count"] == 1
     # the EUR revenue is in no USD sum
     assert usd["revenue"] == 1500
+    # every row counts its positions; C-PNL-3's 3 QA hours have no rate
+    assert usd["total_cost"] == 3 * 150
 
 
 async def test_pnl_list_costs_a_fixed_number_of_queries(
@@ -274,10 +283,39 @@ async def test_pnl_list_costs_a_fixed_number_of_queries(
     await _version(session_factory, world["org_id"], version=2, valid_from=date(2026, 6, 1),
                    rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD")])
 
+    await _version(session_factory, world["org_id"], version=3, valid_from=date(2026, 7, 1),
+                   rates=[dict(department_id=world["tool"], hourly_rate=60, currency="USD")],
+                   machines=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  hourly_rate=85, currency="USD")],
+                   sampling=[dict(machine_class="200-450 t", machine_class_id=world["big"],
+                                  mode="flat", flat_price=1250, currency="USD")])
+
     async def count_for(n_changes: int, start: int) -> int:
         async with session_factory() as s:
             for i in range(n_changes):
-                await _pnl_change(s, world, start + i, quoted_price=1000)
+                c = await _pnl_change(s, world, start + i, quoted_price=1000)
+                # machine and sampling lines without a class of their own,
+                # priced live on the tonnage default of the impacted tool,
+                # and a booking with machine hours
+                tool = Part(part_number=f"T-Q-{start + i}", name="Tool",
+                            item_category="tool", part_type="tool",
+                            tool_tonnage_class=350, project_id=world["project_id"],
+                            created_by=world["admin_id"])
+                s.add(tool)
+                await s.flush()
+                s.add(ChangeImpactedItem(change_id=c.id, part_id=tool.id,
+                                         created_by=world["admin_id"]))
+                s.add(CostingPosition(change_id=c.id, department_id=world["tool"],
+                                      label="press", kind="machine_time",
+                                      pricing="estimate", hours=3,
+                                      created_by=world["admin_id"]))
+                s.add(CostingPosition(change_id=c.id, department_id=world["tool"],
+                                      label="T1", kind="sampling", pricing="estimate",
+                                      trials=2, created_by=world["admin_id"]))
+                s.add(ImplementationBooking(change_id=c.id, department_id=world["tool"],
+                                            hours=2, machine_hours=4,
+                                            booked_by=world["admin_id"],
+                                            booked_at=datetime(2026, 7, 15, 12)))
             await s.commit()
         async with session_factory() as s:
             admin = await s.get(User, world["admin_id"])
@@ -291,11 +329,56 @@ async def test_pnl_list_costs_a_fixed_number_of_queries(
             finally:
                 event.remove(db_engine.sync_engine, "before_cursor_execute", on_exec)
             assert len(rows) >= n_changes
+            # the machine, sampling and booked machine money is really in
+            # (not skipped): 3 h x 85 + 2 x 1250 in the plan
+            r = next(r for r in rows if r["change_number"] == f"C-PNL-{start}")
+            assert r["internal_cost"] == 50 + 2 * 60 + 255 + 2500
+            assert r["actual_cost"] is not None
             return len(seen)
 
     one = await count_for(1, 10)
     many = await count_for(6, 20)          # 7 changes in the list now
     assert many == one, f"{one} queries for 1 change, {many} for 7"
+
+
+async def test_offer_vs_actual_eur_offer_on_usd_costing_has_no_margin(
+        world, session_factory):
+    """CR-3-like: the offer is in EUR, the costing (plant) in USD. The card
+    shows each line in its own currency and no margin, like the list."""
+    await _version(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], hourly_rate=50, currency="USD")])
+    async with session_factory() as s:
+        c = await _pnl_change(s, world, 30, status="in_implementation", quoted_price=3000)
+        s.add(ChangeOffer(change_id=c.id, version=1, status="sent", currency="EUR",
+                          total_one_time=3000, data=default_data(),
+                          created_by=world["admin_id"]))
+        same = await _pnl_change(s, world, 31, status="in_implementation", quoted_price=3000)
+        s.add(ChangeOffer(change_id=same.id, version=1, status="sent", currency="USD",
+                          total_one_time=3000, data=default_data(),
+                          created_by=world["admin_id"]))
+        await s.commit()
+        ova = await PnlService.offer_vs_actual(s, await s.get(ChangeRequest, c.id))
+        ok = await PnlService.offer_vs_actual(s, await s.get(ChangeRequest, same.id))
+        summ = await CostService.summation(s, await s.get(ChangeRequest, c.id))
+    assert ova["currency"] == "EUR" and ova["revenue_currency"] == "EUR"
+    assert ova["costing_currency"] == "USD" and ova["currency_mismatch"] is True
+    for k in ("planned_margin", "actual_margin", "forecast_margin",
+              "planned_margin_pct", "actual_margin_pct", "forecast_margin_pct",
+              "variance"):
+        assert ova[k] is None, k
+    assert set(ova["margin_row"].values()) == {None}
+    lines = {l["key"]: l for l in ova["lines"]}
+    assert lines["revenue"]["currency"] == "EUR" and lines["revenue"]["planned"] == 3000
+    assert lines["internal"]["currency"] == "USD" and lines["external"]["currency"] == "USD"
+    # a line's own variance stays: it is within one currency
+    assert lines["internal"]["variance"] is not None
+    assert any("revenue is in EUR, the costing in USD" in w for w in ova["warnings"])
+    # the /pnl list agrees
+    assert summ["currency"] == "USD" and summ["revenue_currency"] == "EUR"
+    # same currency: margins as before
+    assert ok["currency_mismatch"] is False and ok["planned_margin"] is not None
+    assert ok["margin_row"]["planned"] == ok["planned_margin"]
+    assert {l["currency"] for l in ok["lines"]} == {"USD"}
 
 
 # ---------------------------------------------------------------- 098

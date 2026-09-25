@@ -66,7 +66,12 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
   const totalCost = totals ? num(totals.grand_total) ?? undefined : undefined;
 
   const revenue = change.customer_relevant ? change.quoted_price : change.internal_approved_amount;
-  const margin = revenue !== null && revenue !== undefined && Number.isFinite(revenue) && totalCost !== undefined
+  // The revenue is in the offer's currency, the costs in the costing's. When
+  // they differ there is no margin (no FX), the same rule as the /pnl list.
+  const costCurrency = data?.currency;
+  const revenueCurrency = data?.revenue_currency ?? costCurrency;
+  const currencyMismatch = !!costCurrency && !!revenueCurrency && revenueCurrency !== costCurrency;
+  const margin = !currencyMismatch && revenue !== null && revenue !== undefined && Number.isFinite(revenue) && totalCost !== undefined
     ? revenue - totalCost
     : undefined;
   const marginLabel = change.customer_relevant ? 'Margin' : 'vs. approved budget';
@@ -77,14 +82,14 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
         <div className="text-xs text-slate-400 uppercase tracking-wide">
           {change.customer_relevant ? 'Revenue' : 'Approved budget'}
         </div>
-        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(revenue, data?.currency)}</div>
+        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(revenue, revenueCurrency)}</div>
       </div>
 
       <div>
         <div className="text-xs text-slate-400 uppercase tracking-wide">Cost</div>
-        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(totalCost, data?.currency)}</div>
+        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(totalCost, costCurrency)}</div>
         <div className="text-xs text-slate-500 mt-1">
-          Int. {fmtMoney(internalCost, data?.currency)} · Ext. {fmtMoney(externalCost, data?.currency)}
+          Int. {fmtMoney(internalCost, costCurrency)} · Ext. {fmtMoney(externalCost, costCurrency)}
         </div>
         {/* The costing's own warnings (spec §15 phase 2): currencies it did
             not add, lines without a rate. Shown here only, once. */}
@@ -99,7 +104,12 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
 
       <div>
         <div className="text-xs text-slate-400 uppercase tracking-wide">{marginLabel}</div>
-        <div className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin, data?.currency)}</div>
+        <div data-testid="pnl-margin" className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin, costCurrency)}</div>
+        {currencyMismatch && (
+          <div data-testid="pnl-currency-mismatch" className="text-[11px] text-amber-300 mt-1">
+            No margin: {revenueCurrency} revenue vs {costCurrency} costs
+          </div>
+        )}
       </div>
 
       {/* Offer versus doing (spec §13): only once there is doing. Before

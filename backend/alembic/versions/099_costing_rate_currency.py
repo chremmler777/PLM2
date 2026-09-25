@@ -3,7 +3,8 @@
 - costing_positions.rate_currency: the currency of the rate snapshot (the
   cost sheet row's). costing_positions.currency stays the money currency of
   the line (est_cost and offers: the costing plant's). Backfilled from
-  currency for lines that carry a snapshot.
+  currency for lines that carry a snapshot (after the step below, so a
+  rate-less line gets none).
 - costing_positions: a snapshot that found no rate is not a snapshot:
   rate_on is cleared where rate is NULL, so the line is priced live until a
   rate exists (costing_rates.snapshot_position).
@@ -36,10 +37,13 @@ def upgrade() -> None:
         if "rate_currency" not in _cols(bind, "costing_positions"):
             op.add_column("costing_positions",
                           sa.Column("rate_currency", sa.String(3), nullable=True))
-        op.execute("UPDATE costing_positions SET rate_currency = currency "
-                   "WHERE rate_on IS NOT NULL AND rate_currency IS NULL")
+        # First clear the empty snapshots, then fill rate_currency: a line
+        # that found no rate has no rate currency either (the other order
+        # stamped one on it).
         op.execute("UPDATE costing_positions SET rate_on = NULL "
                    "WHERE rate IS NULL AND rate_on IS NOT NULL")
+        op.execute("UPDATE costing_positions SET rate_currency = currency "
+                   "WHERE rate_on IS NOT NULL AND rate_currency IS NULL")
     if "assessment_cost_line" in tables:
         with op.batch_alter_table("assessment_cost_line") as batch:
             batch.alter_column("rate_snapshot", existing_type=sa.Float(),

@@ -23,6 +23,7 @@ export interface PnlRow {
   no_rate?: boolean;
   warnings?: { code: string; message: string }[];
   revenue: number | null;
+  /** The costing's cost as the summation counts it: assessment cost lines plus costing positions, in `currency`. */
   internal_cost: number;
   external_cost: number;
   total_cost: number;
@@ -126,6 +127,8 @@ export interface OvaLine {
   variance: number | null;
   forecast?: number | null;
   in_margin: boolean;
+  /** The line's own currency: revenue in the offer's, cost lines in the costing's. */
+  currency?: string;
 }
 
 export interface OvaMarginRow {
@@ -149,7 +152,11 @@ export interface OvaTiming {
 
 export interface OfferVsActual {
   change_id: number;
+  /** The revenue's currency (the offer's); kept for older readers. */
   currency: string;
+  revenue_currency?: string;
+  /** Revenue and costing in different currencies: every margin field is null. */
+  currency_mismatch?: boolean;
   /** Spec §15 phase 2: what the costing and the booked hours are priced in. */
   costing_currency?: string | null;
   actual_currency?: string | null;

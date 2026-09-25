@@ -127,7 +127,7 @@ describe('P&L offer vs actual', () => {
     } as unknown as OfferVsActual
     render(<OfferVsActualTable data={data} />)
     expect(screen.getByTestId('ova-currency-mismatch').textContent)
-      .toBe('Offer EUR, costing USD: not converted')
+      .toBe('No margin: EUR revenue vs USD costs')
     expect(screen.getByTestId('ova-sheet-outdated').textContent)
       .toBe('Costing used cost sheet v1, current is v2')
   })

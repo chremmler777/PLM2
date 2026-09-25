@@ -3,8 +3,10 @@
 Computed live from change-management data; the only table of its own is
 change_actual_costs (supplier invoice lines, migration 091). Revenue is `quoted_price` for customer-relevant changes or
 `internal_approved_amount` (the PM-approved summation snapshot) for internal
-changes. Cost is the sum of AssessmentCostLine actuals joined through
-ChangeAssessment. Only changes in status 'costing' or beyond are in scope -
+changes. A row's internal_cost/external_cost/total_cost are the costing's
+cost as the summation counts it: the AssessmentCostLine amounts (joined
+through ChangeAssessment) plus the costing positions, in the costing
+currency. Only changes in status 'costing' or beyond are in scope -
 mirrors ReportService's org-scoping via `_org_scope`.
 """
 from datetime import date, datetime, timedelta
@@ -153,7 +155,13 @@ class PnlService:
             o = ova.get(c.id, {})
             revenue_currency = o.get("revenue_currency") or currency
             comparable = revenue_currency == currency
+            # The row's cost is the costing's, as the summation counts it:
+            # the assessment cost lines plus the costing positions (quoted
+            # cost by kind, own hours at the rate), in the costing currency.
             internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
+            pi, pe = o.get("position_cost") or (0.0, 0.0)
+            internal_cost += pi
+            external_cost += pe
             total_cost = internal_cost + external_cost
             revenue = c.quoted_price if c.customer_relevant else c.internal_approved_amount
             margin = (None if revenue is None or not comparable
@@ -191,7 +199,8 @@ class PnlService:
                 "pending_price": revenue is None,
                 "realized": c.status in REALIZED_STATUSES,
                 # offer versus doing (spec §13)
-                **{k: v for k, v in o.items() if k not in ("warnings", "revenue_currency")},
+                **{k: v for k, v in o.items()
+                   if k not in ("warnings", "revenue_currency", "position_cost")},
                 "no_rate": bool(o.get("no_rate")),
                 "warnings": warnings,
             })
@@ -443,6 +452,9 @@ class PnlService:
                 "slip_unit": "working days" if cal.working else "calendar days",
                 "no_rate": c.id in no_rate,
                 "warnings": warnings,
+                # (internal, external) of the costing positions, for the
+                # row's own cost columns; not a field of the row itself
+                "position_cost": tuple(pos_cost.get(c.id, (0.0, 0.0))),
             }
         return out
 
@@ -834,6 +846,15 @@ class PnlService:
         return max((t.end_date for t in tasks), default=None)
 
     @staticmethod
+    async def revenue_currency(session, change, costing_currency: str) -> str:
+        """The currency the change's revenue (quoted_price) is in: the basis
+        offer's, else the costing's (an internal approval, the quoted price
+        before any offer, a mother-plant change)."""
+        _, offer = await PnlService._basis_offer(session, change)
+        return (offer.currency if offer is not None and offer.currency
+                else costing_currency)
+
+    @staticmethod
     async def _basis_offer(session, change):
         """(basis, offer): the accepted offer, else the latest sent one. A
         mother-plant change (spec §14) has no offer basis at all: "none"."""
@@ -1014,15 +1035,29 @@ class PnlService:
         if timing["baseline_finish"] is None:
             warnings.append("No timing baseline")
 
-        # Currencies are compared, never converted (spec §15 phase 2).
+        # Currencies are compared, never converted (spec §15 phase 2). The
+        # revenue is in the offer's currency, every cost line in the
+        # costing's; when they differ there is no margin and no margin
+        # variance (the /pnl list does the same), only the lines.
         from app.services import costing_rates
-        plan_currency = planned.get("currency") or "EUR"
         cost_currency = (planned.get("costing_currency")
                          or await costing_rates.costing_currency(session, change))
-        if basis != "none" and cost_currency != plan_currency:
+        # a mother-plant change has no offer: nothing is in another currency
+        plan_currency = (cost_currency if basis == "none"
+                         else planned.get("currency") or "EUR")
+        comparable = cost_currency == plan_currency
+        if not comparable:
             warnings.append(
-                f"The offer is in {plan_currency}, the costing in {cost_currency}: "
-                "amounts are compared without conversion")
+                f"The revenue is in {plan_currency}, the costing in {cost_currency}: "
+                "no margin without a currency conversion")
+            for k in ("planned_margin", "actual_margin", "forecast_margin",
+                      "planned_margin_pct", "actual_margin_pct",
+                      "forecast_margin_pct", "variance"):
+                figures[k] = None
+            figures["margin_row"] = {k: None for k in figures["margin_row"]}
+        for line in figures["lines"]:
+            line["currency"] = (plan_currency if line["kind"] == "revenue"
+                                else cost_currency)
         if actuals.get("currency") and actuals["currency"] != plan_currency \
                 and actuals["currency"] != cost_currency and basis != "none":
             warnings.append(
@@ -1037,8 +1072,12 @@ class PnlService:
             if outdated:
                 warnings.append(outdated)
         return {
-            "change_id": change.id, "currency": planned.get("currency") or "EUR",
+            # `currency` is the revenue's (the offer's), kept under its old
+            # name; cost lines are in costing_currency, each line names its own.
+            "change_id": change.id, "currency": plan_currency,
+            "revenue_currency": plan_currency,
             "costing_currency": cost_currency,
+            "currency_mismatch": not comparable,
             "actual_currency": actuals.get("currency"),
             "basis": basis, "phase": phase,
             "offer_version": planned.get("offer_version"),

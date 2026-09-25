@@ -734,6 +734,8 @@ class SummationResponse(BaseModel):
     # in `currency` (the costing plant's); totals_by_currency holds every
     # currency's own sums. Currencies are never added or converted.
     currency: Optional[str] = None
+    # the revenue's currency (basis offer's, else `currency`): no margin when it differs
+    revenue_currency: Optional[str] = None
     totals_by_currency: Dict[str, SummationTotals] = {}
     mixed_currency: bool = False
     unpriced_lines: List[UnpricedLine] = []

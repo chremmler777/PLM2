@@ -466,12 +466,18 @@ class CostService:
         from app.services.pnl_service import PnlService
         actuals = await PnlService.change_actuals(
             session, change, plan_by_department=by_department)
+        revenue_currency = await PnlService.revenue_currency(
+            session, change, currency)
 
         return {
             # Currency (spec §15 phase 2): the totals, by_department and the
             # position margins are in `currency`; every currency's own sums
             # are in totals_by_currency. Nothing is converted.
             "currency": currency,
+            # The revenue's currency (the accepted or latest sent offer's,
+            # else the costing's): quoted_price is in it. When it is not
+            # `currency` there is no margin (no FX).
+            "revenue_currency": revenue_currency,
             "totals_by_currency": {c: by_currency[c] for c in sorted(by_currency)},
             "mixed_currency": bool(other_currencies),
             "unpriced_lines": unpriced,

@@ -94,6 +94,44 @@ describe('PnlCard', () => {
       .toContain('no rate in the cost sheet')
   })
 
+  it('EUR revenue against a USD costing: revenue in EUR, costs in USD, no margin', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation({ grand_total: 2000 }), currency: 'USD', revenue_currency: 'EUR',
+    })
+    render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
+    expect(await screen.findByText('2.000,00 USD')).toBeDefined()
+    expect(screen.getByText('5.000,00 EUR')).toBeDefined()
+    expect(screen.getByTestId('pnl-margin').textContent).toBe('-')
+    expect(screen.getByTestId('pnl-currency-mismatch').textContent)
+      .toBe('No margin: EUR revenue vs USD costs')
+  })
+
+  it('offer vs actual across currencies: each line in its own currency, no margin row values', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation(), currency: 'USD', revenue_currency: 'EUR',
+    })
+    ovaMock.mockResolvedValueOnce({
+      ...ova, currency: 'EUR', revenue_currency: 'EUR', costing_currency: 'USD',
+      currency_mismatch: true, phase: 'actual', in_progress: false,
+      lines: ova.lines.map((l) => ({ ...l, currency: l.kind === 'revenue' ? 'EUR' : 'USD' })),
+      margin_row: { planned: null, actual: null, forecast: null, planned_pct: null,
+        actual_pct: null, forecast_pct: null, variance: null },
+      planned_margin: null, actual_margin: null, planned_margin_pct: null,
+      actual_margin_pct: null, variance: null,
+    })
+    render(wrap(<PnlCard change={change({ status: 'released', customer_relevant: true, quoted_price: 3000 })} />))
+    const rev = await screen.findByTestId('ova-line-revenue')
+    expect(rev.textContent).toContain('3.000,00 EUR')
+    expect(screen.getByTestId('ova-line-internal').textContent).toContain('1.000,00 USD')
+    expect(screen.getByTestId('ova-line-internal').textContent).not.toContain('EUR')
+    expect(screen.getByTestId('ova-line-external').textContent).toContain('700,00 USD')
+    expect(screen.getByTestId('ova-planned-margin').textContent).toBe('-')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toBe('-')
+    expect(screen.queryByTestId('ova-margin-variance')).toBeNull()
+    expect(screen.getByTestId('ova-currency-mismatch').textContent)
+      .toBe('No margin: EUR revenue vs USD costs')
+  })
+
   it('shows Approved budget and "vs. approved budget" label for an internal change', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue(summation({ grand_total: 2000 }))
     render(wrap(<PnlCard change={change({ customer_relevant: false, internal_approved_amount: 3000 })} />))
