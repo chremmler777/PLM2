@@ -493,8 +493,8 @@ describe('GanttPlanner (ECR adapter)', () => {
   })
 
   it('progress: only on the detailed plan during implementation, for editors or the task department', async () => {
-    // Not in implementation: the server sends no progress departments.
-    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false, can_edit_dates: true, progress_department_ids: [] }))
+    // Before the baseline and without a listed department: no progress.
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: false, can_edit: true, can_edit_dates: true, progress_department_ids: [] }))
     renderPlanner({ mode: 'track' })
     await screen.findByTestId('gantt-planner')
     expect(screen.queryByTestId('gantt-progress-handle-1')).toBeNull()
@@ -563,4 +563,12 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(body.tasks_upsert[0].id).toBe('re:3')
     expect(body.links_upsert).toEqual([expect.objectContaining({ id: 're:52', from_task_id: 2, to_task_id: 're:3' })])
   })
+
+  it('progress: an editor may report after the baseline even when no department is listed', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false, can_edit_dates: true, progress_department_ids: [] }))
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-progress-handle-1')).toBeTruthy()
+  })
+
 })

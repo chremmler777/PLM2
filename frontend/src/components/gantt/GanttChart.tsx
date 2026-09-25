@@ -274,7 +274,7 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => p.onLinkClick?.(e, l)}
             onKeyDown={(e) => p.onLinkKey?.(e, l)}>
-            <title>{`${p.linkLabels(l)}${bad ? ' (not met by the dates)' : ''}`}</title>
+            <title>{`${p.linkLabels(l)}${bad ? ' (not met by the dates)' : ''}${l.readOnly ? '. Old dependency, re-draw to edit' : ''}`}</title>
           </path>
         </g>
       ))}

@@ -54,6 +54,8 @@ export interface GanttLink {
   type: LinkType
   /** Working or calendar days per calendar mode; negative = lead. */
   lagDays: number
+  /** Shown but not editable or removable (e.g. an old dependency the host cannot address). */
+  readOnly?: boolean
 }
 
 export interface GanttCalendar {
@@ -95,6 +97,8 @@ export interface ChangeSet {
 export interface ApplyResult {
   /** Temporary id -> id given by the server, for tasks and links. */
   idMap?: Record<string, GanttId>
+  /** Temporary link id -> id given by the server (a separate id space from tasks). */
+  linkIdMap?: Record<string, GanttId>
 }
 
 export interface Issue {

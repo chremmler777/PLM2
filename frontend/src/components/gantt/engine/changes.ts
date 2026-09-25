@@ -120,8 +120,14 @@ export function invertChangeSet(model: GanttModel, cs: ChangeSet): ChangeSet {
 }
 
 /** Replace temporary ids (tasks and links, also inside references). */
-export function remapChangeSet(cs: ChangeSet, idMap: Record<string, GanttId>): ChangeSet {
+/**
+ * Replace temporary ids. Task ids (and task references: parent, link ends,
+ * order, meta values) use `idMap`; link ids use `linkIdMap` only: the two id
+ * spaces overlap (task 5 and link 5 are different things).
+ */
+export function remapChangeSet(cs: ChangeSet, idMap: Record<string, GanttId>, linkIdMap: Record<string, GanttId> = {}): ChangeSet {
   const m = (id: GanttId): GanttId => (key(id) in idMap ? idMap[key(id)] : id)
+  const ml = (id: GanttId): GanttId => (key(id) in linkIdMap ? linkIdMap[key(id)] : id)
   const mo = (id: GanttId | null | undefined) => (id == null ? id : m(id))
   return {
     ...cs,
@@ -130,12 +136,12 @@ export function remapChangeSet(cs: ChangeSet, idMap: Record<string, GanttId>): C
       id: m(u.id), patch: 'parentId' in u.patch ? { ...u.patch, parentId: mo(u.patch.parentId) } : u.patch,
     })),
     removeTasks: cs.removeTasks?.map(m),
-    addLinks: cs.addLinks?.map((l) => ({ ...l, id: m(l.id), from: m(l.from), to: m(l.to) })),
+    addLinks: cs.addLinks?.map((l) => ({ ...l, id: ml(l.id), from: m(l.from), to: m(l.to) })),
     updateLinks: cs.updateLinks?.map((u) => ({
-      id: m(u.id),
+      id: ml(u.id),
       patch: { ...u.patch, ...(u.patch.from != null ? { from: m(u.patch.from) } : {}), ...(u.patch.to != null ? { to: m(u.patch.to) } : {}) },
     })),
-    removeLinks: cs.removeLinks?.map(m),
+    removeLinks: cs.removeLinks?.map(ml),
     order: cs.order?.map(m),
     // Adapter data may carry task ids (e.g. a focus target): remap plain id values.
     ...(cs.meta ? { meta: Object.fromEntries(Object.entries(cs.meta).map(([k, v]) =>
@@ -243,6 +249,7 @@ export function chainLinksChangeSet(model: GanttModel, ids: GanttId[], newId: ()
 export function unlinkChangeSet(model: GanttModel, ids: GanttId[]): ChangeSet | null {
   const set = new Set(ids.map(key))
   const removeLinks = model.links
+    .filter((l) => !l.readOnly)
     .filter((l) => (set.size === 1 ? set.has(key(l.from)) || set.has(key(l.to)) : set.has(key(l.from)) && set.has(key(l.to))))
     .map((l) => l.id)
   return removeLinks.length ? { label: 'Unlink tasks', removeLinks } : null

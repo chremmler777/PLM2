@@ -129,7 +129,7 @@ describe('remapChangeSet', () => {
       removeLinks: ['lt'],
       order: ['tmp0', 'tmp1', 3],
     }
-    const r = remapChangeSet(cs, { tmp0: 10, tmp1: 11, lt: 50 })
+    const r = remapChangeSet(cs, { tmp0: 10, tmp1: 11 }, { lt: 50 })
     expect(r.addTasks![0]).toMatchObject({ id: 11, parentId: 10 })
     expect(r.updateTasks![0]).toEqual({ id: 11, patch: { parentId: 10 } })
     expect(r.removeTasks).toEqual([11])
@@ -198,9 +198,15 @@ describe('builders', () => {
 
 describe('remap and reconcile (review)', () => {
   it('remaps link update ends and id values in meta', () => {
-    const cs = remapChangeSet({ updateLinks: [{ id: 'l', patch: { from: 'tmp', to: 3 } }], meta: { focus: 'tmp', reason: 'why' } }, { tmp: 9, l: 5 })
+    const cs = remapChangeSet({ updateLinks: [{ id: 'l', patch: { from: 'tmp', to: 3 } }], meta: { focus: 'tmp', reason: 'why' } }, { tmp: 9 }, { l: 5 })
     expect(cs.updateLinks).toEqual([{ id: 5, patch: { from: 9, to: 3 } }])
     expect(cs.meta).toEqual({ focus: 9, reason: 'why' })
+  })
+  it('never applies the task map to link ids or the link map to task ids', () => {
+    const cs = remapChangeSet({ updateTasks: [{ id: 1, patch: { name: 'x' } }], removeLinks: [1], addLinks: [{ id: 2, from: 1, to: 2, type: 'FS', lagDays: 0 }] }, { 1: 50 }, { 1: 70, 2: 80 })
+    expect(cs.updateTasks![0].id).toBe(50)
+    expect(cs.removeLinks).toEqual([70])
+    expect(cs.addLinks![0]).toMatchObject({ id: 80, from: 50, to: 2 })
   })
   it('modelContains tells whether a model already shows a ChangeSet', () => {
     const m: GanttModel = { tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 2 }], links: [{ id: 'l', from: 1, to: 1, type: 'FS', lagDays: 0 }] }

@@ -419,7 +419,7 @@ export function schedule(
     const t = byKey.get(k)!
     const s = es.get(k)!, e = ef.get(k)!
     const lf = lfMap.get(k)
-    progress.set(k, Math.max(0, Math.min(100, Math.round(t.progress ?? 0))))
+    progress.set(k, Math.max(0, Math.min(100, Math.floor((t.progress ?? 0) + 0.5))))
     out.set(k, {
       id: t.id, start: toIso(cal.dateAt(s)), end: toIso(endFromIdx(cal, s, e)),
       lateStart: lf != null ? toIso(cal.dateAt(lf - (e - s))) : null,
@@ -428,17 +428,24 @@ export function schedule(
       isSummary: false, progress: progress.get(k)!,
     })
   }
-  // Summary rollup, children first.
+  // Summary rollup, children first. Spans come from the output rows (a
+  // summary's rolled-up start/end index), never from the internal start
+  // point; rounding is half-up (floor(x + 0.5)) like the backend.
+  const rowIdx = new Map<string, [number, number]>()
+  for (const k of g.leaves) rowIdx.set(k, [es.get(k)!, ef.get(k)!])
+  const halfUp = (x: number) => Math.floor(x + 0.5)
   for (const t of [...tree.order].reverse()) {
     const k = key(t.id)
     const ks = kids(k)
     if (!ks.length) continue
     const rs = ks.map((c) => out.get(c)!)
-    const spans = ks.map((c) => Math.max(ef.get(c)! - es.get(c)!, 0))
+    const idxs = ks.map((c) => rowIdx.get(c)!)
+    rowIdx.set(k, [Math.min(...idxs.map((x) => x[0])), Math.max(...idxs.map((x) => x[1]))])
+    const spans = idxs.map(([a, b]) => Math.max(b - a, 0))
     const weight = spans.reduce((a, b) => a + b, 0)
     const prog = weight > 0
-      ? Math.round(rs.reduce((a, r, i) => a + r.progress * spans[i], 0) / weight)
-      : Math.round(rs.reduce((a, r) => a + r.progress, 0) / rs.length)
+      ? halfUp(rs.reduce((a, r, i) => a + r.progress * spans[i], 0) / weight)
+      : halfUp(rs.reduce((a, r) => a + r.progress, 0) / rs.length)
     const slacks = rs.map((r) => r.totalSlack).filter((x): x is number => x != null)
     const frees = rs.map((r) => r.freeSlack).filter((x): x is number => x != null)
     out.set(k, {

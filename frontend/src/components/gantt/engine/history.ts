@@ -7,7 +7,13 @@
 import { invertChangeSet, isEmptyChangeSet, remapChangeSet } from './changes'
 import type { ChangeSet, GanttId, GanttModel } from './types'
 
-export interface HistoryEntry { id: number; forward: ChangeSet; backward: ChangeSet }
+export interface HistoryEntry {
+  id: number
+  forward: ChangeSet
+  backward: ChangeSet
+  /** What last happened to it: recorded, undone or redone (for `revert`). */
+  last?: 'push' | 'undo' | 'redo'
+}
 
 export class History {
   private past: HistoryEntry[] = []
@@ -19,7 +25,7 @@ export class History {
   push(before: GanttModel, cs: ChangeSet): number {
     if (isEmptyChangeSet(cs)) return 0
     const id = ++this.seq
-    this.past.push({ id, forward: cs, backward: invertChangeSet(before, cs) })
+    this.past.push({ id, forward: cs, backward: invertChangeSet(before, cs), last: 'push' })
     if (this.past.length > this.limit) this.past.shift()
     this.future = []
     return id
@@ -41,14 +47,34 @@ export class History {
     const i = this.past.findIndex((e) => e.id === id)
     if (i < 0) return
     const [e] = this.past.splice(i, 1)
-    this.future.push(e)
+    this.future.push({ ...e, last: 'undo' })
   }
 
   confirmRedo(id: number): void {
     const i = this.future.findIndex((e) => e.id === id)
     if (i < 0) return
     const [e] = this.future.splice(i, 1)
-    this.past.push(e)
+    this.past.push({ ...e, last: 'redo' })
+  }
+
+  /**
+   * The save of entry `id` was refused: a new change is forgotten, an undo
+   * or redo goes back to the stack it came from (so it can be retried).
+   */
+  revert(id: number): void {
+    const f = this.future.findIndex((e) => e.id === id)
+    if (f >= 0 && this.future[f].last === 'undo') {
+      const [e] = this.future.splice(f, 1)
+      this.past.push({ ...e, last: 'push' })
+      return
+    }
+    const p = this.past.findIndex((e) => e.id === id)
+    if (p >= 0 && this.past[p].last === 'redo') {
+      const [e] = this.past.splice(p, 1)
+      this.future.push({ ...e, last: 'undo' })
+      return
+    }
+    this.discard(id)
   }
 
   /** Forget one entry (its save was refused). */
@@ -83,10 +109,10 @@ export class History {
     if (which === 'past') this.past.pop(); else this.future.pop()
   }
 
-  remap(idMap: Record<string, GanttId>): void {
-    if (!Object.keys(idMap).length) return
+  remap(idMap: Record<string, GanttId>, linkIdMap: Record<string, GanttId> = {}): void {
+    if (!Object.keys(idMap).length && !Object.keys(linkIdMap).length) return
     const r = (e: HistoryEntry): HistoryEntry => ({
-      id: e.id, forward: remapChangeSet(e.forward, idMap), backward: remapChangeSet(e.backward, idMap),
+      ...e, forward: remapChangeSet(e.forward, idMap, linkIdMap), backward: remapChangeSet(e.backward, idMap, linkIdMap),
     })
     this.past = this.past.map(r)
     this.future = this.future.map(r)

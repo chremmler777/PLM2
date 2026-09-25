@@ -11,7 +11,7 @@
  * the adapter refetches and `onError` is told with the item's tag (history).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { applyAll, modelContains, remapChangeSet, touchedTaskIds } from './engine/changes'
+import { applyAll, isEmptyChangeSet, modelContains, remapChangeSet, touchedTaskIds } from './engine/changes'
 import type { ApplyResult, ChangeSet, GanttId, GanttModel } from './engine/types'
 
 type Status = 'queued' | 'inflight' | 'settled'
@@ -21,8 +21,8 @@ export interface SaveQueueOptions {
   onChange?: (cs: ChangeSet) => Promise<ApplyResult | void> | ApplyResult | void
   /** A save was refused: `tag` is what `enqueue` got with it. */
   onError?: (error: unknown, tag?: number) => void
-  /** Told about temp id -> real id mappings (history and view state remap). */
-  onIdMap?: (idMap: Record<string, GanttId>) => void
+  /** Told about temp id -> real id mappings (history and view state remap); tasks and links apart. */
+  onIdMap?: (idMap: Record<string, GanttId>, linkIdMap: Record<string, GanttId>) => void
   settleMs?: number
 }
 
@@ -32,8 +32,16 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
   const optsRef = useRef(opts)
   optsRef.current = opts
   const running = useRef(false)
-  /** Every temp id -> real id seen so far. */
+  /**
+   * Every temporary (string) id -> real id seen so far, tasks and links apart.
+   * Numeric keys (an old id that came back under a new one) are not kept:
+   * the old number may be reused for something else later.
+   */
   const idMapRef = useRef<Record<string, GanttId>>({})
+  const linkMapRef = useRef<Record<string, GanttId>>({})
+  const tempOnly = (m: Record<string, GanttId>) => Object.fromEntries(Object.entries(m).filter(([k]) => !/^-?\d+$/.test(k)))
+  const remapKnown = (cs: ChangeSet) => (Object.keys(idMapRef.current).length || Object.keys(linkMapRef.current).length
+    ? remapChangeSet(cs, idMapRef.current, linkMapRef.current) : cs)
   // The ref is the source of truth (updated synchronously), the state only renders it:
   // a pump running in a microtask must never see a stale "queued" item and send it twice.
   const itemsRef = useRef(items)
@@ -70,19 +78,28 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
     const next = itemsRef.current.find((i) => i.status === 'queued')
     if (!next) return
     running.current = true
-    const known = idMapRef.current
-    const cs = Object.keys(known).length ? remapChangeSet(next.cs, known) : next.cs
+    const cs = remapKnown(next.cs)
+    if (isEmptyChangeSet(cs)) {
+      // Nothing left to send (e.g. it only touched a task whose create was refused).
+      update((list) => list.filter((i) => i.seq !== next.seq))
+      running.current = false
+      queueMicrotask(() => { void pumpRef.current() })
+      return
+    }
     update((list) => list.map((i) => (i.seq === next.seq ? { ...i, cs, status: 'inflight' } : i)))
     try {
       const res = await optsRef.current.onChange?.(cs)
-      const idMap = res && typeof res === 'object' ? res.idMap : undefined
-      if (idMap && Object.keys(idMap).length) {
-        idMapRef.current = { ...idMapRef.current, ...idMap }
-        optsRef.current.onIdMap?.(idMap)
+      const idMap = (res && typeof res === 'object' ? res.idMap : undefined) ?? {}
+      const linkIdMap = (res && typeof res === 'object' ? res.linkIdMap : undefined) ?? {}
+      const any = Object.keys(idMap).length > 0 || Object.keys(linkIdMap).length > 0
+      if (any) {
+        idMapRef.current = { ...idMapRef.current, ...tempOnly(idMap) }
+        linkMapRef.current = { ...linkMapRef.current, ...tempOnly(linkIdMap) }
+        optsRef.current.onIdMap?.(idMap, linkIdMap)
       }
       update((list) => list.map((i) => {
-        if (i.seq === next.seq) return { ...i, cs: idMap ? remapChangeSet(i.cs, idMap) : i.cs, status: 'settled' as Status, at: Date.now() }
-        return idMap && i.status === 'queued' ? { ...i, cs: remapChangeSet(i.cs, idMap) } : i
+        if (i.seq === next.seq) return { ...i, cs: any ? remapChangeSet(i.cs, idMap, linkIdMap) : i.cs, status: 'settled' as Status, at: Date.now() }
+        return any && i.status === 'queued' ? { ...i, cs: remapChangeSet(i.cs, idMap, linkIdMap) } : i
       }))
     } catch (e) {
       // Only this change is rolled back; later ones still go (the adapter refetches).
@@ -97,8 +114,7 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
   pumpRef.current = pump
 
   const enqueue = useCallback((cs: ChangeSet, tag?: number) => {
-    const known = idMapRef.current
-    const item: Item = { seq: ++seq.current, cs: Object.keys(known).length ? remapChangeSet(cs, known) : cs, status: 'queued', at: Date.now(), tag }
+    const item: Item = { seq: ++seq.current, cs: remapKnown(cs), status: 'queued', at: Date.now(), tag }
     update((list) => [...list, item])
     queueMicrotask(() => { void pumpRef.current() })
   }, [update])

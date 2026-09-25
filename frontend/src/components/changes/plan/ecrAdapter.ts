@@ -69,8 +69,11 @@ export function planToModel(p: PlanOut): EcrModel {
   const tasks = sorted.map(taskToGantt)
   const ids = new Set(sorted.map((t) => t.id))
   const links: GanttLink[] = support.modern
-    ? (p.links ?? []).filter((l) => ids.has(l.from_task_id) && ids.has(l.to_task_id)).map((l) => ({
-      id: l.id, from: l.from_task_id, to: l.to_task_id, type: l.type, lagDays: l.lag_days,
+    ? (p.links ?? []).filter((l) => ids.has(l.from_task_id) && ids.has(l.to_task_id)).map((l, i) => ({
+      // A legacy predecessor (no row in the links table) has no usable id: read-only.
+      id: l.legacy || l.id == null || l.id < 0 ? `legacy-${l.from_task_id}-${l.to_task_id}-${i}` : l.id,
+      from: l.from_task_id, to: l.to_task_id, type: l.type, lagDays: l.lag_days,
+      ...(l.legacy || l.id == null || l.id < 0 ? { readOnly: true } : {}),
     }))
     : sorted.flatMap((t) => t.predecessors.filter((pid) => ids.has(pid)).map((pid) => ({
       id: `p${pid}-${t.id}`, from: pid, to: t.id, type: 'FS' as const, lagDays: 0,

@@ -56,7 +56,7 @@ describe('useSaveQueue', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
     await act(async () => { first.resolve({ idMap: { 'tmp-1': 77 } }); await first.promise })
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
-    expect(onIdMap).toHaveBeenCalledWith({ 'tmp-1': 77 })
+    expect(onIdMap).toHaveBeenCalledWith({ 'tmp-1': 77 }, {})
     expect(seen[1].updateTasks![0].id).toBe(77)
   })
 
@@ -101,7 +101,7 @@ describe('useSaveQueue', () => {
 
   it('rewrites a later ChangeSet that still uses a replaced temp id (cumulative map)', async () => {
     const seen: ChangeSet[] = []
-    const onChange = vi.fn((cs: ChangeSet) => { seen.push(cs); return Promise.resolve(seen.length === 1 ? { idMap: { 'tmp-1': 50, 'l-1': 60 } } : undefined) })
+    const onChange = vi.fn((cs: ChangeSet) => { seen.push(cs); return Promise.resolve(seen.length === 1 ? { idMap: { 'tmp-1': 50 }, linkIdMap: { 'l-1': 60 } } : undefined) })
     const { result } = setup({ onChange })
     act(() => result.current.enqueue({ addTasks: [{ id: 'tmp-1', name: 'N', start: '2026-10-05', duration: 1 }], addLinks: [{ id: 'l-1', from: 1, to: 'tmp-1', type: 'FS', lagDays: 0 }] }))
     await waitFor(() => expect(result.current.saving).toBe(false))
@@ -127,5 +127,28 @@ describe('useSaveQueue', () => {
     act(() => result.current.enqueue({ updateTasks: [{ id: 1, patch: { duration: 9 } }] }))
     await waitFor(() => expect(result.current.saving).toBe(false))
     expect(result.current.display.tasks[0].duration).toBe(9)
+  })
+
+  it('keeps task and link id maps apart and never keeps numeric keys for later changes', async () => {
+    const seen: ChangeSet[] = []
+    const onIdMap = vi.fn()
+    const onChange = vi.fn((cs: ChangeSet) => { seen.push(cs); return Promise.resolve(seen.length === 1 ? { idMap: { 'tmp-1': 50, 5: 60 }, linkIdMap: { 1: 3, 'l-1': 9 } } : undefined) })
+    const { result } = setup({ onChange, onIdMap })
+    act(() => result.current.enqueue({ addTasks: [{ id: 'tmp-1', name: 'N', start: '2026-10-05', duration: 1 }] }))
+    await waitFor(() => expect(result.current.saving).toBe(false))
+    expect(onIdMap).toHaveBeenCalledWith({ 'tmp-1': 50, 5: 60 }, { 1: 3, 'l-1': 9 })
+    act(() => result.current.enqueue({ updateTasks: [{ id: 1, patch: { name: 'x' } }, { id: 5, patch: { name: 'y' } }, { id: 'tmp-1', patch: { name: 'z' } }], removeLinks: ['l-1', 1] }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    expect(seen[1].updateTasks!.map((u) => u.id)).toEqual([1, 5, 50])
+    expect(seen[1].removeLinks).toEqual([9, 1])
+  })
+
+  it('skips a ChangeSet that is empty once remapped', async () => {
+    const onChange = vi.fn(() => Promise.resolve())
+    const { result } = setup({ onChange })
+    act(() => result.current.enqueue({ label: 'nothing' }))
+    act(() => result.current.enqueue({ updateTasks: [{ id: 1, patch: { name: 'B' } }] }))
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    expect((onChange.mock.calls[0] as unknown as [ChangeSet])[0].updateTasks).toBeTruthy()
   })
 })

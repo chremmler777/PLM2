@@ -193,8 +193,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const queue = useSaveQueue(base, {
     onChange: p.onChange,
     // Only the refused change is rolled back (and forgotten by undo).
-    onError: (e, tag) => { if (tag) history.current.discard(tag); bumpHist(); notifyError(errMessage(e), e) },
-    onIdMap: (m) => { history.current.remap(m); remapViewRef.current(m) },
+    onError: (e, tag) => { if (tag) history.current.revert(tag); bumpHist(); notifyError(errMessage(e), e) },
+    onIdMap: (m, lm) => { history.current.remap(m, lm); remapViewRef.current(m) },
   })
   const saved = queue.display
   const modelRef = useRef(saved)
@@ -968,6 +968,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         if (errors.length) { notifyError(errors[0]); return }
         if (!changes) return
         const added = [...(changes.addLinks ?? []), ...(changes.updateLinks ?? []).map((u) => ({ ...model.links.find((l) => key(l.id) === key(u.id))!, ...u.patch }))]
+        const touched = [...(changes.updateLinks ?? []).map((u) => u.id), ...(changes.removeLinks ?? [])]
+        if (model.links.some((l) => l.readOnly && touched.some((id) => key(id) === key(l.id)))) {
+          notifyError('Old dependency, re-draw to edit: remove it by drawing the link again')
+          return
+        }
         const refused = added.map((l) => linkRefusal(key(l.from), key(l.to), l.type)).find(Boolean)
         if (refused) { notifyError(refused); return }
         const badType = added.find((l) => !linkTypes.includes(l.type))
@@ -1139,7 +1144,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         e.preventDefault(); e.stopPropagation()
         const r = (e.currentTarget as Element).getBoundingClientRect?.()
         setLinkPop({ id: key(l.id), x: r ? r.left + r.width / 2 : 200, y: r ? r.top + r.height / 2 : 200 })
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && canLinks) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && canLinks && !l.readOnly) {
         e.preventDefault(); e.stopPropagation()
         void commit({ label: 'Remove link', removeLinks: [l.id] })
       }
@@ -1285,7 +1290,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       {popLink && linkPop && (
         <LinkPopover x={linkPop.x} y={linkPop.y} link={popLink} title={linkLabel(popLink)}
           types={linkTypes.filter((ty) => !linkRefusal(key(popLink.from), key(popLink.to), ty))}
-          allowLag={allowLag} canEdit={canLinks} unit={working ? 'working days' : 'days'}
+          allowLag={allowLag} canEdit={canLinks && !popLink.readOnly} unit={working ? 'working days' : 'days'}
+          note={popLink.readOnly ? 'Old dependency, re-draw to edit' : undefined}
           onClose={() => setLinkPop(null)}
           onDelete={() => { setLinkPop(null); void commit({ label: 'Remove link', removeLinks: [popLink.id] }) }}
           onSave={(patch) => {

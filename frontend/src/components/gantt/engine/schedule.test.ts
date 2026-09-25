@@ -479,3 +479,27 @@ describe('cascade keeps started tasks (review)', () => {
     expect(r.map((m) => [m.id, m.patch.start])).toEqual([['C', '2026-10-12']])
   })
 })
+
+describe('summary progress rollup (review 2, backend parity)', () => {
+  it('weights nested summaries by their rolled-up span and rounds half-up', () => {
+    // Inner summary S2 spans 5..15 Oct (10 days, 50%), leaf C 10 days at 0%: T = 25 exactly; X at 1/2.
+    const tasks = [
+      T('T', '2026-01-01', 0), T('S2', '2026-01-01', 0, { parentId: 'T' }),
+      T('A', '2026-10-05', 2, { parentId: 'S2', progress: 100 }), T('B', '2026-10-13', 2, { parentId: 'S2', progress: 0 }),
+      T('C', '2026-10-05', 10, { parentId: 'T', progress: 0 }),
+      T('H', '2026-01-01', 0), T('H1', '2026-10-05', 1, { parentId: 'H', progress: 50 }), T('H2', '2026-10-05', 1, { parentId: 'H', progress: 0 }),
+    ]
+    const { get } = run(tasks)
+    expect(get('S2').progress).toBe(50)
+    expect(get('T').progress).toBe(25)
+    expect(get('H').progress).toBe(25)
+    const half = run([T('H', '2026-01-01', 0), T('H1', '2026-10-05', 1, { parentId: 'H', progress: 5 }), T('H2', '2026-10-05', 1, { parentId: 'H', progress: 0 })])
+    expect(half.get('H').progress).toBe(3) // 2.5 rounds up
+  })
+  it('has no NaN progress for summaries in a cycle', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S', progress: 40 }), T('B', '2026-10-05', 2)]
+    const { get, r } = run(tasks, [L('A', 'B'), L('B', 'A')])
+    expect(r.cycle.length).toBeGreaterThan(0)
+    expect(get('S').progress).toBe(40)
+  })
+})

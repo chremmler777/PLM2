@@ -134,3 +134,35 @@ describe('History: peek, confirm, discard (review)', () => {
     expect(h.push(m, {})).toBe(0)
   })
 })
+
+describe('History: a refused undo or redo goes back (review 2)', () => {
+  const m: GanttModel = { tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 2 }], links: [] }
+  it('revert of a refused undo puts the entry back on the undo stack', () => {
+    const h = new History()
+    const id = h.push(m, { label: 'x', updateTasks: [{ id: 1, patch: { duration: 3 } }] })
+    h.confirmUndo(id)
+    h.revert(id)
+    expect(h.peekUndo()!.id).toBe(id)
+    expect(h.canRedo).toBe(false)
+  })
+  it('revert of a refused redo puts the entry back on the redo stack', () => {
+    const h = new History()
+    const id = h.push(m, { label: 'x', updateTasks: [{ id: 1, patch: { duration: 3 } }] })
+    h.confirmUndo(id); h.confirmRedo(id)
+    h.revert(id)
+    expect(h.peekRedo()!.id).toBe(id)
+    expect(h.canUndo).toBe(false)
+  })
+  it('revert of a refused new change forgets it', () => {
+    const h = new History()
+    const id = h.push(m, { label: 'x', updateTasks: [{ id: 1, patch: { duration: 3 } }] })
+    h.revert(id)
+    expect(h.canUndo).toBe(false)
+  })
+  it('remaps task and link ids with their own maps', () => {
+    const h = new History()
+    h.push({ tasks: m.tasks, links: [{ id: 1, from: 1, to: 1, type: 'FS', lagDays: 0 }] }, { removeLinks: [1] })
+    h.remap({ 1: 50 }, { 1: 70 })
+    expect(h.peekUndo()!.cs.addLinks).toEqual([{ id: 70, from: 50, to: 50, type: 'FS', lagDays: 0 }])
+  })
+})

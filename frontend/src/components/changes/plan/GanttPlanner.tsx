@@ -117,8 +117,10 @@ export default function GanttPlanner({
   // server fills progress_department_ids only then), a date editor or a member
   // of the task's department.
   const canProgressOn = useCallback((deptId: number | null | undefined) => !compact && track && plan === 'detailed'
-    && (progressDepts ?? []).length > 0
-    && (canDates || (deptId != null && (progressDepts ?? []).includes(deptId))), [compact, track, plan, canDates, progressDepts])
+    // An editor may report once the baseline is set (the server checks the status too);
+    // a department member while the server lists the department.
+    && ((canDates && baselineSet) || (deptId != null && (progressDepts ?? []).includes(deptId))),
+  [compact, track, plan, canDates, baselineSet, progressDepts])
 
   const rights = useMemo(() => ({
     structure: canStructure,
@@ -157,9 +159,13 @@ export default function GanttPlanner({
     const before: GanttModel = { tasks: server?.tasks ?? [], links: server?.links ?? [] }
     try {
       if (modern) {
-        const out = await planApi.applyChanges(changeId, plan, toPlanChangeSet(cs, before), reason)
+        const body = toPlanChangeSet(cs, before)
+        // Nothing the server knows is left (e.g. it only touched a task whose create was refused).
+        if (!body.tasks_upsert.length && !body.tasks_delete.length && !body.links_upsert.length && !body.links_delete.length) return {}
+        const out = await planApi.applyChanges(changeId, plan, body, reason)
         afterSave(out)
-        return { idMap: translateIdMap(out.id_map, out.link_id_map) }
+        // Task and link ids are separate spaces: never merge the two maps.
+        return { idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map) }
       }
       const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
       const { plan: out, idMap } = await persistLegacy(calls, {

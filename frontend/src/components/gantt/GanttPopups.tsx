@@ -76,6 +76,8 @@ const TYPE_LABEL: Record<LinkType, string> = {
 export function LinkPopover(p: {
   x: number; y: number; link: GanttLink; title: string; types: LinkType[]; allowLag: boolean; canEdit: boolean
   unit: string
+  /** Shown under the title (e.g. why the link cannot be edited). */
+  note?: string
   onSave: (patch: { type: LinkType; lagDays: number }) => void; onDelete: () => void; onClose: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -92,6 +94,7 @@ export function LinkPopover(p: {
       className="fixed z-50 w-[260px] space-y-2 rounded-md border p-3 text-xs shadow-2xl"
       style={{ ...pos, background: v('panel'), borderColor: v('gridLine'), color: v('text') }}>
       <p className="font-semibold">{p.title}</p>
+      {p.note && <p data-testid="gantt-link-note" style={{ color: v('textMuted') }}>{p.note}</p>}
       <label className="block">
         <span className="mb-0.5 block text-[10px] uppercase tracking-wide" style={{ color: v('textFaint') }}>Type</span>
         <select aria-label="Link type" value={type} disabled={!p.canEdit} onChange={(e) => setType(e.target.value as LinkType)}

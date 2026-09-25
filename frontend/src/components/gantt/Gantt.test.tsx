@@ -915,7 +915,7 @@ describe('Gantt: review fixes', () => {
 
   // (1) undo of a delete re-adds under the old ids; the adapter maps them to new ones.
   it('undo of a delete then remaps the re-added task, and redo deletes the new id', async () => {
-    const onChange = vi.fn(async (cs: ChangeSet) => (cs.addTasks?.length ? { idMap: { 1: 91, L1: 92 } } : undefined))
+    const onChange = vi.fn(async (cs: ChangeSet) => (cs.addTasks?.length ? { idMap: { 1: 91 }, linkIdMap: { L1: 92 } } : undefined))
     render(<Gantt tasks={base()} links={baseLinks()} onChange={onChange} defaultZoom="day" showToday={false} />)
     fireEvent.click(screen.getByTestId('gantt-row-1'))
     key('Delete')
@@ -1140,5 +1140,21 @@ describe('Gantt: review fixes', () => {
     rerender(<Gantt tasks={base()} links={baseLinks()} onChange={onChange} rights={{ structure: false, links: false }}
       columns={['row', 'name', 'start']} defaultZoom="day" showToday={false} />)
     await waitFor(() => expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(true))
+  })
+})
+
+describe('Gantt: read-only (legacy) links', () => {
+  it('shows them, but the popover cannot edit or remove them and Delete does nothing', async () => {
+    const { onChange } = setup({ links: [{ id: 'legacy-1-2-0', from: 1, to: 2, type: 'FS', lagDays: 0, readOnly: true }] })
+    fireEvent.click(screen.getByTestId('gantt-link-hit-legacy-1-2-0'))
+    const pop = screen.getByTestId('gantt-link-popover')
+    expect(within(pop).getByTestId('gantt-link-note').textContent).toBe('Old dependency, re-draw to edit')
+    expect(within(pop).queryByTestId('gantt-link-delete')).toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByTestId('gantt-link-hit-legacy-1-2-0'), { key: 'Delete' })
+    fireEvent.click(screen.getByTestId('gantt-row-1'))
+    fireEvent.click(screen.getByTestId('gantt-unlink'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).not.toHaveBeenCalled()
   })
 })

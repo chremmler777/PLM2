@@ -52,6 +52,18 @@ describe('PlanOut -> generic model', () => {
     expect(m.calendar).toEqual({ mode: 'working', workdays: [1, 2, 3, 4, 5], holidays: ['2026-12-25'] })
   })
 
+  it('maps legacy links from PlanOut.links as read-only', () => {
+    const m = planToModel(planOut({ links: [
+      { id: -3, from_task_id: 1, to_task_id: 2, type: 'FS', lag_days: 0, legacy: true },
+      { id: null, from_task_id: 2, to_task_id: 3, type: 'FS', lag_days: 0 },
+      { id: 9, from_task_id: 1, to_task_id: 3, type: 'SS', lag_days: 1 },
+    ] }))
+    expect(m.links.map((l) => [String(l.id).startsWith('legacy-'), !!l.readOnly])).toEqual([[true, true], [true, true], [false, false]])
+    // A read-only link never reaches the server as an id.
+    const body = toPlanChangeSet({ removeLinks: [m.links[0].id] }, m)
+    expect(body.links_delete).toEqual([])
+  })
+
   it('maps every task field', () => {
     const g = taskToGantt(task({
       id: 9, parent_id: 4, constraint_type: 'snet', constraint_date: '2026-11-01', progress_pct: 40,

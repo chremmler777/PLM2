@@ -61,12 +61,14 @@ export type PlanConstraintType = 'asap' | 'snet' | 'fnlt' | 'mso' | 'mfo'
 export type PlanLinkType = 'FS' | 'SS' | 'FF' | 'SF'
 
 export interface PlanLink {
-  id: number
+  id: number | null
   from_task_id: number
   to_task_id: number
   type: PlanLinkType
   /** Days in the plan calendar's unit; negative = lead. */
   lag_days: number
+  /** An old `predecessors` dependency: shown, not editable (re-draw to edit). */
+  legacy?: boolean
 }
 
 export interface PlanCalendar {
