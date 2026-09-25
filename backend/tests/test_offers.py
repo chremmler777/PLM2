@@ -812,10 +812,14 @@ async def test_refresh_does_not_count_split_machine_time_twice(
     assert res.json()["totals"]["base"] == 5000.0               # not 6000
     w = {x["code"]: x for x in res.json()["warnings"]}
     assert "override_split" in w and f"'dept:{did}'" in w["override_split"]["message"]
-    # a second refresh: the split lines exist now, nothing is taken twice
-    res = await client.post(_url(cid, f"/{o['id']}/refresh"), headers=sales)
-    lines = {l["key"]: l for l in res.json()["data"]["cost_lines"]}
-    assert lines[f"dept:{did}"]["amount"] == 4000.0
+    # a second and a third refresh: the split lines exist now, nothing is
+    # taken twice, and the warning stays until Sales checks the amount
+    for _ in range(2):
+        res = await client.post(_url(cid, f"/{o['id']}/refresh"), headers=sales)
+        assert res.status_code == 200, res.text
+        lines = {l["key"]: l for l in res.json()["data"]["cost_lines"]}
+        assert lines[f"dept:{did}"]["amount"] == 4000.0
+        assert "override_split" in {x["code"] for x in res.json()["warnings"]}
     # Sales sets the amount: checked, the warning goes
     cl = list(lines.values())
     next(l for l in cl if l["key"] == f"dept:{did}")["amount"] = 3900
@@ -823,3 +827,107 @@ async def test_refresh_does_not_count_split_machine_time_twice(
                              headers=sales)
     assert res.status_code == 200
     assert "override_split" not in {x["code"] for x in res.json()["warnings"]}
+
+
+async def test_refresh_keeps_override_when_machine_time_comes_later(
+        client, offer_world, session_factory, monkeypatch):
+    """An offer seeded after the split, when the department had no machine
+    time yet: its internal line's source was its own work alone, so machine
+    time added later is a new line, not part of Sales' 5000."""
+    from app.services import offer_service
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    o = await _create(client, sales, cid)
+    did = offer_world["depts"]["Tool Engineer"]
+
+    def fresh_line(key, amount):
+        return {"key": key, "label": key, "department": "Tool Engineer",
+                "category": "internal", "amount": amount, "source_amount": amount,
+                "include": True, "customer_category": "Engineering"}
+
+    async def basis(session, change, meta=None):
+        if meta is not None:
+            meta.update({"currency": "EUR", "warnings": [], "versions_used": []})
+        return ([fresh_line(f"dept:{did}", 2000.0),
+                 fresh_line(f"dept_mt:{did}", 600.0)], 2600.0)
+    monkeypatch.setattr(offer_service.OfferService, "_costing_basis", basis)
+    async with session_factory() as s:
+        row = await s.get(ChangeOffer, o["id"])
+        data = dict(row.data)
+        data["cost_lines"] = [{**fresh_line(f"dept:{did}", 2000.0), "amount": 5000.0}]
+        row.data = data
+        await s.commit()
+    res = await client.post(_url(cid, f"/{o['id']}/refresh"), headers=sales)
+    assert res.status_code == 200, res.text
+    lines = {l["key"]: l for l in res.json()["data"]["cost_lines"]}
+    assert lines[f"dept:{did}"]["amount"] == 5000.0              # Sales' amount stands
+    assert lines[f"dept:{did}"].get("split_reduced_amount") is None
+    assert lines[f"dept_mt:{did}"]["amount"] == 600.0
+    assert "override_split" not in {x["code"] for x in res.json()["warnings"]}
+
+
+async def test_stored_german_numbers_are_read_not_zeroed(
+        client, offer_world, session_factory, monkeypatch):
+    """Drafts stored before read_number went en-US hold German text
+    ("1.234,5", "250,00"): reading stored data falls back to that rule, so
+    the PDF totals keep them and an unrelated PATCH stores them as floats.
+    Input stays strict (test_numbers_are_coerced_and_validated)."""
+    from app.services import offer_pdf
+    sales = await _auth(client, "sales")
+    cid = offer_world["change_id"]
+    o = await _create(client, sales, cid)
+    async with session_factory() as s:
+        row = await s.get(ChangeOffer, o["id"])
+        data = dict(row.data)
+        data["cost_lines"] = [
+            {"key": "a", "label": "A", "category": "other", "amount": "1.234,5",
+             "include": True},
+            {"key": "b", "label": "B", "category": "other", "amount": "250,00",
+             "include": True}]
+        data["factors"], data["risks"] = [], []
+        row.data = data
+        await s.commit()
+    calls = []
+    real = offer_pdf.render_offer_pdf
+
+    def capture(ctx):
+        calls.append(ctx)
+        return real(ctx)
+    monkeypatch.setattr(offer_pdf, "render_offer_pdf", capture)
+    res = await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)
+    assert res.status_code == 200, res.text
+    totals = calls[0]["offer"]["totals"]
+    assert totals["base"] == 1484.5 and totals["total_one_time"] == 1484.5
+    # an unrelated edit keeps them, as numbers now
+    res = await client.patch(_url(cid, f"/{o['id']}"),
+                             json={"data": {"subject": "Rib"}}, headers=sales)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        stored = (await s.get(ChangeOffer, o["id"])).data["cost_lines"]
+    assert [l["amount"] for l in stored] == [1234.5, 250.0]
+    assert all(isinstance(l["amount"], float) for l in stored)
+    assert res.json()["totals"]["base"] == 1484.5
+    # a number no rule reads: no PDF with a wrong total
+    async with session_factory() as s:
+        row = await s.get(ChangeOffer, o["id"])
+        data = dict(row.data)
+        data["cost_lines"] = data["cost_lines"] + [
+            {"key": "c", "label": "C", "category": "other", "amount": "lots",
+             "include": True}]
+        row.data = data
+        await s.commit()
+    res = await client.get(_url(cid, f"/{o['id']}/pdf"), headers=sales)
+    assert res.status_code == 400 and "cost line C" in res.json()["detail"]
+
+
+async def test_lenient_reading_falls_back_to_legacy_german_strict_does_not():
+    from app.services.change_service import ChangeError
+    from app.services.offer_service import _num, parse_number
+    for text, expected in (("1.234,5", 1234.5), ("12,5", 12.5), ("250,00", 250.0),
+                           ("1.234", 1234.0), ("1,234.50", 1234.5), ("12.5", 12.5)):
+        assert _num(text) == expected, text
+    assert _num("lots") == 0.0
+    assert parse_number("1.2.3", strict=False, allow_none=True, default=None) is None
+    for text in ("1.234,5", "12,5", "1.234"):
+        with pytest.raises(ChangeError):
+            parse_number(text, "amount")

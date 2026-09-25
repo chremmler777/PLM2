@@ -800,7 +800,10 @@ async def offer_pdf(
     # The data is read here; reportlab (CPU-bound, ~100 ms and more) runs in
     # the thread pool so it never blocks the event loop. A version that went
     # out is served from the in-process cache after its first render.
-    ctx, key = await OfferService.pdf_context(db, change, offer)
+    try:
+        ctx, key = await OfferService.pdf_context(db, change, offer)
+    except _ERRORS as e:
+        raise _http(e)
     pdf = OfferService.pdf_cache_get(key)
     if pdf is None:
         from starlette.concurrency import run_in_threadpool

@@ -224,6 +224,20 @@ async def test_amount_currency_sign_is_read_not_dropped(client, admin_auth, sess
     assert "GBP, USD" in w["message"] and "EUR" in w["message"]
 
 
+async def test_reader_posting_dollar_amount_gets_403_not_the_currency(
+        client, session_factory, world):
+    """The currency check names the change's costing currency: someone who
+    may not enter costs is refused before it runs."""
+    cid = world["change_id"]
+    await _status(session_factory, cid, "in_implementation")
+    eng = await login(client, "eng@test.io")        # no cost role, no department
+    r = await client.post(f"/api/v1/changes/{cid}/actual-costs", headers=eng,
+                          json={"category": "external", "amount": "$1",
+                                "cost_date": "2026-06-01"})
+    assert r.status_code == 403, r.text
+    assert "EUR" not in r.json()["detail"] and "$" not in r.json()["detail"]
+
+
 async def test_engineering_review_is_not_price_pending(client, admin_auth, session_factory,
                                                        world, seed):
     async with session_factory() as s:

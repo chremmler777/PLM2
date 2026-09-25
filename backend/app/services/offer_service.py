@@ -100,8 +100,9 @@ def _bool(v, default: bool = False) -> bool:
 
 
 def _num(v, default: float = 0.0) -> float:
-    """Lenient number for reads: never raises; floats pass through, text is
-    read by read_number (en-US)."""
+    """Lenient number for reads of stored data: never raises; floats pass
+    through, text is read by read_number (en-US), then by the legacy German
+    rule older drafts were stored under."""
     return parse_number(v, strict=False, default=default)
 
 
@@ -183,12 +184,53 @@ def read_number(text: str) -> Optional[float]:
     return None if math.isnan(out) or math.isinf(out) else out
 
 
+_LEGACY_DOT_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(\.\d{3})+$", re.ASCII)
+
+
+def _read_legacy_number(text: str) -> Optional[float]:
+    """The reading offers used before read_number went en-US (the Offer
+    tab's old parseNum): "," is the decimal separator and "." groups
+    thousands ("1.234,5" = 1234.5, "12,5" = 12.5, "250,00" = 250.0,
+    "1.234" = 1234); "1,234.50" (comma groups, dot last) is 1234.5. Only
+    for text STORED under that rule (older drafts and send snapshots),
+    never for input: see parse_number(strict=False)."""
+    t = re.sub(r"\s", "", text)
+    if not t:
+        return None
+    if "," in t and "." in t and t.rfind(".") > t.rfind(","):
+        int_part, _, frac = t.rpartition(".")
+        if not _COMMA_GROUPS.match(int_part) or not frac.isdigit():
+            return None
+        norm = int_part.replace(",", "") + "." + frac
+    elif "," in t:
+        int_part, *rest = t.split(",")
+        if len(rest) != 1:
+            return None
+        if "." in int_part and not _LEGACY_DOT_GROUPS.match(int_part):
+            return None
+        norm = int_part.replace(".", "") + "." + rest[0]
+    elif _LEGACY_DOT_GROUPS.match(t):
+        norm = t.replace(".", "")
+    else:
+        norm = t
+    if not _PLAIN.match(norm):
+        return None
+    try:
+        out = float(norm)
+    except ValueError:
+        return None
+    return None if math.isnan(out) or math.isinf(out) else out
+
+
 def parse_number(v, field: str = "value", *, strict: bool = True,
                  default=0.0, allow_none: bool = False):
     """One number from what a browser or a spreadsheet paste sends: a JSON
     number, or a string read by read_number. Anything else is refused
     (strict) or replaced by the default (lenient, for rows stored before
-    this check existed)."""
+    this check existed). The lenient mode reads STORED data only: text
+    read_number refuses is read once more under the legacy German rule it
+    was typed under ("1.234,5" = 1234.5), so an older draft or snapshot
+    keeps its amounts. Input from the client is always strict."""
     if v is None or (isinstance(v, str) and not v.strip()):
         return None if allow_none else default
     if isinstance(v, bool):
@@ -199,6 +241,8 @@ def parse_number(v, field: str = "value", *, strict: bool = True,
             out = None
     elif isinstance(v, str):
         out = read_number(v)
+        if out is None and not strict:
+            out = _read_legacy_number(v)
     else:
         out = None
     if out is None:
@@ -913,15 +957,22 @@ class OfferService:
             o = old.get(n["key"])
             if o is not None:
                 n["include"] = bool(o.get("include", True))
-                if _num(o.get("amount")) != _num(o.get("source_amount")):
-                    amount = _num(o.get("amount"))
+                amount = _num(o.get("amount"))
+                # Reduced by an earlier refresh and not yet checked by Sales
+                # (still the reduced amount): it stays Sales' amount and the
+                # warning stays with it until Sales edits it.
+                pending = (o.get(SPLIT_REDUCED_KEY) is not None
+                           and amount == _num(o.get(SPLIT_REDUCED_KEY)))
+                if pending or amount != _num(o.get("source_amount")):
                     split = OfferService._split_out_of(n["key"], old, fresh_by_key)
-                    if split:
+                    if split and OfferService._override_covered(o, n, split):
                         # The override (from before machine time and sampling
                         # had their own lines) covered them too: take them
                         # out so they are not counted twice; Sales re-checks.
                         amount = round(max(0.0, amount - sum(
                             _num(x["amount"]) for x in split)), 2)
+                        n[SPLIT_REDUCED_KEY] = amount
+                    elif pending:
                         n[SPLIT_REDUCED_KEY] = amount
                     n["amount"] = amount
             lines.append(n)
@@ -942,6 +993,18 @@ class OfferService:
         await OfferService._store_totals(session, change, offer)
         await session.flush()
         return offer
+
+    @staticmethod
+    def _override_covered(old_line: dict, fresh_own: dict,
+                          split: list[dict]) -> bool:
+        """Did the old line's source (what Sales overrode) include the split
+        lines? Only then was the override priced over them. A line seeded
+        after the split, whose department only later got machine time or
+        sampling, had a source of its own work alone: Sales' amount stands.
+        Matched to the cent."""
+        covered = _num(fresh_own.get("source_amount")) + sum(
+            _num(x.get("source_amount", x.get("amount"))) for x in split)
+        return abs(_num(old_line.get("source_amount")) - covered) <= 0.01 + 1e-9
 
     @staticmethod
     def _split_out_of(key: str, old: dict, fresh_by_key: dict) -> list[dict]:
@@ -1405,8 +1468,19 @@ class OfferService:
     def _pdf_offer(offer: ChangeOffer) -> dict:
         """The offer as the PDF reads it: its data and the totals the
         customer sees. The internal cost is not on the PDF, so it is never
-        computed here (serialize's costing basis is the slow part)."""
-        data = normalise(offer.data)
+        computed here (serialize's costing basis is the slow part). A number
+        that cannot be read (not en-US, not the legacy German rule either)
+        refuses the PDF: the customer never gets a total that left it out."""
+        unreadable: list[str] = []
+        data = normalise(offer.data, issues=unreadable)
+        if unreadable:
+            raise ChangeError(
+                f"Offer v{offer.version} has numbers that cannot be read ("
+                + ", ".join(dict.fromkeys(unreadable))
+                + "): " + ("fix them before printing the PDF"
+                           if offer.status == "draft" else
+                           "no PDF is printed with a wrong total; create a "
+                           "new version with them fixed"))
         data.pop(SNAPSHOT_KEY, None)
         return {"id": offer.id, "version": offer.version, "status": offer.status,
                 "currency": offer.currency, "data": data,

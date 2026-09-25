@@ -1398,6 +1398,19 @@ class ActualCostService:
         }
 
     @staticmethod
+    async def require_write(session, change, user,
+                            department_id: Optional[int]) -> None:
+        """May this user enter a cost (for this department)? Checked before
+        anything about the entry is answered (the route runs it before the
+        currency check, so a reader learns nothing of the costing)."""
+        if not await ActualCostService.is_cost_role(session, change, user):
+            own = await ActualCostService.own_department_ids(session, user)
+            if department_id is None or department_id not in own:
+                raise ActualCostForbidden(
+                    "Only Project Management, Sales, the change lead, an admin "
+                    "or a member of the named department may enter its costs")
+
+    @staticmethod
     async def add(session, change, user, *, category: str, amount: float,
                   cost_date: date, department_id: Optional[int] = None,
                   vendor_name: Optional[str] = None, note: Optional[str] = None,
@@ -1436,12 +1449,7 @@ class ActualCostService:
                 raise ActualCostError(str(e))
         else:
             cur = costing_cur
-        if not await ActualCostService.is_cost_role(session, change, user):
-            own = await ActualCostService.own_department_ids(session, user)
-            if department_id is None or department_id not in own:
-                raise ActualCostForbidden(
-                    "Only Project Management, Sales, the change lead, an admin "
-                    "or a member of the named department may enter its costs")
+        await ActualCostService.require_write(session, change, user, department_id)
         row = ChangeActualCost(
             change_id=change.id, department_id=department_id, category=category,
             vendor_name=(vendor_name or "").strip()[:120] or None,

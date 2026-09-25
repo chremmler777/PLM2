@@ -158,6 +158,13 @@ async def add_actual_cost(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
+    # Permission first: the currency check below names the change's costing
+    # currency, which only someone who may enter costs is told.
+    try:
+        await ActualCostService.require_write(
+            db, change, current_user, body.department_id)
+    except _ERRORS as e:
+        raise _http(e)
     currency = await entry_currency(db, change, body)
     try:
         row = await ActualCostService.add(
