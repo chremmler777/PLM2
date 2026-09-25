@@ -769,3 +769,53 @@ Route decision dialog explains each route in one line and what happens
 (loop back to implementation, plan block, customer mail requirement,
 follow-up change). Cockpit "Blocked by" lists open issues; the release
 blockers list includes them.
+
+### 12a. Recovery timing (Gantt) and escalation plan
+**Recovery plan in the Gantt.** Deciding a fix route (`internal_rework`,
+`supplier_rework`, `design_change`) creates a **recovery group** in the
+detailed plan: a summary block "Recovery VI-n: <title>" (lane = owner
+department) placed after the failed validation block, with one child block
+per fix action (duration from the action's due date or 5 working days
+default, owner department lane), then "Re-validation VI-n" (kind
+`validation`, 3 days) and FS links chaining them; the recovery group is
+linked FS into the blocks that depended on the failed validation (SOP,
+customer approval), so automatic scheduling pushes them. After the baseline
+all of it is recorded as deviations with `reason = "VI-n: <route_reason>"`
+and `caused_by` the recovery group (the user edits the recovery blocks in
+the Gantt like any other). The issue card shows the recovery group's
+finish, the new plan finish and the slip against the baseline finish and
+the release deadline ("Recovery ends 14.11, SOP moves +9 wd, 4 wd after the
+release deadline"). A button "Open recovery in the plan" focuses the group
+in the Gantt (Timing tab, `?tab=timing&task=<id>`).
+
+**New timing for the customer.** When the recovery pushes the plan finish
+past the release deadline, the issue requires a customer timing decision:
+Sales records `customer_decision = new_timing` with the new date (updates
+`release_due_date` with reason "VI-n", audited as
+`release_deadline_set`) or `require_fix` (keep the date: PM must shorten
+the recovery). The deviations created by the recovery are escalated to the
+customer together (one escalation record referencing the issue).
+
+**Escalation plan.** Each issue has an escalation level, computed and
+stored with history (`change_validation_issue_escalations`: id, issue_id,
+level 1..3, reason, notified (text: who), created_by/at, acknowledged_by/at):
+- Level 1, department: raised issue; owner department + PM informed.
+- Level 2, project: automatic when severity 3, or a fix action is overdue,
+  or the recovery slips the plan finish past the baseline finish, or no
+  route decided after 2 working days; PM + change lead + Sales; Sales
+  decides whether the customer must be informed.
+- Level 3, management and customer: automatic when the recovery finish is
+  after the release deadline, or a level-2 escalation is not acknowledged
+  within 2 working days, or the customer requires a fix on a concession;
+  Sales informs the customer (customer mail filed into the issue),
+  management notified (users of the "Management" department if it exists,
+  else admins).
+- Every level change writes an escalation row, a changelog entry
+  `validation_issue_escalated`, a notification to the named roles and a
+  my-actions item "Acknowledge escalation VI-n (level x)"; acknowledging
+  records who/when. Manual escalation (PM/lead/Sales) with a reason is
+  allowed; de-escalation only by closing or by PM with a reason.
+- Level is re-evaluated on every issue or plan change and by the existing
+  notification sweep (notification_sweep.py) for overdue triggers.
+- The cockpit shows the highest open level ("Escalation L3: VI-2 tool
+  cannot run, customer informed 25.09").
