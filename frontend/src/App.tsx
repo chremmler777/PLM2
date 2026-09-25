@@ -28,6 +28,9 @@ import ReportsPage from './pages/ReportsPage';
 import PnlPage from './pages/PnlPage';
 import CostSheetPage from './pages/CostSheetPage';
 import ProcessMapPage from './pages/ProcessMapPage';
+import TrainingPage from './pages/TrainingPage';
+import TrainingRunPage from './pages/TrainingRunPage';
+import TrainingHandoutPage from './pages/TrainingHandoutPage';
 import AppLayout from './components/layout/AppLayout';
 
 const queryClient = new QueryClient();
@@ -206,6 +209,34 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CostSheetPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* ECR training: the record and the manual in the layout; the practical
+          check and the printable handout bare. The check must run outside the
+          layout: its sandbox takes over the shared API client, and the
+          sidebar's live polling must not share the page with it. */}
+      <Route
+        path="/training"
+        element={
+          <ProtectedRoute>
+            <TrainingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/training/run/:role"
+        element={
+          <ProtectedRoute bare>
+            <TrainingRunPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/training/handout/:role"
+        element={
+          <ProtectedRoute bare>
+            <TrainingHandoutPage />
           </ProtectedRoute>
         }
       />

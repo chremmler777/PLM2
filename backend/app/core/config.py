@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     notification_escalation: bool = True
     notification_workflow_complete: bool = True
 
+    # ECR training gate (app/services/training.py). Unset (the default) means
+    # the org setting 'training_gate' decides, and that defaults to off. Set
+    # TRAINING_GATE=true/false to force it for the whole installation.
+    training_gate: bool | None = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

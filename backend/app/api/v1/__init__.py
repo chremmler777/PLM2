@@ -1,5 +1,5 @@
 """API v1 routes, grouped into functional modules."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.api.v1.health import router as health_router
 from app.api.v1.plants import router as plants_router
 from app.api.v1.project_team import router as project_team_router
@@ -64,6 +64,14 @@ from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
 from app.api.v1.cost_sheet import router as cost_sheet_router
 
+# Module: training (ECR training record; the gate below is off by default)
+from app.api.v1.training import router as training_router, enforce_training_gate
+
+#: Wired onto every change router, off unless TRAINING_GATE or the org
+#: setting 'training_gate' switches it on (ruling 2026-09-25: training is
+#: recorded, it does not block). Reads always pass.
+_TRAINING_GATE = [Depends(enforce_training_gate)]
+
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
 api_router.include_router(contacts_router)
@@ -92,14 +100,14 @@ api_router.include_router(sep_router)
 api_router.include_router(sep_files_router)
 api_router.include_router(forms_router)
 api_router.include_router(lessons_router)
-api_router.include_router(changes_router)
-api_router.include_router(change_plan_offer_router)
-api_router.include_router(change_validation_issues_router)
-api_router.include_router(change_actual_costs_router)
-api_router.include_router(change_mother_plant_router)
-api_router.include_router(change_early_stage_router)
-api_router.include_router(change_engineering_review_router)
-api_router.include_router(change_costing_context_router)
+api_router.include_router(changes_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_plan_offer_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_validation_issues_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_actual_costs_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_mother_plant_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_early_stage_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_engineering_review_router, dependencies=_TRAINING_GATE)
+api_router.include_router(change_costing_context_router, dependencies=_TRAINING_GATE)
 api_router.include_router(audit_router)
 api_router.include_router(plants_router)
 api_router.include_router(project_team_router)
@@ -110,5 +118,6 @@ api_router.include_router(paints_router)
 api_router.include_router(reports_router)
 api_router.include_router(pnl_router)
 api_router.include_router(cost_sheet_router)
+api_router.include_router(training_router)
 
 __all__ = ["api_router"]

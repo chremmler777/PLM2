@@ -56,6 +56,7 @@ export default function Sidebar() {
     { path: '/pnl', label: 'P&L', icon: '💰' },
     { path: '/reports', label: 'Reports', icon: '📊' },
     { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
+    { path: '/training', label: 'Training', icon: '🎓' },
   ];
 
   const setupItems = [

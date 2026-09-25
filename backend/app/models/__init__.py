@@ -49,6 +49,7 @@ from app.models.workflow import (
 )
 from app.models.dfm import DfmTopic, DfmEntry, DfmEntryFile, DfmAuditEvent
 from app.models.field_note import FieldNote, FieldNoteComment
+from app.models.training import TrainingVersion, TrainingSignoff, TrainingAttempt
 
 __all__ = [
     "Base",
@@ -75,6 +76,9 @@ __all__ = [
     "RevisionPhase",
     "RevisionStatus",
     "TestDataStatus",
+    "TrainingVersion",
+    "TrainingSignoff",
+    "TrainingAttempt",
     "DfmTopic",
     "DfmEntry",
     "DfmEntryFile",
