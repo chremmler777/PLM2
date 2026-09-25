@@ -21,6 +21,7 @@ import type { ChangeNegotiation, NegotiationChannel } from '../../types/change'
 import type { OfferOut } from '../../types/changeOffer'
 import { DiffList } from './offer/SendOfferDialog'
 import { fmtDate, fmtMoney } from './offer/offerFormat'
+import { formatDate, formatMoney } from '../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -116,6 +117,7 @@ export default function NegotiationCard({
   // A negotiation reads forward: oldest round first, the result at the end.
   const ordered = [...rounds].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const final = ordered.find((r) => r.is_final)
+  const currency = offers?.find((o) => o.currency)?.currency ?? 'EUR'
   const versionOf = (id?: number | null) => offers?.find((o) => o.id === id)?.version
   // Offer versions and rounds read as one story, oldest first.
   type Item = { at: string; round?: ChangeNegotiation; offer?: OfferOut }
@@ -156,7 +158,7 @@ export default function NegotiationCard({
             <li key={`offer-${offer.id}`} data-testid={`timeline-offer-${offer.id}`}
               className={`rounded border px-2 py-1.5 text-sm text-slate-200 ${VERSION_TONE[offer.status] ?? VERSION_TONE.sent}`}>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-slate-400 tabular-nums">{(offer.sent_at ?? offer.created_at).slice(0, 10)}</span>
+                <span className="text-xs text-slate-400 tabular-nums">{formatDate(offer.sent_at ?? offer.created_at)}</span>
                 <span className="inline-flex items-center rounded border border-sky-700 bg-sky-900/60 px-1.5 py-0 text-[10px] leading-tight font-semibold text-sky-100">
                   Offer v{offer.version} {offer.status}
                 </span>
@@ -173,7 +175,7 @@ export default function NegotiationCard({
                 </span>
               </div>
               {offer.change_note && <p className="mt-0.5 text-xs text-slate-300">What changed: {offer.change_note}</p>}
-              {(offer.diff?.length ?? 0) > 0 && <div className="mt-1"><DiffList diff={offer.diff ?? []} /></div>}
+              {(offer.diff?.length ?? 0) > 0 && <div className="mt-1"><DiffList diff={offer.diff ?? []} currency={offer.currency || 'EUR'} /></div>}
               {offer.sent_by_name && <span className="text-xs text-slate-500">{offer.sent_by_name}</span>}
             </li>
           ) : round && ((r) => (
@@ -184,7 +186,7 @@ export default function NegotiationCard({
                   : 'border-slate-700 bg-slate-900/40 text-slate-200'}`}>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-slate-400 tabular-nums">
-                  {r.created_at.slice(0, 10)}
+                  {formatDate(r.created_at)}
                 </span>
                 <span data-testid={`negotiation-channel-${r.id}`}
                   className="inline-flex items-center rounded border border-slate-600 bg-slate-800 px-1.5 py-0 text-[10px] leading-tight text-slate-200">
@@ -204,7 +206,7 @@ export default function NegotiationCard({
                     className={r.is_final
                       ? 'ml-auto tabular-nums text-base font-semibold text-emerald-100'
                       : 'ml-auto tabular-nums text-slate-300'}>
-                    {r.counter_price.toFixed(2)}
+                    {formatMoney(r.counter_price, currency)}
                   </span>
                 )}
               </div>
@@ -235,7 +237,7 @@ export default function NegotiationCard({
               <span className="text-slate-400 text-xs">{t('negotiation.finalPrice')}:</span>
               <span className="tabular-nums text-emerald-100 font-semibold"
                 data-testid="negotiation-final-price">
-                {final.counter_price.toFixed(2)}
+                {formatMoney(final.counter_price, currency)}
               </span>
             </p>
           )}

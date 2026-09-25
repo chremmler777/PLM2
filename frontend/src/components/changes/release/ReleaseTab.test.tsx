@@ -140,13 +140,26 @@ describe('ReleaseTab', () => {
   afterEach(cleanup)
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('lists the blockers and keeps Release disabled while they stand', async () => {
+  it('lists the blockers as info and keeps Release clickable (soft guard via deviation)', async () => {
     vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
     const onAdvance = vi.fn()
     wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
       canManage onAdvance={onAdvance} advancing={false} />)
     expect((await screen.findByTestId('release-blockers')).textContent).toContain('2 open')
-    await waitFor(() => expect((screen.getByTestId('release-change') as HTMLButtonElement).disabled).toBe(true))
+    expect(screen.getByTestId('release-blockers-info').textContent).toContain('deviation')
+    const btn = screen.getByTestId('release-change') as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+    // The page's advance runs the transition; a refusal opens its DeviationBanner.
+    fireEvent.click(btn)
+    expect(onAdvance).toHaveBeenCalledWith('released')
+  })
+
+  it('disables Release only while a transition runs', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing />)
+    await screen.findByTestId('release-blockers')
+    expect((screen.getByTestId('release-change') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('releases once the server says it can', async () => {

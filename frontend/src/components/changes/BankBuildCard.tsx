@@ -23,13 +23,14 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { BankBuildMode, ChangeRequest } from '../../types/change'
+import { formatDate, formatMoney } from '../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const MODES: BankBuildMode[] = ['running_change', 'planned_scrap']
 
-const onDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+const onDay = (iso?: string | null) => formatDate(iso)
 
 interface Props {
   change: Pick<ChangeRequest,
@@ -40,9 +41,11 @@ interface Props {
   canSetMode?: boolean
   /** Sales / change lead / admin. */
   canPublish?: boolean
+  /** Inside the Timing tab the tab's own card publishes the validated plan. */
+  hidePublish?: boolean
 }
 
-export default function BankBuildCard({ change, canSetMode = false, canPublish = false }: Props) {
+export default function BankBuildCard({ change, canSetMode = false, canPublish = false, hidePublish = false }: Props) {
   const qc = useQueryClient()
   const [mode, setMode] = useState<BankBuildMode | null>(change.bank_build_mode ?? null)
   const [note, setNote] = useState(change.bank_build_note ?? '')
@@ -148,7 +151,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
           </p>
           {change.bank_build_mode === 'planned_scrap' && (
             <p className="text-xs text-slate-400">
-              {t('bankbuild.scrapPrice')}: {change.scrap_quote_price?.toFixed(2) ?? '—'}
+              {t('bankbuild.scrapPrice')}: {formatMoney(change.scrap_quote_price)}
             </p>
           )}
           {change.bank_build_note && (
@@ -157,7 +160,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
           {change.bank_build_set_at && (
             <p className="text-xs text-slate-500">
               {t('bankbuild.setBy')
-                .replace('{x}', change.bank_build_set_by_name ?? '—')
+                .replace('{x}', change.bank_build_set_by_name ?? '-')
                 .replace('{d}', onDay(change.bank_build_set_at))}
             </p>
           )}
@@ -166,12 +169,12 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
       )}
 
       {/* Internal decision or customer-facing plan — never ambiguous. */}
-      <div className="border-t border-slate-700 pt-2 space-y-2">
+      {!hidePublish && <div className="border-t border-slate-700 pt-2 space-y-2">
         <p data-testid="bank-build-publish-state"
           className={published ? 'text-xs text-emerald-300' : 'text-xs text-amber-300'}>
           {published
             ? t('bankbuild.published')
-              .replace('{x}', change.plan_published_by_name ?? '—')
+              .replace('{x}', change.plan_published_by_name ?? '-')
               .replace('{d}', onDay(change.plan_published_at))
             : t('bankbuild.unpublished')}
         </p>
@@ -190,7 +193,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
             )}
           </div>
         )}
-      </div>
+      </div>}
     </section>
   )
 }

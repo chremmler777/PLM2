@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
+import { planApi } from '../api/changePlan';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates } from '../lib/waitStates';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
@@ -33,7 +34,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import {
   STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS,
-  STATUS_ACTIVE_TAB, resolveChangeTab, changeTabLabel, type ChangeTab,
+  activeTabsFor, resolveChangeTab, changeTabLabel, type ChangeTab,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
@@ -126,6 +127,13 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.validationState(changeId),
     enabled: !!change && change.status === 'in_validation',
   });
+  // At approved the timing waits on team confirmation; same cache key as the
+  // Timing tab's feedback panel, so it costs no extra request there.
+  const { data: planFeedback } = useQuery({
+    queryKey: ['change', changeId, 'plan-feedback'],
+    queryFn: () => planApi.feedback(changeId),
+    enabled: !!change && change.status === 'approved',
+  });
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
     queryFn: () => changesApi.getGates(changeId),
@@ -200,6 +208,11 @@ export default function ChangeDetailPage() {
   // Timing (spec 2026-09-25): plan editors and who publishes to the customer.
   const canEditPlan = isAdmin || isChangeLead || isSalesMember || isPmMember || isSchedulingMember;
   const canPublishTiming = isAdmin || isChangeLead || isSalesMember;
+  // How the change reaches the line (bank build mode): the backend allows
+  // Scheduling, PM, the change lead and admin, not Sales.
+  const canSetBankBuild = isAdmin || isChangeLead || isSchedulingMember || isPmMember;
+  // Deviation lock / escalate: PM, Sales, lead, admin (spec section 3).
+  const canDecideDeviation = isAdmin || isChangeLead || isPmMember || isSalesMember;
   // Release checklist rows beyond the owner department, and the lessons step.
   const canManageRelease = isAdmin || isChangeLead || isPmMember;
 
@@ -358,14 +371,15 @@ export default function ChangeDetailPage() {
         // What the change is waiting on — same list for every viewer, whoever
         // owns the next move.
         waits={resolveWaitStates(change, concerns, deptName, change.assessments,
-          { state: implState, escalations: implEscalations }, validation)}
+          { state: implState, escalations: implEscalations }, validation,
+          change.status === 'approved' ? planFeedback : null)}
         onGo={goTab}
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
         {EVERYDAY_TABS.map((tb) => {
           const locked = isTabLocked(change.status, tb);
-          const isActivePhase = !locked && STATUS_ACTIVE_TAB[change.status] === tb;
+          const isActivePhase = !locked && activeTabsFor(change.status, change.customer_relevant).includes(tb);
           // Scoping leaves two jobs on the impact tab — pick the impacted items,
           // then confirm the set. Both are done when the confirmation lands.
           const openWork = tb === 'impacted'
@@ -445,7 +459,8 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'timing' && change && (
         <TimingTab change={change} departments={departments}
           myDepartmentIds={myActions?.memberships ?? []}
-          canEditPlan={canEditPlan} canPublish={canPublishTiming} canSeeAll={canSeeCosts} />
+          canEditPlan={canEditPlan} canPublish={canPublishTiming} canSeeAll={canSeeCosts}
+          canSetBankBuild={canSetBankBuild} canDecideDeviation={canDecideDeviation} isAdmin={isAdmin} />
       )}
 
       {effectiveTab === 'release' && change && (

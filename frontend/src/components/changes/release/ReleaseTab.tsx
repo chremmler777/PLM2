@@ -188,15 +188,23 @@ export default function ReleaseTab({
         {inValidation && (
           <div className="space-y-2">
             {blockers.length > 0 && (
-              <ul data-testid="release-blockers" className="space-y-1">
-                {blockers.map((b) => (
-                  <li key={b} className="text-xs text-amber-300">⏳ {b}</li>
-                ))}
-              </ul>
+              <div data-testid="release-blockers-info"
+                className="rounded-lg border border-amber-900/60 bg-amber-950/20 px-3 py-2">
+                <ul data-testid="release-blockers" className="space-y-1">
+                  {blockers.map((b) => (
+                    <li key={b} className="text-xs text-amber-300">⏳ {b}</li>
+                  ))}
+                </ul>
+                {canManage && (
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Releasing anyway asks for a deviation with a reason, which is recorded on the change.
+                  </p>
+                )}
+              </div>
             )}
             {canManage ? (
               <button type="button" data-testid="release-change"
-                disabled={advancing || (!!release && !release.can_release)}
+                disabled={advancing}
                 onClick={() => onAdvance('released')}
                 className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
                 Release change

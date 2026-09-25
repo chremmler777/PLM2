@@ -25,6 +25,13 @@ const RESPONSE_CHIP: Record<string, string> = {
   declined: 'bg-rose-950/60 text-rose-200 border-rose-800',
 }
 
+const RESPONSE_LABEL: Record<string, string> = {
+  pending: 'Waiting for the customer',
+  negotiating: 'In negotiation',
+  accepted: 'Accepted',
+  declined: 'Declined',
+}
+
 export default function CustomerDecision({
   change, latestSent, canRespond, canSignPm, canSignQuality, userId,
 }: {
@@ -38,6 +45,7 @@ export default function CustomerDecision({
 }) {
   const qc = useQueryClient()
   const [acceptOpen, setAcceptOpen] = useState(false)
+  const [declineOpen, setDeclineOpen] = useState(false)
   const [due, setDue] = useState('')
   const [reason, setReason] = useState('')
   const [override, setOverride] = useState('')
@@ -50,7 +58,7 @@ export default function CustomerDecision({
   const respond = useMutation({
     mutationFn: (vars: { response: string; body?: Parameters<typeof changesApi.customerResponse>[2] }) =>
       changesApi.customerResponse(change.id, vars.response, vars.body),
-    onSuccess: () => { setAcceptOpen(false); invalidate() },
+    onSuccess: () => { setAcceptOpen(false); setDeclineOpen(false); invalidate() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Failed to record customer response'),
   })
   const signOff = useMutation({
@@ -72,7 +80,7 @@ export default function CustomerDecision({
         <span className={sectionLabel}>Customer response</span>
         <span data-testid="customer-response"
           className={`rounded border px-1.5 py-0 text-[11px] ${RESPONSE_CHIP[change.customer_response] ?? RESPONSE_CHIP.pending}`}>
-          {change.customer_response}
+          {RESPONSE_LABEL[change.customer_response] ?? change.customer_response}
         </span>
         {latestSent && (
           <span className="text-[11px] text-slate-500">
@@ -81,18 +89,39 @@ export default function CustomerDecision({
         )}
         {canRespond && open && !decided && (
           <div className="ml-auto flex gap-2">
-            <button type="button" onClick={() => setAcceptOpen((o) => !o)}
+            <button type="button" data-testid="customer-accepted" onClick={() => { setAcceptOpen((o) => !o); setDeclineOpen(false) }}
               className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600">
               Customer accepted
             </button>
-            <button type="button" disabled={respond.isPending}
-              onClick={() => respond.mutate({ response: 'declined' })}
+            <button type="button" data-testid="customer-declined" disabled={respond.isPending}
+              onClick={() => { setDeclineOpen((o) => !o); setAcceptOpen(false) }}
               className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">
               Customer declined
             </button>
           </div>
         )}
       </div>
+
+      {declineOpen && (
+        <div data-testid="decline-confirm-box" role="alertdialog" aria-label="Confirm customer declined"
+          className="space-y-2 rounded-lg border border-rose-900/70 bg-rose-950/20 p-3">
+          <p className="text-xs text-rose-200">
+            Recording that the customer declined cannot be undone. The offer is closed and the change cannot be approved
+            on it any more.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setDeclineOpen(false)}
+              className="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-700">
+              Cancel
+            </button>
+            <button type="button" data-testid="decline-confirm" disabled={respond.isPending}
+              onClick={() => respond.mutate({ response: 'declined' })}
+              className="rounded-lg bg-rose-700 px-3 py-1 text-xs font-medium text-white hover:bg-rose-600 disabled:opacity-50">
+              Yes, the customer declined
+            </button>
+          </div>
+        </div>
+      )}
 
       {acceptOpen && (
         <div className="grid gap-2 rounded-lg border border-emerald-900/70 bg-emerald-950/20 p-3 sm:grid-cols-[auto_minmax(0,1fr)]">

@@ -70,11 +70,33 @@ describe('CustomerDecision', () => {
     expect(screen.queryByTestId('accept-override')).toBeNull()
   })
 
-  it('posts a decline without opening the confirm row', async () => {
+  it('asks for confirmation before recording a decline (irreversible)', async () => {
     wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer declined'))
+    expect(changesApi.customerResponse).not.toHaveBeenCalled()
+    expect(screen.getByTestId('decline-confirm-box').textContent).toContain('cannot be undone')
+    fireEvent.click(screen.getByTestId('decline-confirm'))
     await waitFor(() => expect(changesApi.customerResponse).toHaveBeenCalledWith(7, 'declined', undefined))
     expect(screen.queryByTestId('accept-release-due')).toBeNull()
+  })
+
+  it('cancelling the decline confirmation records nothing', () => {
+    wrap(<CustomerDecision change={change()} canRespond canSignPm={false} canSignQuality={false} userId={5} />)
+    fireEvent.click(screen.getByText('Customer declined'))
+    fireEvent.click(screen.getByText('Cancel'))
+    expect(screen.queryByTestId('decline-confirm-box')).toBeNull()
+    expect(changesApi.customerResponse).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['pending', 'Waiting for the customer'],
+    ['negotiating', 'In negotiation'],
+    ['accepted', 'Accepted'],
+    ['declined', 'Declined'],
+  ] as const)('labels the customer response %s in words', (resp, label) => {
+    wrap(<CustomerDecision change={change({ customer_response: resp })} canRespond={false}
+      canSignPm={false} canSignQuality={false} userId={5} />)
+    expect(screen.getByTestId('customer-response').textContent).toBe(label)
   })
 
   it('disables the Quality sign-off for the user who already PM-signed (4-eyes)', () => {

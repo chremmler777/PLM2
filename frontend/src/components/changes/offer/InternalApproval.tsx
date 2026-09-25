@@ -10,6 +10,7 @@ import { changesApi } from '../../../api/changes'
 import { t } from '../../../i18n/cmLabels'
 import type { ChangeDetail } from '../../../types/change'
 import { inputCls } from './offerFormat'
+import { formatDate, formatMoney } from '../../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -37,8 +38,8 @@ export default function InternalApproval({ change, canApprove }: {
       <div data-testid="internal-approved" className="rounded-lg border border-emerald-800 bg-emerald-950/40 p-3">
         <p className="font-medium text-emerald-300">✓ {t('internal.approved')}</p>
         <p className="mt-1 text-xs text-slate-400 tabular-nums">
-          {t('internal.amount')}: {change.internal_approved_amount?.toFixed(2) ?? '-'}
-          {' · '}{new Date(change.internal_approved_at).toLocaleDateString()}
+          {t('internal.amount')}: {formatMoney(change.internal_approved_amount)}
+          {' · '}{formatDate(change.internal_approved_at)}
         </p>
         {change.internal_approval_note && (
           <p className="text-xs text-slate-400">{change.internal_approval_note}</p>

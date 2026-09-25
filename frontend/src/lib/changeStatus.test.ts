@@ -70,3 +70,15 @@ describe('changeStatus', () => {
     })
   })
 })
+
+describe('activeTabsFor', () => {
+  it('marks Approval (offer) active next to costing for an internal change at costing', async () => {
+    const { activeTabsFor } = await import('./changeStatus')
+    expect(activeTabsFor('costing', false)).toEqual(['costing', 'offer'])
+    expect(activeTabsFor('costing', null)).toEqual(['costing', 'offer'])
+    expect(activeTabsFor('costing', true)).toEqual(['costing'])
+    expect(activeTabsFor('quoted', true)).toEqual(['offer'])
+    expect(activeTabsFor('approved', false)).toEqual(['timing'])
+    expect(activeTabsFor('on_hold', true)).toEqual([])
+  })
+})

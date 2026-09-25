@@ -12,6 +12,13 @@ import type {
   Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, ValidationState,
 } from '../types/change'
 
+/** The slice of GET /plan/feedback the waits need. */
+export interface PlanFeedbackLite {
+  required: { department_name: string; verdict: string | null; stale: boolean }[]
+  all_confirmed?: boolean
+  validated_at?: string | null
+}
+
 export interface WaitState {
   /** Stable key, also the test id suffix. */
   key: string
@@ -66,7 +73,7 @@ const isSubmitted = (a: Pick<Assessment, 'submitted_at' | 'verdict'>) =>
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
     | 'rejection_sent_at' | 'costing_pending_department_ids'
-    | 'bank_build_mode' | 'plan_published_at'>,
+    | 'bank_build_mode' | 'plan_published_at' | 'timing_validated_at'>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
@@ -88,6 +95,11 @@ export function resolveWaitStates(
    * the weight delta nobody has taken into the quote.
    */
   validation?: ValidationState | null,
+  /**
+   * At approved: the detailed plan's team confirmation, as the Timing tab's
+   * query ['change', id, 'plan-feedback'] holds it.
+   */
+  planFeedback?: PlanFeedbackLite | null,
 ): WaitState[] {
   const waits: WaitState[] = []
 
@@ -157,12 +169,28 @@ export function resolveWaitStates(
   }
 
   // An approved change is not moving until Scheduling has said how it reaches
-  // the line, and — when the customer is the cost carrier — until Sales has put
-  // the resulting plan in front of them. Two waits, one after the other.
+  // the line and every responsible team has confirmed the detailed timing,
+  // which is then validated. Only a validated timing goes to the customer, so
+  // the publish wait (customer changes) comes after that.
   if (change.status === 'approved') {
     if (!change.bank_build_mode) {
       waits.push({ key: 'bank-build', text: t('wait.onBankBuild'), tab: 'timing' })
-    } else if (change.customer_relevant && !change.plan_published_at) {
+    }
+    const validated = !!change.timing_validated_at || !!planFeedback?.validated_at
+    if (!validated && planFeedback && Array.isArray(planFeedback.required)) {
+      const waiting = planFeedback.required
+        .filter((r) => !(r.verdict === 'confirmed' && !r.stale))
+      if (waiting.length > 0) {
+        waits.push({
+          key: 'timing-confirm',
+          text: t('wait.onTimingConfirm').replace('{x}', waiting.map((r) => r.department_name).join(', ')),
+          tab: 'timing',
+        })
+      } else {
+        waits.push({ key: 'timing-validate', text: t('wait.onTimingValidate'), tab: 'timing' })
+      }
+    }
+    if (validated && change.bank_build_mode && change.customer_relevant && !change.plan_published_at) {
       waits.push({ key: 'plan-publish', text: t('wait.onPlanPublish'), tab: 'timing' })
     }
   }

@@ -20,12 +20,15 @@ export function NumField({
 }) {
   const [text, setText] = useState(value == null ? '' : String(value).replace('.', ','))
   const [focused, setFocused] = useState(false)
+  const invalid = text.trim() !== '' && parseNum(text) === null
   useEffect(() => {
     if (!focused) setText(value == null ? '' : String(value).replace('.', ','))
   }, [value, focused])
   return (
     <input type="text" inputMode="decimal" aria-label={ariaLabel} data-testid={testId}
       disabled={disabled} placeholder={placeholder} data-step={step}
+      aria-invalid={invalid || undefined}
+      title={invalid ? 'Not a number. Use a comma for decimals, e.g. 1.234,50' : undefined}
       value={text}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}
@@ -34,7 +37,7 @@ export function NumField({
         const n = parseNum(e.target.value)
         if (n !== null || e.target.value.trim() === '') onChange(n)
       }}
-      className={`${inputCls} text-right tabular-nums ${className}`} />
+      className={`${inputCls} text-right tabular-nums ${invalid ? '!border-rose-500' : ''} ${className}`} />
   )
 }
 

@@ -100,7 +100,7 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
 }
 
 function OfferHeader({
-  change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings,
+  change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
 }: {
   change: ChangeDetail
   offer: OfferOut
@@ -110,6 +110,11 @@ function OfferHeader({
   onNewVersion?: () => void
   creating?: boolean
   warnings: OfferIssue[]
+  /** Local edits not saved yet: the totals are about to change. */
+  stale?: boolean
+  /** A save is pending or running: Send waits for it. */
+  sendBlocked?: boolean
+  sending?: boolean
 }) {
   const tot = offer.totals
   const cur = offer.currency || 'EUR'
@@ -137,6 +142,9 @@ function OfferHeader({
             )}
           </div>
         </div>
+        <div data-testid="offer-header-totals" data-stale={stale ? 'true' : undefined}
+          title={stale ? 'Saving your changes, the totals update when the server answers' : undefined}
+          className={`flex flex-wrap items-start gap-x-8 gap-y-3 transition-opacity ${stale ? 'opacity-50' : ''}`}>
         <div>
           <div className={sectionLabel}>Total one-time</div>
           <div data-testid="offer-total" className="mt-0.5 text-2xl font-semibold tabular-nums text-slate-50">
@@ -158,12 +166,15 @@ function OfferHeader({
             {tot.margin_pct != null && <span className="ml-1 text-xs text-slate-500">{fmtPct(tot.margin_pct)}</span>}
           </div>
         </div>
+        </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
           <PdfButton changeId={change.id} offerId={offer.id} />
           {canWrite && offer.status === 'draft' && (
             <button type="button" data-testid="offer-send" onClick={onSend}
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500">
-              Send offer
+              disabled={sendBlocked || sending}
+              title={sendBlocked ? 'Saving your changes first' : undefined}
+              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50">
+              {sending ? 'Saving' : 'Send offer'}
             </button>
           )}
           {onNewVersion && (
@@ -206,8 +217,19 @@ function OfferWorkspace({ props, offers, offer }: {
   const { change, canWrite } = props
   const qc = useQueryClient()
   const [sendOpen, setSendOpen] = useState(false)
+  const [preparingSend, setPreparingSend] = useState(false)
   const editable = canWrite && offer.status === 'draft' && ['quoting', 'quoted'].includes(change.status)
-  const { data, update, saveState, flush } = useOfferDraft(change.id, offer)
+  const { data, update, saveState, flush, dirty } = useOfferDraft(change.id, offer)
+  // Send only what the server has: wait for the save, then open the dialog,
+  // which reads the saved offer (fresh totals) from the cache.
+  const openSend = async () => {
+    setPreparingSend(true)
+    try {
+      if (await flush()) setSendOpen(true)
+    } finally {
+      setPreparingSend(false)
+    }
+  }
   const latestSent = offers.find((o) => o.status === 'sent' || o.status === 'accepted')
   const hasDraft = offers.some((o) => o.status === 'draft')
   const { data: plan } = useQuotePlan(change.id)
@@ -243,7 +265,10 @@ function OfferWorkspace({ props, offers, offer }: {
     <div className="space-y-4">
       <OfferHeader change={change} offer={offer} latestSent={latestSent} canWrite={canWrite}
         warnings={offer.warnings ?? []}
-        onSend={() => { void flush(); setSendOpen(true) }}
+        stale={dirty}
+        sendBlocked={saveState === 'pending' || saveState === 'saving'}
+        sending={preparingSend}
+        onSend={() => { void openSend() }}
         onNewVersion={canWrite && !hasDraft && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
         creating={newVersion.isPending} />
 
@@ -293,17 +318,18 @@ function OfferWorkspace({ props, offers, offer }: {
               <NegotiationCard changeId={change.id} status={change.status} canWrite={canWrite}
                 offerId={latestSent?.id ?? null} offers={offers} />
               <CustomerDecision change={change} latestSent={latestSent}
-                canRespond={props.canSeePrices} canSignPm={props.canSignPm}
+                canRespond={canWrite} canSignPm={props.canSignPm}
                 canSignQuality={props.canSignQuality} userId={props.userId} />
             </StepSection>
           )}
         </div>
         <div className="xl:sticky xl:top-14 xl:self-start">
-          <OfferSumCard offer={offer} saveState={saveState} />
+          <OfferSumCard offer={offer} saveState={saveState} stale={dirty} />
         </div>
       </div>
 
-      {sendOpen && <SendOfferDialog changeId={change.id} offer={offer} onClose={() => setSendOpen(false)} />}
+      {sendOpen && <SendOfferDialog changeId={change.id} offerId={offer.id} fallback={offer}
+        onClose={() => setSendOpen(false)} />}
     </div>
   )
 }
@@ -423,7 +449,7 @@ export default function OfferTab(props: OfferTabProps) {
           <OfferTimingSection changeId={change.id} editable={false} />
         </StepSection>
         {change.status === 'quoted' && (
-          <CustomerDecision change={change} canRespond={canSeePrices} canSignPm={props.canSignPm}
+          <CustomerDecision change={change} canRespond={canWrite} canSignPm={props.canSignPm}
             canSignQuality={props.canSignQuality} userId={props.userId} />
         )}
       </div>

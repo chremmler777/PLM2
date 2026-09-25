@@ -9,7 +9,11 @@ import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
 import type { DeviationStatus, PlanDeviation } from '../../../types/changePlan'
 import ReasonDialog from '../ReasonDialog'
-import { fmtDay, toDay } from '../plan/ganttMath'
+import { toDay } from '../plan/ganttMath'
+import { formatDate } from '../../../lib/format'
+
+/** dd.mm.yyyy from a day number (days since 1970-01-01, UTC). */
+const fmtDay = (day: number) => formatDate(new Date(day * 86_400_000).toISOString().slice(0, 10))
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail

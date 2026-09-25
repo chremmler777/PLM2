@@ -117,20 +117,62 @@ describe('resolveWaitStates', () => {
       change({ status: 'in_implementation' }), [], deptName)).toEqual([])
   })
 
-  it('waits on Sales to publish the plan once the mode is set', () => {
+  it('waits on Sales to publish the plan once the mode is set and the timing is validated', () => {
     const waits = resolveWaitStates(
-      change({ status: 'approved', bank_build_mode: 'planned_scrap' }), [], deptName)
+      change({ status: 'approved', bank_build_mode: 'planned_scrap',
+        timing_validated_at: '2026-08-09T09:00:00' }), [], deptName)
     expect(waits.map((w) => w.key)).toEqual(['plan-publish'])
     expect(waits[0].text).toBe(t('wait.onPlanPublish'))
     expect(waits[0].tab).toBe('timing')
-    // Published — nothing left; and an internal change has nobody to publish to.
+    // Not validated yet: nothing to publish.
+    expect(resolveWaitStates(change({ status: 'approved', bank_build_mode: 'planned_scrap' }),
+      [], deptName)).toEqual([])
+    // Published: nothing left; and an internal change has nobody to publish to.
     expect(resolveWaitStates(change({
-      status: 'approved', bank_build_mode: 'planned_scrap',
+      status: 'approved', bank_build_mode: 'planned_scrap', timing_validated_at: '2026-08-09T09:00:00',
       plan_published_at: '2026-08-10T09:00:00',
     }), [], deptName)).toEqual([])
     expect(resolveWaitStates(change({
       status: 'approved', bank_build_mode: 'running_change', customer_relevant: false,
+      timing_validated_at: '2026-08-09T09:00:00',
     }), [], deptName)).toEqual([])
+  })
+
+  it('names the teams the timing still waits on at approved', () => {
+    const fb = {
+      required: [
+        { department_name: 'Development', verdict: 'confirmed', stale: false },
+        { department_name: 'Tool Engineer', verdict: null, stale: false },
+        { department_name: 'Quality', verdict: 'confirmed', stale: true },
+      ],
+      all_confirmed: false, validated_at: null,
+    }
+    const waits = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['timing-confirm'])
+    expect(waits[0].text).toBe('Timing: waiting on team confirmation: Tool Engineer, Quality')
+    expect(waits[0].tab).toBe('timing')
+  })
+
+  it('says the timing is not validated once every team confirmed', () => {
+    const fb = {
+      required: [{ department_name: 'Development', verdict: 'confirmed', stale: false }],
+      all_confirmed: true, validated_at: null,
+    }
+    const waits = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['timing-validate'])
+    expect(waits[0].text).toBe('Timing not validated')
+    // Validated (per the feedback): the publish wait takes over.
+    const after = resolveWaitStates(change({ status: 'approved', bank_build_mode: 'running_change' }),
+      [], deptName, [], {}, null, { ...fb, validated_at: '2026-08-09T09:00:00' })
+    expect(after.map((w) => w.key)).toEqual(['plan-publish'])
+  })
+
+  it('lists the bank-build and timing waits side by side', () => {
+    const fb = { required: [{ department_name: 'Scheduling', verdict: 'concern', stale: false }] }
+    const waits = resolveWaitStates(change({ status: 'approved' }), [], deptName, [], {}, null, fb)
+    expect(waits.map((w) => w.key)).toEqual(['bank-build', 'timing-confirm'])
   })
 
   it('names the departments the assessment round is still waiting on', () => {

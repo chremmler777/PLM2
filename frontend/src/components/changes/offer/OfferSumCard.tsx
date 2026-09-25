@@ -22,7 +22,12 @@ function Row({ label, value, muted, testId, strong }: {
   )
 }
 
-export default function OfferSumCard({ offer, saveState }: { offer: OfferOut; saveState?: SaveState }) {
+export default function OfferSumCard({ offer, saveState, stale }: {
+  offer: OfferOut
+  saveState?: SaveState
+  /** Local edits not saved yet: dim the figures until the server answers. */
+  stale?: boolean
+}) {
   const tot = offer.totals
   const cur = offer.currency || 'EUR'
   const margin = tot.margin_abs
@@ -32,6 +37,8 @@ export default function OfferSumCard({ offer, saveState }: { offer: OfferOut; sa
         <span className={sectionLabel}>Offer sum</span>
         <SaveBadge state={saveState} />
       </div>
+      <div data-testid="offer-sum-figures" data-stale={stale ? 'true' : undefined}
+        className={`transition-opacity ${stale ? 'opacity-50' : ''}`}>
       <div className="space-y-1.5">
         <Row label="Cost basis" value={fmtMoney(tot.base, cur)} testId="sum-base" />
         {(tot.factors ?? []).map((f) => (
@@ -61,6 +68,7 @@ export default function OfferSumCard({ offer, saveState }: { offer: OfferOut; sa
             {fmtMoney(margin, cur)}{tot.margin_pct != null && <span className="ml-1 text-slate-500">({fmtPct(tot.margin_pct)})</span>}
           </span>
         </div>
+      </div>
       </div>
     </aside>
   )

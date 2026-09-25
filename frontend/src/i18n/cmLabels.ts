@@ -55,7 +55,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'impact.pending': { de: 'Bestätigung durch die Entwicklung ausstehend', en: 'Impact confirmation pending (Development)' },
   'impl.title': { de: 'Umsetzung', en: 'Implementation' },
-  'impl.readyToGo': { de: 'Ready to go — alle Prüf-Workflows abgeschlossen', en: 'Ready to go — all check workflows completed' },
+  'impl.readyToGo': { de: 'Ready to go - alle Prüf-Workflows abgeschlossen', en: 'Ready to go - all check workflows completed' },
   'impl.notReady': { de: 'Noch nicht ready to go', en: 'Not ready to go yet' },
   'impl.evidenceOk': { de: '3D-Nachweis vorhanden', en: '3D evidence present' },
   'impl.evidenceMissing': { de: '3D-Nachweis fehlt', en: '3D evidence missing' },
@@ -153,8 +153,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments blocked by open concerns',
   },
   'cockpit.decideInMeeting': {
-    de: 'Entscheidung im Scoping-Termin festhalten — Freigabe, Rückfrage oder Ablehnung →',
-    en: 'Record the decision in the scoping meeting — proceed, needs info or reject →',
+    de: 'Entscheidung im Scoping-Termin festhalten - Freigabe, Rückfrage oder Ablehnung →',
+    en: 'Record the decision in the scoping meeting - proceed, needs info or reject →',
   },
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
@@ -444,8 +444,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'costing.activityPlaceholder': { de: 'Tätigkeit benennen …', en: 'Name the activity …' },
   'costing.sum': { de: 'Summe', en: 'Sum' },
   'costing.noActivities': {
-    de: 'Noch keine Tätigkeiten — aus der Bewertung übernommen oder hier ergänzen.',
-    en: 'No activities yet — they arrive from the assessment, or add them here.',
+    de: 'Noch keine Tätigkeiten - aus der Bewertung übernommen oder hier ergänzen.',
+    en: 'No activities yet - they arrive from the assessment, or add them here.',
   },
   'costing.minutes': { de: 'Fertigungszeit ± min/Teil', en: 'production time ± min/part' },
   'costing.minutesShort': { de: '± min/Teil', en: '± min/part' },
@@ -494,8 +494,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'negotiation.submit': { de: 'Runde speichern', en: 'Save round' },
   'negotiation.delete': { de: 'Löschen', en: 'Delete' },
   'negotiation.goAheadHint': {
-    de: 'Freigabe über die Kundenannahme erfassen — Freigabetermin erforderlich.',
-    en: 'Record the go-ahead via customer acceptance — release deadline required.',
+    de: 'Freigabe über die Kundenannahme erfassen - Freigabetermin erforderlich.',
+    en: 'Record the go-ahead via customer acceptance - release deadline required.',
   },
   'summation.timeBasis': { de: 'Zeitbasis für das Angebot', en: 'Time basis for the quote' },
   'summation.perPart': { de: 'pro Teil', en: 'per part' },
@@ -715,8 +715,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Each department prices its part: internal hours, estimates or vendor quotes, and the lead time of every line. PM closes costing when complete.',
   },
   'costing.closedHint': {
-    de: 'Kalkulation geschlossen — Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
-    en: 'Costing is closed — departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
+    de: 'Kalkulation geschlossen - Fachbereiche können nicht mehr eintragen. PM, Sales oder der Change Lead können sie wieder öffnen.',
+    en: 'Costing is closed - departments can no longer enter lines. PM, Sales or the change lead can reopen it.',
   },
   'quote.timeline': { de: 'Umsetzungs-Zeitplan', en: 'Implementation timeline' },
   'quote.timelineBody': {
@@ -846,12 +846,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.solvedBy': { de: 'geklärt von', en: 'solved by' },
   'concern.fromMeeting': { de: 'aus Termin vom', en: 'from meeting of' },
   'wait.onSales.info': {
-    de: 'Wartet auf Vertrieb — Kundeninfo wird eingeholt: {x}',
-    en: 'Waiting on Sales — obtaining customer info: {x}',
+    de: 'Wartet auf Vertrieb - Kundeninfo wird eingeholt: {x}',
+    en: 'Waiting on Sales - obtaining customer info: {x}',
   },
   'wait.onReview': {
-    de: 'Antwort liegt vor — wartet auf Prüfung: {x}',
-    en: 'Answer received — awaiting review: {x}',
+    de: 'Antwort liegt vor - wartet auf Prüfung: {x}',
+    en: 'Answer received - awaiting review: {x}',
   },
   'wait.onDepartments': {
     de: 'Wartet: {x} hat offene Punkte',
@@ -862,8 +862,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Assessment: waiting on {x} ({n}/{m})',
   },
   'wait.onRejectionLetter': {
-    de: 'Wartet auf Vertrieb — Absage an Kunden versenden',
-    en: 'Waiting on Sales — send the rejection to the customer',
+    de: 'Wartet auf Vertrieb - Absage an Kunden versenden',
+    en: 'Waiting on Sales - send the rejection to the customer',
   },
   'scoping.now': { de: 'Jetzt dran', en: 'Now' },
   'scoping.history': { de: 'Verlauf', en: 'History' },
@@ -1214,8 +1214,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bankbuild.mode.running_change': { de: 'Fließende Änderung', en: 'Running change' },
   'bankbuild.mode.running_change.hint': {
-    de: 'Umstellung in der laufenden Produktion — kein Ausschuss geplant.',
-    en: 'Switch over in running production — no scrap planned.',
+    de: 'Umstellung in der laufenden Produktion - kein Ausschuss geplant.',
+    en: 'Switch over in running production - no scrap planned.',
   },
   'bankbuild.mode.planned_scrap': { de: 'Geplanter Ausschuss', en: 'Planned scrap' },
   'bankbuild.mode.planned_scrap.hint': {
@@ -1224,8 +1224,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'bankbuild.scrapPrice': { de: 'Ausschuss-Angebotspreis', en: 'Scrap quote price' },
   'bankbuild.scrapPriceHint': {
-    de: 'Die Ausschusskosten trägt der Kunde — als zusätzliches Angebot.',
-    en: 'The customer bears the scrap cost — as an additional quote.',
+    de: 'Die Ausschusskosten trägt der Kunde - als zusätzliches Angebot.',
+    en: 'The customer bears the scrap cost - as an additional quote.',
   },
   'bankbuild.needPrice': {
     de: 'Bei geplantem Ausschuss ist ein Angebotspreis erforderlich',
@@ -1272,20 +1272,28 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Publish the bank-build plan to the customer',
   },
   'wait.onBankBuild': {
-    de: 'Wartet auf Terminplanung — Bankbau-Entscheidung offen',
+    de: 'Wartet auf Terminplanung - Bankbau-Entscheidung offen',
     en: 'Scheduling: bank-build decision pending',
   },
+  'wait.onTimingConfirm': {
+    de: 'Timing: wartet auf Bestätigung der Teams: {x}',
+    en: 'Timing: waiting on team confirmation: {x}',
+  },
+  'wait.onTimingValidate': {
+    de: 'Timing noch nicht validiert',
+    en: 'Timing not validated',
+  },
   'wait.onPlanPublish': {
-    de: 'Wartet auf Vertrieb — Plan noch nicht an den Kunden veröffentlicht',
+    de: 'Wartet auf Vertrieb - Plan noch nicht an den Kunden veröffentlicht',
     en: 'Sales: plan not yet published to the customer',
   },
 
   // Stage 8 — how the work is going while it is being done.
   'impl2.title': { de: 'Umsetzungsstand', en: 'Implementation tracking' },
   'impl2.intro': {
-    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat — und was davon '
+    de: 'Was jeder Fachbereich gebucht und zuletzt gemeldet hat - und was davon '
       + 'eskaliert werden muss.',
-    en: 'What each department has booked and last reported — and what of it has '
+    en: 'What each department has booked and last reported - and what of it has '
       + 'to be escalated.',
   },
   'impl2.none': {
@@ -1346,8 +1354,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impl2.resolve': { de: 'Erledigt melden', en: 'Mark resolved' },
   'impl2.resolutionNote': { de: 'Wie wurde es gelöst?', en: 'How was it settled?' },
   'impl2.escalationHint': {
-    de: 'Gefährdung gemeldet — an den Kunden oder intern eskalieren.',
-    en: 'At-risk flagged — escalate to the customer or internally.',
+    de: 'Gefährdung gemeldet - an den Kunden oder intern eskalieren.',
+    en: 'At-risk flagged - escalate to the customer or internally.',
   },
 
   // My-tasks rows
@@ -1368,8 +1376,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments owe a progress report',
   },
   'wait.onRiskEscalation': {
-    de: 'Gefährdung gemeldet — Eskalation durch den Vertrieb offen',
-    en: 'At-risk flagged — Sales escalation pending',
+    de: 'Gefährdung gemeldet - Eskalation durch den Vertrieb offen',
+    en: 'At-risk flagged - Sales escalation pending',
   },
 
   // ── Stage 9: validation ───────────────────────────────────────────────────
@@ -1381,12 +1389,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
       + 'held against the assumptions costing was built on.',
   },
   'validation.none': {
-    de: 'Noch keine Prüfpunkte — die Validierung beginnt mit dem Statuswechsel.',
-    en: 'No checks yet — validation starts when the change reaches this stage.',
+    de: 'Noch keine Prüfpunkte - die Validierung beginnt mit dem Statuswechsel.',
+    en: 'No checks yet - validation starts when the change reaches this stage.',
   },
   'validation.readOnly': {
-    de: 'Abgeschlossen — die Prüfpunkte sind hier nur noch das Protokoll.',
-    en: 'Closed — the checks below are the record, not a form.',
+    de: 'Abgeschlossen - die Prüfpunkte sind hier nur noch das Protokoll.',
+    en: 'Closed - the checks below are the record, not a form.',
   },
   'validation.others': {
     de: '{n} weitere Fachbereiche validieren ebenfalls.',
@@ -1434,8 +1442,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
 
   // The commercial consequence of a weight that moved.
   'validation.quoteUpdate': {
-    de: 'Angebot nachziehen — das Gewicht war geschätzt, Abweichung {x} g',
-    en: 'Quote update required — weight was estimated, delta {x} g',
+    de: 'Angebot nachziehen - das Gewicht war geschätzt, Abweichung {x} g',
+    en: 'Quote update required - weight was estimated, delta {x} g',
   },
   'validation.acknowledge': { de: 'Zur Kenntnis genommen', en: 'Acknowledge' },
   'validation.ackNote': { de: 'Bemerkung (optional)', en: 'Note (optional)' },
@@ -1446,16 +1454,16 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
 
   // Going back a stage, in professional words.
   'validation.escalate': {
-    de: 'Prüfpunkte nicht bestanden — zurück in die Umsetzung',
-    en: 'Checks not passed — escalate',
+    de: 'Prüfpunkte nicht bestanden - zurück in die Umsetzung',
+    en: 'Checks not passed - escalate',
   },
   'validation.escalateTitle': {
     de: 'Zurück in die Umsetzung',
     en: 'Return the change to implementation',
   },
   'validation.escalateLabel': {
-    de: 'Begründung — was ist nicht bestanden und was folgt daraus?',
-    en: 'Reason — what did not pass, and what follows from it?',
+    de: 'Begründung - was ist nicht bestanden und was folgt daraus?',
+    en: 'Reason - what did not pass, and what follows from it?',
   },
   'validation.escalateWarning': {
     de: 'Die Änderung geht in die Umsetzung zurück. Termine sind neu zu planen '
@@ -1504,8 +1512,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'validation checks open ({n} departments)',
   },
   'wait.onWeightAck': {
-    de: 'Gewichtsabweichung nicht bestätigt — Vertrieb',
-    en: 'weight delta unacknowledged — Sales',
+    de: 'Gewichtsabweichung nicht bestätigt - Vertrieb',
+    en: 'weight delta unacknowledged - Sales',
   },
 
   // Vendor decision, stage 5. The department's favourite is a recommendation;

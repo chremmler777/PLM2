@@ -66,7 +66,7 @@ describe('vendorLeadTimeLine', () => {
       { id: 3, department_id: 2, label: 'Drawings', kind: 'internal_effort', offers: [] },
     ] as never)
     expect(line).toBe(
-      `${t('impl2.vendorLeadTimes')}: Equipment change — 30 business days (VendorA)`)
+      `${t('impl2.vendorLeadTimes')}: Equipment change: 30 business days (VendorA)`)
   })
 
   it('says nothing when no vendor has been picked', () => {

@@ -140,7 +140,7 @@ describe('OfferTab', () => {
     vi.mocked(changeOfferApi.send).mockResolvedValue(offer({ status: 'sent' }))
     renderTab(props())
     fireEvent.click(await screen.findByTestId('offer-send'))
-    fireEvent.change(screen.getByTestId('send-received'), { target: { value: '2026-09-24' } })
+    fireEvent.change(await screen.findByTestId('send-received'), { target: { value: '2026-09-24' } })
     expect(screen.getByTestId('send-valid-until').textContent)
       .toBe('The offer is valid 30 days from receipt, until 24.10.2026.')
     expect(screen.queryByTestId('send-note')).toBeNull()
@@ -155,7 +155,11 @@ describe('OfferTab', () => {
     vi.mocked(changeOfferApi.send).mockResolvedValue({ ...v2, status: 'sent' })
     renderTab(props({ change: change({ status: 'quoted' }) }))
     fireEvent.click(await screen.findByTestId('offer-send'))
-    expect(screen.getByTestId('send-diff').textContent).toContain('total_one_time')
+    const diff = (await screen.findByTestId('send-diff')).textContent ?? ''
+    expect(diff).toContain('Total one-time')
+    expect(diff).toContain('1.000,00 EUR')
+    expect(diff).toContain('900,00 EUR')
+    expect(diff).not.toContain('total_one_time')
     const confirm = screen.getByTestId('send-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.change(screen.getByTestId('send-note'), { target: { value: 'Margin down' } })
@@ -176,6 +180,76 @@ describe('OfferTab', () => {
     fireEvent.click(screen.getByTestId('offer-new-version'))
     await waitFor(() => expect(changeOfferApi.create).toHaveBeenCalled())
     expect(screen.getByTestId('offer-negotiation')).toBeDefined()
+  })
+
+  it('serializes saves: an edit during a PATCH waits for it and goes out alone', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    let resolveFirst: (o: OfferOut) => void = () => {}
+    vi.mocked(changeOfferApi.patch)
+      .mockImplementationOnce(() => new Promise<OfferOut>((r) => { resolveFirst = r }))
+      .mockImplementation(async (_c, _o, body) => offer({ data: { ...offer().data, ...body.data } }))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('risk-show-32'))
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    // Second edit while the first PATCH is still in flight.
+    fireEvent.click(screen.getByTestId('risk-show-31'))
+    await new Promise((r) => setTimeout(r, 700))
+    expect(changeOfferApi.patch).toHaveBeenCalledTimes(1)
+    resolveFirst(offer({ data: { ...offer().data } }))
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(2), { timeout: 2000 })
+    const second = vi.mocked(changeOfferApi.patch).mock.calls[1][2]
+    const risks = second.data?.risks ?? []
+    expect(risks.find((r) => r.concern_id === 31)?.show).toBe(false)
+    expect(risks.find((r) => r.concern_id === 32)?.show).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('offer-save-state').textContent).toContain('Saved'))
+  })
+
+  it('Send waits for the save, dims the totals meanwhile and opens with the saved totals', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    let resolveSave: (o: OfferOut) => void = () => {}
+    vi.mocked(changeOfferApi.patch).mockImplementation(() => new Promise<OfferOut>((r) => { resolveSave = r }))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('risk-show-32'))
+    const send = screen.getByTestId('offer-send') as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+    expect(screen.getByTestId('offer-sum-figures').dataset.stale).toBe('true')
+    expect(screen.getByTestId('offer-header-totals').dataset.stale).toBe('true')
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    resolveSave(offer({ totals: { ...offer().totals, total_one_time: 777 } }))
+    await waitFor(() => expect(send.disabled).toBe(false))
+    expect(screen.getByTestId('offer-sum-figures').dataset.stale).toBeUndefined()
+    fireEvent.click(send)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('777,00 EUR')
+  })
+
+  it('does not open the send dialog when the save fails', async () => {
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
+    vi.mocked(changeOfferApi.patch).mockRejectedValue(new Error('boom'))
+    renderTab(props())
+    fireEvent.click(await screen.findByTestId('risk-show-32'))
+    await waitFor(() => expect(screen.getByTestId('offer-save-state').textContent).toContain('Not saved'),
+      { timeout: 2000 })
+    fireEvent.click(screen.getByTestId('offer-send'))
+    await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('PM reads the negotiation but records no customer answer', async () => {
+    const v1 = offer({ status: 'sent', valid_until: '2026-10-20', days_left: 26 })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
+    renderTab(props({ change: change({ status: 'quoted' }), canWrite: false, canSignPm: true }))
+    expect(await screen.findByTestId('customer-decision')).toBeDefined()
+    expect(screen.queryByText('Customer accepted')).toBeNull()
+    expect(screen.queryByText('Customer declined')).toBeNull()
+    expect(screen.getByRole('button', { name: /PM sign-off/ })).toBeDefined()
+  })
+
+  it('Sales records the customer answer', async () => {
+    const v1 = offer({ status: 'sent', valid_until: '2026-10-20', days_left: 26 })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v1])
+    renderTab(props({ change: change({ status: 'quoted' }) }))
+    expect(await screen.findByText('Customer accepted')).toBeDefined()
   })
 
   it('the Approval variant keeps the internal approval control', async () => {

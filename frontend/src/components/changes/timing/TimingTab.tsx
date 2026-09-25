@@ -14,7 +14,7 @@ import { CHANGE_STATUS_ORDER, type ChangeRequest, type ChangeStatus } from '../.
 import BankBuildCard from '../BankBuildCard'
 import ImplementationTracking from '../ImplementationTracking'
 import GanttPlanner from '../plan/GanttPlanner'
-import { fmtIso } from '../plan/ganttMath'
+import { formatDate } from '../../../lib/format'
 import DeviationsPanel from './DeviationsPanel'
 import TeamFeedbackPanel from './TeamFeedbackPanel'
 
@@ -30,6 +30,12 @@ export interface TimingTabProps {
   canEditPlan: boolean
   canPublish: boolean
   canSeeAll: boolean
+  /** Bank-build mode: Scheduling, PM, lead, admin (not Sales). */
+  canSetBankBuild?: boolean
+  /** Deviation lock / escalate: PM, Sales, lead, admin. */
+  canDecideDeviation?: boolean
+  /** Admin answers the team confirmation for any department. */
+  isAdmin?: boolean
 }
 
 const btn = 'rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40'
@@ -53,7 +59,10 @@ function Step({ n, title, detail, state }: {
   )
 }
 
-export default function TimingTab({ change, departments, myDepartmentIds, canEditPlan, canPublish, canSeeAll }: TimingTabProps) {
+export default function TimingTab({
+  change, departments, myDepartmentIds, canEditPlan, canPublish, canSeeAll,
+  canSetBankBuild = false, canDecideDeviation = false, isAdmin = false,
+}: TimingTabProps) {
   const qc = useQueryClient()
   const id = change.id
   const { data: plan } = useQuery({
@@ -115,9 +124,10 @@ export default function TimingTab({ change, departments, myDepartmentIds, canEdi
     if (rest.length) blockers.push(`Waiting for confirmation from ${rest.map((r) => r.department_name).join(', ')}.`)
   }
   const canValidate = canEditPlan || canPublish
+  const timingValidated = !!change.timing_validated_at || !!feedback?.validated_at
 
   const step1: 'done' | 'current' = tasks.length > 0 ? 'done' : 'current'
-  const step2 = tasks.length === 0 ? 'todo' : baseline || (required.length > 0 && waiting.length === 0) ? 'done' : 'current'
+  const step2 = tasks.length === 0 ? 'todo' : baseline || required.length === 0 || waiting.length === 0 ? 'done' : 'current'
   const step3 = baseline ? 'done' : step2 === 'done' ? 'current' : 'todo'
 
   return (
@@ -145,9 +155,9 @@ export default function TimingTab({ change, departments, myDepartmentIds, canEdi
             detail={tasks.length > 0 ? `${tasks.length} task${tasks.length === 1 ? '' : 's'}` : 'Copy the quote plan and refine it'} />
           <Step n={2} title="Team confirmation" state={step2}
             detail={required.length > 0 ? `${confirmed} of ${required.length} confirmed` : 'Every responsible team confirms'} />
-          <Step n={3} title={baseline ? 'Timing validated, tracking' : 'Baseline set'} state={step3}
+          <Step n={3} title={baseline ? 'Timing validated' : 'Validate timing'} state={step3}
             detail={baseline
-              ? `${fmtIso(feedback?.validated_at)}${feedback?.validated_by_name ? `, ${feedback.validated_by_name}` : ''}`
+              ? `${formatDate(feedback?.validated_at ?? change.timing_validated_at)}${feedback?.validated_by_name ? `, ${feedback.validated_by_name}` : ''}`
               : 'Timing validated sets the baseline'} />
         </ol>
 
@@ -184,9 +194,15 @@ export default function TimingTab({ change, departments, myDepartmentIds, canEdi
             <div className="flex flex-wrap items-center gap-3">
               {change.plan_published_at ? (
                 <p className="text-sm text-emerald-300" data-testid="timing-published">
-                  Published to the customer {fmtIso(change.plan_published_at)}{change.plan_published_by_name ? ` by ${change.plan_published_by_name}` : ''}.
+                  Published to the customer {formatDate(change.plan_published_at)}{change.plan_published_by_name ? ` by ${change.plan_published_by_name}` : ''}.
                 </p>
-              ) : canPublish ? (
+              ) : status !== 'approved' ? (
+                <p className="text-sm text-slate-400">Timing validated. Track progress below.</p>
+              ) : !change.bank_build_mode ? (
+                <p className="text-sm text-amber-200/90" data-testid="timing-publish-needs-mode">
+                  Set how the change reaches the line first (bank build below), then the plan can go to the customer.
+                </p>
+              ) : !timingValidated ? null : canPublish ? (
                 <>
                   <button type="button" className={primary} disabled={publish.isPending}
                     onClick={() => publish.mutate()} data-testid="timing-publish">Publish plan to customer</button>
@@ -204,14 +220,15 @@ export default function TimingTab({ change, departments, myDepartmentIds, canEdi
 
       {tasks.length > 0 && (
         <TeamFeedbackPanel changeId={id} feedback={feedback} myDepartmentIds={myDepartmentIds}
-          canRespond={!baseline && status === 'approved'} />
+          isAdmin={isAdmin} canRespond={!baseline && status === 'approved'} />
       )}
 
       {baseline && (
-        <DeviationsPanel changeId={id} deviations={deviations} canDecide={canEditPlan} />
+        <DeviationsPanel changeId={id} deviations={deviations} canDecide={canDecideDeviation} />
       )}
 
-      <BankBuildCard change={change} canSetMode={canEditPlan} canPublish={canPublish} />
+      {/* Publishing lives in the Timing card above: only a validated timing goes to the customer. */}
+      <BankBuildCard change={change} canSetMode={canSetBankBuild} canPublish={canPublish} hidePublish />
 
       {implementing && (
         <ImplementationTracking changeId={id} status={status} departments={departments}

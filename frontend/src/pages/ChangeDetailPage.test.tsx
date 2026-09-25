@@ -68,6 +68,11 @@ vi.mock('../api/changes', () => ({
   },
 }))
 vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
+vi.mock('../api/changePlan', () => ({
+  planApi: {
+    feedback: vi.fn().mockResolvedValue({ revision: 1, required: [], all_confirmed: true, validated_at: null, validated_by_name: null }),
+  },
+}))
 vi.mock('../api/plants', () => ({
   plantsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
@@ -108,8 +113,11 @@ vi.mock('../components/changes/offer/OfferTab', () => ({
   ),
 }))
 vi.mock('../components/changes/timing/TimingTab', () => ({
-  default: (p: { canEditPlan: boolean; canPublish: boolean }) => (
-    <div data-testid="mock-timing-tab">edit={String(p.canEditPlan)} publish={String(p.canPublish)}</div>
+  default: (p: { canEditPlan: boolean; canPublish: boolean; canSetBankBuild?: boolean; canDecideDeviation?: boolean; isAdmin?: boolean }) => (
+    <div data-testid="mock-timing-tab">
+      <span data-testid="timing-rights">edit={String(p.canEditPlan)} publish={String(p.canPublish)}</span>
+      <span data-testid="timing-rights-2">bank={String(p.canSetBankBuild)} decide={String(p.canDecideDeviation)} admin={String(p.isAdmin)}</span>
+    </div>
   ),
 }))
 vi.mock('../components/changes/release/ReleaseTab', () => ({
@@ -340,8 +348,50 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
     change.status = 'approved' as ChangeDetail['status']
     wrap('/changes/1?tab=timing')
-    await waitFor(() => expect(screen.getByTestId('mock-timing-tab').textContent)
+    await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
       .toBe('edit=true publish=false'))
+    // Scheduling sets the bank-build mode but does not lock/escalate deviations.
+    expect(screen.getByTestId('timing-rights-2').textContent).toBe('bank=true decide=false admin=false')
+  })
+
+  it('gives Sales deviation decisions but not the bank-build mode', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 12, name: 'Sales', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [12] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'approved' as ChangeDetail['status']
+    wrap('/changes/1?tab=timing')
+    await waitFor(() => expect(screen.getByTestId('timing-rights').textContent)
+      .toBe('edit=true publish=true'))
+    expect(screen.getByTestId('timing-rights-2').textContent).toBe('bank=false decide=true admin=false')
+  })
+
+  it('gives PM both the bank-build mode and deviation decisions; admin answers for any team', async () => {
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 9, name: 'Project Manager', flow_type: 'action', is_active: true, sort_order: 1 }],
+    } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [9] })
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    change.status = 'approved' as ChangeDetail['status']
+    wrap('/changes/1?tab=timing')
+    await waitFor(() => expect(screen.getByTestId('timing-rights-2').textContent)
+      .toBe('bank=true decide=true admin=false'))
+    cleanup()
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+    authState.current = { isAdmin: true, role: 'admin', userId: 1 }
+    wrap('/changes/1?tab=timing')
+    await waitFor(() => expect(screen.getByTestId('timing-rights-2').textContent)
+      .toBe('bank=true decide=true admin=true'))
+  })
+
+  it('marks the Approval tab active for an internal change at costing', async () => {
+    change.customer_relevant = false
+    change.status = 'costing' as ChangeDetail['status']
+    wrap('/changes/1')
+    const approval = await screen.findByRole('button', { name: /Approval/ })
+    expect(approval.querySelector('[aria-label="' + t('tab.activePhase') + '"]')).not.toBeNull()
+    change.customer_relevant = true
   })
 
   it('widens the page for the offer, timing and release work', async () => {
@@ -625,6 +675,22 @@ describe('ChangeDetailPage wait banner', () => {
     id: 1, change_id: 1, kind: 'needs_info', note: 'What is the target price?',
     raised_by: 9, raised_at: '2026-08-01T09:00:00', is_open: true,
     department_id: null, answer_note: null, ...over,
+  })
+
+  it('names the teams the timing waits on at approved', async () => {
+    const { planApi } = await import('../api/changePlan')
+    vi.mocked(planApi.feedback).mockResolvedValueOnce({
+      revision: 1, all_confirmed: false, validated_at: null, validated_by_name: null,
+      required: [
+        { department_id: 4, department_name: 'Tool Engineer', verdict: null, note: null, by_name: null, at: null, stale: false },
+        { department_id: 2, department_name: 'Development', verdict: 'confirmed', note: null, by_name: 'A', at: null, stale: false },
+      ],
+    })
+    change.status = 'approved' as ChangeDetail['status']
+    change.customer_relevant = true
+    wrap('/changes/1')
+    expect((await screen.findByTestId('wait-timing-confirm')).textContent)
+      .toBe('Timing: waiting on team confirmation: Tool Engineer')
   })
 
   it('tells every viewer the change is waiting on Sales', async () => {

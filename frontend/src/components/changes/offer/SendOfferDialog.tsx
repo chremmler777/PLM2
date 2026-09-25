@@ -4,34 +4,26 @@
  * next to it, so the note can be checked against the numbers).
  */
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changeOfferApi } from '../../../api/changeOffer'
 import type { OfferDiffRow, OfferOut } from '../../../types/changeOffer'
-import { addDaysIso, fmtDate, fmtMoney, inputCls, todayIso } from './offerFormat'
+import { addDaysIso, diffLabel, diffValue, fmtDate, fmtMoney, inputCls, todayIso } from './offerFormat'
 import { offersKey } from './useOfferDraft'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-const show = (v: unknown): string => {
-  if (v === null || v === undefined || v === '') return '-'
-  if (typeof v === 'number') return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 }).format(v)
-  if (typeof v === 'boolean') return v ? 'yes' : 'no'
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
-
-export function DiffList({ diff, testId }: { diff: OfferDiffRow[]; testId?: string }) {
+export function DiffList({ diff, testId, currency = 'EUR' }: { diff: OfferDiffRow[]; testId?: string; currency?: string }) {
   if (diff.length === 0) return null
   return (
     <ul data-testid={testId} className="space-y-0.5 text-[11px]">
       {diff.map((d) => (
         <li key={d.field} className="flex flex-wrap items-baseline gap-1.5">
-          <span className="text-slate-400">{d.field}</span>
-          <span className="tabular-nums text-slate-500 line-through">{show(d.before)}</span>
+          <span className="text-slate-400">{diffLabel(d.field)}</span>
+          <span className="tabular-nums text-slate-500 line-through">{diffValue(d.field, d.before, currency)}</span>
           <span className="text-slate-600">→</span>
-          <span className="tabular-nums text-slate-200">{show(d.after)}</span>
+          <span className="tabular-nums text-slate-200">{diffValue(d.field, d.after, currency)}</span>
         </li>
       ))}
     </ul>
@@ -39,25 +31,36 @@ export function DiffList({ diff, testId }: { diff: OfferDiffRow[]; testId?: stri
 }
 
 export default function SendOfferDialog({
-  changeId, offer, onClose,
+  changeId, offerId, fallback, onClose,
 }: {
   changeId: number
-  offer: OfferOut
+  offerId: number
+  /** Shown only until the cached list has the offer. */
+  fallback?: OfferOut
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  // The offer as the server last saved it (fresh totals), straight from the
+  // cache the draft hook writes every save into.
+  const { data: cached } = useQuery({
+    queryKey: offersKey(changeId),
+    queryFn: () => changeOfferApi.list(changeId),
+    staleTime: Infinity,
+    select: (list: OfferOut[]) => list.find((o) => o.id === offerId),
+  })
+  const offer = cached ?? fallback
   const [received, setReceived] = useState(todayIso())
   const [note, setNote] = useState('')
-  const needsNote = offer.version >= 2
+  const needsNote = (offer?.version ?? 1) >= 2
   const validUntil = received ? addDaysIso(received, 30) : null
 
   const send = useMutation({
-    mutationFn: () => changeOfferApi.send(changeId, offer.id, {
+    mutationFn: () => changeOfferApi.send(changeId, offerId, {
       received_at: received,
       ...(note.trim() ? { change_note: note.trim() } : {}),
     }),
     onSuccess: () => {
-      toast.success(`Offer v${offer.version} sent`)
+      toast.success(`Offer v${offer?.version ?? ''} sent`)
       qc.invalidateQueries({ queryKey: offersKey(changeId) })
       qc.invalidateQueries({ queryKey: ['change', changeId] })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
@@ -66,7 +69,8 @@ export default function SendOfferDialog({
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not send the offer'),
   })
 
-  const blocked = !received || (needsNote && !note.trim()) || send.isPending
+  const blocked = !offer || !received || (needsNote && !note.trim()) || send.isPending
+  if (!offer) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog"
@@ -92,7 +96,7 @@ export default function SendOfferDialog({
             <span className="mb-1 block text-xs text-slate-400">What changed against the last version? (required)</span>
             {(offer.diff?.length ?? 0) > 0 && (
               <div className="mb-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
-                <DiffList diff={offer.diff ?? []} testId="send-diff" />
+                <DiffList diff={offer.diff ?? []} testId="send-diff" currency={offer.currency || 'EUR'} />
               </div>
             )}
             <textarea rows={3} data-testid="send-note" value={note} onChange={(e) => setNote(e.target.value)}

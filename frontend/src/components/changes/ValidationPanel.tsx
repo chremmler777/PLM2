@@ -27,11 +27,12 @@ import ReasonDialog from './ReasonDialog'
 import type {
   ValidationCheck, ValidationDepartmentState, ValidationState,
 } from '../../types/change'
+import { formatDate } from '../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-const onDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+const onDay = (iso?: string | null) => formatDate(iso)
 
 /** 12 not 12.0; 12.5 stays 12.5. */
 const num = (n: number) => String(Math.round(n * 100) / 100)
@@ -120,7 +121,7 @@ function CheckRow({
         {check.checked_at && (
           <span data-testid={`validation-checkedby-${id}`} className="text-xs text-slate-500">
             {t('validation.checkedBy')
-              .replace('{who}', check.checked_by_name ?? '—')
+              .replace('{who}', check.checked_by_name ?? '-')
               .replace('{d}', onDay(check.checked_at))}
           </span>
         )}
@@ -340,9 +341,9 @@ export default function ValidationPanel({
           {state.weight_ack_at ? (
             <p data-testid="validation-weight-acked" className="text-xs text-amber-200/80">
               {t('validation.acked')
-                .replace('{who}', state.weight_ack_by_name ?? '—')
+                .replace('{who}', state.weight_ack_by_name ?? '-')
                 .replace('{d}', onDay(state.weight_ack_at))}
-              {state.weight_ack_note ? ` — ${state.weight_ack_note}` : ''}
+              {state.weight_ack_note ? `: ${state.weight_ack_note}` : ''}
             </p>
           ) : canAcknowledge && editable ? (
             <div className="flex flex-wrap items-center gap-2 pt-0.5">

@@ -91,6 +91,16 @@ describe('BankBuildCard', () => {
     await waitFor(() => expect(changesApi.publishBankBuildPlan).toHaveBeenCalledWith(7))
   })
 
+  it('hides the publish block when the Timing tab publishes instead', () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <BankBuildCard change={change({ bank_build_mode: 'running_change' })} canSetMode={false} canPublish hidePublish />
+      </QueryClientProvider>)
+    expect(screen.queryByTestId('bank-build-publish')).toBeNull()
+    expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
+    expect(screen.getByTestId('bank-build-card')).toBeDefined()
+  })
+
   it('names who published the plan and drops the button once it is out', () => {
     wrap({
       change: change({
@@ -117,7 +127,7 @@ describe('BankBuildCard', () => {
     expect(screen.queryByTestId('bank-build-save')).toBeNull()
     const view = screen.getByTestId('bank-build-readonly')
     expect(view.textContent).toContain(t('bankbuild.mode.planned_scrap'))
-    expect(view.textContent).toContain('4200.00')
+    expect(view.textContent).toContain('4.200,00 EUR')
     expect(view.textContent).toContain('scrap 380 pcs at Ostrava')
     expect(view.textContent).toContain('sched.max')
     expect(view.textContent).toContain(t('bankbuild.readOnly'))

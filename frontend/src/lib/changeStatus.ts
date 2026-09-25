@@ -146,6 +146,18 @@ export const STATUS_ACTIVE_TAB: Partial<Record<ChangeStatus, ChangeTab>> = {
   in_validation: 'release', released: 'release',
 }
 
+/**
+ * The tabs where the change's current phase is worked, given its branch. An
+ * internal change at costing is approved by PM on the Approval (offer) tab
+ * while the departments still enter lines on costing, so both are active.
+ */
+export function activeTabsFor(status: string, customerRelevant?: boolean | null): ChangeTab[] {
+  const tab = STATUS_ACTIVE_TAB[status as ChangeStatus]
+  if (!tab) return []
+  if (status === 'costing' && !customerRelevant) return ['costing', 'offer']
+  return [tab]
+}
+
 const RELEASE_STAGE: string[] = ['in_validation', 'released', 'closed']
 
 /**

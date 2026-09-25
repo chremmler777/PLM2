@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
 import type { FeedbackVerdict, PlanFeedback, PlanFeedbackRow } from '../../../types/changePlan'
-import { fmtIso } from '../plan/ganttMath'
+import { formatDate } from '../../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -17,6 +17,8 @@ interface Props {
   changeId: number
   feedback: PlanFeedback | undefined
   myDepartmentIds: number[]
+  /** Admin may answer for any department (spec section 3). */
+  isAdmin?: boolean
   /** Feedback is open (detailed plan exists, timing not validated yet). */
   canRespond: boolean
 }
@@ -36,7 +38,7 @@ const CHIP: Record<Chip, { label: string; cls: string }> = {
   stale: { label: 'Plan changed since', cls: 'border-amber-700 bg-amber-950/40 text-amber-200' },
 }
 
-export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds, canRespond }: Props) {
+export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds, isAdmin = false, canRespond }: Props) {
   const qc = useQueryClient()
   const [concernFor, setConcernFor] = useState<number | null>(null)
   const [note, setNote] = useState('')
@@ -87,7 +89,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
         <ul className="divide-y divide-slate-700/70">
           {rows.map((r) => {
             const chip = chipOf(r)
-            const mine = myDepartmentIds.includes(r.department_id)
+            const mine = isAdmin || myDepartmentIds.includes(r.department_id)
             const open = concernFor === r.department_id
             return (
               <li key={r.department_id} className="py-2" data-testid={`feedback-row-${r.department_id}`}>
@@ -96,7 +98,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                   <span className={`rounded-full border px-2 py-0.5 text-[11px] ${CHIP[chip].cls}`}
                     data-testid={`feedback-chip-${r.department_id}`}>{CHIP[chip].label}</span>
                   {r.by_name && (
-                    <span className="text-[11px] text-slate-500">{r.by_name}, {fmtIso(r.at)}</span>
+                    <span className="text-[11px] text-slate-500">{r.by_name}, {formatDate(r.at)}</span>
                   )}
                   {mine && canRespond && !open && (
                     <div className="ml-auto flex gap-2">

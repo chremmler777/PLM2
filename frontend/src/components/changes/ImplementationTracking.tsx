@@ -26,11 +26,12 @@ import type {
   CostPosition, ImplBooking, ImplDepartmentState, ImplEscalation,
   ImplEscalationDirection, ImplReport,
 } from '../../types/change'
+import { formatDate } from '../../lib/format'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
-const onDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—')
+const onDay = (iso?: string | null) => formatDate(iso)
 
 /** 12 h, not 12.0 h; 12.5 h stays 12.5 h. */
 const hoursText = (n: number) => String(Math.round(n * 100) / 100)
@@ -53,7 +54,7 @@ export function vendorLeadTimeLine(positions: CostPosition[]): string | null {
       const fav = (p.offers ?? []).find((o) => o.favorite)
       if (!fav || fav.lead_time_days == null) return null
       const unit = t(`costpos.unitShort.${fav.lead_time_unit ?? 'calendar_days'}`)
-      return `${p.label} — ${fav.lead_time_days} ${unit} (${fav.vendor_name})`
+      return `${p.label}: ${fav.lead_time_days} ${unit} (${fav.vendor_name})`
     })
     .filter((s): s is string => s !== null)
   return parts.length > 0 ? `${t('impl2.vendorLeadTimes')}: ${parts.join(' · ')}` : null
@@ -100,7 +101,7 @@ function EscalationList({ items, changeId, editable, canEscalate, testPrefix }: 
             <span className="min-w-0 flex-1">
               <span className={e.resolved_at ? 'line-through' : ''}>{e.note}</span>
               <span className="block text-xs opacity-70">
-                {e.created_by_name ?? '—'}
+                {e.created_by_name ?? '-'}
                 {e.created_at ? ` · ${onDay(e.created_at)}` : ''}
               </span>
               <span data-testid={`impl-escalation-state-${e.id}`}
@@ -266,7 +267,7 @@ function DepartmentBlock({
                 <span className="tabular-nums text-slate-100">{hoursText(b.hours)} h</span>
                 <span className="min-w-0 flex-1">{b.note}</span>
                 <span className="opacity-70">
-                  {b.created_by_name ?? '—'}{b.created_at ? ` · ${onDay(b.created_at)}` : ''}
+                  {b.created_by_name ?? '-'}{b.created_at ? ` · ${onDay(b.created_at)}` : ''}
                 </span>
                 {/* Only your own booking is yours to take back. */}
                 {mayWrite && userId != null && b.created_by === userId && (
@@ -327,7 +328,7 @@ function DepartmentBlock({
                         className="block text-red-200/90">{r.risk_note}</span>
                     )}
                     <span className="block text-slate-500">
-                      {r.created_by_name ?? '—'}{r.created_at ? ` · ${onDay(r.created_at)}` : ''}
+                      {r.created_by_name ?? '-'}{r.created_at ? ` · ${onDay(r.created_at)}` : ''}
                     </span>
                   </span>
                 </span>

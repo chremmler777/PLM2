@@ -5,6 +5,7 @@ import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
+import { formatDate } from '../../lib/format'
 
 interface Props {
   change: ChangeDetail
@@ -134,10 +135,10 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <DeadlineEditor change={change} kind="quote" />
         ) : null}
         <p className="mt-3 text-sm text-slate-300">
-          {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '—'}</span>
+          {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '-'}</span>
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          {new Date(change.created_at).toLocaleDateString()} → {new Date(change.updated_at).toLocaleDateString()}
+          {formatDate(change.created_at)} → {formatDate(change.updated_at)}
         </p>
       </div>
 

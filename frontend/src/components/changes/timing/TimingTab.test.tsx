@@ -16,8 +16,9 @@ vi.mock('../plan/GanttPlanner', () => ({
   default: (p: { mode?: string }) => <div data-testid="gantt-stub" data-mode={p.mode} />,
 }))
 vi.mock('../BankBuildCard', () => ({
-  default: (p: { canSetMode?: boolean; canPublish?: boolean }) =>
-    <div data-testid="bank-build-stub" data-set={String(p.canSetMode)} data-publish={String(p.canPublish)} />,
+  default: (p: { canSetMode?: boolean; canPublish?: boolean; hidePublish?: boolean }) =>
+    <div data-testid="bank-build-stub" data-set={String(p.canSetMode)} data-publish={String(p.canPublish)}
+      data-hide-publish={String(p.hidePublish)} />,
 }))
 vi.mock('../ImplementationTracking', () => ({
   default: (p: { canEscalate?: boolean }) => <div data-testid="impl-stub" data-escalate={String(p.canEscalate)} />,
@@ -150,11 +151,12 @@ describe('TimingTab', () => {
     vi.mocked(planApi.lockDeviation).mockResolvedValue({})
     vi.mocked(planApi.escalateDeviation).mockResolvedValue({})
     vi.mocked(planApi.publishPlan).mockResolvedValue({})
-    renderTab({ change: change({ status: 'in_implementation' }), canPublish: true })
+    renderTab({ change: change({ status: 'in_implementation' }), canPublish: true,
+      canDecideDeviation: true, canSetBankBuild: true })
 
     const row = await screen.findByTestId('deviation-5')
-    expect(row.textContent).toContain('9 Oct 26')
-    expect(row.textContent).toContain('12 Oct 26')
+    expect(row.textContent).toContain('09.10.2026')
+    expect(row.textContent).toContain('12.10.2026')
     expect(screen.getByTestId('deviation-slip-5').className).toContain('text-red-300')
     expect(screen.getByTestId('gantt-stub').dataset.mode).toBe('track')
     expect(screen.getByTestId('impl-stub').dataset.escalate).toBe('true')
@@ -170,19 +172,75 @@ describe('TimingTab', () => {
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'SOP moves 3 days' } })
     fireEvent.click(within(dialog).getByText('Escalate'))
     await waitFor(() => expect(planApi.escalateDeviation).toHaveBeenCalledWith(7, 5, 'SOP moves 3 days'))
-
-    fireEvent.click(screen.getByTestId('timing-publish'))
-    await waitFor(() => expect(planApi.publishPlan).toHaveBeenCalledWith(7))
+    // Publishing is an approved-stage act.
+    expect(screen.queryByTestId('timing-publish')).toBeNull()
   })
 
-  it('hides deviation decisions from users who may not decide', async () => {
+  it('publishes only at approved, with a bank-build mode and a validated timing', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
+    vi.mocked(planApi.feedback).mockResolvedValue(fb({ validated_at: '2026-09-22T10:00:00', all_confirmed: true }))
+    vi.mocked(planApi.publishPlan).mockResolvedValue({})
+    renderTab({
+      change: change({ bank_build_mode: 'running_change', timing_validated_at: '2026-09-22T10:00:00' }),
+      canPublish: true,
+    })
+    fireEvent.click(await screen.findByTestId('timing-publish'))
+    await waitFor(() => expect(planApi.publishPlan).toHaveBeenCalledWith(7))
+    // The bank-build card never shows a second publish button inside the tab.
+    expect(screen.getByTestId('bank-build-stub').dataset.hidePublish).toBe('true')
+  })
+
+  it('asks for the bank-build mode before publishing', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
+    vi.mocked(planApi.feedback).mockResolvedValue(fb({ validated_at: '2026-09-22T10:00:00', all_confirmed: true }))
+    renderTab({ change: change({ timing_validated_at: '2026-09-22T10:00:00' }), canPublish: true })
+    expect((await screen.findByTestId('timing-publish-needs-mode')).textContent)
+      .toContain('Set how the change reaches the line first')
+    expect(screen.queryByTestId('timing-publish')).toBeNull()
+  })
+
+  it('gives the bank-build mode to canSetBankBuild, not to every plan editor (Sales)', async () => {
+    renderTab({ canEditPlan: true, canSetBankBuild: false })
+    expect((await screen.findByTestId('bank-build-stub')).dataset.set).toBe('false')
+    cleanup()
+    renderTab({ canEditPlan: false, canSetBankBuild: true })
+    expect((await screen.findByTestId('bank-build-stub')).dataset.set).toBe('true')
+  })
+
+  it('lets an admin answer for any department', async () => {
+    renderTab({ myDepartmentIds: [], isAdmin: true })
+    await screen.findByTestId('feedback-row-12')
+    expect(screen.getByTestId('feedback-confirm-12')).toBeTruthy()
+    expect(screen.getByTestId('feedback-concern-11')).toBeTruthy()
+    cleanup()
+    renderTab({ myDepartmentIds: [] })
+    await screen.findByTestId('feedback-row-12')
+    expect(screen.queryByTestId('feedback-confirm-12')).toBeNull()
+  })
+
+  it('marks team confirmation done when no team needs to confirm, and names step 3 by its state', async () => {
+    vi.mocked(planApi.feedback).mockResolvedValue(fb({ required: [], all_confirmed: true }))
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('timing-step-2').dataset.state).toBe('done'))
+    expect(screen.getByTestId('timing-step-3').dataset.state).toBe('current')
+    expect(screen.getByTestId('timing-step-3').textContent).toContain('Validate timing')
+    cleanup()
+    vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
+    vi.mocked(planApi.feedback).mockResolvedValue(fb({ validated_at: '2026-09-22T10:00:00', all_confirmed: true }))
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('timing-step-3').dataset.state).toBe('done'))
+    expect(screen.getByTestId('timing-step-3').textContent).toContain('Timing validated')
+    expect(screen.getByTestId('timing-step-3').textContent).toContain('22.09.2026')
+  })
+
+  it('hides deviation decisions from plan editors who may not decide (Scheduling)', async () => {
     vi.mocked(planApi.get).mockResolvedValue(plan({ baseline_set: true }))
     vi.mocked(planApi.deviations).mockResolvedValue([{
       id: 5, task_id: 1, task_name: 'Tool rework', old_start: '2026-10-05', old_end: '2026-10-10',
       new_start: '2026-10-05', new_end: '2026-10-13', slip_days: 3, finish_impact_days: 0,
       reason: 'x', status: 'open',
     }])
-    renderTab({ canEditPlan: false })
+    renderTab({ canEditPlan: true, canDecideDeviation: false })
     await screen.findByTestId('deviation-5')
     expect(screen.queryByTestId('deviation-lock-5')).toBeNull()
     expect(screen.queryByTestId('impl-stub')).toBeNull() // still approved
