@@ -10,7 +10,7 @@ without a Quality sign-off, and you see the full record of every change.
 
 | When | You | Where |
 |---|---|---|
-| Quoted, customer accepted | "Quality sign-off" (a different person from the PM sign-off) | "Offer" |
+| Quoted, customer accepted | "Quality sign-off" (a different person from the PM sign-off): you confirm the process record, not the prices, which you do not see | "Offer" |
 | Any stage | Read the D1 master data and gates ("Feasibility", "Budget", "Release") and the full history | "D1", "Audit" (Governance group) |
 | In Assessment | Only if routed at scoping: answer the checklist, "Dimensional risk" and "Visual risk" first | "Assessments" |
 | Validation | Watch the validation issues and the release checklist; "+ Add lesson" | "Release" |

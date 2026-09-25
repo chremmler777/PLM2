@@ -11,8 +11,8 @@ running short, help build and confirm the plan, and close out ERP and stock.
 | Stage | You | Where |
 |---|---|---|
 | In Assessment | Only if routed at scoping: answer the checklist, "Cycle time change" is yours to judge | "Assessments" |
-| Costing to Quoted | You may edit the quote plan with PM and Sales | "Offer", "Timing" step |
-| Timing | "Bank build plan": "Running change" or "Planned scrap" (with "Scrap quote price") and a "Plan note"; turn the "Bank build (idea)" into a real block; "Confirm timing"; "Validate timing" once everyone confirmed | "Timing" |
+| Costing to Quoted | You may edit the quote plan with PM and Sales, until approval | "Offer", "Timing" step |
+| Timing | "Bank build plan" (often already set from the accepted offer: check it): "Running change" or "Planned scrap" (with "Scrap quote price", the total) and a "Plan note"; turn the "Bank build (idea)" into a real block; "Confirm timing"; "Validate timing" once everyone confirmed | "Timing" |
 | Implementing | Progress on your own blocks; a date move asks "Why does this move?" | "Timing" |
 | Validation | "ERP, BOM and routing updated", "Old stock handled as agreed (bank consumed or scrapped)" | "Release" |
 
@@ -28,7 +28,7 @@ running short, help build and confirm the plan, and close out ERP and stock.
 
 No assessment and no offer. The change goes from scoping to timing with the
 mother plant's SOP as the release deadline. Your bank build planning is the
-first real work. Their MS Project file seeds the plan; "Import MS Project"
+first real work. Their MS Project file seeds the plan at approval; "Import MS Project"
 loads one later.
 
 ## Your practical check

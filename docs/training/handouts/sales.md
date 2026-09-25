@@ -14,7 +14,7 @@ the offer, log every round, and tell the customer what they must hear later.
 | Scoping | Answer the team's questions, file the customer's reply; rejection letter if rejected | "Scoping" |
 | Quote creation | "Start the offer": "Timing", "Price", "Risks", "Document"; "Send offer" with the receipt date | "Offer" |
 | Quoted | "+ Record round"; "New version" with what changed; "Customer accepted" with the release deadline, or "Customer declined" | "Offer", "Negotiation" |
-| Timing | "Confirm timing" for Sales; "Publish plan to customer" once validated | "Timing" |
+| Timing | "Confirm timing" for Sales; "Publish plan to customer" once validated and the bank build mode is set | "Timing" |
 | Implementing | Tell the customer about escalated deviations | "Timing" |
 | Validation | "Record customer decision" on an issue; "Quote the fix" if the customer pays; tick "Customer informed of the implementation date / first shipment" | "Release" |
 
@@ -24,7 +24,7 @@ the offer, log every round, and tell the customer what they must hear later.
 - **The offer is valid 30 days from the customer's receipt.** Enter the real receipt date.
 - **From v2 on, say what changed.** Sending is refused without it.
 - **Your vendor choice is binding.** Against the department's star you give a reason.
-- **Severity-3 risks:** state them or price them, knowingly. The page warns if one is hidden.
+- **Every risk starts hidden on the offer.** Switch on what the customer reads. The page warns while a severity-3 risk is hidden: state it or price it, knowingly.
 - **You answer questions; the asker marks them solved.**
 - **A concession closes only with the customer's mail filed into the issue.**
 

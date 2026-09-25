@@ -41,7 +41,9 @@ export const financeChapter: ContentChapter = {
       blocks: [
         {
           p:
-            '"Cost sheet" is under Setup in the sidebar. The page reads: hourly rates per position, ' +
+            '"Cost sheet" is under Setup in the sidebar for accounts with the admin or engineer ' +
+            'role. Everybody else opens it at the address ending in /cost-sheet. The page reads: ' +
+            'hourly rates per position, ' +
             'machine and sampling prices and personnel overhead, maintained by Finance. Costing and ' +
             'the P&L read the version valid on the day.',
         },
@@ -60,15 +62,15 @@ export const financeChapter: ContentChapter = {
         { h3: 'Changing a rate' },
         {
           steps: [
-            { title: '"New draft"', body: 'Copies the current version. Only one draft exists at a time.' },
+            { title: '"New draft"', body: 'Copies the latest published version. Only one draft exists at a time.' },
             { title: 'Edit the rows', body: 'Change, add or remove rows on any tab. "Changes vs previous" shows what differs.' },
-            { title: '"Publish version"', body: 'Give "Valid from" and a note (for example the budget year or a wage agreement). The date must be after the current version\'s.' },
+            { title: '"Publish version"', body: 'Give "Valid from" and a note (for example the budget year or a wage agreement). The date must be after the valid-from date of the latest published version.' },
           ],
         },
         {
           points: [
             ['From the valid-from date', 'costing and bookings use the new rates. Until then the current version stays in use.'],
-            ['A date in the past', 'asks "Publish backdated anyway": costing lines and bookings dated since then are priced with the new version.'],
+            ['A date in the past', 'asks "Publish backdated anyway". Time booked since then, and lines that had no rate, are priced with the new version. Lines already priced keep their rate.'],
             ['No differences', 'to the previous version: publishing is refused. There is nothing to publish.'],
           ],
         },
@@ -102,15 +104,16 @@ export const financeChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'The page sets "Review every {n} months". When the current version is older, a banner ' +
-            '"Cost sheet review due" appears on the cost sheet and in costing, and "My Tasks" shows ' +
-            '"Review the cost sheet" under Finance. The current rates apply until you publish.',
+            'The page sets "Review every {n} months". When the current version is older, the cost ' +
+            'sheet shows the banner "Cost sheet review due", costing says "Cost sheet v{v} is older ' +
+            'than {m} months (review due {due})", and "My Tasks" shows "Review the cost sheet" ' +
+            'under Finance. The current rates apply until you publish.',
         },
         {
           p:
             '"Plant currencies" lists each plant\'s currency, set from its location. Until Finance ' +
-            'confirms it, it reads "Currency set by location, Finance to confirm". Press "Confirm", ' +
-            'or "Change" if the location guessed wrong.',
+            'confirms it, the currency\'s tooltip reads "Currency set by location, Finance to ' +
+            'confirm". Press "Confirm", or "Change" if the location guessed wrong.',
         },
         { shot: 'fin-review-banner', alt: 'The "Cost sheet review due" banner above the version selector, and "Plant currencies" with one unconfirmed plant.' },
       ],
@@ -150,9 +153,10 @@ export const financeChapter: ContentChapter = {
         },
         {
           p:
-            'The "P&L" page lists every change with "Offer revenue", "Planned cost", "Actual cost", ' +
-            'the margins, "Variance" and "Slip". Prices on a change are shown to Sales, the Project ' +
-            'Manager, the change lead and admins.',
+            'The "P&L" page lists the changes whose prices you may read, with "Offer revenue", ' +
+            '"Planned cost", "Actual cost", the margins, "Variance" and "Slip". Prices on a change ' +
+            'are shown to Sales, every Project Management member, the change lead and admins. ' +
+            'Finance is not among them: unless you lead a change, the page lists none for you today.',
         },
       ],
     },
@@ -162,7 +166,7 @@ export const financeChapter: ContentChapter = {
       blocks: [
         {
           points: [
-            ['Backdating without thinking.', 'Every line and booking since that date is repriced.'],
+            ['Backdating without thinking.', 'Time booked since that date, and lines that had no rate, are priced with the new version. Lines already priced keep their rate, so costing and actuals drift apart.'],
             ['A new position rate without the overhead.', 'Check the effective rate column on "Positions".'],
             ['Leaving a plant currency unconfirmed.', 'Offers in that plant go out in a currency nobody checked.'],
             ['Ignoring the review task.', 'Costing keeps using old rates, and every offer inherits them.'],
@@ -186,7 +190,8 @@ export const financeTasks: PracticeTaskSpec[] = [
       '71.50 per hour from the first of next month. Put it in a new version and publish it.',
     why:
       'A rate takes effect from its date, never before. Published on time, every costing from ' +
-      'that day prices correctly; published late and backdated, lines already priced move.',
+      'that day prices correctly. Published late and backdated, time booked since then is ' +
+      'priced with the new version, but lines already priced keep the old rate.',
     fixture: [
       'Cost sheet with one published version (v1) holding a Tool Engineer rate of 68.00 for plant Toccoa. No draft.',
       'Trainee acts as a Finance member.',
@@ -205,15 +210,17 @@ export const financeTasks: PracticeTaskSpec[] = [
     status: 'needs-sandbox',
     screen: { kind: 'cost-sheet' },
     brief:
-      'On CR-TRAIN-0006 a Packaging Engineer line shows "No rate in the cost sheet": the ' +
+      'On CR-TRAIN-0014 a Packaging Engineer line shows "No rate in the cost sheet": the ' +
       'Toccoa plant has no Packaging Engineer rate. The agreed rate is 55.00 per hour from ' +
       'today. Add it so the line is counted.',
     why:
       'A line without a rate is left out of the total. The offer built on it is too low by ' +
       'exactly that amount.',
     fixture: [
-      'Cost sheet v1 published, no Packaging Engineer row for Toccoa.',
-      'CR-TRAIN-0006 in costing with one Packaging Engineer own-time line priced as missing.',
+      'Cost sheet v1 published with a valid-from before today, no Packaging Engineer row for Toccoa.',
+      'No overhead row in v1 applies to Packaging Engineer at Toccoa, so the looked-up rate equals the base rate.',
+      'CR-TRAIN-0014 in costing with one Packaging Engineer own-time line priced as missing.',
+      'Trainee acts as a Finance member.',
     ],
     pass: [
       { assert: 'a published version valid today holds Packaging Engineer, Toccoa at 55.00', hint: 'No published version valid today has a Packaging Engineer rate of 55.00 for Toccoa.' },

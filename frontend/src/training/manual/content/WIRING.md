@@ -120,12 +120,37 @@ screens before the keys.
 Each `needs-sandbox` task needs a `Screen` kind in `tasks.ts`, a branch in
 `TaskScreen.tsx` mounting the real component, fixture rows in
 `sandbox/state.ts`, and handlers in `sandbox/adapter.ts` for every request
-that screen makes (a miss throws, by design). New fixture changes:
-CR-TRAIN-0003 (approved, detailed plan, downtime and bank build idea),
-CR-TRAIN-0004 (in validation, baseline, deviations, VI-1 and VI-2, release
-checks), CR-TRAIN-0005 (scoping, impact confirmed), CR-TRAIN-0006 (costing
-then quoting, one severity-3 risk), CR-TRAIN-0007 (quoted, v1 sent, later v2
-accepted).
+that screen makes (a miss throws, by design).
+
+**Fixtures are per task.** Each task's `fixture` describes the sandbox state
+that task starts from, and nothing else. Two tasks never share a change or an
+issue number, so a builder can seed each one without reconciling states (one
+change cannot be in implementation for one task and in validation for
+another). The numbers in use, one per task:
+
+| Change | Task | State |
+|---|---|---|
+| CR-TRAIN-0001, 0002 | existing tasks | exist today in `sandbox/state.ts` |
+| CR-TRAIN-0003 | `sch_bank_build_plan` | approved, no bank build mode |
+| CR-TRAIN-0004 | `pm_decide_deviation` | in implementation, baseline, two open deviations |
+| CR-TRAIN-0005 | `pm_scoping_proceed` | scoping, lead, quote deadline, impact confirmed |
+| CR-TRAIN-0006 | `eng_costing_vendor_quotes` | costing |
+| CR-TRAIN-0007 | `sales_new_version` | quoted, v1 sent |
+| CR-TRAIN-0008 | `pm_route_issue` | validation, VI-1 contained with root cause |
+| CR-TRAIN-0009 | `eng_contain_issue` | validation, VI-1 not contained |
+| CR-TRAIN-0010 | `sales_issue_customer_decision` | validation, VI-1 routed as concession |
+| CR-TRAIN-0011 | `sch_release_stock` | validation, release checks open |
+| CR-TRAIN-0012 | `qa_add_lesson` | validation, no lessons |
+| CR-TRAIN-0013 | `sales_send_offer` | quoting, one severity-3 risk (hidden) |
+| CR-TRAIN-0014 | `fin_add_missing_rate` | costing, one line without a rate |
+| CR-TRAIN-0015 | `qa_quality_signoff` | quoted, v2 accepted, PM signed |
+| CR-TRAIN-0016 | `sch_resolve_bank_idea` | approved, idea block past the downtime |
+| CR-TRAIN-0017 | `sch_timing_concern` | approved, detailed plan revision 2 |
+
+"Trainee acts as a ... member" in a fixture names the department the sandbox
+user must belong to. The sandbox has no role emulation beyond that, so a pass
+criterion never asserts that another role was refused (the refusals are
+covered by the handler and backend tests).
 
 | Screen kind | Real component | Requests to answer (from `src/api`) |
 |---|---|---|
@@ -152,7 +177,10 @@ care. Grep each one again before publishing.
 | "Index {rev} pending triage", "Triage index {rev} of {part}" | `intake/IntakePanel.tsx`, `intake/IntakeSection.tsx` | Templates, cited with placeholders |
 | "Send information to" + departments | `motherPlant/MotherPlantTab.tsx` (`Send information to {n} department{s}`) | Template |
 | "Inform" + plant | `motherPlant/InformMotherPlant.tsx` (`Inform {p}`) | Template |
-| "{n} of {m} confirmed", "{n} × No ({b} set via Rest → No)" | `TeamFeedbackPanel.tsx`, `AssessmentBuckets.tsx` | Templates |
+| "{n} of {m} confirmed", "{n} × No ({b} set via Rest to No)" | `TeamFeedbackPanel.tsx`, `AssessmentBuckets.tsx` | Templates |
+| "Rest to No" | `cmLabels.ts` `check.restNo` shows "Rest → No" | The copy writes "Rest to No", as `tasks.ts` does; make the screen and the copy agree in the polish |
+| "Lower to L1" | `validation/EscalationHistory.tsx` (template `Lower to L{n}`, PM or admin only) | Template, cited for an L2 issue |
+| "Cost sheet v{v} is older than {m} months (review due {due})" | `cmLabels.ts` `costing.stale` | Template; the cost sheet page itself shows "Cost sheet review due" (`StaleBanner.tsx`) |
 | "Priced from cost sheet v{v} ({plant}, {cur})", "Review every {n} months" | `CostingSheetBar.tsx` via `cmLabels.ts`, `CostSheetPage.tsx` | Templates |
 | "Quote in 6 d" (shot alt only) | `DeadlineChip.tsx` template | Template |
 | "Publish plan to customer" | `TimingTab.tsx:246` | The Bank build card has "Publish plan to the customer" (hidden on Timing); the polish may unify them |
@@ -177,6 +205,19 @@ on the polished build:
 - After the baseline only plan editors (PM, Sales, Scheduling, the lead,
   admin) move dates; members of the owner department set progress and actual
   dates on their own blocks.
+- Every risk starts hidden on the offer and Sales opts it in; the page warns
+  while a severity-3 risk is hidden (`offer_service.py` risk rows with
+  `"show": False`, final walk P2-7, written against the working tree before
+  it was committed). The Engineers, Quality and Sales chapters and the
+  `sales_send_offer` fixture teach it. If that change does not ship, severity
+  3 is shown by default again and those sentences change back.
+- `components/costSheet/PublishDialog.tsx` makes the same wrong backdating
+  claim the first draft of the Finance chapter made: "Costing lines and
+  bookings dated since then will be priced with this version." Lines already
+  priced keep their snapshot (`costing_rates.snapshot_position`,
+  `stored_price`); only time booked since then and lines without a rate take
+  the new version. The chapter now says so. The dialog text is fixed in the UI
+  polish, not here.
 - The PDF letterhead defaults (KTX Group US Corp., Toccoa) come from
   `backend/app/services/company_profile.py` and can be overridden by
   `KTX_COMPANY_*` environment variables. If production overrides them, the
@@ -191,7 +232,7 @@ open by nature:
 |---|---|---|
 | `docs/training/rollout-announcement.md` | `[go-live date]`, `[session dates]`, `[access contact]`, recipient list | Project Management and the PLM2 administrator, before sending |
 | `docs/training/roster-template.md` | the blank tables | the trainer, per session |
-| New fixture people and changes (J. Planner, CR-TRAIN-0003 to 0007, Toolmaker A and B) | names in the task briefs | whoever builds the sandbox fixtures; rename freely, keep briefs and fixtures in step |
+| New fixture people and changes (J. Planner, CR-TRAIN-0003 to 0017, Toolmaker A and B) | names in the task briefs | whoever builds the sandbox fixtures; rename freely, keep briefs and fixtures in step |
 
 ## 6. Open questions
 
@@ -203,11 +244,14 @@ open by nature:
    Scheduling and Finance ones with role-true tasks and keeps a Quality one
    framed as "when the scoping meeting routes Quality". Agree?
 2. **Finance cannot see prices on a change.** The price viewer is admin,
-   lead, Sales and PM (`ChangeDetailPage.tsx` `canSeeCosts`,
-   `validation_issue_service.cost_role`, `pnl.py` via
-   `NegotiationService.may_read`). Finance owns the rates but cannot read an
-   offer or a change's P&L. Intended? The Finance chapter states the rule as
-   it is.
+   lead, Sales and any Project Management member (`ChangeDetailPage.tsx`
+   `canSeeCosts`, `validation_issue_service.cost_role`, `pnl.py` via
+   `NegotiationService.may_read`, `price_redaction.price_scope`). Finance
+   owns the rates but cannot read an offer, and the "P&L" page lists no
+   change for Finance unless they lead it. Quality is in the same position
+   (it signs off without seeing the offer's figures; money is blanked in the
+   audit and its CSV). Intended? The Finance and Quality chapters state the
+   rule as it is.
 3. **Internal changes cannot be started** ("Internal change" is disabled on
    the start form: "Internal changes come later"). The manual teaches the
    customer path only and does not cover "Approve internal costs". Add a

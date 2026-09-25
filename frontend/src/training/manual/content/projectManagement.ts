@@ -1,3 +1,4 @@
+import { SEED } from '../../sandbox/state'
 import type { ContentChapter, PracticeTaskSpec } from './types'
 
 //: Chapter 03, Project Management. pm-takeover, pm-priority, pm-scoping and
@@ -23,13 +24,13 @@ export const pmChapter: ContentChapter = {
           table: {
             head: ['Stage', 'What you do'],
             rows: [
-              ['Captured', 'Take over with "Hand over to scoping". Set the lead, the priority and check the quote deadline.'],
+              ['Captured', 'Take over with "Hand over to scoping". Set the lead; as the lead, set the priority and check the quote deadline.'],
               ['Scoping', 'Build the impacted set, run the scoping meeting, decide.'],
               ['In Assessment', 'Chase the open departments, add a forgotten one, decide on "Not our responsibility", then "Close assessment → Costing".'],
               ['Costing', 'Watch every department price its part, then "Close costing".'],
-              ['Quoted', 'Give the "PM sign-off" once the customer accepted.'],
+              ['Quoted', 'Give the "PM sign-off". The cockpit asks for it once the customer accepted.'],
               ['Timing', 'Create the detailed plan, get every team to confirm, "Validate timing".'],
-              ['Implementing', 'Lock or escalate each deviation.'],
+              ['Implementing', 'Lock or escalate each deviation. The change cannot be released while one is open.'],
               ['Validation', 'Decide the route of each validation issue, complete the lessons step, release and close.'],
             ],
           },
@@ -50,7 +51,7 @@ export const pmChapter: ContentChapter = {
           steps: [
             { title: 'Read the capture', body: 'Reason, affected items, the customer\'s documents. The "Next step" card lists what is still missing before scoping can start.' },
             { title: 'Check the lead', body: 'On the "Status" card: "Lead", or "No lead assigned". Pick one with "Pick a lead", or "Me". Scoping waits for a lead.' },
-            { title: 'Hand over', body: '"Hand over to scoping". After this the capture changes only through the lead.' },
+            { title: 'Hand over', body: '"Hand over to scoping". Sales and the lead can still correct the capture fields afterwards.' },
           ],
         },
         {
@@ -67,7 +68,7 @@ export const pmChapter: ContentChapter = {
       blocks: [
         {
           points: [
-            ['"Priority"', 'orders everybody\'s task list: "Low", "Medium", "High", "Critical". Critical is for a stopped line or a safety issue.'],
+            ['"Priority"', 'orders everybody\'s task list: "Low", "Medium", "High", "Critical". Only the change lead sets it. Critical is for a stopped line or a safety issue.'],
             ['"Quote deadline"', 'is when the customer expects the offer. Sales sets it at capture. It is active until the offer is sent.'],
             ['"Release deadline"', 'is born when the customer accepts. It is active from then on.'],
           ],
@@ -105,9 +106,10 @@ export const pmChapter: ContentChapter = {
         },
         {
           callout:
-            'Open questions and cancel votes block "Proceed". The asker, or you as PM, settles them ' +
-            'first. "Needs more info" keeps the change in scoping and gives Sales the task to get ' +
-            'the answer from the customer.',
+            'Open questions and cancel votes block "Proceed". Risks do not: a change goes ahead with ' +
+            'its risks on the record. The person who raised a question or vote, or you as PM, ' +
+            'settles it first. "Needs more info" keeps the change in scoping and gives Sales the ' +
+            'task to get the answer from the customer.',
           tone: 'warn',
         },
         { shot: 'pm-scoping-meeting', alt: 'The scoping meeting form with RASIC letters per department, the cost carrier and "Save meeting".' },
@@ -120,7 +122,7 @@ export const pmChapter: ContentChapter = {
         {
           points: [
             ['Who is still owed:', '"Blocked by" lists the departments that have not submitted.'],
-            ['A forgotten department:', '"Add a department to the assessment" with a letter and a reason. It takes effect once the change lead approves it (four eyes).'],
+            ['A forgotten department:', '"Add a department to the assessment" with a letter and a reason. It takes effect once somebody other than you approves it: the change lead, or another Project Manager if you are the lead (four eyes).'],
             ['"Not our responsibility":', 'a department can decline. The lead decides; if rejected, the assessment stays with them.'],
             ['"Not feasible":', 'the "Next step" card offers "Reject change", "Back to scoping" or "Override with a reason". An override is a deviation somebody else approves.'],
             ['All answered:', '"Close assessment → Costing". The confirm dialog lists every verdict and open risk.'],
@@ -152,9 +154,10 @@ export const pmChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'Once Sales has recorded "Customer accepted", the "Offer" tab shows "PM sign-off" and ' +
-            '"Quality sign-off". Approval needs the customer\'s acceptance and both sign-offs. ' +
-            'The two sign-offs must come from two different people.',
+            'While the change is "Quoted", the "Offer" tab shows "PM sign-off" and "Quality ' +
+            'sign-off". The cockpit asks for them once Sales has recorded "Customer accepted". ' +
+            'Approval needs the customer\'s acceptance and both sign-offs. The two sign-offs must ' +
+            'come from two different people.',
         },
         { shot: 'pm-signoff', alt: 'The customer response block with "Accepted", "PM sign-off ✓" and "Quality sign-off" still open.' },
       ],
@@ -176,7 +179,8 @@ export const pmChapter: ContentChapter = {
         {
           p:
             'After the baseline every date move is listed under "Deviations from the baseline" with ' +
-            'its reason, slip and effect on the finish. Each one needs your decision.',
+            'its reason, slip and effect on the finish. Each one needs your decision. Open ' +
+            'deviations do not stop the work, but the change cannot be released while one is open.',
         },
         {
           table: {
@@ -203,8 +207,9 @@ export const pmChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'When a check fails, the owner department raises an issue, contains it and finds the ' +
-            'cause. You, or the lead, decide the route with "Decide the route".',
+            'When a check fails, a member of a department working on the change, you or the lead ' +
+            'presses "Raise issue" on it. The issue names an owner department, which contains it ' +
+            'and finds the cause. You, or the lead, decide the route with "Decide the route".',
         },
         {
           points: [
@@ -216,8 +221,9 @@ export const pmChapter: ContentChapter = {
         },
         {
           p:
-            'Escalation levels rise on their own. You can lower a level with a reason ("Lower to ' +
-            'L1"), and you close an issue by hand only when it has no linked check.',
+            'Escalation levels rise on their own. Project Management (or an admin) can lower a ' +
+            'level with a reason ("Lower to L1" on an L2 issue), and you close an issue by hand ' +
+            'only when it has no linked check.',
         },
         { shot: 'pm-route-dialog', alt: 'The "Decide the route for VI-1" dialog with "Internal rework" selected, one fix action and a reason.' },
       ],
@@ -229,7 +235,7 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Lessons learned', body: 'Make sure the team adds its lessons. Then "Complete lessons step", or give the reason there are none.' },
-            { title: 'Release', body: '"Release change" once the release step shows no blocker: every check passed, every checklist row answered, no open issue.' },
+            { title: 'Release', body: '"Release change" once the release step shows no blocker: every validation check passed, no open validation issue, every impacted revision through its check workflow, every checklist row answered, the lessons step completed and no open plan deviation.' },
             { title: 'Read the summary', body: 'Plan against actual timing, offer against actual cost. The difference is the lesson for the next quote.' },
             { title: 'Close', body: '"Close change".' },
           ],
@@ -242,10 +248,10 @@ export const pmChapter: ContentChapter = {
       blocks: [
         {
           points: [
-            ['Proceeding with nobody on R or A.', 'Then nobody assesses. The dialog warns: "No department is marked R or A: nobody assesses".'],
+            ['Proceeding with nobody on R or A.', 'Refused: the dialog shows "No department is marked R or A: nobody assesses".'],
             ['Editing the impacted set after Development confirmed it.', 'The confirmation is cleared and the change waits for Development again.'],
             ['Validating the timing with a stale confirmation.', 'The button stays disabled. Ask the team to confirm the current plan.'],
-            ['Leaving deviations open.', 'They do not block anything, which is exactly why they get forgotten. Decide each one.'],
+            ['Leaving deviations open.', 'They do not stop the work, which is why they get forgotten, but the change cannot be released while one is open. Decide each one.'],
             ['Deciding the route of an issue you raised.', 'Refused. Ask the lead or another PM.'],
             ['No project team named.', 'Then the whole department counts every task and nobody feels it is theirs.'],
           ],
@@ -261,7 +267,7 @@ export const pmTasks: PracticeTaskSpec[] = [
     role: 'project_management',
     title: 'Set priority and the quote deadline',
     status: 'ready',
-    screen: { kind: 'change-status', change: 'CR-TRAIN-0001' },
+    screen: { kind: 'change-status', changeId: SEED.changeCaptured },
     brief:
       'CR-TRAIN-0001 (Grille Carrier) was escalated by the customer this morning. Set its ' +
       'priority to High, and give it a quote deadline: the customer expects the quote within ' +
@@ -283,19 +289,21 @@ export const pmTasks: PracticeTaskSpec[] = [
     screen: { kind: 'scoping', change: 'CR-TRAIN-0005' },
     brief:
       'The team met today about CR-TRAIN-0005. Tool Engineer and Development assess, APQP ' +
-      'supports, Packaging is not involved. The customer pays. Record the meeting and start ' +
-      'the assessment.',
+      'supports, Manufacturing Engineer is kept informed, Packaging is not involved. The ' +
+      'customer pays. Record the meeting and start the assessment.',
     why:
       'The letters decide who assesses, not who was in the room. A wrong letter is a ' +
       'department that never gets its task, or one that gets a task it cannot answer.',
     fixture: [
-      'CR-TRAIN-0005 in scoping, impacted set confirmed by Development, no open concerns.',
+      'CR-TRAIN-0005 in scoping, customer_relevant true, lead set, required_by_date set, at least one impacted item, impacted set confirmed by Development, no open concerns.',
       'Departments Development, Tool Engineer, APQP, Packaging Engineer, Manufacturing Engineer.',
+      'Trainee acts as a Project Management member.',
     ],
     pass: [
       { assert: 'a meeting exists with decision proceed', hint: 'No meeting with the decision "Proceed & start assessment" yet.' },
       { assert: 'department_rasic gives Tool Engineer and Development R or A', hint: 'Tool Engineer and Development assess: give them R or A.' },
       { assert: 'APQP is S and Packaging Engineer is not R or A', hint: 'APQP supports and Packaging is not involved. Check their letters.' },
+      { assert: 'Manufacturing Engineer is C', hint: 'Manufacturing Engineer is kept informed: "Consulted / informed".' },
       { assert: 'the cost carrier is customer', hint: 'The customer pays: the cost carrier is "Customer (customer relevant)".' },
       { assert: 'change.status is in_assessment', hint: 'The change has not moved to assessment. Did the meeting decide to proceed?' },
     ],
@@ -311,16 +319,18 @@ export const pmTasks: PracticeTaskSpec[] = [
       'buffer absorbs it and the finish does not move. The supplier of the new insert is two ' +
       'weeks late and the finish moves past the release deadline. Decide both.',
     why:
-      'An open deviation blocks nothing, so it is easy to forget. The customer learns about a ' +
-      'late finish from us, through Sales, or from their receiving dock.',
+      'An open deviation does not stop the work, so it is easy to forget, but the change cannot ' +
+      'be released while one is open. The customer learns about a late finish from us, through ' +
+      'Sales, or from their receiving dock.',
     fixture: [
       'CR-TRAIN-0004 in_implementation, baseline set.',
+      'Trainee acts as a Project Management member.',
       'Deviation A: toolmaker block +3 d, finish_impact_days 0, open.',
       'Deviation B: supplier block +14 d, finish past release_due_date, open.',
     ],
     pass: [
       { assert: 'deviation A status is locked', hint: 'The toolmaker slip is absorbed by the buffer: accept it internally with "Lock".' },
-      { assert: 'deviation B status is escalated with a note of at least 10 characters', hint: 'The supplier slip moves the finish past the release deadline: the customer has to hear it. Say what Sales tells them.' },
+      { assert: 'deviation B status is escalated with a non-empty note', hint: 'The supplier slip moves the finish past the release deadline: the customer has to hear it. Say in a sentence what Sales tells them.' },
     ],
   },
   {
@@ -328,16 +338,17 @@ export const pmTasks: PracticeTaskSpec[] = [
     role: 'project_management',
     title: 'Decide the route of a validation issue',
     status: 'needs-sandbox',
-    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0004' },
+    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0008' },
     brief:
-      'VI-1 on CR-TRAIN-0004: the clip tower breaks at the first sampling. Tool Engineer ' +
+      'VI-1 on CR-TRAIN-0008: the clip tower breaks at the first sampling. Tool Engineer ' +
       'contained it and found the cause, a sharp corner in the new insert. Our own toolshop ' +
       'rounds it in three days. Decide the route.',
     why:
       'The route decides where the change goes next, who does what and whether the customer ' +
       'hears about it. It is decided by somebody who did not raise the issue.',
     fixture: [
-      'CR-TRAIN-0004 in_validation, VI-1 raised by another user, severity 2, containment and root cause recorded.',
+      'CR-TRAIN-0008 in_validation, VI-1 raised by another user, severity 2, containment and root cause recorded.',
+      'Trainee acts as a Project Management member.',
       'Detailed plan with baseline and a validation block.',
     ],
     pass: [

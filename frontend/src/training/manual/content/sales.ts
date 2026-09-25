@@ -50,7 +50,7 @@ export const salesChapter: ContentChapter = {
             { title: 'Project and affected items', body: 'Pick every part that changes with the same tool, for example the PEAK variant from the same mold. The first one is the lead item; "Make lead item" changes it.' },
             { title: 'Short description', body: 'One line: what is the problem. It is capped at 100 characters. The detail goes in the documents.' },
             { title: 'Who carries the cost', body: '"Customer change" when the customer pays. It goes through the quote workflow.' },
-            { title: 'Quote deadline', body: 'When the customer expects the offer. Optional on the form, required before PM can take over.' },
+            { title: 'Quote deadline', body: 'When the customer expects the offer. Optional on the form. The hand-over to scoping asks for it, and for a change lead; without them the hand-over needs an approved deviation.' },
             { title: 'Customer documents', body: 'Drop the drawing, the mail, the specification. At least one is required before scoping.' },
             { title: 'Create change', body: 'The form tells you if it is "Ready to hand over to scoping" or what is missing.' },
           ],
@@ -104,7 +104,7 @@ export const salesChapter: ContentChapter = {
         {
           points: [
             ['Vendor choice:', 'the department\'s star is a recommendation. Your choice in the "Vendor decision" is binding and recorded; against the recommendation you give a reason.'],
-            ['Severity-3 risks:', 'the page warns when one is not shown in the offer. State it, or price it, knowingly.'],
+            ['Risks start hidden:', 'no risk is on the offer until you switch it on. The page warns while a severity-3 risk is not shown. State it, or price it, knowingly.'],
             ['"Result vs internal cost"', 'shows the margin before you send. The totals are computed by the server; what you see is what goes out.'],
             ['"↻ Refresh from costing"', 'pulls the current costing into the draft, keeping your own lines and overrides.'],
           ],
@@ -163,7 +163,7 @@ export const salesChapter: ContentChapter = {
         {
           points: [
             ['Confirm the plan.', 'Sales is always asked on the "Team confirmation" panel.'],
-            ['"Publish plan to customer"', 'once the timing is validated. It records that you sent the validated timing; export it with "MS Project" or "CSV" to attach.'],
+            ['"Publish plan to customer"', 'once the timing is validated and the bank build mode is set. It records that you sent the validated timing; export it with "MS Project" or "CSV" to attach.'],
             ['Escalated deviations', 'are yours to tell the customer. The escalation says what Sales tells them.'],
             ['Validation issue, customer to be informed:', '"Record customer decision": "Accepts the deviation", "Requires a fix", "New timing" or "Pending". A concession only closes with the customer\'s mail filed into the issue.'],
             ['A fix the customer pays:', 'you get the task to quote it. "Quote the fix", then "Fix quoted to the customer".'],
@@ -219,17 +219,18 @@ export const salesTasks: PracticeTaskSpec[] = [
     role: 'sales',
     title: 'Build and send the first offer',
     status: 'needs-sandbox',
-    screen: { kind: 'offer', change: 'CR-TRAIN-0006' },
+    screen: { kind: 'offer', change: 'CR-TRAIN-0013' },
     brief:
-      'Costing is closed on CR-TRAIN-0006. Start the offer, switch on a 12 % margin, show the ' +
+      'Costing is closed on CR-TRAIN-0013. Start the offer, switch on a 12 % margin, show the ' +
       'severity-3 sink mark risk to the customer, and send it. The customer confirmed receipt ' +
       'yesterday.',
     why:
       'The offer is the only thing the customer reads. A severity-3 risk the customer never ' +
       'saw is our problem alone when it happens.',
     fixture: [
-      'CR-TRAIN-0006 in quoting, costing closed with two departments and one external position.',
-      'One open risk concern, severity 3, "Sink marks".',
+      'CR-TRAIN-0013 in quoting, costing closed with two departments and one external position.',
+      'One open risk concern, severity 3, "Sink marks". Like every risk, it starts hidden on the offer.',
+      'Trainee acts as a Sales member.',
       'Quote plan seeded.',
     ],
     pass: [
@@ -254,6 +255,7 @@ export const salesTasks: PracticeTaskSpec[] = [
       'why the price moved, and the answer is on the change or nowhere.',
     fixture: [
       'CR-TRAIN-0007 quoted, offer v1 sent 5 days ago with margin 12 %.',
+      'Trainee acts as a Sales member.',
     ],
     pass: [
       { assert: 'a negotiation round with channel call exists, tied to v1', hint: 'The call is not logged yet. "+ Record round" with the channel "Call".' },
@@ -267,22 +269,23 @@ export const salesTasks: PracticeTaskSpec[] = [
     role: 'sales',
     title: 'Record the customer\'s decision on a validation issue',
     status: 'needs-sandbox',
-    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0004' },
+    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0010' },
     brief:
-      'VI-2 on CR-TRAIN-0004 is a small gloss difference. PM routed it as a customer ' +
+      'VI-1 on CR-TRAIN-0010 is a small gloss difference. PM routed it as a customer ' +
       'concession. The customer accepts it for good and sent a mail saying so. Record it.',
     why:
       'A concession without the customer\'s written word is our word against theirs at the ' +
       'next complaint. The issue closes only with the mail filed into it.',
     fixture: [
-      'CR-TRAIN-0004 in_validation, VI-2 severity 1, route customer_concession, customer_inform true, no decision.',
+      'CR-TRAIN-0010 in_validation, VI-1 severity 1, route customer_concession, customer_inform true, no decision.',
+      'Trainee acts as a Sales member.',
       'A sample mail file available to upload.',
     ],
     pass: [
-      { assert: 'VI-2 has an attachment of kind customer_email', hint: 'The customer\'s mail is not filed into the issue. Use "Drop customer mail".' },
+      { assert: 'VI-1 has an attachment of kind customer_email', hint: 'The customer\'s mail is not filed into the issue. Use "Drop customer mail".' },
       { assert: 'customer_decision is accept_deviation with a note', hint: 'The decision is not "Accepts the deviation", or the note is empty.' },
       { assert: 'concession_until is empty', hint: 'The customer accepts it for good: leave "Concession until" empty.' },
-      { assert: 'VI-2 status is accepted', hint: 'The issue is still open. Is the decision recorded?' },
+      { assert: 'VI-1 status is accepted', hint: 'The issue is still open. Is the decision recorded?' },
     ],
   },
 ]

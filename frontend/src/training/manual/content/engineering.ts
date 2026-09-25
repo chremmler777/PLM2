@@ -57,8 +57,8 @@ export const engineeringChapter: ContentChapter = {
         {
           p:
             'The bucket already lists what you assess, taken from the impacted parts: Tool Engineer ' +
-            'gets the tools and molds, Manufacturing Engineer the equipment, APQP the gauges and ' +
-            'documents, Development the part design.',
+            'gets the tools and molds, Manufacturing Engineer the equipment, APQP the gauges, ' +
+            'Development the part design.',
         },
         {
           points: [
@@ -83,7 +83,7 @@ export const engineeringChapter: ContentChapter = {
           points: [
             ['"Yes"', 'opens "Remark": what has to be done. That line seeds your costing.'],
             ['"External modification (supplier)"', 'expects an RFQ to the supplier in your bucket. Reported, not enforced.'],
-            ['"Rest → No"', 'sets only the rows you have not answered to No. Reviewers see how many came from it ("{n} × No ({b} set via Rest → No)"). Use it for rows you really checked.'],
+            ['"Rest to No"', 'sets only the rows you have not answered to No. Reviewers see how many came from it ("{n} × No ({b} set via Rest to No)"). Use it for rows you really checked.'],
             ['"+ Own item"', 'adds a row the list does not cover. It counts as Yes.'],
           ],
         },
@@ -97,7 +97,7 @@ export const engineeringChapter: ContentChapter = {
             ],
           },
         },
-        { shot: 'eng-checklist', alt: '"Impacted areas" with "8 of 13 answered", one Yes row with its remark, and "Rest → No".' },
+        { shot: 'eng-checklist', alt: '"Impacted areas" with "8 of 13 answered", one Yes row with its remark, and "Rest to No".' },
       ],
     },
     {
@@ -106,15 +106,16 @@ export const engineeringChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'If a row worries you, press "⚑ Flag risk" on it. Pick the risk type, rate it 1 to 3 ' +
+            'If a Yes row worries you, press "⚑ Flag risk" on it. Pick the risk type, rate it 1 to 3 ' +
             '(3 = highest risk) and describe it. The row then lists its open risks and jumps to ' +
-            'the risk card.',
+            'the risk card. Only a Yes row carries the button: a worry about a No row goes in with ' +
+            '"+ Risk not on the checklist".',
         },
         {
           points: [
             ['Risks never block your submit.', 'You submit your verdict with your open risks.'],
-            ['Severity 3 reaches the customer.', 'Sales sees it on the offer and decides how to state or price it.'],
-            ['A risk on no row:', '"+ Risk not on the checklist" in the risk panel.'],
+            ['Severity 3 is flagged to Sales.', 'Every risk starts hidden on the offer. Sales decides whether the customer reads it or it is priced, and the offer warns while a severity-3 risk is hidden.'],
+            ['A risk on no row, or on a No row:', '"+ Risk not on the checklist" in the risk panel.'],
             ['Raised by mistake:', '"Delete (added by mistake)", only yours, only while nothing hangs off it. Otherwise close it as resolved.'],
           ],
         },
@@ -212,7 +213,8 @@ export const engineeringChapter: ContentChapter = {
             'In validation your department answers its own checks on the "Release" tab, for ' +
             'example "Tool sampled", "Part measured", "Measured cycle time", "Part weight ' +
             'validated", "Packaging validated with the changed part". "Pass", or "Fail" with what ' +
-            'is not in order. A fail without a reason is not a check.',
+            'is not in order. A fail without a reason is not a check. "Measured cycle time" and ' +
+            '"Part weight validated" pass only with the measured value entered.',
         },
         {
           p:
@@ -281,10 +283,10 @@ export const engineeringChapter: ContentChapter = {
           table: {
             head: ['Route', 'Pick it when'],
             rows: [
-              ['"Full ECR"', 'The index changes the part in a way that needs the full process. Suggested for series parts and official data.'],
-              ['"Attach to an open change"', 'A change on the same part is already running and this index belongs to it.'],
-              ['"Engineering review"', 'Probably no impact, but the serving departments should say so. Suggested for E1 and E2 data.'],
-              ['"Administrative"', 'Nothing changes in content: title block, a re-upload. The index goes live now ("Activate now").'],
+              ['"Full ECR"', 'The index changes the part in a way that needs the full process. Suggested for official data and for every index on a series part.'],
+              ['"Attach to an open change"', 'A change in the same project is already running, not yet past implementation, and this index belongs to it.'],
+              ['"Engineering review"', 'Probably no impact, but the serving departments should say so. Suggested for E-level (review) data on a part not yet in series.'],
+              ['"Administrative"', 'Nothing changes in content: title block, a re-upload. The index goes live now ("Activate now"). Suggested for the very first data on an RFQ part.'],
             ],
           },
         },
@@ -296,9 +298,11 @@ export const engineeringChapter: ContentChapter = {
         { h3: 'Engineering review' },
         {
           p:
-            'On the review you press "Lock the impact". The departments serving the part answer ' +
-            '"No impact" or "Impact" with a note. All "No impact": the index goes live and the ' +
-            'review closes. Any impact: "Escalate to a full ECR".',
+            'On the review, "Lock the impact" takes you to "Impacted", where you lock the set with ' +
+            '"Confirm impact (Development)". The departments serving the part then answer "No ' +
+            'impact", or "Impact" with a note (the note is required only for "Impact"). All "No ' +
+            'impact": the index goes live and the review closes. Any impact: "Escalate to a full ' +
+            'ECR".',
         },
         { shot: 'eng-intake-route', alt: 'The "Triage index C of 20-9001-001-0" dialog with the four routes and the "Suggested:" chip.' },
       ],
@@ -310,7 +314,7 @@ export const engineeringChapter: ContentChapter = {
         {
           points: [
             ['A Yes without a remark.', 'It cannot be costed or planned. Say what has to be done.'],
-            ['"Rest → No" to get the list done.', 'Reviewers see how many rows it set. Look at the rows first.'],
+            ['"Rest to No" to get the list done.', 'Reviewers see how many rows it set. Look at the rows first.'],
             ['A costing line without a lead time.', 'The quote plan has no date for your work and the customer gets a wrong timing.'],
             ['Confirming a plan you did not read.', 'Your confirmation is what "Validate timing" relies on.'],
             ['A failed check without a reason.', 'The owner of the fix cannot start.'],
@@ -353,7 +357,7 @@ export const engineeringTasks: PracticeTaskSpec[] = [
       'needed (say what), nothing else on the list is affected. The change is feasible. ' +
       'Submit it.',
     why:
-      'A department that has not submitted holds the whole change in assessment. "Rest → No" ' +
+      'A department that has not submitted holds the whole change in assessment. "Rest to No" ' +
       'answers the untouched rows in one step, and reviewers can see it was used.',
     fixture: ['CR-TRAIN-0002 in assessment (exists today).'],
     pass: [
@@ -370,20 +374,22 @@ export const engineeringTasks: PracticeTaskSpec[] = [
     screen: { kind: 'costing', change: 'CR-TRAIN-0006', department: 'Tool Engineer' },
     brief:
       'The insert for CR-TRAIN-0006 is made outside. Toolmaker A quotes 18,500 in 35 days, ' +
-      'shipping included. Toolmaker B quotes 16,900 in 49 days plus 400 shipping. The release ' +
-      'deadline is tight, so you recommend A. Enter the line with both quotes and their documents.',
+      'shipping included. Toolmaker B quotes 16,900 in 49 days plus 400 shipping. The ' +
+      'customer\'s timing is tight, so you recommend A. Enter the line with both quotes and ' +
+      'their documents.',
     why:
       'Sales chooses the vendor, but from your line: both prices, both lead times, your ' +
       'recommendation. The lead time is what the quote plan is built from.',
     fixture: [
       'CR-TRAIN-0006 in costing, Tool Engineer costing input open, a tool change category available.',
+      'Trainee acts as a Tool Engineer member.',
       'Two sample PDF files to upload as quote documents.',
     ],
     pass: [
       { assert: 'a Tool Engineer position with pricing quote exists', hint: 'There is no "External · vendor quote" line yet.' },
       { assert: 'it has two full (not partial) offers with price and lead time', hint: 'Both toolmakers belong on the line as alternatives, each with its price and lead time.' },
       { assert: 'offer B has shipping 400 separate, offer A shipping included', hint: 'Check the shipping of each offer.' },
-      { assert: 'the favourite is offer A', hint: 'Star toolmaker A: it is your recommendation because of the deadline.' },
+      { assert: 'the favourite is offer A', hint: 'Star toolmaker A: it is your recommendation because of the tight timing.' },
       { assert: 'each offer carries a quote document', hint: 'A quote without its document cannot be checked. Attach both.' },
     ],
   },
@@ -392,9 +398,9 @@ export const engineeringTasks: PracticeTaskSpec[] = [
     role: 'engineering',
     title: 'Contain an issue and record its cause',
     status: 'needs-sandbox',
-    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0004' },
+    screen: { kind: 'validation-issue', change: 'CR-TRAIN-0009' },
     brief:
-      'VI-1 on CR-TRAIN-0004 is yours as Tool Engineer: the clip tower breaks at the first ' +
+      'VI-1 on CR-TRAIN-0009 is yours as Tool Engineer: the clip tower breaks at the first ' +
       'sampling, and production is blocked. You have put the new parts on hold and the line ' +
       'runs the old state from the bank. The cause is a sharp corner in the new insert, ' +
       'confirmed by the section cut. Record both.',
@@ -402,13 +408,12 @@ export const engineeringTasks: PracticeTaskSpec[] = [
       'At "Blocks production" nothing can be decided until the parts are contained, and no ' +
       'fix route is decided without a cause. Recorded, they are the start of the fix.',
     fixture: [
-      'CR-TRAIN-0004 in_validation, VI-1 severity 3, owner Tool Engineer, raised by another user, not contained.',
+      'CR-TRAIN-0009 in_validation, VI-1 severity 3, owner Tool Engineer, raised by another user, not contained.',
       'Trainee acts as a Tool Engineer member.',
     ],
     pass: [
       { assert: 'VI-1 containment has at least 15 characters', hint: 'The containment is not recorded yet. Say what was held and how the line runs.' },
       { assert: 'VI-1 root_cause has at least 15 characters', hint: 'The root cause is not recorded yet.' },
-      { assert: 'VI-1 route is still empty', hint: 'The route is PM\'s or the lead\'s decision, not the owner department\'s.' },
     ],
   },
 ]

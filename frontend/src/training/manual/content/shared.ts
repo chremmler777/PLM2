@@ -48,7 +48,6 @@ export const basicsChapter: ContentChapter = {
             ['Address:', APP_ADDRESS],
             ['Sign in', 'with your KTX account. Nothing to install.'],
             ['Your name is the record.', 'Everything you enter is stamped with your account. Never work in a colleague\'s session.'],
-            ['Version number', 'next to the logo. Quote it when you report a problem.'],
           ],
         },
         { shot: 'basics-sidebar', alt: 'The sidebar with "Changes", "Process Flow", "P&L", "My Tasks" and "Training" visible.' },
@@ -195,9 +194,11 @@ export const flowChapter: ContentChapter = {
         },
         {
           p:
-            'Before PM can take over, the capture needs a description, at least one attachment and, ' +
-            'for a customer change, the quote deadline. The form says what is missing: "Not ready ' +
-            'to hand over to scoping yet, missing:".',
+            'Before PM can take over, the capture needs a description, at least one attachment, a ' +
+            'change lead and, for a customer change, the quote deadline. The form says what is ' +
+            'missing: "Not ready to hand over to scoping yet, missing:". The check is soft: an ' +
+            'urgent request can be handed over on an approved deviation, with the reason on the ' +
+            'record.',
         },
       ],
     },
@@ -236,7 +237,7 @@ export const flowChapter: ContentChapter = {
         {
           points: [
             ['The checklist:', 'every row Yes or No. A Yes says what has to be done.'],
-            ['Risks:', 'flagged on the row they come from, typed, rated 1 to 3. A risk never blocks the submit.'],
+            ['Risks:', 'flagged on the Yes row they come from, or as a risk not on the checklist, typed, rated 1 to 3. A risk never blocks the submit.'],
             ['The verdict:', '"Feasible", "Feasible with conditions" or "Not feasible". "Not feasible" needs the change PPT.'],
           ],
         },
@@ -265,7 +266,8 @@ export const flowChapter: ContentChapter = {
         },
         {
           p:
-            'The customer accepts a sent, unexpired version. With the "PM sign-off" and the ' +
+            'The customer accepts a sent version; an expired one only with an "Override reason". ' +
+            'With the "PM sign-off" and the ' +
             '"Quality sign-off" from two different people, the change is approved. The release ' +
             'deadline is set at acceptance.',
         },
@@ -319,7 +321,7 @@ export const flowChapter: ContentChapter = {
         },
         {
           steps: [
-            { title: 'Raise', body: 'On the failed check, "Raise issue". It gets a number (VI-1), a category, a severity and an owner department.' },
+            { title: 'Raise', body: 'On the failed check, "Raise issue": a member of a department working on the change, PM or the lead. It gets a number (VI-1), a category, a severity and an owner department.' },
             { title: 'Contain', body: 'The owner department records the immediate action. Required first when the severity is "Blocks production".' },
             { title: 'Root cause', body: 'The owner department records why it failed.' },
             { title: 'Route', body: 'PM or the lead decides the route, with a reason. Four eyes: not the person who raised it.' },
@@ -345,11 +347,11 @@ export const flowChapter: ContentChapter = {
             rows: [
               ['"L1 Department"', 'The owner department and PM. Every issue starts here.'],
               ['"L2 Project"', 'PM, the lead and Sales. Automatic on "Blocks production", an overdue fix action, a recovery past the baseline, or no route after two working days.'],
-              ['"L3 Management and customer"', 'Management is notified and Sales informs the customer. Automatic when the recovery ends after the release deadline, or an L2 is not acknowledged in two working days.'],
+              ['"L3 Management and customer"', 'Management is notified and Sales informs the customer. Automatic when the recovery ends after the release deadline, an L2 is not acknowledged in two working days, or the customer requires a fix instead of a concession.'],
             ],
           },
         },
-        { callout: 'No change is released while a validation issue is open.', tone: 'rule' },
+        { callout: 'No change is released while a validation issue is open, unless an approved deviation overrides the release check.', tone: 'rule' },
         { shot: 'flow-issue-card', alt: 'A validation issue card VI-1 with its stepper, severity chip, "L2" badge and one primary button.' },
       ],
     },

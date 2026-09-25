@@ -66,7 +66,8 @@ export type TrainingRole =
  */
 export type ScreenSpec =
   | { kind: 'start-change' }
-  | { kind: 'change-status'; change: string }
+  /** Same shape as tasks.ts: the sandbox change id (SEED in ../../sandbox/state). */
+  | { kind: 'change-status'; changeId: number }
   | { kind: 'assessment'; department: string }
   | { kind: 'scoping'; change: string }
   | { kind: 'costing'; change: string; department: string }

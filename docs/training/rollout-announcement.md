@@ -15,6 +15,10 @@ next to this file as `rollout-announcement-<yyyy-mm-dd>.md`.
 | Contact for access requests | the PLM2 administrator |
 | Recipient list | every member of the eleven departments below, plus their managers |
 
+The eleven departments: Sales, Project Management, Development, Tool
+Engineer, Manufacturing Engineer, Process Engineer, APQP, Packaging Engineer,
+Scheduling, Quality, Finance.
+
 In the text these appear as `[go-live date]`, `[session dates]` and
 `[access contact]`. Nothing else in the text needs editing.
 
@@ -113,5 +117,4 @@ Send the name, email and department to [access contact].
 
 The ECR screens are new and will have rough edges. If something behaves
 oddly, looks wrong or gets in your way, tell us instead of working around it.
-Include the change number, what you were doing, and the version number shown
-next to the logo.
+Include the change number, what you were doing, and the time it happened.

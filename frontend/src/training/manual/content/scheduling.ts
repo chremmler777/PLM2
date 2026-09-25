@@ -53,7 +53,7 @@ export const schedulingChapter: ContentChapter = {
           points: [
             ['Every row gets Yes or No.', 'A Yes says what has to be done. That text becomes your costing line.'],
             ['"Cycle time change" is yours to judge.', 'A longer cycle is lost press capacity. Say how many shots and which press.'],
-            ['"Rest → No"', 'fills only the rows you have not answered. Use it after you looked at them, not instead.'],
+            ['"Rest to No"', 'fills only the rows you have not answered. Use it after you looked at them, not instead.'],
           ],
         },
         { shot: 'sch-assessment-checklist', alt: 'The Scheduling bucket on the Assessments tab with "Cycle time change" answered Yes and a remark.' },
@@ -71,14 +71,17 @@ export const schedulingChapter: ContentChapter = {
         {
           p:
             'On the "Timing" tab the "Bank build plan" card asks: "How does the change reach ' +
-            'the line?" You choose one of two modes.',
+            'the line?" There are two modes. Often the accepted offer has already set it: when ' +
+            'nobody decided yet, acceptance takes the offer\'s changeover, "Running change", or ' +
+            '"Customer pays scrap" as "Planned scrap" at the offered scrap quantity times the unit ' +
+            'price. Check what the card shows and correct it while the change is approved.',
         },
         {
           table: {
             head: ['Mode', 'What it means'],
             rows: [
               ['"Running change"', 'Switch over in running production. No scrap planned.'],
-              ['"Planned scrap"', 'Remaining stock is scrapped and the bank is rebuilt. Needs a "Scrap quote price": the customer bears the scrap cost as an additional quote.'],
+              ['"Planned scrap"', 'Remaining stock is scrapped and the bank is rebuilt. Needs a "Scrap quote price": the total the customer pays for the scrapped stock, as an additional quote.'],
             ],
           },
         },
@@ -91,9 +94,10 @@ export const schedulingChapter: ContentChapter = {
         { h3: 'The bank build block in the plan' },
         {
           p:
-            'Sales may already have drawn a "Bank build (idea)" block in the quote plan: a dashed ' +
-            'bar that ends where the first tool downtime starts. An idea is a proposal. It does ' +
-            'not push committed work and is not on the critical path.',
+            'When the quote plan has a tool downtime, it adds a "Bank build (idea)" block on its ' +
+            'own: a dashed bar that ends where the first tool downtime starts. Sales may move or ' +
+            'redraw it. An idea is a proposal. It does not push committed work and is not on the ' +
+            'critical path.',
         },
         {
           steps: [
@@ -116,7 +120,7 @@ export const schedulingChapter: ContentChapter = {
         },
         {
           points: [
-            ['Quote plan', 'is the rough timing Sales shows the customer. Editable from costing until the offer is accepted.'],
+            ['Quote plan', 'is the rough timing Sales shows the customer. Editable from costing until the change is approved.'],
             ['Detailed plan', 'starts as a copy of the quote plan when the change is approved: "Create detailed plan from quote plan". You refine it with the teams.'],
             ['Team confirmation', 'Every responsible team, Scheduling included, answers "Confirm timing" or "Raise concern".'],
             ['"Validate timing"', 'sets the baseline. PM, Scheduling or Sales press it once every team has confirmed.'],
@@ -142,7 +146,8 @@ export const schedulingChapter: ContentChapter = {
           p:
             'A change engineered by the mother plant has no assessment and no offer. It goes from ' +
             'scoping straight to approved, with the mother plant\'s SOP as the release deadline. ' +
-            'Your bank build planning is the first real work on it. Their MS Project file can be ' +
+            'Your bank build planning is the first real work on it. Their MS Project file, if ' +
+            'they sent one at the start, seeds the detailed plan at approval. A later file is ' +
             'loaded with "Import MS Project".',
         },
       ],
@@ -194,19 +199,20 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     brief:
       'CR-TRAIN-0003 is approved. The mold goes to the toolmaker for three weeks and the ' +
       'customer will not take a supply gap. Old parts at the old index cannot be sold after ' +
-      'the change. Set the bank build plan: the remaining stock is scrapped, the customer ' +
-      'pays 2.40 per part, and the note says when the bank is built.',
+      'the change. Set the bank build plan: the remaining stock is scrapped, and the scrap ' +
+      'quote to the customer is 4,800.00 (2,000 parts at 2.40). The note says when the bank ' +
+      'is built.',
     why:
       'The bank build mode decides whether the customer pays scrap and what the offer and ' +
       'the plan must carry. Undecided, the plan cannot go to the customer.',
     fixture: [
-      'CR-TRAIN-0003, customer change, status approved, no bank-build mode set.',
+      'CR-TRAIN-0003, customer change, status approved, no bank-build mode set: the accepted offer carried no changeover decision to take over ("Customer pays scrap" without a scrap price).',
       'Detailed plan seeded with a "Tool downtime" block of 21 days.',
       'Trainee acts as a Scheduling member.',
     ],
     pass: [
       { assert: 'change.bank_build_mode is planned_scrap', hint: 'The mode is still not "Planned scrap". Old stock is scrapped here.' },
-      { assert: 'the scrap quote price is greater than 0', hint: '"Planned scrap" needs the price per part the customer pays.' },
+      { assert: 'change.scrap_quote_price is 4800.00', hint: 'The "Scrap quote price" is the total the customer pays for the scrapped stock: 2,000 parts at 2.40.' },
       { assert: 'the plan note has at least 10 characters', hint: 'The plan note is empty or too short. Say when the bank is built and how long it covers.' },
     ],
   },
@@ -215,17 +221,18 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     role: 'scheduling',
     title: 'Turn the bank build idea into a real block',
     status: 'needs-sandbox',
-    screen: { kind: 'timing', change: 'CR-TRAIN-0003' },
+    screen: { kind: 'timing', change: 'CR-TRAIN-0016' },
     brief:
-      'The detailed plan still holds Sales\' "Bank build (idea)". The bank really is built, ' +
+      'The detailed plan of CR-TRAIN-0016 still holds the "Bank build (idea)". The bank really is built, ' +
       'by Scheduling, in the ten days before the tool leaves. Make the idea a real block ' +
       'that ends no later than the tool downtime starts.',
     why:
       'An idea block stops "Validate timing". A bank that ends after the downtime starts ' +
       'is a supply gap.',
     fixture: [
-      'CR-TRAIN-0003 approved, detailed plan with a "Tool downtime" block and a "Bank build (idea)" block that ends 3 days after the downtime starts.',
+      'CR-TRAIN-0016 approved, detailed plan with a "Tool downtime" block and a "Bank build (idea)" block that ends 3 days after the downtime starts.',
       'No baseline yet.',
+      'Trainee acts as a Scheduling member.',
     ],
     pass: [
       { assert: 'no block in the detailed plan has is_idea true', hint: 'The plan still has an idea block. Untick "Idea block" or delete the idea.' },
@@ -238,15 +245,16 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     role: 'scheduling',
     title: 'Raise a concern about the timing',
     status: 'needs-sandbox',
-    screen: { kind: 'timing', change: 'CR-TRAIN-0003' },
+    screen: { kind: 'timing', change: 'CR-TRAIN-0017' },
     brief:
-      'The detailed plan puts the tool downtime in the plant shutdown week, when no bank can ' +
+      'The detailed plan of CR-TRAIN-0017 puts the tool downtime in the plant shutdown week, when no bank can ' +
       'be shipped. Do not confirm the timing. Tell the team what does not work and what would.',
     why:
       'A confirmation is a promise. A concern with a reason is what lets PM fix the plan ' +
       'before the baseline is set, when it is still free to change.',
     fixture: [
-      'CR-TRAIN-0003 approved, detailed plan at plan_revision 2, no Scheduling feedback yet.',
+      'CR-TRAIN-0017 approved, detailed plan at plan_revision 2, no Scheduling feedback yet.',
+      'Trainee acts as a Scheduling member.',
     ],
     pass: [
       { assert: 'the latest Scheduling feedback is verdict concern at the current plan revision', hint: 'Scheduling has not raised a concern on this plan yet.' },
@@ -258,15 +266,15 @@ export const schedulingTasks: PracticeTaskSpec[] = [
     role: 'scheduling',
     title: 'Tick your release checklist rows',
     status: 'needs-sandbox',
-    screen: { kind: 'release', change: 'CR-TRAIN-0004' },
+    screen: { kind: 'release', change: 'CR-TRAIN-0011' },
     brief:
-      'CR-TRAIN-0004 is in validation. The new routing is live in ERP. The bank was consumed ' +
+      'CR-TRAIN-0011 is in validation. The new routing is live in ERP. The bank was consumed ' +
       'as planned. Answer both Scheduling rows of the release checklist.',
     why:
       'Release waits for every row. An old part left in stock at the old index is shipped by ' +
       'somebody who did not know.',
     fixture: [
-      'CR-TRAIN-0004 in_validation, release checks seeded, all open.',
+      'CR-TRAIN-0011 in_validation, release checks seeded, all open.',
       'Trainee acts as a Scheduling member.',
     ],
     pass: [

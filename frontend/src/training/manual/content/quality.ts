@@ -17,13 +17,13 @@ export const qualityChapter: ContentChapter = {
         {
           lede:
             'You are the second pair of eyes. No customer change is approved without a Quality ' +
-            'sign-off, and you see the full record of every change.',
+            'sign-off, and you see the full record of every change, prices excepted.',
         },
         {
           table: {
             head: ['Where', 'What you do'],
             rows: [
-              ['Quoted', 'Give the "Quality sign-off" once the customer accepted.'],
+              ['Quoted', 'Give the "Quality sign-off". The cockpit asks for it once the customer accepted.'],
               ['Any stage', 'Read the change on "D1" and "Audit" in the Governance group.'],
               ['Assessment', 'Only if the scoping meeting routed Quality. Then you answer the checklist like every department.'],
               ['Validation', 'Watch the validation issues and the release checklist. Add lessons learned.'],
@@ -39,13 +39,15 @@ export const qualityChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'When Sales records "Customer accepted", the "Offer" tab shows two buttons: "PM sign-off" ' +
-            'and "Quality sign-off". The cockpit\'s "Next step" says "Sign off (PM and Quality)". ' +
-            'Approval needs the customer\'s acceptance and both sign-offs.',
+            'While the change is "Quoted", the "Offer" tab shows two buttons: "PM sign-off" and ' +
+            '"Quality sign-off". Once Sales records "Customer accepted", the cockpit\'s "Next step" ' +
+            'says "Sign off (PM and Quality)". Approval needs the customer\'s acceptance and both ' +
+            'sign-offs.',
         },
         {
           points: [
-            ['What you confirm:', 'the accepted offer covers the scope, the open risks are stated, and nothing on the record says the change should not go ahead.'],
+            ['What you confirm:', 'the process record. The customer\'s acceptance is recorded, the risks are stated, the concerns are settled, and nothing in the audit says the change should not go ahead.'],
+            ['You do not see prices.', 'Offer prices are shown to Sales, Project Management, the change lead and admins. The "Offer" tab shows you the sign-off without the figures, and money is blanked in the audit and its CSV.'],
             ['Four eyes:', '"PM and Quality sign-off must be different users". If you signed as PM, somebody else from Quality signs.'],
             ['Only Quality members', '(or an admin) see the Quality sign-off button.'],
           ],
@@ -89,7 +91,7 @@ export const qualityChapter: ContentChapter = {
         {
           points: [
             ['"Dimensional risk", "Visual risk"', 'are usually the rows Quality has most to say on. A Yes says what has to be checked.'],
-            ['Flag a risk on the row', 'with "⚑ Flag risk", type and rating 1 to 3. Severity 3 reaches the customer through Sales.'],
+            ['Flag a risk on a Yes row', 'with "⚑ Flag risk", type and rating 1 to 3. A worry about a No row goes in with "+ Risk not on the checklist". Every risk starts hidden on the offer; Sales decides whether the customer reads it, and the offer warns while a severity-3 risk is hidden.'],
             ['Submit', 'with "Submit assessment". A risk never blocks it.'],
           ],
         },
@@ -101,7 +103,8 @@ export const qualityChapter: ContentChapter = {
       blocks: [
         {
           p:
-            'When a check fails it becomes a validation issue (VI-1, VI-2, ...). The owner ' +
+            'When a check fails, a member of a department working on the change, PM or the lead ' +
+            'presses "Raise issue" and it becomes a validation issue (VI-1, VI-2 and on). The owner ' +
             'department contains it and finds the cause, PM or the lead decides the route, the ' +
             'check is answered again. Release is refused while any issue is open.',
         },
@@ -162,7 +165,7 @@ export const qualityChapter: ContentChapter = {
       blocks: [
         {
           points: [
-            ['Signing off without reading the offer.', 'The sign-off says the approved scope is the one the customer accepted.'],
+            ['Signing off without reading the record.', 'The sign-off says the acceptance is recorded, the risks are stated and nothing on the record argues against it.'],
             ['Recording attendance for a session that has not happened.', 'The record says somebody was trained who was not.'],
             ['Accepting an "N.a." without a real note.', 'A release checklist row that does not apply still has to say why.'],
             ['Publishing a new version mid-rollout.', 'Everybody in that role is asked to re-take the check at once. Time it.'],
@@ -179,15 +182,15 @@ export const qualityTasks: PracticeTaskSpec[] = [
     role: 'quality',
     title: 'Give the Quality sign-off',
     status: 'needs-sandbox',
-    screen: { kind: 'offer', change: 'CR-TRAIN-0007' },
+    screen: { kind: 'offer', change: 'CR-TRAIN-0015' },
     brief:
-      'The customer accepted offer v2 of CR-TRAIN-0007 and the PM has signed off. Check that ' +
-      'the accepted version is the one that is valid, then give the Quality sign-off.',
+      'The customer accepted offer v2 of CR-TRAIN-0015 and the PM has signed off. Check the ' +
+      'change\'s risks and history, then give the Quality sign-off.',
     why:
       'No customer change is approved without two different people saying yes. Yours is the ' +
       'second.',
     fixture: [
-      'CR-TRAIN-0007 quoted, offer v2 accepted, customer_response accepted, pm_signed_by another user.',
+      'CR-TRAIN-0015 quoted, offer v2 accepted, customer_response accepted, pm_signed_by another user.',
       'Trainee acts as a Quality member.',
     ],
     pass: [
@@ -208,8 +211,9 @@ export const qualityTasks: PracticeTaskSpec[] = [
       'Answer the row "Dimensional risk" with what has to be checked, and flag the risk on ' +
       'that row at the highest rating.',
     why:
-      'A risk named at assessment becomes a check in the plan, and a severity-3 risk reaches ' +
-      'the customer on the offer. A risk nobody wrote down becomes a complaint.',
+      'A risk named at assessment becomes a check in the plan, and a severity-3 risk is one ' +
+      'Sales has to decide on before the offer goes out. A risk nobody wrote down becomes a ' +
+      'complaint.',
     fixture: [
       'CR-TRAIN-0002 in assessment with a Quality row (exists today).',
       'Risk types timing, quality, cost (exist today).',
@@ -225,21 +229,23 @@ export const qualityTasks: PracticeTaskSpec[] = [
     role: 'quality',
     title: 'Record a lesson learned',
     status: 'needs-sandbox',
-    screen: { kind: 'release', change: 'CR-TRAIN-0004' },
+    screen: { kind: 'release', change: 'CR-TRAIN-0012' },
     brief:
-      'On CR-TRAIN-0004 the first sampling failed because nobody checked the insert radius ' +
-      'against the drawing before it was cut. Record the lesson so the next change checks it.',
+      'On CR-TRAIN-0012 the first sampling failed because nobody checked the insert radius ' +
+      'against the drawing before it was cut. Record the lesson, as a tooling problem, so the ' +
+      'next change checks it.',
     why:
       'A lesson that stays in a meeting is learned once. In the register, linked to the change, ' +
       'it is found by the next team that touches the same tool.',
     fixture: [
-      'CR-TRAIN-0004 in_validation, no lessons yet.',
+      'CR-TRAIN-0012 in_validation, no lessons yet.',
       'Trainee acts as a Quality member.',
     ],
     pass: [
-      { assert: 'a lesson linked to CR-TRAIN-0004 exists with title and description', hint: 'No lesson is recorded on this change yet.' },
+      { assert: 'a lesson linked to CR-TRAIN-0012 exists with title and description', hint: 'No lesson is recorded on this change yet.' },
       { assert: 'its recommendation has at least 10 characters', hint: 'Say what the next change should do differently.' },
-      { assert: 'its type is problem', hint: 'This lesson comes from something that went wrong: type "Problem".' },
+      { assert: 'its category is tooling', hint: 'The insert radius is a tooling matter: category "Tooling".' },
+      { assert: 'its lesson_type is problem (the form\'s default, so this only catches a change away from it)', hint: 'This lesson comes from something that went wrong: type "Problem".' },
     ],
   },
 ]

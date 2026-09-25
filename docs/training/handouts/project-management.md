@@ -14,7 +14,7 @@ owner; you make sure nothing waits without a reason.
 | Scoping | Impacted set ("Apply selection"), Development confirms; "+ Record a meeting" with RASIC letters and cost carrier; decide | "Impacted", "Scoping" |
 | In Assessment | Chase open departments, "Add a department to the assessment" if one was forgotten, "Close assessment → Costing" | "Assessments", "Blocked by" |
 | Costing | Check every department priced its part, "Close costing" | "Costing", "Cost summary" |
-| Quoted | "PM sign-off" after "Customer accepted" | "Offer" |
+| Quoted | "PM sign-off" (the cockpit asks once "Customer accepted" is recorded) | "Offer" |
 | Timing | "Create detailed plan from quote plan", teams confirm, "Validate timing" | "Timing" |
 | Implementing | "Lock" or "Escalate to customer" each deviation | "Deviations from the baseline" |
 | Validation | "Decide the route" of each validation issue, "Complete lessons step", "Release change", "Close change" | "Release" |
@@ -25,7 +25,7 @@ owner; you make sure nothing waits without a reason.
 - **Open questions and cancel votes block "Proceed".** The asker or you settle them.
 - **Quote deadline moves only with "Push back"** and a reason.
 - **A plan edit before validation makes every confirmation stale.**
-- **After the baseline every date move is a deviation.** Decide each one.
+- **After the baseline every date move is a deviation.** Decide each one: the change cannot be released while one is open.
 - **Four eyes:** you never decide the route of an issue you raised yourself. PM and Quality sign-offs are two different people.
 - **Name the project team** (one responsible per department) on each project page.
 
