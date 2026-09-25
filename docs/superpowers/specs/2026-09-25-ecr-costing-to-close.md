@@ -1103,3 +1103,165 @@ Same versioned sheet (one publish covers all parts):
 - UI: cost sheet page tabs "Positions", "Machines", "Sampling",
   "Overheads", each with the version's validity; effective rate column
   on Positions.
+
+## 15b. Backend notes (cost sheet phase 1, 2026-09-25)
+Built: the standalone module. Costing, P&L and bookings are NOT rewired yet
+(phase 2); they still read `department_rate` except
+`/changes/reference/rates`, which now serves the current cost sheet version.
+
+**Files**: `app/models/cost_sheet.py`, `app/services/cost_sheet_service.py`,
+`app/api/v1/cost_sheet.py`, migration `092_cost_sheet.py`,
+`tests/test_cost_sheet.py`; frontend `pages/CostSheetPage.tsx`,
+`components/costSheet/*`, `api/costSheet.ts`, `types/costSheet.ts`, route
+`/cost-sheet`, sidebar Setup > "Cost sheet".
+
+**Model** (as §15/§15a, plus): `cost_sheet_versions.based_on_version_id`
+(draft copied from), `cost_sheet_rates.min_factor` (legacy factor, kept so
+reference/rates keeps its shape), sampling rows carry `labour_department_id`
++ `labour_position` (whose effective rate prices the labour hours),
+`cost_sheet_machine_classes` (per org, soft delete via is_active), and a
+generic `org_settings` (organization_id, key, value) holding
+`cost_sheet_review_months` (default 12). Overhead `percent` values are
+percentages (25 = +25 %). Money columns are `Numeric(asdecimal=False)`.
+
+**Migration 092**: creates the tables, inserts department "Finance"
+(flow_type info) if missing, and per organization with department_rate rows
+creates version 1, published, valid_from = earliest effective_from, one
+rate per department x plant (latest effective_from wins; duplicates in the
+old table collapse), currency EUR. `department_rate` is left in place and
+the startup seed in `main.py` still writes it (phase 2: stop seeding it).
+
+**Rules**: one open draft per org; a new draft copies the latest published
+version (or `based_on_version_id`); publish needs >= 1 position rate and a
+valid_from strictly after the latest published one; published = frozen
+(409 on edit). Validity: a version runs until the day before the next
+published valid_from. Row identity within a version (unique, case-blind):
+rates dept+position+plant, machines plant+class+ref, sampling plant+class,
+overheads plant+dept. Stale = latest published older than review months,
+measured from max(valid_from, published_at); no published version is stale.
+
+**Rights**: read everyone in the org; write (drafts, rows, publish, machine
+classes, settings) = admin not acting as, or effective department Finance
+(`cost_sheet_service.can_edit`, honours X-Acts-As-Department).
+
+**API** (`/api/v1/cost-sheet`): `GET ""` overview (versions with validity,
+current/draft ids, can_edit, stale, departments, plants, machine classes);
+`GET /versions/{id}` (rates with effective_rate + overhead, sampling with
+computed_price + breakdown); `GET /versions/{id}/diff?against=`;
+`GET /versions/{id}/export?format=xlsx|csv&section=Positions|Machines|Sampling|Overheads`;
+`POST /drafts`; `PATCH|DELETE /versions/{id}` (draft); `POST
+/versions/{id}/publish {valid_from, note}`; `POST|PATCH|DELETE
+/versions/{id}/{rates|machines|sampling|overheads}[/{row_id}]`;
+`GET|POST|PATCH|DELETE /machine-classes`; `GET|PUT /settings
+{review_months}`; lookups `GET /lookup/rate|machine|sampling`.
+
+**Functions phase 2 calls** (all in `app.services.cost_sheet_service`, all
+async, org-scoped, `on_date` default today, return `RateHit | None`; a hit
+has `rate`, `currency`, `version_id`, `version`, `row_id`, `match`,
+`base_rate`, `overhead`, `breakdown`, `as_dict()`; store `rate`,
+`version_id` (and `version`) as the costing line's snapshot):
+- `rate_for(db, org_id, department_id, position=None, plant_id=None, on_date=None)`:
+  base position rate, most specific match, no overhead.
+- `effective_labour_rate(db, org_id, department_id, position=None, plant_id=None, on_date=None)`:
+  the rate own_time costing lines and P&L actual hours use (overhead applied).
+- `machine_rate_for(db, org_id, machine_class, plant_id=None, on_date=None, machine_ref=None)`:
+  `machine_time` lines (hours x rate).
+- `sampling_price_for(db, org_id, machine_class, plant_id=None, on_date=None, run_hours=None)`:
+  price of one trial (`sampling` lines: trials x rate; Gantt estimate).
+- `version_on(db, org_id, on_date)` / `latest_published(db, org_id)`: for
+  the offer warning "costing used cost sheet v3, current is v4" (compare the
+  stored version_id with `version_on(today).id`).
+- `stale_status(db, org_id)`: banner in costing and the Finance My Tasks item
+  (not built: the My Tasks aggregator is outside this module).
+- `class_for_tonnage(await list_machine_classes(db, org_id), tonnage)`:
+  default a change's `machine_class` from the impacted tool's tonnage.
+- Pure variants on a loaded version (no DB): `rate_in_version`,
+  `machine_rate_in_version`, `sampling_in_version`, for bulk work.
+None means "no row / nothing published": phase 2 should fall back to
+`department_rate` (as reference/rates does) until every org has a version.
+
+## 16. Early stages polish: capture, scoping, assessment (2026-09-25)
+Judge walk (evidence: scratchpad/early/*.png, report kept by the supervisor)
+found 9 P1, 19 P2, 15 P3. Same quality bar as §1-§13. Decisions:
+
+### P1 fixes
+1. Development "Article design update" choices are objects
+   `{value,label_de,label_en}`: type them so, render the label; an error
+   boundary per assessment bucket; checklist answers autosave as a draft per
+   department (local draft + server draft field in details, restored on load).
+2. Later routing stages never activate while the change is in assessment:
+   stage 2/3 rows (commercial: PM/Sales R/A, Development/Tool C) stay
+   dormant until costing, never rebind a bucket away from a submitted row,
+   never produce assessment actions or My Tasks for PM/Sales on physical-part
+   changes. Board/progress read the first stage only.
+3. "Not our responsibility" re-letters only on approval; while pending the
+   row keeps its letter, shows "Declined, awaiting decision", and the
+   workflow does not advance on it.
+4. Transition rights (backend + UI): -> rejected, -> cancelled, ->
+   on_hold, -> scoping (recall), -> costing (close assessment): change lead,
+   PM members, admin only; -> scoping from captured: Sales/PM/lead/admin;
+   Sales may reject at captured. Buttons hidden for everyone else.
+5. Impact set edits: change lead, PM members, admin (Development confirms).
+   Lead picker on the Status card (lead, PM, admin; defaults to the project's
+   PM when a project PM exists, else empty) and "No lead assigned" in
+   Blocked by; kickoff to scoping requires a lead (soft guard).
+6. Assessment next step: while waiting, no primary button: "Waiting on N
+   departments" row; when all first-stage R/A submitted: primary "Close
+   assessment -> Costing" with a confirm dialog listing verdicts and risks.
+7. Rejected -> closed and cancelled are their own end states in the stepper
+   (red end pill, stages not reached greyed, "stopped at <stage>"); deadline
+   chips hidden on rejected/closed/cancelled; Changes list shows "Rejected"
+   / "Cancelled" distinctly.
+8. Not feasible: Blocked by row "<Dept>: not feasible (Change PPT)" and a
+   next step with Reject / Back to scoping / Override with reason (approved
+   transition deviation), each confirmed.
+9. Audit verify: distinguish "chain broken globally at #n" from a break
+   inside this change's own entries; the change's trail filters by entity
+   ids of this change (not by change number text).
+
+### P2 friction (all to do)
+Create dialog collects the kickoff needs (optional quote deadline via
+DateInput, description, file drop) with a "ready to hand over" check and
+Blocked by lists what's missing; confirm dialogs for -> Scoping, Confirm
+impact, Proceed and start assessment, Submit assessment, "Sent to customer,
+close ECR"; human labels everywhere (verdicts, risk types (regression of
+2c2bf18d), change type, priority, part names instead of "Part #id", audit
+values); one date format (lib/format, DateInput for every date field incl.
+meeting date and quote deadline, My Tasks, attachment rows, audit);
+Blocked by covers open cancel votes, pending routing deviations, "waiting on
+Sales answer", no lead, not feasible; cancel-vote settle wording and record
+("settled by PM" vs "withdrawn by author"); impact tree shows served-by
+links (parts <-> tools/gauges), suggestions, pending selection state, and
+warns before clearing Development's lock; question cards name the asker's
+department role; answer/solve controls only for those who may; Flag form
+defaults to the user's own department; assessment risk panel copy fixed;
+"Your actions" refreshes after submit, progress numbers consistent; Packaging
+impacted = Yes shows the packaging-specific questions (layout, type,
+modification); costing does not wait on not-impacted departments; cancel
+dialog states cancellation is final, push-back copy fixed; My Tasks: one
+list, no duplicates for R and A, human kind labels, badge = row count,
+stage column; Changes list: search, "mine", overdue sort, stage owner,
+wrapping fixed, human labels; "Gate Release: NA -> D1" explained or hidden
+when no gates are set, D1 cost carrier box consistent; routing-deviation
+wait text correct when the lead proposed; rejected: primary "Send rejection
+letter"; meeting form resets/collapses after save and carries the last RASIC
+letters after a reopen.
+
+### P3 polish
+Stepper hints, risk chip grammar from saved state, no risk flag on No
+rows, Change PPT drop zone above Submit, one RFQ drop zone, "+1" badge
+explained, dark-theme toasts, Overview description editor state, labelled
+Status card dates, remaining em-dashes, "required-by date" -> "quote
+deadline", attendee list without non-person entries, disabled Flag button
+explains why, settled question "solved by <name>", atomic impacted items on
+create (one request).
+
+### Open questions resolved
+- Cost carrier re-confirmed at the scoping meeting (required field next to
+  RASIC; Proceed blocked until set; flipping it is audited and notifies Sales).
+- Impact edits after `quoted`: reason required, sets `scope_changed_after_quote`,
+  Blocked by row "Offer vN no longer covers the scope: new offer version or
+  approved deviation"; costing reopens only for affected departments.
+- Title: recomposed when the lead item changes when `title_auto` (default
+  on for composed titles); original title kept in the audit; "Make lead" in
+  the Impacted tab.
