@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ProcessMapPage from './ProcessMapPage'
 
@@ -289,5 +289,104 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-rv-released').textContent).toContain('Released and closed')
     expect(lane.textContent).toContain('escalates to a full ECR')
     expect(screen.getByTestId('procmap-detail-intake').textContent).toContain('Development picks the route alone')
+  })
+
+  describe('overview', () => {
+    beforeEach(() => { window.localStorage.clear() })
+    afterEach(() => { vi.restoreAllMocks(); window.localStorage.clear() })
+
+    it('opens on the detailed flow and switches to the overview', () => {
+      wrap()
+      expect(screen.getByTestId('procmap-view-detailed').getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByTestId('procmap-chart')).toBeTruthy()
+      expect(screen.queryByTestId('procmap-overview')).toBeNull()
+      expect(screen.queryByTestId('procmap-print')).toBeNull()
+
+      fireEvent.click(screen.getByTestId('procmap-view-overview'))
+      expect(screen.getByTestId('procmap-view-overview').getAttribute('aria-pressed')).toBe('true')
+      expect(screen.queryByTestId('procmap-chart')).toBeNull()
+      const stages = screen.getByTestId('procmap-overview-stages')
+      const names = Array.from(stages.children).map((li) => (li.textContent ?? '').replace(/\u00AD/g, ''))
+      expect(names).toHaveLength(11)
+      ;['Intake', 'Capture', 'Scoping', 'Assessment', 'Costing', 'Offer / Approval',
+        'Timing', 'Implementation', 'Validation', 'Release', 'Close'].forEach((n, i) => {
+        expect(names[i]).toContain(n)
+      })
+      // Owner, gate and evidence per stage.
+      const scoping = screen.getByTestId('procmap-ov-stage-scoping').textContent ?? ''
+      expect(scoping).toContain('PM convenes')
+      expect(scoping).toContain('kickoff gate')
+      expect(scoping).toContain('meeting record with RASIC + cost carrier')
+      const assessment = screen.getByTestId('procmap-ov-stage-assessment').textContent ?? ''
+      expect(assessment).toContain('HARD impact set locked')
+      expect(screen.getByTestId('procmap-ov-stage-costing').textContent)
+        .toContain('costing lines with rate snapshot')
+      expect(screen.getByTestId('procmap-overview-audit').textContent).toContain('Audit trail on every stage')
+      const lanes = screen.getByTestId('procmap-overview-lanes').textContent ?? ''
+      expect(lanes).toContain('L1 department, L2 project, L3 management')
+      expect(lanes).toContain('Skips assessment, costing, offer')
+      expect(lanes).toContain('Revision intake')
+      expect(screen.getByTestId('procmap-overview').textContent).not.toContain('\u2014')
+    })
+
+    it('remembers the chosen view', () => {
+      const first = wrap()
+      fireEvent.click(screen.getByTestId('procmap-view-overview'))
+      expect(window.localStorage.getItem('plm2.procmap.view')).toBe('overview')
+      first.unmount()
+      wrap()
+      expect(screen.getByTestId('procmap-overview')).toBeTruthy()
+      fireEvent.click(screen.getByTestId('procmap-view-detailed'))
+      expect(window.localStorage.getItem('plm2.procmap.view')).toBe('detailed')
+    })
+
+    it('falls back to the detailed flow when storage throws', () => {
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked') })
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked') })
+      wrap()
+      expect(screen.getByTestId('procmap-chart')).toBeTruthy()
+      // The toggle still works for this visit.
+      fireEvent.click(screen.getByTestId('procmap-view-overview'))
+      expect(screen.getByTestId('procmap-overview')).toBeTruthy()
+    })
+
+    it('jumps from a box to its node in the detailed flow and highlights it', () => {
+      window.localStorage.setItem('plm2.procmap.view', 'overview')
+      const scroll = vi.fn()
+      const original = Element.prototype.scrollIntoView
+      Element.prototype.scrollIntoView = scroll
+      wrap()
+      const box = screen.getByTestId('procmap-ov-stage-assessment')
+      expect(box.getAttribute('href')).toBe('#procmap-node-in_assessment')
+      fireEvent.click(box)
+      const node = screen.getByTestId('procmap-node-in_assessment')
+      expect(node.hasAttribute('data-procmap-flash')).toBe(true)
+      expect(scroll).toHaveBeenCalled()
+      // The jump is a look, not a new preference.
+      expect(window.localStorage.getItem('plm2.procmap.view')).toBe('overview')
+      Element.prototype.scrollIntoView = original
+    })
+
+    it('links every stage and side track to a node that exists in the detailed flow', () => {
+      window.localStorage.setItem('plm2.procmap.view', 'overview')
+      wrap()
+      const links = [
+        ...screen.getByTestId('procmap-overview-stages').querySelectorAll('a'),
+        ...screen.getByTestId('procmap-overview-lanes').querySelectorAll('a'),
+      ].map((a) => a.getAttribute('href')!.slice(1))
+      expect(links).toHaveLength(14)
+      fireEvent.click(screen.getByTestId('procmap-view-detailed'))
+      for (const id of links) expect(screen.getByTestId(id)).toBeTruthy()
+    })
+
+    it('prints the overview from its own button', () => {
+      window.localStorage.setItem('plm2.procmap.view', 'overview')
+      const print = vi.fn()
+      vi.stubGlobal('print', print)
+      wrap()
+      fireEvent.click(screen.getByTestId('procmap-print'))
+      expect(print).toHaveBeenCalledOnce()
+      vi.unstubAllGlobals()
+    })
   })
 })

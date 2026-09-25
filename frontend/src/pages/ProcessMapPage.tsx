@@ -23,6 +23,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { t } from '../i18n/cmLabels'
+import ProcessOverview from '../components/processMap/ProcessOverview'
+import {
+  OVERVIEW_PRINT_CSS, PROCESS_MAP_CSS, readStoredView, storeView, type ProcessView,
+} from '../components/processMap/overviewData'
 
 type BuildState = 'built' | 'in_build' | 'partial' | 'to_build'
 
@@ -1040,6 +1044,23 @@ const ARTIFACTS: { key: string; y: number; lines: string[]; pnl?: string }[] = [
 
 export default function ProcessMapPage() {
   const [expanded, setExpanded] = useState(false)
+  // Detailed is the default; the overview is remembered once chosen.
+  const [view, setView] = useState<ProcessView>(readStoredView)
+  // A box on the overview names a node in the detailed flow to show.
+  const [jumpTo, setJumpTo] = useState<string | null>(null)
+  const choose = (v: ProcessView) => { setView(v); storeView(v) }
+  // Not remembered: the jump is a look at one node, the chosen view stays.
+  const jump = (target: string) => { setView('detailed'); setJumpTo(target) }
+  useEffect(() => {
+    if (view !== 'detailed' || !jumpTo) return
+    const el = document.querySelector(`[data-testid="${jumpTo}"]`)
+    setJumpTo(null)
+    if (!el) return
+    el.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    el.setAttribute('data-procmap-flash', '')
+    const timer = window.setTimeout(() => el.removeAttribute('data-procmap-flash'), 2400)
+    return () => window.clearTimeout(timer)
+  }, [view, jumpTo])
   // Escape leaves the full-window chart, like any overlay.
   useEffect(() => {
     if (!expanded) return
@@ -1056,6 +1077,35 @@ export default function ProcessMapPage() {
         </Link>
       </div>
 
+      <style>{PROCESS_MAP_CSS}</style>
+      <div className="procmap-noprint flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="View" data-testid="procmap-view-toggle"
+          className="inline-flex rounded-md border border-slate-600 bg-slate-800 p-0.5 text-xs">
+          {(['detailed', 'overview'] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={view === v}
+              data-testid={`procmap-view-${v}`} onClick={() => choose(v)}
+              className={`rounded px-3 py-1 ${view === v
+                ? 'bg-slate-600 text-slate-50 font-medium'
+                : 'text-slate-300 hover:bg-slate-700'}`}>
+              {v === 'detailed' ? 'Detailed' : 'Overview'}
+            </button>
+          ))}
+        </div>
+        {view === 'overview' && (
+          <button type="button" data-testid="procmap-print" onClick={() => window.print()}
+            className="rounded border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700">
+            Print overview
+          </button>
+        )}
+      </div>
+
+      {view === 'overview' ? (
+        <>
+          <style>{OVERVIEW_PRINT_CSS}</style>
+          <ProcessOverview onJump={jump} />
+        </>
+      ) : (
+      <>
       <Flowchart expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
 
       <p data-testid="procmap-legend"
@@ -1161,6 +1211,8 @@ export default function ProcessMapPage() {
         {' '}<span className="font-mono">docs/CHANGE_MANAGEMENT_FLOW.md</span> (enforced mechanics)
         and <span className="font-mono">docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md</span>.
       </p>
+      </>
+      )}
     </div>
   )
 }
