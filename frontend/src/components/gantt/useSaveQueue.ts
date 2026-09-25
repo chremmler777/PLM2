@@ -12,15 +12,20 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { applyAll, isEmptyChangeSet, modelContains, remapChangeSet, touchedTaskIds } from './engine/changes'
+import type { SaveDirection } from './engine/history'
 import type { ApplyResult, ChangeSet, GanttId, GanttModel } from './engine/types'
 
 type Status = 'queued' | 'inflight' | 'settled'
-interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: number }
+/** Which history entry a save belongs to and what it does to it. */
+export interface SaveTag { entry: number; dir: SaveDirection }
+interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: SaveTag }
 
 export interface SaveQueueOptions {
   onChange?: (cs: ChangeSet) => Promise<ApplyResult | void> | ApplyResult | void
-  /** A save was refused: `tag` is what `enqueue` got with it. */
-  onError?: (error: unknown, tag?: number) => void
+  /** A save was refused: `tag` / `seq` identify it. Return an entry id to drop its other queued saves. */
+  onError?: (error: unknown, tag: SaveTag | undefined, seq: number) => number | void
+  /** A save was accepted. */
+  onSettled?: (tag: SaveTag | undefined, seq: number) => void
   /** Told about temp id -> real id mappings (history and view state remap); tasks and links apart. */
   onIdMap?: (idMap: Record<string, GanttId>, linkIdMap: Record<string, GanttId>) => void
   settleMs?: number
@@ -82,6 +87,7 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
     if (isEmptyChangeSet(cs)) {
       // Nothing left to send (e.g. it only touched a task whose create was refused).
       update((list) => list.filter((i) => i.seq !== next.seq))
+      optsRef.current.onSettled?.(next.tag, next.seq)
       running.current = false
       queueMicrotask(() => { void pumpRef.current() })
       return
@@ -101,10 +107,13 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
         if (i.seq === next.seq) return { ...i, cs: any ? remapChangeSet(i.cs, idMap, linkIdMap) : i.cs, status: 'settled' as Status, at: Date.now() }
         return any && i.status === 'queued' ? { ...i, cs: remapChangeSet(i.cs, idMap, linkIdMap) } : i
       }))
+      optsRef.current.onSettled?.(next.tag, next.seq)
     } catch (e) {
       // Only this change is rolled back; later ones still go (the adapter refetches).
       update((list) => list.filter((i) => i.seq !== next.seq))
-      optsRef.current.onError?.(e, next.tag)
+      const forgotten = optsRef.current.onError?.(e, next.tag, next.seq)
+      // A refused original change: its queued undo / redo saves go too.
+      if (typeof forgotten === 'number') update((list) => list.filter((i) => i.status !== 'queued' || i.tag?.entry !== forgotten))
     } finally {
       running.current = false
       queueMicrotask(() => { void pumpRef.current() })
@@ -113,10 +122,12 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
   const pumpRef = useRef(pump)
   pumpRef.current = pump
 
-  const enqueue = useCallback((cs: ChangeSet, tag?: number) => {
+  /** Queue a ChangeSet; returns its sequence number. */
+  const enqueue = useCallback((cs: ChangeSet, tag?: SaveTag): number => {
     const item: Item = { seq: ++seq.current, cs: remapKnown(cs), status: 'queued', at: Date.now(), tag }
     update((list) => [...list, item])
     queueMicrotask(() => { void pumpRef.current() })
+    return item.seq
   }, [update])
 
   /** Rewrite an id with every mapping seen so far (for host / view state). */

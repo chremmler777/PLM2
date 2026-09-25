@@ -210,6 +210,17 @@ describe('ChangeSet -> POST /plan/changes', () => {
     expect(body.links_upsert).toEqual([{ id: 'tmp-l', from_task_id: 1, to_task_id: 'tmp-1', type: 'SS', lag_days: 1 }])
   })
 
+  it('strips only pushed starts, keeping the user fields of those tasks (auto scheduling)', () => {
+    const cs = {
+      updateTasks: [{ id: 1, patch: { start: '2026-10-08' } }, { id: 2, patch: { start: '2026-10-13' } }, { id: 3, patch: { parentId: 1, start: '2026-10-20' } }],
+      meta: { derived: [2, 3] },
+    }
+    expect(toPlanChangeSet(cs, before, { stripDerived: true }).tasks_upsert).toEqual([
+      { id: 1, start_date: '2026-10-08' }, { id: 3, parent_id: 1 },
+    ])
+    expect(toPlanChangeSet(cs, before).tasks_upsert).toHaveLength(3)
+  })
+
   it('does not create a task again that the server already has (reconcile)', () => {
     const body = toPlanChangeSet({ addTasks: [{ id: 2, name: 'T2', start: '2026-10-05', duration: 5 }] }, before)
     expect(body.tasks_upsert).toEqual([])

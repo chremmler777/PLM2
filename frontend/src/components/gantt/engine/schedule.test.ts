@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoSchedulePatches, cascade, downstream, findCycle, schedule, wouldCycle } from './schedule'
+import { autoPushChangeSet, autoSchedulePatches, cascade, downstream, findCycle, push, schedule, wouldCycle } from './schedule'
 import { validate } from './validate'
 import type { GanttCalendar, GanttLink, GanttTask, LinkType, ScheduleOptions } from './types'
 
@@ -501,5 +501,34 @@ describe('summary progress rollup (review 2, backend parity)', () => {
     const { get, r } = run(tasks, [L('A', 'B'), L('B', 'A')])
     expect(r.cycle.length).toBeGreaterThan(0)
     expect(get('S').progress).toBe(40)
+  })
+})
+
+describe('automatic scheduling rules (backend push parity)', () => {
+  it('a task moved under a summary with a predecessor jumps later (parent change may move it)', () => {
+    const tasks = [T('X', '2026-10-05', 5), T('S', '2026-01-01', 0), T('A', '2026-10-12', 2, { parentId: 'S' }), T('B', '2026-10-05', 2)]
+    const model = { tasks, links: [L('X', 'S')] }
+    const r = autoPushChangeSet(model, { updateTasks: [{ id: 'B', patch: { parentId: 'S' } }] }, CAL)
+    expect(r.cs.updateTasks).toEqual([{ id: 'B', patch: { parentId: 'S', start: '2026-10-10' } }])
+    // The start came from the push (the server makes it too); the parent is the user's.
+    expect(r.cs.meta?.derived).toEqual(['B'])
+  })
+  it('a new task linked after another is placed after it', () => {
+    const tasks = [T('X', '2026-10-05', 5)]
+    const r = autoPushChangeSet({ tasks, links: [] }, {
+      addTasks: [T('N', '2026-10-05', 2)], addLinks: [L('X', 'N')],
+    }, CAL)
+    expect(r.cs.addTasks![0].start).toBe('2026-10-10')
+  })
+  it('snet on a summary pushes the leaves below it', () => {
+    const tasks = [T('S', '2026-01-01', 0, { constraint: { type: 'snet', date: '2026-10-20' } }), T('A', '2026-10-05', 2, { parentId: 'S' })]
+    const moves = push(tasks, [], CAL, [], ['S'])
+    expect(moves.map((m) => [m.id, m.patch.start])).toEqual([['A', '2026-10-20']])
+  })
+  it('a moved task that now violates a link from another moved task is pushed', () => {
+    const tasks = [T('A', '2026-10-08', 5), T('B', '2026-10-06', 2)]
+    const moves = push(tasks, [L('A', 'B')], CAL, ['A', 'B'])
+    expect(moves.map((m) => [m.id, m.patch.start])).toEqual([['B', '2026-10-13']])
+    expect([...downstream(tasks, [L('A', 'B')], ['A', 'B']).entries()]).toEqual([['B', 'A']])
   })
 })

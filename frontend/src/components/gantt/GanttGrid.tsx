@@ -8,6 +8,7 @@ import { key } from './engine/tree'
 import type { GanttTask } from './engine/types'
 import { HEADER_H } from './GanttChart'
 import { gridWidth, type CellContext, type EditKind, type GanttColumn } from './columns'
+import { formatDateInput, parseDateInput } from './dateText'
 import type { Row } from './layout'
 import { v } from './theme'
 
@@ -25,6 +26,8 @@ export interface GridProps {
   canEdit: (t: GanttTask, col: GanttColumn) => boolean
   canReorder: boolean
   editing: { key: string; col: string } | null
+  /** The active row: a click on one of its editable cells edits it (spreadsheet style). */
+  activeKey?: string | null
   dropLine: { index: number; where: 'before' | 'after' } | null
   onRowClick: (e: React.MouseEvent, t: GanttTask) => void
   onRowDoubleClick: (t: GanttTask, col: GanttColumn) => void
@@ -53,17 +56,22 @@ export function GridHeader({ columns, height = HEADER_H }: { columns: GanttColum
 function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
   initial: string; type: EditKind; onCommit: (v: string) => void; onCancel: () => void; label: string; placeholder?: string
 }) {
-  const [val, setVal] = useState(initial)
+  // Dates are typed as dd.mm.yyyy (never the locale's native picker) and go out as ISO.
+  const [val, setVal] = useState(type === 'date' ? formatDateInput(initial) : initial)
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
   useEffect(() => { ref.current?.focus(); ref.current?.select?.() }, [])
-  const commit = () => { if (done.current) return; done.current = true; onCommit(val) }
+  const commit = () => {
+    if (done.current) return
+    done.current = true
+    onCommit(type === 'date' ? (parseDateInput(val) ?? val) : val)
+  }
   return (
     <input ref={ref} aria-label={label} data-testid="gantt-cell-editor"
-      type={type === 'date' ? 'date' : type === 'number' ? 'number' : 'text'}
+      type={type === 'number' ? 'number' : 'text'}
       className="h-full w-full rounded-sm border px-1 text-xs outline-none [color-scheme:dark]"
       style={{ background: v('bg'), color: v('text'), borderColor: v('accent') }}
-      value={val} placeholder={placeholder} onChange={(e) => setVal(e.target.value)}
+      value={val} placeholder={placeholder ?? (type === 'date' ? 'dd.mm.yyyy' : undefined)} onChange={(e) => setVal(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -152,10 +160,15 @@ export const GridBody = memo(function GridBody(p: GridProps) {
               style={{ width: col.width, flex: `0 0 ${col.width}px`, color: col.key === 'name' ? v('text') : v('textMuted') }}
               title={isHandle ? 'Drag to move the row' : undefined}
               onPointerDown={isHandle ? (e) => p.onReorderDown(e, t) : undefined}
-              onDoubleClick={(e) => {
+              onClick={editable && !editing && p.activeKey === k && sel ? (e) => {
+                // Second click on a cell of the active row: edit it in place (F2 edits the name).
                 e.stopPropagation()
-                if (editable) p.onStartEdit(t, col.key)
-                else p.onRowDoubleClick(t, col)
+                p.onStartEdit(t, col.key)
+              } : undefined}
+              onDoubleClick={(e) => {
+                // Double-click anywhere on a row opens the task (MS Project "Task Information").
+                e.stopPropagation()
+                p.onRowDoubleClick(t, col)
               }}>
               {content}
             </div>

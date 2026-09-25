@@ -67,8 +67,10 @@ describe('plan api', () => {
   it('uploads an MS Project file as multipart with plan and replace', async () => {
     const file = new File(['<Project/>'], 'p.xml', { type: 'application/xml' })
     await planApi.importXml(7, 'detailed', file, true)
-    const [url, body] = clientMocks.post.mock.calls[clientMocks.post.mock.calls.length - 1]
+    const [url, body, config] = clientMocks.post.mock.calls[clientMocks.post.mock.calls.length - 1]
     expect(url).toBe('/v1/changes/7/plan/import')
+    // Multipart: the JSON default Content-Type is cleared so the browser adds the boundary.
+    expect(config).toEqual({ headers: { 'Content-Type': undefined } })
     expect(body).toBeInstanceOf(FormData)
     expect((body as FormData).get('plan')).toBe('detailed')
     expect((body as FormData).get('replace')).toBe('true')

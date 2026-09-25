@@ -9,8 +9,8 @@ import type { GanttLink, GanttTask } from './engine/types'
 import type { GanttMarker, TaskGeo } from './GanttChart'
 import type { CellContext, GanttColumn } from './columns'
 import {
-  anchorX, barGeo, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, xOf,
-  type Range, type Row, type Zoom,
+  anchorX, barGeo, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, textWidth, xOf,
+  type Obstacle, type Range, type Row, type Zoom,
 } from './layout'
 import { DEFAULT_KIND, type GanttKindStyle, type GanttTheme } from './theme'
 
@@ -121,6 +121,16 @@ export function buildChartSvg(p: SvgExportInput): { svg: string; width: number; 
   // Links
   const geoOf = (k: string) => { const g = p.geo.get(k); return g ? barGeo(g.s, g.e, p.range, p.ppd, g.milestone) : null }
   o.push(`<defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="${th.link}"/></marker></defs>`)
+  // Bars and their labels are obstacles: links run around them, not through the text.
+  const obstacles: Obstacle[] = []
+  p.rows.forEach((r, i) => {
+    if (r.type !== 'task') return
+    const b = geoOf(key(r.task.id))
+    if (!b) return
+    const x1 = b.milestone ? b.x - 7 : b.x
+    const x2 = (b.milestone ? b.x + 12 : b.x + b.w + 6) + textWidth(r.task.name, 11)
+    obstacles.push({ row: i, x1, x2 })
+  })
   for (const l of p.links) {
     const fi = idx.get(key(l.from)), ti = idx.get(key(l.to))
     if (fi == null || ti == null) continue
@@ -129,7 +139,7 @@ export function buildChartSvg(p: SvgExportInput): { svg: string; width: number; 
     const s = linkSides(l.type)
     const d = routeLink({
       x1: anchorX(fb, s.from), y1: fi * p.rowH + pad + barH / 2, row1: fi, fromSide: s.from,
-      x2: anchorX(tb, s.to), y2: ti * p.rowH + pad + barH / 2, row2: ti, toSide: s.to, rowH: p.rowH,
+      x2: anchorX(tb, s.to), y2: ti * p.rowH + pad + barH / 2, row2: ti, toSide: s.to, rowH: p.rowH, obstacles,
     })
     o.push(`<path transform="translate(${gw},${bodyTop})" d="${d}" fill="none" stroke="${th.link}" stroke-width="1.25" marker-end="url(#a)"/>`)
   }

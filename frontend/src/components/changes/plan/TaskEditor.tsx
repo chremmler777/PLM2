@@ -10,13 +10,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TaskKind, TaskOut, TaskPatch } from '../../../types/changePlan'
 import { TASK_KINDS } from '../../../types/changePlan'
-import {
-  KIND_COLOR, KIND_LABEL, addDaysIso, durationFromInclusiveEnd, fmtIso, inclusiveEnd, laneOf,
-  taskGeo, toDay, toIso,
-} from './ganttMath'
+import { KIND_COLOR, KIND_LABEL, laneOf } from './ganttMath'
 import { btn, btnPrimary } from './GanttToolbar'
-import { todayDay } from '../../gantt/engine/calendar'
-import { LIMITS, inYearRange } from '../../gantt/engine/types'
+import {
+  durationFromLastDay, endOf, lastDay, makeCal, normStart, toDay, toIso, todayDay,
+} from '../../gantt/engine/calendar'
+import {
+  LIMITS, inYearRange, type ChangeSet, type ConstraintType, type GanttCalendar, type GanttLink, type LinkType,
+} from '../../gantt/engine/types'
+import DateInput from '../../gantt/DateInput'
+import { formatDateInput } from '../../gantt/dateText'
+import TaskLinks from './TaskLinks'
 
 interface Props {
   task: TaskOut
@@ -32,6 +36,18 @@ interface Props {
   track: boolean
   baselineSet: boolean
   saving: boolean
+  /** Plan calendar (durations in working days in working mode). */
+  calendar?: GanttCalendar
+  /** Typed links (servers with the links table): shown as editable lists instead of "Starts after". */
+  links?: GanttLink[]
+  linkTypes?: LinkType[]
+  allowLag?: boolean
+  /** Constraints are available (servers with the links table). */
+  constraints?: boolean
+  /** The task is a summary (no must-start/finish-on, no FF/SF into it, dates rolled up). */
+  isSummary?: boolean
+  summaryIds?: Set<number>
+  onLinks?: (cs: ChangeSet) => void
   onSave: (patch: TaskPatch) => void
   onDelete?: () => void
   onClose: () => void
@@ -53,7 +69,15 @@ interface Form {
   progress_pct: number
   actual_start: string
   actual_finish: string
+  constraint_type: string
+  /** As shown: the start day for snet / mso, the last day for fnlt / mfo. */
+  constraint_date: string
 }
+
+const FINISH = new Set(['fnlt', 'mfo'])
+/** Stored finish constraint dates are exclusive ends; the panel shows the last day. */
+const shownConstraintDate = (t: TaskOut) => (t.constraint_date && FINISH.has(t.constraint_type ?? '')
+  ? toIso(toDay(t.constraint_date) - 1) : t.constraint_date ?? '')
 
 const formOf = (t: TaskOut): Form => ({
   name: t.name,
@@ -68,7 +92,14 @@ const formOf = (t: TaskOut): Form => ({
   progress_pct: t.progress_pct,
   actual_start: t.actual_start ?? '',
   actual_finish: t.actual_finish ?? '',
+  constraint_type: t.constraint_type ?? 'asap',
+  constraint_date: shownConstraintDate(t),
 })
+
+const CONSTRAINT_LABEL: Record<ConstraintType, string> = {
+  asap: 'As soon as possible', snet: 'Start no earlier than', fnlt: 'Finish no later than',
+  mso: 'Must start on', mfo: 'Must finish on',
+}
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -104,11 +135,14 @@ export default function TaskEditor(p: Props) {
   // The server refuses actual dates later than tomorrow.
   const maxActual = toIso(todayDay() + 1)
 
+  const cal = useMemo(() => makeCal(p.calendar), [p.calendar])
+  const working = cal.mode === 'working'
   const milestone = f.kind === 'milestone'
   const dur = milestone ? 0 : Math.max(0, Math.floor(Number(f.duration) || 0))
   const startOk = /^\d{4}-\d{2}-\d{2}$/.test(f.start_date) && inYearRange(f.start_date)
   const actualsOk = [f.actual_start, f.actual_finish].every((a) => !a || a <= maxActual)
-  const endIncl = startOk ? toIso(inclusiveEnd({ start: toDay(f.start_date), dur })) : ''
+  const endIncl = startOk ? toIso(lastDay(cal, toDay(f.start_date), dur)) : ''
+  const constraintOk = f.constraint_type === 'asap' || (/^\d{4}-\d{2}-\d{2}$/.test(f.constraint_date) && inYearRange(f.constraint_date))
   const readOnly = !p.canEdit && !p.canDates && !p.canProgress
 
   const laneOptions = useMemo(() => {
@@ -129,9 +163,20 @@ export default function TaskEditor(p: Props) {
       if ((f.lane.trim() || null) !== (task.lane ?? null)) out.lane = f.lane.trim() || null
       const dep = f.department_id ? Number(f.department_id) : null
       if (dep !== task.department_id) out.department_id = dep
-      const preds = [...f.predecessors].sort((a, b) => a - b)
-      if (preds.join(',') !== [...task.predecessors].sort((a, b) => a - b).join(',')) out.predecessors = preds
+      if (!p.links) {
+        const preds = [...f.predecessors].sort((a, b) => a - b)
+        if (preds.join(',') !== [...task.predecessors].sort((a, b) => a - b).join(',')) out.predecessors = preds
+      }
       if (f.is_idea !== task.is_idea) out.is_idea = f.is_idea
+      if (p.constraints && constraintOk) {
+        const type = f.constraint_type === 'asap' ? null : f.constraint_type as ConstraintType
+        const date = type ? (FINISH.has(type) ? toIso(toDay(f.constraint_date) + 1) : f.constraint_date) : null
+        if ((type ?? null) !== (task.constraint_type && task.constraint_type !== 'asap' ? task.constraint_type : null)
+          || (type && date !== task.constraint_date)) {
+          out.constraint_type = type
+          out.constraint_date = date
+        }
+      }
     }
     if (canNotes && (f.notes.trim() || null) !== (task.notes ?? null)) out.notes = f.notes.trim() || null
     if (p.canDates && startOk) {
@@ -149,8 +194,9 @@ export default function TaskEditor(p: Props) {
   const dirty = Object.keys(changes).length > 0
   const nameMissing = p.canEdit && !f.name.trim()
 
-  const geo = taskGeo(task)
   const col = KIND_COLOR[task.kind] ?? KIND_COLOR.work
+  const s0 = normStart(cal, toDay(task.start_date))
+  const headerLast = lastDay(cal, s0, task.duration_days)
 
   return (
     <aside role="region" aria-label={`Task ${task.name}`} data-testid="task-editor"
@@ -164,7 +210,7 @@ export default function TaskEditor(p: Props) {
           </p>
           <h3 className="truncate text-sm font-semibold text-slate-100">{task.name}</h3>
           <p className="text-xs text-slate-400">
-            {fmtIso(task.start_date)}{geo.dur > 0 ? ` to ${fmtIso(toIso(inclusiveEnd(geo)))}` : ''}, {laneOf(task)}
+            {formatDateInput(toIso(s0))}{task.duration_days > 0 ? ` to ${formatDateInput(toIso(headerLast))}` : ''}, {laneOf(task)}
           </p>
         </div>
         <button type="button" onClick={p.onClose} aria-label="Close task editor"
@@ -215,20 +261,21 @@ export default function TaskEditor(p: Props) {
         <div className="grid grid-cols-[minmax(0,1fr)_60px_minmax(0,1fr)] gap-2">
           <div>
             <label className={label} htmlFor="te-start">Start</label>
-            <input id="te-start" type="date" className={`${field} px-1.5`} value={f.start_date} disabled={!p.canDates}
-              onChange={(e) => set('start_date', e.target.value)} />
+            <DateInput id="te-start" aria-label="Start" className={`${field} px-1.5`} value={f.start_date} disabled={!p.canDates}
+              onChange={(iso) => set('start_date', iso)} />
           </div>
           <div>
-            <label className={label} htmlFor="te-dur">Days</label>
-            <input id="te-dur" type="number" min={milestone ? 0 : 1} className={field} value={milestone ? '0' : f.duration}
-              disabled={!p.canDates || milestone} onChange={(e) => set('duration', e.target.value)} />
+            <label className={label} htmlFor="te-dur">{working ? 'Work days' : 'Days'}</label>
+            <input id="te-dur" type="number" min={milestone ? 0 : 1} max={LIMITS.maxDuration} className={field} value={milestone ? '0' : f.duration}
+              disabled={!p.canDates || milestone || p.isSummary} onChange={(e) => set('duration', e.target.value)} />
           </div>
           <div>
             <label className={label} htmlFor="te-end">{milestone ? 'On' : 'Last day'}</label>
-            <input id="te-end" type="date" className={`${field} px-1.5`} value={endIncl} disabled={!p.canDates || milestone || !startOk}
-              onChange={(e) => {
-                if (!e.target.value) return
-                set('duration', String(durationFromInclusiveEnd(toDay(f.start_date), toDay(e.target.value))))
+            <DateInput id="te-end" aria-label={milestone ? 'On' : 'Last day'} className={`${field} px-1.5`} value={endIncl}
+              disabled={!p.canDates || milestone || !startOk}
+              onChange={(iso) => {
+                if (!iso) return
+                set('duration', String(durationFromLastDay(cal, toDay(f.start_date), toDay(iso))))
               }} />
           </div>
         </div>
@@ -236,9 +283,36 @@ export default function TaskEditor(p: Props) {
           <p className="text-[11px] text-amber-300/90">Timing is validated. A date change asks for a reason, moves the successors along and records deviations.</p>
         )}
         {startOk && !milestone && dur > 0 && (
-          <p className="-mt-2 text-[11px] text-slate-500">Next task can start {fmtIso(addDaysIso(f.start_date, dur))}.</p>
+          <p className="-mt-2 text-[11px] text-slate-500">
+            Next task can start {formatDateInput(toIso(normStart(cal, endOf(cal, toDay(f.start_date), dur))))}.
+          </p>
         )}
 
+        {p.constraints && (
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <div>
+              <label className={label} htmlFor="te-ctype">Constraint</label>
+              <select id="te-ctype" className={field} value={f.constraint_type} disabled={!p.canEdit}
+                onChange={(e) => set('constraint_type', e.target.value)}>
+                {(['asap', 'snet', 'fnlt', 'mso', 'mfo'] as ConstraintType[])
+                  .filter((c) => !p.isSummary || (c !== 'mso' && c !== 'mfo') || c === f.constraint_type)
+                  .map((c) => <option key={c} value={c}>{CONSTRAINT_LABEL[c]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label} htmlFor="te-cdate">{FINISH.has(f.constraint_type) ? 'Last day' : 'Date'}</label>
+              <DateInput id="te-cdate" aria-label="Constraint date" className={field} value={f.constraint_date}
+                disabled={!p.canEdit || f.constraint_type === 'asap'} onChange={(iso) => set('constraint_date', iso)} />
+            </div>
+          </div>
+        )}
+
+        {p.links && p.onLinks ? (
+          <TaskLinks taskId={task.id} links={p.links} canEdit={p.canEdit} types={p.linkTypes ?? ['FS']}
+            allowLag={p.allowLag ?? false} summary={!!p.isSummary} unit={working ? 'working days' : 'days'}
+            tasks={others.map((o) => ({ id: o.id, name: o.name, row: p.rowNo.get(o.id), summary: p.summaryIds?.has(o.id) }))}
+            onChange={p.onLinks} />
+        ) : (
         <div>
           <span className={label}>Starts after</span>
           {others.length === 0 ? (
@@ -260,6 +334,7 @@ export default function TaskEditor(p: Props) {
             </div>
           )}
         </div>
+        )}
 
         <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-300">
           <input type="checkbox" className="mt-0.5 accent-amber-500" checked={f.is_idea} disabled={!p.canEdit}
@@ -291,19 +366,19 @@ export default function TaskEditor(p: Props) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={label} htmlFor="te-as">Actual start</label>
-                <input id="te-as" type="date" max={maxActual} className={field} value={f.actual_start} disabled={!p.canProgress}
-                  onChange={(e) => set('actual_start', e.target.value)} />
+                <DateInput id="te-as" aria-label="Actual start" max={maxActual} className={field} value={f.actual_start} disabled={!p.canProgress}
+                  onChange={(iso) => set('actual_start', iso)} />
               </div>
               <div>
                 <label className={label} htmlFor="te-af">Actual finish</label>
-                <input id="te-af" type="date" max={maxActual} className={field} value={f.actual_finish} disabled={!p.canProgress}
-                  onChange={(e) => set('actual_finish', e.target.value)} />
+                <DateInput id="te-af" aria-label="Actual finish" max={maxActual} className={field} value={f.actual_finish} disabled={!p.canProgress}
+                  onChange={(iso) => set('actual_finish', iso)} />
               </div>
             </div>
             {task.baseline_start && (
               <p className="text-[11px] text-slate-500">
-                Baseline {fmtIso(task.baseline_start)}
-                {task.baseline_finish ? ` to ${fmtIso(addDaysIso(task.baseline_finish, geo.dur > 0 ? -1 : 0))}` : ''}
+                Baseline {formatDateInput(task.baseline_start)}
+                {task.baseline_finish ? ` to ${formatDateInput(toIso(toDay(task.baseline_finish) - (task.duration_days > 0 ? 1 : 0)))}` : ''}
               </p>
             )}
           </div>
@@ -318,7 +393,7 @@ export default function TaskEditor(p: Props) {
           <div className="ml-auto flex gap-2">
             <button type="button" className={btn} onClick={() => setF(formOf(task))} disabled={!dirty}>Reset</button>
             <button type="button" className={btnPrimary} data-testid="task-editor-save"
-              disabled={!dirty || nameMissing || !startOk || !actualsOk || dur > LIMITS.maxDuration || p.saving}
+              disabled={!dirty || nameMissing || !startOk || !actualsOk || !constraintOk || dur > LIMITS.maxDuration || p.saving}
               onClick={() => p.onSave(changes)}>Save</button>
           </div>
         </footer>

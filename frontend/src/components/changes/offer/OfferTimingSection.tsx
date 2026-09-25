@@ -11,9 +11,11 @@ import { DEFAULT_DISCLAIMER, inputCls, planWeeks, quotePlanKey } from './offerFo
 import { Field, NumField, Toggle } from './ui'
 
 export default function OfferTimingSection({
-  changeId, data, update, editable, fieldsDisabled,
+  changeId, changeNumber, data, update, editable, fieldsDisabled,
 }: {
   changeId: number
+  /** For export file names. */
+  changeNumber?: string
   /** Absent before an offer exists: the Gantt alone. */
   data?: OfferData
   update?: <K extends keyof OfferData>(key: K, value: OfferData[K]) => void
@@ -28,7 +30,7 @@ export default function OfferTimingSection({
     queryFn: () => planApi.get(changeId, 'quote'),
   })
   const timing = data?.timing ?? { include: true }
-  const auto = planWeeks(plan?.summary?.duration_days)
+  const auto = planWeeks(plan?.summary)
   const set = (patch: Partial<NonNullable<OfferData['timing']>>) =>
     update?.('timing', { ...timing, ...patch })
 
@@ -39,7 +41,7 @@ export default function OfferTimingSection({
         Dates are revisited after order.
       </p>
       <div className="-mx-1 overflow-x-auto">
-        <GanttPlanner changeId={changeId} plan="quote" />
+        <GanttPlanner changeId={changeId} plan="quote" changeNumber={changeNumber} />
       </div>
       {data && update && (
         <fieldset disabled={fieldsDisabled} aria-busy={fieldsDisabled}

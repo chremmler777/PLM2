@@ -124,13 +124,17 @@ export function bankBuildChangeSet(ctx: Ctx, selection: GanttId[], scheduling: {
   const firstStart = ctx.tasks.length ? Math.min(...ctx.tasks.map((t) => span(cal, t).s)) : nextWork(cal, todayDay())
   const end = anchor ? span(cal, anchor).s : firstStart + days
   const start = startFor(cal, end, days)
+  // Linked finish-to-start into its anchor: the idea follows it when it moves.
+  const twin = anchor && ctx.tasks.some((t) => t.kind === 'bank_build' && ctx.links.some((l) => key(l.from) === key(t.id) && key(l.to) === key(anchor.id)))
   return {
     label: 'Add bank build idea',
     addTasks: [{
       id, name: 'Bank build (idea)', start: toIso(start), duration: days, kind: 'bank_build', isIdea: true,
       lane: scheduling.lane, meta: { department_id: scheduling.departmentId },
     }],
+    ...(anchor ? { addLinks: [{ id: (ctx.newId ?? (() => tempId('link')))(), from: id, to: anchor.id, type: 'FS' as const, lagDays: 0 }] } : {}),
     order: orderWith(ctx.tasks, id, anchor?.id ?? null, 'before'),
+    ...(twin ? { meta: { warning: `'${anchor!.name}' already has a bank build idea: this adds a second one` } } : {}),
   }
 }
 
@@ -216,4 +220,25 @@ export function withSuccessorMoves(ctx: Ctx, cs: ChangeSet): { cs: ChangeSet; mo
       return { id: u.id, name: t.name, from: t.start, to: u.patch.start!, days }
     })
   return { cs: out, moved }
+}
+
+/**
+ * Idea blocks linked finish-to-start into a task follow it: when the task
+ * moves, the idea keeps ending where the task starts (the server does not
+ * move ideas; these moves are the user's, sent as such).
+ */
+export function ideasFollow(ctx: Ctx, cs: ChangeSet): ChangeSet {
+  const moved = new Map((cs.updateTasks ?? []).filter((u) => 'start' in u.patch).map((u) => [key(u.id), u.patch.start!]))
+  if (!moved.size) return cs
+  const cal = makeCal(ctx.calendar)
+  const upd = [...(cs.updateTasks ?? [])]
+  for (const l of ctx.links) {
+    if (l.type !== 'FS' || !moved.has(key(l.to))) continue
+    const idea = ctx.tasks.find((t) => key(t.id) === key(l.from) && t.isIdea)
+    if (!idea || upd.some((u) => key(u.id) === key(idea.id))) continue
+    const anchorStart = cal.idx(normStart(cal, toDay(moved.get(key(l.to))!)))
+    const start = toIso(cal.dateAt(anchorStart - l.lagDays - Math.max(0, idea.duration)))
+    if (start !== idea.start) upd.push({ id: idea.id, patch: { start } })
+  }
+  return upd.length === (cs.updateTasks ?? []).length ? cs : { ...cs, updateTasks: upd }
 }

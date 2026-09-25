@@ -243,7 +243,7 @@ export default function TimingTab({
       )}
       {/* The detailed plan is created by the "Create detailed plan" button in
           the card above; the Gantt's own seed button would be a second way in. */}
-      <GanttPlanner changeId={id} plan="detailed" mode={mode} hideSeed />
+      <GanttPlanner changeId={id} plan="detailed" mode={mode} status={status} changeNumber={change.change_number} hideSeed />
 
       {tasks.length > 0 && (
         <TeamFeedbackPanel changeId={id} feedback={feedback} myDepartmentIds={myDepartmentIds}

@@ -21,7 +21,7 @@ import { History } from './engine/history'
 import { formatPredecessors, predecessorChangeSet, tempId } from './engine/notation'
 import { exportCsv } from './engine/csv'
 import { exportMspdi } from './engine/mspdi'
-import { autoSchedulePatches, schedule, wouldCycle } from './engine/schedule'
+import { autoPushChangeSet, schedule, wouldCycle } from './engine/schedule'
 import { buildTree, descendants, indent, key, leaves, moveRows, outdent, rowNumbers, type Tree } from './engine/tree'
 import type {
   ChangeSet, GanttCalendar, GanttId, GanttLink, GanttModel, GanttTask, Issue, LinkType,
@@ -34,7 +34,7 @@ import { BUILTIN_COLUMNS, gridWidth, type CellContext, type ColumnKey, type Gant
 import { ContextMenu, LinkPopover, TaskDialog, type MenuEntry } from './GanttPopups'
 import { buildChartSvg, downloadBlob, openPrint, svgToPng } from './exportImage'
 import {
-  PX_PER_DAY, ZOOMS, buildRows, snapDays, timelineRange, typeFromSides, unitFor, visibleWindow, xOf, zoomStep,
+  PX_PER_DAY, ZOOMS, buildRows, snapDays, textWidth, timelineRange, typeFromSides, unitFor, visibleWindow, xOf, zoomStep,
   anchorX, barGeo, type Zoom,
 } from './layout'
 import { THEMES, resolveTheme, themeVars, v, type GanttKindStyle, type GanttThemeName } from './theme'
@@ -92,7 +92,11 @@ export interface GanttProps {
   /** The host's critical ids (e.g. the server's); default the engine's. */
   criticalIds?: GanttId[]
   groupByLane?: boolean
-  /** Run a forward pass after every change and include the moves. */
+  /**
+   * Automatic scheduling (MS Project): every change also moves the successors
+   * it pushes (later only), in the same undo step; those moves are listed in
+   * `meta.derived` of the ChangeSet.
+   */
   autoSchedule?: boolean
   linkTypes?: LinkType[]
   allowLag?: boolean
@@ -111,7 +115,7 @@ export interface GanttProps {
   onTaskOpen?: (t: GanttTask) => void
   onSelectionChange?: (ids: GanttId[]) => void
   menuItems?: (ids: GanttId[]) => MenuEntry[]
-  /** Defaults for a new task (Insert, toolbar). */
+  /** Defaults for a new task (Insert, toolbar). `after` is the nearest leaf above the new row. */
   newTask?: (ctx: { after?: GanttTask; parentId: GanttId | null; start: string; milestone: boolean }) => Partial<GanttTask>
   /** Issues to flag (default: the engine's validation). */
   issues?: Issue[]
@@ -127,7 +131,14 @@ export interface GanttProps {
 }
 
 type DragMode = 'move' | 'start' | 'end' | 'progress'
-interface DragState { mode: DragMode; keys: string[]; delta: number; progress?: number }
+interface DragState {
+  mode: DragMode
+  keys: string[]
+  delta: number
+  progress?: number
+  /** Keyboard nudges count working days in a working calendar. */
+  unit?: 'work'
+}
 interface EditState { key: string; col: string }
 
 const DEFAULT_COLUMNS: ColumnKey[] = ['row', 'name', 'start', 'end', 'duration', 'predecessors']
@@ -193,7 +204,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const queue = useSaveQueue(base, {
     onChange: p.onChange,
     // Only the refused change is rolled back (and forgotten by undo).
-    onError: (e, tag) => { if (tag) history.current.revert(tag); bumpHist(); notifyError(errMessage(e), e) },
+    onError: (e, tag, seq) => {
+      const forgotten = tag ? history.current.refused(tag.entry, seq, tag.dir) : false
+      bumpHist()
+      notifyError(errMessage(e), e)
+      return forgotten && tag ? tag.entry : undefined
+    },
+    onSettled: (tag, seq) => { if (tag) history.current.settled(tag.entry, seq) },
     onIdMap: (m, lm) => { history.current.remap(m, lm); remapViewRef.current(m) },
   })
   const saved = queue.display
@@ -249,7 +266,16 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   }, [readOnly, rights, canDates, canLinks, canStructure])
   const canProgress = useCallback((t: GanttTask) => canField(t, 'progress'), [canField])
   // Undo across a rights change (e.g. the baseline was set) could replay what is no longer allowed.
-  useEffect(() => { history.current.clear(); bumpHist() }, [canStructure, canDates, canLinks])
+  // Only when a right is taken away (not on load or when rights arrive).
+  const rightsRef = useRef({ canStructure, canDates, canLinks })
+  useEffect(() => {
+    const prev = rightsRef.current
+    rightsRef.current = { canStructure, canDates, canLinks }
+    if ((prev.canStructure && !canStructure) || (prev.canDates && !canDates) || (prev.canLinks && !canLinks)) {
+      history.current.clear()
+      bumpHist()
+    }
+  }, [canStructure, canDates, canLinks])
 
   // ---------------------------------------------------------------- derived
   const rowModel = useMemo(() => buildRows(model.tasks, { groupByLane: p.groupByLane, collapsed }), [model.tasks, p.groupByLane, collapsed])
@@ -279,7 +305,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       const e = endOf(cal, s, t.duration)
       if (drag.mode === 'progress') { if (drag.progress != null) out.set(k, { progress: drag.progress }); continue }
       if (drag.mode === 'move') {
-        out.set(k, { start: toIso(nextWork(cal, s + drag.delta)) })
+        out.set(k, { start: toIso(drag.unit === 'work' ? cal.dateAt(cal.idx(s) + drag.delta) : nextWork(cal, s + drag.delta)) })
       } else if (drag.mode === 'end' && t.duration > 0) {
         const ne = e + drag.delta
         out.set(k, { duration: Math.max(1, working ? diff(cal, s, ne) : t.duration + drag.delta) })
@@ -294,11 +320,19 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   const geo = useMemo(() => {
     const m = new Map<string, TaskGeo>()
+    // Committed (non-idea) work below each task, as the engine's rollup uses it.
+    const hasReal = new Map<string, boolean>()
+    for (const t of [...tree.order].reverse()) {
+      const kids = tree.children.get(key(t.id)) ?? []
+      hasReal.set(key(t.id), kids.length ? kids.some((c) => hasReal.get(key(c.id))) : !t.isIdea)
+    }
     for (const t of [...tree.order].reverse()) {
       const k = key(t.id)
       const kids = tree.children.get(k) ?? []
       if (kids.length) {
-        const cs = kids.map((c) => m.get(key(c.id))!).filter(Boolean)
+        // Idea blocks do not stretch a summary (unless it holds only ideas), like the engine.
+        const real = kids.filter((c) => hasReal.get(key(c.id)))
+        const cs = (real.length ? real : kids).map((c) => m.get(key(c.id))!).filter(Boolean)
         m.set(k, { s: Math.min(...cs.map((c) => c.s)), e: Math.max(...cs.map((c) => c.e)), milestone: false, summary: true })
         continue
       }
@@ -351,12 +385,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       .filter((c) => c.key !== 'wbs' || hasHierarchy)
     // Keep the chart readable: the grid takes at most a share of the width.
     const max = viewW ? Math.max(240, viewW * (p.maxGridFraction ?? 0.45)) : Infinity
-    const drop = ['slack', 'wbs', 'kind', 'lane', 'progress', 'predecessors', 'end', 'duration', 'start', 'row']
     const width = () => cols.reduce((n, c) => n + c.width, 0)
     if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(150, c.width - (width() - max)) } : c))
-    for (const k of drop) {
-      if (width() <= max) break
-      if (cols.length > 1) cols = cols.filter((c) => c.key !== k)
+    // Columns drop out from the end of the configured list (the name stays).
+    while (width() > max && cols.length > 1) {
+      const i = cols.map((c) => c.key).lastIndexOf(cols.filter((c) => c.key !== 'name').map((c) => c.key).pop()!)
+      if (i < 0) break
+      cols = cols.filter((_, j) => j !== i)
     }
     return cols
   }, [p.columns, p.compact, p.maxGridFraction, hasHierarchy, viewW])
@@ -371,6 +406,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       predecessors: predText.get(k) ?? '',
       sched: sched.byId.get(t.id), kinds, summary, working,
       summaryDuration: summary && g ? diff(cal, g.s, g.e) : undefined,
+      variance: g && t.baselineEnd && isIsoDay(t.baselineEnd) ? cal.idx(g.e) - cal.idx(toDay(t.baselineEnd)) : null,
     }
   }, [geo, isSummaryKey, rowNo, tree, predText, sched, kinds, working, cal])
 
@@ -506,30 +542,30 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const idsOf = (keys: string[]) => keys.map((k) => tree.byId.get(k)?.id).filter((x): x is GanttId => x != null)
 
   // ---------------------------------------------------------------- commit
-  const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean; tag?: number } = {}): Promise<boolean> => {
+  const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean; undo?: number; redo?: number } = {}): Promise<boolean> => {
     if (!cs0 || isEmptyChangeSet(cs0)) return false
     let cs = cs0
     const before = modelRef.current
-    if (p.autoSchedule) {
-      const after = applyChangeSet(before, cs)
-      const moves = autoSchedulePatches(after.tasks, after.links, p.calendar)
-      if (moves.length) {
-        const upd = [...(cs.updateTasks ?? [])]
-        for (const m of moves) {
-          const i = upd.findIndex((u) => key(u.id) === key(m.id))
-          if (i >= 0) upd[i] = { id: upd[i].id, patch: { ...upd[i].patch, ...m.patch } }
-          else upd.push(m)
-        }
-        cs = { ...cs, updateTasks: upd }
-      }
-    }
+    // Automatic scheduling: the successors this action pushes join the same
+    // ChangeSet (one undo step), listed in meta.derived. Undo / redo replay
+    // their stored ChangeSets as they are.
+    if (p.autoSchedule && opts.undo == null && opts.redo == null) cs = autoPushChangeSet(before, cs, p.calendar).cs
     if (p.beforeChange) {
       const r = await p.beforeChange(cs, before)
       if (!r) return false
       cs = r
     }
-    const tag = opts.history !== false ? history.current.push(modelRef.current, cs) : opts.tag
-    queue.enqueue(cs, tag || undefined)
+    if (opts.undo != null || opts.redo != null) {
+      const entry = (opts.undo ?? opts.redo)!
+      const dir = opts.undo != null ? 'undo' as const : 'redo' as const
+      const seq = queue.enqueue(cs, { entry, dir })
+      if (dir === 'undo') history.current.confirmUndo(entry, seq)
+      else history.current.confirmRedo(entry, seq)
+    } else if (opts.history !== false) {
+      const entry = history.current.push(modelRef.current, cs)
+      const seq = queue.enqueue(cs, entry ? { entry, dir: 'do' } : undefined)
+      if (entry) history.current.sent(entry, seq)
+    } else queue.enqueue(cs)
     bumpHist()
     return true
   }, [p, queue])
@@ -539,13 +575,13 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const undo = useCallback(async () => {
     const h = history.current.peekUndo()
     if (!h) return
-    if (await commit(h.cs, { history: false, tag: h.id })) history.current.confirmUndo(h.id)
+    await commit(h.cs, { undo: h.id })
     bumpHist()
   }, [commit])
   const redo = useCallback(async () => {
     const h = history.current.peekRedo()
     if (!h) return
-    if (await commit(h.cs, { history: false, tag: h.id })) history.current.confirmRedo(h.id)
+    await commit(h.cs, { redo: h.id })
     bumpHist()
   }, [commit])
 
@@ -576,14 +612,19 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const insertTask = (milestone = false) => {
     if (draft) return
     const after = active && active !== draftKey ? tree.byId.get(active) : undefined
-    const parentKey = after ? tree.parentOf.get(key(after.id)) ?? null : null
+    // Under a selected summary the new task becomes its last child; else a sibling of the selected row.
+    const afterIsSummary = !!after && isSummaryKey(key(after.id))
+    const parentKey = after ? (afterIsSummary ? key(after.id) : tree.parentOf.get(key(after.id)) ?? null) : null
     const parentId = parentKey ? tree.byId.get(parentKey)!.id : null
-    const g = after ? geo.get(key(after.id)) : undefined
+    // The nearest leaf above the new row (never a summary) gives the lane.
+    const above = after ? [after, ...descendants(tree, after.id)] : tree.order
+    const leafAbove = [...above].reverse().find((x) => !isSummaryKey(key(x.id)) && key(x.id) !== draftKey)
+    const g = leafAbove ? geo.get(key(leafAbove.id)) : undefined
     const start = toIso(g ? (milestone ? g.e : nextWork(cal, g.e)) : nextWork(cal, sched.finish ? toDay(sched.finish) : today))
-    const extra = p.newTask?.({ after, parentId, start, milestone }) ?? {}
+    const extra = p.newTask?.({ after: leafAbove, parentId, start, milestone }) ?? {}
     const t: GanttTask = {
       id: tempId('task'), parentId, name: '', start,
-      duration: milestone ? 0 : 1, ...(after?.lane ? { lane: after.lane } : {}), ...extra,
+      duration: milestone ? 0 : 1, lane: leafAbove?.lane ?? null, ...extra,
       ...(milestone ? { duration: 0 } : {}),
     }
     const k = key(t.id)
@@ -641,7 +682,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     }
     const refusal = linkRefusal(fromKey, toKey, type)
     if (refusal) { notifyError(refusal); return }
-    if (model.links.some((l) => key(l.from) === fromKey && key(l.to) === toKey)) { p.onNotify?.('These tasks are already linked'); return }
+    // An old (read-only) dependency on the pair does not block: drawing it again makes the real, editable link.
+    if (model.links.some((l) => !l.readOnly && key(l.from) === fromKey && key(l.to) === toKey)) {
+      p.onNotify?.('These tasks are already linked: click the link to change its type or lag')
+      return
+    }
     if (wouldCycle(model.tasks, model.links, from.id, to.id)) { notifyError('That link would create a loop'); return }
     void commit({ label: 'Link tasks', addLinks: [{ id: tempId('link'), from: from.id, to: to.id, type, lagDays: 0 }] })
   }
@@ -705,8 +750,15 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   // ---------------------------------------------------------------- exports
   const exportName = p.exportName ?? 'plan'
-  const svgInput = () => ({
-    title: exportName, rows: buildRows(model.tasks, { groupByLane: p.groupByLane }).rows, columns, ctx: cellCtx, geo,
+  const svgInput = () => {
+    const all = buildRows(model.tasks, { groupByLane: p.groupByLane }).rows
+    // The image has room: the name column fits the longest name (capped).
+    const longest = Math.max(0, ...all.map((r) => (r.type === 'task' ? textWidth(r.task.name, 11) + r.depth * 14 + 24 : 0)))
+    const cols = columns.map((c) => (c.key === 'name' ? { ...c, width: Math.max(c.width, Math.min(420, Math.ceil(longest))) } : c))
+    return svgInputFor(all, cols)
+  }
+  const svgInputFor = (rowsAll: typeof rows, cols: GanttColumn[]) => ({
+    title: exportName, rows: rowsAll, columns: cols, ctx: cellCtx, geo,
     links: model.links, range, ppd, unit, cal, theme: resolveTheme(rootRef.current, theme), kinds,
     markers: p.markers ?? [], today: p.showToday === false ? null : today, critical: criticalSet, showBaselines, rowH,
   })
@@ -814,7 +866,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       const e = endOf(cal, s, t.duration)
       if (d.mode === 'progress') { if (d.progress != null) out.set(k, { progress: d.progress }); continue }
       if (d.delta === 0) continue
-      if (d.mode === 'move') out.set(k, { start: toIso(nextWork(cal, s + d.delta)) })
+      if (d.mode === 'move') out.set(k, { start: toIso(d.unit === 'work' ? cal.dateAt(cal.idx(s) + d.delta) : nextWork(cal, s + d.delta)) })
       else if (d.mode === 'end' && t.duration > 0) out.set(k, { duration: Math.max(1, working ? diff(cal, s, e + d.delta) : t.duration + d.delta) })
       else if (d.mode === 'start' && t.duration > 0) {
         const ns = nextWork(cal, Math.min(s + d.delta, e - 1))
@@ -957,6 +1009,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         if (n > LIMITS.maxDuration) { notifyError(`A task lasts at most ${LIMITS.maxDuration} days`); return }
         patch({ duration: n }, 'Change duration'); return
       }
+      case 'actualStart': case 'actualEnd': {
+        if (val !== '' && !isIsoDay(val)) { notifyError('Type the date as dd.mm.yyyy'); return }
+        if (val && val > toIso(todayDay() + 1)) { notifyError('Actual dates cannot lie in the future'); return }
+        patch(col.key === 'actualStart' ? { actualStart: val || null } : { actualEnd: val || null }, 'Actual dates'); return
+      }
       case 'progress': {
         if (val === '') return
         const n = Math.round(Number(val.replace('%', '')))
@@ -970,7 +1027,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         const added = [...(changes.addLinks ?? []), ...(changes.updateLinks ?? []).map((u) => ({ ...model.links.find((l) => key(l.id) === key(u.id))!, ...u.patch }))]
         const touched = [...(changes.updateLinks ?? []).map((u) => u.id), ...(changes.removeLinks ?? [])]
         if (model.links.some((l) => l.readOnly && touched.some((id) => key(id) === key(l.id)))) {
-          notifyError('Old dependency, re-draw to edit: remove it by drawing the link again')
+          notifyError('This is an old dependency: draw the link again on the chart to replace it, then edit or remove it')
           return
         }
         const refused = added.map((l) => linkRefusal(key(l.from), key(l.to), l.type)).find(Boolean)
@@ -995,7 +1052,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     if (!col.edit) return false
     const k = key(t.id)
     if (k === draftKey) return col.key === 'name'
-    if (isSummaryKey(k) && ['start', 'end', 'duration', 'progress'].includes(col.key)) return false
+    if (isSummaryKey(k) && ['start', 'end', 'duration', 'progress', 'actualStart', 'actualEnd'].includes(col.key)) return false
     return canField(t, col.field ?? col.key)
   }
 
@@ -1006,7 +1063,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const n = nudge.current
     nudge.current = null
     if (!n || n.delta === 0) { setDrag(null); return }
-    const d: DragState = { mode: 'move', keys: n.keys, delta: n.delta }
+    const d: DragState = { mode: 'move', keys: n.keys, delta: n.delta, unit: 'work' }
     await commit(patchesToChangeSetRef.current(computePatchesRef.current(d), n.keys.length > 1 ? `Move ${n.keys.length} tasks` : 'Move task'))
     setDrag(null)
   }
@@ -1036,7 +1093,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     if ((k === 'Enter' || k === 'F2') && active) {
       e.preventDefault()
       const t = tree.byId.get(active)
-      if (t && canField(t, 'name') && k === 'F2') setEditing({ key: active, col: 'name' })
+      if (k === 'F2') { if (t && canField(t, 'name')) setEditing({ key: active, col: 'name' }) }
       else if (t) openTask(t)
       return
     }
@@ -1059,13 +1116,14 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     }
     if ((k === 'ArrowLeft' || k === 'ArrowRight') && selection.length && canDates) {
       e.preventDefault()
-      const step = (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 7 : 1)
+      // One working day (calendar: one day); shift: a week (5 working days / 7 days).
+      const step = (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? (working ? 5 : 7) : 1)
       const keys = nudge.current?.keys ?? leafKeys(selection)
       if (!keys.length) return
       if (nudge.current?.timer) clearTimeout(nudge.current.timer)
       const delta = (nudge.current?.delta ?? 0) + step
       nudge.current = { keys, delta, timer: setTimeout(() => { void flushRef.current() }, 450) }
-      setDrag({ mode: 'move', keys, delta })
+      setDrag({ mode: 'move', keys, delta, unit: 'work' })
     }
   }
   const clipboard = useRef<string[]>([])
@@ -1170,11 +1228,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const hasBaselines = model.tasks.some((t) => t.baselineStart)
   const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40'
   const btnStyle = { borderColor: v('gridLine'), background: v('panel'), color: v('text') }
-  const TB = ({ label, onClick, disabled, testId, title, pressed }: { label: ReactNode; onClick: () => void; disabled?: boolean; testId: string; title: string; pressed?: boolean }) => (
+  const TB = ({ label, onClick, disabled, testId, title, pressed }: { label: ReactNode; onClick: (e?: React.MouseEvent) => void; disabled?: boolean; testId: string; title: string; pressed?: boolean }) => (
     <button type="button" className={btn} style={pressed ? { ...btnStyle, background: v('accent'), color: '#fff', borderColor: v('accent') } : btnStyle}
       onClick={onClick} disabled={disabled} data-testid={testId} title={title} aria-label={title} aria-pressed={pressed}>{label}</button>
   )
   const [exportOpen, setExportOpen] = useState(false)
+  const [tasksMenu, setTasksMenu] = useState<{ x: number; y: number } | null>(null)
 
   return (
     <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} data-testid="gantt-root" data-theme={p.theme ?? 'dark'}
@@ -1195,22 +1254,30 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
               <span className="mx-0.5 h-5 w-px" style={{ background: v('gridLine') }} />
               <TB label="+ Task" onClick={() => insertTask()} testId="gantt-add-task" title="Insert a task after the selected row (Insert)" />
               <TB label="+ Milestone" onClick={() => insertTask(true)} testId="gantt-add-milestone" title="Insert a milestone" />
-              {hierarchy && (
-                <>
-                  <TB label="Indent" onClick={() => doIndent(1)} disabled={!selection.length} testId="gantt-indent" title="Indent: make the selection subtasks (Tab)" />
-                  <TB label="Outdent" onClick={() => doIndent(-1)} disabled={!selection.length} testId="gantt-outdent" title="Outdent (Shift+Tab)" />
-                </>
+            </>
+          )}
+          {(canStructure || canLinks) && (
+            <div className="relative">
+              <TB label="Tasks" onClick={(e?: React.MouseEvent) => {
+                const r = (e?.currentTarget as HTMLElement | undefined)?.getBoundingClientRect()
+                setTasksMenu(r ? { x: r.left, y: r.bottom + 4 } : { x: 200, y: 80 })
+              }} testId="gantt-tasks-menu" title="Indent, outdent, link, unlink or delete the selected tasks" />
+              {tasksMenu && (
+                <ContextMenu x={tasksMenu.x} y={tasksMenu.y} onClose={() => setTasksMenu(null)} items={[
+                  ...(canStructure && hierarchy ? [
+                    { label: 'Indent', shortcut: 'Tab', onSelect: () => doIndent(1), disabled: !selection.length, testId: 'gantt-indent' },
+                    { label: 'Outdent', shortcut: 'Shift+Tab', onSelect: () => doIndent(-1), disabled: !selection.length, testId: 'gantt-outdent' },
+                  ] : []),
+                  ...(canLinks ? [
+                    { label: 'Link finish-to-start', onSelect: linkSelection, disabled: selection.length < 2, testId: 'gantt-link-selected' },
+                    { label: 'Unlink', onSelect: unlinkSelection, disabled: !selection.length, testId: 'gantt-unlink' },
+                  ] : []),
+                  ...(canStructure ? [
+                    { label: 'Delete', shortcut: 'Del', onSelect: deleteSelection, disabled: !selection.length, danger: true, testId: 'gantt-delete' },
+                  ] : []),
+                ]} />
               )}
-            </>
-          )}
-          {canLinks && (
-            <>
-              <TB label="Link" onClick={linkSelection} disabled={selection.length < 2} testId="gantt-link-selected" title="Link the selected tasks finish-to-start" />
-              <TB label="Unlink" onClick={unlinkSelection} disabled={!selection.length} testId="gantt-unlink" title="Remove the links between the selected tasks" />
-            </>
-          )}
-          {canStructure && (
-            <TB label="Delete" onClick={deleteSelection} disabled={!selection.length} testId="gantt-delete" title="Delete the selected tasks (Del)" />
+            </div>
           )}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {queue.saving && (
@@ -1265,7 +1332,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
             <div className="sticky left-0 z-10 border-r" style={{ borderColor: v('gridLine'), background: v('bg') }}>
               <GridBody columns={columns} rows={displayRows} rowH={rowH} first={win.first} last={win.last}
                 selected={selSet} flashKey={flashKey} flagged={flagged} pending={queue.pendingIds} ctx={cellCtx}
-                canEdit={h.canEditCell} canReorder={canStructure} editing={editing} dropLine={dropLine}
+                canEdit={h.canEditCell} canReorder={canStructure} editing={editing} dropLine={dropLine} activeKey={active}
                 onRowClick={h.rowClick} onRowDoubleClick={h.rowDouble} onRowContext={h.openMenu}
                 onToggle={h.toggle} onStartEdit={h.startEdit} onCommitEdit={h.commitEdit}
                 onCancelEdit={h.cancelEdit} onReorderDown={h.reorderDown} />

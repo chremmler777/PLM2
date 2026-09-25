@@ -114,14 +114,15 @@ export function timelineRange(days: number[], unit: Zoom, minSpanDays = 0): Rang
   const valid = days.filter((d) => Number.isFinite(d))
   const min = valid.length ? Math.min(...valid) : 0
   const max = valid.length ? Math.max(...valid) : 0
-  const padBefore = { day: 7, week: 14, month: 31, quarter: 92 }[unit]
-  const padAfter = { day: 21, week: 42, month: 92, quarter: 184 }[unit]
+  // Margins around the plan: coarse zooms show the plan span, not years of empty scale.
+  const padBefore = { day: 7, week: 14, month: 21, quarter: 31 }[unit]
+  const padAfter = { day: 21, week: 42, month: 45, quarter: 62 }[unit]
   let from = mondayOf(min - padBefore)
   if (unit === 'month' || unit === 'quarter') {
     const { y, m } = ymd(min - padBefore)
     from = dayOf(y, unit === 'quarter' ? m - (m % 3) : m, 1)
   }
-  const minSpan = Math.max(minSpanDays, { day: 42, week: 120, month: 365, quarter: 730 }[unit])
+  const minSpan = Math.max(minSpanDays, { day: 42, week: 120, month: 150, quarter: 270 }[unit])
   const to = Math.max(max + padAfter, from + minSpan)
   return { from, to }
 }

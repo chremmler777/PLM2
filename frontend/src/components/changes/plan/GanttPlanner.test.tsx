@@ -9,7 +9,7 @@ vi.mock('../../../api/changePlan', () => ({
   planApi: {
     get: vi.fn(), seed: vi.fn(), createTask: vi.fn(), patchTask: vi.fn(), bulkPatch: vi.fn(),
     deleteTask: vi.fn(), schedule: vi.fn(), exportXml: vi.fn(), exportCsv: vi.fn(),
-    applyChanges: vi.fn(), importXml: vi.fn(),
+    applyChanges: vi.fn(), importXml: vi.fn(), setCalendar: vi.fn(),
   },
 }))
 vi.mock('../../../hooks/queries/useWorkflows', () => ({
@@ -107,13 +107,13 @@ describe('GanttPlanner (ECR adapter)', () => {
     const summary = screen.getByTestId('gantt-summary').textContent ?? ''
     expect(summary).toContain('05.10.26')
     expect(summary).toContain('26.10.26')
-    expect(summary).toContain('22 d, 3.1 wk')
+    expect(summary).toContain('22 d (4 wk)')
   })
 
-  it('uses summary.finish as an exclusive end when there are no leaves to measure', async () => {
+  it('uses summary.finish (the inclusive last day) when there are no leaves to measure', async () => {
     vi.mocked(planApi.get).mockResolvedValue(planOut({ tasks: [task({ id: 1, is_idea: true })], summary: { start: '2026-10-05', finish: '2026-10-10', duration_days: 5, buffer_days: 0, critical_ids: [], ideas: 1 } }))
     renderPlanner()
-    expect((await screen.findByTestId('gantt-summary')).textContent).toContain('09.10.26')
+    expect((await screen.findByTestId('gantt-summary')).textContent).toContain('10.10.26')
   })
 
   it('moves a multi-selection as one block with a single bulk patch (legacy server)', async () => {
@@ -204,8 +204,8 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(screen.queryByTestId('gantt-selection-bar')).toBeNull()
   })
 
-  it('asks for a reason after the baseline, previews the pushed successors, cancel reverts', async () => {
-    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false }))
+  it('asks for a reason after the baseline, previews the pushed successors, cancel reverts, sends only the own move (G3)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ baseline_set: true, can_edit: false }))
     renderPlanner({ mode: 'track' })
     await screen.findByTestId('gantt-planner')
     drag(screen.getByTestId('gantt-bar-shape-1'), 28)
@@ -215,16 +215,17 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(within(dialog).getByTestId('deviation-successors').textContent).toContain('Customer approval')
     fireEvent.click(within(dialog).getByText('Cancel'))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Record a deviation' })).toBeNull())
-    expect(planApi.bulkPatch).not.toHaveBeenCalled()
+    expect(planApi.applyChanges).not.toHaveBeenCalled()
     expect(screen.getByTestId('gantt-row-1').textContent).toContain('05.10.26')
 
     drag(screen.getByTestId('gantt-bar-shape-1'), 28)
     const d2 = await screen.findByRole('dialog', { name: 'Record a deviation' })
     fireEvent.change(within(d2).getByRole('textbox'), { target: { value: 'Toolmaker one day late' } })
     fireEvent.click(within(d2).getByText('Save move'))
-    await waitFor(() => expect(planApi.bulkPatch).toHaveBeenCalledWith(7, 'detailed', [
-      { id: 1, start_date: '2026-10-06' }, { id: 2, start_date: '2026-10-11' }, { id: 3, start_date: '2026-10-14' },
-    ], 'Toolmaker one day late'))
+    // The server carries the successors along (and records them as caused by this move).
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledWith(7, 'detailed', {
+      tasks_upsert: [{ id: 1, start_date: '2026-10-06' }], tasks_delete: [], links_upsert: [], links_delete: [],
+    }, 'Toolmaker one day late'))
   })
 
   it('locks links, kind, idea and name after the baseline; notes and dates stay', async () => {
@@ -395,14 +396,11 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(screen.getByTestId('gantt-add-first')).toBeTruthy()
   })
 
-  it('hides the re-seed button with hideSeed', async () => {
+  it('keeps "Copy quote plan again" in the More menu even with hideSeed (G12)', async () => {
     renderPlanner({ hideSeed: true })
     await screen.findByTestId('gantt-planner')
-    expect(screen.queryByTestId('gantt-reseed')).toBeNull()
-    cleanup()
-    renderPlanner()
-    await screen.findByTestId('gantt-planner')
-    expect(screen.getByTestId('gantt-reseed')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    expect(screen.getByTestId('gantt-reseed').textContent).toBe('Copy quote plan again')
   })
 
   it('is a read-only mini chart when compact', async () => {
@@ -540,6 +538,7 @@ describe('GanttPlanner (ECR adapter)', () => {
     vi.mocked(planApi.schedule).mockResolvedValue(modernOut({ baseline_set: true, can_edit: false }))
     renderPlanner({ mode: 'track' })
     await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
     fireEvent.click(screen.getByTestId('gantt-schedule'))
     const dialog = await screen.findByRole('dialog', { name: 'Record a deviation' })
     expect(within(dialog).getByTestId('deviation-changed').textContent).toContain('Sampling')
@@ -571,4 +570,113 @@ describe('GanttPlanner (ECR adapter)', () => {
     expect(screen.getByTestId('gantt-progress-handle-1')).toBeTruthy()
   })
 
+
+  it('progress waits for implementation when the host passes the status', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false, can_edit_dates: true, progress_department_ids: [11] }))
+    renderPlanner({ mode: 'track', status: 'approved' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.queryByTestId('gantt-progress-handle-1')).toBeNull()
+    cleanup()
+    renderPlanner({ mode: 'track', status: 'in_implementation' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-progress-handle-1')).toBeTruthy()
+  })
+
+  it('automatic scheduling before the baseline: successors move at once, only the own move is sent (G9, P6)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ calendar: { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [], auto: true } }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    drag(screen.getByTestId('gantt-bar-shape-1'), 56)
+    // Optimistic: the successor moved with it.
+    await waitFor(() => expect(screen.getByTestId('gantt-row-2').textContent).toContain('12.10.26'))
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledWith(7, 'detailed', {
+      tasks_upsert: [{ id: 1, start_date: '2026-10-07' }], tasks_delete: [], links_upsert: [], links_delete: [],
+    }, undefined))
+  })
+
+  it('manual scheduling (auto off) leaves successors where they are', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ calendar: { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [], auto: false } }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    drag(screen.getByTestId('gantt-bar-shape-1'), 56)
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalled())
+    expect(vi.mocked(planApi.applyChanges).mock.calls[0][2].tasks_upsert).toEqual([{ id: 1, start_date: '2026-10-07' }])
+    expect(screen.getByTestId('gantt-row-2').textContent).toContain('10.10.26')
+  })
+
+  it('edits the plan calendar: switching to working days asks keep or convert (G7, G11)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    vi.mocked(planApi.setCalendar).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-more'))
+    fireEvent.click(screen.getByTestId('gantt-calendar'))
+    const dlg = await screen.findByTestId('calendar-dialog')
+    fireEvent.click(within(dlg).getByLabelText(/Working days \(weekends/))
+    expect((within(dlg).getByTestId('calendar-save') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(within(dlg).getByLabelText(/Convert them/))
+    fireEvent.click(within(dlg).getByLabelText('Sat'))
+    const day = within(dlg).getByLabelText('New holiday')
+    fireEvent.change(day, { target: { value: '24.12.2026' } })
+    fireEvent.blur(day)
+    fireEvent.click(within(dlg).getByText('Add holiday'))
+    fireEvent.click(within(dlg).getByTestId('calendar-save'))
+    await waitFor(() => expect(planApi.setCalendar).toHaveBeenCalledWith(7, 'detailed',
+      { mode: 'working', workdays: [1, 2, 3, 4, 5, 6], holidays: ['2026-12-24'], auto: true }, true))
+  })
+
+  it('lanes are off by default when the plan has summaries, and the choice is remembered (G14)', async () => {
+    localStorage.removeItem('gantt-lanes-7-detailed')
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({
+      tasks: [task({ id: 1, name: 'Phase', is_summary: true }), task({ id: 2, parent_id: 1 }), task({ id: 3, parent_id: 1, lane: 'Customer' })],
+    }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    expect((screen.getByTestId('gantt-group-toggle') as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByTestId('gantt-group-toggle'))
+    cleanup()
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    expect((screen.getByTestId('gantt-group-toggle') as HTMLInputElement).checked).toBe(true)
+    localStorage.removeItem('gantt-lanes-7-detailed')
+  })
+
+  it('"+ Add a task" on an empty plan shows a draft row and stays there (G4); import is offered too (G12)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ tasks: [], links: [] }))
+    renderPlanner()
+    await screen.findByTestId('gantt-empty')
+    expect(screen.getByTestId('gantt-import-empty')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('gantt-add-first'))
+    const ed = await screen.findByTestId('gantt-cell-editor')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByTestId('gantt-empty')).toBeNull()
+    fireEvent.change(ed, { target: { value: 'First block' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalled())
+    expect(vi.mocked(planApi.applyChanges).mock.calls[0][2].tasks_upsert[0]).toMatchObject({ name: 'First block' })
+  })
+
+  it('shows the tracking columns in track mode (G17)', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(planOut({
+      baseline_set: true, tasks: [task({ id: 1, baseline_start: '2026-10-05', baseline_finish: '2026-10-08', actual_start: '2026-10-05' })],
+    }))
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    const row = screen.getByTestId('gantt-row-1')
+    expect(row.querySelector('[data-col="baselineEnd"]')!.textContent).toBe('07.10.26')
+    expect(row.querySelector('[data-col="variance"]')!.textContent).toBe('+2d')
+    expect(row.querySelector('[data-col="actualStart"]')!.textContent).toBe('05.10.26')
+  })
+
+  it('names the chart exports after the change number (G19)', async () => {
+    renderPlanner({ changeNumber: 'CR-2026-0006' })
+    await screen.findByTestId('gantt-planner')
+    let html = ''
+    const fake = { document: { open: () => undefined, write: (h: string) => { html = h }, close: () => undefined } }
+    const open = vi.spyOn(window, 'open').mockReturnValue(fake as unknown as Window)
+    fireEvent.click(screen.getByTestId('gantt-export'))
+    fireEvent.click(await screen.findByTestId('gantt-export-print'))
+    expect(html).toContain('<title>CR-2026-0006-detailed</title>')
+    open.mockRestore()
+  })
 })

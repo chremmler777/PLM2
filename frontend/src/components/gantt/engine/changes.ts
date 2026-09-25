@@ -74,7 +74,10 @@ export const applyAll = (model: GanttModel, list: ChangeSet[]) => list.reduce(ap
 export function invertChangeSet(model: GanttModel, cs: ChangeSet): ChangeSet {
   const tById = new Map(model.tasks.map((t) => [key(t.id), t]))
   const lById = new Map(model.links.map((l) => [key(l.id), l]))
-  const out: ChangeSet = { label: cs.label, meta: cs.meta }
+  // `derived` (moves the server makes itself) belongs to the forward step only:
+  // an undo must send every restore explicitly.
+  const meta = cs.meta ? Object.fromEntries(Object.entries(cs.meta).filter(([k]) => k !== 'derived')) : undefined
+  const out: ChangeSet = { label: cs.label, ...(meta && Object.keys(meta).length ? { meta } : {}) }
   const after = applyChangeSet(model, cs)
   const afterLinkIds = new Set(after.links.map((l) => key(l.id)))
 
@@ -144,8 +147,10 @@ export function remapChangeSet(cs: ChangeSet, idMap: Record<string, GanttId>, li
     removeLinks: cs.removeLinks?.map(ml),
     order: cs.order?.map(m),
     // Adapter data may carry task ids (e.g. a focus target): remap plain id values.
-    ...(cs.meta ? { meta: Object.fromEntries(Object.entries(cs.meta).map(([k, v]) =>
-      [k, (typeof v === 'string' || typeof v === 'number') && key(v) in idMap ? idMap[key(v)] : v])) } : {}),
+    ...(cs.meta ? { meta: Object.fromEntries(Object.entries(cs.meta).map(([k, v]) => {
+      const one = (x: unknown) => ((typeof x === 'string' || typeof x === 'number') && key(x) in idMap ? idMap[key(x)] : x)
+      return [k, Array.isArray(v) ? v.map(one) : one(v)]
+    })) } : {}),
   }
 }
 

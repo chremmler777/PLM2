@@ -80,8 +80,9 @@ export const planApi = {
     }).then((r) => r.data),
 
   /** Plan calendar (one per change); answers the PlanOut of `plan`. */
-  setCalendar: (id: number, plan: PlanKind, calendar: PlanCalendar) =>
-    client.put<PlanOut>(`${base(id)}/calendar`, calendar, { params: { plan } }).then((r) => r.data),
+  /** `convert`: on a mode switch, convert durations and lags (calendar d x 5/7 -> working d, and back). */
+  setCalendar: (id: number, plan: PlanKind, calendar: PlanCalendar, convert = false) =>
+    client.put<PlanOut>(`${base(id)}/calendar`, { ...calendar, ...(convert ? { convert: true } : {}) }, { params: { plan } }).then((r) => r.data),
 
   /** MS Project XML into a plan (multipart). */
   importXml: (id: number, plan: PlanKind, file: File | Blob, replace = false) => {
@@ -89,7 +90,11 @@ export const planApi = {
     fd.append('file', file, (file as File).name ?? 'plan.xml')
     fd.append('plan', plan)
     fd.append('replace', replace ? 'true' : 'false')
-    return client.post<PlanOut & { import_warnings?: string[] }>(`${base(id)}/import`, fd).then((r) => r.data)
+    // The client's JSON Content-Type default must go: the browser sets
+    // multipart/form-data with its boundary itself (else the server sees no file).
+    return client.post<PlanOut & { import_warnings?: string[] }>(`${base(id)}/import`, fd, {
+      headers: { 'Content-Type': undefined },
+    }).then((r) => r.data)
   },
 
   /** Forward pass on the server. On a baselined detailed plan it needs a reason and records deviations. */

@@ -40,6 +40,31 @@ const STATUS: Record<DeviationStatus, { label: string; cls: string }> = {
 
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n))
 
+/**
+ * The user's own moves first, each followed by the successors it pushed
+ * (`caused_by_task_id`): a pushed row sits under the latest own move of its
+ * cause recorded before it. Rows whose cause is not listed stand alone.
+ */
+function groupByCause(list: PlanDeviation[]): { d: PlanDeviation; pushedBy: PlanDeviation | null }[] {
+  const byId = [...list].sort((a, b) => a.id - b.id)
+  const own = (d: PlanDeviation) => d.caused_by_task_id == null || d.caused_by_task_id === d.task_id
+  const parent = new Map<number, PlanDeviation>()
+  for (const d of byId) {
+    if (own(d)) continue
+    const root = byId.filter((r) => own(r) && r.task_id === d.caused_by_task_id && r.id < d.id).pop()
+    if (root) parent.set(d.id, root)
+  }
+  const out: { d: PlanDeviation; pushedBy: PlanDeviation | null }[] = []
+  const placed = new Set<number>()
+  // Newest moves first, as before; pushed rows follow their move.
+  for (const d of list) {
+    if (placed.has(d.id) || parent.has(d.id)) continue
+    out.push({ d, pushedBy: null }); placed.add(d.id)
+    for (const c of byId) if (parent.get(c.id)?.id === d.id) { out.push({ d: c, pushedBy: d }); placed.add(c.id) }
+  }
+  return out
+}
+
 export default function DeviationsPanel({ changeId, deviations, canDecide: mayDecide, status }: Props) {
   const canDecide = mayDecide && (status == null || DECIDING.includes(status))
   const qc = useQueryClient()
@@ -91,14 +116,23 @@ export default function DeviationsPanel({ changeId, deviations, canDecide: mayDe
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/70">
-              {deviations.map((d) => {
+              {groupByCause(deviations).map(({ d, pushedBy }) => {
                 const ns = toDay(d.new_start)
                 const ne = toDay(d.new_end)
                 const baseEnd = ne - d.slip_days
                 const span = ne - ns
                 return (
-                  <tr key={d.id} className="align-top" data-testid={`deviation-${d.id}`}>
-                    <td className="py-2 pr-2 text-slate-200">{d.task_name}</td>
+                  <tr key={d.id} className={`align-top ${pushedBy ? 'bg-slate-900/40' : ''}`} data-testid={`deviation-${d.id}`}
+                    data-pushed-by={pushedBy?.id}>
+                    <td className={`py-2 pr-2 text-slate-200 ${pushedBy ? 'pl-5' : ''}`}>
+                      {pushedBy && <span className="mr-1 text-slate-500" aria-hidden="true">&#8627;</span>}
+                      {d.task_name}
+                      {pushedBy && (
+                        <p className="text-[11px] text-slate-500" data-testid={`deviation-cause-${d.id}`}>
+                          pushed by {d.caused_by_task_name ?? pushedBy.task_name}
+                        </p>
+                      )}
+                    </td>
                     <td className="py-2 pr-2 whitespace-nowrap text-slate-300 tabular-nums">
                       {fmtDay(span > 0 ? baseEnd - 1 : baseEnd)} <span className="text-slate-500">to</span> {fmtDay(lastDay(ns, ne))}
                     </td>

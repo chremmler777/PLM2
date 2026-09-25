@@ -3,12 +3,13 @@
  * shape of custom ones.
  */
 import type { ReactNode } from 'react'
-import { fmtShort, toIso } from './engine/calendar'
+import { fmtShort, toDay, toIso } from './engine/calendar'
 import type { GanttTask, ScheduledTask } from './engine/types'
 import type { TaskGeo } from './GanttChart'
 import { DEFAULT_KIND, type GanttKindStyle } from './theme'
 
 export type ColumnKey = 'row' | 'wbs' | 'name' | 'start' | 'end' | 'duration' | 'predecessors' | 'lane' | 'kind' | 'progress' | 'slack'
+  | 'baselineStart' | 'baselineEnd' | 'variance' | 'actualStart' | 'actualEnd'
 export type EditKind = 'text' | 'date' | 'number' | 'predecessors'
 
 export interface CellContext {
@@ -22,6 +23,8 @@ export interface CellContext {
   /** Duration units spanned by a summary. */
   summaryDuration?: number
   working: boolean
+  /** Finish minus baseline finish in plan units (+ = late); null without a baseline. */
+  variance?: number | null
 }
 
 export interface GanttColumn {
@@ -70,6 +73,27 @@ export const BUILTIN_COLUMNS: Record<ColumnKey, GanttColumn> = {
     key: 'slack', title: 'Slack', width: 50, align: 'right',
     text: (_t, c) => (c.sched?.totalSlack == null ? '' : `${c.sched.totalSlack}d`),
   },
+  baselineStart: {
+    key: 'baselineStart', title: 'Base start', width: 76,
+    text: (t) => (t.baselineStart ? fmtShort(toDay(t.baselineStart)) : ''),
+  },
+  baselineEnd: {
+    key: 'baselineEnd', title: 'Base finish', width: 76,
+    text: (t) => (t.baselineEnd ? fmtShort(toDay(t.baselineEnd) - (t.baselineStart && t.baselineEnd > t.baselineStart ? 1 : 0)) : ''),
+  },
+  variance: {
+    key: 'variance', title: 'Var.', width: 50, align: 'right',
+    text: (_t, c) => (c.variance == null ? '' : c.variance === 0 ? '0' : `${c.variance > 0 ? '+' : ''}${c.variance}${c.working ? 'wd' : 'd'}`),
+  },
+  actualStart: {
+    key: 'actualStart', title: 'Act. start', width: 76, edit: 'date', field: 'progress',
+    text: (t) => (t.actualStart ? fmtShort(toDay(t.actualStart)) : ''), editValue: (t) => t.actualStart ?? '',
+  },
+  actualEnd: {
+    key: 'actualEnd', title: 'Act. finish', width: 76, edit: 'date', field: 'progress',
+    text: (t) => (t.actualEnd ? fmtShort(toDay(t.actualEnd)) : ''), editValue: (t) => t.actualEnd ?? '',
+  },
+
 }
 
 export const gridWidth = (cols: GanttColumn[]) => cols.reduce((n, c) => n + c.width, 0)

@@ -55,6 +55,8 @@ interface Props {
   groupByLane: boolean
   onGroupByLane: (v: boolean) => void
   onImport?: (file: File) => void
+  onCalendar?: () => void
+  calendarLabel?: string
 }
 
 export default function PlanToolbar(p: Props) {
@@ -87,26 +89,40 @@ export default function PlanToolbar(p: Props) {
           )}
         </Menu>
       )}
-      {p.onSchedule && !p.empty && (
-        <button type="button" className={btn} onClick={p.onSchedule} data-testid="gantt-schedule"
-          title="Moves every task that starts before its predecessors allow. Never pulls tasks earlier.">Auto-schedule</button>
-      )}
       <label className="flex cursor-pointer items-center gap-1.5 px-1 text-xs text-slate-300">
         <input type="checkbox" className="accent-sky-500" checked={p.groupByLane} data-testid="gantt-group-toggle"
           onChange={(e) => p.onGroupByLane(e.target.checked)} />
         Lanes
       </label>
-      {p.onSeed && !p.empty && (
-        <button type="button" className={btn} onClick={p.onSeed} data-testid="gantt-reseed"
-          title="Replaces every task">{p.seedLabel}</button>
+      {/* Less-used actions in one menu: the toolbar stays on one line. */}
+      {(p.onSchedule || p.onCalendar || p.onImport || p.onSeed) && (
+        <Menu label="More" ariaLabel="More plan actions" testId="gantt-more">
+          {(close) => (
+            <>
+              {p.onSchedule && !p.empty && (
+                <button type="button" role="menuitem" className={menuItem} data-testid="gantt-schedule"
+                  title="Moves every task that starts before its predecessors allow. Never pulls tasks earlier."
+                  onClick={() => { close(); p.onSchedule?.() }}>Auto-schedule now</button>
+              )}
+              {p.onCalendar && (
+                <button type="button" role="menuitem" className={menuItem} data-testid="gantt-calendar"
+                  onClick={() => { close(); p.onCalendar?.() }}>{p.calendarLabel ?? 'Calendar'}</button>
+              )}
+              {p.onImport && (
+                <button type="button" role="menuitem" className={menuItem} data-testid="gantt-import"
+                  onClick={() => { close(); fileRef.current?.click() }}>Import MS Project (.xml)</button>
+              )}
+              {p.onSeed && !p.empty && (
+                <button type="button" role="menuitem" className={menuItem} data-testid="gantt-reseed"
+                  onClick={() => { close(); p.onSeed?.() }}>{p.seedLabel}</button>
+              )}
+            </>
+          )}
+        </Menu>
       )}
       {p.onImport && (
-        <>
-          <button type="button" className={btn} onClick={() => fileRef.current?.click()} data-testid="gantt-import"
-            title="Import an MS Project XML file">Import</button>
-          <input ref={fileRef} type="file" accept=".xml,application/xml,text/xml" className="hidden" data-testid="gantt-import-file"
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) p.onImport?.(f) }} />
-        </>
+        <input ref={fileRef} type="file" accept=".xml,application/xml,text/xml" className="hidden" data-testid="gantt-import-file"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) p.onImport?.(f) }} />
       )}
     </>
   )

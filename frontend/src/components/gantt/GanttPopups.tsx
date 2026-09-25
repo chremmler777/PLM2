@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isIsoDay } from './engine/calendar'
 import { CONSTRAINT_TYPES, LIMITS, LINK_TYPES, inYearRange, type ConstraintType, type GanttLink, type GanttTask, type LinkType } from './engine/types'
+import DateInput from './DateInput'
 import { v } from './theme'
 
 export interface MenuItem {
@@ -179,8 +180,8 @@ export function TaskDialog(p: {
             onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <div className="grid grid-cols-3 gap-2">
           <label className="col-span-2 block"><span className={lab} style={{ color: v('textFaint') }}>Start</span>
-            <input type="date" className={field} style={fs} value={f.start} disabled={!p.canField('start')} aria-label="Start"
-              onChange={(e) => setF({ ...f, start: e.target.value })} /></label>
+            <DateInput className={field} style={fs} value={f.start} disabled={!p.canField('start')} aria-label="Start"
+              onChange={(iso) => setF({ ...f, start: iso })} /></label>
           <label className="block"><span className={lab} style={{ color: v('textFaint') }}>{p.working ? 'Work days' : 'Days'}</span>
             <input type="number" min={0} className={field} style={fs} value={f.duration} disabled={!p.canField('duration')} aria-label="Duration"
               onChange={(e) => setF({ ...f, duration: e.target.value })} /></label>
@@ -194,8 +195,8 @@ export function TaskDialog(p: {
                   .map((c) => <option key={c} value={c}>{CONSTRAINT_LABEL[c]}</option>)}
               </select></label>
             <label className="block"><span className={lab} style={{ color: v('textFaint') }}>Date</span>
-              <input type="date" className={field} style={fs} value={f.cdate} aria-label="Constraint date"
-                disabled={!p.canField('constraint') || f.ctype === 'asap'} onChange={(e) => setF({ ...f, cdate: e.target.value })} /></label>
+              <DateInput className={field} style={fs} value={f.cdate} aria-label="Constraint date"
+                disabled={!p.canField('constraint') || f.ctype === 'asap'} onChange={(iso) => setF({ ...f, cdate: iso })} /></label>
           </div>
         )}
         <label className="block"><span className={lab} style={{ color: v('textFaint') }}>Progress %</span>

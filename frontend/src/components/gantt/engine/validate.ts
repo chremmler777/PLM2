@@ -107,10 +107,10 @@ export function validate(
   for (const k of g.leaves) { const s = spanIdx(cal, byKey.get(k)!); es.set(k, s.s); ef.set(k, s.e) }
   for (const t of [...tree.order].reverse()) {
     const k = key(t.id)
-    const kids = tree.children.get(k) ?? []
-    if (!kids.length) continue
-    es.set(k, Math.min(...kids.map((c) => es.get(key(c.id))!)))
-    ef.set(k, Math.max(...kids.map((c) => ef.get(key(c.id))!)))
+    const kids = g.realKids.get(k)
+    if (!kids?.length) continue
+    es.set(k, Math.min(...kids.map((c) => es.get(c)!)))
+    ef.set(k, Math.max(...kids.map((c) => ef.get(c)!)))
   }
   const pinned = (k: string) => (cons.get(k) ?? []).some((c) => c.type === 'mso' || c.type === 'mfo')
   const done = new Set<string>()

@@ -32,8 +32,13 @@ const root = () => screen.getByTestId('gantt-root')
 const key = (k: string, init: Record<string, unknown> = {}) => fireEvent.keyDown(root(), { key: k, ...init })
 const cell = (id: number | string, col: string) =>
   screen.getByTestId(`gantt-row-${id}`).querySelector(`[data-col="${col}"]`) as HTMLElement
+/** Select the row, then click the cell: spreadsheet-style editing of the active row. */
+const startEdit = (id: number | string, col: string) => {
+  fireEvent.click(screen.getByTestId(`gantt-row-${id}`))
+  fireEvent.click(cell(id, col))
+}
 const editCell = (id: number, col: string, value: string, submit: 'Enter' | 'Escape' = 'Enter') => {
-  fireEvent.doubleClick(cell(id, col))
+  startEdit(id, col)
   const ed = screen.getByTestId('gantt-cell-editor')
   fireEvent.change(ed, { target: { value } })
   fireEvent.keyDown(ed, { key: submit })
@@ -334,7 +339,7 @@ describe('Gantt: links', () => {
     const onNotify = vi.fn()
     const { onChange } = setup({ onNotify })
     drawLink('gantt-connector-end-1', screen.getByTestId('gantt-bar-shape-2'))
-    expect(onNotify).toHaveBeenCalledWith('These tasks are already linked')
+    expect(onNotify).toHaveBeenCalledWith(expect.stringContaining('These tasks are already linked'))
     expect(onChange).not.toHaveBeenCalled()
   })
 
@@ -376,10 +381,12 @@ describe('Gantt: links', () => {
     const { onChange, cs } = setup()
     fireEvent.click(screen.getByTestId('gantt-row-2'))
     fireEvent.click(screen.getByTestId('gantt-row-3'), { ctrlKey: true })
+    fireEvent.click(screen.getByTestId('gantt-tasks-menu'))
     fireEvent.click(screen.getByTestId('gantt-link-selected'))
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
     expect(cs().addLinks).toEqual([expect.objectContaining({ from: 2, to: 3, type: 'FS' })])
     fireEvent.click(screen.getByTestId('gantt-row-1'))
+    fireEvent.click(screen.getByTestId('gantt-tasks-menu'))
     fireEvent.click(screen.getByTestId('gantt-unlink'))
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
     expect(cs(1).removeLinks).toEqual(['L1'])
@@ -499,7 +506,7 @@ describe('Gantt: inline editing', () => {
 
   it('does not edit date cells of a summary', () => {
     setup({ tasks: [{ id: 10, name: 'Phase', start: '2026-10-05', duration: 1 }, { ...base()[0], parentId: 10 }], links: [] })
-    fireEvent.doubleClick(cell(10, 'start'))
+    startEdit(10, 'start')
     expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
   })
 })
@@ -585,6 +592,7 @@ describe('Gantt: structure', () => {
   it('indents from the toolbar', async () => {
     const { onChange, cs } = setup()
     fireEvent.click(screen.getByTestId('gantt-row-3'))
+    fireEvent.click(screen.getByTestId('gantt-tasks-menu'))
     fireEvent.click(screen.getByTestId('gantt-indent'))
     await waitFor(() => expect(onChange).toHaveBeenCalled())
     expect(cs().updateTasks).toEqual([{ id: 3, patch: { parentId: 2 } }])
@@ -751,9 +759,9 @@ describe('Gantt: rights', () => {
 
   it('field rights lock single columns', () => {
     setup({ rights: { field: (_t, f) => f !== 'name' } })
-    fireEvent.doubleClick(cell(1, 'name'))
+    startEdit(1, 'name')
     expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
-    fireEvent.doubleClick(cell(1, 'duration'))
+    fireEvent.click(cell(1, 'duration'))
     expect(screen.getByTestId('gantt-cell-editor')).toBeTruthy()
   })
 
@@ -837,7 +845,11 @@ describe('Gantt: task dialog', () => {
     const dlg = screen.getByTestId('gantt-task-dialog')
     fireEvent.change(within(dlg).getByLabelText('Constraint'), { target: { value: 'snet' } })
     expect((within(dlg).getByTestId('gantt-task-dialog-save') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.change(within(dlg).getByLabelText('Constraint date'), { target: { value: '2026-10-20' } })
+    // Typed as dd.mm.yyyy (the field never shows the locale's mm/dd).
+    const date = within(dlg).getByLabelText('Constraint date')
+    fireEvent.change(date, { target: { value: '20.10.2026' } })
+    fireEvent.blur(date)
+    expect((date as HTMLInputElement).value).toBe('20.10.2026')
     fireEvent.click(within(dlg).getByTestId('gantt-task-dialog-save'))
     await waitFor(() => expect(onChange).toHaveBeenCalled())
     expect(cs().updateTasks).toEqual([{ id: 3, patch: { constraint: { type: 'snet', date: '2026-10-20' } } }])
@@ -976,7 +988,7 @@ describe('Gantt: review fixes', () => {
 
   it('refuses FF into a summary typed as a predecessor', () => {
     const { onChange, onError } = setup({ tasks: tree(), links: [], columns: ['row', 'name', 'predecessors'] })
-    fireEvent.doubleClick(cell(10, 'predecessors'))
+    startEdit(10, 'predecessors')
     const ed = screen.getByTestId('gantt-cell-editor')
     fireEvent.change(ed, { target: { value: '1FF' } })
     fireEvent.keyDown(ed, { key: 'Enter' })
@@ -1153,8 +1165,93 @@ describe('Gantt: read-only (legacy) links', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.keyDown(screen.getByTestId('gantt-link-hit-legacy-1-2-0'), { key: 'Delete' })
     fireEvent.click(screen.getByTestId('gantt-row-1'))
+    fireEvent.click(screen.getByTestId('gantt-tasks-menu'))
     fireEvent.click(screen.getByTestId('gantt-unlink'))
     await new Promise((r) => setTimeout(r, 10))
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('drawing a pair covered only by an old dependency creates the real link', async () => {
+    const { onChange, cs } = setup({ links: [{ id: 'legacy-1-2-0', from: 1, to: 2, type: 'FS', lagDays: 0, readOnly: true }] })
+    fireEvent.pointerDown(screen.getByTestId('gantt-connector-end-1'), { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 20, clientY: 40 })
+    fireEvent.pointerUp(screen.getByTestId('gantt-bar-shape-2'), { clientX: 0, clientY: 40 })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().addLinks![0]).toMatchObject({ from: 1, to: 2, type: 'FS' })
+  })
+
+  it('double-click on a row or bar opens the task; F2 edits the name (G16)', () => {
+    const onTaskOpen = vi.fn()
+    setup({ onTaskOpen })
+    fireEvent.doubleClick(cell(2, 'start'))
+    expect(onTaskOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }))
+    expect(screen.queryByTestId('gantt-cell-editor')).toBeNull()
+    fireEvent.doubleClick(screen.getByTestId('gantt-bar-3'))
+    expect(onTaskOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 3 }))
+    fireEvent.click(screen.getByTestId('gantt-row-1'))
+    key('F2')
+    expect((screen.getByTestId('gantt-cell-editor') as HTMLInputElement).value).toBe('Alpha')
+  })
+
+  it('a new row under a selected summary becomes its last child with the lane of the leaf above (G13)', async () => {
+    const tasks: GanttTask[] = [
+      { id: 10, name: 'Phase', start: '2026-10-05', duration: 1, lane: 'Summary lane' },
+      { id: 11, name: 'A', start: '2026-10-05', duration: 2, parentId: 10, lane: 'Tool' },
+      { id: 12, name: 'B', start: '2026-10-07', duration: 2, parentId: 10, lane: 'APQP' },
+      { id: 20, name: 'After', start: '2026-10-20', duration: 1 },
+    ]
+    const { onChange, cs } = setup({ tasks, links: [] })
+    fireEvent.click(screen.getByTestId('gantt-row-10'))
+    fireEvent.click(screen.getByTestId('gantt-add-task'))
+    const ed = screen.getByTestId('gantt-cell-editor')
+    fireEvent.change(ed, { target: { value: 'C' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    const t = cs().addTasks![0]
+    expect(t).toMatchObject({ parentId: 10, lane: 'APQP', start: '2026-10-09' })
+    expect(cs().order!.map(String)).toEqual(['10', '11', '12', String(t.id), '20'])
+    // The new row stays selected.
+    await waitFor(() => expect(screen.getByTestId(`gantt-row-${String(t.id)}`).getAttribute('aria-selected')).toBe('true'))
+  })
+
+  it('arrow keys nudge by working days in a working calendar (G5)', async () => {
+    const { onChange, cs } = setup({ calendar: { mode: 'working', workdays: [1, 2, 3, 4, 5], holidays: [] } })
+    fireEvent.click(screen.getByTestId('gantt-row-1')) // Mon 5 Oct
+    key('ArrowLeft')
+    await waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: 2000 })
+    expect(cs().updateTasks).toEqual([{ id: 1, patch: { start: '2026-10-02' } }]) // Friday before
+  })
+
+  it('the first edit after the rights arrive stays undoable (G6)', async () => {
+    const { onChange, rerender } = setup({ rights: { structure: false, dates: false, links: false } })
+    rerender(<Gantt tasks={base()} links={baseLinks()} onChange={onChange} columns={['row', 'name', 'start']} defaultZoom="day" showToday={false} />)
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('automatic scheduling pushes successors in the same step, listed as derived (G9)', async () => {
+    // Alpha 5..10 Oct -> Beta (12 Oct, FS) keeps its slack: move Alpha by 4 days (ends 14 Oct) pushes Beta to 14 Oct.
+    const { onChange, cs } = setup({ autoSchedule: true })
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28 * 4)
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().updateTasks).toEqual([{ id: 1, patch: { start: '2026-10-09' } }, { id: 2, patch: { start: '2026-10-14' } }])
+    expect(cs().meta?.derived).toEqual([2])
+    // One undo step restores both.
+    key('z', { ctrlKey: true })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    expect(cs(1).updateTasks).toEqual([{ id: 1, patch: { start: '2026-10-05' } }, { id: 2, patch: { start: '2026-10-12' } }])
+    expect(cs(1).meta?.derived).toBeUndefined()
+  })
+
+  it('shows actual work as a thin bar and tracking columns (G17)', () => {
+    setup({
+      showProgress: true, columns: ['row', 'name', 'baselineStart', 'baselineEnd', 'variance', 'actualStart', 'actualEnd'],
+      tasks: [{ ...base()[0], baselineStart: '2026-10-05', baselineEnd: '2026-10-08', actualStart: '2026-10-05', actualEnd: '2026-10-09' }, base()[1], base()[2]],
+    })
+    expect(screen.getByTestId('gantt-actual-1')).toBeTruthy()
+    expect(cell(1, 'baselineEnd').textContent).toBe('07.10.26')
+    expect(cell(1, 'variance').textContent).toBe('+2d')
+    expect(cell(1, 'actualEnd').textContent).toBe('09.10.26')
   })
 })

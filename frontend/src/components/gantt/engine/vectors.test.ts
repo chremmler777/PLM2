@@ -8,7 +8,8 @@
  *   "calendar": {"mode": "calendar"|"working", "workdays": [1..7, Mon=1], "holidays": ["YYYY-MM-DD"]},
  *   "options": {"pull": false,                        // optional, default push
  *               "cycle": true,                        // optional: the plan has a loop
- *               "refused": "summary_pin"},            // optional: validate reports this error
+ *               "refused": "summary_pin",             // optional: validate reports this error
+ *               "push": {"sources": ["A"], "also": []}},  // optional: the push of an edit (only driven tasks move)
  *   "tasks": [{"id": 1, "start": "YYYY-MM-DD", "duration": 5,
  *              "constraint": {"type": "snet", "date": "YYYY-MM-DD"},   // optional
  *              "parentId": null, "isIdea": false}],                    // optional
@@ -20,7 +21,7 @@
  * Only the keys present in `expected` are compared.
  */
 import { describe, expect, it } from 'vitest'
-import { schedule } from './schedule'
+import { pushSchedule, schedule } from './schedule'
 import { validate } from './validate'
 import type { GanttCalendar, GanttLink, GanttTask, LinkType } from './types'
 import sample from './__fixtures__/gantt_vectors.sample.json'
@@ -28,7 +29,7 @@ import sample from './__fixtures__/gantt_vectors.sample.json'
 export interface VectorCase {
   name: string
   calendar?: Partial<GanttCalendar>
-  options?: { pull?: boolean; projectStart?: string; cycle?: boolean; refused?: string }
+  options?: { pull?: boolean; projectStart?: string; cycle?: boolean; refused?: string; push?: { sources: (string | number)[]; also: (string | number)[] } }
   tasks: { id: number | string; start: string; duration: number; constraint?: GanttTask['constraint']; parentId?: number | string | null; isIdea?: boolean }[]
   links: { from: number | string; to: number | string; type: LinkType; lag: number }[]
   expected: Record<string, { start?: string; end?: string; total_slack?: number | null; critical?: boolean; free_slack?: number | null }>
@@ -37,7 +38,10 @@ export interface VectorCase {
 export function runVector(c: VectorCase) {
   const tasks: GanttTask[] = c.tasks.map((t) => ({ ...t, name: `T${t.id}` }))
   const links: GanttLink[] = c.links.map((l, i) => ({ id: `v${i}`, from: l.from, to: l.to, type: l.type, lagDays: l.lag }))
-  const r = schedule(tasks, links, c.calendar, c.options)
+  // push: only what the sources drive (and `also` tasks) may move; everything else keeps its dates.
+  const r = c.options?.push
+    ? pushSchedule(tasks, links, c.calendar, c.options.push.sources, c.options.push.also).result
+    : schedule(tasks, links, c.calendar, c.options)
   if (c.options?.cycle !== undefined && (r.cycle.length > 0) !== c.options.cycle) throw new Error(`cycle expected ${c.options.cycle}`)
   if (c.options?.refused) {
     const codes = validate(tasks, links, c.calendar).filter((i) => i.level === 'error').map((i) => i.code)

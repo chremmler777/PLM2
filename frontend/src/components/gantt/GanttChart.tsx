@@ -9,7 +9,7 @@ import { fmtShort, toDay, type Cal } from './engine/calendar'
 import { key } from './engine/tree'
 import type { GanttLink, GanttTask } from './engine/types'
 import {
-  anchorX, barGeo, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, xOf,
+  anchorX, barGeo, linkSides, majorTicks, minorTicks, offDaySpans, routeLink, textWidth, xOf,
   type BarGeo, type Obstacle, type Range, type Row, type Zoom,
 } from './layout'
 import { DEFAULT_KIND, v, type GanttKindStyle } from './theme'
@@ -98,21 +98,37 @@ export const ChartHeader = memo(function ChartHeader({ range, ppd, unit, today, 
       })}
       <line x1={0} x2={width} y1={H - 0.5} y2={H - 0.5} style={{ stroke: v('gridLine') }} />
       {markers.length > 0 && <line x1={0} x2={width} y1={HEADER_H - 0.5} y2={HEADER_H - 0.5} style={{ stroke: v('rowLine') }} />}
-      {markerLabels(markers, range, ppd).map(({ m, x, text }) => {
-        const c = m.color ?? '#94a3b8'
-        const w = text.length * 5.6 + 10
-        // Pill to the right of the line; flipped left when it would run past the end.
-        const left = x + w + 4 > width ? x - w - 2 : x + 2
-        return (
-          <g key={m.id} data-testid={`gantt-marker-label-${m.id}`}>
-            <path d={`M${x - 4},${HEADER_H - 6} L${x + 4},${HEADER_H - 6} L${x},${HEADER_H} Z`} fill={c} />
-            <line x1={x} x2={x} y1={HEADER_H} y2={H} stroke={c} strokeWidth={1.5} />
-            <rect x={left} y={HEADER_H + 2} width={w} height={MARKER_STRIP - 4} rx={3} fill={c} fillOpacity={0.18} stroke={c} strokeWidth={0.75} />
-            <text x={left + 5} y={HEADER_H + MARKER_STRIP - 5} fontSize={9.5} fontWeight={600} fill={c}>{text}</text>
-            <title>{text}</title>
-          </g>
-        )
-      })}
+      {(() => {
+        // One strip: a label goes right of its line, else left of it, else it
+        // shrinks to its date; the full text stays in the tooltip.
+        let end = -Infinity
+        return markerLabels(markers, range, ppd).map(({ m, x, text }) => {
+          const c = m.color ?? '#94a3b8'
+          const short = fmtShort(toDay(m.date))
+          const place = (t: string) => {
+            const w = t.length * 5.6 + 10
+            const right = x + 2, left = x - w - 2
+            if (right >= end + 2 && right + w <= width) return { t, w, at: right }
+            if (left >= end + 2 && left >= 0) return { t, w, at: left }
+            return null
+          }
+          const pos = place(text) ?? place(short)
+          if (pos) end = pos.at + pos.w
+          return (
+            <g key={m.id} data-testid={`gantt-marker-label-${m.id}`}>
+              <path d={`M${x - 4},${HEADER_H - 6} L${x + 4},${HEADER_H - 6} L${x},${HEADER_H} Z`} fill={c} />
+              <line x1={x} x2={x} y1={HEADER_H} y2={H} stroke={c} strokeWidth={1.5} />
+              {pos && (
+                <>
+                  <rect x={pos.at} y={HEADER_H + 2} width={pos.w} height={MARKER_STRIP - 4} rx={3} fill={c} fillOpacity={0.18} stroke={c} strokeWidth={0.75} />
+                  <text x={pos.at + 5} y={HEADER_H + MARKER_STRIP - 5} fontSize={9.5} fontWeight={600} fill={c}>{pos.t}</text>
+                </>
+              )}
+              <title>{text}</title>
+            </g>
+          )
+        })
+      })()}
       {today != null && today >= range.from && today <= range.to && (() => {
         const x = xOf(today, range, ppd)
         return <path d={`M${x - 5},${HEADER_H - 8} L${x + 5},${HEADER_H - 8} L${x},${HEADER_H - 1} Z`} style={{ fill: v('today') }} />
@@ -295,7 +311,11 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
         const drag = p.canDrag(t)
         const tip = `${t.name}${t.isIdea ? ' (idea)' : ''}\n${fmtShort(g.s)}${g.milestone ? '' : ` to ${fmtShort(g.e - 1)}`}`
         const pending = p.pending.has(k)
-        const labelX = b.milestone ? b.x + 12 : b.x + b.w + (p.canLink ? 14 : 6)
+        // Label right of the bar; left of it when it would run past the chart end.
+        const labelRight = b.milestone ? b.x + 12 : b.x + b.w + (p.canLink ? 14 : 6)
+        const labelW = textWidth(t.name, 11) + (t.isIdea ? 28 : 0)
+        const flip = labelRight + labelW > width - 4 && b.x - labelW - 10 > 0
+        const labelX = flip ? (b.milestone ? b.x - 12 : b.x - (p.canLink ? 14 : 6)) : labelRight
         const baseline = p.showBaselines && t.baselineStart && t.baselineEnd ? (() => {
           const bs = toDay(t.baselineStart), be = toDay(t.baselineEnd)
           const bx = xOf(bs, range, ppd)
@@ -312,6 +332,17 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
             data-testid={`gantt-slip-${k}`} />
         ) : null
         const progress = Math.max(0, Math.min(100, t.progress ?? 0))
+        // Actual work: a thin bar under the planned one, to the actual finish (or today while running).
+        const actual = p.showProgress && t.actualStart && !r.summary ? (() => {
+          const as = toDay(t.actualStart)
+          const ae = t.actualEnd ? toDay(t.actualEnd) + 1 : (p.today != null && p.today > as ? p.today : as + 1)
+          return (
+            <rect x={xOf(as, range, ppd)} y={y + barH + 1} width={Math.max((ae - as) * ppd, 2)} height={2.5} rx={1}
+              fill="#34d399" pointerEvents="none" data-testid={`gantt-actual-${k}`}>
+              <title>{`Actual ${fmtShort(as)}${t.actualEnd ? ` to ${fmtShort(ae - 1)}` : ', running'}`}</title>
+            </rect>
+          )
+        })() : null
         const down = (mode: 'move' | 'start' | 'end' | 'progress') => (e: ReactPointerEvent) => p.onBarDown?.(e, t, mode)
 
         let shape: JSX.Element
@@ -386,6 +417,7 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
             <title>{tip}</title>
             {baseline}
             {shape}
+            {actual}
             {p.flashKey === k && (
               <rect x={b.x - 5} y={y - 4} width={Math.max(b.w, 10) + 10} height={barH + 8} rx={5} fill="none"
                 strokeWidth={2} style={{ stroke: v('focus') }} className="animate-pulse" pointerEvents="none" />
@@ -400,7 +432,7 @@ export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
                 <title>{side === 'end' ? 'Drag to another bar: finish-to-start (drop on its right half: finish-to-finish)' : 'Drag to another bar: start-to-start (drop on its right half: start-to-finish)'}</title>
               </circle>
             ))}
-            <text x={labelX} y={cy + 3.5} fontSize={11} pointerEvents="none"
+            <text x={labelX} y={cy + 3.5} fontSize={11} pointerEvents="none" textAnchor={flip ? 'end' : 'start'}
               style={{ fill: t.isIdea ? v('idea') : r.summary ? v('text') : v('textMuted') }}
               fontWeight={r.summary ? 600 : 400}>
               {t.isIdea && <tspan fontSize={9} fontWeight={700}>IDEA </tspan>}

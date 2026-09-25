@@ -60,6 +60,8 @@ export interface EcrModel {
   tasks: GanttTask[]
   links: GanttLink[]
   calendar: GanttCalendar
+  /** Automatic scheduling of the plan (server pushes successors). */
+  auto: boolean
   support: EcrSupport
 }
 
@@ -82,7 +84,7 @@ export function planToModel(p: PlanOut): EcrModel {
   const calendar: GanttCalendar = cal
     ? { mode: cal.mode === 'working' ? 'working' : 'calendar', workdays: cal.workdays?.length ? cal.workdays : [1, 2, 3, 4, 5], holidays: cal.holidays ?? [] }
     : DEFAULT_ECR_CALENDAR
-  return { tasks, links, calendar, support }
+  return { tasks, links, calendar, auto: support.modern && cal?.auto !== false, support }
 }
 
 // ------------------------------------------------------------------ patches
@@ -155,7 +157,12 @@ export const READD = 're:'
  *   creates). The same for links.
  * - `order` only numbers tasks the server knows or that are created here.
  */
-export function toPlanChangeSet(cs: ChangeSet, before: { tasks: GanttTask[]; links: GanttLink[] }): PlanChangeSet {
+export function toPlanChangeSet(
+  cs: ChangeSet, before: { tasks: GanttTask[]; links: GanttLink[] }, opts: { stripDerived?: boolean } = {},
+): PlanChangeSet {
+  // The server pushes successors itself: send only the user's own moves.
+  // Tasks whose new start the server pushes itself (automatic scheduling).
+  const derived = new Set(opts.stripDerived && Array.isArray(cs.meta?.derived) ? (cs.meta!.derived as GanttId[]).map(key) : [])
   const byKey = new Map(before.tasks.map((t) => [key(t.id), t]))
   const linkKeys = new Set(before.links.map((l) => key(l.id)))
   const added = new Map((cs.addTasks ?? []).map((t) => [key(t.id), t]))
@@ -184,6 +191,10 @@ export function toPlanChangeSet(cs: ChangeSet, before: { tasks: GanttTask[]; lin
   for (const u of cs.updateTasks ?? []) {
     if (!known(u.id)) continue
     const p = patchToEcr(u.patch, byKey.get(key(u.id)))
+    // `derived`: the start came from the automatic push the server makes itself;
+    // the user's other fields on that task still go out.
+    if (derived.has(key(u.id))) delete p.start_date
+    if (!Object.keys(p).length) continue
     if (p.parent_id != null) p.parent_id = tid(p.parent_id) as number
     Object.assign(up(u.id), p)
   }

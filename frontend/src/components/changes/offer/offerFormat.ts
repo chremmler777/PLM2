@@ -102,9 +102,21 @@ export const DEFAULT_DISCLAIMER =
 export const quotePlanKey = (changeId: number) => ['change', changeId, 'plan', 'quote'] as const
 
 /** Weeks from the order milestone to the end of the plan, rounded up. */
-export function planWeeks(durationDays: number | null | undefined): number | null {
-  if (!durationDays || durationDays <= 0) return null
-  return Math.ceil(durationDays / 7)
+/**
+ * Weeks of a plan from its calendar span (start to the inclusive finish),
+ * never from its duration: in a working-day calendar the duration counts
+ * working days, and 78 working days are 16 weeks, not 12. A bare number is
+ * still read as calendar days (older callers).
+ */
+export function planWeeks(
+  span: number | { start: string | null; finish: string | null } | null | undefined,
+): number | null {
+  if (span == null) return null
+  if (typeof span === 'number') return span > 0 ? Math.ceil(span / 7) : null
+  if (!span.start || !span.finish) return null
+  const days = (Date.UTC(+span.finish.slice(0, 4), +span.finish.slice(5, 7) - 1, +span.finish.slice(8, 10))
+    - Date.UTC(+span.start.slice(0, 4), +span.start.slice(5, 7) - 1, +span.start.slice(8, 10))) / 86_400_000 + 1
+  return days > 0 ? Math.ceil(days / 7) : null
 }
 
 // ---------------------------------------------------------------- offer diff

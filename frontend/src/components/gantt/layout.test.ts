@@ -117,7 +117,13 @@ describe('scale', () => {
 
   it('keeps a minimum span per unit', () => {
     const r = timelineRange([toDay('2026-10-05')], 'quarter')
-    expect(r.to - r.from).toBeGreaterThanOrEqual(730)
+    expect(r.to - r.from).toBeGreaterThanOrEqual(270)
+  })
+
+  it('quarter zoom shows the plan span plus a margin, not years (G19)', () => {
+    const r = timelineRange([toDay('2026-10-05'), toDay('2027-06-30')], 'quarter')
+    expect(r.from).toBe(toDay('2026-07-01')) // quarter start before the margin
+    expect(r.to - toDay('2027-06-30')).toBe(62)
   })
 
   it('handles an empty list', () => {

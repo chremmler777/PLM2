@@ -38,9 +38,10 @@
  * - A cycle stops the pass: tasks keep their own dates, slack is null.
  */
 import { endFromIdx, makeCal, toDay, toIso, type Cal } from './calendar'
+import { applyChangeSet } from './changes'
 import { buildTree, key, type Tree } from './tree'
 import type {
-  GanttCalendar, GanttId, GanttLink, GanttTask, Issue, ScheduleOptions, ScheduleResult, ScheduledTask,
+  ChangeSet, GanttCalendar, GanttId, GanttLink, GanttTask, Issue, ScheduleOptions, ScheduleResult, ScheduledTask,
 } from './types'
 
 export const PIN_CONSTRAINTS = ['mso', 'mfo'] as const
@@ -76,6 +77,12 @@ export interface Graph {
   succ: Map<string, string[]>
   /** Summary key -> the children its start point rolls up. */
   startKids: Map<string, string[]>
+  /**
+   * Summary key -> the children its dates roll up: those with committed
+   * (non-idea) work below them; all children when there is none (an idea
+   * does not stretch a summary).
+   */
+  realKids: Map<string, string[]>
 }
 
 /** Is this link used by the math? (backend `usable_link`) */
@@ -145,11 +152,21 @@ export function buildGraph(tasks: GanttTask[], links: GanttLink[]): Graph {
   // Start points roll up their children, deepest summary first, leaving out a
   // child the start point itself drives (it starts after it, so it cannot be
   // the earliest; leaving it out avoids a false cycle).
+  const hasReal = new Map<string, boolean>()
+  const realKids = new Map<string, string[]>()
+  for (const t of [...tree.order].reverse()) {
+    const k = key(t.id)
+    if (!summaries.has(k)) { hasReal.set(k, !t.isIdea); continue }
+    const ks = (tree.children.get(k) ?? []).map((c) => key(c.id))
+    const real = ks.filter((c) => hasReal.get(c))
+    hasReal.set(k, real.length > 0)
+    realKids.set(k, real.length ? real : ks)
+  }
   const startKids = new Map<string, string[]>()
   for (const t of [...tree.order].reverse()) {
     const sid = key(t.id)
     if (!summaries.has(sid)) continue
-    const ks = (tree.children.get(sid) ?? []).map((c) => key(c.id))
+    const ks = realKids.get(sid)!
     const driven = succ.get(nk('PS', sid))?.length ? reach(nk('PS', sid)) : new Set<NodeKey>()
     const keep = ks.filter((c) => !driven.has(startNode(c)))
     const use = keep.length ? keep : ks
@@ -179,7 +196,7 @@ export function buildGraph(tasks: GanttTask[], links: GanttLink[]): Graph {
   }
   const ok = order.length === nodes.length
   const stuck = ok ? [] : [...new Set([...indeg].filter(([, d]) => d > 0).map(([n]) => byNode.get(n)![1]))]
-  return { tree, summaries, anc, leaves, links: ulinks, order: ok ? order : null, stuck, succ, startKids }
+  return { tree, summaries, anc, leaves, links: ulinks, order: ok ? order : null, stuck, succ, startKids, realKids }
 }
 
 /** Constraints per leaf: its own first, then snet / fnlt of its summaries (nearest first). */
@@ -304,7 +321,7 @@ export function schedule(
       } else if (kind === 'PS') {
         es.set(k, Math.min(...g.startKids.get(k)!.map((c) => es.get(c)!)))
       } else {
-        ef.set(k, Math.max(...kids(k).map((c) => ef.get(c)!)))
+        ef.set(k, Math.max(...g.realKids.get(k)!.map((c) => ef.get(c)!)))
       }
     }
   }
@@ -436,8 +453,8 @@ export function schedule(
   const halfUp = (x: number) => Math.floor(x + 0.5)
   for (const t of [...tree.order].reverse()) {
     const k = key(t.id)
-    const ks = kids(k)
-    if (!ks.length) continue
+    if (!kids(k).length) continue
+    const ks = g.realKids.get(k)!
     const rs = ks.map((c) => out.get(c)!)
     const idxs = ks.map((c) => rowIdx.get(c)!)
     rowIdx.set(k, [Math.min(...idxs.map((x) => x[0])), Math.max(...idxs.map((x) => x[1]))])
@@ -488,20 +505,32 @@ export function autoSchedulePatches(
  * `downstream`): successors, successors of every summary above it, every
  * leaf under a summary it links into. The walk stops at another source.
  */
-export function downstream(tasks: GanttTask[], links: GanttLink[], sources: GanttId[]): Map<string, string> {
+export function downstream(tasks: GanttTask[], links: GanttLink[], sources: GanttId[], gates: GanttId[] = []): Map<string, string> {
   const g = buildGraph(tasks, links)
   const srcs = new Set(sources.map(key))
+  const gateSet = new Set(gates.map(key))
   const cause = new Map<string, string>()
-  for (const src of sources.map(key)) {
+  for (const src of [...new Set([...sources.map(key), ...gates.map(key)])]) {
     if (!g.tree.byId.has(src)) continue
-    const starts = g.summaries.has(src) ? [nk('PS', src), nk('PF', src)] : [nk('L', src)]
+    // A summary that may move itself (link into it, snet on it) walks from its
+    // start gate: the leaves below it may move.
+    const starts = g.summaries.has(src)
+      ? (gateSet.has(src) ? [nk('G', src), nk('PS', src), nk('PF', src)] : [nk('PS', src), nk('PF', src)])
+      : [nk('L', src)]
     const seen = new Set(starts)
     const stack = [...starts]
     while (stack.length) {
       const n = stack.pop()!
       for (const m of g.succ.get(n) ?? []) {
         const [kind, x] = parse(m)
-        if (seen.has(m) || (kind === 'L' && srcs.has(x))) continue
+        if (seen.has(m)) continue
+        if (kind === 'L' && srcs.has(x)) {
+          // Another moved task downstream of this one: it may be pushed further
+          // (when its link is now violated); what lies behind it is its own walk.
+          seen.add(m)
+          if (x !== src && !cause.has(x)) cause.set(x, src)
+          continue
+        }
         seen.add(m)
         stack.push(m)
         if (kind === 'L' && !cause.has(x)) cause.set(x, src)
@@ -520,19 +549,100 @@ export function downstream(tasks: GanttTask[], links: GanttLink[], sources: Gant
 export function cascade(
   tasks: GanttTask[], links: GanttLink[], calendar: Partial<GanttCalendar> | null | undefined, sources: GanttId[],
 ): { id: GanttId; patch: { start: string }; cause: GanttId }[] {
-  const cause = downstream(tasks, links, sources)
-  const g = buildGraph(tasks, links)
-  const cons = leafConstraints(tasks, g)
-  // Pinned tasks and tasks that already started (actual start) stay; the walk goes on through them.
-  const movable = new Set([...cause.keys()].filter((k) => !(cons.get(k) ?? []).some((c) => c.type === 'mso' || c.type === 'mfo')
-    && !g.tree.byId.get(k)?.actualStart))
-  const r = schedule(tasks, links, calendar, { only: movable })
+  return push(tasks, links, calendar, sources)
+}
+
+/**
+ * cascade() plus `also`: tasks that may move themselves (a new link or lag
+ * into them, a changed constraint on them), each its own cause. Automatic
+ * scheduling before the baseline and the deviation cascade after it are this
+ * one forward pass (backend `push`).
+ */
+export function push(
+  tasks: GanttTask[], links: GanttLink[], calendar: Partial<GanttCalendar> | null | undefined,
+  sources: GanttId[], also: GanttId[] = [],
+): { id: GanttId; patch: { start: string }; cause: GanttId }[] {
+  const { result: r, movable, cause, tree } = pushSchedule(tasks, links, calendar, sources, also)
   const out: { id: GanttId; patch: { start: string }; cause: GanttId }[] = []
   for (const t of tasks) {
     const k = key(t.id)
     const st = r.byId.get(t.id)
     if (!movable.has(k) || !st || st.start === t.start) continue
-    out.push({ id: t.id, patch: { start: st.start }, cause: g.tree.byId.get(cause.get(k)!)!.id })
+    out.push({ id: t.id, patch: { start: st.start }, cause: tree.byId.get(cause.get(k)!)?.id ?? t.id })
   }
   return out
+}
+
+/** The schedule a push produces (backend `push` result), with what may move and why. */
+export function pushSchedule(
+  tasks: GanttTask[], links: GanttLink[], calendar: Partial<GanttCalendar> | null | undefined,
+  sources: GanttId[], also: GanttId[] = [],
+): { result: ScheduleResult; movable: Set<string>; cause: Map<string, string>; tree: Tree } {
+  const srcKeys = new Set(sources.map(key))
+  const g = buildGraph(tasks, links)
+  const alsoSummaries = also.filter((a) => g.summaries.has(key(a)))
+  const cause = downstream(tasks, links, [...sources, ...also.filter((a) => !srcKeys.has(key(a)))], alsoSummaries)
+  for (const a of also) if (!cause.has(key(a))) cause.set(key(a), key(a))
+  const alsoKeys = new Set(also.map(key))
+  const cons = leafConstraints(tasks, g)
+  // Pinned tasks (unless they move themselves) and tasks that already started stay; the walk goes on through them.
+  const movable = new Set([...cause.keys()].filter((k) => !g.summaries.has(k) && !g.tree.byId.get(k)?.actualStart
+    && (alsoKeys.has(k) || !(cons.get(k) ?? []).some((c) => c.type === 'mso' || c.type === 'mfo'))))
+  return { result: schedule(tasks, links, calendar, { only: movable }), movable, cause, tree: g.tree }
+}
+
+/**
+ * Automatic scheduling of one user action (MS Project "auto"): the successors
+ * the changed tasks push along (later only; pinned and started tasks stay),
+ * added to the ChangeSet so it stays one undoable step. The added moves are
+ * listed in `meta.derived`: a server that pushes by itself gets only the
+ * user's own changes (the adapter strips derived ones).
+ */
+export function autoPushChangeSet(
+  model: { tasks: GanttTask[]; links: GanttLink[] }, cs: ChangeSet, calendar?: Partial<GanttCalendar> | null,
+): { cs: ChangeSet; moved: { id: GanttId; from: string; to: string; cause: GanttId }[] } {
+  const sources = new Set<string>()
+  const also = new Set<string>()
+  for (const u of cs.updateTasks ?? []) {
+    if ('start' in u.patch || 'duration' in u.patch) sources.add(key(u.id))
+    // A new parent or constraint may move the task itself (MS Project): under a
+    // summary with a predecessor it jumps later.
+    if ('constraint' in u.patch || 'parentId' in u.patch) also.add(key(u.id))
+  }
+  // A new task may move itself (its parent, constraint or links bind it).
+  for (const t of cs.addTasks ?? []) also.add(key(t.id))
+  for (const l of cs.addLinks ?? []) also.add(key(l.to))
+  for (const u of cs.updateLinks ?? []) {
+    const l = model.links.find((x) => key(x.id) === key(u.id))
+    if (l) also.add(key(u.patch.to ?? l.to))
+  }
+  if (!sources.size && !also.size) return { cs, moved: [] }
+  const after = applyChangeSet(model, cs)
+  const known = new Set(after.tasks.map((t) => key(t.id)))
+  const idOf = (k: string) => after.tasks.find((t) => key(t.id) === k)!.id
+  const moves = push(after.tasks, after.links, calendar,
+    [...sources].filter((k) => known.has(k)).map(idOf), [...also].filter((k) => known.has(k)).map(idOf))
+  if (!moves.length) return { cs, moved: [] }
+  const user = new Set((cs.updateTasks ?? []).filter((u) => 'start' in u.patch).map((u) => key(u.id)))
+  const upd = [...(cs.updateTasks ?? [])]
+  const added = [...(cs.addTasks ?? [])]
+  const derived: GanttId[] = []
+  const moved: { id: GanttId; from: string; to: string; cause: GanttId }[] = []
+  const byKey = new Map(model.tasks.map((t) => [key(t.id), t]))
+  for (const m of moves) {
+    const k = key(m.id)
+    const ai = added.findIndex((t) => key(t.id) === k)
+    if (ai >= 0) { added[ai] = { ...added[ai], ...m.patch }; continue }
+    const i = upd.findIndex((u) => key(u.id) === k)
+    if (i >= 0) upd[i] = { id: upd[i].id, patch: { ...upd[i].patch, ...m.patch } }
+    else upd.push({ id: m.id, patch: m.patch })
+    if (!user.has(k)) {
+      derived.push(m.id)
+      moved.push({ id: m.id, from: byKey.get(k)?.start ?? m.patch.start, to: m.patch.start, cause: m.cause })
+    }
+  }
+  return {
+    cs: { ...cs, ...(cs.addTasks ? { addTasks: added } : {}), updateTasks: upd, meta: { ...(cs.meta ?? {}), derived } },
+    moved,
+  }
 }

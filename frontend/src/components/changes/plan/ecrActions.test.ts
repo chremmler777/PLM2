@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { applyChangeSet } from '../../gantt/engine/changes'
 import type { GanttLink, GanttTask } from '../../gantt/engine/types'
 import {
-  bankBuildChangeSet, bufferChangeSet, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
+  bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
 } from './ecrActions'
 
 let n = 0
@@ -77,8 +77,10 @@ describe('bank build preset', () => {
       name: 'Bank build (idea)', kind: 'bank_build', isIdea: true, lane: 'Scheduling', start: '2026-09-25', duration: 10,
       meta: { department_id: 30 },
     })
-    expect(cs.addLinks).toBeUndefined()
+    // Linked FS into the downtime so it follows it.
+    expect(cs.addLinks).toEqual([{ id: expect.any(String), from: cs.addTasks![0].id, to: 1, type: 'FS', lagDays: 0 }])
     expect(cs.order!.map(String)[0]).toBe(String(cs.addTasks![0].id))
+    expect(cs.meta).toBeUndefined()
   })
 
   it('ends at the selection start when something is selected', () => {
@@ -191,5 +193,25 @@ describe('successor moves follow summaries (backend cascade)', () => {
     // A moves Mon 5 -> Mon 12 (5 working days): B moves Mon 12 -> Mon 19, 5 working days.
     const { moved } = withSuccessorMoves(ctx, { updateTasks: [{ id: 1, patch: { start: '2026-10-12' } }] })
     expect(moved).toEqual([expect.objectContaining({ id: 2, to: '2026-10-19', days: 5 })])
+  })
+})
+
+describe('bank build ideas follow their anchor (G15)', () => {
+  it('warns about a second bank build on the same downtime', () => {
+    const ctx = plan()
+    const first = bankBuildChangeSet(ctx, [], { lane: 'Scheduling', departmentId: null })
+    const after = applyChangeSet(ctx, first)
+    const second = bankBuildChangeSet({ ...ctx, tasks: after.tasks, links: after.links }, [], { lane: 'Scheduling', departmentId: null })
+    expect(second.meta?.warning).toContain('already has a bank build idea')
+  })
+  it('moves a linked idea along with its anchor', () => {
+    const ctx = { tasks: [t(1, '2026-09-25', 10, { isIdea: true, kind: 'bank_build' }), t(2, '2026-10-05', 5, { kind: 'downtime' })], links: [fs('a', 1, 2)] }
+    const cs = ideasFollow(ctx, { updateTasks: [{ id: 2, patch: { start: '2026-10-12' } }] })
+    expect(cs.updateTasks).toEqual([{ id: 2, patch: { start: '2026-10-12' } }, { id: 1, patch: { start: '2026-10-02' } }])
+  })
+  it('leaves a non-idea predecessor alone', () => {
+    const ctx = { tasks: [t(1, '2026-09-25', 10), t(2, '2026-10-05', 5)], links: [fs('a', 1, 2)] }
+    const cs = { updateTasks: [{ id: 2, patch: { start: '2026-10-12' } }] }
+    expect(ideasFollow(ctx, cs)).toBe(cs)
   })
 })

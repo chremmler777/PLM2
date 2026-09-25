@@ -340,15 +340,17 @@ function OfferWorkspace({ props, offers, offer }: {
         )}
       </nav>
 
+      {/* The Gantt planner is its own tool and stays interactive while a
+          refresh runs; only the offer's own timing fields (and the other
+          sections below) wait for the refreshed draft. The timing gets the
+          full page width: a Gantt needs it more than the sum card beside it. */}
+      <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
+        <OfferTimingSection changeId={change.id} changeNumber={change.change_number} data={data} update={update} editable={editable}
+          fieldsDisabled={refresh.isPending} />
+      </StepSection>
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 space-y-4">
-          {/* The Gantt planner is its own tool and stays interactive while a
-              refresh runs; only the offer's own timing fields (and the other
-              sections below) wait for the refreshed draft. */}
-          <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
-            <OfferTimingSection changeId={change.id} data={data} update={update} editable={editable}
-              fieldsDisabled={refresh.isPending} />
-          </StepSection>
           {/* While a refresh runs the server rewrites the draft: no typing into it meanwhile. */}
           <fieldset disabled={refresh.isPending} aria-busy={refresh.isPending} data-testid="offer-edit-fieldset"
             className="m-0 min-w-0 space-y-4 border-0 p-0">
@@ -431,7 +433,7 @@ export default function OfferTab(props: OfferTabProps) {
           body="Internal changes are not offered. PM approves the costs; the quote plan gives the change its timing before approval." />
         {canSeePrices && props.costSummary}
         <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
-          <OfferTimingSection changeId={change.id} editable={false} />
+          <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
         <StepSection id="offer-approval" n={2} title="Approval" done={!!change.internal_approved_at}>
           <InternalApproval change={change} canApprove={props.canApproveInternalCosts} />
@@ -469,7 +471,7 @@ export default function OfferTab(props: OfferTabProps) {
           The offer opens when costing is closed. The rough timing can be prepared already.
         </p>
         <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
-          <OfferTimingSection changeId={change.id} editable={false} />
+          <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
       </div>
     )
@@ -502,7 +504,7 @@ export default function OfferTab(props: OfferTabProps) {
           )}
         </div>
         <StepSection id="offer-timing" n={1} title="Timing" done={timingDone}>
-          <OfferTimingSection changeId={change.id} editable={false} />
+          <OfferTimingSection changeId={change.id} changeNumber={change.change_number} editable={false} />
         </StepSection>
         {change.status === 'quoted' && (
           <CustomerDecision change={change} canRespond={canWrite} canSignPm={props.canSignPm}

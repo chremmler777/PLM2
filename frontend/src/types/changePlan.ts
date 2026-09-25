@@ -76,6 +76,8 @@ export interface PlanCalendar {
   /** ISO weekdays, Monday = 1. */
   workdays: number[]
   holidays: string[]
+  /** Automatic scheduling (MS Project): the server pushes successors on every change. Default true. */
+  auto?: boolean
 }
 
 export interface Issue {

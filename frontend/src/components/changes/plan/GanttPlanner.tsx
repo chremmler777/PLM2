@@ -26,13 +26,14 @@ import { autoSchedulePatches } from '../../gantt/engine/schedule'
 import { endOf, fmtShort, makeCal, normStart, toDay } from '../../gantt/engine/calendar'
 import { buildTree, key, rowNumbers } from '../../gantt/engine/tree'
 import type { ApplyResult, ChangeSet, GanttId, GanttModel, GanttTask } from '../../gantt/engine/types'
+import CalendarDialog, { type CalendarSave } from '../../gantt/CalendarDialog'
 import ConfirmDialog from './ConfirmDialog'
 import DeviationDialog, { type MovedTask } from './DeviationDialog'
 import PlanToolbar, { btn, btnPrimary, type AlignAction } from './GanttToolbar'
 import TaskEditor from './TaskEditor'
 import ValidationList from './ValidationList'
 import {
-  bankBuildChangeSet, bufferChangeSet, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
+  bankBuildChangeSet, bufferChangeSet, ideasFollow, matchSelection, runParallel, snapToLinks,
 } from './ecrActions'
 import {
   ECR_KINDS, SERVER_SLACK, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
@@ -50,6 +51,10 @@ export interface GanttPlannerProps {
   onPlanChange?: (p: PlanOut) => void
   /** Hide the seed buttons (the host offers its own). */
   hideSeed?: boolean
+  /** The change status: progress is reported only in `in_implementation` (server rule). */
+  status?: string
+  /** Change number for export file names (`<change_number>-<plan>.png`). */
+  changeNumber?: string
   /** CSS height of the chart area. */
   height?: number | string
 }
@@ -67,7 +72,7 @@ interface ReasonAsk { cs: ChangeSet; changed: MovedTask[]; moved: MovedTask[]; r
 interface ConfirmState { title: string; body?: string; label: string; danger?: boolean; run: () => void }
 
 export default function GanttPlanner({
-  changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height,
+  changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height, status, changeNumber,
 }: GanttPlannerProps) {
   const qc = useQueryClient()
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
@@ -93,7 +98,17 @@ export default function GanttPlanner({
 
   const ganttRef = useRef<GanttHandle>(null)
   const track = mode === 'track'
-  const [groupByLane, setGroupByLane] = useState(true)
+  // Lane grouping: remembered per plan; by default off when the plan has
+  // summary tasks (grouping and an outline do not mix).
+  const laneKey = `gantt-lanes-${changeId}-${plan}`
+  const [lanePref, setLanePref] = useState<boolean | null>(() => {
+    try { const v = localStorage.getItem(laneKey); return v == null ? null : v === '1' } catch { return null }
+  })
+  const setGroupByLane = (v: boolean) => {
+    setLanePref(v)
+    try { localStorage.setItem(laneKey, v ? '1' : '0') } catch { /* private mode: not remembered */ }
+  }
+  const [calendarOpen, setCalendarOpen] = useState(false)
   const [selection, setSelection] = useState<GanttId[]>([])
   const [editorId, setEditorId] = useState<number | null>(null)
   const [showIssues, setShowIssues] = useState(false)
@@ -102,6 +117,7 @@ export default function GanttPlanner({
   const [busy, setBusy] = useState(false)
   const [blank, setBlank] = useState(false)
   const [importWarnings, setImportWarnings] = useState<string[]>([])
+  const emptyFile = useRef<HTMLInputElement>(null)
 
   const model = useMemo(() => (data ? planToModel(data) : null), [data])
   const modern = !!model?.support.modern
@@ -112,15 +128,19 @@ export default function GanttPlanner({
   const progressDepts = data?.progress_department_ids
   const summaryIds = useMemo(() => new Set((data?.tasks ?? []).filter((t) => t.is_summary).map((t) => t.id)), [data])
   const byId = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data])
+  const groupByLane = lanePref ?? summaryIds.size === 0
+  // Automatic scheduling: successors move with every change (one undo step).
+  // After the baseline the server always carries successors along.
+  const autoSchedule = modern && (baselineSet || !!model?.auto)
 
-  // Progress (backend `_may_progress`): detailed plan, in implementation (the
-  // server fills progress_department_ids only then), a date editor or a member
-  // of the task's department.
+  // Progress (backend `_may_progress`): the detailed plan while the change is in
+  // implementation, by a date editor or a member of the task's department.
+  // Without a status from the host, the baseline stands in for it.
+  const inImplementation = status != null ? status === 'in_implementation' : baselineSet
   const canProgressOn = useCallback((deptId: number | null | undefined) => !compact && track && plan === 'detailed'
-    // An editor may report once the baseline is set (the server checks the status too);
-    // a department member while the server lists the department.
-    && ((canDates && baselineSet) || (deptId != null && (progressDepts ?? []).includes(deptId))),
-  [compact, track, plan, canDates, baselineSet, progressDepts])
+    && inImplementation
+    && (canDates || (deptId != null && (progressDepts ?? []).includes(deptId))),
+  [compact, track, plan, canDates, inImplementation, progressDepts])
 
   const rights = useMemo(() => ({
     structure: canStructure,
@@ -159,7 +179,9 @@ export default function GanttPlanner({
     const before: GanttModel = { tasks: server?.tasks ?? [], links: server?.links ?? [] }
     try {
       if (modern) {
-        const body = toPlanChangeSet(cs, before)
+        // The server pushes successors itself (auto scheduling, or after the
+        // baseline): send only the user's own changes (G3, P6).
+        const body = toPlanChangeSet(cs, before, { stripDerived: autoSchedule })
         // Nothing the server knows is left (e.g. it only touched a task whose create was refused).
         if (!body.tasks_upsert.length && !body.tasks_delete.length && !body.links_upsert.length && !body.links_delete.length) return {}
         const out = await planApi.applyChanges(changeId, plan, body, reason)
@@ -181,15 +203,25 @@ export default function GanttPlanner({
       qc.invalidateQueries({ queryKey })
       throw e
     }
-  }), [changeId, plan, modern, model, afterSave, qc, queryKey])
+  }), [changeId, plan, modern, model, afterSave, qc, queryKey, autoSchedule])
 
-  /** After the baseline, a date change needs a reason and carries its successors. */
-  const beforeChange = useCallback((cs: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet => {
+  /**
+   * Linked bank build ideas follow their anchor. After the baseline a date
+   * change needs a reason; the preview lists the successors the move pushes
+   * (already in the ChangeSet as `meta.derived`, the server makes the same moves).
+   */
+  const beforeChange = useCallback((cs0: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet => {
+    const cs = ideasFollow({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs0)
     if (!baselineSet || !hasDateChanges(cs)) return cs
-    const { cs: full, moved } = withSuccessorMoves({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs)
+    const derived = new Set(Array.isArray(cs.meta?.derived) ? (cs.meta!.derived as GanttId[]).map(key) : [])
+    const full = cs
     const cal = makeCal(model?.calendar)
     const byKey = new Map(m.tasks.map((t) => [key(t.id), t]))
-    const changed: MovedTask[] = (cs.updateTasks ?? []).filter((u) => 'start' in u.patch || 'duration' in u.patch).map((u) => {
+    const moved: MovedTask[] = (cs.updateTasks ?? []).filter((u) => derived.has(key(u.id)) && u.patch.start).map((u) => {
+      const t = byKey.get(key(u.id))!
+      return { id: t.id, name: t.name, from: t.start, to: u.patch.start!, days: cal.idx(toDay(u.patch.start!)) - cal.idx(normStart(cal, toDay(t.start))) }
+    })
+    const changed: MovedTask[] = (cs.updateTasks ?? []).filter((u) => !derived.has(key(u.id)) && ('start' in u.patch || 'duration' in u.patch)).map((u) => {
       const t = byKey.get(key(u.id))!
       const s0 = normStart(cal, toDay(t.start))
       const e0 = endOf(cal, s0, t.duration)
@@ -231,6 +263,9 @@ export default function GanttPlanner({
     if (patch.actual_start !== undefined) g.actualStart = patch.actual_start
     if (patch.actual_finish !== undefined) g.actualEnd = patch.actual_finish
     if (patch.department_id !== undefined) g.meta = { ...(model?.tasks.find((x) => x.id === t.id)?.meta ?? {}), department_id: patch.department_id }
+    if (patch.constraint_type !== undefined) {
+      g.constraint = patch.constraint_type ? { type: patch.constraint_type, date: patch.constraint_date ?? null } : { type: 'asap', date: null }
+    }
     const cs: ChangeSet = { label: 'Edit task', updateTasks: Object.keys(g).length ? [{ id: t.id, patch: g }] : [] }
     if (patch.predecessors) {
       const links = ganttRef.current?.getModel().links ?? model?.links ?? []
@@ -317,9 +352,21 @@ export default function GanttPlanner({
   const addBuffer = () => apply(bufferChangeSet(ctx(), selection, 5))
   const addBankBuild = () => {
     const sched = departments.find((d) => d.name === 'Scheduling')
-    apply(bankBuildChangeSet(ctx(), selection, { lane: 'Scheduling', departmentId: sched?.id ?? null }))
+    const cs = bankBuildChangeSet(ctx(), selection, { lane: 'Scheduling', departmentId: sched?.id ?? null })
+    if (typeof cs.meta?.warning === 'string') toast.warning?.(cs.meta.warning)
+    apply(cs)
   }
 
+  /** Plan calendar (G7, G11): mode (keep or convert durations), working days, holidays, auto scheduling. */
+  const saveCalendar = (c: CalendarSave) => {
+    setCalendarOpen(false)
+    void runServer(() => planApi.setCalendar(changeId, plan, {
+      mode: c.calendar.mode, workdays: c.calendar.workdays, holidays: c.calendar.holidays,
+      ...(c.auto !== undefined ? { auto: c.auto } : { auto: model?.auto ?? true }),
+    }, c.convert), 'Calendar saved')
+  }
+
+  // `after` is the nearest leaf above the new row: its lane is kept, and its department with it.
   const newTask = useCallback(({ after, milestone }: { after?: GanttTask; milestone: boolean }): Partial<GanttTask> => ({
     kind: milestone ? 'milestone' : 'work',
     meta: { department_id: (after?.meta?.department_id as number | null | undefined) ?? null },
@@ -336,16 +383,22 @@ export default function GanttPlanner({
     rowNumbers(buildTree(model.tasks)).forEach((n, k) => m.set(Number(k), n))
     return m
   }, [model])
+  // Tracking preset (G17): planned vs baseline vs actual.
   const columns = useMemo<(ColumnKey | GanttColumn)[]>(() => (track
-    ? ['row', 'name', 'start', 'end', 'duration', 'predecessors', 'progress']
+    // Listed by importance: narrow screens drop columns from the end.
+    ? ['row', 'name', 'start', 'end', 'progress', 'variance', 'baselineEnd', 'actualStart', 'actualEnd', 'baselineStart', 'predecessors']
     : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', SERVER_SLACK] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
   const issues = useMemo(() => (data ? [...data.validation.errors, ...data.validation.warnings.map((w) => ({ ...w, warn: true }))]
     .map((i) => ({ code: i.code, message: i.message, taskId: i.task_id, level: ('warn' in i ? 'warning' : 'error') as 'warning' | 'error' })) : []), [data])
 
-  // Keep the "Add a task" path of the empty state: once the Gantt shows, start a draft row.
+  // "+ Add a task" on an empty plan: show the (empty) Gantt with a draft row and
+  // stay there until tasks exist (G4); the draft is started once.
+  const draftStarted = useRef(false)
   useEffect(() => {
-    if (blank && ganttRef.current) { ganttRef.current.insertTask(false); setBlank(false) }
-  }, [blank])
+    if (blank && ganttRef.current && !draftStarted.current) { draftStarted.current = true; ganttRef.current.insertTask(false) }
+    if (!blank) draftStarted.current = false
+  })
+  useEffect(() => { if ((data?.tasks.length ?? 0) > 0) setBlank(false) }, [data])
 
   // ---------------------------------------------------------------- render
   if (isLoading) {
@@ -375,6 +428,14 @@ export default function GanttPlanner({
                 <button type="button" className={btnPrimary} onClick={() => seed(false)} disabled={busy} data-testid="gantt-seed">{seedLabel}</button>
               )}
               <button type="button" className={btn} onClick={() => setBlank(true)} disabled={busy} data-testid="gantt-add-first">+ Add a task</button>
+              {modern && (
+                <>
+                  <button type="button" className={btn} onClick={() => emptyFile.current?.click()} disabled={busy} data-testid="gantt-import-empty">
+                    Import MS Project</button>
+                  <input ref={emptyFile} type="file" accept=".xml,application/xml,text/xml" className="hidden" data-testid="gantt-import-empty-file"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importFile(f) }} />
+                </>
+              )}
             </div>
           </>
         ) : (
@@ -395,7 +456,10 @@ export default function GanttPlanner({
   const real = data.tasks.filter((t) => !t.is_idea && !summaryIds.has(t.id))
   const spans = real.map((t) => { const st = normStart(cal, toDay(t.start_date)); return { s: st, e: endOf(cal, st, t.duration_days), ms: t.duration_days === 0 } })
   const firstDay = spans.length ? Math.min(...spans.map((x) => x.s)) : (s.start ? toDay(s.start) : null)
-  const lastDay = spans.length ? Math.max(...spans.map((x) => (x.ms ? x.s : x.e - 1))) : (s.finish ? toDay(s.finish) - 1 : null)
+  // summary.finish is the inclusive last day (backend plan_finish).
+  const lastDay = spans.length ? Math.max(...spans.map((x) => (x.ms ? x.s : x.e - 1))) : (s.finish ? toDay(s.finish) : null)
+  const spanWeeks = firstDay != null && lastDay != null ? Math.ceil((lastDay - firstDay + 1) / 7) : 0
+  const unitLabel = cal.mode === 'working' ? 'wd' : 'd'
   const editorTask = editorId != null ? byId.get(editorId) : undefined
   const stat = (label: string, value: string, tone = 'text-slate-100') => (
     <div className="min-w-0">
@@ -411,7 +475,7 @@ export default function GanttPlanner({
           <div className="grid grid-cols-3 items-center gap-3 sm:grid-cols-7">
             {stat('Start', fmtShort(firstDay))}
             {stat('Finish', fmtShort(lastDay))}
-            {stat('Duration', `${s.duration_days} d, ${Math.round((s.duration_days / 7) * 10) / 10} wk`)}
+            {stat('Duration', `${s.duration_days} ${unitLabel} (${spanWeeks} wk)`)}
             {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Critical path', `${s.critical_ids.length} task${s.critical_ids.length === 1 ? '' : 's'}`)}
@@ -441,18 +505,21 @@ export default function GanttPlanner({
         onError={(m) => toast.error(m)} onNotify={(m) => toast.info?.(m)}
         kinds={ECR_KINDS} columns={columns} markers={markers}
         showBaselines={track} showProgress={track} criticalIds={s.critical_ids}
-        groupByLane={groupByLane}
+        groupByLane={groupByLane} autoSchedule={autoSchedule}
         linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern} hierarchy={modern} constraints={modern}
         defaultZoom={compact ? 'week' : 'day'} height={height ?? (compact ? 300 : '62vh')}
         issues={issues}
         newTask={newTask}
         onTaskOpen={(t) => { if (typeof t.id === 'number') setEditorId(t.id) }}
         onSelectionChange={onSelectionChange}
-        exportName={`change-${changeId}-${plan}`}
+        exportName={`${changeNumber ?? `change-${changeId}`}-${plan}`}
         onExport={exportPlan}
         toolbarStart={!compact ? (
           <PlanToolbar canStructure={canStructure} canDates={canDates} empty={empty}
-            seedLabel={seedLabel} onSeed={canStructure && !hideSeed ? () => seed(true) : undefined}
+            seedLabel={plan === 'quote' ? 'Seed again from costing' : 'Copy quote plan again'}
+            onSeed={canStructure ? () => seed(true) : undefined}
+            onCalendar={modern ? () => setCalendarOpen(true) : undefined}
+            calendarLabel={`Calendar: ${model.calendar.mode === 'working' ? 'working days' : 'calendar days'}${autoSchedule && !baselineSet ? ', auto' : ''}`}
             onBuffer={addBuffer} onBankBuild={addBankBuild}
             onSchedule={canStructure ? () => void runServer(() => planApi.schedule(changeId, plan))
               : baselineSet && canDates && modern ? scheduleWithReason : undefined}
@@ -485,13 +552,21 @@ export default function GanttPlanner({
         <TaskEditor task={editorTask} tasks={data.tasks} rowNo={rowNo} departments={departments}
           canEdit={canStructure} canDates={canDates && !summaryIds.has(editorTask.id)}
           canProgress={canProgressOn(editorTask.department_id)}
-          track={track} baselineSet={baselineSet} saving={busy}
+          track={track} baselineSet={baselineSet} saving={busy} calendar={model.calendar}
+          links={modern ? model.links : undefined} linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern}
+          constraints={modern} isSummary={summaryIds.has(editorTask.id)} summaryIds={summaryIds}
+          onLinks={(cs) => apply(cs)}
           onSave={(patch) => saveFromEditor(editorTask, patch)}
           onDelete={canStructure ? () => setConfirm({
             title: `Delete "${editorTask.name}"?`, body: 'Links to the deleted task are removed too.', label: 'Delete', danger: true,
             run: () => { apply({ label: 'Delete task', removeTasks: [editorTask.id], removeLinks: model.links.filter((l) => l.from === editorTask.id || l.to === editorTask.id).map((l) => l.id) }); setEditorId(null) },
           }) : undefined}
           onClose={() => setEditorId(null)} />
+      )}
+
+      {calendarOpen && (
+        <CalendarDialog calendar={model.calendar} auto={modern && !baselineSet ? model.auto : undefined}
+          canEdit={canStructure} saving={busy} onSave={saveCalendar} onClose={() => setCalendarOpen(false)} />
       )}
 
       <ConfirmDialog open={!!confirm} title={confirm?.title ?? ''} body={confirm?.body}
