@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import client from '../../api/client';
 import { changesApi } from '../../api/changes';
-import { useAuth } from '../../contexts/AuthContext';
 import { t } from '../../i18n/cmLabels';
 import { groupItems } from '../../lib/itemCategory';
 import type { ChangeType } from '../../types/change';
@@ -111,7 +110,6 @@ const projectLabel = (p: ProjectRef): string =>
 
 export default function StartChangeModal({ open, onClose, prefill }: StartChangeModalProps) {
   const navigate = useNavigate();
-  const { userId } = useAuth();
 
   const projectLocked = prefill?.projectId != null;
   const [projectId, setProjectId] = useState<number | undefined>(prefill?.projectId);
@@ -228,7 +226,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         title,
         change_type: changeType,
         reason: reason.trim() || undefined,
-        lead_id: userId ?? undefined,
+        // No lead_id: the backend picks the default lead (the project's PM).
+        // Sending the starter as lead made every Sales starter the lead.
         // One request: the items ride along, the first is the lead, and the
         // composed title follows the lead from here on.
         impacted_part_ids: picked.map((p) => p.id),
@@ -633,7 +632,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                   {t('deadline.quote')} <span className="text-slate-500">{t('start.optional')}</span>
                 </label>
                 <DateInput id="sc-quote-deadline" aria-label={t('deadline.quote')}
-                  value={quoteDeadline} onChange={setQuoteDeadline} placeholder="dd.mm.yyyy"
+                  value={quoteDeadline} onChange={setQuoteDeadline} placeholder="dd.mm.yyyy" commitOnChange
                   className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm" />
                 <p className="mt-1 text-xs text-slate-500">{t('start.quoteDeadlineHint')}</p>
               </div>

@@ -342,6 +342,21 @@ describe('MyTasksPage one list (spec §16)', () => {
     expect(screen.getByText('01.09.2026')).toBeDefined()
   })
 
+  it('reads the stage from stage_label, then stage, then status', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'costing_input', status: 'costing', stage: 'assessment', stage_label: 'Feasibility check' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', status: 'costing', stage: 'captured' }),
+      changeTask({ change_id: 9, change_number: 'GB-CM-0009', kind: 'kickoff', status: 'quote_creation' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0009')
+    const stages = screen.getAllByTestId('task-stage').map((e) => e.textContent)
+    expect(stages).toContain('Feasibility check')
+    expect(stages).toContain('Captured')
+    expect(stages).not.toContain('Costing')
+    expect(stages.length).toBe(3)
+  })
+
   it('shows the change stage and dates as dd.mm.yyyy, overdue first', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'costing_input', status: 'costing', due_date: '2026-11-20' }),

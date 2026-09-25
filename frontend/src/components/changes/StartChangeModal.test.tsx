@@ -61,7 +61,8 @@ describe('StartChangeModal', () => {
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'Rattle at clip' } })
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
     await waitFor(() => expect(changesApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: 1, change_type: 'physical_part', lead_id: 5, customer_relevant: true })))
+      expect.objectContaining({ project_id: 1, change_type: 'physical_part', customer_relevant: true })))
+    expect(vi.mocked(changesApi.create).mock.calls[0][0]).not.toHaveProperty('lead_id')
     await waitFor(() => expect(changesApi.addImpactedItem).toHaveBeenCalledWith(
       42, { part_id: 4, is_lead: true }))
     expect(navigate).toHaveBeenCalledWith('/changes/42')
@@ -397,6 +398,20 @@ describe('StartChangeModal', () => {
         { target: { files: [new File(['x'], 'drawing.pdf', { type: 'application/pdf' })] } })
       expect(await screen.findByTestId('start-ready')).toBeTruthy()
       expect(screen.queryByTestId('start-ready-missing')).toBeNull()
+    })
+
+    it('recalculates the missing list while the quote deadline is typed (no blur)', async () => {
+      wrap(<StartChangeModal open onClose={() => {}} prefill={prefill} />)
+      await screen.findByText('20-3450-001-0 - Clip')
+      const date = screen.getByLabelText('Quote deadline') as HTMLInputElement
+      fireEvent.change(date, { target: { value: '05.11.20' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).toContain('Quote deadline')
+      fireEvent.change(date, { target: { value: '05.11.2026' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).not.toContain('Quote deadline')
+      // The typed text stays as typed.
+      expect(date.value).toBe('05.11.2026')
+      fireEvent.change(date, { target: { value: '' } })
+      expect(screen.getByTestId('start-ready-missing').textContent).toContain('Quote deadline')
     })
 
     it('uploads the dropped documents to the new change', async () => {

@@ -602,6 +602,36 @@ describe('ChangeDetailPage capture phase', () => {
     expect((screen.getByRole('button', { name: /Timing/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('a change rejected at scoping opens on Scoping and keeps the later stages locked', async () => {
+    Object.assign(change, { status: 'rejected', stopped_at: 'scoping' })
+    try {
+      wrap('/changes/1')
+      const scoping = await screen.findByRole('button', { name: /Scoping/ })
+      expect(scoping.className).toContain('border-b-2')
+      expect((screen.getByRole('button', { name: /Costing/ }) as HTMLButtonElement).disabled).toBe(true)
+      const release = screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement
+      expect(release.disabled).toBe(true)
+      expect(release.title).toBe(t('tab.lockedStopped'))
+      // No tab is the current phase of a stopped change.
+      expect(screen.queryByLabelText(t('tab.activePhase'))).toBeNull()
+    } finally {
+      Object.assign(change, { stopped_at: undefined })
+    }
+  })
+
+  it('a change cancelled at costing opens on Overview; costing stays open, release locked', async () => {
+    Object.assign(change, { status: 'cancelled', stopped_at: 'costing' })
+    try {
+      wrap('/changes/1')
+      const overview = await screen.findByRole('button', { name: 'Overview' })
+      expect(overview.className).toContain('border-b-2')
+      expect((screen.getByRole('button', { name: /Costing/ }) as HTMLButtonElement).disabled).toBe(false)
+      expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(true)
+    } finally {
+      Object.assign(change, { stopped_at: undefined })
+    }
+  })
+
   it('withholds nothing from an off-path change', async () => {
     change.status = 'rejected' as ChangeDetail['status']
     wrap('/changes/1')

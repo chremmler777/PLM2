@@ -12,6 +12,13 @@ export interface AuditEntry {
   new_values: string | null
   correlation_id: string | null
   log_level: string
+  /** An admin acting as a department: the department, and the real person. */
+  acting_as_department_id?: number | null
+  acting_as_department_name?: string | null
+  real_user_id?: number | null
+  real_user_name?: string | null
+  /** new_values with ids resolved to what people read (part numbers ...). */
+  display_values?: Record<string, unknown> | null
 }
 export interface AuditVerify {
   valid: boolean

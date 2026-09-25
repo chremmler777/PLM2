@@ -79,6 +79,11 @@ export interface AssessmentObject {
   via_part_id?: number | null;
 }
 
+/** GET /changes/{id}/impact-objects: what serves each given part. */
+export interface ImpactObjectsResponse {
+  parts: { part_id: number; served_by: (AssessmentObject & { category?: string | null })[] }[];
+}
+
 export interface DepartmentObjects {
   department_id: number;
   name: string;
@@ -313,6 +318,8 @@ export interface StageState {
 export interface LeadCandidate {
   id: number;
   name: string;
+  /** Login, shown when two candidates share a display name. */
+  username?: string | null;
   department?: string | null;
   /** The project's PM: the picker's default. */
   is_default?: boolean;
@@ -409,6 +416,9 @@ export interface ChangeTask {
   /** Human kind label and the change's stage, when the backend sends them. */
   kind_label?: string | null;
   status?: ChangeStatus | null;
+  /** The stage the row belongs to (backend key) and its human label. */
+  stage?: string | null;
+  stage_label?: string | null;
   /** R and A rows of one department folded into one task. */
   rasic_letters?: string[];
 }
@@ -1023,6 +1033,8 @@ export interface StageStateResponse {
   can_transition: Record<string, boolean>;
   can_edit_impact: boolean;
   impact_edit_needs_reason: boolean;
+  /** May the viewer record the scoping meeting and its decision (lead, PM, admin). */
+  can_record_meeting?: boolean;
   lead_assigned: boolean;
   title_auto: boolean;
   assessment: StageAssessment | null;

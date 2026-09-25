@@ -13,6 +13,7 @@ vi.mock('../../api/changes', () => ({
     confirmImpact: vi.fn(),
     get: vi.fn(),
     assessmentObjects: vi.fn(),
+    impactObjects: vi.fn(),
     makeLead: vi.fn(),
   },
 }))
@@ -206,6 +207,8 @@ describe('ImpactTree, spec §16', () => {
       id: 7, impacted_items: [{ id: 20, part_id: 2, is_lead: true }, { id: 30, part_id: 3 }],
     } as never)
     vi.mocked(changesApi.assessmentObjects).mockResolvedValue({ departments: [] })
+    // An older backend: no impact-objects endpoint, the assessment objects serve.
+    vi.mocked(changesApi.impactObjects).mockReset().mockRejectedValue({ response: { status: 404 } })
     vi.mocked(changesApi.makeLead).mockReset().mockResolvedValue({})
   })
   afterEach(cleanup)
@@ -226,6 +229,27 @@ describe('ImpactTree, spec §16', () => {
     expect(line.textContent).toContain('T-3454')
     expect(line.textContent).toContain('G-77')
     expect(line.textContent!.match(/T-3454/g)).toHaveLength(1)
+  })
+
+  it('during scoping reads served-by from impact-objects for the selected parts', async () => {
+    vi.mocked(changesApi.impactObjects).mockResolvedValue({ parts: [
+      { part_id: 2, served_by: [
+        { type: 'tool', id: 95, number: 'T-9000', name: 'Mold', via_part_id: 2, category: 'tool' },
+      ] },
+    ] })
+    wrap(<ImpactTree changeId={7} status="scoping" />)
+    const line = await screen.findByTestId('impact-served-2')
+    expect(line.textContent).toContain('T-9000')
+    expect(changesApi.impactObjects).toHaveBeenCalledWith(7, [2])
+    // Ticking another part asks again for the new selection.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    await waitFor(() => expect(changesApi.impactObjects).toHaveBeenCalledWith(7, [2, 3]))
+  })
+
+  it('does not ask impact-objects once the change is routed', async () => {
+    wrap(<ImpactTree changeId={7} status="in_assessment" />)
+    await screen.findByText('Child')
+    expect(changesApi.impactObjects).not.toHaveBeenCalled()
   })
 
   it('marks a pending selection, names it, and discards it', async () => {

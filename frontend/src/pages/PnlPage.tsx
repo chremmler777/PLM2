@@ -15,6 +15,7 @@ import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
 import { formatMoney } from '../lib/format';
+import DateInput from '../components/gantt/DateInput';
 import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
 import type { PnlAggregate, PnlBranch, PnlStatusGroup, PnlFilters, PnlRow } from '../types/pnl';
 
@@ -102,30 +103,43 @@ function Tile({ title, value, sub, subClassName, accent = 'text-slate-100' }: {
   );
 }
 
-function SplitCard({ title, revenue, totalCost, margin, marginPct }: {
-  title: string;
-  revenue: number;
-  totalCost: number;
-  margin: number;
-  marginPct: number | null;
-}) {
+/**
+ * Pipeline / Realized: the same offer-versus-doing figures as the tiles, for
+ * the changes in that group. The plan (offer revenue, planned cost and
+ * margin) always; the actuals once any change in the group has some.
+ */
+function SplitCard({ title, agg }: { title: string; agg: PnlAggregate }) {
+  const revenue = agg.offer_revenue ?? agg.revenue;
+  const planned = agg.planned_cost ?? agg.total_cost;
+  const plannedMargin = agg.planned_margin ?? agg.margin;
+  const pct = (m: number | undefined, r: number | undefined): number | null =>
+    m === undefined || !r ? null : (m / r) * 100;
+  const hasActual = (agg.actual_count ?? 0) > 0;
+  const actualMargin = agg.forecast_margin ?? agg.actual_margin;
+  const line = (label: string, value: React.ReactNode, cls = 'text-slate-100') => (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-slate-400">{label}</span>
+      <span className={`font-semibold ${cls}`}>{value}</span>
+    </div>
+  );
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+    <div className="bg-slate-800 border border-slate-700 rounded-lg p-4" data-testid={`split-${title.toLowerCase()}`}>
       <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">{title}</div>
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-400">Revenue</span>
-        <span className="text-slate-100 font-semibold">{fmtMoney(revenue)}</span>
-      </div>
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-400">Total cost</span>
-        <span className="text-slate-100 font-semibold">{fmtMoney(totalCost)}</span>
-      </div>
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-slate-400">Margin</span>
-        <span className={`font-semibold ${marginAccent(margin)}`}>
-          {fmtMoney(margin)} ({fmtPct(marginPct)})
-        </span>
-      </div>
+      {line('Offer revenue', fmtMoney(revenue))}
+      {line('Planned cost', fmtMoney(planned))}
+      {line('Planned margin',
+        `${fmtMoney(plannedMargin)} (${fmtPct(agg.planned_margin !== undefined ? pct(plannedMargin, revenue) : agg.margin_pct)})`,
+        marginAccent(plannedMargin))}
+      {hasActual && (
+        <div className="mt-2 pt-2 border-t border-slate-700/70 space-y-0.5">
+          {line('Actual cost', fmtMoney(agg.actual_cost))}
+          {line('Actual margin', `${fmtMoney(actualMargin)}${agg.forecast_margin !== undefined ? ' forecast' : ''}`,
+            marginAccent(actualMargin))}
+        </div>
+      )}
+      {!hasActual && agg.actual_count !== undefined && (
+        <p className="mt-2 text-[11px] text-slate-500">No actuals booked yet</p>
+      )}
     </div>
   );
 }
@@ -258,23 +272,25 @@ export default function PnlPage() {
 
         <label className="flex items-center gap-2 text-sm text-slate-400">
           From
-          <input
+          <DateInput
             aria-label="From"
-            type="date"
-            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+            className="w-36 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            max={dateTo || undefined}
+            onChange={setDateFrom}
+            commitOnChange
           />
         </label>
 
         <label className="flex items-center gap-2 text-sm text-slate-400">
           To
-          <input
+          <DateInput
             aria-label="To"
-            type="date"
-            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
+            className="w-36 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            min={dateFrom || undefined}
+            onChange={setDateTo}
+            commitOnChange
           />
         </label>
       </div>
@@ -333,20 +349,8 @@ export default function PnlPage() {
 
           {/* Pipeline vs. Realized */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-            <SplitCard
-              title="Pipeline"
-              revenue={summary.pipeline.revenue}
-              totalCost={summary.pipeline.total_cost}
-              margin={summary.pipeline.margin}
-              marginPct={summary.pipeline.margin_pct}
-            />
-            <SplitCard
-              title="Realized"
-              revenue={summary.realized.revenue}
-              totalCost={summary.realized.total_cost}
-              margin={summary.realized.margin}
-              marginPct={summary.realized.margin_pct}
-            />
+            <SplitCard title="Pipeline" agg={summary.pipeline} />
+            <SplitCard title="Realized" agg={summary.realized} />
           </div>
         </>
       )}

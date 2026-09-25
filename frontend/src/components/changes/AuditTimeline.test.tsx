@@ -61,6 +61,25 @@ describe('AuditTimeline', () => {
     expect(screen.queryByText(/"filename"/)).toBeNull()
   })
 
+  it('names the department an admin acted as, and reads resolved values in words', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 4, action: 'impacted_added', user_name: 'admin', real_user_name: 'Chris D',
+              acting_as_department_name: 'Project Manager',
+              old_values: null, new_values: '{"part_id": 2267}', display_values: { part_id: '3457-10' } }),
+      entry({ id: 3, action: 'scoping_meeting_recorded', user_name: 'Dana Lee',
+              old_values: null, new_values: '{"meeting_id": 27, "channel": "email"}' }),
+      entry({ id: 2, action: 'deadline_set', user_name: 'Dana Lee',
+              old_values: null, new_values: '"2026-09-30 23:59:59"' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect((await screen.findByTestId('audit-acting')).textContent).toBe('(as Project Manager)')
+    expect(screen.getByText(/Chris D/)).toBeDefined()
+    expect(screen.getByText(/part: 3457-10/)).toBeDefined()
+    expect(screen.queryByText(/2267/)).toBeNull()
+    expect(screen.getByText(/meeting id: #27, channel: E-?mail/i)).toBeDefined()
+    expect(screen.getByText(/30\.09\.2026 23:59/)).toBeDefined()
+  })
+
   it('falls back to "System" when there is no actor', async () => {
     vi.mocked(auditApi.list).mockResolvedValue([
       entry({ id: 1, action: 'gate_decided', user_name: null, user_id: null }),

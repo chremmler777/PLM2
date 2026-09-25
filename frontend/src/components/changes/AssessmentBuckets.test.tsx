@@ -199,6 +199,30 @@ describe('AssessmentBuckets', () => {
         .replace('{x}', 'Development'))
   })
 
+  it('counts the viewer’s own department in the progress line, as Blocked by does', async () => {
+    buckets({ myDepartmentIds: [4], change: change({ assessments: [
+      assessment({ id: 1, department_id: 2, status: 'submitted', verdict: 'feasible',
+        submitted_at: '2026-08-01T00:00:00' }),
+      assessment({ id: 2, department_id: 4 }),
+      // Consulted only: owes no answer, not counted.
+      assessment({ id: 3, department_id: 6, rasic_letter: 'C' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-progress')).textContent).toBe(
+      t('bucket.progress').replace('{n}', '1').replace('{m}', '2').replace('{x}', 'Tool Engineer'))
+  })
+
+  it('reads the progress numbers from the round it is handed (stage-state)', async () => {
+    buckets({ myDepartmentIds: [4], round: {
+      first_stage: 1, total: 3, submitted: 1, all_submitted: false,
+      waiting_on: [{ department_id: 2, department_name: 'Development' }, { department_id: 4 }],
+      not_feasible: [], declined_pending: [], verdicts: [], open_risks: [],
+      routing_deviation_pending: false, can_close: false,
+    } })
+    expect((await screen.findByTestId('bucket-progress')).textContent).toBe(
+      t('bucket.progress').replace('{n}', '1').replace('{m}', '3')
+        .replace('{x}', 'Development, Tool Engineer'))
+  })
+
   it('leaves a viewer with no department the progress line alone', async () => {
     buckets({ myDepartmentIds: [] })
     expect(await screen.findByTestId('bucket-progress')).toBeTruthy()
@@ -582,6 +606,9 @@ describe('AssessmentBuckets not-feasible needs its explanation', () => {
       .toBe(t('check.changePptRequired'))
     expect(screen.getByTestId('assessment-evidence-required')).toBeTruthy()
     expect((screen.getByTestId('assessment-submit') as HTMLButtonElement).disabled).toBe(true)
+    // One place to drop the deck: next to Submit; the slot points there.
+    expect(screen.getAllByTestId('dropzone').filter((d) => d.dataset.kind === 'change_ppt')).toHaveLength(1)
+    expect(screen.getByTestId('bucket-ppt-at-submit-2').textContent).toBe(t('bucket.changePptAtSubmit'))
   })
 
   it('is not satisfied by just any document on the assessment', async () => {

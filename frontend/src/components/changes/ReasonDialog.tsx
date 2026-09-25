@@ -21,9 +21,16 @@ export default function ReasonDialog({
   useEffect(() => {
     if (open) setReason('');
   }, [open]);
+  // Escape cancels, wherever focus is inside the page.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-label={title}>
       <div className="bg-slate-800 rounded-xl shadow-xl w-full max-w-md p-5">
         <h3 className="text-base font-semibold mb-2 text-slate-100">{title}</h3>
         {warning && (

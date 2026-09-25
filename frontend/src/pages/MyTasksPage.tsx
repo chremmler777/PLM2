@@ -451,6 +451,14 @@ function TaskList() {
   );
 }
 
+/** The row's stage: the backend's label, else its stage key, else the change status. */
+function taskStageLabel(task: Pick<ChangeTask, 'stage' | 'stage_label' | 'status'>): string {
+  if (task.stage_label) return task.stage_label;
+  const key = task.stage ?? task.status;
+  if (!key) return '-';
+  return STATUS_LABELS[key as keyof typeof STATUS_LABELS] ?? humanize(key);
+}
+
 function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: string) => void }) {
   const hint = taskHint(task);
   const letters = task.rasic_letters ?? [];
@@ -480,7 +488,7 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
         </span>
       </td>
       <td data-testid="task-stage" className="px-4 py-3 align-top text-slate-300 whitespace-nowrap">
-        {task.status ? (STATUS_LABELS[task.status] ?? humanize(task.status)) : '-'}
+        {taskStageLabel(task)}
       </td>
       <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
       <td className="px-4 py-3 align-top text-right">

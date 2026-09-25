@@ -35,6 +35,8 @@ interface Props {
       tabs the row must not offer a dead-end jump affordance. Defaults to
       true so existing callers that don't pass it keep prior behavior. */
   canSeeGovernance?: boolean
+  /** May the viewer record the scoping meeting; others get a pointer, not an instruction. */
+  canRecordMeeting?: boolean
   /** What the change is waiting on (resolveWaitStates). Listed under "Blocked
       by" — the one place a viewer looks to see why nothing is moving. */
   waits?: WaitState[]
@@ -78,7 +80,8 @@ export type NextStep =
  */
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
-  & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'>>,
+  & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'
+    | 'costing_pending_department_ids'>>,
   assessment?: StageAssessment | null): NextStep[] {
   const s = change.status
   // The assessment round (spec §16 P1 6/8): no primary while departments are
@@ -116,6 +119,15 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
       { kind: 'advance', to: 'rejected', label: t('next.reject') },
     ]
   }
+  // Capture: kick off scoping, or reject outright (the customer withdrew
+  // before anyone met). Sales, PM, the lead and admin; `may` hides it from
+  // everyone else.
+  if (s === 'captured' && change.origin !== 'mother_plant') {
+    return [
+      { kind: 'advance', to: 'scoping' },
+      { kind: 'advance', to: 'rejected', label: t('next.reject') },
+    ]
+  }
   // A rejected customer change still owes the customer its letter.
   if (s === 'rejected' && change.customer_relevant && !change.rejection_sent_at) {
     return [{ kind: 'go', key: 'send-rejection', label: t('next.sendRejection'), tab: 'scoping' }]
@@ -136,6 +148,17 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
     }
   }
   if (s === 'costing') {
+    // Departments still owe their cost input: that is the step, no primary
+    // "-> Quote creation" ahead of it (the move stays offered, secondary).
+    const owed = change.costing_pending_department_ids?.length ?? 0
+    if (owed > 0) {
+      return [
+        { kind: 'wait', key: 'costing-input', text: t('next.waitingCostInput')
+          .replace('{n}', String(owed)).replace('{s}', owed === 1 ? '' : 's') },
+        ...(!change.customer_relevant && !change.internal_approved_at ? []
+          : [{ kind: 'advance' as const, to: (change.customer_relevant ? 'quoting' : 'approved') as ChangeStatus }]),
+      ]
+    }
     // An internal change needs its costs approved (Approval tab) before it can
     // advance; a customer-relevant one moves straight to quoting.
     if (!change.customer_relevant && !change.internal_approved_at) {
@@ -173,7 +196,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
 export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
@@ -214,7 +237,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + waits.length
   // Steps the viewer may not take are not offered (spec §16 P1 4).
   const allSteps = nextStepFor(change, assessment)
-  const steps = allSteps.filter((st) => st.kind !== 'advance' || may(st.to))
+  // A not-feasible answer is the lead's and PM's call (reject, back to
+  // scoping, or a deviation to costing). Anyone else reads who decides
+  // instead of "choose how to go on" with nothing to choose.
+  const decidesNotFeasible = may('rejected') || may('scoping')
+  const notFeasibleWho = (assessment?.not_feasible ?? [])
+    .map((d) => d.department_name ?? `#${d.department_id}`).join(', ')
+  const steps = allSteps
+    .filter((st) => st.kind !== 'advance' || may(st.to))
+    .filter((st) => decidesNotFeasible || !(st.kind === 'action' && st.key === 'override-costing'))
+    .map((st) => (!decidesNotFeasible && st.kind === 'wait' && st.key === 'not-feasible'
+      ? { ...st, text: t('next.notFeasibleNotYours').replace('{x}', notFeasibleWho) } : st))
   const hiddenSteps = allSteps.length - steps.length
   const buttons = steps.filter((st): st is Exclude<NextStep, { kind: 'wait' }> => st.kind !== 'wait')
   const offPath = OFF_PATH_STATUSES.includes(change.status)
@@ -384,7 +417,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <button
             className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"
             onClick={() => onAction?.('scoping')}>
-            {t('cockpit.decideInMeeting')}
+            {canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')}
           </button>
         ) : (offPath && steps.length === 0) || allSteps.length === 0 ? (
           <p className="text-sm text-slate-400">

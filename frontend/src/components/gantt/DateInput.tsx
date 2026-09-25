@@ -28,6 +28,12 @@ interface Props {
   onBlur?: () => void
   autoFocus?: boolean
   placeholder?: string
+  /**
+   * Report a complete, valid date (four-digit year or ISO) or an emptied field
+   * while typing, not only on blur / Enter, so dependent UI (a "still
+   * missing" list, a filter) follows the keystrokes. The text is left as typed.
+   */
+  commitOnChange?: boolean
 }
 
 const POP_W = 224
@@ -44,7 +50,14 @@ export default function DateInput(p: Props) {
   const pop = useRef<HTMLDivElement>(null)
   const popId = useId()
   const msgId = useId()
-  useEffect(() => { setText(formatDateInput(p.value)); setMessage(null) }, [p.value])
+  // A value this field just reported while typing must not reformat the text
+  // under the cursor.
+  const emitted = useRef<string | null>(null)
+  useEffect(() => {
+    if (emitted.current !== null && emitted.current === p.value) { emitted.current = null; return }
+    emitted.current = null
+    setText(formatDateInput(p.value)); setMessage(null)
+  }, [p.value])
   useEffect(() => { if (p.autoFocus) { input.current?.focus(); input.current?.select() } }, [p.autoFocus])
 
   const inside = (n: Node | null) => !!n && (!!wrap.current?.contains(n) || !!pop.current?.contains(n))
@@ -152,7 +165,16 @@ export default function DateInput(p: Props) {
         aria-invalid={invalid || !!message || undefined} aria-describedby={shownMessage ? msgId : undefined}
         placeholder={p.placeholder ?? 'dd.mm.yyyy'}
         className={`${p.className ?? ''} pr-7`} style={p.style} value={text}
-        onChange={(e) => { setText(e.target.value); setMessage(null) }}
+        onChange={(e) => {
+          const v = e.target.value
+          setText(v); setMessage(null)
+          if (!p.commitOnChange) return
+          const s = v.trim()
+          const next = !s ? '' : (/^\d{4}-\d{2}-\d{2}$|\d{4}$/.test(s) ? readDateInput(s).iso : null)
+          if (next === null || (next && !inRange(next)) || next === p.value) return
+          emitted.current = next
+          p.onChange(next)
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); close(false); return }
           if (e.key === 'Enter') commitText()

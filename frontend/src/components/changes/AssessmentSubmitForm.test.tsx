@@ -165,6 +165,8 @@ describe('AssessmentSubmitForm drafts and confirm (spec §16)', () => {
     form({ serverDraft: { draft: { data: { details: { impacts: [
       { key: 'cycle_time_change', answer: 'no', impacted: false }] }, verdict: 'feasible' } } } })
     expect((await screen.findByTestId('check-no-cycle_time_change')).getAttribute('aria-pressed')).toBe('true')
+    // Says where the draft came from, not "kept in this browser".
+    expect(screen.getByTestId('assessment-draft-state').textContent).toBe(t('assessment.draftRestored'))
   })
 
   it('names verdicts in words, asks before sending and clears the draft after', async () => {

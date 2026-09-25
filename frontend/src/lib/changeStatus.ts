@@ -242,3 +242,24 @@ export function decodeLogValue(v: string | null | undefined): string | null {
   }
   return v
 }
+
+/**
+ * A stopped change (rejected or cancelled, also a rejection that was closed
+ * afterwards) keeps the tabs of the stage it stopped at; a tab that stage
+ * never reached stays locked, as it was then. Unknown stop stage: nothing is
+ * locked (older data without a status log).
+ */
+export function stoppedTabLocked(stoppedAt: ChangeStatus | null | undefined, tb: ChangeTab): boolean {
+  if (!stoppedAt) return false
+  const from = TAB_UNLOCK_STATUS[tb]
+  if (from === undefined) return false
+  const at = CHANGE_STATUS_ORDER.indexOf(stoppedAt)
+  if (at === -1) return false
+  return at < CHANGE_STATUS_ORDER.indexOf(from)
+}
+
+/** Where a stopped change opens: Scoping when it was rejected there, else Overview. */
+export function stoppedDefaultTab(kind: 'rejected' | 'cancelled',
+  stoppedAt: ChangeStatus | null | undefined): ChangeTab {
+  return kind === 'rejected' && (stoppedAt === 'scoping' || stoppedAt === 'captured') ? 'scoping' : 'overview'
+}

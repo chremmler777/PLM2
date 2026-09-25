@@ -158,6 +158,7 @@ describe('ScopingPanel keeps the discussion out of the record', () => {
 
   it('records a meeting without sending notes', async () => {
     render(wrap(<ScopingPanel change={change()} />))
+    fireEvent.click(await screen.findByTestId('meeting-carrier-customer'))
     fireEvent.click(await screen.findByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
@@ -190,6 +191,7 @@ describe('ScopingPanel department picker', () => {
     // The room overrules the standard: Quality becomes Accountable.
     fireEvent.click(screen.getByTestId('rasic-2-A'))
     expect(screen.getByTestId('rasic-2-A').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
@@ -565,6 +567,7 @@ describe('ScopingPanel meeting routing selection', () => {
     fireEvent.click(chips[4])
     expect(chips[4].getAttribute('aria-pressed')).toBe('false')
 
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
     fireEvent.click(screen.getByRole('button', { name: t('meeting.save') }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
@@ -608,12 +611,15 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(save.disabled).toBe(false)
   })
 
-  it('defaults the carrier from the change and calls out a flip', async () => {
+  it('preselects no carrier, shows the captured value as a hint and calls out a flip', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     vi.mocked(changesApi.createMeeting).mockResolvedValue({} as never)
     render(wrap(<ScopingPanel change={change({ customer_relevant: true })} />))
     const customer = await screen.findByTestId('meeting-carrier-customer') as HTMLInputElement
-    expect(customer.checked).toBe(true)
+    expect(customer.checked).toBe(false)
+    expect((screen.getByTestId('meeting-carrier-internal') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByTestId('meeting-carrier-captured').textContent).toBe('Captured as: Customer change')
+    expect((screen.getByTestId('meeting-save') as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByTestId('meeting-carrier-flip')).toBeNull()
     fireEvent.click(screen.getByTestId('meeting-carrier-internal'))
     expect(screen.getByTestId('meeting-carrier-flip').textContent).toContain('Sales is notified')
@@ -631,6 +637,7 @@ describe('ScopingPanel §16 meeting record', () => {
     const inp = screen.getByLabelText(t('meeting.dateLabel')) as HTMLInputElement
     fireEvent.change(inp, { target: { value: '04.07.2026' } })
     fireEvent.blur(inp)
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
     fireEvent.click(screen.getByTestId('meeting-save'))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].meeting_date).toBe('2026-07-04T12:00:00Z')
@@ -644,6 +651,7 @@ describe('ScopingPanel §16 meeting record', () => {
       return Promise.resolve({} as never)
     })
     render(wrap(<ScopingPanel change={change()} />))
+    fireEvent.click(await screen.findByTestId('meeting-carrier-customer'))
     fireEvent.click(await screen.findByTestId('meeting-save'))
     // Saved: the form is gone, one click brings it back.
     const reopen = await screen.findByTestId('meeting-form-open')
@@ -677,6 +685,22 @@ describe('ScopingPanel §16 meeting record', () => {
     expect(proceed.disabled).toBe(true)
     expect(proceed.getAttribute('title')).toBe(t('meeting.costCarrierMissing'))
     expect(screen.getByTestId('meeting-carrier-21')).toBeTruthy()
+  })
+
+  it('shows the record but no meeting controls to a viewer who may not record it', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided()] as never)
+    render(wrap(<ScopingPanel change={change()} canRecordMeeting={false} />))
+    expect(await screen.findByTestId('meeting-undecided-21')).toBeTruthy()
+    expect(screen.queryByTestId('meeting-proceed-21')).toBeNull()
+    expect(screen.queryByTestId('meeting-form')).toBeNull()
+    expect(screen.queryByTestId('meeting-form-open')).toBeNull()
+    expect(screen.getByTestId('meeting-record-rights').textContent).toBe(t('meeting.recordRights'))
+  })
+
+  it('names a meeting without attendees in words, not with a dash', async () => {
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ participants: [] })] as never)
+    render(wrap(<ScopingPanel change={change()} />))
+    expect(await screen.findByText('04.07.2026 · no attendees recorded')).toBeTruthy()
   })
 
   it('offers people only in the attendee list', async () => {

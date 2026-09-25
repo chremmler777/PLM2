@@ -49,8 +49,17 @@ export default function LeadPicker({ change, canEdit, viewer, isAdmin = false }:
     ...(change.lead_id != null && !candidates.some((c) => c.id === change.lead_id)
       ? [{ id: change.lead_id, name: change.lead_name ?? `#${change.lead_id}` }] : []),
     ...(viewer && !candidates.some((c) => c.id === viewer.id) && viewer.id !== change.lead_id
-      ? [{ id: viewer.id, name: `${viewer.name} (${t('cockpit.leadMe')})` }] : []),
+      ? [{ id: viewer.id, name: viewer.name === t('cockpit.leadMe') ? viewer.name : `${viewer.name} (${t('cockpit.leadMe')})` }] : []),
   ]
+  // Two people may share a display name: the login (or, without one, the
+  // department and then the id) tells them apart.
+  const nameCount = new Map<string, number>()
+  for (const o of options) nameCount.set(o.name, (nameCount.get(o.name) ?? 0) + 1)
+  const optionLabel = (o: LeadCandidate): string => {
+    const dup = (nameCount.get(o.name) ?? 0) > 1
+    const who = dup ? (o.username ? ` (${o.username})` : o.department ? '' : ` (#${o.id})`) : ''
+    return `${o.name}${who}${o.department ? ` (${o.department})` : ''}`
+  }
   const set = useMutation({
     mutationFn: (leadId: number) => changesApi.setLead(change.id, leadId),
     onSuccess: () => {
@@ -76,7 +85,7 @@ export default function LeadPicker({ change, canEdit, viewer, isAdmin = false }:
           <option value="">{t('cockpit.leadPick')}</option>
           {options.map((o) => (
             <option key={o.id} value={o.id}>
-              {o.name}{o.department ? ` (${o.department})` : ''}
+              {optionLabel(o)}
             </option>
           ))}
         </select>

@@ -45,7 +45,24 @@ describe('LeadPicker (spec §16 P1 5)', () => {
       viewer={{ id: 9, name: 'Me' }} />))
     fireEvent.click(screen.getByTestId('lead-edit'))
     const select = await screen.findByTestId('lead-select') as HTMLSelectElement
-    await waitFor(() => expect([...select.options].map((o) => o.text)).toEqual(['Pick a lead', 'Eva', 'Me (Me)']))
+    await waitFor(() => expect([...select.options].map((o) => o.text)).toEqual(['Pick a lead', 'Eva', 'Me']))
+  })
+
+  it('tells two candidates with the same display name apart by their login', async () => {
+    leadCandidates.mockResolvedValue([
+      { id: 3, name: 'Anna Schmidt', username: 'anna.schmidt', department: 'Project Manager' },
+      { id: 4, name: 'Anna Schmidt', username: 'a.schmidt2', department: 'Project Manager' },
+      { id: 5, name: 'Lars Lead', username: 'lars' },
+    ])
+    render(wrap(<LeadPicker change={{ id: 7, lead_id: null, lead_name: null }} canEdit />))
+    fireEvent.click(screen.getByTestId('lead-edit'))
+    const select = () => screen.getByTestId('lead-select') as HTMLSelectElement
+    await waitFor(() => expect(select().options.length).toBe(4))
+    expect([...select().options].map((o) => o.text).slice(1)).toEqual([
+      'Anna Schmidt (anna.schmidt) (Project Manager)',
+      'Anna Schmidt (a.schmidt2) (Project Manager)',
+      'Lars Lead',
+    ])
   })
 
   it('preselects the project PM (is_default) once the candidates arrive', async () => {

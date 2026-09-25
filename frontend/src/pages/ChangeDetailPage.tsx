@@ -44,7 +44,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import {
   STATUS_LABELS, OFF_PATH_STATUSES, everydayTabsFor, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
-  activeTabsFor, resolveChangeTab, changeTabLabel, type ChangeTab,
+  activeTabsFor, resolveChangeTab, changeTabLabel, stoppedTabLocked, stoppedDefaultTab, type ChangeTab,
   decodeLogValue,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
@@ -301,6 +301,9 @@ export default function ChangeDetailPage() {
   // "Inform mother plant" stamp are the PM's (lead, admin).
   const motherPlant = change?.origin === 'mother_plant';
   const canRunMotherPlant = isAdmin || isChangeLead || isPmMember;
+  // The scoping meeting and its decision: the backend's verdict (stage-state),
+  // else lead, PM or admin (the backend answers anyone else 403).
+  const canRecordMeeting = stage?.can_record_meeting ?? (isAdmin || isChangeLead || isPmMember);
 
   // Transition rights (spec §16 P1 4): the backend's verdict for this viewer,
   // else the client mirror. A step the viewer may not take is not shown.
@@ -345,12 +348,27 @@ export default function ChangeDetailPage() {
   // into a tab the viewer or the phase does not allow — a governance tab
   // without authz, or any later-phase tab while capturing — still falls back
   // to overview rather than rendering a blank/forbidden tab (below).
+  // A rejected or cancelled change (also a rejection closed afterwards) ends
+  // at the stage it stopped at: it opens on Overview (Scoping when the
+  // meeting rejected it), no tab is the active phase, and the stages it never
+  // reached stay locked. The rejection closure lives on Scoping, so a
+  // rejected change always keeps it.
+  const stopped = (() => {
+    const kind = stage?.end_state?.kind ?? endStateOf(change);
+    if (kind !== 'rejected' && kind !== 'cancelled') return null;
+    const at = stage?.end_state?.stopped_at ?? stoppedAtFrom(change,
+      (changelog ?? []).filter((e) => e.field_name === 'status')
+        .map((e) => ({ old_value: decodeLogValue(e.old_value), new_value: decodeLogValue(e.new_value) })));
+    return { kind, at };
+  })();
   const tab: Tab = resolveChangeTab(rawTab, change.status, change.origin)
-    ?? defaultTabFor(change.status, change.origin);
+    ?? (stopped ? stoppedDefaultTab(stopped.kind, stopped.at) : defaultTabFor(change.status, change.origin));
   // Once a validation issue exists the Release tab stays open through a loop
   // back to implementation: the validation record never disappears.
-  const tabLocked = (tb: Tab) => isTabLocked(change.status, tb)
-    && !(tb === 'release' && releaseOpenByIssues(change.status, validationIssues.length));
+  const stoppedLocked = (tb: Tab) => !!stopped && stoppedTabLocked(stopped.at, tb)
+    && !(stopped.kind === 'rejected' && tb === 'scoping');
+  const tabLocked = (tb: Tab) => stoppedLocked(tb) || (!stopped && isTabLocked(change.status, tb)
+    && !(tb === 'release' && releaseOpenByIssues(change.status, validationIssues.length)));
   const effectiveTab: Tab =
     (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || tabLocked(tab)
       ? 'overview' : tab;
@@ -545,14 +563,7 @@ export default function ChangeDetailPage() {
 
       <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant}
         origin={change.origin}
-        end={(() => {
-          const kind = stage?.end_state?.kind ?? endStateOf(change);
-          if (kind !== 'rejected' && kind !== 'cancelled') return null;
-          const stoppedAt = stage?.end_state?.stopped_at ?? stoppedAtFrom(change,
-            (changelog ?? []).filter((e) => e.field_name === 'status')
-              .map((e) => ({ old_value: decodeLogValue(e.old_value), new_value: decodeLogValue(e.new_value) })));
-          return { kind, stoppedAt, closed: change.status === 'closed' };
-        })()} />
+        end={stopped ? { kind: stopped.kind, stoppedAt: stopped.at, closed: change.status === 'closed' } : null} />
 
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
@@ -641,6 +652,7 @@ export default function ChangeDetailPage() {
         onShowImpact={() => setTab('impacted')}
         actions={myActions?.actions ?? []}
         onAction={goTab}
+        canRecordMeeting={canRecordMeeting}
         canSeeGovernance={canSeeGovernance}
         // What the change is waiting on — same list for every viewer, whoever
         // owns the next move.
@@ -666,7 +678,7 @@ export default function ChangeDetailPage() {
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
         {everydayTabsFor(change.origin).map((tb) => {
           const locked = tabLocked(tb);
-          const isActivePhase = !locked
+          const isActivePhase = !locked && !stopped
             && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
           // Scoping leaves two jobs on the impact tab — pick the impacted items,
           // then confirm the set. Both are done when the confirmation lands.
@@ -675,7 +687,7 @@ export default function ChangeDetailPage() {
           return (
             <button key={tb}
               disabled={locked}
-              title={locked ? t(lockedTitleKey(tb))
+              title={locked ? t(stoppedLocked(tb) ? 'tab.lockedStopped' : lockedTitleKey(tb))
                 : openWork ? t('tab.openWork')
                 : isActivePhase ? t('tab.activePhase') : undefined}
               className={`pb-2 flex items-center gap-1.5 ${
@@ -736,6 +748,7 @@ export default function ChangeDetailPage() {
         <ScopingPanel change={change}
           canSendRejection={!myActions ? true : isSalesMember}
           canAnswerConcerns={isSalesMember} isPm={isPmMember}
+          canRecordMeeting={canRecordMeeting}
           myDepartmentIds={myActions?.memberships ?? []} />
       )}
 
@@ -798,7 +811,8 @@ export default function ChangeDetailPage() {
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
             userId={userId ?? null} isChangeLead={isChangeLead}
-            declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)} />
+            declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)}
+            round={assessmentState} />
         </div>
       )}
 

@@ -131,12 +131,13 @@ describe('PnlPage', () => {
     changesMock.mockClear()
     summaryMock.mockClear()
 
-    fireEvent.change(screen.getByLabelText(/from/i), { target: { value: '2026-01-01' } })
+    // dd.mm.yyyy, applied as soon as the date is complete (no blur needed).
+    fireEvent.change(screen.getByLabelText(/from/i), { target: { value: '01.01.2026' } })
     await waitFor(() => {
       expect(changesMock).toHaveBeenCalledWith(expect.objectContaining({ date_from: '2026-01-01' }))
     })
 
-    fireEvent.change(screen.getByLabelText(/to/i), { target: { value: '2026-01-31' } })
+    fireEvent.change(screen.getByLabelText(/to/i), { target: { value: '31.01.2026' } })
     await waitFor(() => {
       expect(changesMock).toHaveBeenCalledWith(
         expect.objectContaining({ date_from: '2026-01-01', date_to: '2026-01-31' })
@@ -180,6 +181,35 @@ describe('PnlPage', () => {
     expect(screen.getByTestId('pnl-forecast-cost-1').textContent).toMatch(/forecast 14[.,]000/)
     expect(screen.queryByTestId('pnl-actual-revenue-2')).toBeNull()
     expect(screen.queryByTestId('pnl-forecast-cost-2')).toBeNull()
+  })
+
+  it('never offers a native (locale mm/dd) date picker for the filters', async () => {
+    const { container } = renderPage()
+    await screen.findByRole('link', { name: 'GB-CM-0001' })
+    expect(container.querySelector('input[type="date"]')).toBeNull()
+    expect((screen.getByLabelText(/from/i) as HTMLInputElement).placeholder).toBe('dd.mm.yyyy')
+  })
+
+  it('reads the Pipeline and Realized cards from the offer-vs-doing fields, like the tiles', async () => {
+    summaryMock.mockResolvedValueOnce({
+      ...summaryFixture,
+      pipeline: { ...summaryFixture.pipeline, offer_revenue: 5000, planned_cost: 4000, planned_margin: 1000,
+        actual_count: 0, actual_cost: 0 },
+      realized: { ...summaryFixture.realized, offer_revenue: 42342, planned_cost: 37521.5, planned_margin: 4820.5,
+        actual_count: 1, actual_cost: 7300, actual_margin: 19592, forecast_margin: -1800 },
+    })
+    renderPage()
+    const pipeline = await screen.findByTestId('split-pipeline')
+    expect(pipeline.textContent).toMatch(/Offer revenue5[.,]000/)
+    expect(pipeline.textContent).toMatch(/Planned cost4[.,]000/)
+    expect(pipeline.textContent).toContain('(20.0%)')
+    expect(pipeline.textContent).toContain('No actuals booked yet')
+    const realized = screen.getByTestId('split-realized')
+    expect(realized.textContent).toMatch(/Planned cost37[.,]521/)
+    expect(realized.textContent).toMatch(/Actual cost7[.,]300/)
+    expect(realized.textContent).toMatch(/Actual margin-1[.,]800/)
+    // Not the old total_cost (0 on the live data).
+    expect(realized.textContent).not.toMatch(/Total cost/)
   })
 
   it('an older summary without counts keeps the change count line', async () => {

@@ -19,12 +19,12 @@ import { AttachmentRow } from './AttachmentRow'
 import { impactedCount, impactsOf, choiceLabel } from './departmentForms/ActivityChecklist'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { verdictLabel, plural } from '../../lib/humanLabels'
-import { assessmentProgress } from '../../lib/waitStates'
+import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
 import type {
   ChangeConcern,
-  Assessment, AssessmentObject, ChangeDetail, DepartmentObjects,
+  Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
 } from '../../types/change'
 
 const OBJECT_ICON: Record<string, string> = {
@@ -137,7 +137,7 @@ function ObjectList({ objects, partName }: {
 
 export default function AssessmentBuckets({
   change, departments, myDepartmentIds, editable, isPm = false, canSeeAll = false,
-  canAddDepartment = false, userId = null, isChangeLead = false, declinedIds,
+  canAddDepartment = false, userId = null, isChangeLead = false, declinedIds, round,
 }: {
   change: ChangeDetail
   departments: { id: number; name: string; is_active?: boolean }[]
@@ -155,6 +155,9 @@ export default function AssessmentBuckets({
   isChangeLead?: boolean
   /** "Not our responsibility" declines awaiting a decision (stage-state). */
   declinedIds?: number[]
+  /** The assessment round as "Blocked by" counts it (stage-state, else
+   *  derived): the progress line reads the same numbers. */
+  round?: StageAssessment | null
 }) {
   const changeId = change.id
   // `undefined` means the user has not touched a row yet, so their own bucket
@@ -274,7 +277,13 @@ export default function AssessmentBuckets({
   // departments is their job. A viewer with neither gets the line alone.
   const visible = canSeeAll ? rows : rows.filter((r) => myDepartmentIds.includes(r.id))
   const summarised = canSeeAll ? [] : rows.filter((r) => !myDepartmentIds.includes(r.id))
-  const progress = assessmentProgress(summarised.map((r) => ({
+  // Every first-stage R/A department, the viewer's own included, counted the
+  // way "Blocked by" counts them, so the two never disagree.
+  const roundState = round ?? deriveAssessmentState(change.assessments, deptName)
+  const progress = roundState ? {
+    done: roundState.submitted, total: roundState.total,
+    waiting: roundState.waiting_on.map((d) => d.department_id),
+  } : assessmentProgress(rows.map((r) => ({
     departmentId: r.id,
     rasic: r.rasic,
     submitted: !!r.assessment?.submitted_at
@@ -488,9 +497,14 @@ export default function AssessmentBuckets({
                           old evidence block and its tests. */}
                       {slot(`bucket-evidence-${row.id}`, t('bucket.changePpt'),
                         [...ofKind('change_ppt'), ...legacy], t('bucket.changePptHint'),
-                        <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
-                          kind="change_ppt" label={t('bucket.changePptSlot')}
-                          onUploaded={invalidate} />, required)}
+                        // While the form owes the deck, its one drop zone sits
+                        // next to Submit; this slot points there, not a second zone.
+                        required && canSubmit
+                          ? <p className="text-xs text-amber-200/80" data-testid={`bucket-ppt-at-submit-${row.id}`}>
+                              {t('bucket.changePptAtSubmit')}</p>
+                          : <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact
+                              kind="change_ppt" label={t('bucket.changePptSlot')}
+                              onUploaded={invalidate} />, required)}
                       {slot(`bucket-rfq-${row.id}`, t('attach.rfq'),
                         ofKind('rfq'), t('attach.rfqSlot'),
                         <AttachmentDropzone changeId={changeId} assessmentId={a.id} compact

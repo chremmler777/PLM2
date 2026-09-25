@@ -211,16 +211,36 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
     // Proceeding and rejecting are the meeting's call — no button bypasses it.
     expect(screen.queryByRole('button', { name: /In Assessment/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Rejected/ })).toBeNull()
-    const pointer = screen.getByText(/Record the decision in the scoping meeting/)
+    const pointer = screen.getByText(/Record the scoping meeting: proceed/)
     fireEvent.click(pointer)
     expect(onAction).toHaveBeenCalledWith('scoping')
+  })
+
+  it('points a viewer who cannot record the meeting at Scoping without telling them to record it', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      canRecordMeeting={false} />))
+    expect(screen.queryByText(/Record the scoping meeting/)).toBeNull()
+    expect(screen.getByText(/The scoping meeting decides/)).toBeDefined()
+  })
+
+  it('offers Reject at capture to a viewer who may reject, and hides it otherwise', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      may={(to) => to === 'rejected' || to === 'scoping'} />))
+    expect(screen.getByRole('button', { name: new RegExp(t('next.reject')) })).toBeDefined()
+    cleanup()
+    render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      may={(to) => to === 'scoping'} />))
+    expect(screen.queryByRole('button', { name: new RegExp(t('next.reject')) })).toBeNull()
   })
 
   it('still offers the ordinary advance button on statuses the meeting does not own', () => {
     render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.getByRole('button', { name: /Scoping/ })).toBeDefined()
-    expect(screen.queryByText(/Record the decision in the scoping meeting/)).toBeNull()
+    expect(screen.queryByText(/Record the scoping meeting: proceed/)).toBeNull()
   })
 })
 
@@ -408,6 +428,16 @@ describe('CockpitSummary waits', () => {
     } as never)).toEqual([{ kind: 'advance', to: 'quoting' }])
   })
 
+  it('at costing, waits on cost input with no primary move to quote creation', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'costing', customer_relevant: true, costing_pending_department_ids: [27, 28],
+    })} gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false} />))
+    expect(screen.getByTestId('next-wait-costing-input').textContent)
+      .toContain('Waiting on cost input from 2 departments')
+    const quote = screen.getByTestId('next-to-quoting')
+    expect(quote.className).not.toContain('bg-sky-600')
+  })
+
   it('the Approve internal costs step is gated by needs("internal-approval") like any other', () => {
     render(wrap(<CockpitSummary change={change({
       status: 'costing', customer_relevant: false, internal_approved_at: null,
@@ -488,6 +518,18 @@ describe('CockpitSummary early stages (spec §16)', () => {
     fireEvent.click(screen.getByTestId('next-override-costing'))
     expect(onStepAction).toHaveBeenCalledWith('override-costing')
     expect(screen.queryByTestId('next-to-costing')).toBeNull()
+  })
+
+  it('tells a department at not feasible that the lead or PM decides, with no ways out offered', () => {
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} may={() => false}
+      assessment={round({ waiting_on: [], all_submitted: true,
+        not_feasible: [{ department_id: 27, department_name: 'Tool Engineer', has_change_ppt: true }] })} />))
+    expect(screen.getByTestId('next-wait-not-feasible').textContent)
+      .toContain('Tool Engineer: not feasible. The change lead or Project Management decides how to go on.')
+    expect(screen.queryByTestId('next-override-costing')).toBeNull()
+    expect(screen.queryByTestId('next-to-rejected')).toBeNull()
+    expect(screen.queryByTestId('next-to-scoping')).toBeNull()
   })
 
   it('hides steps the viewer may not take and says who may', () => {

@@ -34,7 +34,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   no_lead_set: { de: 'Kein Leit-Teil', en: 'No lead set' },
   by_department: { de: 'Nach Abteilung', en: 'By department' },
   by_plant: { de: 'Nach Werk', en: 'By plant' },
-  summierung: { de: 'Summierung', en: 'Summierung' },
+  summierung: { de: 'Kostenübersicht', en: 'Cost summary' },
   no_rate_configured: { de: 'Keine Kostensätze für diese Abteilung konfiguriert', en: 'No cost rates configured for this department' },
   'impact.title': { de: 'Betroffene Struktur', en: 'Impact tree' },
   'impact.hint': { de: 'Betroffene Knoten wählen. Vorschläge zeigen strukturell betroffene Baugruppen.', en: 'Pick impacted nodes. Suggestions mark structurally affected parent assemblies.' },
@@ -168,8 +168,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: '{n} departments blocked by open concerns',
   },
   'cockpit.decideInMeeting': {
-    de: 'Entscheidung im Scoping-Termin festhalten - Freigabe, Rückfrage oder Ablehnung →',
-    en: 'Record the decision in the scoping meeting - proceed, needs info or reject →',
+    de: 'Scoping-Termin festhalten: weiter, Rückfrage oder Ablehnung →',
+    en: 'Record the scoping meeting: proceed, ask for information or reject →',
+  },
+  'cockpit.meetingDecides': {
+    de: 'Der Scoping-Termin entscheidet (Lead, Projektmanagement): Scoping ansehen →',
+    en: 'The scoping meeting decides (lead, Project Management): see Scoping →',
   },
   'cockpit.startImplementation': { de: 'Umsetzung starten', en: 'Start implementation' },
   'cockpit.startImplementationHint': {
@@ -184,6 +188,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'gate.feasibility': { de: 'Machbarkeit', en: 'Feasibility' },
   'gate.budget': { de: 'Budget', en: 'Budget' },
   'gate.release': { de: 'Freigabe', en: 'Release' },
+  'audit.actingAs': { de: '(als {d})', en: '(as {d})' },
   'audit.title': { de: 'Audit-Trail', en: 'Audit trail' },
   'audit.chainOk': { de: 'Kette intakt', en: 'chain intact' },
   'audit.chainBroken': { de: 'Kette beschädigt', en: 'chain broken' },
@@ -825,6 +830,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   // The internal deck behind the answer — required when the answer is "no".
   'bucket.changePpt': { de: 'Change-PPT (intern)', en: 'Change PPT (internal)' },
+  'bucket.changePptAtSubmit': {
+    de: 'Oben neben „Absenden" ablegen.',
+    en: 'Drop it next to Submit, above.',
+  },
   'bucket.changePptSlot': {
     de: 'Change-PPT ablegen (intern)',
     en: 'Drop the change PPT here (internal)',
@@ -1129,6 +1138,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'reports.retry': { de: 'Erneut versuchen', en: 'Retry' },
   'tab.activePhase': { de: 'Aktuelle Phase', en: 'Current phase' },
   'tab.openWork': { de: 'Offene Aufgaben', en: 'Open work' },
+  'tab.lockedStopped': {
+    de: 'Die Änderung wurde vorher gestoppt, diese Phase wurde nie erreicht',
+    en: 'The change stopped before this stage, so it was never reached',
+  },
   'tab.lockedUntilScoping': { de: 'Ab dem Scoping verfügbar', en: 'Available from scoping' },
   'tab.lockedUntilPhase': {
     de: 'Wird in einer späteren Phase freigeschaltet',
@@ -1665,6 +1678,15 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Erst den Kostenträger festlegen',
     en: 'Set the cost carrier first',
   },
+  'meeting.costCarrierCaptured': { de: 'Erfasst als: {x}', en: 'Captured as: {x}' },
+  'meeting.costCarrierLast': { de: 'letzter Termin: {x}', en: 'last meeting: {x}' },
+  'meeting.noAttendees': { de: 'keine Teilnehmer erfasst', en: 'no attendees recorded' },
+  'meeting.undated': { de: 'Ohne Datum, keine Teilnehmer erfasst', en: 'No date, no attendees recorded' },
+  'meeting.undecided': { de: 'Entscheidung offen', en: 'Decision pending' },
+  'meeting.recordRights': {
+    de: 'Den Scoping-Termin und seine Entscheidung erfassen der Lead, das Projektmanagement oder ein Admin.',
+    en: 'The lead, Project Management or an admin records the scoping meeting and its decision.',
+  },
   'meeting.costCarrierPick': { de: 'Kostenträger wählen', en: 'Pick the cost carrier' },
   'meeting.saveMissing': { de: 'Noch offen: {x}', en: 'Still needed: {x}' },
   'meeting.recordAnother': { de: '+ Weiteren Termin erfassen', en: '+ Record another meeting' },
@@ -1754,6 +1776,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'deadline.savedRelease': { de: 'Freigabetermin gespeichert', en: 'Release deadline saved' },
   'assessment.pickVerdict': { de: "Ergebnis wählen", en: "Pick a verdict" },
   'assessment.draftSaved': { de: "Entwurf gespeichert", en: "Draft saved" },
+  'assessment.draftRestored': { de: "Entwurf vom Server wiederhergestellt", en: "Draft restored from the server" },
   'assessment.draftLocal': { de: "Entwurf in diesem Browser gesichert", en: "Draft kept in this browser" },
   'assessment.confirmTitle': { de: "Bewertung abgeben: {d}", en: "Submit the {d} assessment" },
   'assessment.confirmBody': { de: "Nach dem Abgeben ist die Bewertung schreibgeschützt. Eine Korrektur braucht die Projektleitung.", en: "Once submitted the answer is read only. Changing it later needs the Project Manager." },
@@ -1769,6 +1792,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'bucket.declinedPending': { de: "Abgelehnt, Entscheidung offen", en: "Declined, awaiting decision" },
   'bucket.staleRows': { de: "+{n} früher", en: "+{n} earlier" },
   'meeting.saved': { de: "Termin gespeichert", en: "Meeting saved" },
+  'next.waitingCostInput': { de: "Wartet auf Kosten von {n} Abteilung(en)", en: "Waiting on cost input from {n} department{s}" },
   'next.waitingOn': { de: "Wartet auf {n} Abteilung(en)", en: "Waiting on {n} department{s}" },
   'next.waitingRouting': { de: "Wartet auf die Entscheidung zur Routing-Änderung", en: "Waiting on the routing change decision" },
   'next.reject': { de: "Änderung ablehnen", en: "Reject change" },
@@ -1821,6 +1845,10 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.confirmBody': { de: "Die Bewertung wird auf diesen Umfang geroutet. Eine spätere Änderung am Umfang hebt diese Bestätigung auf und die Entwicklung muss erneut bestätigen.", en: "The assessment is routed on this set. A later edit to the set clears this confirmation and Development has to confirm again." },
   'impact.confirmCount': { de: "{n} betroffene Teile", en: "{n} impacted items" },
   'next.notFeasible': { de: "{x}: nicht machbar. Wie geht es weiter?", en: "{x}: not feasible. Choose how to go on:" },
+  'next.notFeasibleNotYours': {
+    de: "{x}: nicht machbar. Wie es weitergeht, entscheiden die Änderungsleitung oder das Projektmanagement.",
+    en: "{x}: not feasible. The change lead or Project Management decides how to go on.",
+  },
   'next.overridePending': { de: "Abweichung zum Costing beantragt: wartet auf Entscheidung", en: "Deviation to costing proposed: waiting for its decision" },
   'confirm.overrideApproved': { de: "„Nicht machbar“ durch eine genehmigte Abweichung übersteuert", en: "Not feasible overridden by an approved deviation" },
   'next.ended': { de: "Beendet: kein weiterer Schritt", en: "Ended: no further step" },

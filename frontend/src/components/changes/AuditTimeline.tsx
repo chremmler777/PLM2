@@ -5,6 +5,15 @@ import { t } from '../../i18n/cmLabels'
 import { formatDate, formatDateTime } from '../../lib/format'
 import { auditValueLabel, humanize } from '../../lib/humanLabels'
 
+// Short codes the backend stores for a handful of fields, in words.
+const FIELD_WORDS: Record<string, (v: string) => string> = {
+  channel: (v) => (t(`channel.${v}`) === `channel.${v}` ? humanize(v) : t(`channel.${v}`)),
+  decision: (v) => ({ proceed: t('meeting.proceed'), reject: t('meeting.reject'),
+    needs_info: t('meeting.needsInfo') } as Record<string, string>)[v] ?? humanize(v),
+  kind: humanize, phase: humanize, answer: humanize, origin: humanize, branch: humanize,
+  rasic_letter: (v) => v,
+}
+
 // Turn a stored JSON value into a plain phrase: no braces, quotes or codes.
 // Keys name their field, so a value reads by its field ("status: Scoping").
 const humanValue = (v: unknown, field?: string): string => {
@@ -14,10 +23,20 @@ const humanValue = (v: unknown, field?: string): string => {
     // Empty fields say nothing: "concern id: -" is noise in a trail.
     return Object.entries(v as Record<string, unknown>)
       .filter(([, val]) => val !== null && val !== undefined && val !== '')
-      .map(([k, val]) => `${humanize(k).toLowerCase()}: ${humanValue(val, k)}`)
+      .map(([k, val]) => `${keyLabel(k, val)}: ${humanValue(val, k)}`)
       .join(', ')
   }
+  const f = (field ?? '').toLowerCase()
+  if (FIELD_WORDS[f] && typeof v === 'string') return FIELD_WORDS[f](v)
+  // A bare record id reads as a reference, not as a quantity.
+  if (f.endsWith('_id') && typeof v === 'number') return `#${v}`
   return auditValueLabel(field ?? null, String(v))
+}
+
+// "part id" with a resolved "3457-10" reads "part"; a bare id keeps its word.
+const keyLabel = (k: string, val: unknown): string => {
+  const words = humanize(k).toLowerCase()
+  return k.endsWith('_id') && typeof val === 'string' ? words.replace(/ id$/, '') : words
 }
 
 const parse = (s: string | null): unknown => {
@@ -25,15 +44,23 @@ const parse = (s: string | null): unknown => {
   try { return JSON.parse(s) } catch { return s }
 }
 
-// A human sentence for what changed: "captured → scoping", "pads.pdf", or null.
-const describeChange = (oldRaw: string | null, newRaw: string | null): string | null => {
-  const o = parse(oldRaw)
-  const n = parse(newRaw)
+// The field a bare value belongs to, read from the action ("status_changed").
+const fieldOfAction = (action: string): string | undefined =>
+  action.startsWith('status') ? 'status'
+  : action.startsWith('verdict') ? 'verdict'
+  : action.startsWith('priority') ? 'priority' : undefined
+
+// A human sentence for what changed: "Captured → Scoping", "pads.pdf", or null.
+// The backend's resolved values (part numbers for part ids) win for the new side.
+const describeChange = (e: Pick<AuditEntry, 'action' | 'old_values' | 'new_values' | 'display_values'>): string | null => {
+  const field = fieldOfAction(e.action)
+  const o = parse(e.old_values)
+  const n = e.display_values && typeof e.display_values === 'object' ? e.display_values : parse(e.new_values)
   const hasO = o !== null && o !== undefined
   const hasN = n !== null && n !== undefined
-  if (hasO && hasN) return `${humanValue(o)} → ${humanValue(n)}`
-  if (hasN) return humanValue(n)
-  if (hasO) return humanValue(o)
+  if (hasO && hasN) return `${humanValue(o, field)} → ${humanValue(n, field)}`
+  if (hasN) return humanValue(n, field)
+  if (hasO) return humanValue(o, field)
   return null
 }
 
@@ -143,13 +170,20 @@ export default function AuditTimeline({ correlationId, changeId }: {
           <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{day}</h4>
           <ol className="space-y-1.5 border-l border-slate-700 pl-4">
             {dayEntries.map((e) => {
-              const detail = describeChange(e.old_values, e.new_values)
+              const detail = describeChange(e)
               return (
                 <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono text-xs text-slate-500">
                     {formatDateTime(e.timestamp).slice(11)}
                   </span>
-                  <span className="font-medium text-slate-200">{e.user_name ?? t('audit.system')}</span>
+                  <span className="font-medium text-slate-200">
+                    {e.real_user_name ?? e.user_name ?? t('audit.system')}
+                    {e.acting_as_department_name && (
+                      <span data-testid="audit-acting" className="ml-1 font-normal text-xs text-amber-300/80">
+                        {t('audit.actingAs').replace('{d}', e.acting_as_department_name)}
+                      </span>
+                    )}
+                  </span>
                   <span className="text-slate-300">{humanize(e.action).toLowerCase()}</span>
                   {detail && <span className="text-slate-400">: {detail}</span>}
                   <span className="text-xs text-slate-600">{humanize(e.entity_type)} {e.entity_id}</span>

@@ -10,7 +10,7 @@ import type {
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
-  ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse,
+  ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -89,6 +89,12 @@ export const changesApi = {
   assessmentObjects: (id: number) =>
     client.get<AssessmentObjectsResponse>(`/v1/changes/${id}/assessment-objects`)
       .then((r) => r.data),
+
+  // Served-by objects (tools, gauges, equipment) for the given parts, before
+  // any department is routed: the impact tree during capture and scoping.
+  impactObjects: (id: number, partIds: number[]) =>
+    client.get<ImpactObjectsResponse>(`/v1/changes/${id}/impact-objects`,
+      { params: { part_ids: partIds.join(',') } }).then((r) => r.data),
 
   submitAssessment: (id: number, body: { department_id: number; verdict: string; cost_impact?: number; lead_time_impact_days?: number; conditions?: string; notes?: string; effort_hours?: number; details?: Record<string, unknown> }) =>
     client.post(`/v1/changes/${id}/assessments`, body).then((r) => r.data),

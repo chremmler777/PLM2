@@ -119,9 +119,28 @@ export default function ImpactTree({
   const suggested = useMemo(
     () => new Set(suggestion?.suggested_part_ids ?? []), [suggestion])
 
+  // Before routing (capture, scoping) there are no assessment objects yet:
+  // the served-by walk is asked for the parts as selected right now. An
+  // older backend without the endpoint falls back to the assessment objects.
+  const beforeRouting = status === 'captured' || status === 'scoping'
+  const { data: impactObjects } = useQuery({
+    queryKey: ['change', changeId, 'impact-objects', selectedKey.join(',')],
+    queryFn: () => changesApi.impactObjects(changeId, selectedKey),
+    enabled: beforeRouting && selectedKey.length > 0,
+    retry: false,
+    placeholderData: (prev) => prev,
+  })
+
   // part id -> the tools/gauges/equipment serving it, once per object.
   const servedBy = useMemo(() => {
     const m = new Map<number, AssessmentObject[]>()
+    if (beforeRouting && impactObjects?.parts) {
+      for (const p of impactObjects.parts) {
+        const list = (p.served_by ?? []).filter((o) => SERVING_TYPES.has(o.type))
+        if (list.length > 0) m.set(p.part_id, list)
+      }
+      return m
+    }
     for (const d of objectData?.departments ?? []) {
       for (const o of d.objects ?? []) {
         if (o.via_part_id == null || !SERVING_TYPES.has(o.type)) continue
@@ -131,7 +150,7 @@ export default function ImpactTree({
       }
     }
     return m
-  }, [objectData])
+  }, [objectData, impactObjects, beforeRouting])
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['change', changeId] })

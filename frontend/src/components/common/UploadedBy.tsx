@@ -1,3 +1,5 @@
+import { formatDate } from '../../lib/format'
+
 /**
  * Provenance line for a file row: who put it on the record, and when.
  * Falls back to the date alone when the uploader is unknown (older rows).
@@ -12,7 +14,7 @@ export function UploadedBy({ name, at, className = '' }: {
   return (
     <span data-testid="uploaded-by" className={`text-xs text-slate-500 ${className}`}>
       {name ? `${name}${at ? ' · ' : ''}` : ''}
-      {at ? new Date(at).toLocaleDateString() : ''}
+      {at ? formatDate(at) : ''}
     </span>
   )
 }

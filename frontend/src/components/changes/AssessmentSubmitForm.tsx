@@ -21,6 +21,8 @@ export interface AssessmentDraft {
   verdict?: string
   conditions?: string
   notes?: string
+  /** Where the draft came from: this browser, or the server's copy. */
+  source?: 'local' | 'server'
 }
 
 /** The local draft, else the server's (details.draft or unsubmitted details). */
@@ -30,7 +32,7 @@ export function loadDraft(changeId: number, departmentId: number,
   if (raw) {
     try {
       const d = JSON.parse(raw) as AssessmentDraft
-      if (d && typeof d === 'object' && d.details && typeof d.details === 'object') return d
+      if (d && typeof d === 'object' && d.details && typeof d.details === 'object') return { ...d, source: 'local' }
     } catch {
       // A broken draft is no draft.
     }
@@ -41,11 +43,11 @@ export function loadDraft(changeId: number, departmentId: number,
     if (inner && typeof inner === 'object') {
       const d = inner as Partial<AssessmentDraft> & Record<string, unknown>
       return d.details && typeof d.details === 'object'
-        ? { details: d.details, verdict: d.verdict, conditions: d.conditions, notes: d.notes }
-        : { details: d }
+        ? { details: d.details, verdict: d.verdict, conditions: d.conditions, notes: d.notes, source: 'server' }
+        : { details: d, source: 'server' }
     }
     if (impactsOf(serverDetails).length > 0 || 'impacted' in serverDetails) {
-      return { details: serverDetails }
+      return { details: serverDetails, source: 'server' }
     }
   }
   return null
@@ -95,7 +97,9 @@ export default function AssessmentSubmitForm({
   // Whatever this department's own questionnaire collects, verbatim.
   const [details, setDetails] = useState<Record<string, unknown>>(initial?.details ?? {})
   const [confirming, setConfirming] = useState(false)
-  const [savedAt, setSavedAt] = useState<'local' | 'server' | null>(initial ? 'local' : null)
+  // A draft picked up from the server says so until the next edit saves again.
+  const [savedAt, setSavedAt] = useState<'local' | 'server' | 'restored' | null>(
+    initial ? (initial.source === 'server' ? 'restored' : 'local') : null)
   // Autosave: every change lands locally at once and on the server after a
   // pause. A backend without the draft endpoint is simply not asked again.
   const serverDraftOff = useRef(false)
@@ -281,7 +285,8 @@ export default function AssessmentSubmitForm({
       )}
       {savedAt && (
         <span data-testid="assessment-draft-state" className="ml-2 text-[11px] text-slate-500">
-          {savedAt === 'server' ? t('assessment.draftSaved') : t('assessment.draftLocal')}
+          {savedAt === 'server' ? t('assessment.draftSaved')
+            : savedAt === 'restored' ? t('assessment.draftRestored') : t('assessment.draftLocal')}
         </span>
       )}
       <TransitionConfirmDialog busy={submit.isPending}

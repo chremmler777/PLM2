@@ -29,8 +29,12 @@ const DECISION_LABEL: Record<string, string> = {
 }
 
 export default function ScopingPanel(
-  { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [] }: {
+  { change, canSendRejection = true, canAnswerConcerns = false, isPm = false, myDepartmentIds = [],
+    canRecordMeeting = true }: {
     change: ChangeRequest & { attachments?: Attachment[] }
+    /** Lead, Project Management or admin (stage-state `can_record_meeting`):
+     *  records the meeting and decides it. Everyone else reads the record. */
+    canRecordMeeting?: boolean
     /** The viewer's departments: a new flag is filed under their own. */
     myDepartmentIds?: number[]
     /** Sales membership: Sales writes the answer of record. */
@@ -67,7 +71,9 @@ export default function ScopingPanel(
   const deptIds = Object.keys(deptRasic).map(Number)
   const [deptTouched, setDeptTouched] = useState(false)
   // Who pays, as the room confirms it: required next to RASIC (spec §16).
-  const [carrier, setCarrier] = useState<CostCarrier | ''>(carrierOf(change.customer_relevant))
+  // Never preselected: the room makes the call consciously; what capture
+  // said (and the last meeting's call) is shown beside it as a hint.
+  const [carrier, setCarrier] = useState<CostCarrier | ''>('')
   // The form is a record of one meeting: open while there is none, then one
   // click away. After a save it resets and folds up.
   const [formOpen, setFormOpen] = useState<boolean | null>(null)
@@ -102,8 +108,6 @@ export default function ScopingPanel(
     if (deptTouched || !lastLetters || Object.keys(lastLetters).length === 0) return
     setDeptRasic(Object.fromEntries(Object.entries(lastLetters).map(([k, v]) => [Number(k), v])) as Record<number, RasicLetter>)
     setCarried(true)
-    const last = meetings[meetings.length - 1]
-    if (last?.cost_carrier) setCarrier(last.cost_carrier)
   }, [lastLetters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Attendee autofill: the signed-in user's Entra "relevant people" via the hub,
@@ -158,7 +162,7 @@ export default function ScopingPanel(
     onSuccess: () => {
       // A fresh form for the next record, folded away; the letters of this
       // meeting are what the next one starts from (seeded on reopen).
-      setParticipants(''); setAddName(''); setDate(''); setChannel('meeting')
+      setParticipants(''); setAddName(''); setDate(''); setChannel('meeting'); setCarrier('')
       setDeptTouched(false); setCarried(false); setFormOpen(false)
       toast.success(t('meeting.saved'))
       invalidate()
@@ -206,6 +210,9 @@ export default function ScopingPanel(
   // Meetings belong to scoping: the backend refuses to create one while the
   // change is still being captured, so the recording UI stays hidden there.
   const meetingOpen = status === 'scoping'
+  // Recording and deciding are the lead's, PM's or an admin's (the backend
+  // answers anyone else 403): others see the record, not the controls.
+  const recordOpen = meetingOpen && canRecordMeeting
   // The most recent decision that leaves a ball in our court: a rejection the
   // customer has to be told about, or missing information somebody has to go
   // and get. Cleared once a later meeting reaches 'proceed'.
@@ -275,7 +282,6 @@ export default function ScopingPanel(
     } else if (!deptTouched) {
       setDeptRasic(recommendedRasic())
     }
-    if (last && carrierOfMeeting(last)) setCarrier(carrierOfMeeting(last))
     setFormOpen(true)
   }
   // Open by default, except while the last record still waits for its
@@ -298,6 +304,13 @@ export default function ScopingPanel(
   const letterOf = (m: ChangeMeeting, id: number): string | null =>
     m.department_rasic?.[String(id)] ?? null
 
+  // "25.09.2026 · Anna, Ben", or what is known when the record is thin.
+  const meetingHeadline = (m: ChangeMeeting): string => {
+    const names = m.participants.map((p) => p.name).filter(Boolean).join(', ')
+    const date = m.meeting_date ? formatDate(m.meeting_date) : ''
+    const who = names || t('meeting.noAttendees')
+    return date ? `${date} · ${who}` : (names || t('meeting.undated'))
+  }
   const meetingRow = (m: ChangeMeeting) => (
     <li key={m.id} className="p-3 space-y-1">
       <div className="flex justify-between items-center">
@@ -305,14 +318,13 @@ export default function ScopingPanel(
           <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">
             {t(`channel.${m.channel ?? 'meeting'}`)}
           </span>
-          {formatDate(m.meeting_date)}:{' '}
-          {m.participants.map((p) => p.name).join(', ') || '-'}
+          {meetingHeadline(m)}
         </span>
         {m.decision ? (
           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
             {DECISION_LABEL[m.decision] ?? m.decision}
           </span>
-        ) : meetingOpen && (
+        ) : recordOpen ? (
           <span className="flex gap-2">
             {carrierOfMeeting(m) === '' && (
               <select aria-label={t('meeting.costCarrier')} data-testid={`meeting-carrier-${m.id}`}
@@ -341,6 +353,10 @@ export default function ScopingPanel(
               onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
               {t('meeting.reject')}
             </button>
+          </span>
+        ) : meetingOpen && (
+          <span className="text-xs text-slate-500" data-testid={`meeting-undecided-${m.id}`}>
+            {t('meeting.undecided')}
           </span>
         )}
       </div>
@@ -572,7 +588,10 @@ export default function ScopingPanel(
         </ul>
       </section>
 
-      {meetingOpen && !formShown && (
+      {meetingOpen && !canRecordMeeting && (
+        <p className="text-xs text-slate-500" data-testid="meeting-record-rights">{t('meeting.recordRights')}</p>
+      )}
+      {recordOpen && !formShown && (
         <div className="flex items-center gap-3">
           <button type="button" data-testid="meeting-form-open" onClick={openForm}
             className="text-sm text-sky-300 hover:text-sky-200">
@@ -583,7 +602,7 @@ export default function ScopingPanel(
           )}
         </div>
       )}
-      {meetingOpen && formShown && (
+      {recordOpen && formShown && (
         <div className="border border-slate-700 rounded-lg p-4 space-y-3" data-testid="meeting-form">
           <div className="flex items-center justify-between">
             <h3 className="text-xs uppercase tracking-wide text-slate-500">{t('scoping.newMeeting')}</h3>
@@ -731,6 +750,13 @@ export default function ScopingPanel(
               {t('meeting.costCarrier')}
               <span className="ml-2 opacity-70">{t('meeting.costCarrierHint')}</span>
             </legend>
+            {carrierOf(change.customer_relevant) && (
+              <p className="text-[11px] text-slate-400 mb-1" data-testid="meeting-carrier-captured">
+                {t('meeting.costCarrierCaptured').replace('{x}', t(change.customer_relevant ? 'start.customerChange' : 'start.internalChange'))}
+                {latestMeeting && carrierOfMeeting(latestMeeting)
+                  ? ` · ${t('meeting.costCarrierLast').replace('{x}', carrierName(carrierOfMeeting(latestMeeting)))}` : ''}
+              </p>
+            )}
             <div className="flex flex-wrap gap-4 text-sm">
               {(['customer', 'internal'] as CostCarrier[]).map((c) => (
                 <label key={c} className="flex items-center gap-1.5 cursor-pointer">
