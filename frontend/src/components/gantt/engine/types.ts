@@ -109,6 +109,11 @@ export interface ApplyResult {
    * moves are measured from it, so edits from elsewhere never join the step.
    */
   serverBefore?: GanttModel
+  /**
+   * The tasks the server moved by itself in this request. When given it is
+   * the only source of server moves for the undo step.
+   */
+  serverMoved?: GanttId[]
 }
 
 export interface Issue {

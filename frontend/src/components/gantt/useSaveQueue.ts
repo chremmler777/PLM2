@@ -21,16 +21,20 @@ export interface SaveTag { entry: number; dir: SaveDirection }
 interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: SaveTag; server?: boolean }
 
 /** A task the server moved on its own while saving a ChangeSet. */
-export interface ServerMove { id: GanttId; from: { start: string; duration: number }; to: { start: string; duration: number } }
+/** A task the server moved by itself: only its start (the server never changes a leaf's duration on its own). */
+export interface ServerMove { id: GanttId; from: { start: string }; to: { start: string } }
 
 /**
- * Tasks the server moved on its own for this ChangeSet: not touched by it,
- * reachable from what it touched (successors along links, the tasks under
- * and above them), leaves only (a summary's dates are a roll-up the server
- * computes; it refuses date patches on them), and dated differently than in
- * `before` (the server's previous answer).
+ * Tasks the server moved on its own for this ChangeSet, leaves only (a
+ * summary's dates are a roll-up; the server refuses date patches on them),
+ * never a task the ChangeSet touched. `moved` (the server's own list, e.g.
+ * `moved_ids`) is the only source when given. Without it: the tasks
+ * reachable from what the ChangeSet touched (successors along links, the
+ * tasks under and above them) whose start differs from `before` (the
+ * server's previous answer). Only the start counts: a changed duration was
+ * someone else's edit, never a push.
  */
-export function serverMoves(before: GanttModel, cs: ChangeSet, server: GanttModel): ServerMove[] {
+export function serverMoves(before: GanttModel, cs: ChangeSet, server: GanttModel, moved?: GanttId[] | null): ServerMove[] {
   const touched = new Set(touchedTaskIds(cs).map(String))
   for (const l of [...(cs.addLinks ?? []), ...(cs.updateLinks ?? []).map((u) => u.patch)]) if (l.to != null) touched.add(String(l.to))
   const parentOf = new Map<string, string>()
@@ -60,14 +64,14 @@ export function serverMoves(before: GanttModel, cs: ChangeSet, server: GanttMode
     visit(parentOf.get(x))
   }
   const was = new Map(before.tasks.map((t) => [String(t.id), t]))
+  const listed = moved ? new Set(moved.map(String)) : null
   const out: ServerMove[] = []
   for (const t of server.tasks) {
     const k = String(t.id)
     const b = was.get(k)
-    if (!b || touched.has(k) || !reach.has(k) || kids.has(k)) continue
-    if (b.start !== t.start || b.duration !== t.duration) {
-      out.push({ id: t.id, from: { start: b.start, duration: b.duration }, to: { start: t.start, duration: t.duration } })
-    }
+    if (!b || touched.has(k) || kids.has(k)) continue
+    if (listed ? !listed.has(k) : !reach.has(k)) continue
+    if (b.start !== t.start) out.push({ id: t.id, from: { start: b.start }, to: { start: t.start } })
   }
   return out
 }
@@ -176,7 +180,8 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
       const server = res && typeof res === 'object' ? res.server : undefined
       if (server) {
         const was = res && typeof res === 'object' && res.serverBefore ? res.serverBefore : beforeSend
-        const moves = serverMoves(was, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, server)
+        const moved = res && typeof res === 'object' ? res.serverMoved : undefined
+        const moves = serverMoves(was, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, server, moved)
         if (moves.length) optsRef.current.onServerMoves?.(next.tag, moves)
       }
       // Answered in full and already shown by the host: nothing left to overlay.

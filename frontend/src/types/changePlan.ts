@@ -104,6 +104,8 @@ export interface PlanDeadline {
 export interface PlanOut {
   plan: PlanKind
   tasks: TaskOut[]
+  /** On a plan write: the tasks the server moved by itself in that request (pushes). */
+  moved_ids?: number[]
   revision: number
   baseline_set: boolean
   can_edit: boolean

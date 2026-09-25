@@ -184,7 +184,7 @@ describe('useSaveQueue', () => {
       act(() => { result.current.enqueue({ updateTasks: [{ id: 1, patch: { duration: 5 } }] }, { entry: 1, dir: 'do' }) })
       await waitFor(() => expect(onServerMoves).toHaveBeenCalled())
       expect(onServerMoves.mock.calls[0]).toEqual([{ entry: 1, dir: 'do' },
-        [{ id: 2, from: { start: '2026-10-08', duration: 2 }, to: { start: '2026-10-12', duration: 2 } }]])
+        [{ id: 2, from: { start: '2026-10-08' }, to: { start: '2026-10-12' } }]])
       // the host now shows a server answer that differs from the optimistic view
       // for the edited task too: it wins at once, not after settleMs
       const other: GanttModel = { tasks: [{ ...server.tasks[0], duration: 6 }, server.tasks[1]], links: [L12] }
@@ -231,6 +231,16 @@ describe('useSaveQueue', () => {
       }
       const moves = serverMoves(before, { updateTasks: [{ id: 1, patch: { duration: 5 } }] }, server)
       expect(moves.map((m) => m.id)).toEqual([2, 4])
+    })
+  
+    it('uses the server list of moved tasks as the only source when it comes (moved_ids)', async () => {
+      const { serverMoves } = await import('./useSaveQueue')
+      const before = two()
+      const server: GanttModel = { tasks: [{ ...before.tasks[0], duration: 5 }, { ...before.tasks[1], start: '2026-10-10', duration: 4 }], links: before.links }
+      // B changed, but the server says it moved nothing by itself: an edit from elsewhere
+      expect(serverMoves(before, { updateTasks: [{ id: 1, patch: { duration: 5 } }] }, server, [])).toEqual([])
+      expect(serverMoves(before, { updateTasks: [{ id: 1, patch: { duration: 5 } }] }, server, [2]))
+        .toEqual([{ id: 2, from: { start: '2026-10-08' }, to: { start: '2026-10-10' } }])
     })
   })
 })

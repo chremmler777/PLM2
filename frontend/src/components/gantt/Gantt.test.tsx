@@ -1508,7 +1508,7 @@ describe('Gantt: server pushes join the undo step (review 4b93d732 #11)', () => 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
     expect(calls[1].updateTasks).toEqual(expect.arrayContaining([
       { id: 2, patch: { duration: 3 } },
-      { id: 3, patch: { start: '2026-10-15', duration: 2 } },
+      { id: 3, patch: { start: '2026-10-15' } },
     ]))
   })
 })
@@ -1549,7 +1549,7 @@ describe('Gantt: undo while the step is still saving (review ee43fb8c #3)', () =
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
     expect(calls[1].updateTasks).toEqual(expect.arrayContaining([
       { id: 2, patch: { duration: 3 } },
-      { id: 3, patch: { start: '2026-10-15', duration: 2 } },
+      { id: 3, patch: { start: '2026-10-15' } },
     ]))
   })
 })

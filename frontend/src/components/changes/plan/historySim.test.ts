@@ -40,8 +40,9 @@ function makeServer(nTasks: number, linkPairs: [number, number][], legacyPairs: 
   const isSummary = (id: number) => tasks.some((t) => t.parent_id === id)
   const allLinks = () => [...links.map((l) => [l.from_task_id, l.to_task_id]), ...tasks.flatMap((t) => t.predecessors.map((p: number) => [p, t.id]))]
     .filter(([f, t]) => tasks.some((x) => x.id === f) && tasks.some((x) => x.id === t) && !isSummary(f) && !isSummary(t)) as [number, number][]
-  function pushFrom(sources: number[]) {
+  function pushFrom(sources: number[]): number[] {
     const L = allLinks()
+    const was = new Map(tasks.map((t) => [t.id, t.start_date]))
     const down = new Set(sources); const st = [...sources]
     while (st.length) { const x = st.pop()!; for (const [f, t] of L) if (f === x && !down.has(t)) { down.add(t); st.push(t) } }
     for (let guard = 0; guard < 100; guard++) {
@@ -54,6 +55,7 @@ function makeServer(nTasks: number, linkPairs: [number, number][], legacyPairs: 
       }
       if (!changed) break
     }
+    return tasks.filter((t) => was.has(t.id) && was.get(t.id) !== t.start_date).map((t) => t.id)
   }
   function rollup() {
     for (let pass = 0; pass < 5; pass++) for (const t of tasks) {
@@ -91,8 +93,11 @@ function makeServer(nTasks: number, linkPairs: [number, number][], legacyPairs: 
       if (opts.push) {
         const src = [...pcs.tasks_upsert.map((u: any) => (typeof u.id === 'number' ? u.id : id_map[String(u.id)])),
           ...pcs.links_upsert.map((l: any) => tref(l.to_task_id ?? links.find((y) => y.id === l.id)?.to_task_id))]
-        pushFrom(src.filter((x: any) => typeof x === 'number'))
+        const own = src.filter((x: any) => typeof x === 'number')
+        // moved_ids: what the server moved by itself (not what the request set).
+        const moved_ids = pushFrom(own).filter((id) => !pcs.tasks_upsert.some((u: any) => u.id === id && 'start_date' in u))
         rollup()
+        return { ...plan(), id_map, link_id_map, moved_ids }
       }
       return { ...plan(), id_map, link_id_map }
     } catch (e) { tasks.splice(0, tasks.length, ...JSON.parse(snapT)); links.splice(0, links.length, ...JSON.parse(snapL)); throw e }
@@ -113,7 +118,7 @@ function makeServer(nTasks: number, linkPairs: [number, number][], legacyPairs: 
 }
 
 
-function makeClient(srv: ReturnType<typeof makeServer>) {
+function makeClient(srv: ReturnType<typeof makeServer>, opts: { movedIds?: boolean } = {}) {
   const h = new History()
   let idMapRef: Record<string, any> = {}, linkMapRef: Record<string, any> = {}
   const tempOnly = (m: Record<string, any>) => Object.fromEntries(Object.entries(m).filter(([k]) => !/^-?\d+$/.test(k)))
@@ -121,16 +126,24 @@ function makeClient(srv: ReturnType<typeof makeServer>) {
   type Item = { seq: number; cs: any; status: string; tag?: { entry: number; dir: SaveDirection } }
   let items: Item[] = [], seq = 0
   const log: string[] = []
-  const base = () => { const m = planToModel(srv.plan()); return { tasks: m.tasks, links: m.links } }
+  // Like GanttPlanner: the client knows the server's answers to its own saves
+  // (a refetch after a refusal); another window's edit is not seen until then.
+  let known = srv.plan()
+  const base = () => { const m = planToModel(known); return { tasks: m.tasks, links: m.links } }
   const display = () => applyAll(base(), items.filter((i) => i.status !== 'settled').map((i) => i.cs))
   const onChange = (cs: any) => {
     const before = base()
     const body = toPlanChangeSet(cs, before)
     log.push(JSON.stringify(body))
     if (!body.tasks_upsert.length && !body.tasks_delete.length && !body.links_upsert.length && !body.links_delete.length) return {}
-    const out = srv.apply(body)
+    let out: any
+    try { out = srv.apply(body) } catch (e) { known = srv.plan(); throw e }
+    known = out
     const m = planToModel(out)
-    return { idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map), server: { tasks: m.tasks, links: m.links }, serverBefore: before }
+    return {
+      idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map), server: { tasks: m.tasks, links: m.links }, serverBefore: before,
+      ...(opts.movedIds !== false && out.moved_ids ? { serverMoved: out.moved_ids } : {}),
+    }
   }
   const pumpOne = () => {
     const next = items.find((i) => i.status === 'queued'); if (!next) return false
@@ -147,7 +160,7 @@ function makeClient(srv: ReturnType<typeof makeServer>) {
       if (any) { idMapRef = { ...idMapRef, ...tempOnly(idMap) }; linkMapRef = { ...linkMapRef, ...tempOnly(linkIdMap) }; h.remap(idMap, linkIdMap) }
       // As useSaveQueue + Gantt: what the server moved on its own joins the step.
       if (res?.server && next.tag?.dir === 'do') {
-        const moves = serverMoves(res.serverBefore, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, res.server)
+        const moves = serverMoves(res.serverBefore, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, res.server, res.serverMoved)
         if (moves.length) {
           h.extend(next.tag.entry,
             { updateTasks: moves.map((mv) => ({ id: mv.id, patch: { ...mv.to } })) },
@@ -317,6 +330,20 @@ describe('undo / redo against a server (review simulator)', () => {
     expect(c.log.some((x) => /"id":1,"start_date"/.test(x))).toBe(false)
   })
 
+  for (const movedIds of [true, false]) {
+    it(`S9 undo never reverts another window's edit (${movedIds ? 'moved_ids' : 'fallback: reachable, start only'})`, () => {
+      const s = makeServer(4, [[1, 2], [2, 3], [3, 4]], [], 0, { push: true }); const c = makeClient(s, { movedIds })
+      // another window lengthens D (T3); the server pushes E (T4); this client has not seen it
+      s.apply({ tasks_upsert: [{ id: 3, duration_days: 5 }], tasks_delete: [], links_upsert: [], links_delete: [] })
+      const other = JSON.stringify(s.state())
+      c.commit({ label: 'longer B', updateTasks: [{ id: 2, patch: { duration: 4 } }] }); c.drain()
+      c.undo(); c.drain()
+      expect(JSON.stringify(s.state())).toBe(other)
+      expect(s.tasks.find((t: any) => t.id === 3).duration_days).toBe(5)
+      expect(errors(c)).toEqual([])
+    })
+  }
+
   it('S8 undo pressed before the step answered still undoes the server push', () => {
     const s = makeServer(3, [[1, 2], [2, 3]], [], 0, { push: true }); const c = makeClient(s)
     const start = JSON.stringify(s.state())
@@ -332,7 +359,7 @@ describe('undo / redo against a server (review simulator)', () => {
     const bad: string[] = []
     let clean = 0
     for (let run = 0; run < 1500; run++) {
-      const s = makeServer(7, [[1, 2], [2, 3], [4, 5]], [[5, 6]], 0, { push: true }); const c = makeClient(s)
+      const s = makeServer(7, [[1, 2], [2, 3], [4, 5]], [[5, 6]], 0, { push: true }); const c = makeClient(s, { movedIds: run % 2 === 0 })
       s.tasks.find((t: any) => t.id === 3).parent_id = 7; s.tasks.find((t: any) => t.id === 4).parent_id = 7; s.init()
       const start = JSON.stringify(s.state()).replace(/\(L\)/g, ''); let tmp = 0
       for (let step = 0; step < 12; step++) {

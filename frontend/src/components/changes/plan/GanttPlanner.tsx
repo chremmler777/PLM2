@@ -220,6 +220,8 @@ export default function GanttPlanner({
         return {
           idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map),
           server: { tasks: answered.tasks, links: answered.links }, serverBefore: before,
+          // The server's own list of what it pushed: the only source when present.
+          ...(Array.isArray(out.moved_ids) ? { serverMoved: out.moved_ids } : {}),
         }
       }
       const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
