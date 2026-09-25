@@ -175,7 +175,8 @@ function OpenDialog({
     const first = list[0]
     const last = list[list.length - 1]
     const active = document.activeElement
-    if (e.shiftKey && (active === first || !ref.current.contains(active))) {
+    const atStart = active === first || active === panelRef.current
+    if (e.shiftKey && (atStart || !ref.current.contains(active))) {
       e.preventDefault(); last.focus()
     } else if (!e.shiftKey && (active === last || !ref.current.contains(active))) {
       e.preventDefault(); first.focus()

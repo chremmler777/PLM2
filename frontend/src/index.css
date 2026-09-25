@@ -15,6 +15,8 @@ html, body, #root {
 
 html {
   scroll-behavior: smooth;
+  /* Hiding the scrollbar under a modal must not shift the page sideways. */
+  scrollbar-gutter: stable;
 }
 
 /* A modal <dialog> is open: the page behind it does not scroll. */

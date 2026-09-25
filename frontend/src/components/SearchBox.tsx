@@ -83,6 +83,8 @@ export default function SearchBox() {
   }, [active, activeValid]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // An IME is composing: Enter/Escape/arrows belong to the candidate window.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (!showPanel) { if (debounced.length >= 2) { e.preventDefault(); setOpen(true); } return; }
       if (!hasResults) return;
@@ -128,6 +130,7 @@ export default function SearchBox() {
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={() => { setOpen(false); setActive(-1); }}
         onKeyDown={onKeyDown}
         placeholder="Search parts and projects…"
         className="w-full bg-slate-900/60 border border-slate-700 rounded-md pl-8 pr-3 py-1.5 text-slate-100 text-sm placeholder-slate-400 hover:border-slate-600"
@@ -137,7 +140,7 @@ export default function SearchBox() {
       <p role="status" className="sr-only">{showPanel ? status : ''}</p>
 
       {showPanel && (
-        <div className="absolute z-50 mt-1 w-72 bg-slate-800 border border-slate-600 rounded-lg shadow-lift max-h-80 overflow-y-auto overscroll-contain">
+        <div onMouseDown={(e) => e.preventDefault()} className="absolute z-50 mt-1 w-72 bg-slate-800 border border-slate-600 rounded-lg shadow-lift max-h-80 overflow-y-auto overscroll-contain">
           {!hasResults ? (
             <p aria-hidden="true" className="px-3 py-2 text-slate-400 text-xs">{status}</p>
           ) : (
@@ -151,7 +154,6 @@ export default function SearchBox() {
                     aria-selected={idx === active}
                     key={`proj-${p.id}`}
                     // Keep focus in the input; the click still navigates.
-                    onMouseDown={(e) => e.preventDefault()}
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => go(`/projects/${p.id}`)}
                     className={optionClass(idx)}
@@ -170,7 +172,6 @@ export default function SearchBox() {
                     id={optionId(idx)}
                     aria-selected={idx === active}
                     key={`part-${part.id}`}
-                    onMouseDown={(e) => e.preventDefault()}
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => go(`/projects/${part.project_id}?part=${part.id}`)}
                     className={optionClass(idx, 'last:border-b-0')}
