@@ -35,7 +35,7 @@ from app.models.change import ChangeRequest
 from app.models.entities import User
 from app.models.part import Part, PartRevision
 from app.models.revision_intake import REVIEW_ANSWERS, ChangeReviewAnswer, RevisionIntake
-from app.models.workflow import Department, UserDepartment
+from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
 
@@ -164,14 +164,16 @@ class EngineeringReviewService:
                 session, change, "review_opened",
                 "Engineering review asks " + ", ".join(by_id[d] for d in new), user_id,
                 new_value={"department_ids": new})
-            members = set((await session.execute(
-                select(UserDepartment.user_id).where(
-                    UserDepartment.department_id.in_(new)))).scalars().all())
+            # Only the change's organization: never a namesake department
+            # of another plant.
+            from app.services.change_people import department_members_of_change_org
+            members = set(await department_members_of_change_org(session, change, new))
             members.discard(user_id)
             if members:
                 from app.services.notification_service import NotificationService
-                await NotificationService.notify_once(
-                    session, sorted(members), kind="change_review",
+                await NotificationService.notify_team(
+                    session, change.project_id, new, sorted(members),
+                    kind="change_review",
                     subject_key=f"change:{change.id}:review",
                     title=f"{change.change_number}: engineering review, impact or no impact?"[:255],
                     body=change.title, link=f"/changes/{change.id}?tab=review")
@@ -221,7 +223,8 @@ class EngineeringReviewService:
             f"{dept.name if dept else department_id}: {ANSWER_LABELS[answer]}"
             + (f" ({note})" if note else ""), user.id, notes=note,
             old_value={"answer": old} if old else None,
-            new_value={"department_id": department_id, "answer": answer})
+            new_value={"department_id": department_id, "answer": answer},
+            for_department_id=department_id)
         await EngineeringReviewService.maybe_release(session, change, user.id)
         return row
 
@@ -425,6 +428,7 @@ class EngineeringReviewService:
             for r in await EngineeringReviewService.answers(session, c):
                 if r.answer is None and r.department_id in dept_ids:
                     out.append({"change_id": c.id, "change_number": c.change_number,
-                                "title": c.title, "department_id": r.department_id,
+                                "title": c.title, "project_id": c.project_id,
+                                "department_id": r.department_id,
                                 "department_name": names.get(r.department_id)})
         return out

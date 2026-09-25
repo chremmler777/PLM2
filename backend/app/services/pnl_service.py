@@ -179,13 +179,12 @@ class PnlService:
             if o.status == "accepted":
                 by_change[o.change_id] = o        # the accepted one wins
 
-        # booked hours x the department's rate at the change's rate plant
-        booked = (await session.execute(
-            select(ImplementationBooking.change_id, ImplementationBooking.department_id,
-                   func.sum(ImplementationBooking.hours))
+        # booked hours x the rate valid on each booking's date (spec §15
+        # phase 2), at the change's rate plant
+        booked = list((await session.execute(
+            select(ImplementationBooking)
             .where(ImplementationBooking.change_id.in_(ids))
-            .group_by(ImplementationBooking.change_id,
-                      ImplementationBooking.department_id))).all()
+            .order_by(ImplementationBooking.id))).scalars().all())
         plants: dict[int, list] = {}
         for cid, pid in (await session.execute(
                 select(change_affected_plants.c.change_id,
@@ -202,16 +201,20 @@ class PnlService:
             if len(ps) == 1:
                 return ps[0]
             return project_plant.get(by_id[cid].project_id)
+        from app.services import costing_rates
         rates: dict[tuple, Optional[float]] = {}
         internal_actual: dict[int, float] = {}
-        for cid, dept, hours in booked:
-            key = (dept, rate_plant(cid))
-            if key not in rates:
-                rates[key] = await _rate_at(session, key)
-            if not hours:
-                continue
-            internal_actual[cid] = internal_actual.get(cid, 0.0) + (
-                float(hours or 0.0) * (rates[key] or 0.0))
+        bookings_by_change: dict[int, list] = {}
+        for b in booked:
+            bookings_by_change.setdefault(b.change_id, []).append(b)
+        for cid, rows in bookings_by_change.items():
+            pid = rate_plant(cid)
+            for row in await costing_rates.price_bookings(
+                    session, by_id[cid], rows, plant_id=pid):
+                # unpriced hours count nothing here; the card warns
+                value = (row["labour_value"] or 0.0) + (row["machine_value"] or 0.0)
+                if row["hours"] or row["machine_hours"]:
+                    internal_actual[cid] = internal_actual.get(cid, 0.0) + value
 
         # costing positions belong to the plan exactly as in the summation:
         # quoted cost by kind, their own hours at the department rate
@@ -221,7 +224,11 @@ class PnlService:
                 CostingPosition.change_id.in_(ids)))).scalars().all():
             bucket = pos_cost.setdefault(p.change_id, [0.0, 0.0])
             bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
-            if p.hours:
+            snap = costing_rates.stored_price(p)
+            if snap is not None:
+                # the rate snapshot the line was costed with
+                bucket[0] += costing_rates.line_value(p, snap) or 0.0
+            elif p.hours:
                 key = (p.department_id, rate_plant(p.change_id))
                 if key not in rates:
                     rates[key] = (await _rate_at(session, key))
@@ -457,43 +464,92 @@ class PnlService:
         caller that already computed it so this never recurses into it.
         """
         from app.models.workflow import Department
-        from app.services.cost_service import CostService
         from app.services.implementation_service import ImplementationService
         from app.services.validation_service import ValidationService
 
-        booked = await ImplementationService.booked_hours_by_department(
-            session, change)
+        from app.models.change_impl import ImplementationBooking
+        from app.services import cost_sheet_service as cs
+        from app.services import costing_rates
         implementing = await ImplementationService.implementing_department_ids(
             session, change)
         plant_id = await PnlService._rate_plant(session, change)
+        org_id = ((await costing_rates.org_id_of_plant(session, plant_id))
+                  or await costing_rates.change_org_id(session, change))
+        currency = await cs.plant_currency(session, plant_id)
         plan_by_dept = {row["department_id"]: row
                         for row in (plan_by_department or [])}
         names = dict((await session.execute(
             select(Department.id, Department.name))).all())
+        # Every booking priced on its own date (spec §15 phase 2): the rate
+        # valid when the hours were worked, the booking's position if it
+        # names one, machine hours at the machine class rate.
+        bookings = list((await session.execute(
+            select(ImplementationBooking).where(
+                ImplementationBooking.change_id == change.id)
+            .order_by(ImplementationBooking.id))).scalars().all())
+        priced = await costing_rates.price_bookings(
+            session, change, bookings, org_id=org_id, plant_id=plant_id)
+        per_dept: dict[int, dict] = {}
+        other_currency: dict[str, float] = {}
+        for row in priced:
+            d = per_dept.setdefault(row["department_id"], {
+                "hours": 0.0, "cost": 0.0, "rates": set(), "unrated": False,
+                "machine_hours": 0.0, "machine_cost": 0.0, "machine_unrated": False})
+            d["hours"] += row["hours"]
+            d["machine_hours"] += row["machine_hours"]
+            if row["labour_value"] is None:
+                d["unrated"] = True
+            elif row["labour_currency"] != currency:
+                other_currency[row["labour_currency"]] = (
+                    other_currency.get(row["labour_currency"], 0.0) + row["labour_value"])
+            else:
+                d["cost"] += row["labour_value"]
+                if row["labour_rate"] is not None:
+                    d["rates"].add(row["labour_rate"])
+            if row["machine_value"] is None:
+                d["machine_unrated"] = True
+            elif row["machine_hours"] and row["machine_currency"] != currency:
+                other_currency[row["machine_currency"]] = (
+                    other_currency.get(row["machine_currency"], 0.0) + row["machine_value"])
+            else:
+                d["machine_cost"] += row["machine_value"]
 
         departments = []
-        for dept_id in sorted(set(implementing) | set(booked)):
-            hours = booked.get(dept_id, 0.0)
-            rate = (await CostService.rate_for(session, dept_id, plant_id)
-                    if plant_id is not None else None)
+        for dept_id in sorted(set(implementing) | set(per_dept)):
+            d = per_dept.get(dept_id) or {
+                "hours": 0.0, "cost": 0.0, "rates": set(), "unrated": False,
+                "machine_hours": 0.0, "machine_cost": 0.0, "machine_unrated": False}
+            hours = d["hours"]
+            rate = None
+            if len(d["rates"]) == 1:
+                rate = next(iter(d["rates"]))
+            elif not d["rates"] and not hours:
+                # nothing booked yet: show the rate that would apply today
+                rate = (await costing_rates.labour_price(
+                    session, org_id, dept_id, plant_id)).rate
             plan = plan_by_dept.get(dept_id) or {}
             plan_cost = (plan.get("one_time_internal", 0.0)
                          + plan.get("one_time_external", 0.0)
                          + plan.get("lifecycle_internal", 0.0)
                          + plan.get("lifecycle_external", 0.0))
-            actual = 0.0 if rate is None else hours * rate
+            actual = d["cost"] + d["machine_cost"]
             departments.append({
                 "department_id": dept_id,
                 "department_name": names.get(dept_id),
                 "booked_hours": _round(hours),
+                # One rate when every booking was priced alike; None when
+                # the rate changed between bookings (rates lists them).
                 "hourly_rate": rate,
+                "rates": sorted(d["rates"]),
+                "machine_hours": _round(d["machine_hours"]),
+                "machine_cost": _round(d["machine_cost"]),
                 "actual_cost": _round(actual),
                 "plan_cost": _round(plan_cost),
                 "variance": _round(actual - plan_cost),
-                # True when hours were booked against a department the plant
-                # has no rate for: actual_cost is then a floor, not a total,
-                # and the card must say so rather than quietly under-report.
-                "unrated": bool(rate is None and hours),
+                # True when hours were booked that the cost sheet has no rate
+                # for (on their booking date): actual_cost is then a floor,
+                # not a total, and the card must say so.
+                "unrated": bool(d["unrated"] or d["machine_unrated"]),
             })
 
         extras = []
@@ -528,6 +584,12 @@ class PnlService:
             "total_extras": _round(sum(e["amount"] or 0.0 for e in extras)),
             "unrated_hours": any(d["unrated"] for d in departments),
             "rate_plant_id": plant_id,
+            "currency": currency,
+            # Priced amounts in another currency than the plant's: not in
+            # the totals, never converted.
+            "other_currency": {k: _round(v) for k, v in sorted(other_currency.items())},
+            "total_machine_hours": _round(
+                sum(d["machine_hours"] for d in departments)),
             "variance": _round(total_actual - total_plan),
         }
 
@@ -550,7 +612,7 @@ class PnlService:
         external = float(t["one_time_external"] + t["lifecycle_external"])
         revenue = scrap = None
         piece = None
-        currency = "EUR"
+        currency = summ.get("currency") or "EUR"
         if offer is not None:
             data = normalise(offer.data)
             totals = compute_totals(data, internal + external)
@@ -578,6 +640,10 @@ class PnlService:
         return {
             "taken_at": datetime.utcnow().isoformat(),
             "currency": currency,
+            # what the costing was in and which cost sheet priced it, frozen
+            # with the plan (spec §15 phase 2)
+            "costing_currency": summ.get("currency"),
+            "cost_sheet_versions": summ.get("cost_sheet_versions_used"),
             "offer_version": offer.version if offer is not None else None,
             "revenue": _round(revenue),
             "internal": _round(internal),
@@ -799,8 +865,33 @@ class PnlService:
         timing = await PnlService.timing(session, change, planned.get("quote_finish"))
         if timing["baseline_finish"] is None:
             warnings.append("No timing baseline")
+
+        # Currencies are compared, never converted (spec §15 phase 2).
+        from app.services import costing_rates
+        plan_currency = planned.get("currency") or "EUR"
+        cost_currency = (planned.get("costing_currency")
+                         or await costing_rates.costing_currency(session, change))
+        if basis != "none" and cost_currency != plan_currency:
+            warnings.append(
+                f"The offer is in {plan_currency}, the costing in {cost_currency}: "
+                "amounts are compared without conversion")
+        if actuals.get("currency") and actuals["currency"] != plan_currency \
+                and actuals["currency"] != cost_currency and basis != "none":
+            warnings.append(
+                f"Actual hours are priced in {actuals['currency']}, the plan is in "
+                f"{plan_currency}: not converted")
+        if actuals.get("other_currency"):
+            warnings.append(
+                "Booked amounts in " + ", ".join(actuals["other_currency"])
+                + " are not in the actual cost (no conversion)")
+        if basis != "none":
+            outdated = await costing_rates.version_warning(session, change)
+            if outdated:
+                warnings.append(outdated)
         return {
             "change_id": change.id, "currency": planned.get("currency") or "EUR",
+            "costing_currency": cost_currency,
+            "actual_currency": actuals.get("currency"),
             "basis": basis, "phase": phase,
             "offer_version": planned.get("offer_version"),
             "frozen_at": planned.get("taken_at") if frozen else None,

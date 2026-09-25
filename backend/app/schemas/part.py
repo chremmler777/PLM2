@@ -144,6 +144,9 @@ class PartRevisionResponse(PartRevisionBase):
     updated_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    # Spec §17a: a new customer index still waiting for triage (not active,
+    # never shown as the current one). Set by the revisions list.
+    intake_pending: bool = False
 
     class Config:
         from_attributes = True

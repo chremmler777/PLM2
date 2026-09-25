@@ -81,8 +81,11 @@ class CustomerPackageService:
         return await BomTreeService._display_revision(session, part) if part else None
 
     @staticmethod
-    async def _fill_row(session: AsyncSession, row: PackageRow, statement: str) -> PackageRow:
-        """Current revision, suggested name and rule errors for a row with a part."""
+    async def _fill_row(session: AsyncSession, row: PackageRow, statement: str,
+                        *, same_index_unchanged: bool = False) -> PackageRow:
+        """Current revision, suggested name and rule errors for a row with a part.
+        same_index_unchanged (preview): a file re-sent with the index already
+        current or waiting reads "unchanged", never an error."""
         part = await session.get(Part, row.part_id)
         if part is None:
             row.action, row.error = ACTION_ERROR, "Part not found"
@@ -94,6 +97,10 @@ class CustomerPackageService:
         from app.services.revision_intake_service import RevisionIntakeService
         waiting = await RevisionIntakeService.waiting_for_part(session, row.part_id)
         row.current_pending = waiting is not None
+        if same_index_unchanged and decide_action(
+                row.customer_index, row.current_index) == ACTION_UNCHANGED:
+            row.action, row.error, row.pending_note = ACTION_UNCHANGED, None, None
+            return row
         if waiting is not None:
             block = await RevisionIntakeService.link_block_message(session, waiting)
             if block:
@@ -132,7 +139,8 @@ class CustomerPackageService:
             row.customer_index = (detected
                                   or index_from_filename(name, c.customer_part_number)
                                   or (package_index or None))
-            await CustomerPackageService._fill_row(session, row, statement)
+            await CustomerPackageService._fill_row(session, row, statement,
+                                                   same_index_unchanged=True)
             if row.action != ACTION_ERROR:
                 row.action = decide_action(row.customer_index, row.current_index)
                 if row.action != ACTION_NEW:

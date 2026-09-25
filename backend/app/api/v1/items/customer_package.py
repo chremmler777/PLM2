@@ -17,6 +17,7 @@ from app.schemas.part import PackagePreviewResponse, PackageRowIn, PackageRowOut
 from app.services.customer_package_service import CustomerPackageService, PackageError, PackageRow
 from app.services.revision_file_service import MAX_FILE_SIZE
 from app.services.revision_naming import STATEMENTS, RevisionRuleViolation
+from app.services.revision_intake_service import IntakeError
 
 router = APIRouter(prefix="/parts", tags=["customer-package"])
 
@@ -95,7 +96,7 @@ async def confirm_customer_package(
         await db.rollback()
         return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={
             "detail": "Some rows cannot be stored", "rows": [asdict(r) for r in e.rows]})
-    except RevisionRuleViolation as e:
+    except (RevisionRuleViolation, IntakeError) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except ValueError as e:

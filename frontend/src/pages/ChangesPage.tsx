@@ -197,7 +197,7 @@ export default function ChangesPage() {
                   <td className="px-4 py-3 whitespace-nowrap" data-testid={`change-owner-${c.id}`}>
                     {ended ? <span className="text-slate-600">-</span>
                       : c.stage_owner ? <span className="text-slate-300">{c.stage_owner}</span>
-                        : <StageResponsibleBadge status={c.status} />}
+                        : <StageResponsibleBadge status={c.status} origin={c.origin} />}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">{priorityLabel(c.priority)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">

@@ -58,6 +58,7 @@ from app.api.v1.changes.actual_costs import router as change_actual_costs_router
 from app.api.v1.changes.mother_plant import router as change_mother_plant_router
 from app.api.v1.changes.early_stage import router as change_early_stage_router
 from app.api.v1.changes.engineering_review import router as change_engineering_review_router
+from app.api.v1.changes.costing_context import router as change_costing_context_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
@@ -98,6 +99,7 @@ api_router.include_router(change_actual_costs_router)
 api_router.include_router(change_mother_plant_router)
 api_router.include_router(change_early_stage_router)
 api_router.include_router(change_engineering_review_router)
+api_router.include_router(change_costing_context_router)
 api_router.include_router(audit_router)
 api_router.include_router(plants_router)
 api_router.include_router(project_team_router)

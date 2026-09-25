@@ -160,6 +160,22 @@ async def overview(current_user: User = Depends(get_current_user),
     }
 
 
+@router.get("/review-task")
+async def review_task(current_user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    """The My Tasks item "Review the cost sheet" (spec §15): due for members
+    of Finance (acts-as aware) when stale_status says the latest published
+    version is older than the review period, or nothing is published."""
+    from app.services.workflow_service import WorkflowService
+    fin = await svc.finance_department_id(db)
+    is_finance = fin is not None and fin in await WorkflowService.effective_department_ids(
+        db, current_user)
+    if not is_finance:
+        return {"due": False, "is_finance": False, "stale": None}
+    stale = await svc.stale_status(db, current_user.organization_id)
+    return {"due": bool(stale["stale"]), "is_finance": True, "stale": stale}
+
+
 @router.get("/versions/{version_id}")
 async def get_version(version_id: int, current_user: User = Depends(get_current_user),
                       db: AsyncSession = Depends(get_db)):

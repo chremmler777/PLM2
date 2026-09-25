@@ -357,7 +357,8 @@ function OfferWorkspace({ props, offers, offer }: {
           <StepSection id="offer-price" n={2} title="Price" done={done['offer-price']}>
             <OfferPriceSection data={data} update={update} editable={editable} currency={cur}
               annualEffect={offer.totals.annual_effect}
-              onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} />
+              onRefresh={() => refresh.mutate()} refreshing={refresh.isPending}
+              warnings={offer.warnings ?? []} />
           </StepSection>
           <StepSection id="offer-risks" n={3} title="Risks" done={done['offer-risks']}
             hint="Choose which risks the customer reads and price a surcharge where a risk is real money.">

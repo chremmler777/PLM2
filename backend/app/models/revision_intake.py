@@ -21,7 +21,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.database import Base
 
 INTAKE_SOURCES = ("package", "customer_data", "upload", "promote")
-INTAKE_STATUSES = ("pending", "decided", "superseded")
+INTAKE_STATUSES = ("pending", "decided", "superseded", "rejected")
+# Closed without activation: a newer index replaced it, or the pending
+# revision itself was rejected. Neither waits nor can be triaged any more.
+CLOSED_STATUSES = ("superseded", "rejected")
 ROUTES = ("full_ecr", "attach_ecr", "engineering_review", "administrative")
 REVIEW_ANSWERS = ("no_impact", "impact")
 
@@ -82,8 +85,9 @@ class RevisionIntake(Base):
 
     @property
     def is_waiting(self) -> bool:
-        """The revision is still pending: not activated, not superseded."""
-        return self.activated_at is None and self.status != "superseded"
+        """The revision is still pending: not activated, not superseded or
+        rejected."""
+        return self.activated_at is None and self.status not in CLOSED_STATUSES
 
 
 def waiting_revision_ids():
@@ -91,7 +95,7 @@ def waiting_revision_ids():
     shows or builds on "the current revision" skips these."""
     return select(RevisionIntake.revision_id).where(
         RevisionIntake.activated_at.is_(None),
-        RevisionIntake.status != "superseded")
+        RevisionIntake.status.notin_(CLOSED_STATUSES))
 
 
 class ChangeReviewAnswer(Base):

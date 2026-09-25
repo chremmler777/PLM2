@@ -44,6 +44,8 @@ interface Props {
   quoted?: boolean
   /** Called after the set (or the lead) changed on the server. */
   onChanged?: () => void
+  /** 'engineering_review': the lock opens the review, no assessment is routed. */
+  origin?: string | null
 }
 
 const sortedKey = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b).join(',')
@@ -51,6 +53,7 @@ const sortedKey = (ids: Iterable<number>) => [...ids].sort((a, b) => a - b).join
 export default function ImpactTree({
   changeId, status, impactConfirmedByName, impactConfirmedAt, canConfirm = true,
   canEdit = true, titleAuto = false, scopeChangedAfterQuote = false, quoted = false, onChanged,
+  origin = null,
 }: Props) {
   const qc = useQueryClient()
   const phaseOpen = !LOCKED.includes(status)
@@ -261,9 +264,18 @@ export default function ImpactTree({
               data-testid={`impact-pending-${node.part_id}`}>{t('impact.pendingRemove')}</span>
           )}
           {node.resulting_revision_id !== null && (
-            <span className="px-2 py-0.5 rounded-full text-xs bg-purple-900 text-purple-100">
-              ECN #{node.resulting_revision_id}
-            </span>
+            node.resulting_revision_pending ? (
+              <span data-testid={`impact-resulting-${node.part_id}`}
+                title="New customer index, pending: this change activates it at release"
+                className="px-2 py-0.5 rounded-full text-xs bg-amber-900/70 text-amber-100">
+                {node.resulting_revision_label ?? `#${node.resulting_revision_id}`} pending
+              </span>
+            ) : (
+              <span data-testid={`impact-resulting-${node.part_id}`} title="Resulting revision"
+                className="px-2 py-0.5 rounded-full text-xs bg-purple-900 text-purple-100">
+                {node.resulting_revision_label ?? `ECN #${node.resulting_revision_id}`}
+              </span>
+            )
           )}
           {isSuggested && (
             <button
@@ -322,7 +334,7 @@ export default function ImpactTree({
       <TransitionConfirmDialog busy={confirmImpact.isPending}
         confirm={confirmingImpact ? {
           to: 'impact-confirm', title: t('impact.confirmTitle'),
-          consequence: t('impact.confirmBody'),
+          consequence: t(origin === 'engineering_review' ? 'impact.confirmBodyReview' : 'impact.confirmBody'),
           open: [],
           info: [t('impact.confirmCount').replace('{n}', String(data?.impacted_part_ids?.length ?? 0))],
           confirmLabel: t('impact.confirm'),

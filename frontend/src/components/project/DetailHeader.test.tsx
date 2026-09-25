@@ -15,8 +15,8 @@ const base: Part = {
 }
 const revisions: PartRevision[] = [{ id: 9, part_id: 5, revision_name: 'E1', customer_index: '001', phase: 'review', status: 'approved', created_at: '2026-09-01' }]
 
-function mount(part: Part) {
-  const sel = { partRevisions: revisions, openPart: vi.fn() } as unknown as ArticleSelection
+function mount(part: Part, partRevisions: PartRevision[] = revisions) {
+  const sel = { partRevisions, openPart: vi.fn() } as unknown as ArticleSelection
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter><DetailHeader projectId={2} part={part} article={undefined} sel={sel} /></MemoryRouter>
@@ -42,5 +42,18 @@ describe('DetailHeader', () => {
     mount({ ...base, tier1_part_number: null, customer_part_number: null, thumbnail_url: null })
     expect(screen.getByTestId('detail-thumbnail-placeholder')).toBeTruthy()
     expect(screen.getByTestId('detail-numbers').textContent).toBe('KTX 20-1994-005-0')
+  })
+
+  it('never shows a pending index as the current one: no active index yet, pending triage', () => {
+    mount({ ...base, active_revision_id: null },
+      [{ ...revisions[0], id: 11, revision_name: 'E2', customer_index: '005', status: 'in_review', intake_pending: true }])
+    expect(screen.queryByTestId('detail-active-revision')).toBeNull()
+    expect(screen.getByTestId('detail-no-active-revision').textContent).toBe('No active index yet, pending triage')
+  })
+
+  it('shows no pending note while an active index exists', () => {
+    mount(base, [...revisions, { ...revisions[0], id: 11, revision_name: 'E2', intake_pending: true }])
+    expect(screen.getByTestId('detail-active-revision')).toBeTruthy()
+    expect(screen.queryByTestId('detail-no-active-revision')).toBeNull()
   })
 })

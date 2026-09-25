@@ -152,7 +152,8 @@ class ReleaseService:
             session, change, "release_check",
             f"Release check '{catalog.label_for(key)}': {status}", user.id,
             notes=note, old_value={"status": old},
-            new_value={"check_key": key, "status": status})
+            new_value={"check_key": key, "status": status},
+            for_department_id=row.department_id)
 
     # ------------------------------------------------------------------
     # Lessons

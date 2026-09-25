@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import CostLineGrid from './CostLineGrid'
 import CostPositions from './CostPositions'
+import CostingSheetBar from './CostingSheetBar'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeDetail, Summation } from '../../types/change'
 
@@ -105,6 +106,10 @@ export default function CostingBuckets({
   if (rows.length === 0) {
     return <p className="text-sm text-slate-400">{t('costing.none')}</p>
   }
+  const sheetBar = (
+    <CostingSheetBar changeId={changeId} summation={canSeeAll ? summation : undefined}
+      editable={editable} />
+  )
 
   // An ordinary member gets their own bucket and nothing else — not even a
   // collapsed row for a department whose figures they may not read. The full
@@ -114,6 +119,7 @@ export default function CostingBuckets({
 
   return (
     <div className="space-y-2">
+      {sheetBar}
       {visible.map((a) => {
         const id = a.department_id
         const isMine = myDepartmentIds.includes(id)
@@ -155,7 +161,7 @@ export default function CostingBuckets({
                 {/* Figures ride along only for those allowed to see them. */}
                 {canSeeAll && total != null && (
                   <span data-testid={`costing-total-${id}`} className="tabular-nums text-slate-300">
-                    {total.toFixed(2)}
+                    {total.toFixed(2)}{summation?.currency ? ` ${summation.currency}` : ''}
                   </span>
                 )}
               </span>
@@ -195,7 +201,9 @@ export default function CostingBuckets({
                   <div className="text-sm space-y-3" data-testid={`costing-readonly-${id}`}>
                     <p className="text-slate-300">
                       {t('costing.deptTotal')}: <span className="tabular-nums">
-                        {total != null ? total.toFixed(2) : '-'}
+                        {total != null
+                          ? `${total.toFixed(2)}${summation?.currency ? ` ${summation.currency}` : ''}`
+                          : '-'}
                       </span>
                     </p>
                     {leadTimeOf(id) != null && (

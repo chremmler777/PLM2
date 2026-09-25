@@ -48,6 +48,9 @@ export interface Intake {
   created_at: string;
   needs_triage: boolean;
   can_decide: boolean;
+  /** Project team (spec §18), on My Tasks triage rows. */
+  role?: 'main' | 'backup';
+  main_name?: string | null;
 }
 
 export interface IntakeList {
@@ -61,6 +64,9 @@ export interface ReviewTask {
   title: string;
   department_id: number;
   department_name: string | null;
+  /** Project team (spec §18), on My Tasks rows. */
+  role?: 'main' | 'backup';
+  main_name?: string | null;
 }
 
 export interface MyIntakes {

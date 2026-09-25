@@ -34,7 +34,8 @@ class CostingPositionError(ValueError):
 # to another department would move money out of one budget into another with
 # no record of it — delete and re-add instead.
 _POSITION_FIELDS = ("label", "tag", "kind", "pricing", "est_cost", "vendor_name",
-                    "hours", "lead_time_days", "lead_time_unit", "notes")
+                    "hours", "lead_time_days", "lead_time_unit", "notes",
+                    "labour_position", "machine_class_id", "trials")
 _OFFER_FIELDS = ("vendor_name", "cost", "shipping_cost", "shipping_included",
                  "lead_time_days", "lead_time_unit", "favorite", "is_partial")
 
@@ -200,6 +201,19 @@ class CostingPositionService:
             choosers = dict((await session.execute(
                 select(User.id, User.full_name).where(
                     User.id.in_(chooser_ids)))).all())
+        # The rate each line is priced with and where it comes from (cost
+        # sheet version, department, position), or "No rate in the cost
+        # sheet". One lookup per position of the change it belongs to.
+        from app.services import costing_rates
+        pricing: dict[int, dict] = {}
+        by_change: dict[int, list] = {}
+        for p in positions:
+            by_change.setdefault(p.change_id, []).append(p)
+        for change_id, rows in by_change.items():
+            change = await session.get(ChangeRequest, change_id)
+            if change is not None:
+                pricing.update(await costing_rates.describe_positions(
+                    session, change, rows))
         out = []
         for p in positions:
             # Two different questions, two different properties:
@@ -215,6 +229,9 @@ class CostingPositionService:
                 "department_id": p.department_id, "label": p.label,
                 "tag": p.tag, "kind": p.kind, "pricing": p.pricing,
                 "est_cost": p.est_cost, "vendor_name": p.vendor_name, "hours": p.hours,
+                "labour_position": p.labour_position,
+                "machine_class_id": p.machine_class_id, "trials": p.trials,
+                **pricing.get(p.id, {}),
                 "lead_time_days": p.lead_time_days,
                 "lead_time_unit": p.lead_time_unit, "notes": p.notes,
                 "created_by": p.created_by, "created_at": p.created_at,
@@ -316,6 +333,34 @@ class CostingPositionService:
         # price.
         if position.hours is not None and position.hours < 0:
             raise CostingPositionError("Hours cannot be negative")
+        if position.trials is not None and position.trials < 0:
+            raise CostingPositionError("Trials cannot be negative")
+        if position.labour_position is not None:
+            position.labour_position = position.labour_position.strip()[:80] or None
+        # machine_time and sampling are priced by the cost sheet alone: an
+        # estimate typed next to them would be counted twice.
+        if position.kind in ("machine_time", "sampling"):
+            position.est_cost = None
+            position.vendor_name = None
+            position.labour_position = None
+        else:
+            position.machine_class_id = None
+        if position.kind != "sampling":
+            position.trials = None
+
+    @staticmethod
+    async def _check_machine_class(session: AsyncSession, change: ChangeRequest,
+                                   position: CostingPosition) -> None:
+        """A named machine class must be one of the org's classes."""
+        if position.machine_class_id is None:
+            return
+        from app.models.cost_sheet import CostSheetMachineClass
+        from app.services import costing_rates
+        c = await session.get(CostSheetMachineClass, position.machine_class_id)
+        org_id = await costing_rates.change_org_id(session, change)
+        if c is None or c.organization_id != org_id:
+            raise CostingPositionError(
+                f"Unknown machine class {position.machine_class_id}")
 
     @staticmethod
     def _validate_offer(offer: CostingOffer, position: CostingPosition) -> None:
@@ -368,8 +413,16 @@ class CostingPositionService:
             lead_time_days=spec.get("lead_time_days"),
             lead_time_unit=spec.get("lead_time_unit") or "calendar_days",
             notes=spec.get("notes"), created_by=actor.id,
+            labour_position=spec.get("labour_position"),
+            machine_class_id=spec.get("machine_class_id"),
+            trials=spec.get("trials"),
         )
         CostingPositionService._validate(position)
+        await CostingPositionService._check_machine_class(session, change, position)
+        # Priced now, from the cost sheet valid today: the snapshot stays on
+        # the line until its pricing inputs change.
+        from app.services import costing_rates
+        await costing_rates.snapshot_position(session, change, position)
         session.add(position)
         await session.flush()
         # A just-added row has no loaded `offers` collection, and effective_cost
@@ -386,12 +439,21 @@ class CostingPositionService:
         session: AsyncSession, change: ChangeRequest,
         position: CostingPosition, spec: dict, actor: User,
     ) -> CostingPosition:
+        from app.services import costing_rates
+        before = {f: getattr(position, f) for f in costing_rates.PRICING_FIELDS}
         for field in _POSITION_FIELDS:
             if field in spec:
                 setattr(position, field, spec[field])
         if position.label:
             position.label = position.label.strip()
         CostingPositionService._validate(position)
+        await CostingPositionService._check_machine_class(session, change, position)
+        # Re-priced only when what the rate depends on moved (or the line was
+        # never priced): a typo fixed in the label keeps its snapshot.
+        if (position.rate_on is None
+                or any(getattr(position, f) != before[f]
+                       for f in costing_rates.PRICING_FIELDS)):
+            await costing_rates.snapshot_position(session, change, position)
         position.updated_at = datetime.utcnow()
         await session.flush()
         await CostingPositionService._log(
@@ -417,7 +479,8 @@ class CostingPositionService:
         await ChangeService.append_changelog(
             session, change, "costing_position_deleted",
             f"Costing position '{label}' removed from dept {department_id}",
-            actor.id, old_value={"label": label, "department_id": department_id})
+            actor.id, old_value={"label": label, "department_id": department_id},
+            for_department_id=department_id)
         return paths
 
     @staticmethod
@@ -451,7 +514,8 @@ class CostingPositionService:
             f"{offer.total_cost}", actor.id,
             new_value={"position_id": position.id, "offer_id": offer.id,
                        "vendor_name": offer.vendor_name,
-                       "total_cost": offer.total_cost})
+                       "total_cost": offer.total_cost},
+            for_department_id=position.department_id)
         return offer
 
     @staticmethod
@@ -478,7 +542,8 @@ class CostingPositionService:
             actor.id,
             new_value={"position_id": position.id, "offer_id": offer.id,
                        "favorite": offer.favorite,
-                       "total_cost": offer.total_cost})
+                       "total_cost": offer.total_cost},
+            for_department_id=position.department_id)
         return offer
 
     @staticmethod
@@ -496,7 +561,8 @@ class CostingPositionService:
         await ChangeService.append_changelog(
             session, change, "costing_offer_deleted",
             f"Offer from {vendor} on '{position.label}' removed", actor.id,
-            old_value={"position_id": position.id, "vendor_name": vendor})
+            old_value={"position_id": position.id, "vendor_name": vendor},
+            for_department_id=position.department_id)
         return paths
 
     @staticmethod
@@ -624,4 +690,5 @@ class CostingPositionService:
                        "department_id": position.department_id,
                        "label": position.label, "kind": position.kind,
                        "pricing": position.pricing,
-                       "effective_cost": position.effective_cost})
+                       "effective_cost": position.effective_cost},
+            for_department_id=position.department_id)

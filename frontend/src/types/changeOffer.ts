@@ -157,4 +157,9 @@ export interface OfferOut {
   created_by_name?: string | null
   diff?: OfferDiffRow[] | null
   warnings?: OfferIssue[]
+  /** Spec §15 phase 2: the costing's currency and the cost sheet versions it used. */
+  costing_currency?: string | null
+  costing_totals_by_currency?: Record<string, { grand_total: number }>
+  cost_sheet_versions_used?: number[]
+  cost_sheet_current_version?: number | null
 }

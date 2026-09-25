@@ -257,8 +257,9 @@ class MotherPlantService:
         members.discard(user.id)
         if members:
             from app.services.notification_service import NotificationService
-            await NotificationService.notify_once(
-                session, sorted(members), kind="change_info_sent",
+            await NotificationService.notify_team(
+                session, change.project_id, new, sorted(members),
+                kind="change_info_sent",
                 subject_key=f"change:{change.id}:info",
                 title=(f"{change.change_number}: change from "
                        f"{cfg.plant_name(change)}, read and confirm")[:255],
@@ -295,7 +296,8 @@ class MotherPlantService:
             f"{dname}: read and understood" + (f" ({note})" if note else ""),
             user.id, notes=note,
             new_value={"receipt_id": r.id, "department_id": r.department_id,
-                       "note": note})
+                       "note": note},
+            for_department_id=r.department_id)
         if note and r.sent_by != user.id:
             from app.services.notification_service import NotificationService
             await NotificationService.notify_once(

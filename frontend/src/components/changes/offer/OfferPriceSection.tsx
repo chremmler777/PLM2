@@ -20,8 +20,15 @@ const CATEGORY_CHIP: Record<string, string> = {
 
 type Update = <K extends keyof OfferData>(key: K, value: OfferData[K]) => void
 
+/** Warnings that belong to the price itself (spec §15 phase 2): the costing
+    in another currency than the offer, currencies the costing could not
+    add, lines without a rate, a newer cost sheet than costing used. */
+export const PRICE_WARNING_CODES = [
+  'currency_mismatch', 'mixed_currency', 'no_rate', 'cost_sheet_outdated',
+]
+
 export default function OfferPriceSection({
-  data, update, editable, currency, annualEffect, onRefresh, refreshing,
+  data, update, editable, currency, annualEffect, onRefresh, refreshing, warnings = [],
 }: {
   data: OfferData
   update: Update
@@ -30,7 +37,9 @@ export default function OfferPriceSection({
   annualEffect?: number | null
   onRefresh?: () => void
   refreshing?: boolean
+  warnings?: { code: string; message: string }[]
 }) {
+  const priceWarnings = warnings.filter((w) => PRICE_WARNING_CODES.includes(w.code))
   const lines = data.cost_lines ?? []
   const factors = data.factors ?? []
   const changeover: OfferChangeover = data.changeover ?? { mode: 'running_change' }
@@ -50,6 +59,12 @@ export default function OfferPriceSection({
 
   return (
     <div className="space-y-6">
+      {priceWarnings.length > 0 && (
+        <ul role="status" data-testid="offer-price-warnings"
+          className="rounded-md border border-amber-700/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-100 space-y-1">
+          {priceWarnings.map((w) => <li key={w.code} data-code={w.code}>{w.message}</li>)}
+        </ul>
+      )}
       {/* Cost lines */}
       <div>
         <div className="flex items-center justify-between">

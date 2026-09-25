@@ -83,6 +83,17 @@ describe('PnlCard', () => {
     expect(await screen.findByText('3.000,00 EUR')).toBeDefined()
   })
 
+  it('prices the cost in the costing currency and shows the costing warnings', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation({ grand_total: 2000 }), currency: 'USD',
+      warnings: [{ code: 'no_rate', message: '1 costing line has no rate in the cost sheet and is not counted: the total is too low' }],
+    })
+    render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
+    expect(await screen.findByText('2.000,00 USD')).toBeDefined()
+    expect((await screen.findByTestId('pnl-costing-warnings')).textContent)
+      .toContain('no rate in the cost sheet')
+  })
+
   it('shows Approved budget and "vs. approved budget" label for an internal change', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue(summation({ grand_total: 2000 }))
     render(wrap(<PnlCard change={change({ customer_relevant: false, internal_approved_amount: 3000 })} />))

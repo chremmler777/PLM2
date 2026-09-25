@@ -45,6 +45,21 @@ describe('CustomerPackageDialog', () => {
     expect(rows.find((r: { filename: string }) => r.filename === 'x.stp')).toMatchObject({ part_id: 3, action: 'new_major' })
   })
 
+  it('keeps the result column in view: capped part picker, scrollable table, result never squeezed', async () => {
+    post.mockResolvedValueOnce({ data: { rows: [{ ...previewRows[0], current_pending: true,
+      pending_note: 'E2 is still pending triage; a new index supersedes it' }] } })
+    render(<CustomerPackageDialog open assemblyId={1} projectParts={[{ id: 1, part_number: '1994-100', name: 'A very long part name that used to push the result column out of the dialog' }]}
+      onClose={() => {}} onDone={() => {}} />)
+    fireEvent.change(screen.getByTestId('package-files'), { target: { files: [new File(['x'], 'top.stp')] } })
+    fireEvent.click(screen.getByText('Check package'))
+    const result = await screen.findByTestId('result-top.stp')
+    expect(result.className).toContain('min-w-[12rem]')
+    expect(result.textContent).toContain('pending triage')
+    expect(result.textContent).toContain('a new index supersedes it')
+    expect(screen.getByTestId('part-top.stp').className).toContain('max-w-[14rem]')
+    expect(result.closest('table')?.parentElement?.className).toContain('overflow-x-auto')
+  })
+
   it('shows row errors from a 409 and keeps the table', async () => {
     post.mockResolvedValueOnce({ data: { rows: previewRows } })
     post.mockRejectedValueOnce({ response: { status: 409, data: { detail: 'x', rows: [{ ...previewRows[0], action: 'error', error: 'Revision number must be above E1' }] } } })

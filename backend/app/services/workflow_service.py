@@ -260,8 +260,9 @@ class WorkflowService:
 
             part, revision = await WorkflowService._instance_part_context(db, instance)
             stage_label = stage.name or f"stage {stage.stage_order}"
-            await NotificationService.notify_departments(
-                db,
+            # Project team (spec §18): the responsible first, backups as info.
+            await NotificationService.notify_team(
+                db, part.project_id,
                 list(actionable_departments),
                 title=f"Workflow task: {part.name} {revision.revision_name}",
                 body=f"Your department has a new task in '{stage_label}'.",
@@ -275,8 +276,8 @@ class WorkflowService:
             stage_label = stage.name or f"stage {stage.stage_order}"
             link = (f"/changes/{instance.change_id}?tab=assessments"
                     if instance.change_id is not None else "/my-tasks")
-            await NotificationService.notify_departments_once(
-                db,
+            await NotificationService.notify_team(
+                db, part.project_id,
                 list(fyi_departments),
                 kind="fyi_stage",
                 subject_key=f"inst:{instance.id}:stage:{stage.stage_order}",
@@ -760,6 +761,9 @@ class WorkflowService:
             part = revision.part
             stage = t.step.stage
             role, main_name = await _role(part.project_id, t.department_id)
+            if t.owner_id == user_id:
+                # A task the viewer took is theirs, backup or not.
+                role, main_name = "main", None
             results.append({
                 "task_id": t.id,
                 "instance_id": t.instance_id,

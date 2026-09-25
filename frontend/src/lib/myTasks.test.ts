@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { byUrgency, changeTaskMine, foldChangeTasks, foldWorkflowTasks } from './myTasks'
+import { byUrgency, changeTaskMine, foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst } from './myTasks'
 import type { ChangeTask } from '../types/change'
 import type { MyTask } from '../types/workflow'
 
@@ -55,5 +55,36 @@ describe('byUrgency', () => {
       { id: 'soon', overdue: false, due_date: '2026-10-01' },
     ]
     expect([...rows].sort(byUrgency).map((r) => r.id)).toEqual(['late', 'soon', 'later', 'undated'])
+  })
+})
+
+describe('project team roles (spec §18)', () => {
+  it('folds main over backup and keeps the main name on an all-backup fold', () => {
+    const mixed = foldChangeTasks([
+      ct({ rasic_letters: ['A'], role: 'backup', main_name: 'Cody' }),
+      ct({ rasic_letters: ['R'], role: 'main' }),
+    ])
+    expect(mixed[0].role).toBe('main')
+    expect(mixed[0].main_name).toBeNull()
+    const backup = foldChangeTasks([
+      ct({ rasic_letters: ['A'], role: 'backup', main_name: 'Cody' }),
+      ct({ rasic_letters: ['R'], role: 'backup', main_name: 'Cody' }),
+    ])
+    expect(isBackup(backup[0])).toBe(true)
+    expect(backup[0].main_name).toBe('Cody')
+  })
+
+  it('treats a row without a role (older backend, no responsible) as main', () => {
+    expect(isBackup(ct({}))).toBe(false)
+  })
+
+  it('sorts main rows before backup rows, urgency inside each group', () => {
+    const rows = [
+      { role: 'backup', overdue: true, due_date: '2026-01-01' },
+      { role: 'main', overdue: false, due_date: '2026-12-01' },
+      { role: 'main', overdue: true, due_date: '2026-06-01' },
+    ].sort(mainFirst)
+    expect(rows.map((r) => r.role)).toEqual(['main', 'main', 'backup'])
+    expect(rows[0].overdue).toBe(true)
   })
 })

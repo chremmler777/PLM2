@@ -174,9 +174,9 @@ class MeetingService:
         if sales is not None:
             from app.services.notification_service import NotificationService
             from app.services.change_people import department_members_of_change_org
-            await NotificationService.notify_users(
-                session, await department_members_of_change_org(
-                    session, change, [sales]),
+            await NotificationService.notify_team(
+                session, change.project_id, [sales],
+                await department_members_of_change_org(session, change, [sales]),
                 title=f"Cost carrier changed: {change.change_number}",
                 body=(f"The scoping meeting set '{change.title}' to "
                       f"{label('cost_carrier', meeting.cost_carrier).lower()}."),

@@ -2350,7 +2350,8 @@ class ChangePlanService:
             f"{dept.name if dept else department_id} (revision {row.plan_revision})",
             user.id, notes=note,
             new_value={"department_id": department_id, "verdict": verdict,
-                       "plan_revision": row.plan_revision})
+                       "plan_revision": row.plan_revision},
+            for_department_id=department_id)
 
     @staticmethod
     async def validate_timing(session: AsyncSession, change: ChangeRequest,

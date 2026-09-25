@@ -125,6 +125,30 @@ describe('ImpactTree', () => {
     expect(sibling.checked).toBe(true)
   })
 
+  it('says the review asks the serving departments when locking an engineering review', async () => {
+    wrap(<ImpactTree changeId={7} status="scoping" origin="engineering_review" />)
+    await screen.findByText('Child')
+    fireEvent.click(screen.getByRole('button', { name: /Confirm impact \(Development\)/ }))
+    const text = screen.getByTestId('confirm-consequence').textContent
+    expect(text).toContain('The review asks the departments serving these parts')
+    expect(text).not.toContain('assessment is routed')
+  })
+
+  it('labels the resulting revision by its name, a pending customer index as pending', async () => {
+    const child = tree.tree[0].children
+    vi.mocked(changesApi.getImpactTree).mockResolvedValue({
+      ...tree,
+      tree: [{ ...tree.tree[0], children: [
+        { ...child[0], resulting_revision_id: 2128, resulting_revision_label: 'E2 · 005', resulting_revision_pending: true },
+        { ...child[1], is_impacted: true, resulting_revision_id: 2129, resulting_revision_label: 'E1.1', resulting_revision_pending: false },
+      ] }],
+    })
+    wrap(<ImpactTree changeId={7} status="scoping" />)
+    expect((await screen.findByTestId('impact-resulting-2')).textContent).toBe('E2 · 005 pending')
+    expect(screen.getByTestId('impact-resulting-3').textContent).toBe('E1.1')
+    expect(screen.queryByText(/ECN #/)).toBeNull()
+  })
+
   it('shows an enabled Confirm impact button to Development, and calls the API', async () => {
     wrap(<ImpactTree changeId={7} status="captured" />)
     await screen.findByText('Child')

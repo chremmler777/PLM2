@@ -138,7 +138,23 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, action: str,
         description: str, performed_by: int, *, field_name: Optional[str] = None,
         old_value=None, new_value=None, notes: Optional[str] = None,
+        for_department_id: Optional[int] = None,
     ) -> ChangeChangelog:
+        """for_department_id: the department whose role the act belongs to.
+        When the project has another responsible for it (spec §18), the act
+        is a backup's stand-in: notes lead with "<backup> for <main>" and
+        new_value carries stands_in_for {user_id, name, department_id}."""
+        if for_department_id is not None:
+            from app.services.project_team_service import ProjectTeamService
+            si = await ProjectTeamService.stand_in(
+                session, change.project_id, for_department_id, performed_by)
+            if si is not None:
+                line = await ProjectTeamService.stand_in_note(session, si, performed_by)
+                notes = f"{line}: {notes}" if notes else line
+                if new_value is None or isinstance(new_value, dict):
+                    new_value = {**(new_value or {}), "stands_in_for": si}
+                else:
+                    new_value = {"value": new_value, "stands_in_for": si}
         prev = await ChangeService._last_entry_hash(session, change.id)
         old_s = json.dumps(old_value) if old_value is not None else None
         new_s = json.dumps(new_value) if new_value is not None else None
@@ -1015,6 +1031,11 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change, "rejected", f"Rejected: {rejection_reason}",
                 user_id, notes=rejection_reason)
+        if to_status in ("rejected", "cancelled"):
+            # Spec §17a: an index this change was to release waits for a new
+            # triage; Development is told.
+            from app.services.revision_intake_service import RevisionIntakeService
+            await RevisionIntakeService.on_change_dead(session, change, user_id)
         if validation_escalation:
             await ChangeService.append_changelog(
                 session, change, "validation_escalated",
@@ -1123,6 +1144,19 @@ class ChangeService:
 
     @staticmethod
     async def release(session: AsyncSession, change: ChangeRequest, user_id: int):
+        # A pending customer index is released only by the change its intake
+        # is linked to: one superseded, rejected or re-triaged elsewhere after
+        # this change died (and was reopened) is refused, before anything moves.
+        from app.services.revision_intake_service import RevisionIntakeService
+        for item in change.impacted_items:
+            if item.resulting_revision_id is None:
+                continue
+            rev = await session.get(PartRevision, item.resulting_revision_id)
+            if rev is None:
+                continue
+            block = await RevisionIntakeService.activation_blocker(session, rev, change)
+            if block:
+                raise ChangeError(block)
         change.released_at = datetime.utcnow()
         change.released_by = user_id
         for item in change.impacted_items:
@@ -1156,6 +1190,22 @@ class ChangeService:
             select(Part).where(Part.project_id == change.project_id)
         )).scalars().all()
         impacted = {i.part_id: i for i in change.impacted_items}
+        # The resulting revision's name, and whether it is a new customer
+        # index still pending (spec §17a: "E2 · 005 pending", not "ECN #id").
+        res_ids = [i.resulting_revision_id for i in change.impacted_items
+                   if i.resulting_revision_id is not None]
+        res_revs = {r.id: r for r in (await session.execute(
+            select(PartRevision).where(PartRevision.id.in_(res_ids)))).scalars().all()} \
+            if res_ids else {}
+        from app.models.revision_intake import RevisionIntake, waiting_revision_ids
+        res_waiting = set((await session.execute(waiting_revision_ids().where(
+            RevisionIntake.revision_id.in_(res_ids)))).scalars().all()) if res_ids else set()
+
+        def res_label(item) -> Optional[str]:
+            rev = res_revs.get(item.resulting_revision_id) if item else None
+            if rev is None:
+                return None
+            return rev.revision_name + (f" · {rev.customer_index}" if rev.customer_index else "")
         ids = {p.id for p in parts}
         children_map: dict = defaultdict(list)
         roots = []
@@ -1181,6 +1231,9 @@ class ChangeService:
                 "is_impacted": item is not None,
                 "is_lead": bool(item and item.is_lead),
                 "resulting_revision_id": item.resulting_revision_id if item else None,
+                "resulting_revision_label": res_label(item),
+                "resulting_revision_pending": bool(
+                    item and item.resulting_revision_id in res_waiting),
                 "children": [node(c, seen) for c in kids],
             }
 
@@ -1781,6 +1834,8 @@ class ChangeService:
                 "label": f"Submit assessment for {dept_names.get(a.department_id, a.department_id)}",
                 "target_tab": "assessments",
                 "assessment_id": a.id,
+                "department_id": a.department_id,
+                "_owned": a.effective_owner_id == user.id,
             })
 
         # kind "wf_task": active ECN (part-revision-scoped) tasks spawned by
@@ -1810,6 +1865,8 @@ class ChangeService:
                                if change.status in ("in_validation", "released")
                                else "timing"),
                 "task_id": t.id,
+                "role_department_id": t.department_id,
+                "_owned": t.owner_id == user.id,
             })
 
         # kind "deviation_decision": pending transition deviations this user
@@ -1921,6 +1978,19 @@ class ChangeService:
                         "gate_key": gate.gate_key,
                     })
 
+        # Project team (spec §18): each item carries the viewer's role on it.
+        # "main" items are theirs; "backup" items (the project has another
+        # responsible for the owing department) show in a muted "As backup"
+        # group. Lead-held and personal items (gates, deviations, escalations
+        # the user was notified of, a task they took) are always main.
+        from app.services.project_team_service import TeamRoles
+        from app.services.change_people import holds_lead
+        team = TeamRoles(session, user.id)
+        lead = holds_lead(change, user)
+        for a in actions:
+            owned = bool(a.pop("_owned", False)) or lead
+            await team.annotate(a, change.project_id, owned=owned)
+            a.pop("role_department_id", None)
         return actions
 
     @staticmethod
@@ -2710,6 +2780,7 @@ class ChangeService:
             session, change, "assessment_submitted",
             f"Assessment for dept {department_id}: {verdict}", user_id,
             field_name="verdict", new_value=verdict,
+            for_department_id=department_id,
         )
         return a
 

@@ -82,10 +82,19 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
 
       <div>
         <div className="text-xs text-slate-400 uppercase tracking-wide">Cost</div>
-        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(totalCost)}</div>
+        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(totalCost, data?.currency)}</div>
         <div className="text-xs text-slate-500 mt-1">
-          Int. {fmtMoney(internalCost)} · Ext. {fmtMoney(externalCost)}
+          Int. {fmtMoney(internalCost, data?.currency)} · Ext. {fmtMoney(externalCost, data?.currency)}
         </div>
+        {/* The costing's own warnings (spec §15 phase 2): currencies it did
+            not add, lines without a rate. */}
+        {(data?.warnings ?? []).length > 0 && (
+          <ul data-testid="pnl-costing-warnings" className="mt-1 space-y-0.5">
+            {(data?.warnings ?? []).map((w) => (
+              <li key={w.code} className="text-[11px] text-amber-300">{w.message}</li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div>

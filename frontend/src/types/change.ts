@@ -424,7 +424,14 @@ export interface ChangeTask {
   stage_label?: string | null;
   /** R and A rows of one department folded into one task. */
   rasic_letters?: string[];
+  /** Project team (spec §18): "main" counts; "backup" is listed muted. */
+  role?: TeamRole;
+  /** The responsible's name, on backup rows. */
+  main_name?: string | null;
 }
+
+/** The viewer's standing on a role's work for a project (spec §18). */
+export type TeamRole = 'main' | 'backup';
 
 // --- Cost & summation types (sub-project A) ---
 
@@ -463,7 +470,22 @@ export interface PlantRollup {
   lifecycle_internal: number; lifecycle_external: number;
 }
 export interface DeptRollup extends Omit<PlantRollup, 'plant_id'> { department_id: number; }
+export interface SummationTotals {
+  one_time_internal: number; one_time_external: number;
+  lifecycle_internal: number; lifecycle_external: number; grand_total: number;
+}
+
 export interface Summation {
+  /** The costing currency (the costing plant's): totals and by_department are in it. */
+  currency?: string;
+  /** Every currency's own sums; never added together, never converted. */
+  totals_by_currency?: Record<string, SummationTotals>;
+  mixed_currency?: boolean;
+  unpriced_lines?: { position_id: number; department_id: number; label: string; kind: string;
+    quantity: number; unit: string; reason?: string | null; message: string }[];
+  warnings?: { code: string; message: string }[];
+  cost_sheet_versions_used?: number[];
+  cost_sheet_current_version?: number | null;
   by_plant: PlantRollup[];
   by_department: DeptRollup[];
   totals: { one_time_internal: number; one_time_external: number;
@@ -577,6 +599,9 @@ export interface MyAction {
   issue_id?: number | null;
   escalation_id?: number | null;
   level?: number | null;
+  /** Project team (spec §18): backup items show in a muted "As backup" group. */
+  role?: TeamRole;
+  main_name?: string | null;
 }
 
 export interface MyActionsResponse {
@@ -594,6 +619,10 @@ export interface ImpactTreeNode {
   is_impacted: boolean;
   is_lead: boolean;
   resulting_revision_id: number | null;
+  /** "E2 · 005": the resulting revision's name and customer index. */
+  resulting_revision_label?: string | null;
+  /** A new customer index still pending triage/release (spec §17a). */
+  resulting_revision_pending?: boolean;
   children: ImpactTreeNode[];
 }
 
@@ -642,7 +671,12 @@ export type ConcernKind = 'reject_proposal' | 'needs_info' | 'risk';
  * Three kinds, because the three are answered by different people and read
  * differently in the summation.
  */
-export type CostPositionKind = 'internal_effort' | 'support_effort' | 'own_time' | 'external';
+export type CostPositionKind =
+  | 'internal_effort' | 'support_effort' | 'own_time' | 'external'
+  /** hours x the machine class rate of the cost sheet */
+  | 'machine_time'
+  /** trials x the sampling price of the class */
+  | 'sampling';
 
 /** What a line under a category is: money bought, or the department's own hours. */
 export type CostEntryType = 'money' | 'time';
@@ -714,6 +748,51 @@ export interface CostPosition {
   /** The summed partial quotes on a quoted line. */
   parts_cost?: number;
   offers: CostingOffer[];
+  /** Cost sheet pricing (spec §15 phase 2). */
+  labour_position?: string | null;
+  machine_class_id?: number | null;
+  machine_class?: string | null;
+  trials?: number | null;
+  /** The rate snapshot the line is priced with; null = no rate (not 0). */
+  rate?: number | null;
+  rate_currency?: string | null;
+  /** The line's currency: the costing plant's. */
+  currency?: string | null;
+  rate_unit?: 'h' | 'trial' | null;
+  rate_source?: 'cost_sheet' | 'department_rate' | null;
+  cost_sheet_version_id?: number | null;
+  cost_sheet_version?: number | null;
+  rate_match?: string | null;
+  rate_on?: string | null;
+  /** "Cost sheet v2, Tool Engineer, Engineer, 21,50 USD/h" or "No rate in the cost sheet". */
+  rate_label?: string | null;
+  /** Hours (trials) on the line but nothing to price them with. */
+  rate_missing?: boolean;
+  rate_missing_reason?: string | null;
+  rate_is_snapshot?: boolean;
+  /** quantity x rate in `currency`; null when the rate is missing. */
+  line_value?: number | null;
+}
+
+/** GET /changes/{id}/costing/context */
+export interface CostingContext {
+  plant_id: number | null;
+  plant_name: string | null;
+  currency: string;
+  rate_source: 'cost_sheet' | 'department_rate';
+  current_version: { id: number; version: number; valid_from: string } | null;
+  latest_version: number | null;
+  stale: {
+    stale: boolean; review_months: number; latest_version: number | null;
+    reviewed_on: string | null; due_on: string | null; reason: string | null;
+  } | null;
+  machine_classes: { id: number; name: string; tonnage_min: number | null; tonnage_max: number | null }[];
+  machine_class_id: number | null;
+  default_machine_class_id: number | null;
+  effective_machine_class_id: number | null;
+  tonnage: number | null;
+  positions_by_department: Record<string, string[]>;
+  can_set_machine_class?: boolean;
 }
 
 export interface CostPositionIn {
@@ -728,6 +807,9 @@ export interface CostPositionIn {
   lead_time_days?: number | null;
   lead_time_unit?: LeadTimeUnit | null;
   notes?: string | null;
+  labour_position?: string | null;
+  machine_class_id?: number | null;
+  trials?: number | null;
 }
 
 export interface CostingOfferIn {

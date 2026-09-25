@@ -151,7 +151,7 @@ async def seed_test_data():
             await session.commit()
 
             # --- Change-management cost reference data (idempotent) ---
-            from app.models.change_cost import DepartmentRate, AssessmentActivity
+            from app.models.change_cost import AssessmentActivity
             from app.models.entities import Plant, Organization
             from app.models.workflow import Department as _Dep
             org = (await session.execute(select(Organization))).scalars().first()
@@ -164,26 +164,9 @@ async def seed_test_data():
                         session.add(p)
                         await session.flush()
                         plants[name] = p
-                rate_table = {
-                    "Sales": (50.0, None), "Development": (65.0, 21.5), "Tool Engineer": (65.0, 21.5),
-                    "Manufacturing Engineer": (65.0, 21.5), "Quality": (45.0, 21.5), "Logistics": (50.0, 21.5),
-                    "Production": (55.0, 21.5), "Purchasing": (50.0, 21.5),
-                    "Production control": (50.0, 21.5),
-                }
-                existing_rates = {(r.department_id, r.plant_id) for r in (await session.execute(
-                    select(DepartmentRate))).scalars().all()}
-                for dep_name, (mx, usa) in rate_table.items():
-                    dep = (await session.execute(
-                        select(_Dep).where(_Dep.name == dep_name))).scalar_one_or_none()
-                    if dep is None:
-                        continue
-                    for plant_name, rate, factor in [("Silao Mexico", mx, 0.6), ("USA", usa, 0.36)]:
-                        if rate is None:
-                            continue
-                        pid = plants[plant_name].id
-                        if (dep.id, pid) not in existing_rates:
-                            session.add(DepartmentRate(department_id=dep.id, plant_id=pid,
-                                                       hourly_rate=rate, min_factor=factor))
+                # Hourly rates are no longer seeded here: Finance maintains
+                # them in the cost sheet (spec §15). The department_rate
+                # table stays for the fallback of orgs without a sheet.
                 await session.flush()
 
                 # --- Activity catalog (idempotent) ---

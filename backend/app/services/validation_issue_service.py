@@ -377,10 +377,38 @@ class ValidationIssueService:
         if user_id is None:
             text += " (automatic)"
             extra = {**extra, "system": True}
+        # Project team (spec §18): the role the act belongs to, so a backup's
+        # act reads "<backup> for <main>". Sweeps are nobody's stand-in.
+        role_dept = None
+        if user_id is not None:
+            role_dept = await ValidationIssueService._act_department(
+                session, issue, action)
         await ChangeService.append_changelog(
             session, change, f"validation_issue_{action}",
             f"{issue.ref} {text}", actor, notes=notes,
-            new_value={"issue_id": issue.id, "number": issue.number, **extra})
+            new_value={"issue_id": issue.id, "number": issue.number, **extra},
+            for_department_id=role_dept)
+
+    # Which role an issue act belongs to (project team, spec §18).
+    _ACT_ROLE = {
+        "route_decided": "Project Manager", "closed": "Project Manager",
+        "customer_decision": "Sales", "fix_quoted": "Sales",
+    }
+    _ACT_OWNER_DEPT = frozenset({
+        "contained", "root_cause", "action_added", "action_done",
+        "revalidated", "revalidated_early", "revalidation",
+    })
+
+    @staticmethod
+    async def _act_department(session, issue: ValidationIssue,
+                              action: str) -> Optional[int]:
+        if action in ValidationIssueService._ACT_OWNER_DEPT:
+            return issue.department_id
+        name = ValidationIssueService._ACT_ROLE.get(action)
+        if name is None:
+            return None
+        return (await session.execute(
+            select(Department.id).where(Department.name == name))).scalar_one_or_none()
 
     @staticmethod
     async def change_org_id(session: AsyncSession,
@@ -2088,8 +2116,20 @@ class ValidationIssueService:
                 owed.append("add_action")
             for key in owed:
                 kind, label = svc.ACT_KINDS[key]
-                out.append({"kind": kind, "label": label.format(ref=i.ref),
-                            "target_tab": "release", "issue_id": i.id})
+                item = {"kind": kind, "label": label.format(ref=i.ref),
+                        "target_tab": "release", "issue_id": i.id}
+                # Project team (spec §18): the department that owes the act,
+                # so the task lists can tell main from backup. Route, close,
+                # customer and quote follow their fixed role (KIND_DEPARTMENT).
+                if key == "action_done":
+                    mine = [a for a in acts[i.id] if a.status == "open"
+                            and (a.owner_id == v.id or v.in_dept(a.department_id))]
+                    if not any(a.owner_id == v.id for a in mine) and mine:
+                        item["role_department_id"] = mine[0].department_id
+                elif key in ("contain", "root_cause", "recheck", "add_action") \
+                        and v.in_dept(i.department_id):
+                    item["role_department_id"] = i.department_id
+                out.append(item)
             for e in escs[i.id]:
                 if e.acknowledged_at is None and e.level >= 2 and \
                         e.trigger != "deescalate" and \

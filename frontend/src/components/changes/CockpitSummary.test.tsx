@@ -192,6 +192,33 @@ describe('CockpitSummary', () => {
     expect(screen.queryByText(/nothing/i)).not.toBeNull()
   })
 
+  it('lists backup items apart, muted, with the main name, and still actionable (spec §18)', () => {
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change()}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[
+        { kind: 'assessment', label: 'Submit assessment for R&D', target_tab: 'assessments', assessment_id: 1, role: 'main' },
+        { kind: 'impact_confirm', label: 'Confirm impacted items', target_tab: 'impacted', role: 'backup', main_name: 'Cody Hrtyanski' },
+      ]}
+      onAction={onAction} />))
+    const main = screen.getByTestId('your-actions')
+    const backup = screen.getByTestId('backup-actions')
+    expect(backup.textContent).toContain(t('actions.asBackup'))
+    expect(backup.textContent).toContain('Cody Hrtyanski')
+    expect(backup.textContent).toContain('Confirm impacted items')
+    expect(main.textContent).toContain('Submit assessment for R&D')
+    fireEvent.click(screen.getByRole('button', { name: /Confirm impacted items/ }))
+    expect(onAction).toHaveBeenCalledWith('impacted')
+  })
+
+  it('shows only the "As backup" group when every item is backup', () => {
+    render(wrap(<CockpitSummary change={change()}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[{ kind: 'impact_confirm', label: 'Confirm impacted items', target_tab: 'impacted', role: 'backup', main_name: 'Cody' }]} />))
+    expect(screen.queryByTestId('your-actions')).toBeNull()
+    expect(screen.getByTestId('backup-actions')).toBeDefined()
+  })
+
   it('hides the "Your actions" panel entirely when there are no actions', () => {
     render(wrap(<CockpitSummary change={change()}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}

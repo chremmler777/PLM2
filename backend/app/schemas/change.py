@@ -581,6 +581,11 @@ class ActualsDeptRow(BaseModel):
     # The rate the hours were valued at, and null when the plant has none for
     # this department — in which case actual_cost is a floor, not a total.
     hourly_rate: Optional[float] = None
+    # Every rate the bookings were priced with (the one valid on each
+    # booking's date); hourly_rate is None when there is more than one.
+    rates: List[float] = []
+    machine_hours: float = 0.0
+    machine_cost: float = 0.0
     actual_cost: float
     plan_cost: float
     variance: float
@@ -608,6 +613,9 @@ class ActualsBlock(BaseModel):
     unrated_hours: bool = False
     rate_plant_id: Optional[int] = None
     variance: float = 0.0
+    currency: Optional[str] = None
+    other_currency: Dict[str, float] = {}
+    total_machine_hours: float = 0.0
 
 
 class PlantRollup(BaseModel):
@@ -616,6 +624,7 @@ class PlantRollup(BaseModel):
     one_time_external: float
     lifecycle_internal: float
     lifecycle_external: float
+    currency: Optional[str] = None
 
 
 class DeptRollup(BaseModel):
@@ -636,6 +645,7 @@ class DeptPlantRollup(BaseModel):
     lifecycle_external: float
     demand_hours: float = 0.0
     minutes_per_part: float = 0.0
+    currency: Optional[str] = None
 
 
 class SummationTotals(BaseModel):
@@ -669,6 +679,10 @@ class PositionVendorDetail(BaseModel):
     label: str
     kind: str
     cost: float = 0.0
+    currency: Optional[str] = None
+    # hours (trials) x the line's rate; None = no rate in the cost sheet
+    line_value: Optional[float] = None
+    rate: Optional[float] = None
     recommended_vendor: Optional[str] = None
     recommended_cost: Optional[float] = None
     chosen_vendor: Optional[str] = None
@@ -687,6 +701,9 @@ class PositionRollup(BaseModel):
     # hours × the department's rate at the costing plant, the same valuation a
     # cost line gives demand_hours. Counted in one_time_internal.
     hours_cost: float = 0.0
+    machine_hours: float = 0.0
+    trials: int = 0
+    unpriced_count: int = 0
     position_count: int = 0
     # Hours were declared but no rate is configured for this department at the
     # costing plant, so they are valued at zero. Flagged rather than guessed.
@@ -696,7 +713,33 @@ class PositionRollup(BaseModel):
     positions: List[PositionVendorDetail] = []
 
 
+class UnpricedLine(BaseModel):
+    position_id: int
+    department_id: int
+    label: str
+    kind: str
+    quantity: float = 0.0
+    unit: str = "h"
+    reason: Optional[str] = None
+    message: str = "No rate in the cost sheet"
+
+
+class SummationWarning(BaseModel):
+    code: str
+    message: str
+
+
 class SummationResponse(BaseModel):
+    # Spec §15 phase 2: totals, by_department and the position margins are
+    # in `currency` (the costing plant's); totals_by_currency holds every
+    # currency's own sums. Currencies are never added or converted.
+    currency: Optional[str] = None
+    totals_by_currency: Dict[str, SummationTotals] = {}
+    mixed_currency: bool = False
+    unpriced_lines: List[UnpricedLine] = []
+    warnings: List[SummationWarning] = []
+    cost_sheet_versions_used: List[int] = []
+    cost_sheet_current_version: Optional[int] = None
     by_plant: List[PlantRollup] = []
     by_department: List[DeptRollup] = []
     by_department_plant: List[DeptPlantRollup] = []
@@ -819,6 +862,12 @@ class CostingPositionCreate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"
     notes: Optional[str] = None
+    # Cost sheet pricing (spec §15 phase 2): the labour position that picks
+    # the rate (own time), the machine class (machine_time, sampling; default
+    # the change's class) and the number of trials (sampling).
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    trials: Optional[int] = Field(default=None, ge=0, le=10000)
 
 
 class CostingPositionUpdate(BaseModel):
@@ -834,6 +883,9 @@ class CostingPositionUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: Optional[str] = None
     notes: Optional[str] = None
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    trials: Optional[int] = Field(default=None, ge=0, le=10000)
 
 
 class CostingPositionResponse(BaseModel):
@@ -850,6 +902,29 @@ class CostingPositionResponse(BaseModel):
     lead_time_days: Optional[int] = None
     lead_time_unit: str = "calendar_days"
     notes: Optional[str] = None
+    labour_position: Optional[str] = None
+    machine_class_id: Optional[int] = None
+    machine_class: Optional[str] = None
+    trials: Optional[int] = None
+    # The rate the line is priced with (spec §15 phase 2): the snapshot taken
+    # when it was costed. rate None + rate_missing = "No rate in the cost
+    # sheet" (not counted, never 0). rate_label reads e.g. "Cost sheet v2,
+    # Tool Engineer, Engineer, 21,50 USD/h". line_value = hours (trials) x
+    # rate in `currency` (the costing plant's).
+    rate: Optional[float] = None
+    rate_currency: Optional[str] = None
+    currency: Optional[str] = None
+    rate_unit: Optional[str] = None
+    rate_source: Optional[str] = None
+    cost_sheet_version_id: Optional[int] = None
+    cost_sheet_version: Optional[int] = None
+    rate_match: Optional[str] = None
+    rate_on: Optional[date] = None
+    rate_label: Optional[str] = None
+    rate_missing: bool = False
+    rate_missing_reason: Optional[str] = None
+    rate_is_snapshot: bool = False
+    line_value: Optional[float] = None
     created_by: int
     created_at: datetime
     updated_at: datetime
@@ -1135,6 +1210,11 @@ class ImplementationBookingCreate(BaseModel):
     # correction, which is DELETE plus a fresh booking.
     hours: float = Field(gt=0)
     note: Optional[str] = None
+    # Optional pricing detail (spec §15 phase 2): the position whose cost
+    # sheet rate prices the hours, and machine hours on a machine class.
+    labour_position: Optional[str] = Field(default=None, max_length=80)
+    machine_class_id: Optional[int] = None
+    machine_hours: Optional[float] = Field(default=None, ge=0, lt=1e6)
 
 
 class ImplementationBookingResponse(BaseModel):
@@ -1143,6 +1223,9 @@ class ImplementationBookingResponse(BaseModel):
     department_id: int
     hours: float
     note: Optional[str] = None
+    labour_position: Optional[str] = None
+    machine_class_id: Optional[int] = None
+    machine_hours: Optional[float] = None
     # The stored columns. Kept in the payload because "booked" is what the
     # act is called on the shop floor.
     booked_by: int

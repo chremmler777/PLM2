@@ -249,8 +249,15 @@ async def get_part_revisions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get all revisions for a part."""
+    """Get all revisions for a part; intake_pending flags a new customer
+    index still waiting for triage."""
     revisions = await RevisionService.get_part_revisions(db, part_id)
+    from app.models.revision_intake import RevisionIntake, waiting_revision_ids
+    ids = [r.id for r in revisions]
+    waiting = set((await db.execute(waiting_revision_ids().where(
+        RevisionIntake.revision_id.in_(ids)))).scalars().all()) if ids else set()
+    for r in revisions:
+        r.intake_pending = r.id in waiting
     return revisions
 
 

@@ -290,28 +290,61 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     )
   }
 
+  // Project team (spec §18): items where the viewer is only backup (the
+  // project has another responsible for the role) are listed apart, muted,
+  // with the main's name; they stay actionable.
+  const mainActions = actions.filter((a) => a.role !== 'backup')
+  const backupActions = actions.filter((a) => a.role === 'backup')
+  const actionKey = (a: MyAction, i: number) =>
+    `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? i}`
+  // An issue act opens the tab that shows the issues now (Timing during a
+  // loop back), whatever tab the server named.
+  const runAction = (a: MyAction) => (isIssueActionKind(a.kind)
+    ? onAction?.(issueTabFor(change.status), a.issue_id ?? undefined)
+    : onAction?.(a.target_tab))
+  const backupGroup = (
+    <div data-testid="backup-actions">
+      <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('actions.asBackup')}</h3>
+      <div className="flex flex-wrap gap-2">
+        {backupActions.map((a, i) => (
+          <button
+            key={actionKey(a, i)}
+            type="button"
+            title={t('team.backupHint')}
+            className="border border-slate-600 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-left"
+            onClick={() => runAction(a)}>
+            {pluralizeLabel(a.label)}
+            {a.main_name && (
+              <span className="block text-xs text-slate-400">{t('team.main').replace('{x}', a.main_name)}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="my-4">
-      {actions.length > 0 && (
-        <div className="bg-sky-950 border border-sky-700 rounded-lg p-4 mb-3">
+      {mainActions.length > 0 && (
+        <div data-testid="your-actions" className="bg-sky-950 border border-sky-700 rounded-lg p-4 mb-3">
           <h3 className="text-xs uppercase tracking-wide text-sky-300 mb-2">{t('actions.title')}</h3>
           <div className="flex flex-wrap gap-2">
-            {actions.map((a, i) => (
+            {mainActions.map((a, i) => (
               <button
-                key={`${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? i}`}
+                key={actionKey(a, i)}
                 type="button"
                 data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : undefined}
                 className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg text-sm"
-                // An issue act opens the tab that shows the issues now (Timing
-                // during a loop back), whatever tab the server named.
-                onClick={() => (isIssueActionKind(a.kind)
-                  ? onAction?.(issueTabFor(change.status), a.issue_id ?? undefined)
-                  : onAction?.(a.target_tab))}>
+                onClick={() => runAction(a)}>
                 {pluralizeLabel(a.label)}
               </button>
             ))}
           </div>
+          {backupActions.length > 0 && <div className="mt-3 pt-3 border-t border-sky-900">{backupGroup}</div>}
         </div>
+      )}
+      {mainActions.length === 0 && backupActions.length > 0 && (
+        <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4 mb-3">{backupGroup}</div>
       )}
       <div className="grid md:grid-cols-3 gap-3">
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
@@ -321,7 +354,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           {endLabel(change) ?? STATUS_LABELS[change.status]}
         </span>
         {' '}
-        <StageResponsibleBadge status={change.status} />
+        <StageResponsibleBadge status={change.status} origin={change.origin} />
         {' '}
         {/* Phase-aware: release deadline once active, otherwise the frozen
             quote verdict, otherwise the quote deadline for customer work. */}

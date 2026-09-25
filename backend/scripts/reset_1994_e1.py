@@ -18,8 +18,9 @@ What it does, in one transaction:
             mirror's own number are attached to it.
   4. DELETE  (--delete-others) the articles of the project that are not in
             the nominated list: their relations, files, changelogs, revisions
-            and the part row. Refuses when anything else (BOM lines, changes,
-            paint, PPAP, workflows, children) references them.
+            and the part row. Their revision intakes (triage rows of pending
+            customer indexes) go first. Refuses when anything else (BOM lines,
+            changes, paint, PPAP, workflows, children) references them.
 
 Idempotent: a file whose SHA-256 already sits on the revision is skipped, a
 part already nominated is left alone. Dry run by default, --apply writes.
@@ -50,6 +51,7 @@ from sqlalchemy import delete as sa_delete, func, or_
 
 from app.models.paint import PartPaint
 from app.models.part import Part, PartBOMItem, PartRelation, PartRevision, RevisionChangelog, RevisionFile
+from app.models.revision_intake import RevisionIntake
 from app.services.part_service import ChangelogService, RevisionService
 from app.services.revision_file_service import MIME_MAP, uploads_dir
 from app.utils.cad_converter import convert_step_to_gltf
@@ -79,6 +81,40 @@ KIND_NOTE = {
 # 206_881_479____DMU_TM__003_____INNER_SIDE_COVER___B-RELEASE___20260529.CATPart
 NAME_RE = re.compile(r"^(\d{3})_(\d{3})_(\d{3})_+([A-Z]{3})_([A-Z]{2})__(\d{3})", re.I)
 EXT_KIND = {".catpart": "cad", ".catproduct": "cad", ".pdf": "drawing", ".stp": "cad", ".step": "cad"}
+
+
+def _intakes_of(part_ids, rev_ids):
+    """Intakes on the deleted parts or revisions (also as the adopted proposal)."""
+    return or_(RevisionIntake.part_id.in_(part_ids),
+               RevisionIntake.revision_id.in_(rev_ids),
+               RevisionIntake.promoted_from_revision_id.in_(rev_ids))
+
+
+async def count_intakes(s, part_ids, rev_ids):
+    if not part_ids and not rev_ids:
+        return 0
+    return (await s.execute(select(func.count()).select_from(RevisionIntake)
+                            .where(_intakes_of(part_ids, rev_ids)))).scalar_one()
+
+
+async def delete_intakes(s, part_ids, rev_ids):
+    """Delete the intakes of revisions about to be deleted. They reference the
+    part and revision rows, so they go first; a newer intake of another part
+    never supersedes these, but a surviving row pointing at one of them via
+    superseded_by_id is cleared to keep the foreign key valid."""
+    if not part_ids and not rev_ids:
+        return 0
+    ids = list((await s.execute(select(RevisionIntake.id).where(
+        _intakes_of(part_ids, rev_ids)))).scalars().all())
+    if not ids:
+        return 0
+    from sqlalchemy import update as sa_update
+    await s.execute(sa_update(RevisionIntake).where(RevisionIntake.superseded_by_id.in_(ids))
+                    .values(superseded_by_id=None))
+    await s.flush()
+    await s.execute(sa_delete(RevisionIntake).where(RevisionIntake.id.in_(ids)))
+    await s.flush()
+    return len(ids)
 
 
 def sha256(path):
@@ -238,7 +274,9 @@ async def main():
                 if n:
                     blockers[label] = n
             other_rels = [r for r in rels_all if r.from_part_id in other_ids or r.to_part_id in other_ids]
-            print(f"   will delete: {len(other_rels)} relations, {len(other_rev_ids)} revisions, their files and changelogs")
+            n_intakes = await count_intakes(s, other_ids, other_rev_ids)
+            print(f"   will delete: {len(other_rels)} relations, {len(other_rev_ids)} revisions, "
+                  f"{n_intakes} revision intakes, their files and changelogs")
             for r in other_rels:
                 print(f"      relation {r.id} {r.relation_type} {r.from_part_id}->{r.to_part_id}")
             if blockers:
@@ -343,6 +381,10 @@ async def main():
             for p in others:
                 p.active_revision_id = None
             await s.flush()
+            # intakes reference part and revision: before either goes
+            n = await delete_intakes(s, other_ids, other_rev_ids)
+            if n:
+                print(f"   deleted {n} revision intakes")
             # changelogs reference part, revision AND file ids: they go first
             await s.execute(sa_delete(RevisionChangelog).where(
                 or_(RevisionChangelog.part_id.in_(other_ids), RevisionChangelog.revision_id.in_(other_rev_ids))))

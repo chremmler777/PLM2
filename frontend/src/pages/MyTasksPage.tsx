@@ -12,7 +12,8 @@ import { rasicColors } from '../lib/constants';
 import { formatDate } from '../lib/format';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
-import { byUrgency, foldChangeTasks, foldWorkflowTasks, type FoldedWorkflowTask } from '../lib/myTasks';
+import { foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
+import BackupChip from '../components/common/BackupChip';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { t } from '../i18n/cmLabels';
@@ -21,6 +22,7 @@ import { projectLabel } from '../lib/project';
 import { toast } from 'sonner';
 import FormPanel from '../forms/FormPanel';
 import IntakeSection from '../components/intake/IntakeSection';
+import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -393,14 +395,25 @@ function TaskList() {
     ...foldWorkflowTasks(wfTasks).map((task): Row => ({
       source: 'workflow', key: `w-${task.task_id}`, task, overdue: task.overdue, due_date: task.due_date,
     })),
-  ].sort(byUrgency);
+  ].sort((a, b) => mainFirst(
+    { ...a, role: a.task.role }, { ...b, role: b.task.role }));
+  // Project team (spec §18): the header counts main rows, the same number as
+  // the sidebar badge; backup rows are listed after them, muted.
+  const backupCount = rows.filter((r) => isBackup(r.task)).length;
+  const mainCount = rows.length - backupCount;
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-2">
         <h2 data-testid="task-list-title"
           className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-          {t('tasks.openList')} ({rows.length})
+          {t('tasks.openList')} ({mainCount})
+          {backupCount > 0 && (
+            <span data-testid="task-list-backup-count"
+              className="ml-2 normal-case tracking-normal font-normal text-slate-500">
+              {t('tasks.asBackup').replace('{n}', String(backupCount))}
+            </span>
+          )}
         </h2>
         <label className="flex items-center gap-2 text-xs text-slate-400">
           {t('tasks.deptFilter')}
@@ -452,6 +465,11 @@ function TaskList() {
   );
 }
 
+/** Mine rows carry the accent; backup rows (spec §18) read muted. */
+const rowClass = (task: { mine?: boolean; role?: string }) =>
+  `border-b border-slate-700 last:border-0 hover:bg-slate-750${
+    task.mine ? ' border-l-2 border-sky-500' : ''}${isBackup(task) ? ' opacity-60' : ''}`;
+
 /** The row's stage: the backend's label, else its stage key, else the change status. */
 function taskStageLabel(task: Pick<ChangeTask, 'stage' | 'stage_label' | 'status'>): string {
   if (task.stage_label) return task.stage_label;
@@ -464,9 +482,8 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
   const hint = taskHint(task);
   const letters = task.rasic_letters ?? [];
   return (
-    <tr data-testid="task-row"
-      className={`border-b border-slate-700 last:border-0 hover:bg-slate-750${
-        task.mine ? ' border-l-2 border-sky-500' : ''}`}>
+    <tr data-testid="task-row" data-role={task.role ?? 'main'}
+      className={rowClass(task)}>
       <td className="px-4 py-3 align-top">
         <span className="font-mono text-slate-100 whitespace-nowrap">{task.change_number}</span>
         <span className="block text-slate-200">{task.title}</span>
@@ -485,6 +502,7 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
           {task.kind === 'assessment' && task.owner_name && (
             <span className="block text-xs text-slate-400">{task.owner_name}</span>
           )}
+          {isBackup(task) && <BackupChip mainName={task.main_name} className="ml-2" />}
           {hint && <span className="block text-xs text-slate-400">{hint}</span>}
         </span>
       </td>
@@ -506,9 +524,8 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
 
 function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigate: (to: string) => void }) {
   return (
-    <tr data-testid="task-row"
-      className={`border-b border-slate-700 last:border-0 hover:bg-slate-750${
-        task.mine ? ' border-l-2 border-sky-500' : ''}`}>
+    <tr data-testid="task-row" data-role={task.role ?? 'main'}
+      className={rowClass(task)}>
       <td className="px-4 py-3 align-top">
         <span className="font-mono text-slate-100 whitespace-nowrap">{task.part_number}</span>
         <span className="block text-slate-200">{task.part_name}</span>
@@ -522,6 +539,7 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
           <span className="block text-xs text-slate-400">{task.owner_name}</span>
         )}
         <span className="block text-xs text-slate-500">{task.department_name}</span>
+        {isBackup(task) && <BackupChip mainName={task.main_name} className="mt-0.5" />}
       </td>
       <td className="px-4 py-3 align-top text-slate-300">
         <span className="whitespace-nowrap">{t('tasks.stageN').replace('{n}', String(task.stage_order))}</span>
@@ -553,6 +571,8 @@ export default function MyTasksPage() {
       <TaskList />
 
       <IntakeSection />
+
+      <CostSheetReviewTask />
 
       <SepItemsSection />
 

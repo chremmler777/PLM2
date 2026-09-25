@@ -565,13 +565,25 @@ class OfferService:
     # Seeding from the costing
     # ------------------------------------------------------------------
     @staticmethod
-    async def _costing_basis(session: AsyncSession,
-                             change: ChangeRequest) -> tuple[list[dict], float]:
+    async def _costing_basis(session: AsyncSession, change: ChangeRequest,
+                             meta: Optional[dict] = None) -> tuple[list[dict], float]:
         """Cost lines from the summation, and its grand total. The summation
         is read, never re-derived: it already knows rates, the chosen vendor
-        and which offers count."""
+        and which offers count. Both are in the costing currency only (the
+        summation never adds currencies); `meta`, when given, receives the
+        summation's currency, per-currency totals, warnings and the cost
+        sheet versions it used."""
         from app.services.cost_service import CostService
         summ = await CostService.summation(session, change)
+        if meta is not None:
+            meta.update({
+                "currency": summ.get("currency"),
+                "totals_by_currency": summ.get("totals_by_currency") or {},
+                "mixed_currency": summ.get("mixed_currency", False),
+                "warnings": summ.get("warnings") or [],
+                "versions_used": summ.get("cost_sheet_versions_used") or [],
+                "current_version": summ.get("cost_sheet_current_version"),
+            })
         names = {i: n for i, n in (await session.execute(
             select(Department.id, Department.name))).all()}
         positions = list((await session.execute(
@@ -700,9 +712,14 @@ class OfferService:
                 draft_id=draft.id)
         base = next((o for o in offers if o.status != "draft"), None)
         version = (max((o.version for o in offers), default=0)) + 1
+        seed_currency = "EUR"
         if base is None:
             data = await OfferService.seed_data(session, change)
             source = "seeded from the costing"
+            # A first offer starts in the costing's currency; Sales may
+            # change it (the Price section then warns, nothing converts).
+            from app.services import costing_rates
+            seed_currency = await costing_rates.costing_currency(session, change)
         else:
             data = normalise(copy.deepcopy(base.data))
             data.pop(SNAPSHOT_KEY, None)
@@ -711,7 +728,7 @@ class OfferService:
             source = f"cloned from v{base.version}"
         offer = ChangeOffer(
             change_id=change.id, version=version, status="draft",
-            currency=(base.currency if base else "EUR"), data=data,
+            currency=(base.currency if base else seed_currency), data=data,
             created_by=user.id)
         from sqlalchemy.exc import IntegrityError
         try:
@@ -1064,8 +1081,26 @@ class OfferService:
                         offers: list[ChangeOffer]) -> list[dict]:
         if not offers:
             return []
-        lines_now, internal = await OfferService._costing_basis(session, change)
+        meta: dict = {}
+        lines_now, internal = await OfferService._costing_basis(session, change, meta)
         sources_now = {l["key"]: l["source_amount"] for l in lines_now}
+        # Price section warnings (spec §15 phase 2): the costing's currency
+        # against the offer's, currencies the costing could not add, lines
+        # without a rate, and a cost sheet newer than the one costing used.
+        cost_cur = meta.get("currency")
+        current_v = meta.get("current_version")
+        old_versions = [v for v in meta.get("versions_used") or []
+                        if current_v is not None and v != current_v]
+        costing_issues = []
+        for w in meta.get("warnings") or []:
+            if w.get("code") in ("mixed_currency", "no_rate"):
+                costing_issues.append(_issue(w["code"], w["message"]))
+        outdated = None
+        if old_versions:
+            outdated = (_issue(
+                "cost_sheet_outdated",
+                f"Costing used cost sheet {', '.join(f'v{v}' for v in old_versions)}, "
+                f"current is v{current_v}"))
         quote_empty = not await ChangePlanService.tasks(session, change, "quote")
         users = await ChangePlanService._user_names(
             session, [o.created_by for o in offers] + [o.sent_by for o in offers])
@@ -1123,6 +1158,15 @@ class OfferService:
                    for r in data["risks"]):
                 warnings.append(_issue(
                     "high_risk_unpriced", "A high risk is shown without a surcharge"))
+            if cost_cur and o.currency and cost_cur != o.currency:
+                warnings.append(_issue(
+                    "currency_mismatch",
+                    f"The costing is in {cost_cur}, this offer is in {o.currency}: "
+                    "amounts are not converted"))
+            if o.status == "draft":
+                warnings.extend(dict(w) for w in costing_issues)
+            if outdated is not None:
+                warnings.append(dict(outdated))
             expired = OfferService.is_expired(o)
             if expired:
                 warnings.append(_issue(
@@ -1140,6 +1184,10 @@ class OfferService:
                 "created_by_name": users.get(o.created_by),
                 "updated_at": o.updated_at,
                 "diff": diff, "warnings": warnings,
+                "costing_currency": cost_cur,
+                "costing_totals_by_currency": meta.get("totals_by_currency") or {},
+                "cost_sheet_versions_used": meta.get("versions_used") or [],
+                "cost_sheet_current_version": current_v,
             })
         return out
 

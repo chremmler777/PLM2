@@ -460,7 +460,10 @@ async def my_change_tasks(
                 can_capture or (is_pm and mp.is_mother_plant(c))):
             # a mother-plant change is captured by Project Management
             tasks.append({**await _base(c), "kind": "kickoff",
-                          "missing": await ChangeService.kickoff_missing(db, c)})
+                          "missing": await ChangeService.kickoff_missing(db, c),
+                          # project team: a mother-plant kickoff is PM's role
+                          "role_department_id": (dept_by_name.get("Project Manager")
+                                                 if mp.is_mother_plant(c) else None)})
         elif c.status == "scoping":
             if is_pm:
                 tasks.append({
@@ -757,6 +760,8 @@ async def my_change_tasks(
                 .where(ChangeAssessment.change_id.in_(task_change_ids),
                        ChangeAssessment.department_id.in_(dep_ids)))).all():
             letters.setdefault(cid, set()).add(letter)
+    from app.services.project_team_service import TeamRoles
+    team = TeamRoles(db, current_user.id)
     seen: set = set()
     unique = []
     for t in tasks:
@@ -781,6 +786,11 @@ async def my_change_tasks(
                                     key="RASCI".index)
         t["is_mine"] = bool(t.get("mine")) or (
             not acting and lead_of.get(t["change_id"]) == current_user.id)
+        # Project team (spec §18): "main" rows count on the badge and the
+        # list header; "backup" rows (another responsible leads this role
+        # on the project) stay listed, muted, with the main's name.
+        await team.annotate(t, t.get("project_id"), owned=t["is_mine"])
+        t.pop("role_department_id", None)
         unique.append(t)
     tasks = unique
 
@@ -788,6 +798,7 @@ async def my_change_tasks(
     # last), then change number. Assessment rows keep "mine" as the top tie
     # break — an answer you already accepted outranks one you have not.
     tasks.sort(key=lambda d: (
+        d.get("role") == "backup",
         not d.get("mine", False), not d["overdue"],
         d["due_date"] is None, d["due_date"] or datetime.max, d["change_number"]))
     return tasks
@@ -875,6 +886,9 @@ async def reference_rates(db: AsyncSession = Depends(get_db),
     sheet = await sheet_rates(db, current_user.organization_id)
     if sheet is not None:
         return sheet
+    from app.services.costing_rates import has_cost_sheet
+    if await has_cost_sheet(db, current_user.organization_id):
+        return []      # a cost sheet exists but none is valid today: no rates
     from app.models.change_cost import DepartmentRate
     rows = (await db.execute(select(DepartmentRate))).scalars().all()
     return [{"department_id": r.department_id, "plant_id": r.plant_id,

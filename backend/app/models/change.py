@@ -260,6 +260,12 @@ class ChangeRequest(Base):
     scope_change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     scope_change_department_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # The press class machine_time / sampling costing lines are priced on
+    # (cost sheet §15a, migration 098). None = default from the impacted
+    # tool's tonnage (costing_rates.default_machine_class).
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
+
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     released_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

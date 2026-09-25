@@ -530,6 +530,11 @@ class RevisionService:
         if not revision:
             raise ValueError("Revision not found")
 
+        # A pending customer index: its intake closes with it (spec §17a),
+        # so the index can never be triaged or activated afterwards.
+        from app.services.revision_intake_service import RevisionIntakeService
+        await RevisionIntakeService.on_revision_rejected(session, revision, created_by)
+
         # Mark as rejected
         revision.status = RevisionStatus.REJECTED.value
 

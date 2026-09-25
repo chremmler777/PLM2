@@ -70,7 +70,7 @@ export default function LifecycleStepper({
                 className={`px-2 py-1 rounded-full ${cls}`}>
                 {origin === 'engineering_review' && s === 'scoping' ? 'Impact and review' : stepperLabel(s)}</span>
               {/* Who owns the stage, shown on the stage node itself. */}
-              <StageResponsibleBadge status={s} />
+              <StageResponsibleBadge status={s} origin={origin} />
               {!offPath && !end && i === idx && (
                 <span className="text-[10px] text-slate-400">{hint}</span>
               )}

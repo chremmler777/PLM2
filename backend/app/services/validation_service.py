@@ -421,7 +421,7 @@ class ValidationService:
             old_value={"status": old_status, "value": old_value},
             new_value={"department_id": department_id, "check_key": check_key,
                        "status": status, "value": row.value},
-            notes=row.note)
+            notes=row.note, for_department_id=department_id)
 
         if check_key == catalog.WEIGHT_KEY and status == "passed":
             await ValidationService._stamp_validated_weight(

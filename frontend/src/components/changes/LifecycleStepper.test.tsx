@@ -56,6 +56,21 @@ describe('LifecycleStepper stage responsibility', () => {
   })
 })
 
+describe('LifecycleStepper engineering review track', () => {
+  afterEach(cleanup)
+
+  it('gives every review stage to Development, never Sales or PM', () => {
+    const { container } = render(<LifecycleStepper status="scoping" origin="engineering_review" />)
+    const tags = [...container.querySelectorAll('[data-testid="stage-responsible"]')].map((el) => [
+      el.parentElement?.querySelector('[data-testid^="step-"]')?.textContent, el.textContent])
+    expect(tags).toEqual([
+      ['Captured', 'Development / intake'],
+      ['Impact and review', 'Development'],
+      ['Released', 'Development'],
+    ])
+  })
+})
+
 describe('LifecycleStepper scoping handoff note', () => {
   afterEach(cleanup)
 

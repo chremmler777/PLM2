@@ -797,7 +797,7 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'impacted' && change && (
-        <ImpactTree changeId={change.id} status={change.status}
+        <ImpactTree changeId={change.id} status={change.status} origin={change.origin}
           impactConfirmedByName={change.impact_confirmed_by_name}
           impactConfirmedAt={change.impact_confirmed_at}
           canConfirm={canConfirmImpact}

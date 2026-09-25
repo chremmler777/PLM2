@@ -32,12 +32,12 @@ async def project_structure(session: AsyncSession, project_id: int) -> dict:
         .order_by(PartRelation.relation_type, PartRelation.id))).scalars().all()
 
     # Spec §17a: revisions still pending triage, flagged per article.
-    from app.models.revision_intake import RevisionIntake
+    from app.models.revision_intake import CLOSED_STATUSES, RevisionIntake
     waiting = {i.revision_id: i for i in (await session.execute(
         select(RevisionIntake).where(
             RevisionIntake.part_id.in_(article_ids),
             RevisionIntake.activated_at.is_(None),
-            RevisionIntake.status != "superseded"))).scalars().all()} if article_ids else {}
+            RevisionIntake.status.notin_(CLOSED_STATUSES)))).scalars().all()} if article_ids else {}
     revs_by_part: dict[int, list] = defaultdict(list)
     for r in revs:
         revs_by_part[r.part_id].append(r)

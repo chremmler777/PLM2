@@ -4,7 +4,7 @@ three D1 gates, and the costing positions that price what hours×rate cannot."""
 from datetime import date, datetime
 
 from sqlalchemy import (
-    String, Text, DateTime, Date, Float, Integer, Boolean, Numeric, ForeignKey,
+    String, Text, DateTime, Date, Float, Integer, Boolean, Numeric, ForeignKey, JSON,
 )
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -20,7 +20,13 @@ COST_KINDS = ("one_time", "lifecycle")
 # internal_effort / support_effort: the two standing answers every department
 # owes. own_time: any further line of the department's hours (valued at its
 # rate). external: money spent outside, estimated or quoted.
-COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "own_time", "external")
+# machine_time: hours x the machine class rate; sampling: trials x the
+# sampling price of the class (both from the cost sheet, spec §15a).
+COSTING_POSITION_KINDS = ("internal_effort", "support_effort", "own_time", "external",
+                          "machine_time", "sampling")
+# The kinds whose hours are the department's own labour, priced at the
+# effective labour rate of the cost sheet.
+LABOUR_KINDS = ("internal_effort", "support_effort", "own_time", "external")
 # How an EXTERNAL position gets its number: a house estimate, or real vendor
 # offers. Effort positions are always estimates — the field is stored uniformly
 # so the column never has to be read conditionally, but only external positions
@@ -93,6 +99,12 @@ class AssessmentCostLine(Base):
     # saved) on every shot for the life of the programme.
     minutes_per_part: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where rate_snapshot came from (098): the plant's currency, the cost
+    # sheet version (None for the department_rate fallback) and the source.
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    cost_sheet_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_versions.id"), nullable=True)
+    rate_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     assessment: Mapped["ChangeAssessment"] = relationship(back_populates="cost_lines")
 
@@ -136,6 +148,30 @@ class CostingPosition(Base):
     lead_time_unit: Mapped[str] = mapped_column(
         String(20), default="calendar_days", server_default="calendar_days")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Pricing inputs of the cost-sheet kinds (098): the labour position that
+    # picks a position rate (Engineer, Technician; None = department
+    # default), the machine class of machine_time / sampling lines, and the
+    # number of trials of a sampling line.
+    labour_position: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
+    trials: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The rate snapshot, written when the line is priced (created, or its
+    # pricing inputs changed) and read by the summation from then on, so a
+    # later cost sheet version never moves a costed line under its owner.
+    # rate None with rate_on set = looked up and NOT found ("cannot price",
+    # never 0). currency is the line's currency (the costing plant's).
+    rate: Mapped[float | None] = mapped_column(
+        Numeric(12, 2, asdecimal=False), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    rate_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    cost_sheet_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_versions.id"), nullable=True)
+    cost_sheet_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rate_match: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    rate_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rate_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(

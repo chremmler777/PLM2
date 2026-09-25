@@ -65,6 +65,13 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
           {data.frozen_at ? `, frozen ${formatDate(data.frozen_at)}` : ''}
           </>}
         </span>
+        {/* Currencies are compared, never converted (spec §15 phase 2). */}
+        {data.basis !== 'none' && data.costing_currency && data.costing_currency !== cur && (
+          <span data-testid="ova-currency-mismatch"
+            className="rounded bg-amber-950/60 border border-amber-800/60 px-1.5 py-0 text-[11px] text-amber-200">
+            Offer {cur}, costing {data.costing_currency}: not converted
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -158,7 +165,8 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
       {data.warnings.length > 0 && (
         <ul data-testid="ova-warnings" className="mt-2 space-y-0.5">
           {data.warnings.map((w) => (
-            <li key={w} className="text-[11px] text-amber-300">{w}</li>
+            <li key={w} className="text-[11px] text-amber-300"
+              data-testid={w.startsWith('Costing used cost sheet') ? 'ova-sheet-outdated' : undefined}>{w}</li>
           ))}
         </ul>
       )}

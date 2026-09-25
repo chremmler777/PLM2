@@ -1305,6 +1305,43 @@ create (one request).
   second concurrent draft is blocked by the unique index
   (organization_id, draft_lock) and answered 409.
 
+### 15c. Phase 2 as built (migration `098_costing_rate_snapshot.py`)
+- **Pricing** (`app/services/costing_rates.py`): labour hours of every
+  labour kind (internal_effort, support_effort, own_time, external's own
+  hours) use `effective_labour_rate(department, labour_position, costing
+  plant, today)`; `machine_time` = hours x machine class rate; `sampling` =
+  trials x price of one trial. Costing plant = the change's single affected
+  plant, else the project's (the summation's existing rule). department_rate
+  only while the org has no published version at all.
+- **Snapshot on `costing_positions`**: `rate`, `currency`, `rate_source`,
+  `cost_sheet_version_id`, `cost_sheet_version`, `rate_match`, `rate_on`,
+  `rate_detail`; inputs `labour_position`, `machine_class_id`, `trials`.
+  Written on create and whenever kind/hours/position/class/trials change;
+  lines from before 098 are priced live (read only). `assessment_cost_line`
+  gains `currency`, `cost_sheet_version_id`, `rate_source`.
+  `change_requests.machine_class_id` (PUT `/changes/{id}/costing/machine-class`;
+  None = default from the impacted tool's `tool_tonnage_class`).
+  `implementation_bookings` gain `labour_position`, `machine_class_id`,
+  `machine_hours`.
+- **No rate**: rate None -> `rate_missing`, "No rate in the cost sheet",
+  listed in `summation.unpriced_lines`, warning `no_rate`, never counted.
+- **Currency**: summation `currency` (costing plant's), totals and
+  by_department in it only; `totals_by_currency`, `mixed_currency`,
+  warning `mixed_currency`. First offer is created in the costing currency.
+  Offer warnings `currency_mismatch`, `mixed_currency`, `no_rate` (drafts),
+  `cost_sheet_outdated` ("Costing used cost sheet v1, current is v2"),
+  shown in the Price section. P&L: `costing_currency`, `actual_currency`,
+  the same version and currency warnings; no FX.
+- **Actuals**: every booking priced on its booking date (position rate if
+  named), machine hours at the class rate; `rates`, `machine_hours`,
+  `machine_cost` per department; unpriced hours flag `unrated`.
+- **Stale**: `GET /changes/{id}/costing/context` (plant, currency, version,
+  stale, classes, positions per department) drives the costing banner;
+  `GET /cost-sheet/review-task` drives the Finance My Tasks item. The
+  department_rate startup seed in `main.py` is gone (table kept).
+- **098 data fix**: an org with department_rate rows and no cost sheet
+  version gets v1 (valid from the earliest effective_from, else 2020-01-01).
+
 ## 17. Revision intake: every new index is captured and triaged (2026-09-25)
 Parts and their CAD/drawing revisions live in the part model (PartRevision,
 revision files, customer package receive). Today new indexes can land without
@@ -1397,6 +1434,48 @@ actions are audited as "<backup> for <main>". Table project_responsibles
 (unique project + department), migration 097, API GET/PUT
 /projects/{id}/team (PM members or admin), "Project team" card on the
 project page.
+
+### 18a. As built: counting, cockpit, audit, notifications (2026-09-25)
+- **Resolver**: `project_team_service.TeamRoles` (per request, cached per
+  project + department). The owing department of a row is its
+  `role_department_id`, else `department_id` for per-department kinds
+  (`DEPARTMENT_ROW_KINDS`: assessment, costing_input/update, plan_feedback,
+  info_ack, release_check, progress_report, review_answer), else the kind's
+  fixed role (`KIND_DEPARTMENT`: PM, Sales, Development, Scheduling). A row
+  the viewer owns (took it, or leads the change) is always main. A stale
+  responsible (inactive, or left the department) means legacy: everyone main.
+- **Rows carry `role` ("main"|"backup") and `main_name`** (backup only):
+  `GET /changes/my-tasks`, `GET /workflow-instances/my-tasks`,
+  `GET /intakes/my` (triage: Development of the intake's project; review
+  answers: their department), cockpit `GET /changes/{id}/my-actions`.
+  Validation-issue items name their owing department (owner department for
+  contain/root cause/fix/recheck/add action; route/close PM; customer/quote
+  Sales). Assessment rows: the responsible is the default main; whoever
+  took the row owns it.
+- **Counting**: the sidebar badge (`useOpenTaskCount`) and the My Tasks
+  header count main rows only; backup rows are listed after them, muted,
+  with a "Backup" chip and "Main: <name>" and a "+n as backup" note.
+  `GET /workflow-instances/open-task-count` counts main only too.
+- **Cockpit**: "Your actions" shows main items; backup items sit in a muted
+  "As backup" group (inside the card, or alone when nothing is main) and stay
+  actionable.
+- **Audit**: `ChangeService.append_changelog(..., for_department_id=)`.
+  When the actor is not the project's responsible for that department the
+  notes lead with "<backup> for <main>" and new_value carries
+  `stands_in_for {user_id, name, department_id}`. Wired for assessment
+  submit, cost lines, costing positions and offers, release checks, plan
+  feedback, validation checks, validation-issue acts, review answers and
+  mother-plant receipt acks; intake triage writes the same line into the
+  part changelog notes.
+- **Notifications**: `NotificationService.notify_team(project_id,
+  department_ids, user_ids?)` for department notifications about a
+  project's work (assessment started, workflow task / FYI stage, mother-plant
+  information, cost carrier to Sales, revision intake triage, engineering
+  review). The responsible (or everybody where none is set) gets it as
+  today. Notifications have no quiet/info flag, so backups still receive an
+  ordinary unread notification; its body ends with "Info: you are backup
+  here, main: <name>." A real quiet flag (not counted in the bell) would
+  need a column on `notifications`; not done.
 
 ### 17b. As built (2026-09-25)
 - **Migration 096** `revision_intakes` (part, project, revision unique,

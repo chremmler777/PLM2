@@ -23,8 +23,24 @@ export const STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
   released: 'role.pmShort',
 }
 
-export function StageResponsibleBadge({ status }: { status: ChangeStatus }) {
-  const key = STAGE_RESPONSIBLE[status]
+/**
+ * The engineering review (origin engineering_review, spec §17) is
+ * Development's light track: it comes from the intake triage, Development
+ * locks the impact and collects the answers, and the release is automatic
+ * once every department answered "no impact".
+ */
+export const REVIEW_STAGE_RESPONSIBLE: Partial<Record<ChangeStatus, string>> = {
+  captured: 'role.developmentIntake',
+  scoping: 'role.development',
+  released: 'role.development',
+}
+
+export function stageResponsibleKey(status: ChangeStatus, origin?: string | null): string | undefined {
+  return (origin === 'engineering_review' ? REVIEW_STAGE_RESPONSIBLE : STAGE_RESPONSIBLE)[status]
+}
+
+export function StageResponsibleBadge({ status, origin }: { status: ChangeStatus; origin?: string | null }) {
+  const key = stageResponsibleKey(status, origin)
   if (!key) return null
   return (
     <span data-testid="stage-responsible" title={t('responsible.label')}

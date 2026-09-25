@@ -112,12 +112,20 @@ async def get_open_task_count(
     db: AsyncSession = Depends(get_db),
 ):
     """Actionable open tasks for the nav badge — scoped to the user's
-    departments when they have memberships, global otherwise."""
-    from sqlalchemy import func
+    departments when they have memberships, global otherwise. Project team
+    (spec §18): a task where the caller is only backup (the project has
+    another responsible for the task's department) does not count."""
+    from app.models.change import ChangeRequest
+    from app.models.part import Part, PartRevision
+    from app.services.project_team_service import TeamRoles
 
     stmt = (
-        select(func.count(WfInstanceTask.id))
+        select(WfInstanceTask.department_id, WfInstanceTask.owner_id,
+               Part.project_id, ChangeRequest.project_id)
         .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
+        .outerjoin(PartRevision, PartRevision.id == WfInstance.part_revision_id)
+        .outerjoin(Part, Part.id == PartRevision.part_id)
+        .outerjoin(ChangeRequest, ChangeRequest.id == WfInstance.change_id)
         .where(
             WfInstance.status == "active",
             WfInstanceTask.status == "active",
@@ -127,8 +135,13 @@ async def get_open_task_count(
     dept_ids = await WorkflowService.effective_department_ids(db, current_user)
     if dept_ids:
         stmt = stmt.where(WfInstanceTask.department_id.in_(dept_ids))
-    result = await db.execute(stmt)
-    return {"count": result.scalar() or 0}
+    roles = TeamRoles(db, current_user.id)
+    count = 0
+    for dept_id, owner_id, part_project, change_project in (await db.execute(stmt)).all():
+        role, _ = await roles.role(part_project or change_project, dept_id,
+                                   owned=owner_id == current_user.id)
+        count += role == "main"
+    return {"count": count}
 
 
 @router.get("/my-tasks")

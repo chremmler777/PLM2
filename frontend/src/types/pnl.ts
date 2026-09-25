@@ -131,6 +131,9 @@ export interface OvaTiming {
 export interface OfferVsActual {
   change_id: number;
   currency: string;
+  /** Spec §15 phase 2: what the costing and the booked hours are priced in. */
+  costing_currency?: string | null;
+  actual_currency?: string | null;
   basis: PnlBasis;
   /** Basis none: the plant the change came from, when the backend names it. */
   mother_plant_name?: string | null;

@@ -9,6 +9,13 @@ const base = '/v1/cost-sheet';
 export const costSheetApi = {
   overview: (): Promise<CostSheetOverview> => client.get(base).then((r) => r.data),
 
+  /** My Tasks "Review the cost sheet": due for Finance when the sheet is stale. */
+  reviewTask: (): Promise<{
+    due: boolean; is_finance: boolean
+    stale: { stale: boolean; review_months: number; latest_version: number | null;
+      reviewed_on: string | null; due_on: string | null; reason: string | null } | null
+  }> => client.get(`${base}/review-task`).then((r) => r.data),
+
   version: (id: number): Promise<CostSheetVersionDetail> =>
     client.get(`${base}/versions/${id}`).then((r) => r.data),
 

@@ -7,7 +7,7 @@ import {
   alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, salesEffectiveOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
-import { addDaysIso, daysUntil, formatDate, todayIso } from '../../lib/format';
+import { addDaysIso, daysUntil, formatDate, formatMoney, todayIso } from '../../lib/format';
 import type { CostPosition } from '../../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -289,6 +289,17 @@ export default function SummationView({
                             <span data-testid={`summation-position-divergence-${p.id}`}
                               className="rounded bg-amber-900/50 text-amber-200 px-1.5 py-0 text-[10px] leading-tight">
                               {t('vendor.againstRecommendation')}
+                            </span>
+                          )}
+                          {/* Hours, machine hours or trials priced from the cost
+                              sheet (already inside the totals above). */}
+                          {(p.kind === 'sampling' ? (p.trials ?? 0) : (p.hours ?? 0)) > 0 && (
+                            <span data-testid={`summation-position-value-${p.id}`}
+                              className={p.rate_missing ? 'text-amber-300' : 'text-slate-500'}>
+                              {p.kind === 'sampling' ? `${p.trials} ${t('costpos.trialsShort')}` : `${p.hours} h`}
+                              {' · '}
+                              {p.rate_missing ? t('costpos.noRate')
+                                : p.line_value != null ? formatMoney(p.line_value, p.currency) : '-'}
                             </span>
                           )}
                           <span className="ml-auto tabular-nums text-slate-300">

@@ -165,6 +165,9 @@ export interface MyTask {
   due_date: string | null;
   overdue: boolean;
   mine: boolean;
+  /** Project team (spec §18): "main" counts; "backup" is listed muted. */
+  role?: 'main' | 'backup';
+  main_name?: string | null;
 }
 
 // Instance request types

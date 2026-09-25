@@ -7,7 +7,7 @@ import type {
   ChangeMeeting, MeetingParticipant, ChangeConcern, ConcernKind, AttachmentKind,
   AssessmentObjectsResponse, ChecklistItemDef, RiskType, RiskSeverity,
   RiskTemplate, RiskTemplateIn, RasicLetter, CostCategory, CostEntryType,
-  CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
+  CostPosition, CostPositionIn, CostingOffer, CostingOfferIn, CostingContext,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
   ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse, ImpactObjectsResponse,
@@ -212,6 +212,12 @@ export const changesApi = {
     client.put<CostPosition>(`/v1/changes/${id}/costing/positions/${pid}`, body).then((r) => r.data),
   deleteCostPosition: (id: number, pid: number) =>
     client.delete(`/v1/changes/${id}/costing/positions/${pid}`).then((r) => r.data),
+  /** Plant, currency, cost sheet version and stale state, machine classes (spec §15 phase 2). */
+  costingContext: (id: number) =>
+    client.get<CostingContext>(`/v1/changes/${id}/costing/context`).then((r) => r.data),
+  setMachineClass: (id: number, machineClassId: number | null) =>
+    client.put<CostingContext>(`/v1/changes/${id}/costing/machine-class`,
+      { machine_class_id: machineClassId }).then((r) => r.data),
 
   // Vendor offers under an external position — one row per vendor asked.
   addCostingOffer: (id: number, pid: number, body: CostingOfferIn) =>

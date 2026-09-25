@@ -21,6 +21,15 @@ vi.mock('../../api/changes', () => ({
     listSuppliers: vi.fn().mockResolvedValue([{ id: 1, name: 'Hasco', is_active: true }]),
     createSupplier: vi.fn().mockResolvedValue({ id: 2, name: 'Meusburger' }),
     uploadAttachment: vi.fn().mockResolvedValue({}),
+    costingContext: vi.fn().mockResolvedValue({
+      plant_id: 1, plant_name: 'Toccoa', currency: 'USD', rate_source: 'cost_sheet',
+      current_version: { id: 9, version: 2, valid_from: '2026-07-01' }, latest_version: 2,
+      stale: null,
+      machine_classes: [{ id: 3, name: '200-450 t', tonnage_min: 200, tonnage_max: 450 },
+        { id: 4, name: '>450 t', tonnage_min: 450, tonnage_max: null }],
+      machine_class_id: null, default_machine_class_id: 3, effective_machine_class_id: 3,
+      tonnage: 350, positions_by_department: { '2': ['Engineer', 'Technician'] },
+    }),
   },
 }))
 
@@ -97,7 +106,7 @@ describe('CostPositions', () => {
     fireEvent.blur(support)
     await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7, {
       department_id: 2, label: t('costpos.supportEffortField'),
-      kind: 'support_effort', hours: 16,
+      kind: 'support_effort', hours: 16, labour_position: null,
     }))
     expect(changesApi.updateCostPosition).not.toHaveBeenCalled()
   })
@@ -228,7 +237,7 @@ describe('CostPositions', () => {
     }] as never)
     positions()
     await screen.findByTestId('costpos-row-11')
-    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('1850.00')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('1.850,00')
     expect(screen.getByTestId('costpos-lead-11').textContent)
       .toBe(`30 ${t('costpos.unitShort.calendar_days')}`)
     expect(screen.getByTestId('costpos-offer-summary-11').textContent)
@@ -249,7 +258,9 @@ describe('CostPositions', () => {
     positions()
     await screen.findByTestId('costpos-row-11')
     // 5200 from the favourite offer; 12 h standing + 6 h around the vendor.
-    expect(screen.getByTestId('costpos-total-2').textContent).toBe('5200.00 + 18 h')
+    const total = screen.getByTestId('costpos-total-2').textContent
+    expect(total).toContain('5.200,00')
+    expect(total).toContain('18 h')
   })
 
   it('draws a quoted position as one row per vendor, shipping included or separate', async () => {
@@ -266,7 +277,7 @@ describe('CostPositions', () => {
     expect(screen.queryByTestId('offer-shipping-cost-92')).toBeNull()
     // The position shows what it is worth — the favourite offer's price and
     // its lead time, in the unit that offer was quoted in.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5200.00')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5.200,00')
     expect(screen.getByTestId('costpos-lead-11').textContent)
       .toBe(`30 ${t('costpos.unitShort.business_days')}`)
   })
@@ -280,7 +291,7 @@ describe('CostPositions', () => {
     positions()
     await screen.findByTestId('costpos-row-11')
     // 5400 with freight included — nothing on top.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5400.00')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5.400,00')
     expect(screen.getByTestId('costpos-lead-11').textContent)
       .toBe(`20 ${t('costpos.unitShort.calendar_days')}`)
     expect(screen.queryByTestId('costpos-needs-favorite-11')).toBeNull()
@@ -454,7 +465,7 @@ describe('CostPositions — vendor decision', () => {
     // Nothing to press: no choose control leaks into the department's block.
     expect(screen.queryByTestId('vendor-choose-92')).toBeNull()
     // The department's own figures still read off its favourite.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5200.00')
+    expect(screen.getByTestId('costpos-cost-11').textContent).toContain('5.200,00')
   })
 
   it('says nothing about a decision nobody has made', async () => {
@@ -476,5 +487,105 @@ describe('CostPositions — vendor decision', () => {
     const line = await screen.findByTestId('costpos-chosen-11')
     expect(line.textContent).toContain('Vendor A')
     expect(line.textContent).not.toContain(t('vendor.againstRecommendation'))
+  })
+})
+
+describe('CostPositions — cost sheet pricing (spec §15 phase 2)', () => {
+  const priced = {
+    id: 20, department_id: 2, label: 'Rework drawing', tag: 'sampling', kind: 'own_time',
+    pricing: 'estimate', est_cost: null, hours: 5, lead_time_days: null, notes: null,
+    effective_cost: null, offers: [], labour_position: 'Engineer',
+    rate: 21.5, rate_currency: 'USD', currency: 'USD', rate_unit: 'h',
+    rate_source: 'cost_sheet', cost_sheet_version: 2,
+    rate_label: 'Cost sheet v2, Tool Engineer, Engineer, 21,50 USD/h',
+    rate_missing: false, line_value: 107.5,
+  }
+  const machine = {
+    id: 21, department_id: 2, label: 'Press trial', tag: null, kind: 'machine_time',
+    pricing: 'estimate', est_cost: null, hours: 3, lead_time_days: null, notes: null,
+    effective_cost: null, offers: [], machine_class_id: 3, machine_class: '200-450 t',
+    rate: 85, rate_currency: 'USD', currency: 'USD', rate_unit: 'h',
+    rate_label: 'Cost sheet v2, Machine 200-450 t, 85,00 USD/h', rate_missing: false,
+    line_value: 255,
+  }
+  const sampling = {
+    id: 22, department_id: 2, label: 'T1', tag: null, kind: 'sampling', pricing: 'estimate',
+    est_cost: null, hours: null, trials: 2, lead_time_days: null, notes: null,
+    effective_cost: null, offers: [], machine_class_id: 3, machine_class: '200-450 t',
+    rate: 1250, rate_currency: 'USD', currency: 'USD', rate_unit: 'trial',
+    rate_label: 'Cost sheet v2, Sampling 200-450 t, 1.250,00 USD/trial', rate_missing: false,
+    line_value: 2500,
+  }
+  const missing = {
+    id: 23, department_id: 2, label: 'Unrated work', tag: 'sampling', kind: 'own_time',
+    pricing: 'estimate', est_cost: null, hours: 4, lead_time_days: null, notes: null,
+    effective_cost: null, offers: [], rate: null, currency: 'USD', rate_unit: 'h',
+    rate_label: 'No rate in the cost sheet', rate_missing: true, line_value: null,
+  }
+
+  beforeEach(() => {
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(
+      [priced, machine, sampling, missing] as never)
+    vi.mocked(changesApi.costingTags).mockResolvedValue(TAGS as never)
+    vi.mocked(changesApi.createCostPosition).mockClear()
+  })
+  afterEach(cleanup)
+
+  it('shows where each rate comes from and the line value in its currency', async () => {
+    positions()
+    expect((await screen.findByTestId('costpos-rate-20')).textContent)
+      .toBe('Cost sheet v2, Tool Engineer, Engineer, 21,50 USD/h')
+    expect(screen.getByTestId('costpos-value-20').textContent).toBe('107,50 USD')
+    expect(screen.getByTestId('costpos-cost-21').textContent).toBe('3 h')
+    expect(screen.getByTestId('costpos-value-21').textContent).toBe('255,00 USD')
+    expect(screen.getByTestId('costpos-kind-21').textContent).toContain('200-450 t')
+    expect(screen.getByTestId('costpos-cost-22').textContent).toBe(`2 ${t('costpos.trialsShort')}`)
+    expect(screen.getByTestId('costpos-value-22').textContent).toBe('2.500,00 USD')
+  })
+
+  it('says "No rate in the cost sheet" and keeps the line out of the total', async () => {
+    positions()
+    expect((await screen.findByTestId('costpos-norate-23')).textContent).toBe(t('costpos.noRate'))
+    expect(screen.queryByTestId('costpos-value-23')).toBeNull()
+    const total = screen.getByTestId('costpos-total-2').textContent ?? ''
+    // 107,50 + 255 + 2.500 = 2.862,50 USD; the unrated 4 h are not a zero
+    expect(total).toContain('2.862,50 USD')
+    expect(screen.getByTestId('costpos-unpriced-2').textContent)
+      .toBe(t('costpos.unpricedInTotal').replace('{n}', '1'))
+  })
+
+  it('adds a machine time line on the change’s class and a sampling line by trials', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-20')
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: '__machine_time' } })
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-new-class-2') as HTMLSelectElement).value).toBe('3'))
+    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '4' } })
+    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({ kind: 'machine_time', hours: 4, machine_class_id: 3,
+        label: t('costpos.type.machine') })))
+
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: '__sampling' } })
+    fireEvent.change(screen.getByTestId('costpos-new-class-2'), { target: { value: '4' } })
+    fireEvent.change(screen.getByTestId('costpos-new-trials-2'), { target: { value: '2' } })
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'T2' } })
+    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenLastCalledWith(7,
+      expect.objectContaining({ kind: 'sampling', trials: 2, machine_class_id: 4, hours: null })))
+  })
+
+  it('offers the department’s cost sheet positions on an own-time line', async () => {
+    positions()
+    await screen.findByTestId('costpos-row-20')
+    fireEvent.change(screen.getByTestId('costpos-new-tag-2'), { target: { value: 'sampling' } })
+    const pick = await screen.findByTestId('costpos-new-position-2') as HTMLSelectElement
+    expect([...pick.options].map((o) => o.value)).toEqual(['', 'Engineer', 'Technician'])
+    fireEvent.change(pick, { target: { value: 'Technician' } })
+    fireEvent.change(screen.getByTestId('costpos-new-label-2'), { target: { value: 'Check' } })
+    fireEvent.change(screen.getByTestId('costpos-new-hours-2'), { target: { value: '2' } })
+    fireEvent.click(screen.getByTestId('costpos-add-2'))
+    await waitFor(() => expect(changesApi.createCostPosition).toHaveBeenCalledWith(7,
+      expect.objectContaining({ kind: 'own_time', labour_position: 'Technician', hours: 2 })))
   })
 })

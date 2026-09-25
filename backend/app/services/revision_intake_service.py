@@ -35,8 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.change import ChangeImpactedItem, ChangeRequest, SCOPING_STATUSES
 from app.models.entities import Plant, Project, User
 from app.models.part import Part, PartRevision, RevisionFile, RevisionStatus
-from app.models.revision_intake import ROUTES, RevisionIntake
-from app.models.workflow import Department, UserDepartment
+from app.models.revision_intake import CLOSED_STATUSES, ROUTES, RevisionIntake
+from app.models.workflow import Department
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +107,127 @@ class RevisionIntakeService:
         return await ChangeService._user_in_department(session, user, DEVELOPMENT)
 
     @staticmethod
-    async def _development_member_ids(session: AsyncSession) -> list[int]:
-        return list((await session.execute(
-            select(UserDepartment.user_id).join(
-                Department, Department.id == UserDepartment.department_id)
-            .where(Department.name == DEVELOPMENT))).scalars().all())
+    async def _development_id(session: AsyncSession) -> Optional[int]:
+        return (await session.execute(
+            select(Department.id).where(Department.name == DEVELOPMENT))).scalar_one_or_none()
+
+    @staticmethod
+    async def _development_member_ids(session: AsyncSession,
+                                      project_id: Optional[int]) -> list[int]:
+        """Active Development members of the project's organization only
+        (never a namesake department of another customer's plant)."""
+        from app.services.change_people import department_members_of_change_org
+        from types import SimpleNamespace
+        dev_id = await RevisionIntakeService._development_id(session)
+        if dev_id is None:
+            return []
+        return await department_members_of_change_org(
+            session, SimpleNamespace(project_id=project_id), [dev_id])
+
+    @staticmethod
+    async def _notify_development(session: AsyncSession, intake: RevisionIntake,
+                                  actor_id: Optional[int], *, title: str, body: str,
+                                  subject_key: str) -> None:
+        members = [m for m in await RevisionIntakeService._development_member_ids(
+            session, intake.project_id) if m != actor_id]
+        if not members:
+            return
+        from app.services.notification_service import NotificationService
+        dev_id = await RevisionIntakeService._development_id(session)
+        await NotificationService.notify_team(
+            session, intake.project_id, [dev_id] if dev_id else [], members,
+            kind="revision_intake", subject_key=subject_key, title=title[:255],
+            body=body, link=f"/parts/{intake.part_id}")
+
+    # ------------------------------------------------------------------
+    # Links to a change that died (cancelled / rejected without release)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def unlink_dead_change(session: AsyncSession, intake: RevisionIntake,
+                                 user_id: Optional[int], why: str) -> None:
+        """The index leaves the dead change it was linked to: the impacted
+        item's resulting revision is cleared (so a reopened change cannot
+        release it) and the change's changelog says why."""
+        if intake.change_id is None:
+            return
+        change = await session.get(ChangeRequest, intake.change_id)
+        if change is None or not _change_is_dead(change):
+            return
+        items = (await session.execute(
+            select(ChangeImpactedItem).where(
+                ChangeImpactedItem.change_id == change.id,
+                ChangeImpactedItem.resulting_revision_id == intake.revision_id))).scalars().all()
+        rev = await session.get(PartRevision, intake.revision_id)
+        if rev is not None and rev.originating_change_id == change.id:
+            rev.originating_change_id = None
+        if not items:
+            return
+        for item in items:
+            item.resulting_revision_id = None
+        await session.flush()
+        part = await session.get(Part, intake.part_id)
+        from app.services.change_service import ChangeService
+        await ChangeService.append_changelog(
+            session, change, "intake_unlinked",
+            f"Index {rev.revision_name if rev else intake.revision_id} of "
+            f"{part.part_number if part else intake.part_id} unlinked: {why}",
+            user_id, old_value={"revision_id": intake.revision_id},
+            new_value={"intake_id": intake.id})
+
+    @staticmethod
+    async def on_change_dead(session: AsyncSession, change: ChangeRequest,
+                             user_id: Optional[int]) -> None:
+        """A change was cancelled or rejected: every index it was to release
+        waits for a new triage. Development is told."""
+        if not _change_is_dead(change):
+            return
+        intakes = (await session.execute(
+            select(RevisionIntake).where(
+                RevisionIntake.change_id == change.id,
+                RevisionIntake.activated_at.is_(None),
+                RevisionIntake.status == "decided"))).scalars().all()
+        for intake in intakes:
+            rev = await session.get(PartRevision, intake.revision_id)
+            part = await session.get(Part, intake.part_id)
+            name = rev.revision_name if rev else "?"
+            number = part.part_number if part else intake.part_id
+            await RevisionIntakeService._notify_development(
+                session, intake, user_id,
+                title=f"Triage again: index {name} of {number}",
+                body=(f"{change.change_number} was {change.status}: the index is "
+                      f"still pending and needs a new route"),
+                subject_key=f"intake:{intake.id}:retriage:{change.id}")
+
+    @staticmethod
+    async def activation_blocker(session: AsyncSession, rev: PartRevision,
+                                 change: Optional[ChangeRequest]) -> Optional[str]:
+        """Why this change (None: a route without a change) may not activate
+        the revision, or None. A pending customer index is only activated
+        through its own, current intake."""
+        intake = (await session.execute(
+            select(RevisionIntake).where(RevisionIntake.revision_id == rev.id)
+        )).scalar_one_or_none()
+        if intake is None or intake.activated_at is not None:
+            return None
+        where = f" in {change.change_number}" if change is not None else ""
+        if intake.status == "superseded":
+            newer = (await session.get(RevisionIntake, intake.superseded_by_id)
+                     if intake.superseded_by_id else None)
+            newer_rev = (await session.get(PartRevision, newer.revision_id)
+                         if newer is not None else None)
+            return (f"Index {rev.revision_name} was superseded by "
+                    f"{newer_rev.revision_name if newer_rev else 'a newer index'}; "
+                    f"re-link or remove it{where}")
+        if intake.status == "rejected":
+            return (f"Index {rev.revision_name} was rejected; "
+                    f"re-link or remove it{where}")
+        if change is not None and intake.change_id is not None \
+                and intake.change_id != change.id:
+            other = await session.get(ChangeRequest, intake.change_id)
+            return (f"Index {rev.revision_name} was re-triaged to "
+                    f"{other.change_number if other else intake.change_id}; "
+                    f"re-link or remove it{where}")
+        return None
 
     # ------------------------------------------------------------------
     # Intake creation (called from RevisionService.receive_customer_data)
@@ -123,7 +239,7 @@ class RevisionIntakeService:
             select(RevisionIntake).where(
                 RevisionIntake.part_id == part_id,
                 RevisionIntake.activated_at.is_(None),
-                RevisionIntake.status != "superseded")
+                RevisionIntake.status.notin_(CLOSED_STATUSES))
             .order_by(RevisionIntake.id.desc()).limit(1))).scalar_one_or_none()
 
     @staticmethod
@@ -179,6 +295,9 @@ class RevisionIntakeService:
         await session.flush()
         if supersedes is not None:
             old_rev = await session.get(PartRevision, supersedes.revision_id)
+            await RevisionIntakeService.unlink_dead_change(
+                session, supersedes, user_id,
+                f"superseded by the newer index {revision.revision_name}")
             supersedes.status = "superseded"
             supersedes.superseded_by_id = intake.id
             if old_rev is not None:
@@ -190,17 +309,43 @@ class RevisionIntakeService:
                     f"Index {old_rev.revision_name if old_rev else '?'} superseded by "
                     f"{revision.revision_name} before it was triaged (archived)"),
                 performed_by=user_id)
-        members = [m for m in await RevisionIntakeService._development_member_ids(session)
-                   if m != user_id]
-        if members:
-            from app.services.notification_service import NotificationService
-            await NotificationService.notify_once(
-                session, sorted(set(members)), kind="revision_intake",
-                subject_key=f"intake:{intake.id}",
-                title=f"Triage index {revision.revision_name} of {part.part_number}"[:255],
-                body=f"{SOURCE_LABELS[source]}: decide the route for the new index",
-                link=f"/parts/{part.id}")
+        await RevisionIntakeService._notify_development(
+            session, intake, user_id,
+            title=f"Triage index {revision.revision_name} of {part.part_number}",
+            body=f"{SOURCE_LABELS[source]}: decide the route for the new index",
+            subject_key=f"intake:{intake.id}")
         return intake
+
+    @staticmethod
+    async def on_revision_rejected(session: AsyncSession, rev: PartRevision,
+                                   user_id: Optional[int]) -> None:
+        """The pending customer index itself was rejected: its intake is
+        closed (status rejected, audited) and can no longer be triaged or
+        activated. Refused while a live change is to release it."""
+        from app.services.part_service import ChangelogService
+        intake = (await session.execute(
+            select(RevisionIntake).where(RevisionIntake.revision_id == rev.id)
+        )).scalar_one_or_none()
+        if intake is None or intake.activated_at is not None \
+                or intake.status in CLOSED_STATUSES:
+            return
+        msg = await RevisionIntakeService.link_block_message(session, intake)
+        if msg:
+            change = await session.get(ChangeRequest, intake.change_id)
+            raise IntakeError(
+                f"Index {rev.revision_name} is linked to {change.change_number}: "
+                f"reject or cancel {change.change_number}, or remove the index "
+                f"from it, before rejecting the index")
+        await RevisionIntakeService.unlink_dead_change(
+            session, intake, user_id, "the index was rejected")
+        intake.status = "rejected"
+        await session.flush()
+        await ChangelogService.log_action(
+            session, part_id=intake.part_id, revision_id=rev.id,
+            action="intake_rejected",
+            action_description=(f"Index {rev.revision_name} rejected: its intake is "
+                                f"closed without activation"),
+            performed_by=user_id, new_value="rejected")
 
     # ------------------------------------------------------------------
     # Activation (shared with ChangeService.release)
@@ -216,6 +361,9 @@ class RevisionIntakeService:
         part = await session.get(Part, rev.part_id)
         if part is None:
             raise IntakeError("Part not found")
+        block = await RevisionIntakeService.activation_blocker(session, rev, change)
+        if block:
+            raise IntakeError(block)
         prior = part.active_revision_id
         if prior is not None and prior != rev.id:
             rev.supersedes_revision_id = prior
@@ -273,6 +421,8 @@ class RevisionIntakeService:
             raise IntakeError(f"Unknown route '{route}' - one of {', '.join(ROUTES)}")
         if intake.status == "superseded":
             raise IntakeError("This index was superseded by a newer one: triage that one")
+        if intake.status == "rejected":
+            raise IntakeError("This index was rejected: it cannot be triaged or activated")
         if intake.activated_at is not None:
             raise IntakeError("This index is already active")
         if intake.status == "decided":
@@ -295,6 +445,13 @@ class RevisionIntakeService:
         part = await session.get(Part, intake.part_id)
         if rev is None or part is None:
             raise IntakeError("The revision of this intake no longer exists")
+        if _val(rev.status) == RevisionStatus.REJECTED.value:
+            raise IntakeError(
+                f"Index {rev.revision_name} was rejected: it cannot be triaged or activated")
+        if intake.status == "decided":
+            # Re-triage: the dead change lets go of the index first.
+            await RevisionIntakeService.unlink_dead_change(
+                session, intake, user.id, "the index was triaged again")
 
         change = None
         if route == "full_ecr":
@@ -315,13 +472,23 @@ class RevisionIntakeService:
         intake.decided_at = datetime.utcnow()
         intake.change_id = change.id if change is not None else None
         await session.flush()
+        # Project team (spec §18): a Development backup triaging for the
+        # project's Development responsible is recorded as "<backup> for <main>".
+        from app.services.project_team_service import ProjectTeamService
+        dev_id = (await session.execute(
+            select(Department.id).where(Department.name == DEVELOPMENT))).scalar_one_or_none()
+        si = await ProjectTeamService.stand_in(session, intake.project_id, dev_id, user.id)
+        audit_notes = reason
+        if si is not None:
+            line = await ProjectTeamService.stand_in_note(session, si, user.id)
+            audit_notes = f"{line}: {reason}" if reason else line
         await ChangelogService.log_action(
             session, part_id=part.id, revision_id=rev.id, action="intake_decided",
             action_description=(
                 f"Index {rev.revision_name} triaged: {ROUTE_LABELS[route]}"
                 + (f" ({change.change_number})" if change is not None else "")
                 + (f". Reason: {reason}" if reason else "")),
-            performed_by=user.id, new_value=route, notes=reason)
+            performed_by=user.id, new_value=route, notes=audit_notes)
         if route == "administrative":
             await RevisionIntakeService.activate(
                 session, rev, user.id, note=f"administrative: {reason}")
@@ -453,7 +620,7 @@ class RevisionIntakeService:
             q = q.where(RevisionIntake.change_id == change_id)
         if waiting:
             q = q.where(RevisionIntake.activated_at.is_(None),
-                        RevisionIntake.status != "superseded")
+                        RevisionIntake.status.notin_(CLOSED_STATUSES))
         q = RevisionIntakeService._org_scope(q, user)
         return list((await session.execute(
             q.order_by(RevisionIntake.id.desc()))).scalars().all())
@@ -521,10 +688,25 @@ class RevisionIntakeService:
         """My Tasks: "Triage index <x> of <part>" for Development, and the
         engineering-review answers owed by the caller's departments."""
         from app.services.engineering_review_service import EngineeringReviewService
+        from app.services.project_team_service import TeamRoles
+        team = TeamRoles(session, user.id)
         triage = []
         can = await RevisionIntakeService.may_triage(session, user)
         if can:
-            for i in await RevisionIntakeService.list(session, user, status="pending"):
-                triage.append(await RevisionIntakeService.out(session, i, True))
+            for i in await RevisionIntakeService.list(session, user, waiting=True):
+                if i.status not in ("pending", "decided"):
+                    continue
+                row = await RevisionIntakeService.out(session, i, True)
+                if not row["needs_triage"]:
+                    continue
+                # Project team (spec §18): Development's responsible on the
+                # part's project is main; other Development members backup.
+                role, main = await team.role(
+                    i.project_id, await team.department_id(DEVELOPMENT))
+                row["role"], row["main_name"] = role, main
+                triage.append(row)
         reviews = await EngineeringReviewService.my_open_answers(session, user)
+        for r in reviews:
+            role, main = await team.role(r.get("project_id"), r["department_id"])
+            r["role"], r["main_name"] = role, main
         return {"triage": triage, "review": reviews}

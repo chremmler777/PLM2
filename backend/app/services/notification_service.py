@@ -108,3 +108,53 @@ class NotificationService:
         return await NotificationService.notify_once(
             db, member_ids, kind=kind, subject_key=subject_key,
             title=title, body=body, link=link)
+
+    @staticmethod
+    async def notify_team(
+        db: AsyncSession,
+        project_id: int | None,
+        department_ids: list[int],
+        user_ids: list[int] | None = None,
+        *,
+        title: str,
+        body: str | None = None,
+        link: str | None = None,
+        kind: str | None = None,
+        subject_key: str | None = None,
+    ) -> int:
+        """Per-department notification about a project's work, routed by the
+        project team (spec §18): the responsible of each department (or every
+        member where none is set) gets it as today; a backup gets the same
+        notification marked as info ("Info: you are backup here, main: X").
+        Notifications have no quiet flag, so the info copy is still an
+        ordinary unread notification. user_ids: the recipients when the
+        caller already narrowed them (e.g. to the change's organization);
+        otherwise every member of the departments. kind + subject_key dedup
+        like notify_once."""
+        from app.services.project_team_service import ProjectTeamService
+        if user_ids is None:
+            if not department_ids:
+                return 0
+            user_ids = [u for (u,) in (await db.execute(
+                select(UserDepartment.user_id).where(
+                    UserDepartment.department_id.in_(department_ids)))).all()]
+        mains, backups = await ProjectTeamService.split_recipients(
+            db, project_id, department_ids, user_ids)
+
+        async def _send(ids: list[int], text: str | None) -> int:
+            if not ids:
+                return 0
+            if kind is not None and subject_key is not None:
+                return await NotificationService.notify_once(
+                    db, ids, kind=kind, subject_key=subject_key,
+                    title=title, body=text, link=link)
+            return await NotificationService.notify_users(db, ids, title, text, link)
+
+        n = await _send(mains, body)
+        by_main: dict[str, list[int]] = {}
+        for uid, main in backups.items():
+            by_main.setdefault(main, []).append(uid)
+        for main, ids in by_main.items():
+            note = f"Info: you are backup here, main: {main}."
+            n += await _send(ids, f"{body}\n{note}" if body else note)
+        return n

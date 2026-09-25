@@ -158,16 +158,19 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
           </div>
         )}
         {rows && (
-          <table className="w-full text-sm">
+          // The result column carries the pending / supersede notes: the part
+          // picker is capped so it can never push that column out of view.
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm [&_td]:pr-2 [&_th]:pr-2 [&_td]:py-1 [&_td]:align-top">
             <thead className="text-slate-400 text-left"><tr>
-              <th>File</th><th>Part</th><th>Current</th><th>Index</th><th>Action</th><th>Rev. no.</th><th>Result</th>
+              <th>File</th><th>Part</th><th>Current</th><th>Index</th><th>Action</th><th>Rev. no.</th><th className="min-w-[12rem]">Result</th>
             </tr></thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.filename} data-testid={`row-${r.filename}`} className={r.action === 'error' ? 'bg-red-900/20' : ''}>
-                  <td className="font-mono text-slate-100 truncate max-w-[16rem]" title={r.filename}>{r.filename}</td>
+                  <td className="font-mono text-slate-100 truncate max-w-[12rem]" title={r.filename}>{r.filename}</td>
                   <td>
-                    <select data-testid={`part-${r.filename}`} value={r.part_id ?? ''} className="bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
+                    <select data-testid={`part-${r.filename}`} value={r.part_id ?? ''} className="w-full max-w-[14rem] bg-slate-900 border border-slate-700 rounded px-1 text-slate-100"
                       onChange={(e) => { const id = e.target.value ? parseInt(e.target.value, 10) : null;
                         const p = projectParts.find((x) => x.id === id);
                         patch(r.filename, { part_id: id, part_number: p?.part_number ?? null, action: id == null ? 'unmatched' : ((r.action === 'unmatched' || r.action === 'error') ? 'new_major' : r.action) }); }}>
@@ -176,7 +179,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                       {projectParts.map((p) => <option key={p.id} value={p.id}>{p.part_number} {p.name}</option>)}
                     </select>
                   </td>
-                  <td className="font-mono text-slate-300">{revisionLabel(r.current_revision, r.current_index) || '—'}</td>
+                  <td className="font-mono text-slate-300 whitespace-nowrap">{revisionLabel(r.current_revision, r.current_index) || '—'}</td>
                   <td><input data-testid={`index-${r.filename}`} value={r.customer_index ?? ''} onChange={(e) => patch(r.filename, { customer_index: e.target.value || null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100" /></td>
                   <td>
@@ -189,7 +192,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                   <td><input data-testid={`major-${r.filename}`} type="number" min={1} value={r.major ?? ''} placeholder={r.suggested_name?.replace(/^E/, '') ?? ''}
                     disabled={r.action !== 'new_major' && r.action !== 'error'} onChange={(e) => patch(r.filename, { major: e.target.value ? parseInt(e.target.value, 10) : null })}
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100 disabled:opacity-40" /></td>
-                  <td className="text-xs">
+                  <td data-testid={`result-${r.filename}`} className="text-xs min-w-[12rem]">
                     {r.action === 'error' && <span className="text-red-300">{r.error}</span>}
                     {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}<span className="block text-amber-300">pending triage</span></span>}
                     {r.pending_note && <span className="block text-amber-300">{r.pending_note}</span>}
@@ -200,6 +203,7 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
               ))}
             </tbody>
           </table>
+          </div>
         )}
         {error && <p className="text-sm text-red-300">{error}</p>}
         {rows && (

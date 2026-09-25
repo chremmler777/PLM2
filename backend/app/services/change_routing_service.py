@@ -197,8 +197,8 @@ class ChangeRoutingService:
         # Broadcast "started" to everyone involved (incl. I).
         involved = ChangeRoutingService._involved_department_ids(stages)
         if involved:
-            await NotificationService.notify_departments(
-                session, involved,
+            await NotificationService.notify_team(
+                session, change.project_id, involved,
                 title=f"Change {change.change_number} entered assessment",
                 body=f"'{change.title}' has started cross-functional assessment.",
                 link=f"/changes/{change.id}",

@@ -83,6 +83,12 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
             <RevisionLabel name={activeRevision.revision_name} index={activeRevision.customer_index} />
           </span>
         )}
+        {!activeRevision && !part.active_revision_id && sel.partRevisions?.some((r) => r.intake_pending) && (
+          <span data-testid="detail-no-active-revision" title="The new customer index waits for Development's triage"
+            className="px-1.5 py-0.5 rounded bg-amber-900/40 text-xs text-amber-200">
+            No active index yet, pending triage
+          </span>
+        )}
         <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${typeColor(part.part_type)}`}>
           {part.part_type.replace(/_/g, ' ')}
         </span>

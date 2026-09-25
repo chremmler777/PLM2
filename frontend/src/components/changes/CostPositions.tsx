@@ -6,9 +6,17 @@
  * Tooling, the part weight. Every further line is a category from the
  * department's own list, and the category says what the line is:
  *
- *   own time     — hours, valued at the department's rate in the summation
+ *   own time     — hours, valued at the cost sheet's effective labour rate
+ *                  (department, optional position, costing plant)
+ *   machine time — machine hours x the machine class rate of the cost sheet
+ *   sampling     — trials x the sampling price of the class
  *   estimate     — money, a house number
  *   vendor quote — money, read from the favourite of the offers under the line
+ *
+ * Every priced line says where its rate comes from ("Cost sheet v2, Tool
+ * Engineer, Engineer, 21,50 USD/h"): the snapshot taken when the line was
+ * costed. A line the sheet has no rate for says "No rate in the cost sheet"
+ * and is not counted: never priced at 0.
  *
  * A quoted line carries its vendors as sub-rows with one star among them. The
  * favourite is not decoration: it is the offer the line's price and lead time
@@ -27,9 +35,10 @@ import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { TOOL_ENGINEER_DEPARTMENT } from '../../lib/departments'
+import { formatMoney } from '../../lib/format'
 import type {
   CostCategory, CostEntryType, CostPosition, CostPositionKind, CostPositionPricing,
-  CostingOffer, LeadTimeUnit,
+  CostingContext, CostingOffer, LeadTimeUnit,
 } from '../../types/change'
 
 const UNITS: LeadTimeUnit[] = ['calendar_days', 'business_days']
@@ -456,19 +465,99 @@ function NewOfferForm({ changeId, positionId, onAdded }: {
 
 const cellCls = 'px-2 py-1.5 align-top'
 const numCls = 'tabular-nums text-right'
-const money = (v: number) => v.toFixed(2)
 
-type LineType = 'time' | 'estimate' | 'quote'
+type LineType = 'time' | 'estimate' | 'quote' | 'machine' | 'sampling'
 const lineTypeOf = (p: CostPosition): LineType =>
-  p.kind === 'external' ? (p.pricing === 'quote' ? 'quote' : 'estimate') : 'time'
+  p.kind === 'machine_time' ? 'machine'
+    : p.kind === 'sampling' ? 'sampling'
+      : p.kind === 'external' ? (p.pricing === 'quote' ? 'quote' : 'estimate') : 'time'
+
+/** What the line's rate multiplies: trials on a sampling line, hours else. */
+const quantityOf = (p: CostPosition): number =>
+  p.kind === 'sampling' ? (p.trials ?? 0) : (p.hours ?? 0)
+
+/**
+ * Where the line's rate comes from, under its description: the cost sheet
+ * version, department, position and rate ("Cost sheet v2, Tool Engineer,
+ * Engineer, 21,50 USD/h"), or the missing-rate state.
+ */
+function RateNote({ p }: { p: CostPosition }) {
+  if (p.rate_missing) {
+    return (
+      <span data-testid={`costpos-norate-${p.id}`} title={t('costpos.noRateHint')}
+        className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-950/60 border border-amber-800/60 px-1.5 py-0 text-[11px] text-amber-200">
+        {t('costpos.noRate')}
+      </span>
+    )
+  }
+  if (p.rate == null || !p.rate_label) return null
+  // A money line without own hours has nothing the rate would price.
+  if (p.kind === 'external' && quantityOf(p) <= 0) return null
+  return (
+    <span data-testid={`costpos-rate-${p.id}`}
+      className="block text-[11px] text-slate-500 tabular-nums">
+      {p.rate_label}
+    </span>
+  )
+}
+
+/** hours (trials) x rate, in the line's currency; "not counted" without a rate. */
+function LineValue({ p }: { p: CostPosition }) {
+  if (quantityOf(p) <= 0) return null
+  if (p.rate_missing) {
+    return <span className="block text-[11px] text-amber-300">{t('costpos.notCounted')}</span>
+  }
+  if (p.line_value == null) return null
+  return (
+    <span data-testid={`costpos-value-${p.id}`} className="block text-xs text-slate-300 tabular-nums">
+      {formatMoney(p.line_value, p.currency ?? p.rate_currency)}
+    </span>
+  )
+}
+
+/** The cost sheet positions a department has a rate for, or its default rate. */
+function PositionSelect({ testId, value, options, onChange }: {
+  testId: string; value: string; options: string[]; onChange: (v: string) => void
+}) {
+  if (options.length === 0 && !value) return null
+  return (
+    <select data-testid={testId} value={value} aria-label={t('costpos.labourPosition')}
+      title={t('costpos.labourPosition')}
+      onChange={(e) => onChange(e.target.value)} className={`${fieldCls} w-32 text-xs`}>
+      <option value="">{t('costpos.labourDefault')}</option>
+      {[...options, ...(value && !options.includes(value) ? [value] : [])].map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+    </select>
+  )
+}
+
+/** The org's machine classes; the change's class is the default. */
+function MachineClassSelect({ testId, value, ctx, onChange }: {
+  testId: string; value: number | null; ctx?: CostingContext; onChange: (v: number | null) => void
+}) {
+  const classes = ctx?.machine_classes ?? []
+  return (
+    <select data-testid={testId} value={value ?? ''} aria-label={t('costpos.machineClass')}
+      title={t('costpos.machineClass')}
+      onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+      className={`${fieldCls} w-32 text-xs`}>
+      <option value="">{t('costpos.machineClassPick')}</option>
+      {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+    </select>
+  )
+}
 
 /** A position row: reads as one line; edits in place; a quoted line opens its vendors. */
-function PositionRow({ changeId, position, editable, index, categories, onChanged }: {
+function PositionRow({ changeId, position, editable, index, categories, onChanged, ctx }: {
   changeId: number; position: CostPosition; editable: boolean; index: number
-  categories: CostCategory[]; onChanged: () => void
+  categories: CostCategory[]; onChanged: () => void; ctx?: CostingContext
 }) {
   const p = position
   const [editing, setEditing] = useState(false)
+  const [labourPos, setLabourPos] = useState(p.labour_position ?? '')
+  const [classId, setClassId] = useState<number | null>(p.machine_class_id ?? null)
+  const [trials, setTrials] = useState(p.trials != null ? String(p.trials) : '')
   const [label, setLabel] = useState(p.label)
   const [hours, setHours] = useState(p.hours != null ? String(p.hours) : '')
   const [est, setEst] = useState(p.est_cost != null ? String(p.est_cost) : '')
@@ -481,6 +570,8 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
   const type = lineTypeOf(p)
   const isExternal = p.kind === 'external'
   const isQuote = type === 'quote'
+  const isMachine = type === 'machine' || type === 'sampling'
+  const positions = ctx?.positions_by_department?.[String(p.department_id)] ?? []
   const cost = effectiveOf(p)
   const time = leadTimeOf(p)
   // With several offers and no vote the line has no price; a single offer
@@ -495,11 +586,15 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
     mutationFn: async () => {
       if (type === 'estimate') await ensureVendor(qc, vendor)
       return changesApi.updateCostPosition(changeId, p.id, {
-        label: label.trim(), hours: num(hours),
+        label: label.trim(),
+        hours: type === 'sampling' ? null : num(hours),
         est_cost: type === 'estimate' ? num(est) : null,
         vendor_name: type === 'estimate' ? (vendor.trim() || null) : null,
         lead_time_days: num(lead), lead_time_unit: unit,
         notes: notes.trim() || null,
+        ...(isMachine
+          ? { machine_class_id: classId, trials: type === 'sampling' ? num(trials) : null }
+          : { labour_position: labourPos || null }),
       })
     },
     onSuccess: () => { toast.success(t('costpos.saved')); setEditing(false); onChanged() },
@@ -511,13 +606,16 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the position'),
   })
 
+  const cur = p.currency ?? ctx?.currency ?? null
   const amount = (
     <span data-testid={`costpos-cost-${p.id}`} className="text-slate-200 tabular-nums">
-      {type === 'time'
+      {type === 'time' || type === 'machine'
         ? (p.hours != null ? `${p.hours} h` : '-')
-        : cost != null
-          ? <>{money(cost)}{p.hours != null && ` + ${p.hours} h`}</>
-          : p.hours != null ? `${p.hours} h` : '-'}
+        : type === 'sampling'
+          ? (p.trials != null ? `${p.trials} ${t('costpos.trialsShort')}` : '-')
+          : cost != null
+            ? <>{formatMoney(cost, cur)}{p.hours != null && ` + ${p.hours} h`}</>
+            : p.hours != null ? `${p.hours} h` : '-'}
     </span>
   )
 
@@ -543,6 +641,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           ) : (
             <>
               <span data-testid={`costpos-label-${p.id}`} className="text-slate-100">{p.label}</span>
+              <RateNote p={p} />
               {type === 'estimate' && p.vendor_name && (
                 <span data-testid={`costpos-vendor-${p.id}`} className="block text-xs text-slate-400">
                   {t('costpos.vendor')}: {p.vendor_name}
@@ -565,6 +664,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
         <td className={`${cellCls} whitespace-nowrap`}>
           <span data-testid={`costpos-kind-${p.id}`} className="text-xs text-slate-400">
             {t(`costpos.type.${type}`)}
+            {isMachine && p.machine_class && (
+              <span className="block text-[11px] text-slate-500">{p.machine_class}</span>
+            )}
             <span className="sr-only"> · {t(`costpos.kind.${p.kind}`)}{isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}</span>
           </span>
           {isQuote && offerCount > 0 && (
@@ -584,14 +686,28 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
                   aria-label={t('costpos.estCost')} placeholder={t('costpos.estCost')}
                   onChange={(e) => setEst(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
               )}
-              <input data-testid={`costpos-edit-hours-${p.id}`} type="number" step="0.5" value={hours}
-                aria-label={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
-                placeholder={isExternal ? t('costpos.ownTime') : t('costpos.hours')}
-                onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
+              {type === 'sampling' ? (
+                <input data-testid={`costpos-edit-trials-${p.id}`} type="number" step="1" min={0}
+                  value={trials} aria-label={t('costpos.trials')} placeholder={t('costpos.trials')}
+                  onChange={(e) => setTrials(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
+              ) : (
+                <input data-testid={`costpos-edit-hours-${p.id}`} type="number" step="0.5" value={hours}
+                  aria-label={type === 'machine' ? t('costpos.machineHours') : isExternal ? t('costpos.ownTime') : t('costpos.hours')}
+                  placeholder={type === 'machine' ? t('costpos.machineHours') : isExternal ? t('costpos.ownTime') : t('costpos.hours')}
+                  onChange={(e) => setHours(e.target.value)} className={`${fieldCls} w-28 tabular-nums`} />
+              )}
+              {isMachine ? (
+                <MachineClassSelect testId={`costpos-edit-class-${p.id}`} value={classId} ctx={ctx}
+                  onChange={setClassId} />
+              ) : (
+                <PositionSelect testId={`costpos-edit-position-${p.id}`} value={labourPos}
+                  options={positions} onChange={setLabourPos} />
+              )}
             </span>
           ) : (
             <>
               {amount}
+              <LineValue p={p} />
               {needsFavorite && (
                 <span data-testid={`costpos-needs-favorite-${p.id}`}
                   className="block text-xs text-amber-300">★ {t('costpos.pickFavorite')}</span>
@@ -690,24 +806,34 @@ const EFFORT_FIELDS: { kind: CostPositionKind; labelKey: string; rowKey: string;
  */
 function EffortRow({
   changeId, departmentId, kind, labelKey, rowKey, descKey, position, editable, index, onChanged,
+  ctx,
 }: {
   changeId: number; departmentId: number
   kind: CostPositionKind; labelKey: string; rowKey: string; descKey: string
   position?: CostPosition
-  editable: boolean; index: number; onChanged: () => void
+  editable: boolean; index: number; onChanged: () => void; ctx?: CostingContext
 }) {
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
+  const [labourPos, setLabourPos] = useState(position?.labour_position ?? '')
+  const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
   const save = useMutation({
-    mutationFn: () => position
-      ? changesApi.updateCostPosition(changeId, position.id, { hours: num(hours) })
+    mutationFn: (override?: { labour_position: string | null }) => position
+      ? changesApi.updateCostPosition(changeId, position.id, override ?? { hours: num(hours) })
       : changesApi.createCostPosition(changeId, {
         department_id: departmentId, label: t(labelKey), kind, hours: num(hours),
+        labour_position: (override ? override.labour_position : labourPos) || null,
       }),
     onSuccess: () => { toast.success(t('costpos.saved')); onChanged() },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the effort'),
   })
   const dirty = num(hours) !== (position?.hours ?? null)
-  const commit = () => { if (dirty && !save.isPending) save.mutate() }
+  const commit = () => { if (dirty && !save.isPending) save.mutate(undefined) }
+  // The position re-prices a saved row at once; before the first save it
+  // rides along with the hours.
+  const pickPosition = (v: string) => {
+    setLabourPos(v)
+    if (position) save.mutate({ labour_position: v || null })
+  }
   return (
     <tr className="border-t border-slate-700/70">
       <td className={`${cellCls} text-slate-500 tabular-nums w-8`}>{index}</td>
@@ -717,11 +843,16 @@ function EffortRow({
           {t('costpos.standing')}
         </span>
       </td>
-      <td className={`${cellCls} text-slate-400 text-xs`}>{t(descKey)}</td>
+      <td className={`${cellCls} text-slate-400 text-xs`}>
+        {t(descKey)}
+        {position && <RateNote p={position} />}
+      </td>
       <td className={`${cellCls} text-xs text-slate-400 whitespace-nowrap`}>{t('costpos.type.time')}</td>
       <td className={`${cellCls} ${numCls} whitespace-nowrap`}>
         {editable ? (
           <span className="inline-flex items-center gap-1.5">
+            <PositionSelect testId={`costpos-effort-position-${kind}-${departmentId}`}
+              value={labourPos} options={positions} onChange={pickPosition} />
             <label htmlFor={`effort-${kind}-${departmentId}`} className="sr-only">{t(labelKey)}</label>
             <input id={`effort-${kind}-${departmentId}`}
               data-testid={`costpos-effort-${kind}-${departmentId}`}
@@ -743,6 +874,7 @@ function EffortRow({
             {position?.hours != null ? position.hours : '-'}
           </span>
         )}
+        {position && <LineValue p={position} />}
       </td>
       <td className={cellCls} />
       <td className={cellCls} />
@@ -806,15 +938,18 @@ function PartWeightRow({ changeId, departmentId, weightG, editable, index, onSav
 }
 
 const ADD_CATEGORY = '__add_category'
+/** The cost-sheet kinds, offered in the category list under their own group. */
+const MACHINE_TIME = '__machine_time'
+const SAMPLING = '__sampling'
 
 /**
  * The add line at the foot of the table. Step by step: the category decides
  * what the line is (own hours, or money as estimate or vendor quote), then the
  * description, then the amount. Enter saves and clears for the next line.
  */
-function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged }: {
+function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChanged, ctx }: {
   changeId: number; departmentId: number; categories: CostCategory[]
-  onAdded: () => void; onCategoriesChanged: () => void
+  onAdded: () => void; onCategoriesChanged: () => void; ctx?: CostingContext
 }) {
   const [tag, setTag] = useState('')
   const [label, setLabel] = useState('')
@@ -828,16 +963,37 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
   // "+ Add own category…" opens a two-field line: name and what it is.
   const [newCat, setNewCat] = useState<{ label: string; type: CostEntryType } | null>(null)
 
-  const category = categories.find((c) => c.key === tag)
+  const [trials, setTrials] = useState('')
+  const [labourPos, setLabourPos] = useState('')
+  const [classId, setClassId] = useState<number | null>(null)
+  const isMachine = tag === MACHINE_TIME
+  const isSampling = tag === SAMPLING
+  const isSheetKind = isMachine || isSampling
+  const category = isSheetKind ? undefined : categories.find((c) => c.key === tag)
   const entryType: CostEntryType = category?.entry_type ?? 'money'
-  const isTime = entryType === 'time'
-  const isQuote = !isTime && pricing === 'quote'
-  const lineType: LineType = isTime ? 'time' : pricing
+  const isTime = !isSheetKind && entryType === 'time'
+  const isQuote = !isTime && !isSheetKind && pricing === 'quote'
+  const lineType: LineType = isMachine ? 'machine' : isSampling ? 'sampling' : isTime ? 'time' : pricing
+  const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
+  // A machine line defaults to the change's class (own or from the tool's tonnage).
+  const effectiveClass = classId ?? ctx?.effective_machine_class_id ?? null
 
-  const reset = () => { setLabel(''); setHours(''); setEst(''); setVendor(''); setLead('') }
+  const reset = () => {
+    setLabel(''); setHours(''); setEst(''); setVendor(''); setLead(''); setTrials('')
+  }
   const add = useMutation({
     mutationFn: async () => {
       if (lineType === 'estimate') await ensureVendor(qc, vendor)
+      if (isSheetKind) {
+        return changesApi.createCostPosition(changeId, {
+          department_id: departmentId, label: label.trim(),
+          kind: isMachine ? 'machine_time' : 'sampling', pricing: 'estimate',
+          hours: isMachine ? num(hours) : null,
+          trials: isSampling ? num(trials) : null,
+          machine_class_id: effectiveClass,
+          lead_time_days: num(lead), lead_time_unit: unit,
+        })
+      }
       return changesApi.createCostPosition(changeId, {
         department_id: departmentId,
         label: label.trim(),
@@ -848,6 +1004,7 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
         est_cost: lineType === 'estimate' ? num(est) : null,
         vendor_name: lineType === 'estimate' ? (vendor.trim() || null) : null,
         lead_time_days: num(lead), lead_time_unit: unit,
+        labour_position: labourPos || null,
       })
     },
     onSuccess: () => { reset(); onAdded() },
@@ -886,12 +1043,20 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
             onChange={(e) => {
               if (e.target.value === ADD_CATEGORY) { setNewCat({ label: '', type: 'money' }); return }
               setNewCat(null); setTag(e.target.value)
+              // A cost-sheet kind names itself until the user says more.
+              if ((e.target.value === MACHINE_TIME || e.target.value === SAMPLING) && !label.trim()) {
+                setLabel(t(e.target.value === MACHINE_TIME ? 'costpos.type.machine' : 'costpos.type.sampling'))
+              }
             }}
             className={`${fieldCls} w-40`}>
             <option value="">{t('costpos.pickCategory')}</option>
             {own.length > 0 && <optgroup label={t('costpos.tag')}>{own.map(option)}</optgroup>}
             {custom.length > 0 && <optgroup label={t('costpos.categoryHint').split(':')[0]}>{custom.map(option)}</optgroup>}
             {common.map(option)}
+            <optgroup label={t('costpos.costSheetGroup')}>
+              <option value={MACHINE_TIME}>{t('costpos.kind.machine_time')}</option>
+              <option value={SAMPLING}>{t('costpos.kind.sampling')}</option>
+            </optgroup>
             <option value={ADD_CATEGORY}>{t('costpos.addCategory')}</option>
           </select>
           {category?.custom_id != null && (
@@ -919,8 +1084,18 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
           </span>
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
-          {isTime ? (
-            <span className="text-xs text-slate-400">{t('costpos.type.time')}</span>
+          {isSheetKind ? (
+            <span className="inline-flex flex-col gap-1">
+              <span className="text-xs text-slate-400">{t(`costpos.type.${lineType}`)}</span>
+              <MachineClassSelect testId={`costpos-new-class-${departmentId}`} value={effectiveClass}
+                ctx={ctx} onChange={setClassId} />
+            </span>
+          ) : isTime ? (
+            <span className="inline-flex flex-col gap-1">
+              <span className="text-xs text-slate-400">{t('costpos.type.time')}</span>
+              <PositionSelect testId={`costpos-new-position-${departmentId}`} value={labourPos}
+                options={positions} onChange={setLabourPos} />
+            </span>
           ) : (
             // Two buttons, not a dropdown: a house number or a vendor's written
             // offer is the one choice on a money line, and it should be seen.
@@ -948,12 +1123,20 @@ function AddLine({ changeId, departmentId, categories, onAdded, onCategoriesChan
                 className={`${fieldCls} w-24 tabular-nums text-right`} />
             )}
             {/* Money lines take the department's own time around the vendor too;
-                a time line IS the hours. */}
-            <input data-testid={`costpos-new-hours-${departmentId}`} type="number" step="0.5"
-              value={hours} aria-label={isTime ? t('costpos.hours') : t('costpos.ownTime')}
-              placeholder={isTime ? t('costpos.hours') : t('costpos.ownTime')}
-              onChange={(e) => setHours(e.target.value)} onKeyDown={submitOnEnter}
-              className={`${fieldCls} w-24 tabular-nums text-right`} />
+                a time line IS the hours; a sampling line counts trials. */}
+            {isSampling ? (
+              <input data-testid={`costpos-new-trials-${departmentId}`} type="number" step="1" min={0}
+                value={trials} aria-label={t('costpos.trials')} placeholder={t('costpos.trials')}
+                onChange={(e) => setTrials(e.target.value)} onKeyDown={submitOnEnter}
+                className={`${fieldCls} w-24 tabular-nums text-right`} />
+            ) : (
+              <input data-testid={`costpos-new-hours-${departmentId}`} type="number" step="0.5"
+                value={hours}
+                aria-label={isMachine ? t('costpos.machineHours') : isTime ? t('costpos.hours') : t('costpos.ownTime')}
+                placeholder={isMachine ? t('costpos.machineHours') : isTime ? t('costpos.hours') : t('costpos.ownTime')}
+                onChange={(e) => setHours(e.target.value)} onKeyDown={submitOnEnter}
+                className={`${fieldCls} w-24 tabular-nums text-right`} />
+            )}
           </span>
         </td>
         <td className={`${cellCls} whitespace-nowrap`}>
@@ -1033,6 +1216,11 @@ export default function CostPositions({
     queryKey: ['costing-tags', departmentId],
     queryFn: () => changesApi.costingTags(departmentId),
   })
+  const { data: ctx } = useQuery({
+    queryKey: ['costing-context', changeId],
+    queryFn: () => changesApi.costingContext(changeId),
+    retry: false,
+  })
   const categories = tags?.items ?? []
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['costing-positions', changeId] })
@@ -1051,8 +1239,23 @@ export default function CostPositions({
     qc.invalidateQueries({ queryKey: ['change-summation', changeId] })
   }
   const standingCount = EFFORT_FIELDS.length + (isToolEngineer ? 1 : 0)
-  const totalMoney = listed.reduce((s, p) => s + (lineTypeOf(p) === 'time' ? 0 : (effectiveOf(p) ?? 0)), 0)
-  const totalHours = mine.reduce((s, p) => s + (p.hours ?? 0), 0)
+  // The department's total, per currency (never added across currencies):
+  // money lines plus every priced hours/trials value. Lines without a rate
+  // are counted out loud, not as 0.
+  const byCurrency = new Map<string, number>()
+  const addTo = (cur: string, v: number) => byCurrency.set(cur, (byCurrency.get(cur) ?? 0) + v)
+  for (const p of mine) {
+    const cur = p.currency ?? ctx?.currency ?? 'EUR'
+    const type = lineTypeOf(p)
+    if (type === 'estimate' || type === 'quote') {
+      const c = effectiveOf(p)
+      if (c != null) addTo(cur, c)
+    }
+    if (p.line_value != null && quantityOf(p) > 0) addTo(p.rate_currency ?? cur, p.line_value)
+  }
+  const unpriced = mine.filter((p) => p.rate_missing).length
+  const totalHours = mine.reduce((s, p) => s + (p.kind === 'machine_time' || p.kind === 'sampling' ? 0 : (p.hours ?? 0)), 0)
+  const totals = [...byCurrency.entries()]
 
   return (
     <div data-testid={`costpos-section-${departmentId}`} className="space-y-1">
@@ -1078,7 +1281,8 @@ export default function CostPositions({
                 <EffortRow key={`${kind}-${bound?.id ?? 'new'}`}
                   changeId={changeId} departmentId={departmentId}
                   kind={kind} labelKey={labelKey} rowKey={rowKey} descKey={descKey}
-                  position={bound} editable={editable} index={i + 1} onChanged={invalidate} />
+                  position={bound} editable={editable} index={i + 1} onChanged={invalidate}
+                  ctx={ctx} />
               )
             })}
             {isToolEngineer && (
@@ -1099,13 +1303,13 @@ export default function CostPositions({
               </tr>
             ) : listed.map((p, i) => (
               <PositionRow key={p.id} changeId={changeId} position={p} categories={categories}
-                editable={editable} index={standingCount + i + 1} onChanged={invalidate} />
+                editable={editable} index={standingCount + i + 1} onChanged={invalidate} ctx={ctx} />
             ))}
           </tbody>
           <tfoot>
             {editable && (
               <AddLine changeId={changeId} departmentId={departmentId} categories={categories}
-                onAdded={invalidate}
+                ctx={ctx} onAdded={invalidate}
                 onCategoriesChanged={() => qc.invalidateQueries({ queryKey: ['costing-tags', departmentId] })} />
             )}
             <tr className="border-t border-slate-600">
@@ -1115,7 +1319,20 @@ export default function CostPositions({
               </td>
               <td className={`${cellCls} ${numCls} text-slate-100 whitespace-nowrap`}
                 data-testid={`costpos-total-${departmentId}`}>
-                {money(totalMoney)}{totalHours > 0 && ` + ${totalHours} h`}
+                {totals.length === 0
+                  ? formatMoney(0, ctx?.currency ?? null)
+                  : totals.map(([cur, v]) => (
+                    <span key={cur} className="block">{formatMoney(v, cur)}</span>
+                  ))}
+                {totalHours > 0 && (
+                  <span className="block text-xs text-slate-400">{totalHours} h</span>
+                )}
+                {unpriced > 0 && (
+                  <span data-testid={`costpos-unpriced-${departmentId}`}
+                    className="block text-[11px] text-amber-300" title={t('costpos.noRateHint')}>
+                    {t('costpos.unpricedInTotal').replace('{n}', String(unpriced))}
+                  </span>
+                )}
               </td>
               <td colSpan={2} />
             </tr>

@@ -381,3 +381,27 @@ describe('MyTasksPage one list (spec §16)', () => {
     expect(await screen.findByText('Release checklist')).toBeDefined()
   })
 })
+
+describe('MyTasksPage project team (spec §18)', () => {
+  beforeEach(() => {
+    clientMocks.get.mockResolvedValue({ data: [] })
+  })
+  afterEach(cleanup)
+
+  it('counts main rows only, lists backup rows muted with the main name', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'scoping_wrapup', role: 'main' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'impact_confirm',
+                   role: 'backup', main_name: 'Cody Hrtyanski' }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
+    expect(screen.getByTestId('task-list-backup-count').textContent).toBe(
+      t('tasks.asBackup').replace('{n}', '1'))
+    const rows = screen.getAllByTestId('task-row')
+    expect(rows.map((r) => r.getAttribute('data-role'))).toEqual(['main', 'backup'])
+    expect(rows[1].className).toContain('opacity-60')
+    expect(screen.getByTestId('backup-chip').textContent).toContain('Cody Hrtyanski')
+  })
+})
