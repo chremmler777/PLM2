@@ -14,6 +14,8 @@ the e-mail local part, then first name (+ last initial) in the full name or
 the username split on '.', '_', '-' and spaces, then a prefix / close match.
 The best tier that finds anybody wins; when it finds more than one, the row
 is AMBIGUOUS and nothing is guessed: resolve it with --project-id / --user-id.
+A user found only by the fuzzy tier (e.g. Russ -> Russell) is FUZZY_USER and
+blocks --apply too, until the person is pinned with --user-id.
 
 Dry run by default: prints every proposed row and every problem. --apply
 writes, and only when no row has a problem (unless --partial). Idempotent: a
@@ -214,7 +216,11 @@ async def plan_team(session: AsyncSession, team: dict[str, dict[str, Person]] = 
                                              "is not an active user"))
             continue
         found, tier = match_users(person, active)
-        if len(found) == 1:
+        if len(found) == 1 and tier == "fuzzy":
+            resolved[person.label] = (None, f"fuzzy_user: only a close match, "
+                                            f"{_user_label(found[0])}; confirm with "
+                                            f"--user-id '{person.label}={found[0].id}'")
+        elif len(found) == 1:
             resolved[person.label] = (found[0], "")
             others = [u for u in active if u.id != found[0].id and
                       match_users(Person(person.label, person.first, person.last_initial),
@@ -297,11 +303,29 @@ async def plan_team(session: AsyncSession, team: dict[str, dict[str, Person]] = 
 
 async def apply_plan(session: AsyncSession, plan: Plan,
                      actor_id: Optional[int] = None) -> dict[str, int]:
-    """Write the ok rows of the plan (the caller commits)."""
-    counts = {"set": 0, "replace": 0, "unchanged": 0, "memberships": 0}
+    """Write the ok rows of the plan (the caller commits).
+
+    Each row is rechecked against the DB first: when somebody else set a
+    different responsible since the plan was made and the row is not a
+    planned "replace", the row is skipped (status "skipped_taken"), never
+    overwritten. Nothing of a skipped row is written, membership included."""
+    counts = {"set": 0, "replace": 0, "unchanged": 0, "memberships": 0, "skipped": 0}
     for row in plan.rows:
         if not row.ok:
             continue
+        rec = None
+        if row.status != "unchanged":
+            rec = (await session.execute(select(ProjectResponsible).where(
+                ProjectResponsible.project_id == row.project_id,
+                ProjectResponsible.department_id == row.department_id))
+            ).scalar_one_or_none()
+            if (rec is not None and rec.user_id != row.user_id
+                    and row.status != "replace"):
+                row.status = "skipped_taken"
+                row.detail = (f"user #{rec.user_id} was set since the plan was made; "
+                              "not overwritten (rerun the dry run)")
+                counts["skipped"] += 1
+                continue
         if row.add_membership:
             exists = (await session.execute(select(UserDepartment).where(
                 UserDepartment.user_id == row.user_id,
@@ -313,9 +337,6 @@ async def apply_plan(session: AsyncSession, plan: Plan,
         if row.status == "unchanged":
             counts["unchanged"] += 1
             continue
-        rec = (await session.execute(select(ProjectResponsible).where(
-            ProjectResponsible.project_id == row.project_id,
-            ProjectResponsible.department_id == row.department_id))).scalar_one_or_none()
         if rec is None:
             rec = ProjectResponsible(project_id=row.project_id,
                                      department_id=row.department_id)
@@ -368,7 +389,10 @@ async def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--user-id", action="append", default=[], metavar="NAME=ID")
     args = ap.parse_args(argv)
 
-    engine = create_async_engine(os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./plm.db"))
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        sys.exit("DATABASE_URL not set; run inside the PLM backend container.")
+    engine = create_async_engine(url)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with Session() as s:
@@ -385,7 +409,10 @@ async def main(argv: Optional[list[str]] = None) -> int:
             counts = await apply_plan(s, plan, args.actor_id)
             await s.commit()
             print(f"\nAPPLIED: {counts}")
-            return 0
+            skipped = [r for r in plan.rows if r.status == "skipped_taken"]
+            for r in skipped:
+                print(f" !! {r.project_token} {r.department}: {r.detail}")
+            return 2 if skipped else 0
     finally:
         await engine.dispose()
 

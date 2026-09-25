@@ -62,7 +62,7 @@ async def world(session_factory, seed):
         org = seed["org_id"]
         users = {
             "cody": await _user(s, org, "cody.hrtyanski"),
-            "russ": await _user(s, org, "russell.b", "Russell Brown"),
+            "russ": await _user(s, org, "russ.b", "Russ Brown"),
             "dale": await _user(s, org, "dale.perry"),
             "george": await _user(s, org, "george.k", "George Kim"),
             "apurva": await _user(s, org, "apurvam"),
@@ -103,7 +103,7 @@ async def test_dry_run_plans_everything_and_writes_nothing(session_factory, worl
     u, p = world["user"], world["proj"]
     assert got[("1994", "APQP")] == u["george"]
     assert got[("VW426", "APQP")] == u["apurva"]
-    assert got[("2277", "Manufacturing Engineer")] == u["russ"]      # Russ -> Russell (fuzzy)
+    assert got[("2277", "Manufacturing Engineer")] == u["russ"]      # Russ -> Russ Brown (name)
     assert got[("1994", "Development")] == u["christoph"]            # exact username wins
     assert {r.project_id for r in plan.rows if r.project_token == "1994"} == {p["1994"]}
     assert {r.project_id for r in plan.rows if r.project_token == "VW426"} == {p["1864"]}
@@ -134,7 +134,8 @@ async def test_apply_is_read_by_the_service_and_idempotent(session_factory, worl
         assert {r.status for r in again.rows} == {"unchanged"}
         counts = await mod.apply_plan(s, again)
         await s.commit()
-    assert counts == {"set": 0, "replace": 0, "unchanged": 15, "memberships": 0}
+    assert counts == {"set": 0, "replace": 0, "unchanged": 15, "memberships": 0,
+                      "skipped": 0}
     assert await _count(session_factory, ProjectResponsible) == 15
 
 
@@ -227,3 +228,56 @@ async def test_missing_user_reports_and_never_matches_inactive(session_factory, 
     pm = [r for r in plan.rows if r.department == "Project Manager"]
     assert {r.status for r in pm} == {"no_user"}
     assert all("inactive matches" in r.detail and "cody.hrtyanski" in r.detail for r in pm)
+
+
+async def test_fuzzy_user_blocks_apply_until_pinned(session_factory, world, monkeypatch,
+                                                    db_engine):
+    async with session_factory() as s:
+        russ = await s.get(User, world["user"]["russ"])
+        russ.username, russ.full_name = "russell.b", "Russell Brown"
+        await s.commit()
+    async with session_factory() as s:
+        plan = await mod.plan_team(s)
+    bad = plan.problems
+    assert {(r.project_token, r.department) for r in bad} == {
+        ("1994", "Manufacturing Engineer"), ("2277", "Manufacturing Engineer"),
+        ("VW426", "Manufacturing Engineer")}
+    assert all(r.status == "fuzzy_user" and "russell.b" in r.detail
+               and f"Russ={world['user']['russ']}" in r.detail for r in bad)
+
+    monkeypatch.setenv("DATABASE_URL", str(db_engine.url))
+    assert await mod.main(["--apply"]) == 2
+    assert await _count(session_factory, ProjectResponsible) == 0
+    assert await mod.main(["--apply", f"--user-id=Russ={world['user']['russ']}"]) == 0
+    async with session_factory() as s:
+        assert await ProjectTeamService.responsible_user_id(
+            s, world["proj"]["2277"], "Manufacturing Engineer") == world["user"]["russ"]
+
+
+async def test_apply_skips_a_row_taken_after_the_plan(session_factory, world):
+    u, d, p = world["user"], world["dept"], world["proj"]
+    async with session_factory() as s:
+        plan = await mod.plan_team(s)
+    assert not plan.problems
+    async with session_factory() as s:          # somebody sets a PM in the UI meanwhile
+        s.add(UserDepartment(user_id=u["christoph"], department_id=d["Project Manager"]))
+        s.add(ProjectResponsible(project_id=p["1994"], department_id=d["Project Manager"],
+                                 user_id=u["christoph"]))
+        await s.commit()
+    async with session_factory() as s:
+        counts = await mod.apply_plan(s, plan)
+        await s.commit()
+    assert counts["skipped"] == 1 and counts["set"] == 14
+    row = next(r for r in plan.rows
+               if (r.project_token, r.department) == ("1994", "Project Manager"))
+    assert row.status == "skipped_taken"
+    async with session_factory() as s:
+        assert await ProjectTeamService.responsible_user_id(
+            s, p["1994"], "Project Manager") == u["christoph"]
+
+
+async def test_no_database_url_is_an_error(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        await mod.main([])
+    assert "DATABASE_URL" in str(exc.value.code)

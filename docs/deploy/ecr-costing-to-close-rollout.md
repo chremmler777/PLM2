@@ -6,8 +6,8 @@ Status: PREPARED, NOT EXECUTED. Run only on the project owner's explicit
 
 Prod as of 2026-09-25: `/data/compose/plm2` at `f4b354e5`, alembic `086`
 (see the adminpanel runbook `docs/plm2-prod-deploy-runbook.md` §11, row
-2026-09-25). This rollout takes prod from `086` to `100` (or `101`, see
-below). Procedure and names follow that runbook §10 and the release note
+2026-09-25). This rollout takes prod from `086` to the branch head (`101` or `102`,
+see below). Procedure and names follow that runbook §10 and the release note
 `docs/handoff/project-worksheet-dfm-release.md` (main repo).
 
 Spec: `docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md`.
@@ -28,12 +28,12 @@ No new Python or npm dependencies (requirements.txt and package.json are
 unchanged against main). The image rebuild is still mandatory: code and
 migrations are baked into it.
 
-## Migrations 085 to 101
+## Migrations 085 to 102
 
 085 and 086 are already on prod (deployed 2026-09-25) and are listed for
 completeness. On Postgres the whole `alembic upgrade head` run is ONE
 transaction (`alembic/env.py`, no transaction_per_migration): if any step
-fails, nothing of 087..100 stays.
+fails, nothing of 087..head stays.
 
 | Rev | What it does | Data-touching | Downgrade risk |
 |---|---|---|---|
@@ -53,7 +53,8 @@ fails, nothing of 087..100 stays.
 | 098 | Rate snapshot on `costing_positions` (rate, currency, source, cost sheet version, match, date, detail, `labour_position`, `trials`, `machine_class_id`); on `assessment_cost_line` (currency, version, source); `change_requests.machine_class_id`; on `implementation_bookings` (`labour_position`, `machine_class_id`, `machine_hours`). Data fix: an org with `department_rate` rows but no cost sheet version gets version 1 (valid from its earliest rate, 2020-01-01 when undated), in the plant currency. | Yes (INSERT version and rates only where an org has none) | Drops the columns: priced snapshots lost (lines go back to live pricing). The version created by the fix stays. |
 | 099 | `costing_positions.rate_currency` (backfilled from `currency` where a snapshot exists); clears `rate_on` where `rate` is NULL; `assessment_cost_line.rate_snapshot` becomes nullable. | Yes (UPDATE costing_positions; raw SQL, but no booleans, so dialect-safe) | Sets NULL `rate_snapshot` to 0 and makes it NOT NULL again (rate-less lines then read as priced at 0); drops `rate_currency`. |
 | 100 | Training: `training_versions`, `training_signoffs`, `training_attempts`. | No | Drops the three tables: all sign-offs and attempts lost. |
-| 101 | ONLY IF PRESENT at deploy time (another agent may add "actual cost currency"): expected to add a currency to `change_actual_costs`. Read it before the deploy: check whether it backfills existing rows (from the plant currency?) and whether its downgrade drops the column. Adjust the expected head below to `101`. | Read it | Read it |
+| 101 | ONLY IF PRESENT at deploy time (another agent may add "actual cost currency"): expected to add a currency to `change_actual_costs`. Read it before the deploy: check whether it backfills existing rows (from the plant currency?) and whether its downgrade drops the column. Adjust the expected head below. | Read it | Read it |
+| 101 or 102 | Toccoa plant currency set to USD explicitly (094's `US` / `USA` word match may miss `Toccoa, GA`). Takes the next free number after the actual cost currency migration, if that ships. | Yes (UPDATE the Toccoa `plants` row) | Read it: a downgrade may leave the currency as set. |
 
 Summary: nothing drops or rewrites existing business data except 093
 (origin backfill), 094 (plant currencies, cost sheet rebuild), 095
@@ -95,12 +96,12 @@ Add to the prod `plm2-backend` environment (back up the compose file first):
 
 1. Branch merged to main on the owner's go (no merge is part of this
    document). Check the tree is complete: `alembic heads` shows one head
-   (`100`, or `101`).
+   (`101` or `102`, see the migration table).
 2. Full suites on a clean checkout of the merge commit: backend
    `python -m pytest -q` (xdist), frontend `npx vitest run`, `npx tsc
    --noEmit`. Record the counts in the deploy log.
 3. Prefill script test: `python -m pytest tests/test_prefill_project_team.py
-   -n 0 -q` (8 tests).
+   -n 0 -q` (11 tests).
 
 ## Prod steps
 
@@ -123,9 +124,14 @@ docker exec compose-plm2-db-1 psql -U plm -d plm -c "select count(*) from parts;
 What to look for:
 
 - Plants: 094 sets USD only when location, name or code contains the word
-  `US` / `USA` or `UNITED STATES`. If the Toccoa row reads e.g. `Toccoa, GA`
-  it becomes EUR: then Finance sets USD on the cost sheet page right after
-  the deploy (rates keep their numbers either way; nothing is converted).
+  `US` / `USA` or `UNITED STATES`, so a Toccoa row that reads e.g.
+  `Toccoa, GA` would become EUR. A new migration on this branch (101 or
+  102, whichever number is free) sets the Toccoa plant currency to USD
+  explicitly, so this no longer depends on the word match. Verify after the
+  migration (step 3 on `plm_scratch`, step 4 on prod) with
+  `select id, name, code, location, currency from plants order by id;`:
+  Toccoa must read `USD`. If it does not, stop and check that migration is
+  in the build (rates keep their numbers either way; nothing is converted).
   Silao (Mexico) becomes EUR: Finance decides the currency.
 - Department rates: note which departments have a Toccoa rate. There is no
   Project Manager rate today (see the Finance to-do).
@@ -134,15 +140,18 @@ What to look for:
   `Finance` is created by 092 if missing.
 - Keep the counts for the post-deploy comparison.
 
-### 1. Back up the DB
+### 1. Back up the compose file (and optionally an early DB copy)
 
 ```bash
-docker exec compose-plm2-db-1 pg_dump -U plm -d plm | gzip \
-  > /data/compose/db-backups/plm2-before-ecr-costing-to-close-$(date +%Y%m%d-%H%M%S).sql.gz
+set -o pipefail
 cp /data/compose/docker-compose.yml /data/compose/docker-compose.yml.bak-$(date +%Y%m%d-%H%M%S)-plm2-ecr
+# optional early copy; NOT the rollback backup (users keep working until step 4)
+docker exec compose-plm2-db-1 pg_dump -U plm -d plm | gzip \
+  > /data/compose/db-backups/plm2-early-ecr-costing-to-close-$(date +%Y%m%d-%H%M%S).sql.gz
 ```
 
-Check the dump is not empty (`ls -l`, `zcat ... | head`).
+The authoritative backup is taken in step 4, after the backend is stopped,
+so it holds every write up to the outage.
 
 ### 2. Pull and build (no recreate yet)
 
@@ -163,8 +172,8 @@ time docker run --rm --network compose_ktx-net \
   <new plm2-backend image> alembic upgrade head
 ```
 
-Then on `plm_scratch`: `alembic_version` = `100` (or `101`), the counts from
-step 0 unchanged, `select id, name, currency from plants;` as expected,
+Then on `plm_scratch`: `alembic_version` = the head (`101` or `102`), the counts from
+step 0 unchanged, `select id, name, currency from plants;` with Toccoa `USD`,
 `select organization_id, version, status, valid_from, note from
 cost_sheet_versions order by 1, 2;` shows a published chain,
 `select count(*) from cost_sheet_rates;` greater than 0. Run the prefill dry
@@ -183,17 +192,27 @@ explicitly while the backend is stopped (short outage, announce it):
 
 ```bash
 cd /data/compose
+set -o pipefail
 docker compose stop plm2-backend
+# authoritative backup: backend stopped, nothing writes any more
+docker exec compose-plm2-db-1 pg_dump -U plm -d plm | gzip \
+  > /data/compose/db-backups/plm2-before-ecr-costing-to-close-$(date +%Y%m%d-%H%M%S).sql.gz \
+  && echo BACKUP OK
+ls -l /data/compose/db-backups/ | tail -3; zcat /data/compose/db-backups/plm2-before-ecr-costing-to-close-*.sql.gz | head -5
 docker compose run --rm --no-deps plm2-backend alembic upgrade head
-docker compose run --rm --no-deps plm2-backend alembic current     # must show 100 (head), or 101
+docker compose run --rm --no-deps plm2-backend alembic current     # must show the head (100, 101 or 102)
+docker exec compose-plm2-db-1 psql -U plm -d plm -c "select id, name, code, location, currency from plants order by id;"   # Toccoa = USD
 ```
+
+Do not run `alembic upgrade head` unless `BACKUP OK` was printed and the
+dump is not empty. Note the backup file name in the deploy log.
 
 Add the environment lines (section Environment) to the `plm2-backend` block
 now, then:
 
 ```bash
 docker compose up -d plm2-backend plm2-frontend
-docker exec compose-plm2-backend-1 alembic current                 # again: 100 / 101
+docker exec compose-plm2-backend-1 alembic current                 # again: the head
 docker exec compose-plm2-backend-1 printenv PLM_BUSINESS_TZ
 docker compose exec nginx nginx -s reload                          # new container IP
 docker exec compose-plm2-backend-1 python -c "from OCC.Core.STEPControl import STEPControl_Reader"   # prints nothing
@@ -285,19 +304,32 @@ card on the three projects.
    the P&L. Add the rate in a new draft version and publish it with the
    right valid-from date (lines priced earlier keep their snapshot; lines
    without a rate price live once the rate exists).
-3. Decide the Silao (Mexico) currency if Silao rates are used.
-4. If 101 ships: check the currency of any actual costs already entered.
+3. Toccoa plant currency: the new migration (101 or 102) sets it to USD
+   explicitly, because 094's `US` / `USA` word match may miss `Toccoa, GA`.
+   Confirm with the plants query (step 4) that Toccoa reads `USD`.
+4. Decide the Silao (Mexico) currency if Silao rates are used.
+5. If 101 ships: check the currency of any actual costs already entered.
 
 ## Rollback
 
 Decide by what broke.
 
-- Code only, schema fine (UI or API bug): `cd /data/compose/plm2 && git
-  checkout f4b354e5`, `docker compose up -d --build plm2-backend
-  plm2-frontend`, nginx reload. Every column 087..100 added to an existing
-  table is nullable or has a server default, so the old code runs on the new
-  schema; its startup `alembic upgrade head` only logs a warning about the
-  unknown revision. New tables sit unused. Revisions received since deploy
+- Code only, schema fine (UI or API bug): first make the old code's
+  assumption true again: at `f4b354e5` `assessment_cost_line.rate_snapshot`
+  is required (non-null), migration 099 made it nullable, so rate-less lines
+  written since the deploy would break the old code:
+
+  ```bash
+  docker exec compose-plm2-db-1 psql -v ON_ERROR_STOP=1 -U plm -d plm \
+    -c "UPDATE assessment_cost_line SET rate_snapshot = 0 WHERE rate_snapshot IS NULL;"
+  ```
+
+  Those lines then read as priced at 0 (not "No rate"); note the count the
+  UPDATE prints. Then `cd /data/compose/plm2 && git checkout f4b354e5`,
+  `docker compose up -d --build plm2-backend plm2-frontend`, nginx reload.
+  Every other column 087..102 added to an existing table is nullable or has
+  a server default, so the old code runs on the new schema; its startup
+  `alembic upgrade head` only logs a warning about the unknown revision. New tables sit unused. Revisions received since deploy
   may be `in_review`; set them active by hand if needed. Return to main
   afterwards (`git checkout main`).
 - Migration failed during step 4: nothing was applied (one transaction).
@@ -305,12 +337,16 @@ Decide by what broke.
   with the old image is not possible after the rebuild, so check out
   `f4b354e5` and rebuild as above.
 - Data wrong after migration (cost sheet, currencies, origins): restore the
-  backup rather than downgrade; the downgrades lose data (table above).
+  backup rather than downgrade; the downgrades lose data (table above). Use
+  the authoritative backup from step 4
+  (`plm2-before-ecr-costing-to-close-<ts>.sql.gz`), not the optional early
+  copy from step 1.
 
   ```bash
+  set -o pipefail
   docker compose stop plm2-backend
-  docker exec compose-plm2-db-1 psql -U plm -d postgres -c "drop database plm;" -c "create database plm owner plm;"
-  zcat /data/compose/db-backups/plm2-before-ecr-costing-to-close-<ts>.sql.gz | docker exec -i compose-plm2-db-1 psql -U plm -d plm
+  docker exec compose-plm2-db-1 psql -v ON_ERROR_STOP=1 -U plm -d postgres -c "drop database plm;" -c "create database plm owner plm;"
+  zcat /data/compose/db-backups/plm2-before-ecr-costing-to-close-<ts>.sql.gz | docker exec -i compose-plm2-db-1 psql -v ON_ERROR_STOP=1 -U plm -d plm
   cd /data/compose/plm2 && git checkout f4b354e5 && cd .. && docker compose up -d --build plm2-backend plm2-frontend
   docker exec compose-plm2-backend-1 alembic current                 # 086
   docker compose exec nginx nginx -s reload
