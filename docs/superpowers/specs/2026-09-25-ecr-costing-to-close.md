@@ -867,7 +867,10 @@ build planning and implementation.
 - **Origin**: `change_requests.origin` String(20) `customer` | `internal` |
   `mother_plant` (migration after the ones in flight; backfill from
   customer_relevant), plus `mother_plant_name` String(120),
-  `mother_plant_ref` String(120), `mother_plant_sop` Date. `customer_relevant`
+  `mother_plant_ref` String(120), `mother_plant_sop` Date.
+  Mother plants are a dropdown, default **KTX Weissenburg (WUG)**, second
+  option **KTX Solingen** (rare); stored as the name string, list in config
+  (`app/services/mother_plants.py`) so more can be added. `customer_relevant`
   stays false for mother-plant changes (no quote deadline, no offer).
 - **Start**: StartChangeModal option "Change from mother plant": name,
   reference, SOP date (required), documents, optional MS Project file for
