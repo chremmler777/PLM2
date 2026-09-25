@@ -216,4 +216,45 @@ describe('PnlPage', () => {
     renderPage()
     expect(await screen.findByText('2 changes, incl. internal budgets')).toBeDefined()
   })
+
+  it('shows every amount in its own currency, no margin across currencies', async () => {
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[0], change_id: 15, change_number: 'CR-15', currency: 'USD',
+        revenue_currency: 'USD', offer_revenue: null, revenue: null, pending_price: true,
+        planned_cost: 3175, planned_margin: null, actual_cost: null, actual_margin: null,
+        variance: null, no_rate: true,
+        warnings: [{ code: 'no_rate', message: 'Costing lines without a rate' }] },
+      { ...rowsFixture[0], change_id: 16, change_number: 'CR-16', currency: 'USD',
+        revenue_currency: 'EUR', currency_mismatch: true, offer_revenue: 1000,
+        planned_cost: 400, planned_margin: null, margin: null, actual_cost: null,
+        actual_margin: null, variance: null },
+    ] })
+    renderPage()
+    const row15 = (await screen.findByText('CR-15')).closest('tr')!
+    expect(row15.textContent).toContain('3.175,00 USD')
+    expect(row15.textContent).not.toContain('EUR')
+    expect(screen.getByTestId('pnl-no-rate-15')).toBeDefined()
+    const row16 = screen.getByText('CR-16').closest('tr')!
+    expect(row16.textContent).toContain('1.000,00 EUR')
+    expect(row16.textContent).toContain('400,00 USD')
+    expect(screen.getByTestId('pnl-currency-mismatch-16').textContent).toBe('EUR vs USD: no margin')
+  })
+
+  it('groups the summary by currency: one block of tiles per currency', async () => {
+    summaryMock.mockResolvedValueOnce({
+      ...summaryFixture, currency: 'EUR', currencies: ['EUR', 'USD'],
+      by_currency: {
+        EUR: summaryFixture,
+        USD: { ...summaryFixture, count: 1,
+          totals: { ...summaryFixture.totals, planned_cost: 3175, no_rate_count: 1 } },
+      },
+    })
+    renderPage()
+    const usd = await screen.findByTestId('pnl-summary-USD')
+    expect(usd.textContent).toContain('3.175,00 USD')
+    expect(usd.textContent).not.toContain('EUR')
+    expect(screen.getByTestId('pnl-summary-EUR').textContent).toContain('100.000,00 EUR')
+    expect(screen.getByTestId('pnl-summary-notes-USD').textContent)
+      .toContain('without a rate in the cost sheet')
+  })
 })

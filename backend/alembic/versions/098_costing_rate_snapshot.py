@@ -17,8 +17,10 @@
   effective_from lost its migrated version there (094 deleted 092's single
   version and built one per dated effective_from; with no dates, none).
   Here: an org with department_rate rows and no cost sheet version at all
-  gets version 1, published, valid from 2020-01-01 (fixed: the rows carry
-  no date), latest row per department x plant, currency of the plant.
+  gets version 1, published, valid from the earliest effective_from over ALL
+  of the org's rows (so every booking since the first rate is priced;
+  2020-01-01 when no row carries a date), with the latest row per
+  department x plant, in the currency of the plant.
   Safe on a DB where 094 went fine: orgs that have any version are skipped.
 
 Dialect-neutral; FK columns via batch mode (SQLite recreates the table).
@@ -161,7 +163,10 @@ def _version_for_undated_orgs(bind) -> None:
             cur = picked.get(key)
             if cur is None or rank > (cur.effective_from or date.min, cur.id):
                 picked[key] = r
-        dates = [r.effective_from for r in picked.values() if r.effective_from]
+        # valid from the org's EARLIEST rate, not the earliest of the rows
+        # kept: a rate superseded later still priced the time before it.
+        dates = [r.effective_from for r in rows
+                 if r.organization_id == org_id and r.effective_from]
         valid_from = min(dates) if dates else UNDATED_VALID_FROM
         bind.execute(versions.insert().values(
             organization_id=org_id, version=1, status="published", valid_from=valid_from,

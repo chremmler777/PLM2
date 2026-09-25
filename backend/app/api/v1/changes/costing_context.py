@@ -42,12 +42,18 @@ async def set_machine_class(change_id: int, body: MachineClassIn,
                             current_user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
     change = await _change(db, change_id, current_user)
+    if not costing_rates.machine_class_open(change, current_user):
+        raise HTTPException(status_code=409,
+                            detail="The machine class can only be changed while the "
+                                   "change is in costing")
     if not await costing_rates.may_set_machine_class(db, change, current_user):
         raise HTTPException(status_code=403,
                             detail="Only Project Management, an admin or a department "
                                    "costing this change may set its machine class")
     try:
         await costing_rates.set_machine_class(db, change, body.machine_class_id, current_user)
+    except costing_rates.MachineClassLocked as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()

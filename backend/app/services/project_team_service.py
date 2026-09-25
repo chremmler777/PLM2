@@ -187,11 +187,19 @@ class ProjectTeamService:
                        department_id: Optional[int], user_id: int) -> Optional[dict]:
         """{"user_id", "name"} of the responsible this user stands in for when
         they act on the department's work on this project, or None (no
-        responsible, or the user IS the responsible)."""
+        responsible, the user IS the responsible, or the user is not a member
+        of the department at all: an admin, the PM or the change lead acting
+        from outside is nobody's backup)."""
         if department_id is None:
             return None
         resp = await _responsible(session, project_id, department_id)
         if resp is None or resp[0] == user_id:
+            return None
+        member = (await session.execute(
+            select(UserDepartment.user_id).where(
+                UserDepartment.user_id == user_id,
+                UserDepartment.department_id == department_id))).first() is not None
+        if not member:
             return None
         return {"user_id": resp[0], "name": resp[1], "department_id": department_id}
 

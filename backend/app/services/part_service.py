@@ -564,6 +564,12 @@ class RevisionService:
 
         old_status = revision.status
 
+        # A customer index rejected while pending closed its intake: the
+        # intake reopens with it (pending, audited), or the restore is
+        # refused while the intake still names a change.
+        from app.services.revision_intake_service import RevisionIntakeService
+        await RevisionIntakeService.on_revision_unrejected(session, revision, created_by)
+
         # Restore to DRAFT for proposals, or IN_PROGRESS for majors
         if revision.parent_revision_id:
             revision.status = RevisionStatus.DRAFT.value

@@ -249,3 +249,92 @@ async def test_notify_team_without_responsible_is_todays_behaviour(session_facto
         await s.commit()
         bodies = [r.body for r in (await s.execute(select(Notification))).scalars()]
     assert bodies == ["B", "B"]
+
+
+# --- review fixes: recipients, stand-in, badge count ---------------------------
+
+async def test_notify_team_default_recipients_are_active_members_of_the_org(
+        session_factory, seed, team):
+    from app.models.entities import Organization
+    from app.services.notification_service import NotificationService
+    sales = team["dept"]["Sales"]
+    async with session_factory() as s:
+        (await s.get(User, team["user"]["sales.two"])).is_active = False
+        other = Organization(name="Other", code="other-org", is_active=True)
+        s.add(other); await s.flush()
+        u = User(organization_id=other.id, username="sales.far", email="sales.far@test.io",
+                 full_name="Sales Far", hashed_password=get_password_hash("team-secret-1"),
+                 role="engineer", is_active=True, mfa_enabled=False)
+        s.add(u); await s.flush()
+        s.add(UserDepartment(user_id=u.id, department_id=sales))
+        await s.commit()
+        n = await NotificationService.notify_team(
+            s, seed["project_id"], [sales], title="T", body="B")
+        await s.commit()
+        got = sorted(r.user_id for r in (await s.execute(select(Notification))).scalars())
+    assert n == 1 and got == [team["user"]["sales.one"]]
+
+
+async def test_stand_in_only_for_members_and_new_value_keeps_its_shape(
+        session_factory, seed, team, client):
+    from app.models.change import ChangeRequest
+    from app.services.change_service import ChangeService
+    from app.services.project_team_service import ProjectTeamService
+    dev = team["dept"]["Development"]
+    await _set_responsible(session_factory, seed["project_id"], dev, team["user"]["development.one"])
+    cid = await _change_in(client, session_factory, seed, "costing")
+    async with session_factory() as s:
+        # an admin (or PM, lead) outside Development is nobody's backup
+        assert await ProjectTeamService.stand_in(
+            s, seed["project_id"], dev, seed["admin_id"]) is None
+        assert await ProjectTeamService.stand_in(
+            s, seed["project_id"], dev, team["user"]["project.one"]) is None
+        change = await s.get(ChangeRequest, cid)
+        admin_entry = await ChangeService.append_changelog(
+            s, change, "x", "d", seed["admin_id"], new_value={"a": 1},
+            for_department_id=dev)
+        scalar = await ChangeService.append_changelog(
+            s, change, "x", "d", team["user"]["development.two"], new_value=12.5,
+            for_department_id=dev)
+        empty = await ChangeService.append_changelog(
+            s, change, "x", "d", team["user"]["development.two"],
+            for_department_id=dev)
+        await s.commit()
+    assert json.loads(admin_entry.new_value) == {"a": 1} and admin_entry.notes is None
+    # a scalar stays the scalar; the stand-in is in the notes
+    assert json.loads(scalar.new_value) == 12.5
+    assert scalar.notes == "Development Two for Development One"
+    assert empty.new_value is None and empty.notes == "Development Two for Development One"
+
+
+async def test_open_task_count_is_the_badge_number(client, seed, team, session_factory):
+    pm = team["dept"]["Project Manager"]
+    cid = await _change_in(client, session_factory, seed, "scoping")
+
+    async def count(email):
+        res = await client.get("/api/v1/workflow-instances/open-task-count",
+                               headers=await login(client, email))
+        assert res.status_code == 200, res.text
+        return res.json()["count"]
+
+    async def badge(email):
+        h = await login(client, email)
+        wf = (await client.get("/api/v1/workflow-instances/my-tasks", headers=h)).json()
+        ch = (await client.get("/api/v1/changes/my-tasks", headers=h)).json()
+        it = (await client.get("/api/v1/intakes/my", headers=h)).json()
+        fin = (await client.get("/api/v1/cost-sheet/review-task", headers=h)).json()
+        folded = {}
+        for r in ch:
+            k = (r["change_id"], r["kind"], r.get("department_id"))
+            folded[k] = folded.get(k, True) and r.get("role") == "backup"
+        return (sum(1 for r in wf if r.get("role") != "backup")
+                + sum(1 for b in folded.values() if not b)
+                + sum(1 for r in it["triage"] + it["review"] if r.get("role") != "backup")
+                + (1 if fin["due"] else 0))
+
+    one = await count("project.one@test.io")
+    assert one >= 1 and one == await badge("project.one@test.io")
+    await _set_responsible(session_factory, seed["project_id"], pm, team["user"]["project.one"])
+    two = await count("project.two@test.io")
+    assert two == await badge("project.two@test.io") and two == one - len(
+        await _rows(client, "project.two@test.io", "scoping_wrapup", cid))

@@ -740,19 +740,10 @@ class WorkflowService:
 
         # Project team (spec 2026-09-25): a task's department may have a
         # responsible on the task's project -- everyone else active in the
-        # department is a backup there. Cached per (project_id, department_id)
-        # since many tasks share the same pair.
-        from app.services.project_team_service import ProjectTeamService
-        role_cache: dict[tuple[int, int], tuple[str, Optional[str]]] = {}
-
-        async def _role(project_id: int, department_id: int) -> tuple[str, Optional[str]]:
-            key = (project_id, department_id)
-            if key not in role_cache:
-                role = await ProjectTeamService.role_for_user(
-                    db, project_id, department_id, user_id)
-                main_name = await ProjectTeamService.main_name(db, project_id, department_id)
-                role_cache[key] = (role, main_name)
-            return role_cache[key]
+        # department is a backup there. TeamRoles caches the responsible per
+        # (project, department), the same resolver every task list uses.
+        from app.services.project_team_service import TeamRoles
+        roles = TeamRoles(db, user_id)
 
         results = []
         for t in tasks:
@@ -760,10 +751,9 @@ class WorkflowService:
             revision = instance.part_revision
             part = revision.part
             stage = t.step.stage
-            role, main_name = await _role(part.project_id, t.department_id)
-            if t.owner_id == user_id:
-                # A task the viewer took is theirs, backup or not.
-                role, main_name = "main", None
+            # A task the viewer took is theirs, backup or not.
+            role, main_name = await roles.role(part.project_id, t.department_id,
+                                               owned=t.owner_id == user_id)
             results.append({
                 "task_id": t.id,
                 "instance_id": t.instance_id,

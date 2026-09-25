@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import FormPanel from '../forms/FormPanel';
 import IntakeSection from '../components/intake/IntakeSection';
 import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
+import { useMyTaskCounts } from '../hooks/queries/useOpenTaskCount';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -558,11 +559,21 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
   );
 }
 
+/** The badge's number: every main row on this page, sections included. */
+function MyTasksTotal() {
+  const { total } = useMyTaskCounts();
+  return (
+    <span data-testid="my-tasks-total" className="text-slate-400 font-normal">({total})</span>
+  );
+}
+
 export default function MyTasksPage() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-100">My Tasks</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
+          My Tasks <MyTasksTotal />
+        </h1>
         <p className="text-slate-400 text-sm mt-1">{t('tasks.subtitle')}</p>
       </div>
 

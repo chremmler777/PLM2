@@ -92,7 +92,8 @@ class AssessmentCostLine(Base):
     activity_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     cost_kind: Mapped[str] = mapped_column(String(20), default="one_time")
     demand_hours: Mapped[float] = mapped_column(Float, default=0.0)
-    rate_snapshot: Mapped[float] = mapped_column(Float, default=0.0)
+    # None = no rate was found when the line was priced (099): never 0.
+    rate_snapshot: Mapped[float | None] = mapped_column(Float, nullable=True)
     internal_cost: Mapped[float] = mapped_column(Float, default=0.0)
     external_cost: Mapped[float] = mapped_column(Float, default=0.0)
     # Lifecycle lines price the change per part: minutes added (or, negative,
@@ -160,11 +161,15 @@ class CostingPosition(Base):
     # The rate snapshot, written when the line is priced (created, or its
     # pricing inputs changed) and read by the summation from then on, so a
     # later cost sheet version never moves a costed line under its owner.
-    # rate None with rate_on set = looked up and NOT found ("cannot price",
-    # never 0). currency is the line's currency (the costing plant's).
+    # rate_on None = no snapshot: never priced, or no rate was found when
+    # it was (priced live then, "cannot price", never 0). currency is the
+    # money currency of the line (est_cost, offers: the costing plant's);
+    # rate_currency the currency of the rate (099), which the cost sheet row
+    # may state differently.
     rate: Mapped[float | None] = mapped_column(
         Numeric(12, 2, asdecimal=False), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    rate_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     rate_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     cost_sheet_version_id: Mapped[int | None] = mapped_column(
         ForeignKey("cost_sheet_versions.id"), nullable=True)

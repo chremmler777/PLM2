@@ -246,7 +246,9 @@ async def test_summary_shape_and_totals(session_factory, seed, pnl_data):
             s["totals"]["revenue"] - s["totals"]["total_cost"])
         assert set(s["by_branch"]) == {"customer", "internal"}
         assert set(s.keys()) == {
-            "totals", "pipeline", "realized", "by_project", "by_branch", "count"}
+            "totals", "pipeline", "realized", "by_project", "by_branch", "count",
+        # grouped by costing currency (no FX): the top level is the main one
+        "currency", "currencies", "by_currency"}
         # cust(quoted) + internal(costing) + approved(approved) + org B's
         # change (admin bypasses org scoping) all in scope.
         assert s["count"] == 4

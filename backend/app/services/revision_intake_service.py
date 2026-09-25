@@ -347,6 +347,54 @@ class RevisionIntakeService:
                                 f"closed without activation"),
             performed_by=user_id, new_value="rejected")
 
+    @staticmethod
+    async def on_revision_unrejected(session: AsyncSession, rev: PartRevision,
+                                     user_id: Optional[int]) -> None:
+        """The rejected index is restored: an intake that its rejection
+        closed opens again as pending (waiting for Development's triage,
+        audited), unless it still names a change (refused: that link has to
+        be settled first) or a newer index superseded it meanwhile."""
+        from app.services.part_service import ChangelogService
+        intake = (await session.execute(
+            select(RevisionIntake).where(RevisionIntake.revision_id == rev.id)
+        )).scalar_one_or_none()
+        if intake is None or intake.status != "rejected" \
+                or intake.activated_at is not None:
+            return
+        if intake.change_id is not None:
+            change = await session.get(ChangeRequest, intake.change_id)
+            if change is not None and not _change_is_dead(change):
+                raise IntakeError(
+                    f"Index {rev.revision_name} is still linked to "
+                    f"{change.change_number}: remove it from that change before "
+                    f"restoring the index")
+        if intake.superseded_by_id is not None:
+            raise IntakeError(
+                f"Index {rev.revision_name} was superseded by a newer index: "
+                f"it cannot be restored")
+        other = await RevisionIntakeService.waiting_for_part(session, intake.part_id)
+        if other is not None and other.id != intake.id:
+            raise IntakeError(
+                f"Another index of this part is waiting for triage: settle it "
+                f"before restoring {rev.revision_name}")
+        intake.change_id = None
+        intake.status = "pending"
+        intake.route = None
+        intake.decided_by = None
+        intake.decided_at = None
+        await session.flush()
+        await ChangelogService.log_action(
+            session, part_id=intake.part_id, revision_id=rev.id,
+            action="intake_reopened",
+            action_description=(f"Index {rev.revision_name} restored: its intake "
+                                f"waits for triage again"),
+            performed_by=user_id, old_value="rejected", new_value="pending")
+        await RevisionIntakeService._notify_development(
+            session, intake, user_id,
+            title=f"Triage again: index {rev.revision_name}",
+            body="The rejected index was restored and needs a route",
+            subject_key=f"intake:{intake.id}:reopened:{datetime.utcnow().isoformat()}")
+
     # ------------------------------------------------------------------
     # Activation (shared with ChangeService.release)
     # ------------------------------------------------------------------

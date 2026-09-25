@@ -17,10 +17,13 @@ import type { ChangeStatus } from '../types/change';
 import { formatMoney } from '../lib/format';
 import DateInput from '../components/gantt/DateInput';
 import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
-import type { PnlAggregate, PnlBranch, PnlStatusGroup, PnlFilters, PnlRow } from '../types/pnl';
+import type {
+  PnlAggregate, PnlBranch, PnlStatusGroup, PnlFilters, PnlRow, PnlSummary, PnlSummaryBlock,
+} from '../types/pnl';
 
-const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v);
+/** Money always with its currency: amounts in different currencies are never added. */
+const fmtMoney = (v: number | null | undefined, currency?: string | null) =>
+  v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, currency);
 
 const fmtPct = (v: number | null | undefined) =>
   v === null || v === undefined ? '-' : `${v.toFixed(1)}%`;
@@ -58,11 +61,11 @@ function pricedLine(t: PnlAggregate, count: number): string {
 }
 
 /** Actual cost tile: the expected end cost next to what is booked. */
-function actualCostLine(t: PnlAggregate): string {
+function actualCostLine(t: PnlAggregate, currency?: string): string {
   const c = t.actual_count ?? 0;
   const n = `${c} change${c === 1 ? '' : 's'} with hours, invoices or issue costs`;
   return t.forecast_cost !== undefined && differs(t.forecast_cost, t.actual_cost)
-    ? `forecast ${fmtMoney(t.forecast_cost)}; ${n}` : n;
+    ? `forecast ${fmtMoney(t.forecast_cost, currency)}; ${n}` : n;
 }
 
 function sortRows(rows: PnlRow[], key: SortKey, dir: 1 | -1): PnlRow[] {
@@ -108,7 +111,9 @@ function Tile({ title, value, sub, subClassName, accent = 'text-slate-100' }: {
  * the changes in that group. The plan (offer revenue, planned cost and
  * margin) always; the actuals once any change in the group has some.
  */
-function SplitCard({ title, agg }: { title: string; agg: PnlAggregate }) {
+function SplitCard({ title, agg, currency }: {
+  title: string; agg: PnlAggregate; currency?: string
+}) {
   const revenue = agg.offer_revenue ?? agg.revenue;
   const planned = agg.planned_cost ?? agg.total_cost;
   const plannedMargin = agg.planned_margin ?? agg.margin;
@@ -125,15 +130,15 @@ function SplitCard({ title, agg }: { title: string; agg: PnlAggregate }) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4" data-testid={`split-${title.toLowerCase()}`}>
       <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">{title}</div>
-      {line('Offer revenue', fmtMoney(revenue))}
-      {line('Planned cost', fmtMoney(planned))}
+      {line('Offer revenue', fmtMoney(revenue, currency))}
+      {line('Planned cost', fmtMoney(planned, currency))}
       {line('Planned margin',
-        `${fmtMoney(plannedMargin)} (${fmtPct(agg.planned_margin !== undefined ? pct(plannedMargin, revenue) : agg.margin_pct)})`,
+        `${fmtMoney(plannedMargin, currency)} (${fmtPct(agg.planned_margin !== undefined ? pct(plannedMargin, revenue) : agg.margin_pct)})`,
         marginAccent(plannedMargin))}
       {hasActual && (
         <div className="mt-2 pt-2 border-t border-slate-700/70 space-y-0.5">
-          {line('Actual cost', fmtMoney(agg.actual_cost))}
-          {line('Actual margin', `${fmtMoney(actualMargin)}${agg.forecast_margin !== undefined ? ' forecast' : ''}`,
+          {line('Actual cost', fmtMoney(agg.actual_cost, currency))}
+          {line('Actual margin', `${fmtMoney(actualMargin, currency)}${agg.forecast_margin !== undefined ? ' forecast' : ''}`,
             marginAccent(actualMargin))}
         </div>
       )}
@@ -142,6 +147,98 @@ function SplitCard({ title, agg }: { title: string; agg: PnlAggregate }) {
       )}
     </div>
   );
+}
+
+/**
+ * The summary tiles for one costing currency. A portfolio in several
+ * currencies gets one block per currency: amounts are never added across
+ * currencies (no FX), and changes whose revenue is in another currency than
+ * their costing carry no margin and are only counted.
+ */
+function SummaryBlock({ block, currency, heading }: {
+  block: PnlSummaryBlock; currency?: string; heading?: boolean
+}) {
+  const t = block.totals;
+  const notes = [
+    (t.mismatch_count ?? 0) > 0
+      && `${t.mismatch_count} change${t.mismatch_count === 1 ? '' : 's'} with the revenue in another currency: no margin, not in the sums`,
+    (t.no_rate_count ?? 0) > 0
+      && `${t.no_rate_count} change${t.no_rate_count === 1 ? '' : 's'} with costing lines without a rate in the cost sheet: the cost is too low`,
+  ].filter(Boolean) as string[];
+  return (
+    <div data-testid={`pnl-summary-${currency ?? 'all'}`} className="mb-6">
+      {heading && (
+        <h2 className="text-sm font-semibold text-slate-300 mb-2">
+          {currency} <span className="font-normal text-slate-500">({block.count} change{block.count === 1 ? '' : 's'})</span>
+        </h2>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+        <Tile
+          title="Offer revenue"
+          value={fmtMoney(t.offer_revenue ?? t.revenue, currency)}
+          sub={pricedLine(t, block.count)}
+          subClassName="text-[10px] text-slate-500"
+        />
+        <Tile
+          title="Planned cost"
+          value={fmtMoney(t.planned_cost ?? t.total_cost, currency)}
+          sub="internal hours x rate, external, scrap"
+        />
+        <Tile
+          title="Planned margin"
+          value={fmtMoney(t.planned_margin ?? t.margin, currency)}
+          accent={marginAccent(t.planned_margin ?? t.margin)}
+          sub={`on the plan frozen at acceptance`}
+        />
+        <Tile
+          title="Late"
+          value={t.late_count ?? 0}
+          sub={t.max_slip_days ? `worst slip ${t.max_slip_days} days` : 'no slip'}
+          accent={(t.late_count ?? 0) > 0 ? 'text-rose-300' : 'text-slate-100'}
+        />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <Tile
+          title="Actual cost"
+          value={fmtMoney(t.actual_cost, currency)}
+          sub={actualCostLine(t, currency)}
+        />
+        <Tile
+          title="Actual margin"
+          value={fmtMoney(t.forecast_margin ?? t.actual_margin, currency)}
+          accent={marginAccent(t.forecast_margin ?? t.actual_margin)}
+          sub={`forecast, to date ${fmtMoney(t.actual_margin, currency)}${
+            t.actual_revenue !== undefined ? ` on ${fmtMoney(t.actual_revenue, currency)} revenue` : ''}`}
+        />
+        <Tile
+          title="Variance"
+          value={fmtMoney(t.variance, currency)}
+          sub="actual minus planned margin, changes with actuals"
+          accent={t.variance === undefined ? 'text-slate-100'
+            : t.variance < -0.005 ? 'text-rose-300' : 'text-emerald-400'}
+        />
+      </div>
+      {notes.length > 0 && (
+        <ul data-testid={`pnl-summary-notes-${currency ?? 'all'}`}
+          className="mb-3 space-y-0.5 text-xs text-amber-300">
+          {notes.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      )}
+      {/* Pipeline vs. Realized */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <SplitCard title="Pipeline" agg={block.pipeline} currency={currency} />
+        <SplitCard title="Realized" agg={block.realized} currency={currency} />
+      </div>
+    </div>
+  );
+}
+
+/** One block per currency, the main currency first; a single block otherwise. */
+function summaryBlocks(summary: PnlSummary): { currency?: string; block: PnlSummaryBlock }[] {
+  const byCur = summary.by_currency ?? {};
+  const order = summary.currencies ?? Object.keys(byCur);
+  if (order.length <= 1) return [{ currency: summary.currency ?? order[0], block: summary }];
+  return order.filter((c) => byCur[c]).map((c) => ({ currency: c, block: byCur[c] }));
 }
 
 function useProjects() {
@@ -200,7 +297,7 @@ export default function PnlPage() {
     queryKey: ['pnl', 'changes', ...filterKey],
     queryFn: () => pnlApi.changes(filters),
   });
-  const rows = changesData?.rows ?? [];
+  const rows = useMemo(() => changesData?.rows ?? [], [changesData]);
   const [sortKey, setSortKey] = useState<SortKey>('change_number');
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const sorted = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
@@ -300,58 +397,10 @@ export default function PnlPage() {
         <div className="text-sm text-slate-400 mb-6">Loading…</div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <Tile
-              title="Offer revenue"
-              value={fmtMoney(summary.totals.offer_revenue ?? summary.totals.revenue)}
-              sub={pricedLine(summary.totals, summary.count)}
-              subClassName="text-[10px] text-slate-500"
-            />
-            <Tile
-              title="Planned cost"
-              value={fmtMoney(summary.totals.planned_cost ?? summary.totals.total_cost)}
-              sub="internal hours x rate, external, scrap"
-            />
-            <Tile
-              title="Planned margin"
-              value={fmtMoney(summary.totals.planned_margin ?? summary.totals.margin)}
-              accent={marginAccent(summary.totals.planned_margin ?? summary.totals.margin)}
-              sub={`on the plan frozen at acceptance`}
-            />
-            <Tile
-              title="Late"
-              value={summary.totals.late_count ?? 0}
-              sub={summary.totals.max_slip_days ? `worst slip ${summary.totals.max_slip_days} days` : 'no slip'}
-              accent={(summary.totals.late_count ?? 0) > 0 ? 'text-rose-300' : 'text-slate-100'}
-            />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <Tile
-              title="Actual cost"
-              value={fmtMoney(summary.totals.actual_cost)}
-              sub={actualCostLine(summary.totals)}
-            />
-            <Tile
-              title="Actual margin"
-              value={fmtMoney(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
-              accent={marginAccent(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
-              sub={`forecast, to date ${fmtMoney(summary.totals.actual_margin)}${
-                summary.totals.actual_revenue !== undefined ? ` on ${fmtMoney(summary.totals.actual_revenue)} revenue` : ''}`}
-            />
-            <Tile
-              title="Variance"
-              value={fmtMoney(summary.totals.variance)}
-              sub="actual minus planned margin, changes with actuals"
-              accent={summary.totals.variance === undefined ? 'text-slate-100'
-                : summary.totals.variance < -0.005 ? 'text-rose-300' : 'text-emerald-400'}
-            />
-          </div>
-
-          {/* Pipeline vs. Realized */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-            <SplitCard title="Pipeline" agg={summary.pipeline} />
-            <SplitCard title="Realized" agg={summary.realized} />
-          </div>
+          {summaryBlocks(summary).map(({ currency, block }, _i, all) => (
+            <SummaryBlock key={currency ?? 'all'} block={block} currency={currency}
+              heading={all.length > 1} />
+          ))}
         </>
       )}
 
@@ -378,6 +427,9 @@ export default function PnlPage() {
             <tbody>
               {sorted.map((r) => {
                 const tone = varianceTone(r.variance, r.planned_margin, 1);
+                // costs and margins in the costing currency, the revenue in its own
+                const cur = r.currency;
+                const rcur = r.revenue_currency ?? r.currency;
                 return (
                 <tr key={r.change_id} className="border-t border-slate-700 hover:bg-slate-800/60">
                   <td className="px-2 py-2.5 font-mono whitespace-nowrap">
@@ -408,22 +460,30 @@ export default function PnlPage() {
                         </span>
                       </span>
                     ) : (
-                      <span className="text-slate-100">{fmtMoney(r.offer_revenue ?? r.revenue)}</span>
+                      <span className="text-slate-100">{fmtMoney(r.offer_revenue ?? r.revenue, rcur)}</span>
                     )}
                     {differs(r.actual_revenue, r.offer_revenue ?? r.revenue) && (
                       <div data-testid={`pnl-actual-revenue-${r.change_id}`} className="text-[10px] text-slate-500"
                         title="Revenue with the validation issue costs billed to the customer">
-                        actual {fmtMoney(r.actual_revenue)}
+                        actual {fmtMoney(r.actual_revenue, rcur)}
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">{fmtMoney(r.planned_cost ?? r.total_cost)}</td>
                   <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
-                    {fmtMoney(r.actual_cost)}
+                    {fmtMoney(r.planned_cost ?? r.total_cost, cur)}
+                    {r.no_rate && (
+                      <div data-testid={`pnl-no-rate-${r.change_id}`} className="text-[10px] text-amber-300"
+                        title={r.warnings?.find((w) => w.code === 'no_rate')?.message}>
+                        no rate, too low
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
+                    {fmtMoney(r.actual_cost, cur)}
                     {differs(r.forecast_cost, r.actual_cost) && (
                       <div data-testid={`pnl-forecast-cost-${r.change_id}`} className="text-[10px] text-slate-500"
                         title="Expected cost at release: open cost lines count at plan">
-                        forecast {fmtMoney(r.forecast_cost)}
+                        forecast {fmtMoney(r.forecast_cost, cur)}
                       </div>
                     )}
                   </td>
@@ -432,16 +492,23 @@ export default function PnlPage() {
                       className={`px-2.5 py-1 rounded-full text-xs font-semibold ${marginBadgeClasses(r.planned_margin ?? r.margin)}`}
                       title={r.branch === 'internal' ? 'vs. approved budget' : undefined}
                     >
-                      {fmtMoney(r.planned_margin ?? r.margin)}
+                      {fmtMoney(r.planned_margin ?? r.margin, cur)}
                     </span>
+                    {r.currency_mismatch && (
+                      <div data-testid={`pnl-currency-mismatch-${r.change_id}`}
+                        className="mt-1 text-[10px] text-amber-300"
+                        title={r.warnings?.find((w) => w.code === 'currency_mismatch')?.message}>
+                        {rcur} vs {cur}: no margin
+                      </div>
+                    )}
                   </td>
-                  <td className={`px-2 py-2.5 text-right whitespace-nowrap ${marginAccent(r.forecast_margin ?? r.actual_margin)}`}>{fmtMoney(r.forecast_margin ?? r.actual_margin)}</td>
+                  <td className={`px-2 py-2.5 text-right whitespace-nowrap ${marginAccent(r.forecast_margin ?? r.actual_margin)}`}>{fmtMoney(r.forecast_margin ?? r.actual_margin, cur)}</td>
                   <td className="px-2 py-2.5 text-right whitespace-nowrap">
                     {r.variance === null || r.variance === undefined ? (
                       <span className="text-slate-500">-</span>
                     ) : (
                       <span className={`rounded px-1.5 py-0.5 text-xs ${TONE_CLASS[tone]}`}>
-                        {r.variance > 0 ? '+' : ''}{fmtMoney(r.variance)}
+                        {r.variance > 0 ? '+' : ''}{fmtMoney(r.variance, cur)}
                       </span>
                     )}
                   </td>

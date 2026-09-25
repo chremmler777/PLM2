@@ -823,6 +823,12 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Gesamt inkl. Kostenpositionen',
     en: 'Total incl. cost positions',
   },
+  'summation.costLines': { de: 'Summe Kostenzeilen', en: 'Total cost lines' },
+  'summation.positionsPart': {
+    de: 'Kostenpositionen (in den Spalten enthalten)',
+    en: 'Cost positions (included in the columns)',
+  },
+  'costpos.classFromChange': { de: 'Klasse der Änderung', en: 'change class' },
   'summation.timing': { de: 'Terminlage', en: 'Timing' },
   'summation.maxLeadTime': { de: 'Längste Vorlaufzeit', en: 'Longest lead time' },
   'summation.days': { de: 'Tage', en: 'days' },

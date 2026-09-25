@@ -121,8 +121,6 @@ describe('SummationView vendor decision', () => {
     expect(screen.getByTestId('vendor-chosen-reason-3').textContent).toBe('Liefertermin');
     // The recommendation does not disappear once it has been overruled.
     expect(screen.getByTestId('vendor-recommended-3').textContent).toContain('Vendor A');
-    // And the wrap-up counts what Sales bought: 9000, shipping included.
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('9000.00');
   });
 
   it('leaves the divergence chip off when Sales followed the recommendation', async () => {
@@ -133,8 +131,6 @@ describe('SummationView vendor decision', () => {
     quoting();
     await screen.findByTestId('vendor-chosen-3');
     expect(screen.queryByTestId('vendor-divergence-3')).toBeNull();
-    // 5000 + 200 freight, the favourite's own figure.
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('5200.00');
   });
 
   it('keeps the decision away from readers who do not answer for the price', async () => {
@@ -158,5 +154,85 @@ describe('SummationView vendor decision', () => {
     quoting();
     await screen.findByTestId('summation-position-3');
     expect(screen.queryByTestId('vendor-decision-3')).toBeNull();
+  });
+});
+
+/**
+ * CR-3's shape: the backend's totals already hold the positions (the
+ * internal hours of the own-time lines and the external tool money), so the
+ * wrap-up splits the total, it never adds the positions on top of it.
+ */
+describe('SummationView totals come from the backend, counted once', () => {
+  const CR3 = {
+    currency: 'USD',
+    by_plant: [],
+    by_department: [
+      { department_id: 5, one_time_internal: 279.5, one_time_external: 850,
+        lifecycle_internal: 0, lifecycle_external: 0 },
+      { department_id: 6, one_time_internal: 0, one_time_external: 12500,
+        lifecycle_internal: 0, lifecycle_external: 0 },
+    ],
+    totals: { one_time_internal: 279.5, one_time_external: 13350,
+      lifecycle_internal: 0, lifecycle_external: 0, grand_total: 13629.5 },
+    effort_by_department: [], total_effort_hours: 0,
+    positions_by_department: [
+      { department_id: 5, position_cost: 850, hours: 13, hours_cost: 279.5, machine_hours: 0,
+        trials: 0, position_count: 2, unrated_hours: false, unpriced_count: 0,
+        positions: [
+          { position_id: 11, label: 'Implementation support', kind: 'support_effort',
+            cost: 0, currency: 'USD', line_value: 172, rate: 21.5 },
+          { position_id: 12, label: 'cvxc', kind: 'external', cost: 850, currency: 'USD',
+            line_value: 107.5, rate: 21.5 },
+        ] },
+      { department_id: 6, position_cost: 12500, hours: 0, hours_cost: 0, machine_hours: 0,
+        trials: 0, position_count: 1, unrated_hours: false, unpriced_count: 0,
+        positions: [
+          { position_id: 13, label: 'Tool modification insert LH', kind: 'external',
+            cost: 12500, currency: 'USD', line_value: 0, rate: null },
+        ] },
+    ],
+    total_position_cost: 13350,
+    total_position_hours_cost: 279.5,
+  };
+  const POSITIONS = [
+    { id: 11, department_id: 5, label: 'Implementation support', kind: 'support_effort',
+      pricing: null, hours: 8, effective_cost: 999, line_value: 172, rate_currency: 'USD', offers: [] },
+    { id: 12, department_id: 5, label: 'cvxc', kind: 'external', pricing: 'estimate',
+      hours: 5, est_cost: 850, effective_cost: 850, line_value: 107.5, rate_currency: 'USD', offers: [] },
+    { id: 13, department_id: 6, label: 'Tool modification insert LH', kind: 'external',
+      pricing: 'estimate', est_cost: 12500, effective_cost: 12500, offers: [] },
+  ];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { changesApi } = await import('../../api/changes');
+    vi.mocked(changesApi.getSummation).mockResolvedValue(CR3 as never);
+    vi.mocked(changesApi.listCostPositions).mockResolvedValue(POSITIONS as never);
+  });
+  afterEach(cleanup);
+
+  it('shows 13.629,50 USD including the positions, and the positions as a part of it', async () => {
+    wrap(<SummationView changeId={3} status="closed" />);
+    expect((await screen.findByTestId('summation-grand-with-positions')).textContent)
+      .toBe('13.629,50 USD');
+    // the cost lines alone: nothing beyond the positions
+    expect(screen.getByTestId('summation-total').textContent).toBe('0,00 USD');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('13.629,50 USD');
+  });
+
+  it('keeps the department total the backend row total; positions are a part of it', async () => {
+    wrap(<SummationView changeId={3} status="closed" />);
+    expect((await screen.findByTestId('summation-dept-total-5')).textContent).toBe('1.129,50 USD');
+    expect(screen.getByTestId('summation-dept-positions-5').textContent).toBe('1.129,50 USD');
+    expect(screen.getByTestId('summation-dept-total-6').textContent).toBe('12.500,00 USD');
+    expect(screen.getByTestId('summation-positions-dept-total-6').textContent).toBe('12.500,00 USD');
+  });
+
+  it('shows each position at its backend amount: money plus priced hours', async () => {
+    wrap(<SummationView changeId={3} status="closed" />);
+    // an effort line shows its value, not the frontend's effective cost
+    expect((await screen.findByTestId('summation-position-amount-11')).textContent)
+      .toBe('172,00 USD');
+    expect(screen.getByTestId('summation-position-amount-12').textContent).toBe('957,50 USD');
   });
 });

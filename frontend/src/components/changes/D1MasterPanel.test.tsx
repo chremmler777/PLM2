@@ -231,15 +231,15 @@ describe('SummationView', () => {
 
   it('renders grand total from summation data', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByText('425.00')).toBeDefined();
+    expect(screen.getByTestId('summation-total').textContent).toBe('425,00 EUR');
   });
 
   it('renders all four cost breakdown rows', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByText('100.00')).toBeDefined();
-    expect(screen.getByText('50.00')).toBeDefined();
-    expect(screen.getByText('200.00')).toBeDefined();
-    expect(screen.getByText('75.00')).toBeDefined();
+    expect(screen.getByText('100,00 EUR')).toBeDefined();
+    expect(screen.getByText('50,00 EUR')).toBeDefined();
+    expect(screen.getByText('200,00 EUR')).toBeDefined();
+    expect(screen.getByText('75,00 EUR')).toBeDefined();
   });
 
   it('renders by_department row', async () => {
@@ -261,8 +261,9 @@ describe('SummationView', () => {
   });
 
   // The wrap-up Sales quotes off: the department's grid lines AND the positions
-  // it booked, with the vendor it picked carrying the price.
-  it('adds each department’s cost positions to the wrap-up', async () => {
+  // it booked, with the vendor it picked carrying the price. The backend's
+  // department row already holds the positions: shown as a part, never added.
+  it('shows each department’s cost positions as a part of its backend total', async () => {
     const { changesApi } = await import('../../api/changes');
     (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([
       { id: 3, department_id: 5, label: 'Anlagenumbau', tag: 'equipment_change',
@@ -276,11 +277,21 @@ describe('SummationView', () => {
         hours: 8, est_cost: 800, effective_cost: 800, offers: [] },
     ]);
     const withDept = {
+      currency: 'EUR',
       by_plant: [],
-      by_department: [{ department_id: 5, one_time_internal: 10, one_time_external: 5,
+      by_department: [{ department_id: 5, one_time_internal: 810, one_time_external: 5205,
         lifecycle_internal: 20, lifecycle_external: 8 }],
-      totals: { one_time_internal: 10, one_time_external: 5, lifecycle_internal: 20,
-        lifecycle_external: 8, grand_total: 43 },
+      totals: { one_time_internal: 810, one_time_external: 5205, lifecycle_internal: 20,
+        lifecycle_external: 8, grand_total: 6043 },
+      positions_by_department: [{ department_id: 5, position_cost: 6000, hours: 8,
+        hours_cost: 0, machine_hours: 0, trials: 0, position_count: 2,
+        unrated_hours: false, unpriced_count: 0, positions: [
+          { position_id: 3, label: 'Anlagenumbau', kind: 'external', cost: 5200,
+            currency: 'EUR', line_value: 0, rate: null },
+          { position_id: 4, label: 'Erprobung', kind: 'support_effort', cost: 800,
+            currency: 'EUR', line_value: 0, rate: null },
+        ] }],
+      total_position_cost: 6000, total_position_hours_cost: 0,
     };
     (changesApi.getSummation as ReturnType<typeof vi.fn>).mockResolvedValue(withDept);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -289,15 +300,14 @@ describe('SummationView', () => {
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     );
     render(<SummationView changeId={1} />, { wrapper });
-    // 5000 + 200 shipping from the favourite offer, plus the 800 estimate.
     await waitFor(() => expect(
-      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6000.00'));
-    // Grid lines (43) and positions (6000) side by side per department.
-    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6043.00');
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6000.00');
-    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6043.00');
+      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6.000,00 EUR'));
+    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6.043,00 EUR');
+    expect(screen.getByTestId('summation-total').textContent).toBe('43,00 EUR');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6.000,00 EUR');
+    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6.043,00 EUR');
     // The chosen vendor is named — it is the price the total is built on.
-    expect(screen.getByTestId('summation-position-vendor-3').textContent).toContain('Vendor A');
+    expect((await screen.findByTestId('summation-position-vendor-3')).textContent).toContain('Vendor A');
   });
 
   it('renders by_plant row', async () => {

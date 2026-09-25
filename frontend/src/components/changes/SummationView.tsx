@@ -4,11 +4,11 @@ import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { useDepartments } from '../../hooks/queries/useWorkflows';
 import {
-  alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, salesEffectiveOf, tagLabel,
+  alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
 import { addDaysIso, daysUntil, formatDate, formatMoney, todayIso } from '../../lib/format';
-import type { CostPosition } from '../../types/change';
+import type { CostPosition, SummationPositionLine } from '../../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -174,12 +174,37 @@ export default function SummationView({
   if (isLoading) return <div className="text-slate-400 text-sm p-4">Loading…</div>;
   if (!data) return null;
   const tot = data.totals;
+  // Every figure below is the backend's, in the costing currency: the
+  // positions are already inside the totals and the department rows (their
+  // quoted money and their hours priced from the cost sheet), so they are
+  // shown as a part of the total, never added to it again.
+  const cur = data.currency ?? 'EUR';
+  const money = (v: number | null | undefined) => formatMoney(v ?? 0, cur);
+  const rollups = data.positions_by_department ?? [];
+  const rollupOf = (deptId: number) => rollups.find((r) => r.department_id === deptId);
+  const rollupTotal = (deptId: number) => {
+    const r = rollupOf(deptId);
+    return r ? r.position_cost + r.hours_cost : 0;
+  };
+  const positionsTotal = (data.total_position_cost ?? 0) + (data.total_position_hours_cost ?? 0);
+  const costLinesTotal = tot.grand_total - positionsTotal;
+  const hasPositions = rollups.length > 0;
+  const lineOf = (p: CostPosition): SummationPositionLine | undefined =>
+    rollupOf(p.department_id)?.positions.find((l) => l.position_id === p.id);
+  /** A position's share of the total: its quoted money plus its priced hours. */
+  const lineAmount = (p: CostPosition): string => {
+    const l = lineOf(p);
+    if (!l) return '-';
+    const valueCur = p.rate_currency ?? cur;
+    // hours without a rate: not counted, and not shown as a 0
+    if (l.line_value === null && !l.cost) return '-';
+    const value = l.line_value ?? 0;
+    if (l.currency === valueCur || !value || !l.cost) {
+      return formatMoney(l.cost + value, value ? valueCur : l.currency);
+    }
+    return `${formatMoney(l.cost, l.currency)} + ${formatMoney(value, valueCur)}`;
+  };
   const posOf = (deptId: number) => allPositions.filter((p) => p.department_id === deptId);
-  // The wrap-up counts what Sales decided to buy; the department's own block
-  // keeps showing the figure its favourite carries.
-  const posTotalOf = (deptId: number) =>
-    posOf(deptId).reduce((s, p) => s + (salesEffectiveOf(p) ?? 0), 0);
-  const positionsTotal = allPositions.reduce((s, p) => s + (salesEffectiveOf(p) ?? 0), 0);
   const canDecideVendor = canQuote && status === 'quoting';
   // Departments in position order, plus any that only show up in the summation.
   const posDeptIds = [...new Set(allPositions.map((p) => p.department_id))];
@@ -200,28 +225,40 @@ export default function SummationView({
         <div className="font-semibold text-slate-100 mb-2">{t('summierung')}</div>
         <table className="w-full">
           <tbody>
-            <tr><td>{t('one_time')} ({t('internal')})</td><td className="text-right">{tot.one_time_internal.toFixed(2)}</td></tr>
-            <tr><td>{t('one_time')} ({t('external')})</td><td className="text-right">{tot.one_time_external.toFixed(2)}</td></tr>
-            <tr><td>{t('lifecycle')} ({t('internal')})</td><td className="text-right">{tot.lifecycle_internal.toFixed(2)}</td></tr>
-            <tr><td>{t('lifecycle')} ({t('external')})</td><td className="text-right">{tot.lifecycle_external.toFixed(2)}</td></tr>
-            <tr className="border-t border-slate-600 font-semibold"><td>{t('total')}</td><td className="text-right">{tot.grand_total.toFixed(2)}</td></tr>
-            {/* The positions are counted on their own line, so it stays visible
-                what came from the grid and what the departments booked. */}
-            {allPositions.length > 0 && (
+            <tr><td>{t('one_time')} ({t('internal')})</td><td className="text-right tabular-nums">{money(tot.one_time_internal)}</td></tr>
+            <tr><td>{t('one_time')} ({t('external')})</td><td className="text-right tabular-nums">{money(tot.one_time_external)}</td></tr>
+            <tr><td>{t('lifecycle')} ({t('internal')})</td><td className="text-right tabular-nums">{money(tot.lifecycle_internal)}</td></tr>
+            <tr><td>{t('lifecycle')} ({t('external')})</td><td className="text-right tabular-nums">{money(tot.lifecycle_external)}</td></tr>
+            {hasPositions ? (
               <>
+                {/* The four rows above hold everything; below they split into
+                    what the cost lines booked and what the positions did. */}
+                <tr className="border-t border-slate-600 font-semibold">
+                  <td>{t('summation.costLines')}</td>
+                  <td className="text-right tabular-nums" data-testid="summation-total">
+                    {money(costLinesTotal)}
+                  </td>
+                </tr>
                 <tr>
                   <td>{t('costpos.title')}</td>
                   <td className="text-right tabular-nums" data-testid="summation-positions-total">
-                    {positionsTotal.toFixed(2)}
+                    {money(positionsTotal)}
                   </td>
                 </tr>
                 <tr className="border-t border-slate-600 font-semibold">
                   <td>{t('summation.withPositions')}</td>
                   <td className="text-right tabular-nums" data-testid="summation-grand-with-positions">
-                    {(tot.grand_total + positionsTotal).toFixed(2)}
+                    {money(tot.grand_total)}
                   </td>
                 </tr>
               </>
+            ) : (
+              <tr className="border-t border-slate-600 font-semibold">
+                <td>{t('total')}</td>
+                <td className="text-right tabular-nums" data-testid="summation-total">
+                  {money(tot.grand_total)}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -254,8 +291,9 @@ export default function SummationView({
               <div key={deptId} data-testid={`summation-positions-dept-${deptId}`}>
                 <div className="flex justify-between text-xs text-slate-300">
                   <span>{deptName(deptId)}</span>
-                  <span className="tabular-nums font-semibold">
-                    {posTotalOf(deptId).toFixed(2)}
+                  <span className="tabular-nums font-semibold"
+                    data-testid={`summation-positions-dept-total-${deptId}`}>
+                    {money(rollupTotal(deptId))}
                   </span>
                 </div>
                 <ul className="text-xs">
@@ -299,11 +337,12 @@ export default function SummationView({
                               {p.kind === 'sampling' ? `${p.trials} ${t('costpos.trialsShort')}` : `${p.hours} h`}
                               {' · '}
                               {p.rate_missing ? t('costpos.noRate')
-                                : p.line_value != null ? formatMoney(p.line_value, p.currency) : '-'}
+                                : p.line_value != null ? formatMoney(p.line_value, p.rate_currency ?? cur) : '-'}
                             </span>
                           )}
-                          <span className="ml-auto tabular-nums text-slate-300">
-                            {(salesEffectiveOf(p) ?? 0).toFixed(2)}
+                          <span className="ml-auto tabular-nums text-slate-300"
+                            data-testid={`summation-position-amount-${p.id}`}>
+                            {lineAmount(p)}
                           </span>
                         </div>
                         {canDecideVendor && decidable && (
@@ -320,7 +359,7 @@ export default function SummationView({
       )}
 
       {data.by_department.length > 0 && (
-        <div>
+        <div className="overflow-x-auto">
           <div className="text-xs font-semibold text-slate-300 mb-1">{t('by_department')}</div>
           <table className="w-full text-xs">
             <thead>
@@ -330,29 +369,33 @@ export default function SummationView({
                 <th className="text-right pb-1">{t('one_time')} {t('external')}</th>
                 <th className="text-right pb-1">{t('lifecycle')} {t('internal')}</th>
                 <th className="text-right pb-1">{t('lifecycle')} {t('external')}</th>
-                <th className="text-right pb-1">{t('costpos.title')}</th>
+                <th className="text-right pb-1" title={t('summation.positionsPart')}>
+                  {t('costpos.title')}
+                </th>
                 <th className="text-right pb-1">{t('total')}</th>
               </tr>
             </thead>
             <tbody>
               {data.by_department.map((row) => {
-                const lines = row.one_time_internal + row.one_time_external
+                // The row total is the backend's: the positions are inside
+                // its columns already, and the positions column only says
+                // how much of it they are.
+                const total = row.one_time_internal + row.one_time_external
                   + row.lifecycle_internal + row.lifecycle_external;
-                const pos = posTotalOf(row.department_id);
                 return (
                   <tr key={row.department_id} className="border-b border-slate-800">
                     <td className="py-0.5">{deptName(row.department_id)}</td>
-                    <td className="text-right tabular-nums">{row.one_time_internal.toFixed(2)}</td>
-                    <td className="text-right tabular-nums">{row.one_time_external.toFixed(2)}</td>
-                    <td className="text-right tabular-nums">{row.lifecycle_internal.toFixed(2)}</td>
-                    <td className="text-right tabular-nums">{row.lifecycle_external.toFixed(2)}</td>
-                    <td className="text-right tabular-nums"
+                    <td className="text-right tabular-nums">{money(row.one_time_internal)}</td>
+                    <td className="text-right tabular-nums">{money(row.one_time_external)}</td>
+                    <td className="text-right tabular-nums">{money(row.lifecycle_internal)}</td>
+                    <td className="text-right tabular-nums">{money(row.lifecycle_external)}</td>
+                    <td className="text-right tabular-nums text-slate-400"
                       data-testid={`summation-dept-positions-${row.department_id}`}>
-                      {pos.toFixed(2)}
+                      {money(rollupTotal(row.department_id))}
                     </td>
                     <td className="text-right tabular-nums font-semibold"
                       data-testid={`summation-dept-total-${row.department_id}`}>
-                      {(lines + pos).toFixed(2)}
+                      {money(total)}
                     </td>
                   </tr>
                 );
@@ -363,7 +406,7 @@ export default function SummationView({
       )}
 
       {data.by_plant.length > 0 && (
-        <div>
+        <div className="overflow-x-auto">
           <div className="text-xs font-semibold text-slate-300 mb-1">{t('by_plant')}</div>
           <table className="w-full text-xs">
             <thead>{breakdownHeaders}</thead>
@@ -371,10 +414,10 @@ export default function SummationView({
               {data.by_plant.map((row) => (
                 <tr key={row.plant_id} className="border-b border-slate-800">
                   <td className="py-0.5">{plantName(row.plant_id)}</td>
-                  <td className="text-right tabular-nums">{row.one_time_internal.toFixed(2)}</td>
-                  <td className="text-right tabular-nums">{row.one_time_external.toFixed(2)}</td>
-                  <td className="text-right tabular-nums">{row.lifecycle_internal.toFixed(2)}</td>
-                  <td className="text-right tabular-nums">{row.lifecycle_external.toFixed(2)}</td>
+                  <td className="text-right tabular-nums">{formatMoney(row.one_time_internal, row.currency ?? cur)}</td>
+                  <td className="text-right tabular-nums">{formatMoney(row.one_time_external, row.currency ?? cur)}</td>
+                  <td className="text-right tabular-nums">{formatMoney(row.lifecycle_internal, row.currency ?? cur)}</td>
+                  <td className="text-right tabular-nums">{formatMoney(row.lifecycle_external, row.currency ?? cur)}</td>
                 </tr>
               ))}
             </tbody>

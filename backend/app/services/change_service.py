@@ -142,8 +142,11 @@ class ChangeService:
     ) -> ChangeChangelog:
         """for_department_id: the department whose role the act belongs to.
         When the project has another responsible for it (spec §18), the act
-        is a backup's stand-in: notes lead with "<backup> for <main>" and
-        new_value carries stands_in_for {user_id, name, department_id}."""
+        is a backup's stand-in (a member of that department acting for its
+        responsible): notes lead with "<backup> for <main>", and a dict
+        new_value carries stands_in_for {user_id, name, department_id} next
+        to its own keys. Any other new_value keeps its shape (readers parse
+        it as the value it is); the notes carry the stand-in then."""
         if for_department_id is not None:
             from app.services.project_team_service import ProjectTeamService
             si = await ProjectTeamService.stand_in(
@@ -151,10 +154,8 @@ class ChangeService:
             if si is not None:
                 line = await ProjectTeamService.stand_in_note(session, si, performed_by)
                 notes = f"{line}: {notes}" if notes else line
-                if new_value is None or isinstance(new_value, dict):
-                    new_value = {**(new_value or {}), "stands_in_for": si}
-                else:
-                    new_value = {"value": new_value, "stands_in_for": si}
+                if isinstance(new_value, dict):
+                    new_value = {**new_value, "stands_in_for": si}
         prev = await ChangeService._last_entry_hash(session, change.id)
         old_s = json.dumps(old_value) if old_value is not None else None
         new_s = json.dumps(new_value) if new_value is not None else None

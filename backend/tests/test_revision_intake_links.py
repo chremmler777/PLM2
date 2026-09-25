@@ -179,7 +179,7 @@ async def test_rejecting_pending_revision_closes_its_intake(client, session_fact
     from app.services.revision_intake_service import IntakeError, RevisionIntakeService
     rev = (await _receive(client, world["part_id"])).json()
     r = await client.post(f"{API}/parts/{world['part_id']}/revisions/{rev['id']}/reject",
-                          json={}, headers=await _auth(client, "eng"))
+                          json={}, headers=await _auth(client, "dev"))
     assert r.status_code == 200, r.text
     i = await _intake(client, world["part_id"])
     assert i["status"] == "rejected" and i["needs_triage"] is False and i["waiting"] is False
@@ -210,10 +210,103 @@ async def test_rejecting_pending_revision_linked_to_live_change_is_refused(clien
     i = await _intake(client, world["part_id"])
     (await _decide(client, i["id"], "full_ecr")).json()
     r = await client.post(f"{API}/parts/{world['part_id']}/revisions/{rev['id']}/reject",
-                          json={}, headers=await _auth(client, "eng"))
-    assert r.status_code == 400 and "linked to" in r.json()["detail"]
+                          json={}, headers=await _auth(client, "dev"))
+    assert r.status_code == 409 and "linked to" in r.json()["detail"]
     async with session_factory() as s:
         assert (await s.get(RevisionIntake, i["id"])).status == "decided"
+
+
+async def test_reject_and_unreject_are_developments_call(client, session_factory, world):
+    rev = (await _receive(client, world["part_id"])).json()
+    url = f"{API}/parts/{world['part_id']}/revisions/{rev['id']}"
+    r = await client.post(f"{url}/reject", json={}, headers=await _auth(client, "eng"))
+    assert r.status_code == 403
+    # the revision must be the part's
+    r = await client.post(f"{API}/parts/{world['part_id']}/revisions/999999/reject",
+                          json={}, headers=await _auth(client, "dev"))
+    assert r.status_code == 404
+    r = await client.post(f"{url}/reject", json={}, headers=await _auth(client, "dev"))
+    assert r.status_code == 200, r.text
+    r = await client.post(f"{url}/unreject", json={}, headers=await _auth(client, "eng"))
+    assert r.status_code == 403
+
+
+async def test_reject_is_refused_across_organizations(client, session_factory, world):
+    from app.models.workflow import Department
+    rev = (await _receive(client, world["part_id"])).json()
+    async with session_factory() as s:
+        org = Organization(name="Elsewhere", code="ELS")
+        s.add(org)
+        await s.flush()
+        u = User(organization_id=org.id, username="dev.else", email="dev.else@test.io",
+                 full_name="Dev Else", role="engineer",
+                 hashed_password=get_password_hash(ENGINEER_PASSWORD),
+                 is_active=True, mfa_enabled=False)
+        s.add(u)
+        await s.flush()
+        dev = (await s.execute(select(Department).where(
+            Department.name == "Development"))).scalar_one()
+        s.add(UserDepartment(user_id=u.id, department_id=dev.id))
+        await s.commit()
+    from tests.conftest import login
+    h = await login(client, "dev.else@test.io", ENGINEER_PASSWORD)
+    r = await client.post(f"{API}/parts/{world['part_id']}/revisions/{rev['id']}/reject",
+                          json={}, headers=h)
+    assert r.status_code == 404
+
+
+async def test_unreject_reopens_the_intake_to_pending(client, session_factory, world):
+    from app.models.part import RevisionChangelog
+    rev = (await _receive(client, world["part_id"])).json()
+    url = f"{API}/parts/{world['part_id']}/revisions/{rev['id']}"
+    assert (await client.post(f"{url}/reject", json={},
+                              headers=await _auth(client, "dev"))).status_code == 200
+    i = await _intake(client, world["part_id"])
+    assert i["status"] == "rejected"
+    r = await client.post(f"{url}/unreject", json={}, headers=await _auth(client, "admin"))
+    assert r.status_code == 200, r.text
+    async with session_factory() as s:
+        intake = await s.get(RevisionIntake, i["id"])
+        assert intake.status == "pending" and intake.change_id is None
+        acts = [c.action for c in (await s.execute(select(RevisionChangelog).where(
+            RevisionChangelog.revision_id == rev["id"]))).scalars()]
+        assert "intake_reopened" in acts
+    my = (await client.get(f"{API}/intakes/my", headers=await _auth(client, "dev"))).json()
+    assert [t["id"] for t in my["triage"]] == [i["id"]]
+    # triage works again
+    r = await _decide(client, i["id"], "administrative", reason="restored")
+    assert r.status_code == 200, r.text
+
+
+async def test_unreject_refused_while_a_newer_index_waits(client, session_factory, world):
+    rev = (await _receive(client, world["part_id"])).json()
+    url = f"{API}/parts/{world['part_id']}/revisions/{rev['id']}"
+    assert (await client.post(f"{url}/reject", json={},
+                              headers=await _auth(client, "dev"))).status_code == 200
+    assert (await _receive(client, world["part_id"])).status_code == 201
+    r = await client.post(f"{url}/unreject", json={}, headers=await _auth(client, "dev"))
+    assert r.status_code == 409 and "waiting" in r.json()["detail"]
+
+
+async def test_unreject_refused_while_linked_to_a_live_change(client, session_factory, world):
+    rev = (await _receive(client, world["part_id"])).json()
+    i = await _intake(client, world["part_id"])
+    async with session_factory() as s:
+        change = ChangeRequest(change_number="C-LINK-1", title="t", reason="r",
+                               change_type="physical_part", project_id=world["seed"]["project_id"],
+                               raised_by=world["users"]["dev"], status="scoping")
+        s.add(change)
+        await s.flush()
+        intake = await s.get(RevisionIntake, i["id"])
+        intake.status = "rejected"
+        intake.change_id = change.id
+        (await s.get(PartRevision, rev["id"])).status = "rejected"
+        await s.commit()
+    r = await client.post(f"{API}/parts/{world['part_id']}/revisions/{rev['id']}/unreject",
+                          json={}, headers=await _auth(client, "dev"))
+    assert r.status_code == 409 and "C-LINK-1" in r.json()["detail"]
+    async with session_factory() as s:
+        assert (await s.get(RevisionIntake, i["id"])).status == "rejected"
 
 
 # ----------------------------------------------------------------------

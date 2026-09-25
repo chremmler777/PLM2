@@ -106,41 +106,45 @@ async def _task_response(db: AsyncSession, task: WfInstanceTask) -> dict:
 # Routes — NOTE: my-tasks MUST be registered before /{instance_id}
 # ---------------------------------------------------------------------------
 
+def _fold_main_count(rows: list[dict], key) -> int:
+    """Rows folded like My Tasks folds them (lib/myTasks.ts): one row per
+    key; a folded row is backup only when every row in it is backup."""
+    folded: dict[tuple, bool] = {}
+    for r in rows:
+        k = key(r)
+        backup = r.get("role") == "backup"
+        folded[k] = folded.get(k, True) and backup
+    return sum(1 for backup in folded.values() if not backup)
+
+
 @router.get("/open-task-count")
 async def get_open_task_count(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Actionable open tasks for the nav badge — scoped to the user's
-    departments when they have memberships, global otherwise. Project team
-    (spec §18): a task where the caller is only backup (the project has
-    another responsible for the task's department) does not count."""
-    from app.models.change import ChangeRequest
-    from app.models.part import Part, PartRevision
-    from app.services.project_team_service import TeamRoles
+    """The nav badge's number, counted exactly as the sidebar and the My
+    Tasks header count it (hooks/queries/useOpenTaskCount.ts): the workflow
+    tasks of the caller's departments and the change tasks, folded the same
+    way, plus the new-index triage and engineering review rows and the
+    Finance review task; rows where the caller is only backup (spec §18) are
+    not counted."""
+    from app.api.v1.changes.changes import my_change_tasks
+    from app.api.v1.cost_sheet import review_task
+    from app.services.revision_intake_service import RevisionIntakeService
 
-    stmt = (
-        select(WfInstanceTask.department_id, WfInstanceTask.owner_id,
-               Part.project_id, ChangeRequest.project_id)
-        .join(WfInstance, WfInstance.id == WfInstanceTask.instance_id)
-        .outerjoin(PartRevision, PartRevision.id == WfInstance.part_revision_id)
-        .outerjoin(Part, Part.id == PartRevision.part_id)
-        .outerjoin(ChangeRequest, ChangeRequest.id == WfInstance.change_id)
-        .where(
-            WfInstance.status == "active",
-            WfInstanceTask.status == "active",
-            WfInstanceTask.is_actionable == True,  # noqa: E712
-        )
-    )
     dept_ids = await WorkflowService.effective_department_ids(db, current_user)
-    if dept_ids:
-        stmt = stmt.where(WfInstanceTask.department_id.in_(dept_ids))
-    roles = TeamRoles(db, current_user.id)
-    count = 0
-    for dept_id, owner_id, part_project, change_project in (await db.execute(stmt)).all():
-        role, _ = await roles.role(part_project or change_project, dept_id,
-                                   owned=owner_id == current_user.id)
-        count += role == "main"
+    workflow = await WorkflowService.get_my_tasks(db, dept_ids, current_user.id)
+    changes = await my_change_tasks(current_user=current_user, db=db)
+    intakes = await RevisionIntakeService.my(db, current_user)
+    finance = await review_task(current_user=current_user, db=db)
+    count = (
+        _fold_main_count(workflow, lambda r: (
+            r["instance_id"], r["stage_order"], r["step_name"], r["department_name"]))
+        + _fold_main_count(changes, lambda r: (
+            r.get("change_id"), r.get("kind"), r.get("department_id")))
+        + sum(1 for r in [*intakes["triage"], *intakes["review"]]
+              if r.get("role") != "backup")
+        + (1 if finance.get("due") else 0))
     return {"count": count}
 
 

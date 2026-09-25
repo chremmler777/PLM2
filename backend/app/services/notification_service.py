@@ -128,16 +128,18 @@ class NotificationService:
         notification marked as info ("Info: you are backup here, main: X").
         Notifications have no quiet flag, so the info copy is still an
         ordinary unread notification. user_ids: the recipients when the
-        caller already narrowed them (e.g. to the change's organization);
-        otherwise every member of the departments. kind + subject_key dedup
-        like notify_once."""
+        caller already narrowed them; otherwise the ACTIVE members of the
+        departments in the project's organization (change_people's rule for
+        a change: never a namesake department elsewhere, never a disabled
+        account). kind + subject_key dedup like notify_once."""
+        from types import SimpleNamespace
+        from app.services.change_people import department_members_of_change_org
         from app.services.project_team_service import ProjectTeamService
         if user_ids is None:
             if not department_ids:
                 return 0
-            user_ids = [u for (u,) in (await db.execute(
-                select(UserDepartment.user_id).where(
-                    UserDepartment.department_id.in_(department_ids)))).all()]
+            user_ids = await department_members_of_change_org(
+                db, SimpleNamespace(project_id=project_id), department_ids)
         mains, backups = await ProjectTeamService.split_recipients(
             db, project_id, department_ids, user_ids)
 

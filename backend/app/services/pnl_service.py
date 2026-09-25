@@ -80,18 +80,29 @@ class PnlService:
         change_ids = [c.id for c in changes]
 
         # Single grouped cost query across every change in scope - never call
-        # CostService.summation per change (N+1 query trap).
+        # CostService.summation per change (N+1 query trap). Grouped by the
+        # line's currency too: amounts in different currencies are never
+        # added (spec §15 phase 2, no FX).
+        from app.models.entities import Plant
+        plant_info = {pid: (org, cur or "EUR") for pid, org, cur in (await session.execute(
+            select(Plant.id, Plant.organization_id, Plant.currency))).all()}
         cost_rows = (await session.execute(
-            select(ChangeAssessment.change_id,
+            select(ChangeAssessment.change_id, AssessmentCostLine.currency,
+                   AssessmentCostLine.plant_id,
                    func.coalesce(func.sum(AssessmentCostLine.internal_cost), 0.0),
                    func.coalesce(func.sum(AssessmentCostLine.external_cost), 0.0))
             .select_from(AssessmentCostLine)
             .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
             .where(ChangeAssessment.change_id.in_(change_ids))
-            .group_by(ChangeAssessment.change_id)
+            .group_by(ChangeAssessment.change_id, AssessmentCostLine.currency,
+                      AssessmentCostLine.plant_id)
         )).all()
-        costs = {cid: (internal or 0.0, external or 0.0)
-                 for cid, internal, external in cost_rows}
+        line_costs: dict[int, dict[str, list]] = {}
+        for cid, cur, pid, internal, external in cost_rows:
+            cur = cur or (plant_info.get(pid) or (None, "EUR"))[1]
+            bucket = line_costs.setdefault(cid, {}).setdefault(cur, [0.0, 0.0])
+            bucket[0] += internal or 0.0
+            bucket[1] += external or 0.0
 
         if plant_id is not None:
             plant_change_ids = set((await session.execute(
@@ -122,16 +133,39 @@ class PnlService:
                 select(Project.id, Project.name).where(Project.id.in_(project_ids))
             )).all())
 
-        ova = await PnlService._offer_vs_actual_batch(session, changes, costs)
+        ctx = await PnlService._portfolio_context(session, changes, plant_info)
+        costs: dict[int, tuple[float, float]] = {}
+        other_cost: dict[int, dict[str, float]] = {}
+        for c in changes:
+            cur = ctx["currency"][c.id]
+            by_cur = line_costs.get(c.id, {})
+            internal, external = by_cur.get(cur, (0.0, 0.0))
+            costs[c.id] = (internal, external)
+            others = {k: _round(v[0] + v[1]) for k, v in by_cur.items()
+                      if k != cur and (v[0] or v[1])}
+            if others:
+                other_cost[c.id] = others
+        ova = await PnlService._offer_vs_actual_batch(session, changes, costs, ctx)
 
         rows = []
         for c in changes:
+            currency = ctx["currency"][c.id]
+            o = ova.get(c.id, {})
+            revenue_currency = o.get("revenue_currency") or currency
+            comparable = revenue_currency == currency
             internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
             total_cost = internal_cost + external_cost
             revenue = c.quoted_price if c.customer_relevant else c.internal_approved_amount
-            margin = None if revenue is None else revenue - total_cost
+            margin = (None if revenue is None or not comparable
+                      else revenue - total_cost)
             margin_pct = (margin / revenue * 100
                           if margin is not None and revenue not in (None, 0) else None)
+            warnings = list(o.get("warnings") or [])
+            if c.id in other_cost:
+                warnings.append({
+                    "code": "mixed_currency",
+                    "message": (f"Costing has amounts in {', '.join(other_cost[c.id])}: "
+                                f"not in the {currency} cost (no currency conversion)")})
             rows.append({
                 "change_id": c.id,
                 "change_number": c.change_number,
@@ -140,6 +174,13 @@ class PnlService:
                 "project_name": names.get(c.project_id) if c.project_id is not None else None,
                 "branch": "customer" if c.customer_relevant else "internal",
                 "status": c.status,
+                # Every amount of the row is in `currency` (the costing
+                # plant's) except the revenue, which is in revenue_currency;
+                # when the two differ no margin is computed (no FX).
+                "currency": currency,
+                "revenue_currency": revenue_currency,
+                "currency_mismatch": not comparable,
+                "other_currency_cost": other_cost.get(c.id, {}),
                 "revenue": _round(revenue),
                 "internal_cost": _round(internal_cost),
                 "external_cost": _round(external_cost),
@@ -150,23 +191,66 @@ class PnlService:
                 "pending_price": revenue is None,
                 "realized": c.status in REALIZED_STATUSES,
                 # offer versus doing (spec §13)
-                **ova.get(c.id, {}),
+                **{k: v for k, v in o.items() if k not in ("warnings", "revenue_currency")},
+                "no_rate": bool(o.get("no_rate")),
+                "warnings": warnings,
             })
         return rows
 
     @staticmethod
-    async def _offer_vs_actual_batch(session, changes, costs: dict) -> dict[int, dict]:
+    async def _portfolio_context(session, changes, plant_info: dict) -> dict:
+        """Per change of the list: its costing plant, organisation and
+        currency, resolved with two grouped queries, plus the request's
+        RateBook (each organisation's cost sheet loaded once)."""
+        from app.models.change import change_affected_plants
+        from app.services import costing_rates
+        ids = [c.id for c in changes]
+        plants: dict[int, list] = {}
+        for cid, pid in (await session.execute(
+                select(change_affected_plants.c.change_id,
+                       change_affected_plants.c.plant_id)
+                .where(change_affected_plants.c.change_id.in_(ids)))).all():
+            plants.setdefault(cid, []).append(pid)
+        project_ids = {c.project_id for c in changes if c.project_id}
+        project_plant = dict((await session.execute(
+            select(Project.id, Project.plant_id).where(Project.id.in_(project_ids))
+        )).all()) if project_ids else {}
+        plant_of, org_of, currency = {}, {}, {}
+        for c in changes:
+            ps = plants.get(c.id) or []
+            pid = ps[0] if len(ps) == 1 else project_plant.get(c.project_id)
+            plant_of[c.id] = pid
+            org, cur = plant_info.get(pid, (None, "EUR"))
+            if org is None:
+                org = plant_info.get(project_plant.get(c.project_id), (None, None))[0]
+            org_of[c.id] = org
+            currency[c.id] = cur if pid is not None else "EUR"
+        return {"plant": plant_of, "org": org_of, "currency": currency,
+                "book": costing_rates.RateBook(session)}
+
+    @staticmethod
+    async def _offer_vs_actual_batch(session, changes, costs: dict,
+                                     ctx: Optional[dict] = None) -> dict[int, dict]:
         """The list's offer-vs-actual columns, a fixed number of grouped
         queries for the whole portfolio (the card's per-change version would
-        be an N+1 across it). Planned figures come from the accepted offer's
-        frozen snapshot; without one the offer total (or quoted price) and
-        the cost lines stand in."""
-        from app.models.change import change_affected_plants
+        be an N+1 across it): cost sheet versions are loaded once per
+        organisation and picked by date in Python (RateBook). Planned figures
+        come from the accepted offer's frozen snapshot; without one the offer
+        total (or quoted price) and the cost lines stand in. Money in another
+        currency than the costing's is left out, and a revenue in another
+        currency gets no margin (no FX)."""
         from app.models.change_impl import ImplementationBooking
         from app.models.change_offer import ChangeOffer
         from app.models.change_plan import ChangePlanTask
         from app.services.change_plan_service import ChangePlanService
         from app.services.offer_service import SNAPSHOT_KEY
+        from app.services import costing_rates
+        if ctx is None:
+            from app.models.entities import Plant
+            plant_info = {pid: (org, cur or "EUR") for pid, org, cur in (await session.execute(
+                select(Plant.id, Plant.organization_id, Plant.currency))).all()}
+            ctx = await PnlService._portfolio_context(session, changes, plant_info)
+        book = ctx["book"]
         ids = [c.id for c in changes]
         offers = list((await session.execute(
             select(ChangeOffer).where(
@@ -185,54 +269,73 @@ class PnlService:
             select(ImplementationBooking)
             .where(ImplementationBooking.change_id.in_(ids))
             .order_by(ImplementationBooking.id))).scalars().all())
-        plants: dict[int, list] = {}
-        for cid, pid in (await session.execute(
-                select(change_affected_plants.c.change_id,
-                       change_affected_plants.c.plant_id)
-                .where(change_affected_plants.c.change_id.in_(ids)))).all():
-            plants.setdefault(cid, []).append(pid)
-        project_plant = dict((await session.execute(
-            select(Project.id, Project.plant_id).where(Project.id.in_(
-                {c.project_id for c in changes if c.project_id})))).all())
         by_id = {c.id: c for c in changes}
-
-        def rate_plant(cid):
-            ps = plants.get(cid) or []
-            if len(ps) == 1:
-                return ps[0]
-            return project_plant.get(by_id[cid].project_id)
-        from app.services import costing_rates
-        rates: dict[tuple, Optional[float]] = {}
         internal_actual: dict[int, float] = {}
         bookings_by_change: dict[int, list] = {}
         for b in booked:
             bookings_by_change.setdefault(b.change_id, []).append(b)
         for cid, rows in bookings_by_change.items():
-            pid = rate_plant(cid)
+            cur = ctx["currency"][cid]
             for row in await costing_rates.price_bookings(
-                    session, by_id[cid], rows, plant_id=pid):
-                # unpriced hours count nothing here; the card warns
-                value = (row["labour_value"] or 0.0) + (row["machine_value"] or 0.0)
+                    session, by_id[cid], rows, plant_id=ctx["plant"][cid],
+                    org_id=ctx["org"][cid], book=book):
+                # unpriced hours count nothing here; the card warns. Hours
+                # priced in another currency stay out (no FX).
+                value = 0.0
+                if row["labour_value"] and row["labour_currency"] == cur:
+                    value += row["labour_value"]
+                if row["machine_value"] and row["machine_currency"] == cur:
+                    value += row["machine_value"]
                 if row["hours"] or row["machine_hours"]:
                     internal_actual[cid] = internal_actual.get(cid, 0.0) + value
 
         # costing positions belong to the plan exactly as in the summation:
-        # quoted cost by kind, their own hours at the department rate
+        # quoted cost by kind, their own hours at the rate snapshot (priced
+        # live, from the same book, where there is none)
         from app.models.change_cost import CostingPosition
         pos_cost: dict[int, list] = {}
+        no_rate: set[int] = set()
+        tonnage: Optional[dict[int, float]] = None
+
+        async def change_class(c) -> Optional[int]:
+            """The change's own class, else its tonnage default: one grouped
+            query for every change, the classes from the book."""
+            nonlocal tonnage
+            if getattr(c, "machine_class_id", None):
+                return c.machine_class_id
+            if tonnage is None:
+                from app.models.change import ChangeImpactedItem
+                from app.models.part import Part
+                tonnage = {cid: t for cid, t in (await session.execute(
+                    select(ChangeImpactedItem.change_id, func.max(Part.tool_tonnage_class))
+                    .join(Part, Part.id == ChangeImpactedItem.part_id)
+                    .where(ChangeImpactedItem.change_id.in_(ids),
+                           Part.tool_tonnage_class.is_not(None))
+                    .group_by(ChangeImpactedItem.change_id))).all()}
+            return await book.class_for_tonnage(ctx["org"][c.id], tonnage.get(c.id))
         for p in (await session.execute(select(CostingPosition).where(
                 CostingPosition.change_id.in_(ids)))).scalars().all():
-            bucket = pos_cost.setdefault(p.change_id, [0.0, 0.0])
-            bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
-            snap = costing_rates.stored_price(p)
-            if snap is not None:
-                # the rate snapshot the line was costed with
-                bucket[0] += costing_rates.line_value(p, snap) or 0.0
-            elif p.hours:
-                key = (p.department_id, rate_plant(p.change_id))
-                if key not in rates:
-                    rates[key] = (await _rate_at(session, key))
-                bucket[0] += float(p.hours) * (rates[key] or 0.0)
+            cid = p.change_id
+            cur = ctx["currency"][cid]
+            bucket = pos_cost.setdefault(cid, [0.0, 0.0])
+            if (p.currency or cur) == cur:
+                bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
+            price = costing_rates.stored_price(p)
+            if price is None and costing_rates.quantity(p):
+                if p.kind in ("machine_time", "sampling"):
+                    cls = p.machine_class_id or await change_class(by_id[cid])
+                    fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
+                    price = await fn(ctx["org"][cid], cls, ctx["plant"][cid])
+                else:
+                    price = await book.labour_price(ctx["org"][cid], p.department_id,
+                                                    ctx["plant"][cid], p.labour_position)
+            if price is None:
+                continue
+            value = costing_rates.line_value(p, price)
+            if value is None:
+                no_rate.add(cid)
+            elif price.currency == cur:
+                bucket[0] += value
 
         extra = await PnlService.actual_cost_sums(session, ids)
         issues = await PnlService.issue_costs(session, ids)
@@ -250,6 +353,7 @@ class PnlService:
             session, [c.id for c in changes if not c.customer_relevant])
         out = {}
         for c in changes:
+            currency = ctx["currency"][c.id]
             o = by_change.get(c.id)
             snap = (((o.data or {}).get(SNAPSHOT_KEY) or {}).get("pnl")
                     if o is not None and o.status == "accepted" else None)
@@ -257,6 +361,7 @@ class PnlService:
                 snap = internal_frozen.get(c.id)
             internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
             mother_plant = getattr(c, "origin", None) == "mother_plant"
+            revenue_currency = currency
             if mother_plant:
                 # spec §14: no offer basis, actual local costs only
                 planned = {"revenue": None, "internal": 0.0, "external": 0.0,
@@ -264,13 +369,18 @@ class PnlService:
             elif snap:
                 planned = {k: snap.get(k) for k in
                            ("revenue", "internal", "external", "scrap")}
+                revenue_currency = snap.get("currency") or (
+                    o.currency if o is not None else None) or currency
             else:
                 revenue = (o.total_one_time if o is not None else
                            c.quoted_price if c.customer_relevant
                            else c.internal_approved_amount)
+                if o is not None:
+                    revenue_currency = o.currency or currency
                 pi, pe = pos_cost.get(c.id, (0.0, 0.0))
                 planned = {"revenue": revenue, "internal": internal_cost + pi,
                            "external": external_cost + pe, "scrap": 0.0}
+            comparable = revenue_currency == currency
             e = extra.get(c.id, {})
             i = issues.get(c.id, {})
             fig = compose(planned, {
@@ -283,6 +393,10 @@ class PnlService:
                 "issues_customer": i.get("customer", 0.0),
                 "issues_supplier": i.get("supplier", 0.0)},
                 in_progress=c.status in IN_PROGRESS_STATUSES)
+            if not comparable:
+                for k in ("planned_margin", "actual_margin", "forecast_margin",
+                          "variance"):
+                    fig[k] = None
             # nothing booked, invoiced or raised yet: there is no actual to
             # compare, and a zero would read as a saving
             recorded = (c.id in internal_actual or bool(e) or bool(i))
@@ -303,10 +417,19 @@ class PnlService:
             forecast = max((t.end_date for t in detailed), default=None)
             slip = (cal.idx(forecast) - cal.idx(baseline)
                     if baseline is not None and forecast is not None else None)
+            warnings = []
+            if not comparable:
+                warnings.append({
+                    "code": "currency_mismatch",
+                    "message": (f"The revenue is in {revenue_currency}, the costing in "
+                                f"{currency}: no margin without a currency conversion")})
+            if c.id in no_rate:
+                warnings.append({"code": "no_rate", "message": costing_rates.NO_RATE_WARNING})
             out[c.id] = {
                 "phase": phase,
                 # the card's basis rule (pnl_basis), so list and card agree
                 "basis": pnl_basis(c, o, bool(snap)),
+                "revenue_currency": revenue_currency,
                 "offer_revenue": fig["planned_revenue"],
                 "planned_cost": fig["planned_cost"],
                 "planned_margin": fig["planned_margin"],
@@ -318,6 +441,8 @@ class PnlService:
                 "variance": fig["variance"] if phase == "actual" else None,
                 "slip_days": slip,
                 "slip_unit": "working days" if cal.working else "calendar days",
+                "no_rate": c.id in no_rate,
+                "warnings": warnings,
             }
         return out
 
@@ -334,16 +459,20 @@ class PnlService:
             date_from=date_from, date_to=date_to)
 
         def _agg(subset: list[dict]) -> dict:
-            revenue = sum(r["revenue"] or 0.0 for r in subset)
+            # Rows whose revenue is in another currency than their costing
+            # have no margin (no FX): their revenue stays out of every sum,
+            # and so does their cost where it would meet that revenue.
+            comparable = [r for r in subset if not r.get("currency_mismatch")]
+            revenue = sum(r["revenue"] or 0.0 for r in comparable)
             internal_cost = sum(r["internal_cost"] for r in subset)
             external_cost = sum(r["external_cost"] for r in subset)
             total_cost = sum(r["total_cost"] for r in subset)
-            margin = revenue - total_cost
+            margin = revenue - sum(r["total_cost"] for r in comparable)
             margin_pct = (margin / revenue * 100) if revenue else None
             # Offer vs doing: revenue, cost and margin over the SAME rows,
             # the priced ones (a change without a price has no margin, so its
             # cost stays out of the cost too); the rest is counted.
-            priced = [r for r in subset if r.get("offer_revenue") is not None]
+            priced = [r for r in comparable if r.get("offer_revenue") is not None]
             actual_rows = [r for r in priced if r.get("phase") == "actual"]
             slips = [r["slip_days"] for r in subset if r.get("slip_days") is not None]
             return {
@@ -351,7 +480,9 @@ class PnlService:
                 "planned_cost": _round(sum(r.get("planned_cost") or 0.0 for r in priced)),
                 "planned_margin": _round(sum(r.get("planned_margin") or 0.0 for r in priced)),
                 "priced_count": len(priced),
-                "unpriced_count": len(subset) - len(priced),
+                "unpriced_count": len(comparable) - len(priced),
+                "mismatch_count": len(subset) - len(comparable),
+                "no_rate_count": sum(1 for r in subset if r.get("no_rate")),
                 "actual_revenue": _round(sum(r.get("actual_revenue") or 0.0
                                              for r in actual_rows)),
                 "actual_cost": _round(sum(r.get("actual_cost") or 0.0 for r in actual_rows)),
@@ -371,37 +502,54 @@ class PnlService:
                 "margin_pct": _round(margin_pct),
             }
 
-        pipeline_rows = [r for r in rows if r["status"] in PIPELINE_STATUSES]
-        realized_rows = [r for r in rows if r["status"] in REALIZED_STATUSES]
+        def _block(subset: list[dict]) -> dict:
+            pipeline_rows = [r for r in subset if r["status"] in PIPELINE_STATUSES]
+            realized_rows = [r for r in subset if r["status"] in REALIZED_STATUSES]
+            by_project: dict[int, dict] = {}
+            for r in subset:
+                if r["project_id"] is None:
+                    continue
+                p = by_project.setdefault(r["project_id"], {
+                    "project_id": r["project_id"], "name": r["project_name"],
+                    "revenue": 0.0, "total_cost": 0.0, "margin_cost": 0.0,
+                })
+                p["total_cost"] += r["total_cost"]
+                if not r.get("currency_mismatch"):
+                    p["revenue"] += r["revenue"] or 0.0
+                    p["margin_cost"] += r["total_cost"]
+            return {
+                "totals": _agg(subset),
+                "pipeline": _agg(pipeline_rows),
+                "realized": _agg(realized_rows),
+                "by_project": [
+                    {"project_id": p["project_id"], "name": p["name"],
+                     "revenue": _round(p["revenue"]), "total_cost": _round(p["total_cost"]),
+                     "margin": _round(p["revenue"] - p["margin_cost"])}
+                    for p in by_project.values()],
+                "by_branch": {
+                    "customer": _agg([r for r in subset if r["branch"] == "customer"]),
+                    "internal": _agg([r for r in subset if r["branch"] == "internal"]),
+                },
+                "count": len(subset),
+            }
 
-        by_project: dict[int, dict] = {}
+        # Currencies are grouped, never added (spec §15 phase 2): one block
+        # per costing currency. The top level is the block of the currency
+        # most changes are costed in, so a single-currency portfolio reads
+        # exactly as before.
+        groups: dict[str, list[dict]] = {}
         for r in rows:
-            if r["project_id"] is None:
-                continue
-            p = by_project.setdefault(r["project_id"], {
-                "project_id": r["project_id"], "name": r["project_name"],
-                "revenue": 0.0, "total_cost": 0.0,
-            })
-            p["revenue"] += r["revenue"] or 0.0
-            p["total_cost"] += r["total_cost"]
-        by_project_list = [
-            {**p, "revenue": _round(p["revenue"]), "total_cost": _round(p["total_cost"]),
-             "margin": _round(p["revenue"] - p["total_cost"])}
-            for p in by_project.values()
-        ]
-
-        by_branch = {
-            "customer": _agg([r for r in rows if r["branch"] == "customer"]),
-            "internal": _agg([r for r in rows if r["branch"] == "internal"]),
-        }
-
+            groups.setdefault(r.get("currency") or "EUR", []).append(r)
+        currencies = sorted(groups, key=lambda c: (-len(groups[c]), c))
+        by_currency = {c: _block(groups[c]) for c in sorted(groups)}
+        primary = currencies[0] if currencies else "EUR"
+        top = by_currency.get(primary) or _block([])
         return {
-            "totals": _agg(rows),
-            "pipeline": _agg(pipeline_rows),
-            "realized": _agg(realized_rows),
-            "by_project": by_project_list,
-            "by_branch": by_branch,
+            **top,
             "count": len(rows),
+            "currency": primary,
+            "currencies": currencies,
+            "by_currency": by_currency,
         }
 
     # ------------------------------------------------------------------
@@ -943,14 +1091,6 @@ LINE_LABELS = (
     ("issues_customer", "Validation issues, billed to customer", "cost"),
     ("issues_supplier", "Validation issues, recoverable from supplier", "info"),
 )
-
-
-async def _rate_at(session, key) -> Optional[float]:
-    """Department rate at a plant, None without a plant or a rate."""
-    from app.services.cost_service import CostService
-    dept, plant = key
-    return (await CostService.rate_for(session, dept, plant)
-            if plant is not None else None)
 
 
 def _num_or_none(v) -> Optional[float]:

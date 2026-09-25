@@ -77,7 +77,7 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
         <div className="text-xs text-slate-400 uppercase tracking-wide">
           {change.customer_relevant ? 'Revenue' : 'Approved budget'}
         </div>
-        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(revenue)}</div>
+        <div className="text-xl font-semibold text-slate-100 mt-1">{fmtMoney(revenue, data?.currency)}</div>
       </div>
 
       <div>
@@ -87,7 +87,7 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
           Int. {fmtMoney(internalCost, data?.currency)} · Ext. {fmtMoney(externalCost, data?.currency)}
         </div>
         {/* The costing's own warnings (spec §15 phase 2): currencies it did
-            not add, lines without a rate. */}
+            not add, lines without a rate. Shown here only, once. */}
         {(data?.warnings ?? []).length > 0 && (
           <ul data-testid="pnl-costing-warnings" className="mt-1 space-y-0.5">
             {(data?.warnings ?? []).map((w) => (
@@ -99,7 +99,7 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
 
       <div>
         <div className="text-xs text-slate-400 uppercase tracking-wide">{marginLabel}</div>
-        <div className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin)}</div>
+        <div className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin, data?.currency)}</div>
       </div>
 
       {/* Offer versus doing (spec §13): only once there is doing. Before

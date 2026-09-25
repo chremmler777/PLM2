@@ -510,7 +510,7 @@ function LineValue({ p }: { p: CostPosition }) {
   if (p.line_value == null) return null
   return (
     <span data-testid={`costpos-value-${p.id}`} className="block text-xs text-slate-300 tabular-nums">
-      {formatMoney(p.line_value, p.currency ?? p.rate_currency)}
+      {formatMoney(p.line_value, p.rate_currency ?? p.currency)}
     </span>
   )
 }
@@ -665,7 +665,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
           <span data-testid={`costpos-kind-${p.id}`} className="text-xs text-slate-400">
             {t(`costpos.type.${type}`)}
             {isMachine && p.machine_class && (
-              <span className="block text-[11px] text-slate-500">{p.machine_class}</span>
+              <span className="block text-[11px] text-slate-500">
+                {p.machine_class}{p.machine_class_from_change ? ` (${t('costpos.classFromChange')})` : ''}
+              </span>
             )}
             <span className="sr-only"> · {t(`costpos.kind.${p.kind}`)}{isExternal && p.pricing ? ` · ${t(`costpos.pricing.${p.pricing}`)}` : ''}</span>
           </span>

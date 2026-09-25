@@ -564,7 +564,7 @@ class CostLineResponse(BaseModel):
     activity_label: Optional[str] = None
     cost_kind: str
     demand_hours: float
-    rate_snapshot: float
+    rate_snapshot: Optional[float] = None
     internal_cost: float
     external_cost: float
     minutes_per_part: Optional[float] = None
@@ -904,13 +904,18 @@ class CostingPositionResponse(BaseModel):
     notes: Optional[str] = None
     labour_position: Optional[str] = None
     machine_class_id: Optional[int] = None
+    # The class the line is priced on: its own, or the change's
+    # (machine_class_from_change) which it follows when the change's moves.
     machine_class: Optional[str] = None
+    machine_class_used_id: Optional[int] = None
+    machine_class_from_change: bool = False
     trials: Optional[int] = None
     # The rate the line is priced with (spec §15 phase 2): the snapshot taken
     # when it was costed. rate None + rate_missing = "No rate in the cost
     # sheet" (not counted, never 0). rate_label reads e.g. "Cost sheet v2,
     # Tool Engineer, Engineer, 21,50 USD/h". line_value = hours (trials) x
-    # rate in `currency` (the costing plant's).
+    # rate, in rate_currency; currency is the money currency of est_cost and
+    # the offers (the costing plant's).
     rate: Optional[float] = None
     rate_currency: Optional[str] = None
     currency: Optional[str] = None

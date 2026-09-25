@@ -447,7 +447,7 @@ export interface CostLine {
    *  Negative when the change makes the part faster to produce. */
   minutes_per_part?: number | null;
   demand_hours: number;
-  rate_snapshot: number;
+  rate_snapshot: number | null;
   internal_cost: number;
   external_cost: number;
   note?: string | null;
@@ -466,6 +466,8 @@ export interface CostLineIn {
 
 export interface PlantRollup {
   plant_id: number;
+  /** A plant's row is in that plant's currency. */
+  currency?: string;
   one_time_internal: number; one_time_external: number;
   lifecycle_internal: number; lifecycle_external: number;
 }
@@ -473,6 +475,31 @@ export interface DeptRollup extends Omit<PlantRollup, 'plant_id'> { department_i
 export interface SummationTotals {
   one_time_internal: number; one_time_external: number;
   lifecycle_internal: number; lifecycle_external: number; grand_total: number;
+}
+
+export interface SummationPositionLine {
+  position_id: number;
+  label: string;
+  kind: string;
+  /** The quoted money of the line (Sales' chosen offer, else the estimate). */
+  cost: number;
+  currency: string;
+  /** hours (trials) x rate; null = no rate in the cost sheet (not counted). */
+  line_value: number | null;
+  rate: number | null;
+}
+
+export interface SummationPositionRollup {
+  department_id: number;
+  position_cost: number;
+  hours: number;
+  hours_cost: number;
+  machine_hours: number;
+  trials: number;
+  position_count: number;
+  unrated_hours: boolean;
+  unpriced_count: number;
+  positions: SummationPositionLine[];
 }
 
 export interface Summation {
@@ -500,6 +527,15 @@ export interface Summation {
   total_minutes_per_part?: number;
   /** The Tool Engineer's weight quote, carried into the wrap-up Sales prices. */
   part_weight_estimate_g?: number | null;
+  /**
+   * The costing positions' share of the totals, per department. Already
+   * INSIDE totals and by_department (never add it again): position_cost is
+   * the quoted money, hours_cost the positions' hours (trials) priced from
+   * the cost sheet, both in the costing currency.
+   */
+  positions_by_department?: SummationPositionRollup[];
+  total_position_cost?: number;
+  total_position_hours_cost?: number;
   /**
    * What the change actually cost, once the work has run (stage 8/9). Absent
    * before implementation — everything reading it must survive that.
@@ -750,13 +786,18 @@ export interface CostPosition {
   offers: CostingOffer[];
   /** Cost sheet pricing (spec §15 phase 2). */
   labour_position?: string | null;
+  /** The line's own class; null = priced on the change's class (follows it). */
   machine_class_id?: number | null;
+  /** The class the line is priced on (its own or the change's). */
   machine_class?: string | null;
+  machine_class_used_id?: number | null;
+  machine_class_from_change?: boolean;
   trials?: number | null;
   /** The rate snapshot the line is priced with; null = no rate (not 0). */
   rate?: number | null;
+  /** The rate's currency (the cost sheet row's): line_value is in it. */
   rate_currency?: string | null;
-  /** The line's currency: the costing plant's. */
+  /** The money currency of the line (estimate, offers): the costing plant's. */
   currency?: string | null;
   rate_unit?: 'h' | 'trial' | null;
   rate_source?: 'cost_sheet' | 'department_rate' | null;
@@ -770,7 +811,7 @@ export interface CostPosition {
   rate_missing?: boolean;
   rate_missing_reason?: string | null;
   rate_is_snapshot?: boolean;
-  /** quantity x rate in `currency`; null when the rate is missing. */
+  /** quantity x rate in `rate_currency`; null when the rate is missing. */
   line_value?: number | null;
 }
 

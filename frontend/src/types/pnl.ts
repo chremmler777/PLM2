@@ -14,6 +14,14 @@ export interface PnlRow {
   project_name: string | null;
   branch: PnlBranch;
   status: ChangeStatus;
+  /** The costing currency: every amount of the row except the revenue. */
+  currency?: string;
+  /** The revenue's currency (the offer's); no margin when it differs. */
+  revenue_currency?: string;
+  currency_mismatch?: boolean;
+  /** Costing lines without a rate in the cost sheet: the cost is too low. */
+  no_rate?: boolean;
+  warnings?: { code: string; message: string }[];
   revenue: number | null;
   internal_cost: number;
   external_cost: number;
@@ -63,6 +71,9 @@ export interface PnlAggregate {
   variance?: number;
   late_count?: number;
   max_slip_days?: number | null;
+  /** Changes whose revenue is in another currency than their costing. */
+  mismatch_count?: number;
+  no_rate_count?: number;
 }
 
 export interface PnlByProject {
@@ -73,7 +84,7 @@ export interface PnlByProject {
   margin: number;
 }
 
-export interface PnlSummary {
+export interface PnlSummaryBlock {
   totals: PnlAggregate;
   pipeline: PnlAggregate;
   realized: PnlAggregate;
@@ -83,6 +94,14 @@ export interface PnlSummary {
     internal: PnlAggregate;
   };
   count: number;
+}
+
+/** The top level is the block of the main currency; by_currency has one
+ *  block per costing currency (amounts are never added across currencies). */
+export interface PnlSummary extends PnlSummaryBlock {
+  currency?: string;
+  currencies?: string[];
+  by_currency?: Record<string, PnlSummaryBlock>;
 }
 
 export interface PnlFilters {

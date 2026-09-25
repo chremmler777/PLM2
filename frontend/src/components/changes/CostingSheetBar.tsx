@@ -3,8 +3,9 @@
  * prices this change (version, plant, currency), a banner when Finance owes
  * a review of the sheet, the change's machine class (machine time and
  * sampling lines are priced on it; default from the impacted tool's tonnage),
- * and the summation's own warnings (currencies it refused to add, lines
- * without a rate) for those who see the money.
+ * and the totals per currency when the costing mixes currencies. The
+ * summation's warnings (lines without a rate, mixed currencies) are shown
+ * once, on the P&L card above.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -47,7 +48,6 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
     : ctx.current_version ? vars(t('costing.sheetInfo')) : t('costing.sheetNone')
   const stale = ctx.stale?.stale ? ctx.stale : null
   const defaultClass = ctx.machine_classes.find((c) => c.id === ctx.default_machine_class_id)
-  const warnings = summation?.warnings ?? []
   const byCurrency = Object.entries(summation?.totals_by_currency ?? {})
 
   return (
@@ -86,12 +86,6 @@ export default function CostingSheetBar({ changeId, summation, editable }: {
           </select>
         </span>
       </div>
-      {warnings.length > 0 && (
-        <ul data-testid="costing-summation-warnings"
-          className="rounded-md border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200 space-y-1">
-          {warnings.map((w) => <li key={w.code} data-code={w.code}>{w.message}</li>)}
-        </ul>
-      )}
       {summation?.mixed_currency && byCurrency.length > 1 && (
         <p data-testid="costing-totals-by-currency" className="text-xs text-slate-400">
           {t('costing.totalsByCurrency')}:{' '}

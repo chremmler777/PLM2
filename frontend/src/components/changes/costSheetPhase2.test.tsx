@@ -58,7 +58,7 @@ describe('CostingSheetBar', () => {
     await waitFor(() => expect(changesApi.setMachineClass).toHaveBeenCalledWith(7, 4))
   })
 
-  it('lists the summation warnings and the totals per currency', async () => {
+  it('shows the totals per currency, the warnings only once (on the P&L card)', async () => {
     vi.mocked(changesApi.costingContext).mockResolvedValue(
       { ...ctx, stale: { ...ctx.stale!, stale: false } } as never)
     const summation = {
@@ -73,8 +73,9 @@ describe('CostingSheetBar', () => {
       ],
     } as unknown as Summation
     wrap(<CostingSheetBar changeId={7} editable summation={summation} />)
-    const list = await screen.findByTestId('costing-summation-warnings')
-    expect(list.querySelectorAll('li')).toHaveLength(2)
+    expect((await screen.findByTestId('costing-totals-by-currency')).textContent)
+      .toContain('120,00 EUR · 100,00 USD')
+    expect(screen.queryByTestId('costing-summation-warnings')).toBeNull()
     expect(screen.queryByTestId('costing-stale-banner')).toBeNull()
     expect(screen.getByTestId('costing-totals-by-currency').textContent)
       .toContain('120,00 EUR · 100,00 USD')

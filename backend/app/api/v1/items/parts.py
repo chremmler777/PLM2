@@ -362,6 +362,34 @@ async def set_lifecycle_phase(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+async def _may_reject_revision(db: AsyncSession, part_id: int, revision_id: int,
+                               user: User) -> None:
+    """Rejecting or restoring an index is Development's call (admins too),
+    on a part of the caller's own organization; the revision must be the
+    part's."""
+    from app.models.entities import Plant, Project
+    from app.models.part import Part, PartRevision
+    from app.services.revision_intake_service import RevisionIntakeService
+    rev = await db.get(PartRevision, revision_id)
+    if rev is None or rev.part_id != part_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Revision not found")
+    if user.effective_role != "admin":
+        org = (await db.execute(
+            select(Plant.organization_id)
+            .join(Project, Project.plant_id == Plant.id)
+            .join(Part, Part.project_id == Project.id)
+            .where(Part.id == part_id))).scalar_one_or_none()
+        if org is not None and org != user.organization_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                detail="Part not found")
+    if not await RevisionIntakeService.may_triage(db, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Development rejects or restores a revision "
+                   "(admins: act as Development)")
+
+
 @router.post("/{part_id}/revisions/{revision_id}/reject", response_model=PartRevisionResponse)
 async def reject_revision(
     part_id: int,
@@ -371,6 +399,7 @@ async def reject_revision(
     db: AsyncSession = Depends(get_db),
 ):
     """Reject a major revision so you can go back to a previous version."""
+    await _may_reject_revision(db, part_id, revision_id, current_user)
     try:
         revision = await RevisionService.reject_revision(
             session=db,
@@ -379,6 +408,9 @@ async def reject_revision(
         )
         await db.commit()
         return revision
+    except IntakeError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to reject revision: {e}")
@@ -393,7 +425,9 @@ async def unreject_revision(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Restore a rejected/archived revision back to draft (for proposals) or available status."""
+    """Restore a rejected/archived revision back to draft (for proposals) or
+    available status; a customer index's closed intake reopens with it."""
+    await _may_reject_revision(db, part_id, revision_id, current_user)
     try:
         revision = await RevisionService.unreject_revision(
             session=db,
@@ -402,6 +436,9 @@ async def unreject_revision(
         )
         await db.commit()
         return revision
+    except IntakeError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to unreject revision: {e}")

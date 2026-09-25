@@ -405,3 +405,36 @@ describe('MyTasksPage project team (spec §18)', () => {
     expect(screen.getByTestId('backup-chip').textContent).toContain('Cody Hrtyanski')
   })
 })
+
+describe('MyTasksPage total: the badge number', () => {
+  afterEach(cleanup)
+
+  it('counts the main task rows, the main index rows and the Finance review, never backups', async () => {
+    navigate.mockClear()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/intakes/my'))
+        return Promise.resolve({ data: {
+          triage: [
+            { id: 1, part_id: 4, revision_name: 'B', part_number: 'P-1', part_name: 'Housing',
+              project_name: 'X', source_label: 'Customer', received_at: '2026-09-20', role: 'main' },
+            { id: 2, part_id: 5, revision_name: 'C', part_number: 'P-2', part_name: 'Cover',
+              project_name: 'X', source_label: 'Customer', received_at: '2026-09-20',
+              role: 'backup', main_name: 'Dev One' },
+          ],
+          review: [],
+        } })
+      if (url.includes('/cost-sheet/review-task'))
+        return Promise.resolve({ data: { due: true, is_finance: true, stale: null } })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await screen.findByTestId('intake-task-1')
+    await screen.findByTestId('cost-sheet-review-task')
+    // 1 change task + 1 main index row + the Finance review; the backup index is not counted
+    await waitFor(() => expect(screen.getByTestId('my-tasks-total').textContent).toBe('(3)'))
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(1)')
+  })
+})

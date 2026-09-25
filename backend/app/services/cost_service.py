@@ -72,7 +72,10 @@ class CostService:
             return []      # nothing to price against yet; try again later
         price = await CostService.price_for(
             session, assessment.department_id, plant_id)
-        rate = price.rate or 0.0
+        # No rate in the cost sheet: the line says so (None), it is not 0,
+        # and it names no source it did not come from.
+        rate = price.rate
+        source = price.source if rate is not None else None
 
         from app.models.workflow import Department
         from app.services import assessment_checklist as checklist
@@ -98,8 +101,8 @@ class CostService:
                 activity_label=label,
                 cost_kind=cost_kind, demand_hours=0.0, rate_snapshot=rate,
                 internal_cost=0.0, external_cost=0.0,
-                currency=price.currency, rate_source=price.source,
-                cost_sheet_version_id=price.version_id,
+                currency=price.currency, rate_source=source,
+                cost_sheet_version_id=price.version_id if rate is not None else None,
                 # The remark from the checklist travels with the line: it is
                 # the reason this row exists.
                 note=item.get("remark") or None,
@@ -131,11 +134,33 @@ class CostService:
         return project.plant_id if project is not None else None
 
     @staticmethod
+    def _pricing_key(plant_id, activity_id, activity_label, cost_kind, demand_hours) -> tuple:
+        """What makes a grid line the same line for pricing: an unchanged
+        line keeps the rate it was costed with."""
+        return (int(plant_id), activity_id, (activity_label or "").strip(),
+                cost_kind, round(float(demand_hours or 0.0), 4))
+
+    @staticmethod
     async def replace_cost_lines(session: AsyncSession, change: ChangeRequest,
                                  assessment: ChangeAssessment, lines: list[dict],
                                  user_id: int) -> list[AssessmentCostLine]:
+        """Replace the department's grid. A line that comes back unchanged
+        (same plant, activity, kind and hours) keeps its rate snapshot, its
+        currency and its cost sheet version: saving the grid never re-prices
+        what nobody touched. New or changed lines are priced from the cost
+        sheet valid today; a line with hours and no rate is refused."""
         from app.services.change_service import ChangeService  # local import avoids cycle
         await session.refresh(assessment, ["cost_lines"])
+        kept: dict[tuple, list[AssessmentCostLine]] = {}
+        for old in assessment.cost_lines:
+            if old.rate_snapshot is None:
+                continue          # never priced: price it now
+            kept.setdefault(CostService._pricing_key(
+                old.plant_id, old.activity_id, old.activity_label, old.cost_kind,
+                old.demand_hours), []).append(old)
+        snapshots: dict[tuple, list[tuple]] = {
+            k: [(o.rate_snapshot, o.currency, o.rate_source, o.cost_sheet_version_id)
+                for o in v] for k, v in kept.items()}
         for old in list(assessment.cost_lines):
             await session.delete(old)
         await session.flush()
@@ -148,26 +173,34 @@ class CostService:
                 raise CostError("Free-input line requires an activity_label")
             plant_id = spec["plant_id"]
             demand_hours = float(spec.get("demand_hours") or 0.0)
-            price = await CostService.price_for(
-                session, assessment.department_id, plant_id)
-            if price.rate is None and demand_hours > 0:
-                # Cannot price: refused, never valued at 0.
-                raise CostError(
-                    f"No rate in the cost sheet for department "
-                    f"{assessment.department_id} at plant {plant_id}")
-            rate = price.rate or 0.0
+            key = CostService._pricing_key(
+                plant_id, spec.get("activity_id"), spec.get("activity_label"),
+                cost_kind, demand_hours)
+            if snapshots.get(key):
+                rate, currency, source, version_id = snapshots[key].pop(0)
+            else:
+                price = await CostService.price_for(
+                    session, assessment.department_id, plant_id)
+                if price.rate is None and demand_hours > 0:
+                    # Cannot price: refused, never valued at 0.
+                    raise CostError(
+                        f"No rate in the cost sheet for department "
+                        f"{assessment.department_id} at plant {plant_id}")
+                rate, currency = price.rate, price.currency
+                source = price.source if rate is not None else None
+                version_id = price.version_id if rate is not None else None
             line = AssessmentCostLine(
                 assessment_id=assessment.id, plant_id=plant_id,
                 activity_id=spec.get("activity_id"), activity_label=spec.get("activity_label"),
                 cost_kind=cost_kind, demand_hours=demand_hours, rate_snapshot=rate,
-                internal_cost=demand_hours * rate,
+                internal_cost=demand_hours * (rate or 0.0),
                 external_cost=float(spec.get("external_cost") or 0.0),
                 minutes_per_part=(
                     None if spec.get("minutes_per_part") is None
                     else float(spec["minutes_per_part"])),
                 note=spec.get("note"),
-                currency=price.currency, rate_source=price.source,
-                cost_sheet_version_id=price.version_id,
+                currency=currency, rate_source=source,
+                cost_sheet_version_id=version_id,
             )
             session.add(line)
             new_lines.append(line)
@@ -273,6 +306,15 @@ class CostService:
         # costed (costing_rates); a line with no rate is NOT counted as 0:
         # it is listed in unpriced_lines and the summation warns.
         pos_by_dep: dict[int, dict] = {}
+        book = costing_rates.RateBook(session)
+        # The time a department spent on its assessment is its standing
+        # internal_effort line (the assessment's own effort_hours for a
+        # department that has none).
+        effort_from_positions: dict[int, float] = {}
+        for p in positions:
+            if p.kind == "internal_effort" and p.hours:
+                effort_from_positions[p.department_id] = (
+                    effort_from_positions.get(p.department_id, 0.0) + float(p.hours))
         for p in positions:
             # The money Sales is quoting, which is the CHOSEN vendor's price
             # once Sales has decided and the department's own effective_cost
@@ -291,7 +333,7 @@ class CostService:
                  "unrated_hours": False, "unpriced_count": 0, "positions": []})
 
             price = await costing_rates.position_price(
-                session, change, p, org_id=org_id, plant_id=costing_plant)
+                session, change, p, org_id=org_id, plant_id=costing_plant, book=book)
             if price.version_id:
                 version_ids_used.add(price.version_id)
             value = costing_rates.line_value(p, price)
@@ -406,6 +448,10 @@ class CostService:
             .where(ChangeAssessment.change_id == change.id,
                    ChangeAssessment.effort_hours.is_not(None))
             .group_by(ChangeAssessment.department_id))).all()
+
+        effort_hours = {d: float(h) for d, h in efforts}
+        effort_hours.update(effort_from_positions)
+        efforts = sorted((d, h) for d, h in effort_hours.items() if h)
 
         by_department = [{"department_id": did, **vals}
                          for did, vals in sorted(by_dep.items())]

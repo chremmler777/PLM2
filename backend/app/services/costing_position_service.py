@@ -448,9 +448,10 @@ class CostingPositionService:
             position.label = position.label.strip()
         CostingPositionService._validate(position)
         await CostingPositionService._check_machine_class(session, change, position)
-        # Re-priced only when what the rate depends on moved (or the line was
-        # never priced): a typo fixed in the label keeps its snapshot.
-        if (position.rate_on is None
+        # Re-priced only when what the rate depends on moved, or the line has
+        # no rate yet (never priced, or none was found: Finance may have added
+        # it since): a typo fixed in the label keeps its snapshot.
+        if (position.rate_on is None or position.rate is None
                 or any(getattr(position, f) != before[f]
                        for f in costing_rates.PRICING_FIELDS)):
             await costing_rates.snapshot_position(session, change, position)

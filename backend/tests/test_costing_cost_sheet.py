@@ -213,7 +213,10 @@ async def test_machine_time_and_sampling_lines(client, admin_auth, world, sessio
     assert ctx["effective_machine_class_id"] == world["big"] and ctx["currency"] == "USD"
     m = await _add(client, admin_auth, world, kind="machine_time", label="Press", hours=3,
                    est_cost=999)
-    assert m["machine_class_id"] == world["big"] and m["rate"] == 85
+    # priced on the change's (default) class, which the line does not own:
+    # a later change of the class moves it
+    assert m["machine_class_id"] is None and m["machine_class_used_id"] == world["big"]
+    assert m["machine_class_from_change"] and m["rate"] == 85
     assert m["line_value"] == 255 and m["est_cost"] is None
     assert m["rate_label"] == "Cost sheet v1, Machine 200-450 t, 85,00 USD/h"
     sp = await _add(client, admin_auth, world, kind="sampling", label="T1", trials=2)
@@ -227,8 +230,10 @@ async def test_machine_time_and_sampling_lines(client, admin_auth, world, sessio
     tool = next(p for p in summ["positions_by_department"]
                 if p["department_id"] == world["tool"])
     assert tool["machine_hours"] == 6 and tool["trials"] == 3
-    assert summ["totals"]["one_time_internal"] == 255 + 2500
-    assert len(summ["unpriced_lines"]) == 2          # the classless press + T2
+    # the first press found no rate when it was added, so it stored no
+    # snapshot: it is priced live and now picks up the tonnage default
+    assert summ["totals"]["one_time_internal"] == 255 + 255 + 2500
+    assert [u["position_id"] for u in summ["unpriced_lines"]] == [bad["id"]]
     # a foreign class is refused
     res = await client.post(_url(world, "/costing/positions"), json={
         "department_id": world["tool"], "label": "x", "kind": "machine_time",
