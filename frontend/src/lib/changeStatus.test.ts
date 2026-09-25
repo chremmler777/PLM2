@@ -130,6 +130,23 @@ describe('one verb per step (UI polish 2.4)', () => {
     for (const v of Object.values(TRANSITION_LABELS)) expect(v).not.toMatch(/→/)
   })
 
+  it('cancels and holds by their own verb even from on hold', async () => {
+    const { transitionLabel } = await import('./changeStatus')
+    expect(transitionLabel('cancelled', 'on_hold')).toBe('Cancel change')
+    expect(transitionLabel('on_hold', 'in_validation')).toBe('Put on hold')
+    expect(transitionLabel('in_validation', 'on_hold')).toBe('Resume')
+    expect(transitionLabel('released', 'on_hold')).toBe('Resume')
+  })
+
+  it('names every backward move as going back', async () => {
+    const { transitionLabel } = await import('./changeStatus')
+    expect(transitionLabel('in_implementation', 'in_validation')).toBe('Back to implementation')
+    expect(transitionLabel('costing', 'quoting')).toBe('Reopen costing')
+    expect(transitionLabel('scoping', 'in_assessment')).toBe('Back to scoping')
+    expect(transitionLabel('scoping', 'rejected')).toBe('Reopen change')
+    expect(transitionLabel('closed', 'rejected')).toBe('Close change')
+  })
+
   it('spells statuses en-US', () => {
     expect(STATUS_LABELS.cancelled).toBe('Canceled')
   })

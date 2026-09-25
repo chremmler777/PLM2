@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
-import { Check, Hourglass, Info } from 'lucide-react'
+import { AlertTriangle, Check, Hourglass, Info } from 'lucide-react'
 import Dialog from '../common/Dialog'
 import Button from '../common/Button'
 
@@ -23,6 +23,9 @@ export interface TransitionConfirm {
   final?: boolean
   /** Still loading what is open. */
   loading?: boolean
+  /** Worth a second look before the step, never holding it (shown in amber
+      above the open list; e.g. a costing total of zero). */
+  warning?: string
   /** Worth knowing before the step, never holding it (shown muted). */
   info?: string[]
   /** The step needs a reason on the record: a required memo box. */
@@ -75,6 +78,11 @@ export default function TransitionConfirmDialog({
           : 'border-amber-700/60 bg-amber-950/40 text-amber-200'}`}>
         {confirm.consequence}
       </p>
+      {!confirm.loading && confirm.warning && (
+        <p data-testid="confirm-warning" className="mb-3 flex items-start gap-1.5 text-sm text-amber-200">
+          <AlertTriangle aria-hidden="true" size={16} className="mt-0.5 shrink-0" /><span>{confirm.warning}</span>
+        </p>
+      )}
       {confirm.loading ? (
         <p className="text-xs text-slate-400">Checking what is still open…</p>
       ) : confirm.open.length > 0 ? (

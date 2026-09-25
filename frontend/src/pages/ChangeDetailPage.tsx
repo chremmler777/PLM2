@@ -50,7 +50,7 @@ import { t } from '../i18n/cmLabels';
 import {
   OFF_PATH_STATUSES, everydayTabsFor, transitionLabel, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, stoppedTabLocked, stoppedDefaultTab, type ChangeTab,
-  decodeLogValue,
+  decodeLogValue, STATUS_LABELS,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
@@ -379,14 +379,17 @@ export default function ChangeDetailPage() {
     queryFn: () => changesApi.getSummation(changeId),
     enabled: (confirmTo === 'quoting' || change?.status === 'costing') && canSeeCosts,
   });
-  // Why "Close costing" is held, read like CostingBuckets reads it: a total of
-  // zero with nothing waiting for a rate, or departments with nothing booked.
-  const costingHold = (() => {
+  // What is worth a second look before "Close costing", read like
+  // CostingBuckets reads it: a total of zero with nothing waiting for a rate,
+  // or departments with nothing booked. A warning only, never a hold: the
+  // backend counts a zero line as an answer (costing_pending_department_ids),
+  // so a change that legitimately costs nothing must still close.
+  const costingWarning = (() => {
     const sum = closingSummation;
     if (!change || change.status !== 'costing' || !sum || !canSeeCosts) return null;
     const unpricedDepts = new Set((sum.unpriced_lines ?? []).map((l) => l.department_id));
     if (Math.abs(sum.totals?.grand_total ?? 0) < 0.005 && unpricedDepts.size === 0) {
-      return `Nothing is costed yet: the total is ${formatMoney(0, sum.currency ?? 'EUR')}.`;
+      return `The total is ${formatMoney(0, sum.currency ?? 'EUR')}. Check that nothing was forgotten.`;
     }
     const deptIds = [...new Set(change.assessments.map((a) => a.department_id))];
     const unbooked = deptIds.filter((id) => {
@@ -397,7 +400,7 @@ export default function ChangeDetailPage() {
     });
     if (unbooked.length === 0) return null;
     return `${unbooked.length} of ${deptIds.length} department${deptIds.length === 1 ? '' : 's'} `
-      + `ha${unbooked.length === 1 ? 's' : 've'} not costed yet: ${unbooked.map(deptName).join(', ')}.`;
+      + `booked no cost: ${unbooked.map(deptName).join(', ')}. Check that nothing was forgotten.`;
   })();
   // Releasing past open guards asks for a deviation with the reason, here and
   // now, instead of a bare refusal and a second dialog.
@@ -460,8 +463,13 @@ export default function ChangeDetailPage() {
     && !(stopped.kind === 'rejected' && tb === 'scoping');
   const tabLocked = (tb: Tab) => stoppedLocked(tb) || (!stopped && isTabLocked(change.status, tb)
     && !(tb === 'release' && releaseOpenByIssues(change.status, validationIssues.length)));
+  // The tabs the tablist renders. A tab not among them (?tab=review while the
+  // review still loads, or a tab this change has no longer) falls back to
+  // Overview, so one rendered tab is always selected and focusable.
+  const everydayTabs = everydayTabsFor(change.origin, hasReview);
+  const renderedTabs: Tab[] = canSeeGovernance ? [...everydayTabs, ...GOVERNANCE_TABS] : everydayTabs;
   const effectiveTab: Tab =
-    (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || tabLocked(tab)
+    !renderedTabs.includes(tab) || (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || tabLocked(tab)
       ? 'overview' : tab;
   // Actions and waits may still name old tabs; resolve them the same way.
   const goTab = (raw: string, issueId?: number) =>
@@ -488,9 +496,11 @@ export default function ChangeDetailPage() {
   // F10: who may take which next step, mirroring the backend's 403 gates.
   const needs = (step: string): string | null => {
     switch (step) {
+      // Rights only: what the costing looks like is a warning (costingWarning),
+      // never a hold the backend does not know.
       case 'to:quoting': return !(isAdmin || isChangeLead || isSalesMember || isPmMember)
         ? 'Needs Sales, the Project Manager or the change lead'
-        : costingHold;
+        : null;
       case 'offer':
       case 'answer': return canEditQuotedPrice ? null : 'Needs Sales or the change lead';
       // Only the missing side gates the step: a viewer who can sign PM but
@@ -541,6 +551,15 @@ export default function ChangeDetailPage() {
   ];
   const confirm: TransitionConfirm | null = (() => {
     if (!confirmTo) return null;
+    // Resuming from hold goes back to where the change stood: a plain resume,
+    // never the forward step's confirm ("Finish implementation", "Release").
+    if (change.status === 'on_hold' && confirmTo !== 'cancelled') {
+      const verb = transitionLabel(confirmTo, 'on_hold');
+      return { to: confirmTo, title: verb,
+        consequence: `The change goes back to ${STATUS_LABELS[confirmTo as ChangeStatus] ?? confirmTo}, where it was put on hold. `
+          + 'This step is recorded in the audit trail.',
+        open: [], confirmLabel: verb };
+    }
     if (change.status === 'captured' && confirmTo === 'scoping') {
       return {
         to: confirmTo, title: t('confirm.kickoffTitle'),
@@ -597,6 +616,7 @@ export default function ChangeDetailPage() {
           ...unpriced.map((u) => `${u.message}: the total is too low`),
         ],
         allClear: 'Every department has entered its cost input, and every line has a rate.',
+        warning: costingWarning ?? undefined,
         confirmLabel: transitionLabel('quoting'),
         loading: canSeeCosts && closingSummationLoading,
       };
@@ -764,6 +784,7 @@ export default function ChangeDetailPage() {
       stage?.waits, { concerns, assessments: change.assessments, departmentName: deptName }),
     onGo: goTab,
     needs,
+    warns: (step: string) => (step === 'to:quoting' ? costingWarning : null),
     assessment: assessmentState,
     may,
     review: review ?? null,
@@ -791,6 +812,27 @@ export default function ChangeDetailPage() {
       isAdmin={isAdmin} />,
   };
 
+  // "More actions" menu keys: Escape closes it and gives focus back to its
+  // button; the arrow keys (Home, End) move between the items.
+  const onMoreKey = (e: React.KeyboardEvent<HTMLDetailsElement>) => {
+    const el = e.currentTarget;
+    const summary = el.querySelector<HTMLElement>('summary');
+    if (e.key === 'Escape' && el.open) {
+      e.preventDefault(); e.stopPropagation();
+      el.open = false; summary?.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = Array.from(el.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    e.preventDefault();
+    if (!el.open) el.open = true;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+      : at === -1 ? (e.key === 'ArrowUp' ? items.length - 1 : 0)
+      : (at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[n]?.focus();
+  };
   // Rare and destructive moves live behind "More actions", not beside the title.
   const canCancel = CANCELLABLE.includes(change.status) && may('cancelled');
   const headerActions = (
@@ -799,13 +841,16 @@ export default function ChangeDetailPage() {
         <button type="button" data-testid="header-reopen" className={btnSm.secondary}
           onClick={() => setReopenOpen(true)}>{transitionLabel('scoping', 'rejected')}</button>
       )}
-      {change.status === 'on_hold' && may(resumeTo) && (
+      {/* Only once the changelog says where the hold came from: before that
+          resumeTo is a guess. */}
+      {change.status === 'on_hold' && changelog !== undefined && may(resumeTo) && (
         <button type="button" className={btnSm.secondary}
           onClick={() => advance(resumeTo)}>{transitionLabel(resumeTo, 'on_hold')}</button>
       )}
       {canCancel && (
         <details ref={moreRef} className="relative"
-          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) e.currentTarget.open = false; }}>
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) e.currentTarget.open = false; }}
+          onKeyDown={onMoreKey}>
           <summary aria-label={t('change.moreActions')} title={t('change.moreActions')}
             className={`${btnIcon} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
             <MoreHorizontal aria-hidden="true" size={18} />
@@ -813,7 +858,13 @@ export default function ChangeDetailPage() {
           <div role="menu" className="absolute right-0 z-30 mt-1 w-48 rounded-lg border border-slate-700 bg-slate-800 p-1 shadow-lift">
             <button type="button" role="menuitem" data-testid="header-cancel"
               className="w-full rounded-md px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-              onClick={() => { if (moreRef.current) moreRef.current.open = false; advance('cancelled'); }}>
+              onClick={() => {
+                if (moreRef.current) {
+                  moreRef.current.open = false;
+                  moreRef.current.querySelector<HTMLElement>('summary')?.focus();
+                }
+                advance('cancelled');
+              }}>
               {transitionLabel('cancelled')}…
             </button>
           </div>
@@ -898,6 +949,7 @@ export default function ChangeDetailPage() {
         <DeviationBanner
           changeId={changeId}
           blockedTo={blocked.to}
+          from={change.status}
           blockedReason={blocked.reason}
           seq={blockedSeq}
           onRetry={() => transition.mutate({ to: blocked.to })}
@@ -975,7 +1027,7 @@ export default function ChangeDetailPage() {
           on hover and on keyboard focus, not only in a mouse tooltip. */}
       <div role="tablist" aria-label={t('change.tabs')} onKeyDown={onTabKey}
         className="mb-4 flex flex-nowrap items-end gap-x-4 overflow-x-auto border-b border-slate-700 text-sm sm:flex-wrap sm:overflow-visible">
-        {everydayTabsFor(change.origin, hasReview).map((tb) => tabButton(tb, false))}
+        {everydayTabs.map((tb) => tabButton(tb, false))}
         {canSeeGovernance && (
           <>
             <span aria-hidden="true" className="ml-auto mb-2.5 h-4 w-px bg-slate-700" />

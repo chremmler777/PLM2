@@ -29,6 +29,23 @@ describe('TransitionConfirmDialog', () => {
     expect(document.activeElement).toBe(go)
   })
 
+  it('shows a warning without holding the step', () => {
+    const onConfirm = vi.fn()
+    render(<TransitionConfirmDialog confirm={{ ...base, warning: 'The total is 0.00 EUR.', open: ['Dept: no rate'] }}
+      onConfirm={onConfirm} onClose={() => {}} />)
+    expect(screen.getByTestId('confirm-warning').textContent).toBe('The total is 0.00 EUR.')
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(false)
+    fireEvent.click(go)
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the warning while still loading', () => {
+    render(<TransitionConfirmDialog confirm={{ ...base, warning: 'The total is 0.00 EUR.', loading: true }}
+      onConfirm={() => {}} onClose={() => {}} />)
+    expect(screen.queryByTestId('confirm-warning')).toBeNull()
+  })
+
   it('asks for a required reason, focused first, and hands it over trimmed', () => {
     const onConfirm = vi.fn()
     render(<TransitionConfirmDialog confirm={{ ...base, reason: { label: 'Why?' } }}

@@ -52,6 +52,10 @@ interface Props {
    * Absent: everything is allowed (the backend still decides).
    */
   needs?: (step: string) => string | null
+  /** Worth a look before a step, never holding it (e.g. "Close costing" with a
+      total of zero): shown as a note beside the step, the button stays live.
+      Same keys as `needs`. */
+  warns?: (step: string) => string | null
   /** The assessment round (stage-state, or derived): decides the next step
       while the change is in assessment. */
   assessment?: StageAssessment | null
@@ -285,7 +289,7 @@ const Where = ({ to }: { to: string }) => (
 /** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
 interface Blocker { key: string; text: string; go?: () => void }
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, warns = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
@@ -507,6 +511,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                   <span data-testid="compact-held" className="min-w-0 truncate text-xs text-amber-200"
                     title={deniedFor(primaryStep) ?? undefined}>
                     {deniedFor(primaryStep)}
+                  </span>
+                )}
+                {!deniedFor(primaryStep) && primaryStep.kind === 'advance' && warns(`to:${primaryStep.to}`) && (
+                  <span data-testid="compact-warn" className="min-w-0 truncate text-xs text-amber-200"
+                    title={warns(`to:${primaryStep.to}`) ?? undefined}>
+                    {warns(`to:${primaryStep.to}`)}
                   </span>
                 )}
                 {stepButton(primaryStep, true, 'sm')}
@@ -737,6 +747,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             )}
             {/* While the step waits there is no primary button at all. */}
             {buttons.map((st) => stepButton(st, !demoted && steps[0] === st))}
+            {/* A warning beside a live step: read it, the step still goes. */}
+            {buttons.flatMap((st) => {
+              if (st.kind !== 'advance' || deniedFor(st)) return []
+              const w = warns(`to:${st.to}`)
+              return w ? [(
+                <p key={`warn-${st.to}`} data-testid={`next-warn-${st.to}`}
+                  className="flex items-start gap-1.5 text-xs text-amber-200">
+                  <AlertTriangle aria-hidden="true" size={12} className="mt-0.5 shrink-0" /><span>{w}</span>
+                </p>
+              )] : []
+            })}
             {/* The gate that holds a step, with the way to where it is decided. */}
             {[...new Map(buttons.flatMap((st) => {
               const g = st.kind === 'advance' ? gateHolding(st.to) : undefined

@@ -33,10 +33,14 @@ export const TRANSITION_LABELS: Record<ChangeStatus, string> = {
 
 /** The verb for moving a change from `from` to `to`. */
 export function transitionLabel(to: ChangeStatus | string, from?: ChangeStatus | string | null): string {
+  // Canceling and holding read the same from anywhere, also from on hold.
+  if (to === 'cancelled' || to === 'on_hold') return TRANSITION_LABELS[to]
+  if (from === 'on_hold') return 'Resume'
+  // The backward moves (ALLOWED_TRANSITIONS): each says it goes back.
   if (to === 'scoping' && from === 'in_assessment') return 'Back to scoping'
   if (to === 'scoping' && from === 'rejected') return 'Reopen change'
-  if (from === 'on_hold') return 'Resume'
   if (to === 'costing' && from === 'quoting') return 'Reopen costing'
+  if (to === 'in_implementation' && from === 'in_validation') return 'Back to implementation'
   return TRANSITION_LABELS[to as ChangeStatus] ?? STATUS_LABELS[to as ChangeStatus] ?? String(to)
 }
 

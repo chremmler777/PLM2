@@ -139,9 +139,10 @@ vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>m
 const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing', 'to:quoting'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
   gateStateText: (d?: string | null) => (d === 'no' ? 'answered No' : d === 'na' ? 'not answered Yes (it is n/a)' : 'not decided yet'),
-  default: ({ waits = [], needs, onAdvance, onDecideDeviation, deviationTargets, onAskDeviation }: {
+  default: ({ waits = [], needs, warns, onAdvance, onDecideDeviation, deviationTargets, onAskDeviation }: {
     waits?: { key: string; text: string }[]
     needs?: (step: string) => string | null
+    warns?: (step: string) => string | null
     onAdvance?: (to: string) => void
     onDecideDeviation?: (id?: number) => void
     deviationTargets?: { approved: string[]; pending: string[] }
@@ -154,6 +155,7 @@ vi.mock('../components/changes/CockpitSummary', () => ({
       {needs && NEEDS_PROBE_KEYS.map((k) => (
         <p key={k} data-testid={`needs-${k}`}>{needs(k) ?? 'allowed'}</p>
       ))}
+      {warns && <p data-testid="warns-to:quoting">{warns('to:quoting') ?? 'no warning'}</p>}
       {/* Drives the confirm dialogs the same way the real advance buttons would. */}
       <button type="button" onClick={() => onAdvance?.('in_validation')}>mock-advance-in_validation</button>
       <button type="button" onClick={() => onAdvance?.('scoping')}>mock-advance-scoping</button>
@@ -1384,17 +1386,29 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
     expect(screen.getByTestId('confirm-go').textContent).toBe('Record approval')
   })
 
-  it('holds "Close costing" while nothing is costed, and names departments not costed yet', async () => {
+  it('never holds "Close costing" on the costing total: a zero total is a warning beside the step and in the confirm', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'costing' as ChangeDetail['status']
     const zero = { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }
+    // A department that legitimately costs nothing booked a zero line: the
+    // backend counts it as an answer, so the step must stay open.
     vi.mocked(changesApi.getSummation).mockResolvedValue({
-      currency: 'USD', unpriced_lines: [], by_department: [],
+      currency: 'USD', unpriced_lines: [],
+      by_department: [{ department_id: change.assessments[0]?.department_id ?? 1, ...zero }],
       totals: { ...zero, grand_total: 0 }, effort_by_department: [],
     } as never)
     wrap('/changes/1?tab=overview')
-    await waitFor(() => expect(screen.getByTestId('needs-to:quoting').textContent)
-      .toBe('Nothing is costed yet: the total is 0.00 USD.'))
+    await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent)
+      .toBe('The total is 0.00 USD. Check that nothing was forgotten.'))
+    expect(screen.getByTestId('needs-to:quoting').textContent).toBe('allowed')
+    fireEvent.click(screen.getByText('mock-advance-quoting'))
+    await screen.findByTestId('confirm-quoting')
+    expect((await screen.findByTestId('confirm-warning')).textContent)
+      .toBe('The total is 0.00 USD. Check that nothing was forgotten.')
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(false)
+    fireEvent.click(go)
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'quoting', { to: 'quoting' }))
     cleanup()
     vi.mocked(changesApi.getSummation).mockResolvedValue({
       currency: 'USD', unpriced_lines: [],
@@ -1402,8 +1416,47 @@ describe('ChangeDetailPage UI polish (WP3)', () => {
       totals: { ...zero, grand_total: 100 }, effort_by_department: [],
     } as never)
     wrap('/changes/1?tab=overview')
-    await waitFor(() => expect(screen.getByTestId('needs-to:quoting').textContent).not.toContain('Nothing is costed'))
+    await waitFor(() => expect(screen.getByTestId('warns-to:quoting').textContent).toBe('no warning'))
     vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
+  })
+
+  it('resuming from hold into validation asks a plain resume, not "Finish implementation"', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'on_hold' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'status', action_description: '', performed_by: 1, performed_at: '2026-09-25T10:00:00',
+        field_name: 'status', old_value: 'in_validation', new_value: 'on_hold' },
+    ] as never)
+    wrap('/changes/1?tab=overview')
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }))
+    await screen.findByTestId('confirm-in_validation')
+    expect(screen.getByRole('dialog', { name: 'Resume' })).toBeDefined()
+    expect(screen.getByTestId('confirm-go').textContent).toBe('Resume')
+    expect(screen.getByTestId('confirm-consequence').textContent).toContain('goes back to Validation')
+  })
+
+  it('selects Overview when ?tab names a tab that is not rendered (the review still loading)', async () => {
+    wrap('/changes/1?tab=review')
+    const overview = await screen.findByRole('tab', { name: 'Overview' })
+    expect(screen.queryByRole('tab', { name: 'Review' })).toBeNull()
+    expect(overview.getAttribute('aria-selected')).toBe('true')
+    expect(overview.tabIndex).toBe(0)
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(overview.id)
+  })
+
+  it('"More actions": arrow keys reach the items, Escape closes and returns focus', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1?tab=overview')
+    const cancel = await screen.findByTestId('header-cancel')
+    const details = cancel.closest('details') as HTMLDetailsElement
+    const summary = details.querySelector('summary') as HTMLElement
+    summary.focus()
+    fireEvent.keyDown(summary, { key: 'ArrowDown' })
+    expect(details.open).toBe(true)
+    expect(document.activeElement).toBe(cancel)
+    fireEvent.keyDown(cancel, { key: 'Escape' })
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(summary)
   })
 
   it('titles the finish-implementation confirm with its verb', async () => {

@@ -9,6 +9,9 @@ import ReasonDialog from './ReasonDialog';
 interface Props {
   changeId: number;
   blockedTo: string;
+  /** The change's current status: resuming, reopening and going back read
+   * by where the change comes from (transitionLabel). */
+  from?: string | null;
   blockedReason: string;
   /** Bumped by the caller on every block report, even an identical one, so
    * the scroll-into-view effect below re-fires when the same transition is
@@ -29,7 +32,7 @@ const STATUS_STYLE: Record<string, string> = {
   consumed: 'bg-slate-700 text-slate-400',
 };
 
-export default function DeviationBanner({ changeId, blockedTo, blockedReason, seq, onRetry, onClose }: Props) {
+export default function DeviationBanner({ changeId, blockedTo, from, blockedReason, seq, onRetry, onClose }: Props) {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -110,7 +113,7 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
 
       <ReasonDialog
         open={dialogOpen}
-        title={`Deviation: ${transitionLabel(blockedTo)}`}
+        title={`Deviation: ${transitionLabel(blockedTo, from)}`}
         label="Reason (recorded in the audit trail, requires 4-eyes approval)"
         submitLabel="Submit"
         onSubmit={(reason) => { propose.mutate(reason); setDialogOpen(false); }}

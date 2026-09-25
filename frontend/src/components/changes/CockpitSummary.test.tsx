@@ -130,6 +130,24 @@ describe('CockpitSummary', () => {
     expect(screen.getByTestId('compact-held').textContent).toBe('Needs the Project Manager or the change lead')
   })
 
+  it('a warning sits beside a live step and never disables it', () => {
+    const onAdvance = vi.fn()
+    const warns = (k: string) => (k === 'to:closed' ? 'Check that nothing was forgotten.' : null)
+    render(wrap(<CockpitSummary change={change({ status: 'released' })}
+      gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false} warns={warns} />))
+    const go = screen.getByTestId('next-to-closed') as HTMLButtonElement
+    expect(go.disabled).toBe(false)
+    expect(screen.getByTestId('next-warn-closed').textContent).toBe('Check that nothing was forgotten.')
+    expect(screen.queryByTestId('next-needs')).toBeNull()
+    fireEvent.click(go)
+    expect(onAdvance).toHaveBeenCalledWith('closed')
+    cleanup()
+    render(wrap(<CockpitSummary variant="compact" change={change({ status: 'released' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} warns={warns} />))
+    expect((screen.getByTestId('next-to-closed') as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByTestId('compact-warn').textContent).toBe('Check that nothing was forgotten.')
+  })
+
   it('names an undecided gate "not decided yet", not "n/a"', () => {
     render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[{ gate_key: 'feasibility', decision: null as unknown as 'na' }]}

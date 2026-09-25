@@ -139,6 +139,40 @@ describe('ChangesPage list polish (spec §16)', () => {
     expect(rows().map((r) => within(r).getByRole('link').textContent)).toEqual(['GB-CM-0003', 'GB-CM-0002', 'GB-CM-0001'])
   })
 
+  it('puts the viewer own changes first: own overdue, own open, overdue, open, ended', async () => {
+    const late = { deadline_state: 'overdue', active_deadline: 'quote', required_by_date: '2020-01-01' }
+    vi.mocked(changesApi.list).mockResolvedValue([
+      row({ id: 1, status: 'closed', is_mine: true }),
+      row({ id: 2, change_number: 'GB-CM-0002' }),
+      row({ id: 3, change_number: 'GB-CM-0003', ...late }),
+      row({ id: 4, change_number: 'GB-CM-0004', is_mine: true }),
+      row({ id: 5, change_number: 'GB-CM-0005', is_mine: true, ...late }),
+    ] as never)
+    wrap()
+    await screen.findByText('GB-CM-0005')
+    expect(rows().map((r) => within(r).getByRole('link').textContent)).toEqual(
+      ['GB-CM-0005', 'GB-CM-0004', 'GB-CM-0003', 'GB-CM-0002', 'GB-CM-0001'])
+    expect((screen.getByTestId('changes-sort') as HTMLSelectElement).selectedOptions[0].textContent)
+      .toBe(t('changes.sortAction'))
+  })
+
+  it('ignores an unknown ?status and says "no match" for an empty status filter', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue([] as never)
+    const view = (url: string) => render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={[url]}><ChangesPage /></MemoryRouter>
+      </QueryClientProvider>)
+    view('/changes?status=bogus')
+    expect(await screen.findByText('No changes yet')).toBeDefined()
+    expect(vi.mocked(changesApi.list)).toHaveBeenLastCalledWith({})
+    expect((screen.getByLabelText(t('changes.statusFilter')) as HTMLSelectElement).value).toBe('')
+    cleanup()
+    view('/changes?status=released')
+    expect(await screen.findByText(t('changes.noMatch'))).toBeDefined()
+    expect(vi.mocked(changesApi.list)).toHaveBeenLastCalledWith({ status: 'released' })
+    expect(screen.queryByText('No changes yet')).toBeNull()
+  })
+
   it('keeps search, mine, intake and sort in the URL', async () => {
     vi.mocked(changesApi.list).mockResolvedValue([
       row({ id: 1, lead_id: 5 }), row({ id: 2, change_number: 'GB-CM-0002', title: 'Grille', lead_id: 9 }),

@@ -42,15 +42,23 @@ const PRIORITY_CHIP: Record<string, string> = {
   critical: 'bg-red-900 text-red-200',
 };
 
-/** "Needs action first": open and overdue, then open, then ended; the API's
+/** "Needs action first": the viewer's own overdue changes, then the viewer's
+ *  own open ones, then anyone's overdue, then open, then ended; the API's
  *  newest-first order inside each group. */
-const actionRank = (c: ChangeRequest): number => (hasEnded(c) ? 2 : isOverdue(c) ? 0 : 1);
+const actionRank = (c: ChangeRequest, mine: boolean): number => {
+  if (hasEnded(c)) return 4;
+  const overdue = isOverdue(c);
+  if (mine) return overdue ? 0 : 1;
+  return overdue ? 2 : 3;
+};
 
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
   // Every filter lives in the URL, so Back and a shared link keep them.
   const [searchParams, setSearchParams] = useSearchParams();
-  const statusFilter = searchParams.get('status') ?? '';
+  // An unknown ?status (typo, old link) is ignored rather than sent on.
+  const rawStatus = searchParams.get('status') ?? '';
+  const statusFilter = Object.prototype.hasOwnProperty.call(STATUS_LABELS, rawStatus) ? rawStatus : '';
   const query = searchParams.get('q') ?? '';
   const mineOnly = searchParams.get('mine') === '1';
   // Spec §17: the changes a new customer index started (or joined).
@@ -82,7 +90,7 @@ export default function ChangesPage() {
       c.change_number, c.title, c.project_number, c.project_name,
     ].some((f) => (f ?? '').toLowerCase().includes(q))));
     if (sort === 'action') {
-      return [...rows].sort((a, b) => actionRank(a) - actionRank(b));
+      return [...rows].sort((a, b) => actionRank(a, mine(a)) - actionRank(b, mine(b)));
     }
     if (sort === 'overdue') {
       // Overdue first; then the nearest running deadline; then by priority.
@@ -95,7 +103,7 @@ export default function ChangesPage() {
     return rows;
   }, [data, query, mineOnly, intakeOnly, sort, userId]);
 
-  const filtered = query.trim() !== '' || mineOnly || intakeOnly;
+  const filtered = statusFilter !== '' || query.trim() !== '' || mineOnly || intakeOnly;
   // Type only earns a column when the list actually mixes types.
   const showType = new Set(shown.map((c) => c.change_type)).size > 1;
   const cols = showType ? 9 : 8;
