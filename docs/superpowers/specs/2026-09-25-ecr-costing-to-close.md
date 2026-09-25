@@ -857,3 +857,41 @@ the same. UI: PnlCard shows plan only before implementation, then the
 offer-vs-actual table with variance chips, the timing line and an "Add
 actual cost" form (supplier invoice lines); the release summary uses the
 same card.
+
+## 14. Mother-plant changes (side track, 2026-09-25)
+Some changes are engineered and commercially handled by the mother plant.
+We have no feasibility and no quoting phase: the goal is to inform the team
+what is done, take the mother plant's timing, and start directly with bank
+build planning and implementation.
+
+- **Origin**: `change_requests.origin` String(20) `customer` | `internal` |
+  `mother_plant` (migration after the ones in flight; backfill from
+  customer_relevant), plus `mother_plant_name` String(120),
+  `mother_plant_ref` String(120), `mother_plant_sop` Date. `customer_relevant`
+  stays false for mother-plant changes (no quote deadline, no offer).
+- **Start**: StartChangeModal option "Change from mother plant": name,
+  reference, SOP date (required), documents, optional MS Project file for
+  their timing. Who may start: `can_start_change` departments and PM.
+- **Flow**: `captured -> scoping -> approved -> in_implementation ->
+  in_validation -> released -> closed`. New allowed transition
+  `scoping -> approved` only for origin mother_plant, hard-gated on the
+  impact lock (Development) and the inform list being sent; no
+  assessment/costing/quoting/quoted statuses ever. On entering `approved`:
+  `release_due_date = mother_plant_sop` (reason "Mother plant timing"),
+  detailed plan seeded from the imported file if given, else empty with
+  the SOP milestone.
+- **Team informed**: at scoping the PM selects departments to inform
+  (default: the physical-part routing departments). "Send information"
+  creates one `change_info_receipts` row per department (id, change_id,
+  department_id, sent_by/at, acknowledged_by/at, note) and a My Tasks item
+  "Read and understood" for its members; acknowledging may carry a note
+  back. Open receipts show in Blocked by (info, not a gate).
+- **Timing**: Timing tab as for other changes (detailed plan, bank build,
+  team confirmation, baseline, publish is not needed: no customer publish;
+  "Inform mother plant" stamp instead), deviations and validation issues as
+  usual; escalation level 3 informs the mother plant contact (text) instead
+  of the customer, via PM.
+- **Tabs**: Assessments, Costing, Offer replaced by one "Mother plant"
+  tab (reference, documents, SOP, their timing file, inform list with
+  receipts). LifecycleStepper shows only the used stages.
+- **P&L**: actual local costs only (no offer basis; basis "none").
