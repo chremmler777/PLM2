@@ -6,7 +6,9 @@
  * {"cases": [{
  *   "name": "fs chain",
  *   "calendar": {"mode": "calendar"|"working", "workdays": [1..7, Mon=1], "holidays": ["YYYY-MM-DD"]},
- *   "options": {"pull": false},                       // optional, default push
+ *   "options": {"pull": false,                        // optional, default push
+ *               "cycle": true,                        // optional: the plan has a loop
+ *               "refused": "summary_pin"},            // optional: validate reports this error
  *   "tasks": [{"id": 1, "start": "YYYY-MM-DD", "duration": 5,
  *              "constraint": {"type": "snet", "date": "YYYY-MM-DD"},   // optional
  *              "parentId": null, "isIdea": false}],                    // optional
@@ -19,13 +21,14 @@
  */
 import { describe, expect, it } from 'vitest'
 import { schedule } from './schedule'
+import { validate } from './validate'
 import type { GanttCalendar, GanttLink, GanttTask, LinkType } from './types'
 import sample from './__fixtures__/gantt_vectors.sample.json'
 
 export interface VectorCase {
   name: string
   calendar?: Partial<GanttCalendar>
-  options?: { pull?: boolean; projectStart?: string }
+  options?: { pull?: boolean; projectStart?: string; cycle?: boolean; refused?: string }
   tasks: { id: number | string; start: string; duration: number; constraint?: GanttTask['constraint']; parentId?: number | string | null; isIdea?: boolean }[]
   links: { from: number | string; to: number | string; type: LinkType; lag: number }[]
   expected: Record<string, { start?: string; end?: string; total_slack?: number | null; critical?: boolean; free_slack?: number | null }>
@@ -35,6 +38,11 @@ export function runVector(c: VectorCase) {
   const tasks: GanttTask[] = c.tasks.map((t) => ({ ...t, name: `T${t.id}` }))
   const links: GanttLink[] = c.links.map((l, i) => ({ id: `v${i}`, from: l.from, to: l.to, type: l.type, lagDays: l.lag }))
   const r = schedule(tasks, links, c.calendar, c.options)
+  if (c.options?.cycle !== undefined && (r.cycle.length > 0) !== c.options.cycle) throw new Error(`cycle expected ${c.options.cycle}`)
+  if (c.options?.refused) {
+    const codes = validate(tasks, links, c.calendar).filter((i) => i.level === 'error').map((i) => i.code)
+    if (!codes.includes(c.options.refused)) throw new Error(`expected error ${c.options.refused}, got ${codes.join(', ')}`)
+  }
   const got: VectorCase['expected'] = {}
   for (const [id, exp] of Object.entries(c.expected)) {
     const s = [...r.byId.values()].find((x) => String(x.id) === id)

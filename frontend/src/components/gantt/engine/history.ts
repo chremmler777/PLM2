@@ -7,19 +7,54 @@
 import { invertChangeSet, isEmptyChangeSet, remapChangeSet } from './changes'
 import type { ChangeSet, GanttId, GanttModel } from './types'
 
-export interface HistoryEntry { forward: ChangeSet; backward: ChangeSet }
+export interface HistoryEntry { id: number; forward: ChangeSet; backward: ChangeSet }
 
 export class History {
   private past: HistoryEntry[] = []
   private future: HistoryEntry[] = []
+  private seq = 0
   constructor(private limit = 100) {}
 
-  /** Record a ChangeSet about to be applied to `before`. */
-  push(before: GanttModel, cs: ChangeSet): void {
-    if (isEmptyChangeSet(cs)) return
-    this.past.push({ forward: cs, backward: invertChangeSet(before, cs) })
+  /** Record a ChangeSet about to be applied to `before`; returns the entry id (0 when nothing was recorded). */
+  push(before: GanttModel, cs: ChangeSet): number {
+    if (isEmptyChangeSet(cs)) return 0
+    const id = ++this.seq
+    this.past.push({ id, forward: cs, backward: invertChangeSet(before, cs) })
     if (this.past.length > this.limit) this.past.shift()
     this.future = []
+    return id
+  }
+
+  /** The ChangeSet an undo would apply, without moving anything yet. */
+  peekUndo(): { id: number; cs: ChangeSet } | null {
+    const e = this.past[this.past.length - 1]
+    return e ? { id: e.id, cs: { ...e.backward, label: `Undo ${e.forward.label ?? 'change'}`.trim() } } : null
+  }
+
+  peekRedo(): { id: number; cs: ChangeSet } | null {
+    const e = this.future[this.future.length - 1]
+    return e ? { id: e.id, cs: { ...e.forward } } : null
+  }
+
+  /** The undo of entry `id` went through: move it to the redo stack. */
+  confirmUndo(id: number): void {
+    const i = this.past.findIndex((e) => e.id === id)
+    if (i < 0) return
+    const [e] = this.past.splice(i, 1)
+    this.future.push(e)
+  }
+
+  confirmRedo(id: number): void {
+    const i = this.future.findIndex((e) => e.id === id)
+    if (i < 0) return
+    const [e] = this.future.splice(i, 1)
+    this.past.push(e)
+  }
+
+  /** Forget one entry (its save was refused). */
+  discard(id: number): void {
+    this.past = this.past.filter((e) => e.id !== id)
+    this.future = this.future.filter((e) => e.id !== id)
   }
 
   get canUndo() { return this.past.length > 0 }
@@ -51,7 +86,7 @@ export class History {
   remap(idMap: Record<string, GanttId>): void {
     if (!Object.keys(idMap).length) return
     const r = (e: HistoryEntry): HistoryEntry => ({
-      forward: remapChangeSet(e.forward, idMap), backward: remapChangeSet(e.backward, idMap),
+      id: e.id, forward: remapChangeSet(e.forward, idMap), backward: remapChangeSet(e.backward, idMap),
     })
     this.past = this.past.map(r)
     this.future = this.future.map(r)

@@ -18,7 +18,7 @@ vi.mock('../../../hooks/queries/useWorkflows', () => ({
     { id: 30, name: 'Scheduling', is_active: true },
   ] }),
 }))
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
 
 const task = (over: Partial<TaskOut> & { id: number }): TaskOut => ({
   change_id: 7, plan: 'detailed', name: `Task ${over.id}`, lane: 'Tool Engineer', department_id: 11,
@@ -473,5 +473,94 @@ describe('GanttPlanner (ECR adapter)', () => {
     renderPlanner({ onPlanChange })
     await screen.findByTestId('gantt-planner')
     expect(onPlanChange).toHaveBeenCalledWith(expect.objectContaining({ revision: 3 }))
+  })
+
+  it('a refetch that started before a save cannot hide the saved move', async () => {
+    const moved = modernOut({ tasks: modernOut().tasks.map((t) => (t.id === 2 ? { ...t, start_date: '2026-10-11' } : t)) })
+    vi.mocked(planApi.get).mockResolvedValueOnce(modernOut())
+    let releaseGet!: (p: PlanOut) => void
+    vi.mocked(planApi.get).mockImplementationOnce(() => new Promise((r) => { releaseGet = r }))
+    vi.mocked(planApi.applyChanges).mockResolvedValue({ ...moved, id_map: {}, link_id_map: {} })
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    void qc.refetchQueries({ queryKey: ['change', 7, 'plan', 'detailed'] })
+    await waitFor(() => expect(planApi.get).toHaveBeenCalledTimes(2))
+    drag(screen.getByTestId('gantt-bar-shape-2'), 28)
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalled())
+    await act(async () => { releaseGet(modernOut()) })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(screen.getByTestId('gantt-row-2').textContent).toContain('11.10.26')
+  })
+
+  it('progress: only on the detailed plan during implementation, for editors or the task department', async () => {
+    // Not in implementation: the server sends no progress departments.
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false, can_edit_dates: true, progress_department_ids: [] }))
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.queryByTestId('gantt-progress-handle-1')).toBeNull()
+    cleanup()
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ baseline_set: true, can_edit: false, can_edit_dates: true, progress_department_ids: [11] }))
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-progress-handle-1')).toBeTruthy()
+    cleanup()
+    vi.mocked(planApi.get).mockResolvedValue(planOut({ plan: 'quote', can_edit: true, can_edit_dates: true, progress_department_ids: [11] }))
+    renderPlanner({ mode: 'track', plan: 'quote' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.queryByTestId('gantt-progress-handle-1')).toBeNull()
+  })
+
+  it('the slack column shows the server slack', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ tasks: modernOut().tasks.map((t) => ({ ...t, total_slack: t.id * 3 })) }))
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-row-2').querySelector('[data-col="slack"]')!.textContent).toBe('6d')
+  })
+
+  it('lists the notes the server made while importing', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ tasks: [] }))
+    vi.mocked(planApi.importXml).mockResolvedValue({ ...modernOut(), import_warnings: ['Task 5 has no name and was skipped'] })
+    renderPlanner()
+    await screen.findByTestId('gantt-empty')
+    cleanup()
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    const file = new File(['<Project/>'], 'plan.xml', { type: 'application/xml' })
+    fireEvent.change(screen.getByTestId('gantt-import-file'), { target: { files: [file] } })
+    fireEvent.click(await screen.findByTestId('confirm-ok'))
+    expect((await screen.findByTestId('gantt-import-warnings')).textContent).toContain('Task 5 has no name')
+  })
+
+  it('after the baseline auto-schedule previews the moves and sends a reason', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({
+      baseline_set: true, can_edit: false,
+      tasks: modernOut().tasks.map((t) => (t.id === 2 ? { ...t, start_date: '2026-10-08' } : t)),
+    }))
+    vi.mocked(planApi.schedule).mockResolvedValue(modernOut({ baseline_set: true, can_edit: false }))
+    renderPlanner({ mode: 'track' })
+    await screen.findByTestId('gantt-planner')
+    fireEvent.click(screen.getByTestId('gantt-schedule'))
+    const dialog = await screen.findByRole('dialog', { name: 'Record a deviation' })
+    expect(within(dialog).getByTestId('deviation-changed').textContent).toContain('Sampling')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'tool late' } })
+    fireEvent.click(within(dialog).getByText('Save move'))
+    await waitFor(() => expect(planApi.schedule).toHaveBeenCalledWith(7, 'detailed', 'tool late'))
+  })
+
+  it('undo of a delete re-creates the task through "re:" temp ids', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    renderPlanner()
+    await screen.findByTestId('gantt-planner')
+    vi.mocked(planApi.applyChanges).mockResolvedValueOnce({ ...modernOut({ tasks: modernOut().tasks.filter((t) => t.id !== 3), links: [modernOut().links![0]] }), id_map: {}, link_id_map: {} })
+    fireEvent.click(screen.getByTestId('gantt-row-3'))
+    fireEvent.keyDown(screen.getByTestId('gantt-scroller'), { key: 'Delete' })
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledTimes(1))
+    vi.mocked(planApi.applyChanges).mockResolvedValueOnce({ ...modernOut(), id_map: { 're:3': 30 }, link_id_map: { 're:52': 62 } })
+    fireEvent.click(screen.getByTestId('gantt-undo'))
+    await waitFor(() => expect(planApi.applyChanges).toHaveBeenCalledTimes(2))
+    const body = vi.mocked(planApi.applyChanges).mock.calls[1][2]
+    expect(body.tasks_upsert[0].id).toBe('re:3')
+    expect(body.links_upsert).toEqual([expect.objectContaining({ id: 're:52', from_task_id: 2, to_task_id: 're:3' })])
   })
 })

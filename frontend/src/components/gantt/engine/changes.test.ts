@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  modelContains,
   applyAll, applyChangeSet, chainLinksChangeSet, duplicateChangeSet, invertChangeSet, isEmptyChangeSet,
   remapChangeSet, removeTasksChangeSet, touchedTaskIds, unlinkChangeSet,
 } from './changes'
@@ -193,4 +194,20 @@ describe('builders', () => {
     expect(unlinkChangeSet(model(), [4])!.removeLinks).toEqual(['b', 'c'])
   })
   it('unlink with nothing to remove is null', () => expect(unlinkChangeSet(model(), [1, 5])).toBeNull())
+})
+
+describe('remap and reconcile (review)', () => {
+  it('remaps link update ends and id values in meta', () => {
+    const cs = remapChangeSet({ updateLinks: [{ id: 'l', patch: { from: 'tmp', to: 3 } }], meta: { focus: 'tmp', reason: 'why' } }, { tmp: 9, l: 5 })
+    expect(cs.updateLinks).toEqual([{ id: 5, patch: { from: 9, to: 3 } }])
+    expect(cs.meta).toEqual({ focus: 9, reason: 'why' })
+  })
+  it('modelContains tells whether a model already shows a ChangeSet', () => {
+    const m: GanttModel = { tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 2 }], links: [{ id: 'l', from: 1, to: 1, type: 'FS', lagDays: 0 }] }
+    expect(modelContains(m, { updateTasks: [{ id: 1, patch: { name: 'A' } }] })).toBe(true)
+    expect(modelContains(m, { updateTasks: [{ id: 1, patch: { name: 'B' } }] })).toBe(false)
+    expect(modelContains(m, { addTasks: [{ id: 2, name: 'N', start: '2026-10-05', duration: 1 }] })).toBe(false)
+    expect(modelContains(m, { removeTasks: [2], removeLinks: ['x'] })).toBe(true)
+    expect(modelContains(m, { updateLinks: [{ id: 'l', patch: { lagDays: 1 } }] })).toBe(false)
+  })
 })

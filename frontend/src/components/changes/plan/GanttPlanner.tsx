@@ -21,11 +21,11 @@ import { useDepartments } from '../../../hooks/queries/useWorkflows'
 import type { PlanOut, TaskOut, TaskPatch } from '../../../types/changePlan'
 import { Gantt, type GanttHandle } from '../../gantt/Gantt'
 import type { GanttMarker } from '../../gantt/GanttChart'
-import type { ColumnKey } from '../../gantt/columns'
+import type { ColumnKey, GanttColumn } from '../../gantt/columns'
+import { autoSchedulePatches } from '../../gantt/engine/schedule'
 import { endOf, fmtShort, makeCal, normStart, toDay } from '../../gantt/engine/calendar'
-import { buildTree, key } from '../../gantt/engine/tree'
+import { buildTree, key, rowNumbers } from '../../gantt/engine/tree'
 import type { ApplyResult, ChangeSet, GanttId, GanttModel, GanttTask } from '../../gantt/engine/types'
-import { buildRows } from '../../gantt/layout'
 import ConfirmDialog from './ConfirmDialog'
 import DeviationDialog, { type MovedTask } from './DeviationDialog'
 import PlanToolbar, { btn, btnPrimary, type AlignAction } from './GanttToolbar'
@@ -35,7 +35,8 @@ import {
   bankBuildChangeSet, bufferChangeSet, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
 } from './ecrActions'
 import {
-  ECR_KINDS, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
+  ECR_KINDS, SERVER_SLACK, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
+  translateIdMap,
 } from './ecrAdapter'
 import { deadlineColor } from './ganttMath'
 
@@ -70,7 +71,18 @@ export default function GanttPlanner({
 }: GanttPlannerProps) {
   const qc = useQueryClient()
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
-  const { data, isLoading, isError } = useQuery({ queryKey, queryFn: () => planApi.get(changeId, plan) })
+  // Each save bumps this. A GET that started before a save answered carries
+  // the old plan: the cache (the save's answer) wins over it.
+  const saveGen = useRef(0)
+  const { data, isLoading, isError } = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const gen = saveGen.current
+      const out = await planApi.get(changeId, plan)
+      const cached = qc.getQueryData<PlanOut>(queryKey)
+      return gen !== saveGen.current && cached ? cached : out
+    },
+  })
   const { data: deptData } = useDepartments()
   const departments = useMemo(
     () => (deptData ?? []).filter((d) => d.is_active !== false).map((d) => ({ id: d.id, name: d.name })),
@@ -89,6 +101,7 @@ export default function GanttPlanner({
   const [reasonAsk, setReasonAsk] = useState<ReasonAsk | null>(null)
   const [busy, setBusy] = useState(false)
   const [blank, setBlank] = useState(false)
+  const [importWarnings, setImportWarnings] = useState<string[]>([])
 
   const model = useMemo(() => (data ? planToModel(data) : null), [data])
   const modern = !!model?.support.modern
@@ -100,8 +113,12 @@ export default function GanttPlanner({
   const summaryIds = useMemo(() => new Set((data?.tasks ?? []).filter((t) => t.is_summary).map((t) => t.id)), [data])
   const byId = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data])
 
-  const canProgressOn = useCallback((deptId: number | null | undefined) => !compact && track
-    && (canEdit || (deptId != null && (progressDepts ?? []).includes(deptId))), [compact, track, canEdit, progressDepts])
+  // Progress (backend `_may_progress`): detailed plan, in implementation (the
+  // server fills progress_department_ids only then), a date editor or a member
+  // of the task's department.
+  const canProgressOn = useCallback((deptId: number | null | undefined) => !compact && track && plan === 'detailed'
+    && (progressDepts ?? []).length > 0
+    && (canDates || (deptId != null && (progressDepts ?? []).includes(deptId))), [compact, track, plan, canDates, progressDepts])
 
   const rights = useMemo(() => ({
     structure: canStructure,
@@ -123,6 +140,7 @@ export default function GanttPlanner({
   const serverRef = useRef<PlanOut | null>(null)
   useEffect(() => { if (data) serverRef.current = data }, [data])
   const afterSave = useCallback((out: PlanOut | null) => {
+    saveGen.current += 1
     if (out) { serverRef.current = out; qc.setQueryData(queryKey, out) }
     qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
     qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
@@ -132,14 +150,16 @@ export default function GanttPlanner({
 
   const onChange = useCallback((cs: ChangeSet): Promise<ApplyResult> => serialized(`${changeId}:${plan}`, async () => {
     const reason = typeof cs.meta?.reason === 'string' ? cs.meta.reason : undefined
+    // A refetch in flight would answer with the plan before this save.
+    await qc.cancelQueries({ queryKey })
     // Not the Gantt's view: that already shows this ChangeSet (optimistic).
     const server = serverRef.current ? planToModel(serverRef.current) : model
     const before: GanttModel = { tasks: server?.tasks ?? [], links: server?.links ?? [] }
     try {
       if (modern) {
-        const out = await planApi.applyChanges(changeId, plan, toPlanChangeSet(cs, before.tasks), reason)
+        const out = await planApi.applyChanges(changeId, plan, toPlanChangeSet(cs, before), reason)
         afterSave(out)
-        return { idMap: { ...(out.id_map ?? {}), ...(out.link_id_map ?? {}) } }
+        return { idMap: translateIdMap(out.id_map, out.link_id_map) }
       }
       const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
       const { plan: out, idMap } = await persistLegacy(calls, {
@@ -169,7 +189,8 @@ export default function GanttPlanner({
       const e0 = endOf(cal, s0, t.duration)
       const s1 = normStart(cal, toDay(u.patch.start ?? t.start))
       const e1 = endOf(cal, s1, u.patch.duration ?? t.duration)
-      return { id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start, days: e1 - e0 }
+      // Slip in the plan calendar's units (working days in working mode).
+      return { id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start, days: cal.idx(e1) - cal.idx(e0) }
     })
     return new Promise((resolve) => setReasonAsk({ cs: full, changed, moved, resolve }))
   }, [baselineSet, model])
@@ -217,12 +238,17 @@ export default function GanttPlanner({
   }
 
   // ---------------------------------------------------------------- server actions
-  const runServer = async (fn: () => Promise<PlanOut>, done?: string) => {
+  const runServer = async (fn: () => Promise<PlanOut & { import_warnings?: string[] }>, done?: string) => {
     setBusy(true)
     try {
+      await qc.cancelQueries({ queryKey })
       const out = await serialized(`${changeId}:${plan}`, fn)
       afterSave(out)
-      if (done) toast.success?.(done)
+      const warnings = out.import_warnings ?? []
+      if (warnings.length) {
+        setImportWarnings(warnings)
+        toast.warning?.(`${done ?? 'Done'}, ${warnings.length} note${warnings.length === 1 ? '' : 's'}: see the list under the chart`)
+      } else if (done) toast.success?.(done)
     } catch (e) {
       toast.error(errDetail(e) ?? 'Could not save the plan')
       qc.invalidateQueries({ queryKey })
@@ -247,6 +273,25 @@ export default function GanttPlanner({
       title: 'Import and replace the plan?',
       body: `Every task of this plan is replaced by the tasks in ${file.name}.`,
       label: 'Import and replace', danger: true, run: () => go(true),
+    })
+  }
+  /** After the baseline the server's forward pass records deviations: preview and ask why first. */
+  const scheduleWithReason = () => {
+    const m = ganttRef.current?.getModel() ?? { tasks: model?.tasks ?? [], links: model?.links ?? [] }
+    const cal = makeCal(model?.calendar)
+    const moves = autoSchedulePatches(m.tasks, m.links, model?.calendar)
+    if (!moves.length) { toast.info?.('Every task already starts after its predecessors'); return }
+    const byK = new Map(m.tasks.map((t) => [key(t.id), t]))
+    const changed: MovedTask[] = moves.map((mv) => {
+      const t = byK.get(key(mv.id))!
+      return { id: t.id, name: t.name, from: t.start, to: mv.patch.start, days: cal.idx(toDay(mv.patch.start)) - cal.idx(normStart(cal, toDay(t.start))) }
+    })
+    setReasonAsk({
+      cs: { label: 'Auto-schedule' }, changed, moved: [],
+      resolve: (r) => {
+        const reason = typeof r?.meta?.reason === 'string' ? r.meta.reason : null
+        if (reason) void runServer(() => planApi.schedule(changeId, plan, reason))
+      },
     })
   }
   const exportPlan = (fmt: 'mspdi' | 'csv') => {
@@ -278,16 +323,16 @@ export default function GanttPlanner({
   const markers = useMemo<GanttMarker[]>(() => (data?.deadlines ?? []).map((d) => ({
     id: d.key, date: d.date, label: d.label, color: deadlineColor(d.key),
   })), [data])
+  // Row numbers follow the stored order (like the Gantt's # column), not the lane view.
   const rowNo = useMemo(() => {
     if (!model) return new Map<number, number>()
-    const r = buildRows(model.tasks, { groupByLane })
     const m = new Map<number, number>()
-    r.rowNo.forEach((n, k) => m.set(Number(k), n))
+    rowNumbers(buildTree(model.tasks)).forEach((n, k) => m.set(Number(k), n))
     return m
-  }, [model, groupByLane])
-  const columns = useMemo<ColumnKey[]>(() => (track
+  }, [model])
+  const columns = useMemo<(ColumnKey | GanttColumn)[]>(() => (track
     ? ['row', 'name', 'start', 'end', 'duration', 'predecessors', 'progress']
-    : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', 'slack'] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
+    : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', SERVER_SLACK] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
   const issues = useMemo(() => (data ? [...data.validation.errors, ...data.validation.warnings.map((w) => ({ ...w, warn: true }))]
     .map((i) => ({ code: i.code, message: i.message, taskId: i.task_id, level: ('warn' in i ? 'warning' : 'error') as 'warning' | 'error' })) : []), [data])
 
@@ -403,7 +448,8 @@ export default function GanttPlanner({
           <PlanToolbar canStructure={canStructure} canDates={canDates} empty={empty}
             seedLabel={seedLabel} onSeed={canStructure && !hideSeed ? () => seed(true) : undefined}
             onBuffer={addBuffer} onBankBuild={addBankBuild}
-            onSchedule={canStructure ? () => void runServer(() => planApi.schedule(changeId, plan)) : undefined}
+            onSchedule={canStructure ? () => void runServer(() => planApi.schedule(changeId, plan))
+              : baselineSet && canDates && modern ? scheduleWithReason : undefined}
             selectionCount={selection.length} onAlign={align}
             groupByLane={groupByLane} onGroupByLane={setGroupByLane}
             onImport={canStructure && modern ? importFile : undefined} />
@@ -415,6 +461,17 @@ export default function GanttPlanner({
           {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
           {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
           {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}
+        </div>
+      )}
+
+      {importWarnings.length > 0 && !compact && (
+        <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200" data-testid="gantt-import-warnings" role="status">
+          <div className="mb-1 flex items-center">
+            <span className="font-medium">The import skipped or changed {importWarnings.length} item{importWarnings.length === 1 ? '' : 's'}:</span>
+            <button type="button" className="ml-auto text-amber-300 hover:text-amber-100" onClick={() => setImportWarnings([])}
+              aria-label="Dismiss import notes">Dismiss</button>
+          </div>
+          <ul className="list-disc space-y-0.5 pl-4">{importWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
         </div>
       )}
 

@@ -235,4 +235,7 @@ export interface PlanDeviation {
   decided_at?: string | null
   decision_note?: string | null
   escalation_id?: number | null
+  /** Set when the row was pushed by another task's move (successor cascade). */
+  caused_by_task_id?: number | null
+  caused_by_task_name?: string | null
 }

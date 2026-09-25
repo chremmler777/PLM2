@@ -11,6 +11,7 @@
  */
 import { key } from '../../gantt/engine/tree'
 import type { GanttKindStyle } from '../../gantt/theme'
+import type { GanttColumn } from '../../gantt/columns'
 import { KIND_COLOR, KIND_LABEL } from './ganttMath'
 import type { ChangeSet, GanttCalendar, GanttId, GanttLink, GanttTask } from '../../gantt/engine/types'
 import type {
@@ -50,6 +51,7 @@ export function taskToGantt(t: TaskOut): GanttTask {
     meta: {
       department_id: t.department_id, department_name: t.department_name ?? null,
       own_lane: t.lane, sort_order: t.sort_order, source_position_id: t.source_position_id ?? null,
+      total_slack: t.total_slack ?? t.slack_days ?? null,
     },
   }
 }
@@ -134,52 +136,96 @@ export function sortOrders(order: GanttId[], current: Map<string, number>): Map<
   return out
 }
 
-/** Generic ChangeSet -> the batch body of `POST /plan/changes` (modern servers). */
-export function toPlanChangeSet(cs: ChangeSet, before: GanttTask[]): PlanChangeSet {
-  const byKey = new Map(before.map((t) => [key(t.id), t]))
+/** Prefix for a task or link that comes back (undo of a delete, redo of an add) under its old id. */
+export const READD = 're:'
+
+/**
+ * Generic ChangeSet -> the batch body of `POST /plan/changes` (modern servers).
+ *
+ * - A task or link added with a numeric id the server does not know any more
+ *   (undo of a delete, redo of an add) goes out under the temp id "re:<id>";
+ *   `translateIdMap` turns the answer back into "<id>" -> new id so the
+ *   history rewrites the old id. References to it (parent, link ends,
+ *   predecessors) use the same temp id.
+ * - Updates of a task created in the same set merge into the create;
+ *   updates of ids the server does not know are dropped (never turned into
+ *   creates). The same for links.
+ * - `order` only numbers tasks the server knows or that are created here.
+ */
+export function toPlanChangeSet(cs: ChangeSet, before: { tasks: GanttTask[]; links: GanttLink[] }): PlanChangeSet {
+  const byKey = new Map(before.tasks.map((t) => [key(t.id), t]))
+  const linkKeys = new Set(before.links.map((l) => key(l.id)))
+  const added = new Map((cs.addTasks ?? []).map((t) => [key(t.id), t]))
+  /** Wire id of a task: re-added numeric ids travel as temp ids. */
+  const tid = (id: GanttId): GanttId => (typeof id === 'number' && !byKey.has(key(id)) && added.has(key(id)) ? `${READD}${id}` : id)
+  const lid = (id: GanttId): GanttId => (typeof id === 'number' && !linkKeys.has(key(id)) ? `${READD}${id}` : id)
+  const known = (id: GanttId) => byKey.has(key(id)) || added.has(key(id))
+
   const ups = new Map<string, TaskUpsert>()
   const up = (id: GanttId): TaskUpsert => {
     const k = key(id)
-    if (!ups.has(k)) ups.set(k, { id })
+    if (!ups.has(k)) ups.set(k, { id: tid(id) })
     return ups.get(k)!
   }
   for (const t of cs.addTasks ?? []) {
-    const u = up(t.id)
-    Object.assign(u, {
+    if (byKey.has(key(t.id))) continue // already on the server (idempotent reconcile)
+    Object.assign(up(t.id), {
       name: t.name, kind: (t.kind as TaskKind) ?? 'work', lane: t.lane?.trim() || null,
       department_id: (t.meta?.department_id as number | null | undefined) ?? null,
       start_date: t.start, duration_days: t.duration, is_idea: !!t.isIdea, notes: t.notes ?? null,
-      ...(t.parentId != null ? { parent_id: t.parentId } : {}),
+      ...(t.parentId != null ? { parent_id: tid(t.parentId) } : {}),
       ...(t.constraint && t.constraint.type !== 'asap' ? { constraint_type: t.constraint.type, constraint_date: t.constraint.date ?? null } : {}),
       ...(t.progress ? { progress_pct: Math.round(t.progress) } : {}),
     })
   }
   for (const u of cs.updateTasks ?? []) {
+    if (!known(u.id)) continue
     const p = patchToEcr(u.patch, byKey.get(key(u.id)))
+    if (p.parent_id != null) p.parent_id = tid(p.parent_id) as number
     Object.assign(up(u.id), p)
   }
   if (cs.order?.length) {
-    const current = new Map(before.map((t) => [key(t.id), Number(t.meta?.sort_order ?? 0)]))
-    for (const t of cs.addTasks ?? []) current.delete(key(t.id))
-    sortOrders(cs.order, current).forEach((v, k) => {
-      const id = cs.order!.find((x) => key(x) === k)!
+    const current = new Map(before.tasks.map((t) => [key(t.id), Number(t.meta?.sort_order ?? 0)]))
+    const order = cs.order.filter(known)
+    for (const t of cs.addTasks ?? []) if (!byKey.has(key(t.id))) current.delete(key(t.id))
+    sortOrders(order, current).forEach((v, k) => {
+      const id = order.find((x) => key(x) === k)!
       up(id).sort_order = v
     })
   }
   const removed = new Set((cs.removeTasks ?? []).map(key))
-  const tasks_upsert = [...ups.values()].filter((u) => !removed.has(key(u.id!)) && Object.keys(u).length > 1)
-  const links_upsert: LinkUpsert[] = [
-    ...(cs.addLinks ?? []).map((l) => ({ id: l.id, from_task_id: l.from, to_task_id: l.to, type: l.type, lag_days: l.lagDays })),
-    ...(cs.updateLinks ?? []).filter((u) => isReal(u.id)).map((u) => ({
-      id: u.id, ...(u.patch.type ? { type: u.patch.type } : {}), ...(u.patch.lagDays !== undefined ? { lag_days: u.patch.lagDays } : {}),
-    })),
-  ]
+  const tasks_upsert = [...ups.entries()].filter(([k, u]) => !removed.has(k) && Object.keys(u).length > 1).map(([, u]) => u)
+
+  const linkUps = new Map<string, LinkUpsert>()
+  for (const l of cs.addLinks ?? []) {
+    if (linkKeys.has(key(l.id)) || !known(l.from) || !known(l.to)) continue
+    linkUps.set(key(l.id), { id: lid(l.id), from_task_id: tid(l.from), to_task_id: tid(l.to), type: l.type, lag_days: l.lagDays })
+  }
+  for (const u of cs.updateLinks ?? []) {
+    const k = key(u.id)
+    const target = linkUps.get(k) ?? (linkKeys.has(k) ? { id: u.id } : null)
+    if (!target) continue // unknown link: nothing to update
+    if (u.patch.type) target.type = u.patch.type
+    if (u.patch.lagDays !== undefined) target.lag_days = u.patch.lagDays
+    if (u.patch.from != null) target.from_task_id = tid(u.patch.from)
+    if (u.patch.to != null) target.to_task_id = tid(u.patch.to)
+    linkUps.set(k, target)
+  }
   return {
     tasks_upsert,
-    tasks_delete: (cs.removeTasks ?? []).filter(isReal),
-    links_upsert,
-    links_delete: (cs.removeLinks ?? []).filter(isReal),
+    tasks_delete: (cs.removeTasks ?? []).filter((id): id is number => isReal(id) && byKey.has(key(id))),
+    links_upsert: [...linkUps.values()],
+    links_delete: (cs.removeLinks ?? []).filter((id): id is number => isReal(id) && linkKeys.has(key(id))),
   }
+}
+
+/** Server id maps -> the generic idMap ("re:7" comes back as "7"). */
+export function translateIdMap(...maps: (Record<string, number> | undefined)[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const m of maps) {
+    for (const [k, v] of Object.entries(m ?? {})) out[k.startsWith(READD) ? k.slice(READD.length) : k] = v
+  }
+  return out
 }
 
 // ------------------------------------------------------------------ legacy
@@ -273,10 +319,11 @@ export async function persistLegacy(calls: LegacyCall[], api: LegacyApi, known: 
   const idMap: Record<string, number> = {}
   const seen = new Set(known)
   let plan: PlanOut | null = null
-  const real = (id: GanttId): number => (typeof id === 'number' ? id : idMap[key(id)])
+  // A re-created task (undo of a delete) is known under its new id first.
+  const real = (id: GanttId): number => idMap[key(id)] ?? (typeof id === 'number' ? id : (undefined as unknown as number))
   for (const c of calls) {
     if (c.kind === 'create') {
-      const body = { ...c.body, predecessors: [...(c.body.predecessors ?? []), ...c.predTemps.map((t) => idMap[t]).filter((x) => x != null)] }
+      const body = { ...c.body, predecessors: [...(c.body.predecessors ?? []).map((x) => real(x)), ...c.predTemps.map((t) => idMap[t]).filter((x) => x != null)] }
       plan = await api.createTask(body)
       const created = plan.tasks.find((t) => !seen.has(t.id))
       if (created) { idMap[c.tempId] = created.id; seen.add(created.id) }
@@ -314,3 +361,9 @@ export function serialized<T>(chainKey: string, fn: () => Promise<T>): Promise<T
   return next
 }
 
+
+/** Slack as the server computed it (dates as they stand), not the local forward pass. */
+export const SERVER_SLACK: GanttColumn = {
+  key: 'slack', title: 'Slack', width: 50, align: 'right',
+  text: (t) => (typeof t.meta?.total_slack === 'number' ? `${t.meta.total_slack}d` : ''),
+}

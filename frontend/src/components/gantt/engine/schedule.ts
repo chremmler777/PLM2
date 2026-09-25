@@ -1,408 +1,469 @@
 /**
- * Critical path scheduling (spec 2026-09-25 §11). The backend service
- * implements the same rules; both are checked against the shared vectors in
- * `backend/tests/data/gantt_vectors.json`.
+ * Critical path scheduling (spec 2026-09-25 §11). A port of the backend's
+ * `plan_engine.compute` so both engines give the same answers; both are
+ * checked against `backend/tests/data/gantt_vectors.json`.
+ *
+ * Everything runs in index space: `cal.idx(day)` counts days (calendar
+ * mode) or working days (working mode). A task starting at index s with
+ * duration d ends at index s + d; dates come back through `cal.dateAt`.
  *
  * Rules
- * - Units: durations, lags and slack count days in calendar mode, working
- *   days in working mode (see calendar.ts). Ends are exclusive.
- * - Links P -> S with lag L (negative = lead), X = shift(date, L):
- *     FS: S.start >= shift(P.end, L)    SS: S.start >= shift(P.start, L)
- *     FF: S.end   >= shift(P.end, L)    SF: S.end   >= shift(P.start, L)
- * - Forward pass, early start ES of a leaf = max of: its anchor (its own start
- *   in the default "push" mode, the project start in "pull" mode or when pull
- *   is on and the task has no predecessor), every link bound, inherited
- *   summary bounds, `snet` date, `mfo`/`mso` override (a hard constraint wins
- *   over links, a conflict is reported). The start is then moved to a working
- *   day (non-milestones, working mode). EF = shift(ES, duration).
- * - Summary tasks: a link or constraint on a summary applies to every leaf
- *   below it (start bounds as start bounds, finish bounds per leaf duration).
- *   Their dates roll up: start = min child start, end = max child end,
- *   progress = duration weighted mean of the leaves.
- * - Idea tasks are scheduled forward like any task but are left out of the
- *   project finish, the backward pass, slack and the critical path.
- * - Backward pass over non-idea tasks: LF starts at the project finish
- *   (max EF of non-idea leaves) and is lowered by every successor link
- *   (mirror of the rules above) and by `fnlt`/`mfo` dates (and `mso` via its
- *   start). LS = startFor(LF, duration).
- * - Total slack = diff(ES, LS) (may be negative: a constraint cannot be met).
- *   Free slack = min over outgoing links of the gap to the successor's bound,
- *   or diff(EF, project finish) without successors; never above total slack.
- *   Critical = not an idea and total slack <= 0. A summary is critical when a
- *   leaf below it is; its slack is the minimum of its leaves.
- * - A cycle (links, including a link between a task and its own summary)
- *   stops the pass: every task keeps its own dates, slack is null and the
- *   cycle is reported.
+ * - Links P -> S with lag L (negative = lead):
+ *     FS: S.es >= P.ef + L    SS: S.es >= P.es + L
+ *     FF: S.ef >= P.ef + L    SF: S.ef >= P.es + L
+ * - Summary task rule (spec §11): a link INTO a summary (FS, SS) bounds the
+ *   start of every leaf below it; FF/SF into a summary are refused and not
+ *   scheduled. A link FROM a summary reads its rolled-up dates (SS/SF the
+ *   earliest start, FS/FF the latest end). A link between a summary and its
+ *   own descendant is ignored (warning `summary_link`, not a cycle).
+ *   Constraints: snet and fnlt on a summary apply to every leaf below it;
+ *   mso / mfo on a summary are refused and not scheduled.
+ * - Forward pass, leaf ES = its own start ("push", default) or the project
+ *   start (pull), raised by snet dates (own and summaries'), the start gate
+ *   of its summaries and every incoming link. mso / mfo pin the start and
+ *   win over everything.
+ * - Idea tasks are scheduled forward but left out of the project finish, the
+ *   backward pass, slack and the critical path.
+ * - Backward pass over non-idea leaves from the project finish (max EF of
+ *   non-idea leaves). A summary's finish bound caps every leaf below it; its
+ *   start bound caps only the leaves that define its start. fnlt dates cap
+ *   the late finish; a pinned task's late finish is its early finish.
+ * - Total slack = LF - EF (may be negative); critical = total slack <= 0.
+ *   Free slack = the smallest gap to the successors' bounds (links out of
+ *   the task and out of its summaries), else project finish - EF; never
+ *   above total slack.
+ * - Summaries roll up: start / end from their children, total and free
+ *   slack = min of the children, critical when a child is, progress weighted
+ *   by the children's spans (plain mean when every span is 0).
+ * - A cycle stops the pass: tasks keep their own dates, slack is null.
  */
-import {
-  diff, endOf, makeCal, normStart, shift, startFor, toDay, toIso, type Cal,
-} from './calendar'
-import { buildTree, key, leaves, type Tree } from './tree'
+import { endFromIdx, makeCal, toDay, toIso, type Cal } from './calendar'
+import { buildTree, key, type Tree } from './tree'
 import type {
   GanttCalendar, GanttId, GanttLink, GanttTask, Issue, ScheduleOptions, ScheduleResult, ScheduledTask,
 } from './types'
 
-interface Node {
-  t: GanttTask
-  k: string
-  dur: number
-  start: number
-}
-
-/** Lower bound on the successor's start (FS/SS) or end (FF/SF). */
-function forwardBound(cal: Cal, type: GanttLink['type'], lag: number, pStart: number, pEnd: number) {
-  switch (type) {
-    case 'SS': return { side: 'start' as const, day: shift(cal, pStart, lag) }
-    case 'FF': return { side: 'end' as const, day: shift(cal, pEnd, lag) }
-    case 'SF': return { side: 'end' as const, day: shift(cal, pStart, lag) }
-    default: return { side: 'start' as const, day: shift(cal, pEnd, lag) }
-  }
-}
+export const PIN_CONSTRAINTS = ['mso', 'mfo'] as const
+export const FINISH_TARGET_LINKS = ['FF', 'SF'] as const
 
 /**
- * Topological order over "events": in(X) (bounds known) and out(X) (dates
- * known). Leaves have in == out. Returns null and the cycle members on a loop.
+ * Graph nodes: L a leaf; for a summary G its start gate (the start bound
+ * every leaf below it gets), PS its start point (the earliest child start,
+ * read by SS/SF out of it) and PF its finish point (the latest child end,
+ * read by FS/FF out of it).
  */
-function eventOrder(tree: Tree, links: GanttLink[]): { order: string[] | null; cycle: string[] } {
-  const inN = (k: string) => (tree.children.get(k)?.length ? `in:${k}` : `n:${k}`)
-  const outN = (k: string) => (tree.children.get(k)?.length ? `out:${k}` : `n:${k}`)
-  const nodes = new Set<string>()
-  const edges = new Map<string, string[]>()
-  const add = (a: string, b: string) => {
-    nodes.add(a); nodes.add(b)
-    if (!edges.has(a)) edges.set(a, [])
-    edges.get(a)!.push(b)
+type NodeKind = 'G' | 'L' | 'PS' | 'PF'
+type NodeKey = string
+const nk = (kind: NodeKind, k: string): NodeKey => `${kind}|${k}`
+const parse = (n: NodeKey): [NodeKind, string] => {
+  const i = n.indexOf('|')
+  return [n.slice(0, i) as NodeKind, n.slice(i + 1)]
+}
+
+interface ULink { from: string; to: string; type: GanttLink['type']; lag: number; id: GanttId }
+
+export interface Graph {
+  tree: Tree
+  summaries: Set<string>
+  anc: Map<string, string[]>
+  leaves: string[]
+  links: ULink[]
+  /** Topological order of the nodes, null on a cycle. */
+  order: [NodeKind, string][] | null
+  /** Task keys stuck in a cycle (empty without one). */
+  stuck: string[]
+  /** Node successors ("L|k", "G|k", "PS|k", "PF|k"): links and structure edges. */
+  succ: Map<string, string[]>
+  /** Summary key -> the children its start point rolls up. */
+  startKids: Map<string, string[]>
+}
+
+/** Is this link used by the math? (backend `usable_link`) */
+export function usableLink(from: string, to: string, type: GanttLink['type'], tree: Tree, anc: Map<string, string[]>, summaries: Set<string>): boolean {
+  if (!tree.byId.has(from) || !tree.byId.has(to) || from === to) return false
+  if ((anc.get(to) ?? []).includes(from) || (anc.get(from) ?? []).includes(to)) return false
+  if (summaries.has(to) && (type === 'FF' || type === 'SF')) return false
+  return true
+}
+
+export function buildGraph(tasks: GanttTask[], links: GanttLink[]): Graph {
+  const tree = buildTree(tasks)
+  const summaries = new Set([...tree.children.entries()].filter(([, c]) => c.length).map(([k]) => k))
+  const anc = new Map<string, string[]>()
+  for (const t of tasks) {
+    const chain: string[] = []
+    let p = tree.parentOf.get(key(t.id)) ?? null
+    while (p != null) { chain.push(p); p = tree.parentOf.get(p) ?? null }
+    anc.set(key(t.id), chain)
   }
-  for (const t of tree.order) {
+  const leaves = tasks.map((t) => key(t.id)).filter((k) => !summaries.has(k))
+  // One link per (from, to, type); a duplicate keeps the larger lag.
+  const use = new Map<string, ULink>()
+  for (const l of links) {
+    const type = (['FS', 'SS', 'FF', 'SF'] as const).includes(l.type) ? l.type : 'FS'
+    const f = key(l.from), t = key(l.to)
+    if (!usableLink(f, t, type, tree, anc, summaries)) continue
+    const lag = Math.round(l.lagDays || 0)
+    const k = `${f}>${t}>${type}`
+    const cur = use.get(k)
+    if (!cur || lag > cur.lag) use.set(k, { from: f, to: t, type, lag, id: l.id })
+  }
+  const ulinks = [...use.values()]
+  const src = (k: string, type: GanttLink['type']): NodeKey =>
+    nk(!summaries.has(k) ? 'L' : type === 'SS' || type === 'SF' ? 'PS' : 'PF', k)
+  const dst = (k: string): NodeKey => nk(summaries.has(k) ? 'G' : 'L', k)
+  const startNode = (k: string): NodeKey => nk(summaries.has(k) ? 'PS' : 'L', k)
+  const pos = new Map(tasks.map((t, i) => [key(t.id), i]))
+  const rank: Record<NodeKind, number> = { G: 0, L: 1, PS: 2, PF: 3 }
+  const nodes: [NodeKind, string][] = []
+  for (const t of tasks) {
     const k = key(t.id)
-    nodes.add(inN(k)); nodes.add(outN(k))
-    for (const c of tree.children.get(k) ?? []) {
-      add(inN(k), inN(key(c.id)))
-      add(outN(key(c.id)), outN(k))
+    if (summaries.has(k)) nodes.push(['G', k], ['PS', k], ['PF', k])
+    else nodes.push(['L', k])
+  }
+  const succ = new Map<NodeKey, NodeKey[]>()
+  const edge = (a: NodeKey, b: NodeKey) => {
+    if (!succ.has(a)) succ.set(a, [])
+    succ.get(a)!.push(b)
+  }
+  for (const [p, cs] of tree.children) {
+    for (const c of cs) {
+      const ck = key(c.id)
+      if (summaries.has(ck)) { edge(nk('G', p), nk('G', ck)); edge(nk('PF', ck), nk('PF', p)) }
+      else { edge(nk('G', p), nk('L', ck)); edge(nk('L', ck), nk('PF', p)) }
     }
   }
-  for (const l of links) {
-    const f = key(l.from), t = key(l.to)
-    if (!tree.byId.has(f) || !tree.byId.has(t)) continue
-    if (f === t) return { order: null, cycle: [f] }
-    add(outN(f), inN(t))
+  for (const l of ulinks) edge(src(l.from, l.type), dst(l.to))
+  const reach = (start: NodeKey): Set<NodeKey> => {
+    const seen = new Set([start])
+    const stack = [start]
+    while (stack.length) {
+      for (const m of succ.get(stack.pop()!) ?? []) if (!seen.has(m)) { seen.add(m); stack.push(m) }
+    }
+    return seen
   }
-  const indeg = new Map<string, number>([...nodes].map((n) => [n, 0]))
-  edges.forEach((bs) => bs.forEach((b) => indeg.set(b, (indeg.get(b) ?? 0) + 1)))
-  // Stable: seed in display order.
-  const rank = new Map<string, number>()
-  tree.order.forEach((t, i) => { const k = key(t.id); rank.set(inN(k), i * 2); rank.set(outN(k), i * 2 + 1) })
-  const ready = [...nodes].filter((n) => indeg.get(n) === 0).sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0))
-  const out: string[] = []
+  // Start points roll up their children, deepest summary first, leaving out a
+  // child the start point itself drives (it starts after it, so it cannot be
+  // the earliest; leaving it out avoids a false cycle).
+  const startKids = new Map<string, string[]>()
+  for (const t of [...tree.order].reverse()) {
+    const sid = key(t.id)
+    if (!summaries.has(sid)) continue
+    const ks = (tree.children.get(sid) ?? []).map((c) => key(c.id))
+    const driven = succ.get(nk('PS', sid))?.length ? reach(nk('PS', sid)) : new Set<NodeKey>()
+    const keep = ks.filter((c) => !driven.has(startNode(c)))
+    const use = keep.length ? keep : ks
+    startKids.set(sid, use)
+    for (const c of use) edge(startNode(c), nk('PS', sid))
+  }
+  const indeg = new Map<NodeKey, number>(nodes.map(([kd, k]) => [nk(kd, k), 0]))
+  succ.forEach((ms) => ms.forEach((m) => indeg.set(m, (indeg.get(m) ?? 0) + 1)))
+  const byNode = new Map(nodes.map((n) => [nk(n[0], n[1]), n]))
+  const cmp = (a: NodeKey, b: NodeKey) => {
+    const na = byNode.get(a)!, nb = byNode.get(b)!
+    return (pos.get(na[1])! - pos.get(nb[1])!) || (rank[na[0]] - rank[nb[0]])
+  }
+  const ready = [...indeg].filter(([, d]) => d === 0).map(([n]) => n).sort(cmp)
+  const order: [NodeKind, string][] = []
   while (ready.length) {
     const n = ready.shift()!
-    out.push(n)
-    for (const b of edges.get(n) ?? []) {
-      indeg.set(b, indeg.get(b)! - 1)
-      if (indeg.get(b) === 0) {
-        // insert keeping rank order
-        const r = rank.get(b) ?? 0
+    order.push(byNode.get(n)!)
+    for (const m of succ.get(n) ?? []) {
+      indeg.set(m, indeg.get(m)! - 1)
+      if (indeg.get(m) === 0) {
         let i = 0
-        while (i < ready.length && (rank.get(ready[i]) ?? 0) <= r) i++
-        ready.splice(i, 0, b)
+        while (i < ready.length && cmp(ready[i], m) <= 0) i++
+        ready.splice(i, 0, m)
       }
     }
   }
-  if (out.length === nodes.size) return { order: out, cycle: [] }
-  const stuck = new Set<string>()
-  for (const n of nodes) if ((indeg.get(n) ?? 0) > 0) stuck.add(n.replace(/^(in|out|n):/, ''))
-  return { order: null, cycle: [...stuck] }
+  const ok = order.length === nodes.length
+  const stuck = ok ? [] : [...new Set([...indeg].filter(([, d]) => d > 0).map(([n]) => byNode.get(n)![1]))]
+  return { tree, summaries, anc, leaves, links: ulinks, order: ok ? order : null, stuck, succ, startKids }
 }
 
+/** Constraints per leaf: its own first, then snet / fnlt of its summaries (nearest first). */
+export function leafConstraints(tasks: GanttTask[], g: Graph): Map<string, { type: string; date: number }[]> {
+  const out = new Map<string, { type: string; date: number }[]>()
+  for (const t of tasks) {
+    const k = key(t.id)
+    const cs: { type: string; date: number }[] = []
+    ;[k, ...(g.anc.get(k) ?? [])].forEach((x, n) => {
+      const c = g.tree.byId.get(x)?.constraint
+      if (!c || c.type === 'asap' || !c.date) return
+      if (n > 0 && (c.type === 'mso' || c.type === 'mfo')) return
+      cs.push({ type: c.type, date: toDay(c.date) })
+    })
+    out.set(k, cs)
+  }
+  return out
+}
+
+/** A summary source has only the point this link reads (start or finish). */
+function reqStart(l: ULink, pEs: number | undefined, pEf: number | undefined, dur: number): number {
+  if (l.type === 'SS') return pEs! + l.lag
+  if (l.type === 'FF') return pEf! + l.lag - dur
+  if (l.type === 'SF') return pEs! + l.lag - dur
+  return pEf! + l.lag
+}
+
+function pinOf(cons: { type: string; date: number }[], cal: Cal, dur: number): number | null {
+  for (const c of cons) {
+    if (c.type === 'mso') return cal.idx(c.date)
+    if (c.type === 'mfo') return cal.idx(c.date) - dur
+  }
+  return null
+}
+
+const minN = (a: number | null, b: number | null) => (a == null ? b : b == null ? a : Math.min(a, b))
 const issue = (level: Issue['level'], code: string, message: string, taskId: GanttId | null): Issue =>
   ({ level, code, message, taskId })
 
-/** Find a cycle among the links (task ids), or [] when there is none. */
+/** Task ids in a dependency loop (links used for scheduling), or []. */
 export function findCycle(tasks: GanttTask[], links: GanttLink[]): GanttId[] {
-  const tree = buildTree(tasks)
-  const { cycle } = eventOrder(tree, links)
-  return cycle.map((k) => tree.byId.get(k)?.id ?? k)
+  const self = links.find((l) => key(l.from) === key(l.to) && tasks.some((t) => key(t.id) === key(l.from)))
+  if (self) return [self.from]
+  const g = buildGraph(tasks, links)
+  return g.stuck.map((k) => g.tree.byId.get(k)?.id ?? k)
 }
 
-/** Would adding from -> to close a loop? */
+/** Would adding from -> to (FS) close a loop? A self link counts as one. */
 export function wouldCycle(tasks: GanttTask[], links: GanttLink[], from: GanttId, to: GanttId): boolean {
   if (key(from) === key(to)) return true
   return findCycle(tasks, [...links, { id: '__probe', from, to, type: 'FS', lagDays: 0 }]).length > 0
 }
 
+export interface ComputeOptions extends ScheduleOptions {
+  /** false: keep every task at its own dates (analyse). Default true. */
+  move?: boolean
+  /** Only these leaf keys may move; every other task keeps its dates. */
+  only?: Set<string>
+}
+
 export function schedule(
-  tasks: GanttTask[], links: GanttLink[], calendar?: Partial<GanttCalendar> | null, opts: ScheduleOptions = {},
+  tasks: GanttTask[], links: GanttLink[], calendar?: Partial<GanttCalendar> | null, opts: ComputeOptions = {},
 ): ScheduleResult {
   const cal = makeCal(calendar)
-  const tree = buildTree(tasks)
+  const move = opts.move !== false
+  const g = buildGraph(tasks, links)
+  const { tree, summaries } = g
+  const byKey = tree.byId
+  const cons = leafConstraints(tasks, g)
+  const inLinks = new Map<NodeKey, ULink[]>()
+  const outLinks = new Map<string, ULink[]>()
+  const dstNode = (k: string) => nk(summaries.has(k) ? 'G' : 'L', k)
+  for (const l of g.links) {
+    const d = dstNode(l.to)
+    if (!inLinks.has(d)) inLinks.set(d, [])
+    inLinks.get(d)!.push(l)
+    if (!outLinks.has(l.from)) outLinks.set(l.from, [])
+    outLinks.get(l.from)!.push(l)
+  }
+  const dur = (k: string) => Math.max(0, Math.round(byKey.get(k)!.duration || 0))
+  const own = (k: string) => cal.idx(toDay(byKey.get(k)!.start))
+  const es = new Map<string, number>()
+  const ef = new Map<string, number>()
+  const gate = new Map<string, number | null>()
+  const leafStarts = g.leaves.map(own)
+  const projectStart = opts.projectStart ? cal.idx(toDay(opts.projectStart)) : (leafStarts.length ? Math.min(...leafStarts) : 0)
+  const parentOf = (k: string) => tree.parentOf.get(k) ?? null
+  const kids = (k: string) => (tree.children.get(k) ?? []).map((c) => key(c.id))
   const issues: Issue[] = []
-  const byId = new Map<GanttId, ScheduledTask>()
-  const validLinks = links.filter((l) => tree.byId.has(key(l.from)) && tree.byId.has(key(l.to)))
-  const isSum = (k: string) => (tree.children.get(k)?.length ?? 0) > 0
 
-  const nodes = new Map<string, Node>()
-  for (const t of tasks) {
-    const k = key(t.id)
-    nodes.set(k, { t, k, dur: Math.max(0, Math.round(t.duration || 0)), start: toDay(t.start) })
-  }
-
-  const { order, cycle } = eventOrder(tree, validLinks)
-  const ES = new Map<string, number>()
-  const EF = new Map<string, number>()
-
-  const rollup = () => {
-    // Summaries: bottom-up over pre-order reversed.
-    for (const t of [...tree.order].reverse()) {
-      const k = key(t.id)
-      const kids = tree.children.get(k) ?? []
-      if (!kids.length) continue
-      ES.set(k, Math.min(...kids.map((c) => ES.get(key(c.id))!)))
-      EF.set(k, Math.max(...kids.map((c) => EF.get(key(c.id))!)))
-    }
-  }
-
-  const progressOf = (k: string): number => {
-    const ls = leaves(tree, k)
-    const weights = ls.map((l) => Math.max(1, nodes.get(key(l.id))!.dur))
-    const total = weights.reduce((a, b) => a + b, 0)
-    if (!total) return 0
-    const sum = ls.reduce((acc, l, i) => acc + (Math.max(0, Math.min(100, l.progress ?? 0)) * weights[i]), 0)
-    return Math.round(sum / total)
-  }
-
-  if (!order) {
-    // Cycle: keep the dates as planned.
-    for (const n of nodes.values()) {
-      const s = normStart(cal, n.start)
-      ES.set(n.k, s)
-      EF.set(n.k, endOf(cal, s, n.dur))
-    }
-    rollup()
+  if (!g.order) {
+    for (const k of g.leaves) { es.set(k, own(k)); ef.set(k, own(k) + dur(k)) }
     issues.push(issue('error', 'cycle', 'The dependencies form a loop', null))
-    for (const t of tasks) {
-      const k = key(t.id)
-      byId.set(t.id, {
-        id: t.id, start: toIso(ES.get(k)!), end: toIso(EF.get(k)!), lateStart: null, lateEnd: null,
-        totalSlack: null, freeSlack: null, critical: false, isSummary: isSum(k),
-        progress: isSum(k) ? progressOf(k) : Math.max(0, Math.min(100, t.progress ?? 0)),
-      })
-    }
-    return {
-      byId, cycle: cycle.map((k) => tree.byId.get(k)?.id ?? k), criticalIds: [],
-      start: ES.size ? toIso(Math.min(...ES.values())) : null,
-      finish: finishOf(tasks, tree, EF), issues,
-    }
-  }
-
-  // ------------------------------------------------------------ forward pass
-  const incoming = new Map<string, GanttLink[]>()
-  const outgoing = new Map<string, GanttLink[]>()
-  for (const l of validLinks) {
-    const f = key(l.from), t = key(l.to)
-    if (!incoming.has(t)) incoming.set(t, [])
-    incoming.get(t)!.push(l)
-    if (!outgoing.has(f)) outgoing.set(f, [])
-    outgoing.get(f)!.push(l)
-  }
-  const projectStart = opts.projectStart ? toDay(opts.projectStart)
-    : Math.min(...[...nodes.values()].filter((n) => !isSum(n.k)).map((n) => n.start), Infinity)
-
-  /** Start bounds and end bounds collected for a node (incl. inherited from summaries). */
-  const startBound = new Map<string, number>()
-  const endBound = new Map<string, number>()
-  const hasPred = new Set<string>()
-  const bump = (m: Map<string, number>, k: string, d: number) => m.set(k, Math.max(m.get(k) ?? -Infinity, d))
-
-  const collect = (k: string) => {
-    for (const l of incoming.get(k) ?? []) {
-      const p = key(l.from)
-      const b = forwardBound(cal, l.type, Math.round(l.lagDays || 0), ES.get(p)!, EF.get(p)!)
-      bump(b.side === 'start' ? startBound : endBound, k, b.day)
-      hasPred.add(k)
-    }
-    const c = nodes.get(k)!.t.constraint
-    if (c && c.type === 'snet' && c.date) bump(startBound, k, toDay(c.date))
-    const parent = tree.parentOf.get(k)
-    if (parent != null) {
-      if (startBound.has(parent)) bump(startBound, k, startBound.get(parent)!)
-      if (endBound.has(parent)) bump(endBound, k, endBound.get(parent)!)
-      if (hasPred.has(parent)) hasPred.add(k)
-    }
-  }
-
-  for (const ev of order) {
-    const [kind, k] = ev.split(/:(.*)/s) as [string, string]
-    if (kind === 'out') {
-      // Summary: all children are scheduled, roll its dates up now so links out of it see them.
-      const kids = tree.children.get(k) ?? []
-      ES.set(k, Math.min(...kids.map((c) => ES.get(key(c.id))!)))
-      EF.set(k, Math.max(...kids.map((c) => EF.get(key(c.id))!)))
-      continue
-    }
-    collect(k)
-    if (kind === 'in') {
-      // Summary: hard constraints on a summary act as bounds for its leaves.
-      const c = nodes.get(k)!.t.constraint
-      if (c?.date && (c.type === 'mso')) bump(startBound, k, toDay(c.date))
-      if (c?.date && (c.type === 'mfo')) bump(endBound, k, toDay(c.date))
-      continue
-    }
-    const n = nodes.get(k)!
-    const anchor = opts.pull ? (hasPred.has(k) ? -Infinity : projectStart) : n.start
-    let es = Math.max(anchor, startBound.get(k) ?? -Infinity)
-    if (endBound.has(k)) es = Math.max(es, startFor(cal, endBound.get(k)!, n.dur))
-    if (!Number.isFinite(es)) es = n.start
-    const c = n.t.constraint
-    const linkEs = es
-    if (c?.date && (c.type === 'mso' || c.type === 'mfo')) {
-      const fixed = c.type === 'mso' ? toDay(c.date) : startFor(cal, toDay(c.date), n.dur)
-      if (hasPred.has(k) && normStart(cal, linkEs) > normStart(cal, fixed)) {
-        issues.push(issue('warning', 'constraint_conflict',
-          `'${n.t.name}' must ${c.type === 'mso' ? 'start' : 'finish'} on ${c.date} but its predecessors push it later`, n.t.id))
-      }
-      es = fixed
-    }
-    es = normStart(cal, es)
-    ES.set(k, es)
-    EF.set(k, endOf(cal, es, n.dur))
-    if (c?.type === 'fnlt' && c.date && EF.get(k)! > toDay(c.date)) {
-      issues.push(issue('warning', 'constraint_conflict',
-        `'${n.t.name}' cannot finish by ${c.date}`, n.t.id))
-    }
-  }
-  rollup()
-
-  // ------------------------------------------------------------ backward pass
-  const real = (k: string) => !nodes.get(k)!.t.isIdea && !ancestorsIdea(tree, k)
-  const realLeaves = [...nodes.keys()].filter((k) => !isSum(k) && real(k))
-  const finish = realLeaves.length ? Math.max(...realLeaves.map((k) => EF.get(k)!)) : null
-  const LF = new Map<string, number>()
-  const LS = new Map<string, number>()
-
-  if (finish != null) {
-    const finishBound = new Map<string, number>()
-    const startCap = new Map<string, number>()
-    const lower = (m: Map<string, number>, k: string, d: number) => m.set(k, Math.min(m.get(k) ?? Infinity, d))
-    const collectBack = (k: string) => {
-      for (const l of outgoing.get(k) ?? []) {
-        const s = key(l.to)
-        if (!real(s) || !LS.has(s)) continue
-        const lag = Math.round(l.lagDays || 0)
-        // Mirror of forwardBound: the successor's late start/finish less the lag.
-        switch (l.type) {
-          case 'SS': lower(startCap, k, shift(cal, LS.get(s)!, -lag)); break
-          case 'FF': lower(finishBound, k, shift(cal, LF.get(s)!, -lag)); break
-          case 'SF': lower(startCap, k, shift(cal, LF.get(s)!, -lag)); break
-          default: lower(finishBound, k, shift(cal, LS.get(s)!, -lag))
+  } else {
+    for (const [kind, k] of g.order) {
+      if (kind === 'G') {
+        const p = parentOf(k)
+        let b: number | null = p != null ? gate.get(p) ?? null : null
+        for (const l of inLinks.get(nk('G', k)) ?? []) {
+          const r = (l.type === 'SS' ? es.get(l.from)! : ef.get(l.from)!) + l.lag
+          b = b == null ? r : Math.max(b, r)
         }
-      }
-      const c = nodes.get(k)!.t.constraint
-      if (c?.date && (c.type === 'fnlt' || c.type === 'mfo')) lower(finishBound, k, toDay(c.date))
-      if (c?.date && c.type === 'mso') lower(startCap, k, toDay(c.date))
-      const parent = tree.parentOf.get(k)
-      if (parent != null) {
-        if (finishBound.has(parent)) lower(finishBound, k, finishBound.get(parent)!)
-        if (startCap.has(parent)) lower(startCap, k, startCap.get(parent)!)
-      }
-    }
-    // Reverse event order: out(X) of a summary collects its outgoing bounds
-    // before its children (which inherit), leaves compute LS/LF.
-    for (const ev of [...order].reverse()) {
-      const [kind, k] = ev.split(/:(.*)/s) as [string, string]
-      if (!real(k)) continue
-      if (kind === 'in') {
-        // Summary late dates from its leaves.
-        const ls = leaves(tree, k).map((l) => key(l.id)).filter((x) => LS.has(x))
-        if (ls.length) {
-          LS.set(k, Math.min(...ls.map((x) => LS.get(x)!)))
-          LF.set(k, Math.max(...ls.map((x) => LF.get(x)!)))
+        gate.set(k, b)
+      } else if (kind === 'L') {
+        const d = dur(k)
+        const o = own(k)
+        const fixed = !move || (opts.only != null && !opts.only.has(k))
+        const pin = fixed ? null : pinOf(cons.get(k)!, cal, d)
+        let s: number
+        if (fixed) s = o
+        else if (pin != null) s = pin
+        else {
+          s = opts.pull ? projectStart : o
+          for (const c of cons.get(k)!) if (c.type === 'snet') s = Math.max(s, cal.idx(c.date))
+          const p = parentOf(k)
+          const pg = p != null ? gate.get(p) ?? null : null
+          if (pg != null) s = Math.max(s, pg)
+          for (const l of inLinks.get(nk('L', k)) ?? []) s = Math.max(s, reqStart(l, es.get(l.from), ef.get(l.from), d))
         }
-        continue
+        es.set(k, s)
+        ef.set(k, s + d)
+      } else if (kind === 'PS') {
+        es.set(k, Math.min(...g.startKids.get(k)!.map((c) => es.get(c)!)))
+      } else {
+        ef.set(k, Math.max(...kids(k).map((c) => ef.get(c)!)))
       }
-      // Summary: its outgoing links and finish constraints bind all its leaves.
-      if (kind === 'out') { collectBack(k); continue }
-      collectBack(k)
-      const n = nodes.get(k)!
-      let lf = Math.min(finish, finishBound.get(k) ?? Infinity)
-      if (startCap.has(k)) lf = Math.min(lf, endOf(cal, startCap.get(k)!, n.dur))
-      LF.set(k, lf)
-      LS.set(k, startFor(cal, lf, n.dur))
     }
   }
 
-  // ------------------------------------------------------------ slack
-  const critical: GanttId[] = []
+  const isIdea = (k: string) => !!byKey.get(k)!.isIdea
+  const real = g.leaves.filter((k) => !isIdea(k))
   const total = new Map<string, number | null>()
   const free = new Map<string, number | null>()
-  for (const k of nodes.keys()) {
-    if (isSum(k) || !real(k) || !LS.has(k)) { total.set(k, null); free.set(k, null); continue }
-    const ts = diff(cal, ES.get(k)!, LS.get(k)!)
-    total.set(k, ts)
-    let fs = Infinity
-    const succ = (outgoing.get(k) ?? []).filter((l) => real(key(l.to)))
-    // Links out of an ancestor summary also count for its leaves.
-    for (const a of ancestorsList(tree, k)) succ.push(...(outgoing.get(a) ?? []).filter((l) => real(key(l.to))))
-    for (const l of succ) {
-      const s = key(l.to)
-      const lag = Math.round(l.lagDays || 0)
-      const b = forwardBound(cal, l.type, lag, ES.get(k)!, EF.get(k)!)
-      const target = b.side === 'start' ? ES.get(s)! : EF.get(s)!
-      fs = Math.min(fs, diff(cal, b.day, target))
+  const crit = new Map<string, boolean>()
+  const lfMap = new Map<string, number>()
+  let projectEnd: number | null = null
+
+  if (g.order && real.length) {
+    const pe = Math.max(...real.map((k) => ef.get(k)!))
+    projectEnd = pe
+    const lg = new Map<string, number | null>()
+    const lpf = new Map<string, number | null>()
+    const lps = new Map<string, number | null>()
+    // The two earliest non-idea starts under each summary: a start bound out
+    // of a summary binds a leaf only when every OTHER leaf under it starts
+    // after the bound (one of them keeps the summary start otherwise).
+    const first2 = new Map<string, [number, string][]>()
+    for (const k of real) {
+      for (const a of g.anc.get(k) ?? []) {
+        const cur = [...(first2.get(a) ?? []), [es.get(k)!, k] as [number, string]]
+        cur.sort((x, y) => x[0] - y[0] || (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0))
+        first2.set(a, cur.slice(0, 2))
+      }
     }
-    if (!succ.length) fs = diff(cal, EF.get(k)!, finish!)
-    free.set(k, Math.min(fs, ts))
+    const othersStart = (a: string, k: string): number | null => {
+      const rest = (first2.get(a) ?? []).filter((x) => x[1] !== k)
+      return rest.length ? rest[0][0] : null
+    }
+    const late = (node: NodeKey, which: 'start' | 'finish'): number | null => {
+      const [kind, x] = parse(node)
+      if (kind === 'L') {
+        if (!lfMap.has(x)) return null // an idea successor
+        return which === 'start' ? lfMap.get(x)! - (ef.get(x)! - es.get(x)!) : lfMap.get(x)!
+      }
+      return which === 'start' ? lg.get(x) ?? null : null
+    }
+    const bounds = (src: string): [number | null, number | null] => {
+      let fb: number | null = null, sb: number | null = null
+      for (const l of outLinks.get(src) ?? []) {
+        const vv = late(dstNode(l.to), l.type === 'FS' || l.type === 'SS' ? 'start' : 'finish')
+        if (vv == null) continue
+        if (l.type === 'FS' || l.type === 'FF') fb = minN(fb, vv - l.lag)
+        else sb = minN(sb, vv - l.lag)
+      }
+      return [fb, sb]
+    }
+    for (const [kind, k] of [...g.order].reverse()) {
+      if (kind === 'G') {
+        let vv: number | null = null
+        for (const c of kids(k)) vv = minN(vv, summaries.has(c) ? lg.get(c) ?? null : late(nk('L', c), 'start'))
+        lg.set(k, vv)
+      } else if (kind === 'PF') {
+        const [fb] = bounds(k)
+        const p = parentOf(k)
+        lpf.set(k, p != null ? minN(fb, lpf.get(p) ?? null) : fb)
+      } else if (kind === 'PS') {
+        lps.set(k, bounds(k)[1])
+      } else if (!isIdea(k)) {
+        const d = ef.get(k)! - es.get(k)!
+        let f = pe
+        let [fb, sb] = bounds(k)
+        const p = parentOf(k)
+        if (p != null) fb = minN(fb, lpf.get(p) ?? null)
+        for (const a of g.anc.get(k) ?? []) {
+          const bnd = lps.get(a) ?? null
+          const o = othersStart(a, k)
+          if (bnd != null && (o == null || o > bnd)) sb = minN(sb, bnd)
+        }
+        if (fb != null) f = Math.min(f, fb)
+        if (sb != null) f = Math.min(f, sb + d)
+        for (const c of cons.get(k)!) if (c.type === 'fnlt') f = Math.min(f, cal.idx(c.date))
+        if (pinOf(cons.get(k)!, cal, d) != null) f = Math.min(f, ef.get(k)!)
+        lfMap.set(k, f)
+      }
+    }
+    const early = (node: NodeKey, which: 'start' | 'finish'): number | null => {
+      const [kind, x] = parse(node)
+      if (kind === 'L') {
+        if (isIdea(x)) return null
+        return which === 'start' ? es.get(x)! : ef.get(x)!
+      }
+      return which === 'start' ? es.get(x)! : null
+    }
+    for (const k of real) {
+      const tot = lfMap.get(k)! - ef.get(k)!
+      const rooms: number[] = []
+      for (const src of [k, ...(g.anc.get(k) ?? [])]) {
+        const o = src === k ? null : othersStart(src, k)
+        for (const l of outLinks.get(src) ?? []) {
+          const vv = early(dstNode(l.to), l.type === 'FS' || l.type === 'SS' ? 'start' : 'finish')
+          if (vv == null) continue
+          if (l.type === 'FS' || l.type === 'FF') rooms.push(vv - l.lag - ef.get(k)!)
+          else if (o == null || o > vv - l.lag) rooms.push(vv - l.lag - es.get(k)!)
+        }
+      }
+      const fr = rooms.length ? Math.min(...rooms) : pe - ef.get(k)!
+      total.set(k, tot)
+      free.set(k, Math.min(fr, tot))
+      crit.set(k, tot <= 0)
+    }
   }
-  for (const t of tree.order) {
-    const k = key(t.id)
-    if (!isSum(k) || !real(k)) continue
-    const vals = leaves(tree, k).map((l) => total.get(key(l.id))).filter((v): v is number => v != null)
-    total.set(k, vals.length ? Math.min(...vals) : null)
-  }
-  for (const t of tree.order) {
-    const k = key(t.id)
-    const ts = total.get(k)
-    const crit = ts != null && ts <= 0 && real(k)
-    if (crit) critical.push(t.id)
-    byId.set(t.id, {
-      id: t.id,
-      start: toIso(ES.get(k)!),
-      end: toIso(EF.get(k)!),
-      lateStart: LS.has(k) ? toIso(LS.get(k)!) : null,
-      lateEnd: LF.has(k) ? toIso(LF.get(k)!) : null,
-      totalSlack: ts ?? null,
-      freeSlack: free.get(k) ?? null,
-      critical: crit,
-      isSummary: isSum(k),
-      progress: isSum(k) ? progressOf(k) : Math.max(0, Math.min(100, t.progress ?? 0)),
+
+  const byId = new Map<GanttId, ScheduledTask>()
+  const progress = new Map<string, number>()
+  const out = new Map<string, ScheduledTask>()
+  for (const k of g.leaves) {
+    const t = byKey.get(k)!
+    const s = es.get(k)!, e = ef.get(k)!
+    const lf = lfMap.get(k)
+    progress.set(k, Math.max(0, Math.min(100, Math.round(t.progress ?? 0))))
+    out.set(k, {
+      id: t.id, start: toIso(cal.dateAt(s)), end: toIso(endFromIdx(cal, s, e)),
+      lateStart: lf != null ? toIso(cal.dateAt(lf - (e - s))) : null,
+      lateEnd: lf != null ? toIso(endFromIdx(cal, lf - (e - s), lf)) : null,
+      totalSlack: total.get(k) ?? null, freeSlack: free.get(k) ?? null, critical: crit.get(k) ?? false,
+      isSummary: false, progress: progress.get(k)!,
     })
   }
-  const starts = [...nodes.keys()].filter((k) => !isSum(k) && real(k)).map((k) => ES.get(k)!)
+  // Summary rollup, children first.
+  for (const t of [...tree.order].reverse()) {
+    const k = key(t.id)
+    const ks = kids(k)
+    if (!ks.length) continue
+    const rs = ks.map((c) => out.get(c)!)
+    const spans = ks.map((c) => Math.max(ef.get(c)! - es.get(c)!, 0))
+    const weight = spans.reduce((a, b) => a + b, 0)
+    const prog = weight > 0
+      ? Math.round(rs.reduce((a, r, i) => a + r.progress * spans[i], 0) / weight)
+      : Math.round(rs.reduce((a, r) => a + r.progress, 0) / rs.length)
+    const slacks = rs.map((r) => r.totalSlack).filter((x): x is number => x != null)
+    const frees = rs.map((r) => r.freeSlack).filter((x): x is number => x != null)
+    out.set(k, {
+      id: t.id, start: toIso(Math.min(...rs.map((r) => toDay(r.start)))), end: toIso(Math.max(...rs.map((r) => toDay(r.end)))),
+      lateStart: null, lateEnd: null,
+      totalSlack: slacks.length ? Math.min(...slacks) : null, freeSlack: frees.length ? Math.min(...frees) : null,
+      critical: rs.some((r) => r.critical), isSummary: true, progress: prog,
+    })
+  }
+  for (const t of tree.order) byId.set(t.id, out.get(key(t.id))!)
+  const criticalIds = g.leaves.filter((k) => crit.get(k)).map((k) => byKey.get(k)!.id)
+  const realStarts = real.map((k) => es.get(k)!)
   return {
-    byId, cycle: [], criticalIds: critical,
-    start: starts.length ? toIso(Math.min(...starts)) : null,
-    finish: finish != null ? toIso(finish) : null,
+    byId,
+    cycle: g.order ? [] : g.stuck.map((k) => byKey.get(k)?.id ?? k),
+    criticalIds,
+    start: realStarts.length ? toIso(cal.dateAt(Math.min(...realStarts))) : null,
+    finish: projectEnd != null ? toIso(endFromIdx(cal, Math.min(...realStarts), projectEnd))
+      : (real.length ? toIso(Math.max(...real.map((k) => endFromIdx(cal, es.get(k)!, ef.get(k)!)))) : null),
     issues,
   }
 }
 
-function ancestorsList(tree: Tree, k: string): string[] {
-  const out: string[] = []
-  let cur = tree.parentOf.get(k) ?? null
-  while (cur != null) { out.push(cur); cur = tree.parentOf.get(cur) ?? null }
-  return out
-}
-
-function ancestorsIdea(tree: Tree, k: string): boolean {
-  return ancestorsList(tree, k).some((a) => !!tree.byId.get(a)?.isIdea)
-}
-
-function finishOf(tasks: GanttTask[], tree: Tree, EF: Map<string, number>): string | null {
-  const ends = tasks.filter((t) => !t.isIdea && !(tree.children.get(key(t.id))?.length)).map((t) => EF.get(key(t.id))!)
-  return ends.length ? toIso(Math.max(...ends)) : null
-}
-
 /**
- * Auto-schedule: the date patches that move tasks to their early start
+ * Auto-schedule: the date patches that move leaves to their early start
  * (only tasks whose start actually changes; summaries are never patched).
  */
 export function autoSchedulePatches(
@@ -413,4 +474,58 @@ export function autoSchedulePatches(
   return tasks
     .filter((t) => { const s = r.byId.get(t.id); return s && !s.isSummary && s.start !== t.start })
     .map((t) => ({ id: t.id, patch: { start: r.byId.get(t.id)!.start } }))
+}
+
+/**
+ * Leaf key -> the nearest source whose move can push it (backend
+ * `downstream`): successors, successors of every summary above it, every
+ * leaf under a summary it links into. The walk stops at another source.
+ */
+export function downstream(tasks: GanttTask[], links: GanttLink[], sources: GanttId[]): Map<string, string> {
+  const g = buildGraph(tasks, links)
+  const srcs = new Set(sources.map(key))
+  const cause = new Map<string, string>()
+  for (const src of sources.map(key)) {
+    if (!g.tree.byId.has(src)) continue
+    const starts = g.summaries.has(src) ? [nk('PS', src), nk('PF', src)] : [nk('L', src)]
+    const seen = new Set(starts)
+    const stack = [...starts]
+    while (stack.length) {
+      const n = stack.pop()!
+      for (const m of g.succ.get(n) ?? []) {
+        const [kind, x] = parse(m)
+        if (seen.has(m) || (kind === 'L' && srcs.has(x))) continue
+        seen.add(m)
+        stack.push(m)
+        if (kind === 'L' && !cause.has(x)) cause.set(x, src)
+      }
+    }
+  }
+  return cause
+}
+
+/**
+ * What moving `sources` pushes along (backend `cascade`): only their
+ * downstream leaves move, later and never earlier; a pinned task keeps its
+ * date, a task with an actual start keeps its dates. Returns the start
+ * patches and, per moved task, the source behind it.
+ */
+export function cascade(
+  tasks: GanttTask[], links: GanttLink[], calendar: Partial<GanttCalendar> | null | undefined, sources: GanttId[],
+): { id: GanttId; patch: { start: string }; cause: GanttId }[] {
+  const cause = downstream(tasks, links, sources)
+  const g = buildGraph(tasks, links)
+  const cons = leafConstraints(tasks, g)
+  // Pinned tasks and tasks that already started (actual start) stay; the walk goes on through them.
+  const movable = new Set([...cause.keys()].filter((k) => !(cons.get(k) ?? []).some((c) => c.type === 'mso' || c.type === 'mfo')
+    && !g.tree.byId.get(k)?.actualStart))
+  const r = schedule(tasks, links, calendar, { only: movable })
+  const out: { id: GanttId; patch: { start: string }; cause: GanttId }[] = []
+  for (const t of tasks) {
+    const k = key(t.id)
+    const st = r.byId.get(t.id)
+    if (!movable.has(k) || !st || st.start === t.start) continue
+    out.push({ id: t.id, patch: { start: st.start }, cause: g.tree.byId.get(cause.get(k)!)!.id })
+  }
+  return out
 }

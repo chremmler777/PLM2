@@ -12,7 +12,7 @@ const calTasks: GanttTask[] = [
     lane: 'Tool Engineer', progress: 40, notes: 'a & b <c>', baselineStart: '2026-10-05', baselineEnd: '2026-10-09',
     actualStart: '2026-10-05', actualEnd: '2026-10-08',
   },
-  { id: 3, parentId: 1, name: 'Supplier parts', start: '2026-10-10', duration: 5, kind: 'supplier', isIdea: true, lane: 'Supplier', constraint: { type: 'snet', date: '2026-10-10' } },
+  { id: 3, parentId: 1, name: 'Supplier parts', start: '2026-10-10', duration: 5, kind: 'supplier', isIdea: true, lane: 'Supplier', constraint: { type: 'snet', date: '2026-10-09' } },
   { id: 4, parentId: null, name: 'Gate', start: '2026-10-15', duration: 0, kind: 'milestone', constraint: { type: 'fnlt', date: '2026-10-16' } },
   { id: 5, parentId: null, name: 'Approval', start: '2026-10-16', duration: 2, kind: 'customer', lane: 'Customer', constraint: { type: 'mfo', date: '2026-10-18' } },
   { id: 6, parentId: null, name: 'SOP', start: '2026-10-20', duration: 1, constraint: { type: 'mso', date: '2026-10-20' } },
@@ -38,7 +38,7 @@ const val = (el: Element, tag: string) => el.getElementsByTagName(tag)[0]?.textC
 const linkSet = (ls: GanttLink[]) => ls.map((l) => `${l.from}>${l.to}:${l.type}${l.lagDays}`).sort()
 
 describe('exportMspdi', () => {
-  const xml = exportMspdi(calTasks, links, { name: 'CR-1-quote.xml', title: 'CR-1 quote plan', calendar: CAL })
+  const xml = exportMspdi(calTasks, links, { name: 'CR-1-quote.xml', title: 'CR-1 quote plan', calendar: CAL, includeIdeas: true })
   const doc = parse(xml)
   it('parses as XML with the MSPDI namespace', () => {
     expect(doc.getElementsByTagName('parsererror')).toHaveLength(0)
@@ -67,7 +67,8 @@ describe('exportMspdi', () => {
     expect(val(t, 'Duration')).toBe('PT120H0M0S')
     expect(val(t, 'DurationFormat')).toBe('8')
     expect(val(t, 'Start')).toBe('2026-10-05T08:00:00')
-    expect(val(t, 'Finish')).toBe('2026-10-10T08:00:00')
+    // Finish is the last day at 17:00 in both modes (backend parity).
+    expect(val(t, 'Finish')).toBe('2026-10-09T17:00:00')
   })
   it('marks milestones', () => expect(val(taskEls(doc)[3], 'Milestone')).toBe('1'))
   it('writes link type codes and lag in tenths of minutes', () => {
@@ -82,15 +83,17 @@ describe('exportMspdi', () => {
   })
   it('writes constraint codes and dates', () => {
     const ts = taskEls(doc)
-    expect(ts.map((t) => val(t, 'ConstraintType'))).toEqual(['0', '0', '4', '7', '3', '2'])
-    expect(val(ts[2], 'ConstraintDate')).toBe('2026-10-10T08:00:00')
-    expect(val(ts[3], 'ConstraintDate')).toBe('2026-10-16T08:00:00')
+    // Summary: none; unconstrained leaf: SNET on its own start (keeps MS Project from moving it).
+    expect(ts.map((t) => val(t, 'ConstraintType'))).toEqual([null, '4', '4', '7', '3', '2'])
+    expect(val(ts[1], 'ConstraintDate')).toBe('2026-10-05T08:00:00')
+    expect(val(ts[2], 'ConstraintDate')).toBe('2026-10-09T08:00:00')
+    expect(val(ts[3], 'ConstraintDate')).toBe('2026-10-15T17:00:00')
   })
   it('writes baseline 0', () => {
     const b = taskEls(doc)[1].getElementsByTagName('Baseline')[0]
     expect(val(b, 'Number')).toBe('0')
     expect(val(b, 'Start')).toBe('2026-10-05T08:00:00')
-    expect(val(b, 'Finish')).toBe('2026-10-09T08:00:00')
+    expect(val(b, 'Finish')).toBe('2026-10-08T17:00:00')
   })
   it('writes kind in Text1 and the idea flag in Flag1', () => {
     const ea = Array.from(taskEls(doc)[2].getElementsByTagName('ExtendedAttribute'))
@@ -108,11 +111,15 @@ describe('exportMspdi', () => {
   it('writes the calendar week and holidays', () => {
     const wd = Array.from(doc.getElementsByTagName('WeekDay'))
     const regular = wd.filter((w) => val(w, 'DayType') !== '0')
-    expect(regular.map((w) => val(w, 'DayWorking'))).toEqual(['0', '1', '1', '1', '1', '1', '0'])
+    // Calendar mode: every day works (elapsed durations); holidays only shade.
+    expect(regular.map((w) => val(w, 'DayWorking'))).toEqual(['1', '1', '1', '1', '1', '1', '1'])
     expect(xml).toContain('<FromDate>2026-12-25T00:00:00</FromDate>')
+    expect(xml).toContain('<Name>Holiday (shading only)</Name>')
+    const w = parse(exportMspdi(workTasks, [], { calendar: WORK }))
+    expect(Array.from(w.getElementsByTagName('WeekDay')).map((x) => val(x, 'DayWorking'))).toEqual(['0', '1', '1', '1', '1', '1', '0'])
   })
-  it('can leave idea tasks out', () => {
-    const d2 = parse(exportMspdi(calTasks, links, { skipIdeas: true, calendar: CAL }))
+  it('leaves idea tasks out by default (like the server export)', () => {
+    const d2 = parse(exportMspdi(calTasks, links, { calendar: CAL }))
     expect(taskEls(d2)).toHaveLength(5)
     // Links touching the idea (2->3, 3->4) drop out; 4->5 (UID 3) and 2->6 (UID 2) stay.
     expect(Array.from(d2.getElementsByTagName('PredecessorUID')).map((e) => e.textContent)).toEqual(['3', '2'])
@@ -135,7 +142,7 @@ describe('exportMspdi', () => {
 
 describe('round trip export -> import', () => {
   it('keeps every field in calendar mode', () => {
-    const back = importMspdi(exportMspdi(calTasks, links, { calendar: CAL, title: 'T' }))
+    const back = importMspdi(exportMspdi(calTasks, links, { calendar: CAL, title: 'T', includeIdeas: true }))
     expect(back.tasks).toEqual(calTasks)
     expect(linkSet(back.links)).toEqual(linkSet(links))
     expect(back.calendar).toEqual(CAL)
@@ -154,8 +161,8 @@ describe('round trip export -> import', () => {
     expect(back.tasks[0].id).toBe(1)
   })
   it('a second round trip is stable', () => {
-    const once = importMspdi(exportMspdi(calTasks, links, { calendar: CAL }))
-    const twice = importMspdi(exportMspdi(once.tasks, once.links, { calendar: once.calendar }))
+    const once = importMspdi(exportMspdi(calTasks, links, { calendar: CAL, includeIdeas: true }))
+    const twice = importMspdi(exportMspdi(once.tasks, once.links, { calendar: once.calendar, includeIdeas: true }))
     expect(twice.tasks).toEqual(once.tasks)
     expect(linkSet(twice.links)).toEqual(linkSet(once.links))
   })
@@ -223,7 +230,8 @@ describe('importMspdi from MS Project', () => {
   it('falls back to the finish date without a Duration element', () => {
     expect(r.tasks[2].duration).toBe(3)
   })
-  it('reads a milestone', () => expect(r.tasks[3]).toMatchObject({ start: '2026-10-09', duration: 0 }))
+  // A start at the end of the working day (17:00) is the next day (backend rule).
+  it('reads a milestone', () => expect(r.tasks[3]).toMatchObject({ start: '2026-10-10', duration: 0 }))
   it('reads a 17:00 finish constraint as the exclusive next day', () => {
     expect(r.tasks[3].constraint).toEqual({ type: 'fnlt', date: '2026-10-17' })
   })
@@ -264,5 +272,56 @@ describe('durationHours', () => {
   it('returns null for rubbish', () => {
     expect(durationHours(null)).toBeNull()
     expect(durationHours('40h')).toBeNull()
+  })
+})
+
+describe('MSPDI parity with the backend (review)', () => {
+  const sumTasks: GanttTask[] = [
+    { id: 1, name: 'Phase', start: '2026-10-05', duration: 0, constraint: { type: 'mso', date: '2026-10-05' } },
+    { id: 2, parentId: 1, name: 'A', start: '2026-10-05', duration: 4, progress: 100 },
+    { id: 3, parentId: 1, name: 'B', start: '2026-10-09', duration: 2, progress: 0 },
+    { id: 4, name: 'Idea', start: '2026-10-05', duration: 2, isIdea: true },
+  ]
+  const doc = parse(exportMspdi(sumTasks, [], { calendar: CAL }))
+  const ts = taskEls(doc)
+  it('drops mso/mfo on a summary and writes its rolled-up percent', () => {
+    expect(val(ts[0], 'ConstraintType')).toBeNull()
+    expect(val(ts[0], 'PercentComplete')).toBe('67')
+  })
+  it('leaves idea tasks out by default', () => expect(ts).toHaveLength(3))
+  it('a summary keeps snet / fnlt', () => {
+    const d = parse(exportMspdi([{ ...sumTasks[0], constraint: { type: 'fnlt', date: '2026-10-20' } }, sumTasks[1]], [], { calendar: CAL }))
+    expect(val(taskEls(d)[0], 'ConstraintType')).toBe('7')
+    expect(val(taskEls(d)[0], 'ConstraintDate')).toBe('2026-10-19T17:00:00')
+  })
+  const wrap = (tasks: string) => `<Project xmlns="${MSPDI_NS}"><DurationFormat>7</DurationFormat><Tasks>${tasks}</Tasks></Project>`
+  it('refuses an FF link into a summary task', () => {
+    expect(() => importMspdi(wrap(`
+      <Task><UID>1</UID><Name>X</Name><OutlineLevel>1</OutlineLevel><Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>
+      <Task><UID>2</UID><Name>S</Name><OutlineLevel>1</OutlineLevel><Summary>1</Summary><Start>2026-10-05T08:00:00</Start>
+        <PredecessorLink><PredecessorUID>1</PredecessorUID><Type>0</Type></PredecessorLink></Task>
+      <Task><UID>3</UID><Name>C</Name><OutlineLevel>2</OutlineLevel><Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>`))).toThrow(/FF link into the summary/)
+  })
+  it('refuses must-start-on on a summary task', () => {
+    expect(() => importMspdi(wrap(`
+      <Task><UID>2</UID><Name>S</Name><OutlineLevel>1</OutlineLevel><Start>2026-10-05T08:00:00</Start>
+        <ConstraintType>2</ConstraintType><ConstraintDate>2026-10-06T08:00:00</ConstraintDate></Task>
+      <Task><UID>3</UID><Name>C</Name><OutlineLevel>2</OutlineLevel><Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>`))).toThrow(/summary task with a must-start-on/)
+  })
+  it('a skipped row keeps the outline: its children move up, not under a sibling', () => {
+    const r = importMspdi(wrap(`
+      <Task><UID>1</UID><Name>Sibling</Name><OutlineLevel>1</OutlineLevel><Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>
+      <Task><UID>2</UID><Name>Broken</Name><OutlineLevel>1</OutlineLevel></Task>
+      <Task><UID>3</UID><Name>Child</Name><OutlineLevel>2</OutlineLevel><Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration></Task>`))
+    expect(r.tasks.map((t) => [t.id, t.parentId])).toEqual([[1, null], [3, null]])
+  })
+  it('reads SNET on the own start as no constraint, and shading holidays back in calendar mode', () => {
+    const back = importMspdi(exportMspdi([{ id: 1, name: 'A', start: '2026-10-05', duration: 2 }], [], { calendar: CAL }))
+    expect(back.tasks[0].constraint).toBeUndefined()
+    expect(back.calendar).toEqual(CAL)
+  })
+  it('a start at 17:00 is the next day', () => {
+    const r = importMspdi(wrap(`<Task><UID>1</UID><Name>M</Name><OutlineLevel>1</OutlineLevel><Milestone>1</Milestone><Start>2026-10-09T17:00:00</Start></Task>`))
+    expect(r.tasks[0].start).toBe('2026-10-10')
   })
 })

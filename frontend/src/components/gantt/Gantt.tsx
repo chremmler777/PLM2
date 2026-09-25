@@ -22,11 +22,11 @@ import { formatPredecessors, predecessorChangeSet, tempId } from './engine/notat
 import { exportCsv } from './engine/csv'
 import { exportMspdi } from './engine/mspdi'
 import { autoSchedulePatches, schedule, wouldCycle } from './engine/schedule'
-import { descendants, indent, key, leaves, moveRows, outdent } from './engine/tree'
+import { buildTree, descendants, indent, key, leaves, moveRows, outdent, rowNumbers, type Tree } from './engine/tree'
 import type {
   ChangeSet, GanttCalendar, GanttId, GanttLink, GanttModel, GanttTask, Issue, LinkType,
 } from './engine/types'
-import { LINK_TYPES } from './engine/types'
+import { LIMITS, LINK_TYPES, inYearRange } from './engine/types'
 import { linkViolated, validate } from './engine/validate'
 import { ChartBody, ChartHeader, HEADER_H, MARKER_STRIP, type GanttMarker, type LinkDraft, type TaskGeo } from './GanttChart'
 import { GridBody, GridHeader } from './GanttGrid'
@@ -136,6 +136,30 @@ const isTextTarget = (el: EventTarget | null) => {
   const t = el as HTMLElement | null
   return !!t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable)
 }
+/** Keys typed on a button, menu, dialog or toolbar belong to that control, not to the chart. */
+const isControlTarget = (el: EventTarget | null) => {
+  const t = el as Element | null
+  return !!t?.closest?.('button,a,[role=menu],[role=menuitem],[role=dialog],[role=toolbar],[role=listbox]')
+}
+
+/** A callback with a stable identity that always runs the latest closure (memoised children). */
+function useStable<A extends unknown[], R>(fn: (...a: A) => R): (...a: A) => R {
+  const ref = useRef(fn)
+  ref.current = fn
+  return useCallback((...a: A) => ref.current(...a), [])
+}
+
+/** Display order with a local draft row inserted after `afterKey`'s subtree. */
+function draftOrder(tree: Tree, id: GanttId, afterKey: string | null): GanttId[] {
+  const order = tree.order.map((x) => x.id)
+  let at = order.length
+  if (afterKey && tree.byId.has(afterKey)) {
+    const sub = [afterKey, ...descendants(tree, afterKey).map((x) => key(x.id))]
+    at = Math.max(...sub.map((k) => order.findIndex((o) => key(o) === k))) + 1
+  }
+  order.splice(at, 0, id)
+  return order
+}
 
 export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
@@ -165,17 +189,21 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     if (e instanceof Error && e.message) return e.message
     return 'The change could not be saved'
   }
+  const remapViewRef = useRef<(m: Record<string, GanttId>) => void>(() => undefined)
   const queue = useSaveQueue(base, {
     onChange: p.onChange,
-    onError: (e) => { history.current.clear(); bumpHist(); notifyError(errMessage(e), e) },
-    onIdMap: (m) => history.current.remap(m),
+    // Only the refused change is rolled back (and forgotten by undo).
+    onError: (e, tag) => { if (tag) history.current.discard(tag); bumpHist(); notifyError(errMessage(e), e) },
+    onIdMap: (m) => { history.current.remap(m); remapViewRef.current(m) },
   })
   const saved = queue.display
   const modelRef = useRef(saved)
   modelRef.current = saved
   /** A new row that exists only locally until it gets a name (Escape or an empty name drops it). */
-  const [draft, setDraft] = useState<{ task: GanttTask; order: GanttId[] } | null>(null)
-  const model = useMemo(() => (draft ? applyChangeSet(saved, { addTasks: [draft.task], order: draft.order }) : saved), [saved, draft])
+  const [draft, setDraft] = useState<{ task: GanttTask; afterKey: string | null } | null>(null)
+  const model = useMemo(() => (draft
+    ? applyChangeSet(saved, { addTasks: [draft.task], order: draftOrder(buildTree(saved.tasks), draft.task.id, draft.afterKey) })
+    : saved), [saved, draft])
   const draftKey = draft ? key(draft.task.id) : null
 
   // ---------------------------------------------------------------- view state
@@ -220,10 +248,21 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     }
   }, [readOnly, rights, canDates, canLinks, canStructure])
   const canProgress = useCallback((t: GanttTask) => canField(t, 'progress'), [canField])
+  // Undo across a rights change (e.g. the baseline was set) could replay what is no longer allowed.
+  useEffect(() => { history.current.clear(); bumpHist() }, [canStructure, canDates, canLinks])
 
   // ---------------------------------------------------------------- derived
   const rowModel = useMemo(() => buildRows(model.tasks, { groupByLane: p.groupByLane, collapsed }), [model.tasks, p.groupByLane, collapsed])
-  const { rows, tree, rowNo, index } = rowModel
+  const { rows, index } = rowModel
+  // Structure, order and row numbers follow the stored (ungrouped) order: lane
+  // grouping is a view and must not rewrite the order or renumber predecessors.
+  const tree = useMemo(() => buildTree(model.tasks), [model.tasks])
+  const rowNo = useMemo(() => rowNumbers(tree), [tree])
+  const predText = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const t of tree.order) m.set(key(t.id), formatPredecessors(t.id, model.links, rowNo))
+    return m
+  }, [tree, model.links, rowNo])
   const sched = useMemo(() => schedule(model.tasks, model.links, p.calendar), [model.tasks, model.links, p.calendar])
   const issues = useMemo(() => p.issues ?? validate(model.tasks, model.links, p.calendar), [p.issues, model.tasks, model.links, p.calendar])
   const flagged = useMemo(() => new Set(issues.filter((i) => i.level === 'error' && i.taskId != null).map((i) => key(i.taskId!))), [issues])
@@ -297,10 +336,10 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     for (const l of model.links) {
       const f = tree.byId.get(key(l.from)), t = tree.byId.get(key(l.to))
       if (!f || !t || isSummaryKey(key(f.id)) || isSummaryKey(key(t.id))) continue
-      if (isIsoDay(f.start) && isIsoDay(t.start) && linkViolated(displayTask(f), displayTask(t), l, p.calendar)) s.add(key(l.id))
+      if (isIsoDay(f.start) && isIsoDay(t.start) && linkViolated(displayTask(f), displayTask(t), l, cal)) s.add(key(l.id))
     }
     return s
-  }, [model.links, tree, isSummaryKey, displayTask, p.calendar])
+  }, [model.links, tree, isSummaryKey, displayTask, cal])
 
   const hasHierarchy = useMemo(() => tree.order.some((t) => (tree.depth.get(key(t.id)) ?? 0) > 0), [tree])
   const viewW = viewport.w
@@ -329,11 +368,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const summary = isSummaryKey(k)
     return {
       geo: g, rowNo: rowNo.get(k), wbs: tree.wbs.get(k),
-      predecessors: formatPredecessors(t.id, model.links, rowNo),
+      predecessors: predText.get(k) ?? '',
       sched: sched.byId.get(t.id), kinds, summary, working,
       summaryDuration: summary && g ? diff(cal, g.s, g.e) : undefined,
     }
-  }, [geo, isSummaryKey, rowNo, tree, model.links, sched, kinds, working, cal])
+  }, [geo, isSummaryKey, rowNo, tree, predText, sched, kinds, working, cal])
 
   // ---------------------------------------------------------------- scale
   const allDays = useMemo(() => {
@@ -467,7 +506,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   const idsOf = (keys: string[]) => keys.map((k) => tree.byId.get(k)?.id).filter((x): x is GanttId => x != null)
 
   // ---------------------------------------------------------------- commit
-  const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean } = {}): Promise<boolean> => {
+  const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean; tag?: number } = {}): Promise<boolean> => {
     if (!cs0 || isEmptyChangeSet(cs0)) return false
     let cs = cs0
     const before = modelRef.current
@@ -489,24 +528,24 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       if (!r) return false
       cs = r
     }
-    if (opts.history !== false) history.current.push(modelRef.current, cs)
-    queue.enqueue(cs)
+    const tag = opts.history !== false ? history.current.push(modelRef.current, cs) : opts.tag
+    queue.enqueue(cs, tag || undefined)
     bumpHist()
     return true
   }, [p, queue])
 
+  // The entry moves to the other stack only once the change really went out
+  // (a cancelled reason dialog leaves the history as it was).
   const undo = useCallback(async () => {
-    const cs = history.current.undo()
-    if (!cs) return
-    const ok = await commit(cs, { history: false })
-    if (!ok) history.current.redo()
+    const h = history.current.peekUndo()
+    if (!h) return
+    if (await commit(h.cs, { history: false, tag: h.id })) history.current.confirmUndo(h.id)
     bumpHist()
   }, [commit])
   const redo = useCallback(async () => {
-    const cs = history.current.redo()
-    if (!cs) return
-    const ok = await commit(cs, { history: false })
-    if (!ok) history.current.undo()
+    const h = history.current.peekRedo()
+    if (!h) return
+    if (await commit(h.cs, { history: false, tag: h.id })) history.current.confirmRedo(h.id)
     bumpHist()
   }, [commit])
 
@@ -547,15 +586,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       duration: milestone ? 0 : 1, ...(after?.lane ? { lane: after.lane } : {}), ...extra,
       ...(milestone ? { duration: 0 } : {}),
     }
-    const order = tree.order.filter((x) => key(x.id) !== draftKey).map((x) => x.id)
-    let at = order.length
-    if (after) {
-      const sub = [after, ...descendants(tree, after.id)].map((x) => key(x.id))
-      at = Math.max(...sub.map((k) => order.findIndex((id) => key(id) === k))) + 1
-    }
-    order.splice(at, 0, t.id)
     const k = key(t.id)
-    setDraft({ task: t, order })
+    setDraft({ task: t, afterKey: after ? key(after.id) : null })
     setSelection([k]); setAnchor(k); setActive(k)
     setEditing({ key: k, col: 'name' })
   }
@@ -564,7 +596,9 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const d = draft
     setDraft(null)
     if (!d || !name) return
-    void commit({ label: d.task.duration === 0 ? 'Insert milestone' : 'Insert task', addTasks: [{ ...d.task, name }], order: d.order })
+    // Order from the model as it is NOW (an earlier insert may have got its real id meanwhile).
+    const order = draftOrder(buildTree(modelRef.current.tasks), d.task.id, d.afterKey)
+    void commit({ label: d.task.duration === 0 ? 'Insert milestone' : 'Insert task', addTasks: [{ ...d.task, name }], order })
   }
 
   const deleteSelection = () => {
@@ -605,9 +639,39 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       notifyError(`${type} links are not available here${linkTypes.length === 1 ? `: only ${linkTypes[0]}` : ''}`)
       return
     }
+    const refusal = linkRefusal(fromKey, toKey, type)
+    if (refusal) { notifyError(refusal); return }
     if (model.links.some((l) => key(l.from) === fromKey && key(l.to) === toKey)) { p.onNotify?.('These tasks are already linked'); return }
     if (wouldCycle(model.tasks, model.links, from.id, to.id)) { notifyError('That link would create a loop'); return }
     void commit({ label: 'Link tasks', addLinks: [{ id: tempId('link'), from: from.id, to: to.id, type, lagDays: 0 }] })
+  }
+
+  remapViewRef.current = (m) => {
+    const has = (k: string | null | undefined) => k != null && k in m
+    const rk = (k: string) => (k in m ? key(m[k]) : k)
+    setSelection((sel) => (sel.some(has) ? sel.map(rk) : sel))
+    setActive((a) => (has(a) ? rk(a!) : a))
+    setAnchor((a) => (has(a) ? rk(a!) : a))
+    setDialogKey((d) => (has(d) ? rk(d!) : d))
+    setEditing((ed) => (ed && has(ed.key) ? { ...ed, key: rk(ed.key) } : ed))
+    setCollapsed((c) => ([...c].some(has) ? new Set([...c].map(rk)) : c))
+    setDraft((d) => {
+      if (!d) return d
+      const pid = d.task.parentId
+      const np = pid != null && has(key(pid)) ? m[key(pid)] : pid
+      const na = has(d.afterKey) ? rk(d.afterKey!) : d.afterKey
+      return np === pid && na === d.afterKey ? d : { task: { ...d.task, parentId: np }, afterKey: na }
+    })
+  }
+
+  /** What the server refuses for a link (spec §11 summary rule), as a message; null when allowed. */
+  const linkRefusal = (fromKey: string, toKey: string, type: LinkType): string | null => {
+    let a = tree.parentOf.get(toKey) ?? null
+    while (a) { if (a === fromKey) return 'A summary task cannot be linked to a task under it'; a = tree.parentOf.get(a) ?? null }
+    a = tree.parentOf.get(fromKey) ?? null
+    while (a) { if (a === toKey) return 'A task cannot be linked to its own summary'; a = tree.parentOf.get(a) ?? null }
+    if (isSummaryKey(toKey) && (type === 'FF' || type === 'SF')) return `${type} links into a summary task are not allowed: link to a task under it`
+    return null
   }
 
   const focusTask = useCallback((id: GanttId) => {
@@ -693,20 +757,30 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const g = geo.get(k)
     const bx = g ? barGeo(g.s, g.e, range, ppd, g.milestone) : null
     const startProgress = Math.round(t.progress ?? 0)
+    // Re-render only when the snapped value changes, at most once per frame.
+    let last: number | null = null
+    let frame = 0
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - x0
       if (!moved && Math.abs(dx) < 3 && Math.abs(ev.clientY - y0) < 3) return
       moved = true
       if (!movable || !keys.length) return
-      if (mode === 'progress' && bx) {
-        const pct = Math.max(0, Math.min(100, Math.round((startProgress + (dx / Math.max(1, bx.w)) * 100) / 5) * 5))
-        setDrag({ mode, keys, delta: 0, progress: pct })
-      } else setDrag({ mode, keys, delta: snapDays(dx, latest.current.ppd) })
+      const value = mode === 'progress' && bx
+        ? Math.max(0, Math.min(100, Math.round((startProgress + (dx / Math.max(1, bx.w)) * 100) / 5) * 5))
+        : snapDays(dx, latest.current.ppd)
+      if (value === last) return
+      last = value
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        setDrag(mode === 'progress' ? { mode, keys, delta: 0, progress: value } : { mode, keys, delta: value })
+      })
     }
     const onUp = async (ev: PointerEvent) => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      cancelAnimationFrame(frame)
+      if (ev.type === 'pointercancel') { setDrag(null); return }
       if (!moved) {
         setDrag(null)
         selectKey(k, { ctrlKey: additive && !ev.shiftKey, metaKey: false, shiftKey: ev.shiftKey })
@@ -718,7 +792,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         ? { mode, keys, delta: 0, progress: Math.max(0, Math.min(100, Math.round((startProgress + (dx / Math.max(1, bx.w)) * 100) / 5) * 5)) }
         : { mode, keys, delta: snapDays(dx, latest.current.ppd) }
       setDrag(final)
-      const patches = computePatches(final)
+      const patches = computePatchesRef.current(final)
       const label = mode === 'progress' ? 'Progress' : mode === 'move' ? (keys.length > 1 ? `Move ${keys.length} tasks` : 'Move task') : 'Resize task'
       await latest.current.commit(patchesToChangeSetRef.current(patches, label))
       setDrag(null)
@@ -767,17 +841,20 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const x1 = anchorX(b, side) + (side === 'start' ? -5 : 5)
     const y1 = i * rowH + rowH / 2
     let moved = false
+    let frame = 0
     const onMove = (ev: PointerEvent) => {
       moved = true
       const pt = svgPoint(ev.clientX, ev.clientY)
-      setLinkDraft({ x1, y1, x2: pt.x, y2: pt.y })
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => setLinkDraft({ x1, y1, x2: pt.x, y2: pt.y }))
     }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      cancelAnimationFrame(frame)
       setLinkDraft(null)
-      if (!moved) return
+      if (!moved || ev.type === 'pointercancel') return
       const el = (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(ev.clientX, ev.clientY) : null)
         ?? (ev.target as Element | null)
       const hit = el?.closest?.('[data-task-id]')
@@ -817,11 +894,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       target = { index: i, where }
       setDropLine(target)
     }
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
       setDropLine(null)
-      if (!target) return
+      if (!target || ev.type === 'pointercancel') return
       const r = rows[target.index]
       const keys = selSet.has(k) ? selection : [k]
       if (r.type === 'group') {
@@ -835,6 +913,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
   const moveTo = (keys: string[], targetKey: string, where: 'before' | 'after', lane?: string) => {
     const cs = moveRows(tree.order, idsOf(keys), tree.byId.get(targetKey)!.id, where)
@@ -860,9 +939,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       case 'lane': patch({ lane: val || null }, 'Change lane'); return
       case 'start':
         if (!isIsoDay(val)) return
+        if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         patch({ start: val }, 'Change start'); return
       case 'end': {
         if (!isIsoDay(val)) return
+        if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         if (t.duration === 0) { patch({ start: val }, 'Move milestone'); return }
         const s = normStart(cal, toDay(t.start))
         if (toDay(val) < s) { notifyError('The finish cannot be before the start'); return }
@@ -873,6 +954,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         if (val === '') return
         const n = Math.round(Number(val.replace(/[a-z]+$/i, '')))
         if (!Number.isFinite(n) || n < 0) { notifyError('The duration must be 0 or more days'); return }
+        if (n > LIMITS.maxDuration) { notifyError(`A task lasts at most ${LIMITS.maxDuration} days`); return }
         patch({ duration: n }, 'Change duration'); return
       }
       case 'progress': {
@@ -886,9 +968,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         if (errors.length) { notifyError(errors[0]); return }
         if (!changes) return
         const added = [...(changes.addLinks ?? []), ...(changes.updateLinks ?? []).map((u) => ({ ...model.links.find((l) => key(l.id) === key(u.id))!, ...u.patch }))]
+        const refused = added.map((l) => linkRefusal(key(l.from), key(l.to), l.type)).find(Boolean)
+        if (refused) { notifyError(refused); return }
         const badType = added.find((l) => !linkTypes.includes(l.type))
         if (badType) { notifyError(`${badType.type} links are not available here`); return }
         if (!allowLag && added.some((l) => l.lagDays !== 0)) { notifyError('Lag and lead are not available here'); return }
+        if (added.some((l) => Math.abs(l.lagDays) > LIMITS.maxLag)) { notifyError(`A lag or lead is at most ${LIMITS.maxLag} days`); return }
         const after = applyChangeSet(model, changes)
         if (schedule(after.tasks, after.links, p.calendar).cycle.length) { notifyError('Those predecessors would create a loop'); return }
         void commit(changes)
@@ -927,6 +1012,10 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   const onKeyDown = (e: ReactKeyboardEvent) => {
     if (isTextTarget(e.target) || p.compact) return
+    // Only keys typed in the chart / grid (or on the root after a click there);
+    // toolbar buttons, menus and dialogs keep their own keys, Tab keeps moving focus.
+    const inChart = e.target === rootRef.current || !!scrollerRef.current?.contains(e.target as Node)
+    if (!inChart || isControlTarget(e.target)) return
     const mod = e.ctrlKey || e.metaKey
     const k = e.key
     if (k === 'Escape') { setSelection([]); setEditing(null); setDraft(null); setMenu(null); setLinkPop(null); return }
@@ -1021,16 +1110,57 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     setMenu({ x: e.clientX, y: e.clientY })
   }
 
-  // ---------------------------------------------------------------- render
-  const vars = themeVars(theme)
-  const bodyH = Math.max(rows.length, 1) * rowH
-  const heightCss = p.height ?? (p.compact ? 320 : '70vh')
-  const popLink = linkPop ? model.links.find((l) => key(l.id) === linkPop.id) : undefined
+  // ---------------------------------------------------------------- stable handlers (memoised panes)
   const linkLabel = (l: GanttLink) => {
     const f = tree.byId.get(key(l.from)), t = tree.byId.get(key(l.to))
     const lag = l.lagDays ? ` ${l.lagDays > 0 ? '+' : ''}${l.lagDays}d` : ''
     return `${l.type}${lag}: #${rowNo.get(key(l.from)) ?? '?'} ${f?.name ?? ''} to #${rowNo.get(key(l.to)) ?? '?'} ${t?.name ?? ''}`
   }
+  const h = {
+    canEditCell: useStable(canEditCell),
+    rowClick: useStable((e: React.MouseEvent, t: GanttTask) => { if (!p.compact) selectKey(key(t.id), e) }),
+    rowDouble: useStable((t: GanttTask) => { if (!p.compact) openTask(t) }),
+    openMenu: useStable(openMenu),
+    toggle: useStable((rk: string) => setCollapsed((c) => { const n = new Set(c); if (n.has(rk)) n.delete(rk); else n.add(rk); return n })),
+    startEdit: useStable((t: GanttTask, col: string) => setEditing({ key: key(t.id), col })),
+    commitEdit: useStable(commitEdit),
+    cancelEdit: useStable(() => { if (editing?.key === draftKey) setDraft(null); setEditing(null) }),
+    reorderDown: useStable(onReorderDown),
+    linkLabel: useStable(linkLabel),
+    canDrag: useStable((t: GanttTask) => !p.compact && canField(t, 'start')),
+    canProgressBar: useStable((t: GanttTask) => !p.compact && canProgress(t)),
+    barDown: useStable(onBarDown),
+    linkHandleDown: useStable(onLinkHandleDown),
+    linkClick: useStable((e: React.MouseEvent, l: GanttLink) => { if (!p.compact) setLinkPop({ id: key(l.id), x: e.clientX, y: e.clientY }) }),
+    /** Keyboard on a focused link: Enter / Space edits it, Delete removes it. */
+    linkKey: useStable((e: React.KeyboardEvent, l: GanttLink) => {
+      if (p.compact) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault(); e.stopPropagation()
+        const r = (e.currentTarget as Element).getBoundingClientRect?.()
+        setLinkPop({ id: key(l.id), x: r ? r.left + r.width / 2 : 200, y: r ? r.top + r.height / 2 : 200 })
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && canLinks) {
+        e.preventDefault(); e.stopPropagation()
+        void commit({ label: 'Remove link', removeLinks: [l.id] })
+      }
+    }),
+    /** Keyboard on a focused bar: Space selects, Enter opens. */
+    barKey: useStable((e: React.KeyboardEvent, t: GanttTask) => {
+      if (p.compact) return
+      if (e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectKey(key(t.id), e) }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); selectKey(key(t.id)); openTask(t) }
+    }),
+    backgroundDown: useStable((e: ReactPointerEvent) => {
+      rootRef.current?.focus({ preventScroll: true })
+      if (!(e.shiftKey || e.ctrlKey || e.metaKey)) setSelection([])
+    }),
+  }
+
+  // ---------------------------------------------------------------- render
+  const vars = themeVars(theme)
+  const bodyH = Math.max(rows.length, 1) * rowH
+  const heightCss = p.height ?? (p.compact ? 320 : '70vh')
+  const popLink = linkPop ? model.links.find((l) => key(l.id) === linkPop.id) : undefined
   const dialogTask = dialogKey ? tree.byId.get(dialogKey) : undefined
   const hasBaselines = model.tasks.some((t) => t.baselineStart)
   const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40'
@@ -1130,51 +1260,45 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
             <div className="sticky left-0 z-10 border-r" style={{ borderColor: v('gridLine'), background: v('bg') }}>
               <GridBody columns={columns} rows={displayRows} rowH={rowH} first={win.first} last={win.last}
                 selected={selSet} flashKey={flashKey} flagged={flagged} pending={queue.pendingIds} ctx={cellCtx}
-                canEdit={canEditCell} canReorder={canStructure} editing={editing} dropLine={dropLine}
-                onRowClick={(e, t) => { if (!p.compact) selectKey(key(t.id), e) }}
-                onRowDoubleClick={(t) => { if (!p.compact) openTask(t) }}
-                onRowContext={openMenu}
-                onToggle={(rk) => setCollapsed((c) => { const n = new Set(c); if (n.has(rk)) n.delete(rk); else n.add(rk); return n })}
-                onStartEdit={(t, col) => setEditing({ key: key(t.id), col })}
-                onCommitEdit={commitEdit}
-                onCancelEdit={() => { if (editing?.key === draftKey) setDraft(null); setEditing(null) }}
-                onReorderDown={onReorderDown} />
+                canEdit={h.canEditCell} canReorder={canStructure} editing={editing} dropLine={dropLine}
+                onRowClick={h.rowClick} onRowDoubleClick={h.rowDouble} onRowContext={h.openMenu}
+                onToggle={h.toggle} onStartEdit={h.startEdit} onCommitEdit={h.commitEdit}
+                onCancelEdit={h.cancelEdit} onReorderDown={h.reorderDown} />
             </div>
             <ChartBody uid={uid} rows={displayRows} rowH={rowH} first={win.first} last={win.last} range={range} ppd={ppd}
               unit={unit} cal={cal} geo={geo} links={model.links} kinds={kinds} selected={selSet} critical={criticalSet}
               showBaselines={showBaselines} showProgress={p.showProgress ?? false} pending={queue.pendingIds}
               flashKey={flashKey} markers={p.markers ?? []} today={p.showToday === false ? null : today}
-              linkLabels={linkLabel} brokenLinks={brokenLinks}
-              canDrag={(t) => !p.compact && canField(t, 'start')} canLink={canLinks}
-              canProgress={(t) => !p.compact && canProgress(t)}
+              linkLabels={h.linkLabel} brokenLinks={brokenLinks}
+              canDrag={h.canDrag} canLink={canLinks} canProgress={h.canProgressBar}
               linkDraft={linkDraft} svgRef={svgRef}
-              onBarDown={p.compact ? undefined : onBarDown}
-              onLinkHandleDown={onLinkHandleDown}
-              onLinkClick={(e, l) => { if (!p.compact) setLinkPop({ id: key(l.id), x: e.clientX, y: e.clientY }) }}
-              onBackgroundDown={p.compact ? undefined : (e) => {
-                rootRef.current?.focus({ preventScroll: true })
-                if (!(e.shiftKey || e.ctrlKey || e.metaKey)) setSelection([])
-              }}
-              onBarContext={openMenu}
-              onBarDoubleClick={(t) => { if (!p.compact) openTask(t) }} />
+              onBarDown={p.compact ? undefined : h.barDown}
+              onLinkHandleDown={h.linkHandleDown}
+              onLinkClick={h.linkClick} onLinkKey={h.linkKey}
+              onBackgroundDown={p.compact ? undefined : h.backgroundDown}
+              onBarContext={h.openMenu} onBarDoubleClick={h.rowDouble} onBarKey={h.barKey} />
           </div>
         </div>
       </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuEntries()} onClose={() => setMenu(null)} />}
       {popLink && linkPop && (
-        <LinkPopover x={linkPop.x} y={linkPop.y} link={popLink} title={linkLabel(popLink)} types={linkTypes}
+        <LinkPopover x={linkPop.x} y={linkPop.y} link={popLink} title={linkLabel(popLink)}
+          types={linkTypes.filter((ty) => !linkRefusal(key(popLink.from), key(popLink.to), ty))}
           allowLag={allowLag} canEdit={canLinks} unit={working ? 'working days' : 'days'}
           onClose={() => setLinkPop(null)}
           onDelete={() => { setLinkPop(null); void commit({ label: 'Remove link', removeLinks: [popLink.id] }) }}
           onSave={(patch) => {
             setLinkPop(null)
             if (patch.type !== popLink.type && !linkTypes.includes(patch.type)) return
+            const refused = linkRefusal(key(popLink.from), key(popLink.to), patch.type)
+            if (refused) { notifyError(refused); return }
             void commit({ label: 'Edit link', updateLinks: [{ id: popLink.id, patch }] })
           }} />
       )}
       {dialogTask && (
         <TaskDialog task={dialogTask} working={working} allowConstraints={p.constraints ?? true}
+          summary={isSummaryKey(key(dialogTask.id))}
           canField={(f) => canField(dialogTask, f) && !(isSummaryKey(key(dialogTask.id)) && ['start', 'duration', 'progress'].includes(f))}
           onClose={() => setDialogKey(null)}
           onSave={(pt) => void commit(patchesToChangeSet(new Map([[key(dialogTask.id), pt]]), 'Edit task'))} />

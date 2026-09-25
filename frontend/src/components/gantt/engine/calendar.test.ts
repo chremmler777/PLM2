@@ -93,8 +93,9 @@ describe('makeCal', () => {
     const c = makeCal({ mode: 'working', holidays: ['2026-10-07', 'nope', '2026-02-30'] })
     expect(c.source.holidays).toEqual(['2026-10-07'])
   })
-  it('falls back to Mon-Fri when workdays are empty', () => {
-    expect(makeCal({ mode: 'working', workdays: [] }).source.workdays).toEqual([1, 2, 3, 4, 5])
+  it('falls back to Mon-Fri when workdays are missing, to elapsed days when they are empty (backend rule)', () => {
+    expect(makeCal({ mode: 'working' }).source.workdays).toEqual([1, 2, 3, 4, 5])
+    expect(makeCal({ mode: 'working', workdays: [] }).mode).toBe('calendar')
   })
   it('treats a calendar without any valid working weekday as calendar mode', () => {
     const c = makeCal({ mode: 'working', workdays: [9] })

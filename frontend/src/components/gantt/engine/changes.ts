@@ -131,10 +131,38 @@ export function remapChangeSet(cs: ChangeSet, idMap: Record<string, GanttId>): C
     })),
     removeTasks: cs.removeTasks?.map(m),
     addLinks: cs.addLinks?.map((l) => ({ ...l, id: m(l.id), from: m(l.from), to: m(l.to) })),
-    updateLinks: cs.updateLinks?.map((u) => ({ id: m(u.id), patch: u.patch })),
+    updateLinks: cs.updateLinks?.map((u) => ({
+      id: m(u.id),
+      patch: { ...u.patch, ...(u.patch.from != null ? { from: m(u.patch.from) } : {}), ...(u.patch.to != null ? { to: m(u.patch.to) } : {}) },
+    })),
     removeLinks: cs.removeLinks?.map(m),
     order: cs.order?.map(m),
+    // Adapter data may carry task ids (e.g. a focus target): remap plain id values.
+    ...(cs.meta ? { meta: Object.fromEntries(Object.entries(cs.meta).map(([k, v]) =>
+      [k, (typeof v === 'string' || typeof v === 'number') && key(v) in idMap ? idMap[key(v)] : v])) } : {}),
   }
+}
+
+/** Does the model already show everything this ChangeSet does? (reconcile) */
+export function modelContains(model: GanttModel, cs: ChangeSet): boolean {
+  const t = new Map(model.tasks.map((x) => [key(x.id), x as unknown as Record<string, unknown>]))
+  const l = new Map(model.links.map((x) => [key(x.id), x as unknown as Record<string, unknown>]))
+  const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+  if ((cs.addTasks ?? []).some((x) => !t.has(key(x.id)))) return false
+  if ((cs.removeTasks ?? []).some((id) => t.has(key(id)))) return false
+  for (const u of cs.updateTasks ?? []) {
+    const cur = t.get(key(u.id))
+    if (!cur) return false
+    for (const [f, v] of Object.entries(u.patch)) if (f !== 'meta' && !same(cur[f], v)) return false
+  }
+  if ((cs.addLinks ?? []).some((x) => !l.has(key(x.id)))) return false
+  if ((cs.removeLinks ?? []).some((id) => l.has(key(id)))) return false
+  for (const u of cs.updateLinks ?? []) {
+    const cur = l.get(key(u.id))
+    if (!cur) return false
+    for (const [f, v] of Object.entries(u.patch)) if (!same(cur[f], v)) return false
+  }
+  return true
 }
 
 /** Every task id a ChangeSet touches (for "saving" markers). */

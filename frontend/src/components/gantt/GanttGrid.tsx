@@ -3,7 +3,7 @@
  * task at the same height as the chart rows, inline cell editing and the
  * drag handle for row reorder. Virtualised like the chart.
  */
-import { useEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useEffect, useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import { key } from './engine/tree'
 import type { GanttTask } from './engine/types'
 import { HEADER_H } from './GanttChart'
@@ -76,7 +76,7 @@ function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
   )
 }
 
-export function GridBody(p: GridProps) {
+export const GridBody = memo(function GridBody(p: GridProps) {
   const width = gridWidth(p.columns)
   const height = Math.max(p.rows.length, 1) * p.rowH
   const out: JSX.Element[] = []
@@ -85,7 +85,7 @@ export function GridBody(p: GridProps) {
     const top = i * p.rowH
     if (r.type === 'group') {
       out.push(
-        <button key={r.key} type="button" data-testid={`gantt-group-${r.label}`}
+        <button key={r.key} type="button" data-testid={`gantt-group-${r.label}`} aria-rowindex={i + 1}
           className="absolute left-0 flex items-center gap-1.5 border-b px-2 text-left"
           style={{ top, height: p.rowH, width, background: v('groupBg'), borderColor: v('gridLine') }}
           aria-expanded={!r.collapsed} aria-label={`${r.collapsed ? 'Expand' : 'Collapse'} ${r.label}`}
@@ -102,7 +102,7 @@ export function GridBody(p: GridProps) {
     const sel = p.selected.has(k)
     const c = p.ctx(t)
     out.push(
-      <div key={k} role="row" aria-selected={sel} data-testid={`gantt-row-${k}`} data-row-index={i}
+      <div key={k} role="row" aria-selected={sel} aria-rowindex={i + 1} data-testid={`gantt-row-${k}`} data-row-index={i}
         className="absolute left-0 flex cursor-default select-none items-center border-b text-xs"
         style={{
           top, height: p.rowH, width, borderColor: v('rowLine'),
@@ -173,4 +173,4 @@ export function GridBody(p: GridProps) {
       )}
     </div>
   )
-}
+})

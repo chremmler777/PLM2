@@ -143,3 +143,10 @@ export interface ScheduleResult {
   finish: string | null
   issues: Issue[]
 }
+
+/** Bounds the backend enforces (400/422): mirrored in the inputs. */
+export const LIMITS = { minYear: 1900, maxYear: 2200, maxDuration: 36500, maxLag: 3650, maxOutline: 50 } as const
+export const inYearRange = (iso: string) => {
+  const y = Number(iso.slice(0, 4))
+  return y >= LIMITS.minYear && y <= LIMITS.maxYear
+}

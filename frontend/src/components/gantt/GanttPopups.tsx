@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { isIsoDay } from './engine/calendar'
-import { CONSTRAINT_TYPES, LINK_TYPES, type ConstraintType, type GanttLink, type GanttTask, type LinkType } from './engine/types'
+import { CONSTRAINT_TYPES, LIMITS, LINK_TYPES, inYearRange, type ConstraintType, type GanttLink, type GanttTask, type LinkType } from './engine/types'
 import { v } from './theme'
 
 export interface MenuItem {
@@ -83,7 +83,7 @@ export function LinkPopover(p: {
   const [type, setType] = useState<LinkType>(p.link.type)
   const [lag, setLag] = useState(String(p.link.lagDays))
   const lagNum = Math.round(Number(lag))
-  const valid = Number.isFinite(lagNum) && lag.trim() !== ''
+  const valid = Number.isFinite(lagNum) && lag.trim() !== '' && Math.abs(lagNum) <= LIMITS.maxLag
   const dirty = type !== p.link.type || (valid && lagNum !== p.link.lagDays)
   const pos = clampPos(p.x, p.y, 260, 190)
   const types = LINK_TYPES.filter((t) => p.types.includes(t) || t === p.link.type)
@@ -104,7 +104,7 @@ export function LinkPopover(p: {
           <span className="mb-0.5 block text-[10px] uppercase tracking-wide" style={{ color: v('textFaint') }}>
             Lag in {p.unit} (negative = lead)
           </span>
-          <input aria-label="Lag" type="number" value={lag} disabled={!p.canEdit} onChange={(e) => setLag(e.target.value)}
+          <input aria-label="Lag" type="number" min={-LIMITS.maxLag} max={LIMITS.maxLag} value={lag} disabled={!p.canEdit} onChange={(e) => setLag(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && dirty && valid) p.onSave({ type, lagDays: lagNum }) }}
             className="w-full rounded border px-1.5 py-1" style={{ background: v('bg'), borderColor: v('gridLine'), color: v('text') }} />
         </label>
@@ -133,6 +133,8 @@ export function TaskDialog(p: {
   canField: (field: string) => boolean
   allowConstraints: boolean
   working: boolean
+  /** A summary task: must-start-on / must-finish-on are not offered (the server refuses them). */
+  summary?: boolean
   onSave: (patch: Partial<GanttTask>) => void
   onClose: () => void
 }) {
@@ -157,8 +159,8 @@ export function TaskDialog(p: {
       patch.constraint = f.ctype === 'asap' ? { type: 'asap', date: null } : { type: f.ctype, date: f.cdate || null }
     }
   }
-  const constraintOk = f.ctype === 'asap' || isIsoDay(f.cdate)
-  const ok = f.name.trim() !== '' && isIsoDay(f.start) && constraintOk
+  const constraintOk = (f.ctype === 'asap' || isIsoDay(f.cdate)) && !(p.summary && (f.ctype === 'mso' || f.ctype === 'mfo'))
+  const ok = f.name.trim() !== '' && isIsoDay(f.start) && inYearRange(f.start) && constraintOk && dur <= LIMITS.maxDuration
   const field = 'w-full rounded border px-2 py-1 text-sm [color-scheme:dark] disabled:opacity-50'
   const fs = { background: v('bg'), borderColor: v('gridLine'), color: v('text') }
   const lab = 'mb-0.5 block text-[10px] uppercase tracking-wide'
@@ -185,7 +187,8 @@ export function TaskDialog(p: {
             <label className="col-span-2 block"><span className={lab} style={{ color: v('textFaint') }}>Constraint</span>
               <select className={field} style={fs} value={f.ctype} disabled={!p.canField('constraint')} aria-label="Constraint"
                 onChange={(e) => setF({ ...f, ctype: e.target.value as ConstraintType })}>
-                {CONSTRAINT_TYPES.map((c) => <option key={c} value={c}>{CONSTRAINT_LABEL[c]}</option>)}
+                {CONSTRAINT_TYPES.filter((c) => !p.summary || (c !== 'mso' && c !== 'mfo') || c === f.ctype)
+                  .map((c) => <option key={c} value={c}>{CONSTRAINT_LABEL[c]}</option>)}
               </select></label>
             <label className="block"><span className={lab} style={{ color: v('textFaint') }}>Date</span>
               <input type="date" className={field} style={fs} value={f.cdate} aria-label="Constraint date"

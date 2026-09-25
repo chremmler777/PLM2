@@ -152,6 +152,8 @@ export interface ChartBodyProps {
   onBarDown?: (e: ReactPointerEvent, t: GanttTask, mode: 'move' | 'start' | 'end' | 'progress') => void
   onLinkHandleDown?: (e: ReactPointerEvent, t: GanttTask, side: 'start' | 'end') => void
   onLinkClick?: (e: React.MouseEvent, l: GanttLink) => void
+  onLinkKey?: (e: React.KeyboardEvent, l: GanttLink) => void
+  onBarKey?: (e: React.KeyboardEvent, t: GanttTask) => void
   onBackgroundDown?: (e: ReactPointerEvent) => void
   onBarContext?: (e: React.MouseEvent, t: GanttTask) => void
   onBarDoubleClick?: (t: GanttTask) => void
@@ -173,7 +175,7 @@ function markerLabels(markers: GanttMarker[], range: Range, ppd: number) {
     })
 }
 
-export function ChartBody(p: ChartBodyProps) {
+export const ChartBody = memo(function ChartBody(p: ChartBodyProps) {
   const { rows, rowH, range, ppd } = p
   const width = Math.max(1, (range.to - range.from) * ppd)
   const height = Math.max(rows.length, 1) * rowH
@@ -221,8 +223,8 @@ export function ChartBody(p: ChartBodyProps) {
   const kindOf = (t: GanttTask): GanttKindStyle => (t.kind && p.kinds[t.kind]) || DEFAULT_KIND
 
   return (
-    <svg ref={p.svgRef} width={width} height={height} className="block select-none" role="img"
-      aria-label="Gantt chart" data-testid="gantt-body" onPointerDown={p.onBackgroundDown}>
+    <svg ref={p.svgRef} width={width} height={height} className="block select-none" role="group"
+      aria-label="Gantt chart: task bars and links" data-testid="gantt-body" onPointerDown={p.onBackgroundDown}>
       <defs>
         <pattern id={hatch} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect width={6} height={6} fill="#475569" />
@@ -267,10 +269,11 @@ export function ChartBody(p: ChartBodyProps) {
           <path d={d} fill="none" strokeWidth={crit ? 1.75 : 1.25}
             style={{ stroke: bad ? v('linkBad') : crit ? v('critical') : v('link') }}
             markerEnd={`url(#${bad ? arrowBad : crit ? arrowCrit : arrow})`} />
-          <path d={d} fill="none" stroke="transparent" strokeWidth={7} className="cursor-pointer"
-            role="button" aria-label={`Link ${p.linkLabels(l)}`} data-testid={`gantt-link-hit-${key(l.id)}`}
+          <path d={d} fill="none" stroke="transparent" strokeWidth={7} className="cursor-pointer focus:outline-none"
+            role="button" tabIndex={0} aria-label={`Link ${p.linkLabels(l)}. Enter edits, Delete removes.`} data-testid={`gantt-link-hit-${key(l.id)}`}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => p.onLinkClick?.(e, l)}>
+            onClick={(e) => p.onLinkClick?.(e, l)}
+            onKeyDown={(e) => p.onLinkKey?.(e, l)}>
             <title>{`${p.linkLabels(l)}${bad ? ' (not met by the dates)' : ''}`}</title>
           </path>
         </g>
@@ -373,7 +376,10 @@ export function ChartBody(p: ChartBodyProps) {
           )
         }
         return (
-          <g key={k} data-task-id={k} data-testid={`gantt-bar-${k}`} className="group"
+          <g key={k} data-task-id={k} data-testid={`gantt-bar-${k}`} className="group focus:outline-none"
+            role="button" tabIndex={0} aria-pressed={sel}
+            aria-label={`${t.name}${r.summary ? ' (summary)' : ''}, ${tip.split('\n')[1] ?? ''}. Space selects, Enter opens.`}
+            onKeyDown={(e) => p.onBarKey?.(e, t)}
             opacity={pending ? 0.75 : 1}
             onContextMenu={(e) => p.onBarContext?.(e, t)}
             onDoubleClick={() => p.onBarDoubleClick?.(t)}>
@@ -384,7 +390,7 @@ export function ChartBody(p: ChartBodyProps) {
               <rect x={b.x - 5} y={y - 4} width={Math.max(b.w, 10) + 10} height={barH + 8} rx={5} fill="none"
                 strokeWidth={2} style={{ stroke: v('focus') }} className="animate-pulse" pointerEvents="none" />
             )}
-            {p.canLink && !r.summary && (['start', 'end'] as const).map((side) => (
+            {p.canLink && (['start', 'end'] as const).map((side) => (
               <circle key={side} cx={anchorX(b, side) + (side === 'start' ? -5 : 5)} cy={cy} r={4}
                 strokeWidth={1.5} data-side={side} data-task-id={k}
                 style={{ fill: v('bg'), stroke: v('accent') }}
@@ -411,4 +417,4 @@ export function ChartBody(p: ChartBodyProps) {
       )}
     </svg>
   )
-}
+})

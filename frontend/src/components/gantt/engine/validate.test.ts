@@ -59,8 +59,11 @@ describe('validate', () => {
     const issues = validate([T(1), T(2)], [L(1, 2)])
     expect(issues[0]).toMatchObject({ code: 'dependency_violation', level: 'error', taskId: 2, linkId: '1-2' })
   })
-  it('links on summaries are not checked as violations', () => {
-    expect(codes([T(1), T(2, { start: '2026-10-01' }), T(3, { parentId: 2 })], [L(1, 2)])).not.toContain('dependency_violation')
+  it('a link into a summary is checked against every leaf below it and flagged as a summary link', () => {
+    const c = codes([T(1), T(2, { start: '2026-10-01' }), T(3, { parentId: 2 })], [L(1, 2)])
+    expect(c).toContain('dependency_violation')
+    expect(c).toContain('summary_link')
+    expect(codes([T(1), T(2, { start: '2026-10-01' }), T(3, { parentId: 2, start: '2026-10-20' })], [L(1, 2)])).not.toContain('dependency_violation')
   })
   it('cycle', () => expect(codes([T(1), T(2, { start: '2026-10-10' })], [L(1, 2), L(2, 1)])).toContain('cycle'))
   it('includes constraint conflicts from the schedule', () => {

@@ -15,6 +15,8 @@ import {
   taskGeo, toDay, toIso,
 } from './ganttMath'
 import { btn, btnPrimary } from './GanttToolbar'
+import { todayDay } from '../../gantt/engine/calendar'
+import { LIMITS, inYearRange } from '../../gantt/engine/types'
 
 interface Props {
   task: TaskOut
@@ -99,10 +101,13 @@ export default function TaskEditor(p: Props) {
     setF((prev) => ({ ...prev, [k]: v }))
   }
   const canNotes = p.canEdit || p.canDates
+  // The server refuses actual dates later than tomorrow.
+  const maxActual = toIso(todayDay() + 1)
 
   const milestone = f.kind === 'milestone'
   const dur = milestone ? 0 : Math.max(0, Math.floor(Number(f.duration) || 0))
-  const startOk = /^\d{4}-\d{2}-\d{2}$/.test(f.start_date)
+  const startOk = /^\d{4}-\d{2}-\d{2}$/.test(f.start_date) && inYearRange(f.start_date)
+  const actualsOk = [f.actual_start, f.actual_finish].every((a) => !a || a <= maxActual)
   const endIncl = startOk ? toIso(inclusiveEnd({ start: toDay(f.start_date), dur })) : ''
   const readOnly = !p.canEdit && !p.canDates && !p.canProgress
 
@@ -286,12 +291,12 @@ export default function TaskEditor(p: Props) {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={label} htmlFor="te-as">Actual start</label>
-                <input id="te-as" type="date" className={field} value={f.actual_start} disabled={!p.canProgress}
+                <input id="te-as" type="date" max={maxActual} className={field} value={f.actual_start} disabled={!p.canProgress}
                   onChange={(e) => set('actual_start', e.target.value)} />
               </div>
               <div>
                 <label className={label} htmlFor="te-af">Actual finish</label>
-                <input id="te-af" type="date" className={field} value={f.actual_finish} disabled={!p.canProgress}
+                <input id="te-af" type="date" max={maxActual} className={field} value={f.actual_finish} disabled={!p.canProgress}
                   onChange={(e) => set('actual_finish', e.target.value)} />
               </div>
             </div>
@@ -313,7 +318,7 @@ export default function TaskEditor(p: Props) {
           <div className="ml-auto flex gap-2">
             <button type="button" className={btn} onClick={() => setF(formOf(task))} disabled={!dirty}>Reset</button>
             <button type="button" className={btnPrimary} data-testid="task-editor-save"
-              disabled={!dirty || nameMissing || !startOk || p.saving}
+              disabled={!dirty || nameMissing || !startOk || !actualsOk || dur > LIMITS.maxDuration || p.saving}
               onClick={() => p.onSave(changes)}>Save</button>
           </div>
         </footer>

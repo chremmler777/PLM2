@@ -109,3 +109,28 @@ describe('History', () => {
     expect(h.size).toEqual({ past: 0, future: 0 })
   })
 })
+
+describe('History: peek, confirm, discard (review)', () => {
+  const m: GanttModel = { tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 2 }], links: [] }
+  it('peekUndo does not move the entry until confirmed', () => {
+    const h = new History()
+    const id = h.push(m, { label: 'x', updateTasks: [{ id: 1, patch: { duration: 3 } }] })
+    const p = h.peekUndo()!
+    expect(p.id).toBe(id)
+    expect(p.cs.updateTasks).toEqual([{ id: 1, patch: { duration: 2 } }])
+    expect(h.canUndo).toBe(true)
+    h.confirmUndo(id)
+    expect(h.canUndo).toBe(false)
+    expect(h.peekRedo()!.cs.updateTasks).toEqual([{ id: 1, patch: { duration: 3 } }])
+    h.confirmRedo(id)
+    expect(h.canUndo).toBe(true)
+  })
+  it('discard forgets one refused entry and keeps the others', () => {
+    const h = new History()
+    const a = h.push(m, { label: 'a', updateTasks: [{ id: 1, patch: { duration: 3 } }] })
+    const b = h.push(m, { label: 'b', updateTasks: [{ id: 1, patch: { name: 'B' } }] })
+    h.discard(b)
+    expect(h.peekUndo()!.id).toBe(a)
+    expect(h.push(m, {})).toBe(0)
+  })
+})

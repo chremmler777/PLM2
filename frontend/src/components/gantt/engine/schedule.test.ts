@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { autoSchedulePatches, findCycle, schedule, wouldCycle } from './schedule'
+import { autoSchedulePatches, cascade, downstream, findCycle, schedule, wouldCycle } from './schedule'
+import { validate } from './validate'
 import type { GanttCalendar, GanttLink, GanttTask, LinkType, ScheduleOptions } from './types'
 
 const CAL: Partial<GanttCalendar> = { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [] }
@@ -260,8 +261,9 @@ describe('constraints', () => {
     expect(get('B').start).toBe('2026-10-08')
     expect(get('A').totalSlack).toBe(-2)
     expect(get('A').critical).toBe(true)
-    expect(r.issues.map((i) => i.code)).toEqual(['constraint_conflict'])
-    expect(r.issues[0]).toMatchObject({ level: 'warning', taskId: 'B' })
+    // The conflict is reported by validate on the dates as they stand (pinned link).
+    expect(r.issues).toEqual([])
+    expect(validate(tasks, [L('A', 'B')], CAL).filter((i) => i.code === 'constraint_conflict')[0]).toMatchObject({ level: 'warning', taskId: 'B' })
   })
   it('mfo pins the (exclusive) finish', () => {
     const { get } = run([T('A', '2026-10-01', 3, { constraint: { type: 'mfo', date: '2026-10-12' } })])
@@ -273,8 +275,7 @@ describe('constraints', () => {
   })
   it('mfo conflicting with a predecessor is reported', () => {
     const tasks = [T('A', '2026-10-05', 5), T('B', '2026-10-05', 2, { constraint: { type: 'mfo', date: '2026-10-09' } })]
-    const { r } = run(tasks, [L('A', 'B')])
-    expect(r.issues.map((i) => i.code)).toContain('constraint_conflict')
+    expect(validate(tasks, [L('A', 'B')], CAL).map((i) => i.code)).toContain('constraint_conflict')
   })
   it('fnlt met: slack against the constraint date', () => {
     const { get, r } = run([T('A', '2026-10-05', 3, { constraint: { type: 'fnlt', date: '2026-10-10' } }), T('B', '2026-10-05', 10)])
@@ -282,10 +283,11 @@ describe('constraints', () => {
     expect(r.issues).toEqual([])
   })
   it('fnlt missed: warning and negative slack', () => {
-    const { get, r } = run([T('A', '2026-10-05', 5, { constraint: { type: 'fnlt', date: '2026-10-08' } })])
+    const tasks = [T('A', '2026-10-05', 5, { constraint: { type: 'fnlt', date: '2026-10-08' } })]
+    const { get } = run(tasks)
     expect(get('A').totalSlack).toBe(-2)
     expect(get('A').critical).toBe(true)
-    expect(r.issues[0]).toMatchObject({ code: 'constraint_conflict', taskId: 'A' })
+    expect(validate(tasks, [], CAL)[0]).toMatchObject({ code: 'constraint_conflict', taskId: 'A' })
   })
   it('fnlt does not move the task forward', () => {
     expect(run([T('A', '2026-10-05', 5, { constraint: { type: 'fnlt', date: '2026-10-08' } })]).get('A').start).toBe('2026-10-05')
@@ -307,10 +309,11 @@ describe('idea tasks', () => {
     expect(get('A').start).toBe('2026-10-08')
     expect(get('I').critical).toBe(false)
   })
-  it('children of an idea summary count as ideas', () => {
-    const { get, r } = run([T('S', '2026-10-05', 0, { isIdea: true }), T('A', '2026-10-05', 9, { parentId: 'S' }), T('B', '2026-10-05', 2)])
-    expect(r.finish).toBe('2026-10-07')
-    expect(get('A').totalSlack).toBeNull()
+  it('only the idea flag of the leaf counts (backend rule), not an idea summary', () => {
+    const { get, r } = run([T('S', '2026-10-05', 0, { isIdea: true }), T('A', '2026-10-05', 9, { parentId: 'S' }), T('B', '2026-10-05', 2, { isIdea: true })])
+    expect(r.finish).toBe('2026-10-14')
+    expect(get('A').totalSlack).toBe(0)
+    expect(get('B').totalSlack).toBeNull()
   })
   it('a plan of only ideas has no finish', () => {
     expect(run([T('I', '2026-10-05', 3, { isIdea: true })]).r.finish).toBeNull()
@@ -333,7 +336,8 @@ describe('summary tasks', () => {
     const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 3, { parentId: 'S' }), T('B', '2026-10-05', 10, { parentId: 'S' })]
     const { get } = run(tasks)
     expect(get('A').totalSlack).toBe(7)
-    expect(get('S')).toMatchObject({ totalSlack: 0, critical: true, freeSlack: null })
+    // Summary free slack is the minimum of its children (backend rule).
+    expect(get('S')).toMatchObject({ totalSlack: 0, critical: true, freeSlack: 0 })
   })
   it('a summary with only slack leaves is not critical', () => {
     const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 3, { parentId: 'S' }), T('X', '2026-10-05', 10)]
@@ -346,11 +350,36 @@ describe('summary tasks', () => {
     expect(get('B').start).toBe('2026-10-10')
     expect(get('S')).toMatchObject({ start: '2026-10-10', end: '2026-10-12' })
   })
-  it('an FF link into a summary bounds every leaf end', () => {
+  it('an FF or SF link into a summary is refused: not scheduled, reported', () => {
     const tasks = [T('X', '2026-10-05', 5), T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 4, { parentId: 'S' })]
-    const { get } = run(tasks, [L('X', 'S', 'FF')])
-    expect(get('A').start).toBe('2026-10-08')
-    expect(get('B').start).toBe('2026-10-06')
+    for (const type of ['FF', 'SF'] as const) {
+      const { get } = run(tasks, [L('X', 'S', type)])
+      expect(get('A').start).toBe('2026-10-05')
+      expect(get('B').start).toBe('2026-10-05')
+      expect(validate(tasks, [L('X', 'S', type)], CAL).map((i) => i.code)).toContain('summary_finish_link')
+    }
+  })
+  it('mso / mfo on a summary are refused: not scheduled, reported', () => {
+    const tasks = [T('S', '2026-01-01', 0, { constraint: { type: 'mso', date: '2026-10-20' } }), T('A', '2026-10-05', 2, { parentId: 'S' })]
+    expect(run(tasks).get('A').start).toBe('2026-10-05')
+    expect(validate(tasks, [], CAL).map((i) => i.code)).toContain('summary_pin')
+  })
+  it('fnlt on a summary caps the late finish of its leaves and warns on the rolled-up finish', () => {
+    const tasks = [T('S', '2026-01-01', 0, { constraint: { type: 'fnlt', date: '2026-10-08' } }), T('A', '2026-10-05', 5, { parentId: 'S' }), T('X', '2026-10-05', 9)]
+    expect(run(tasks).get('A').totalSlack).toBe(-2)
+    expect(validate(tasks, [], CAL).find((i) => i.code === 'constraint_conflict')).toMatchObject({ taskId: 'S' })
+  })
+  it('an SF link out of a summary reads its earliest start', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-07', 2, { parentId: 'S' }), T('B', '2026-10-05', 6, { parentId: 'S' }), T('Y', '2026-10-01', 2)]
+    // SF: Y.end >= S.start (5 Oct) + 3 -> Y ends 8 Oct, starts 6 Oct.
+    expect(run(tasks, [L('S', 'Y', 'SF', 3)]).get('Y').start).toBe('2026-10-06')
+  })
+  it('a link between a summary and its own leaf is ignored with a warning, not a cycle', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 1, { parentId: 'S' })]
+    const { r, get } = run(tasks, [L('S', 'B')])
+    expect(r.cycle).toEqual([])
+    expect(get('B').start).toBe('2026-10-05')
+    expect(validate(tasks, [L('S', 'B')], CAL).map((i) => i.code)).toEqual(['summary_link'])
   })
   it('an FS link out of a summary waits for its last leaf', () => {
     const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 6, { parentId: 'S' }), T('Y', '2026-10-05', 1)]
@@ -382,12 +411,16 @@ describe('cycles', () => {
     expect(r.criticalIds).toEqual([])
     expect(r.issues[0]).toMatchObject({ code: 'cycle', level: 'error' })
   })
-  it('detects a self link', () => {
-    expect(run([T('A', '2026-10-05', 3)], [L('A', 'A')]).r.cycle).toEqual(['A'])
+  it('a self link is not scheduled but findCycle and validate report it', () => {
+    const tasks = [T('A', '2026-10-05', 3)]
+    expect(run(tasks, [L('A', 'A')]).r.cycle).toEqual([])
+    expect(findCycle(tasks, [L('A', 'A')])).toEqual(['A'])
+    expect(validate(tasks, [L('A', 'A')], CAL).map((i) => i.code)).toEqual(['self_link', 'cycle'])
   })
-  it('detects a link from a child to its own summary', () => {
+  it('a link from a child to its own summary is not a cycle', () => {
     const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' })]
-    expect(run(tasks, [L('A', 'S')]).r.cycle.length).toBeGreaterThan(0)
+    expect(run(tasks, [L('A', 'S')]).r.cycle).toEqual([])
+    expect(wouldCycle(tasks, [], 'A', 'S')).toBe(false)
   })
   it('detects a three-task loop', () => {
     const tasks = [T('A', '2026-10-05', 1), T('B', '2026-10-05', 1), T('C', '2026-10-05', 1), T('D', '2026-10-05', 1)]
@@ -409,7 +442,40 @@ describe('cycles', () => {
   })
   it('rolls summaries up even on a cycle', () => {
     const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 1)]
-    const { get } = run(tasks, [L('B', 'B')])
+    const { get, r } = run(tasks, [L('B', 'A'), L('A', 'B')])
+    expect(r.cycle.length).toBeGreaterThan(0)
     expect(get('S')).toMatchObject({ start: '2026-10-05', end: '2026-10-07', totalSlack: null })
+  })
+})
+
+describe('cascade and downstream (backend parity, review)', () => {
+  it('pushes successors, successors of summaries above, and leaves under a linked summary; pinned stay', () => {
+    const tasks = [
+      T('A', '2026-10-05', 3), T('S', '2026-01-01', 0), T('B', '2026-10-08', 2, { parentId: 'S' }),
+      T('C', '2026-10-10', 1), T('D', '2026-10-10', 1, { constraint: { type: 'mso', date: '2026-10-10' } }),
+    ]
+    const links = [L('A', 'S'), L('S', 'C'), L('A', 'D')]
+    const moved = { ...tasks[0], start: '2026-10-07' }
+    const r = cascade([moved, ...tasks.slice(1)], links, CAL, ['A'])
+    expect(r.map((m) => [m.id, m.patch.start, m.cause])).toEqual([['B', '2026-10-10', 'A'], ['C', '2026-10-12', 'A']])
+    expect([...downstream(tasks, links, ['A']).keys()].sort()).toEqual(['B', 'C', 'D'])
+  })
+  it('only moves later, never pulls a successor earlier', () => {
+    expect(cascade([T('A', '2026-10-01', 2), T('B', '2026-10-20', 1)], [L('A', 'B')], CAL, ['A'])).toEqual([])
+  })
+})
+
+describe('cascade keeps started tasks (review)', () => {
+  it('a task with an actual start is not moved, but its successors are', () => {
+    const tasks = [T('A', '2026-10-07', 3), T('B', '2026-10-08', 2, { actualStart: '2026-10-08' }), T('C', '2026-10-10', 1)]
+    const r = cascade(tasks, [L('A', 'B'), L('B', 'C')], CAL, ['A'])
+    // B would be pushed to 10 Oct, but it has started; C after B's unchanged end stays too.
+    expect(r.map((m) => m.id)).toEqual([])
+  })
+  it('the walk continues through a started task to its successors', () => {
+    const tasks = [T('A', '2026-10-09', 3), T('B', '2026-10-08', 2, { actualStart: '2026-10-08' }), T('C', '2026-10-10', 1)]
+    // B stays (started) even though A now ends 12 Oct; C follows B (ends 10 Oct): not pushed; C also after A directly.
+    const r = cascade(tasks, [L('A', 'B'), L('B', 'C'), L('A', 'C')], CAL, ['A'])
+    expect(r.map((m) => [m.id, m.patch.start])).toEqual([['C', '2026-10-12']])
   })
 })

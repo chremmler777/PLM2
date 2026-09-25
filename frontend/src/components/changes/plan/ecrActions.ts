@@ -3,10 +3,11 @@
  * presets and the alignment actions of the selection. Pure, unit tested.
  */
 import {
-  endOf, makeCal, nextWork, normStart, shift, startFor, toDay, toIso, type Cal,
+  endOf, makeCal, nextWork, normStart, shift, startFor, toDay, toIso, todayDay, type Cal,
 } from '../../gantt/engine/calendar'
 import { tempId } from '../../gantt/engine/notation'
-import { autoSchedulePatches } from '../../gantt/engine/schedule'
+import { applyChangeSet } from '../../gantt/engine/changes'
+import { cascade } from '../../gantt/engine/schedule'
 import { key } from '../../gantt/engine/tree'
 import type { ChangeSet, GanttCalendar, GanttId, GanttLink, GanttTask } from '../../gantt/engine/types'
 
@@ -23,34 +24,25 @@ const span = (cal: Cal, t: GanttTask) => {
 }
 const isMilestone = (t: GanttTask) => t.duration === 0 || t.kind === 'milestone'
 
-/** Push-mode moves of the tasks reachable from `from` after the ChangeSet (successors only). */
+/**
+ * The successor moves the backend makes when `from` move (its `cascade`):
+ * everything downstream along links, links out of their summaries and into
+ * summaries (to the leaves below), later only, pinned tasks stay.
+ */
 function pushSuccessors(ctx: Ctx, cs: ChangeSet, from: GanttId[]): ChangeSet {
-  const tasks = [...ctx.tasks.filter((t) => !(cs.removeTasks ?? []).some((r) => key(r) === key(t.id))), ...(cs.addTasks ?? [])]
-    .map((t) => {
-      const u = (cs.updateTasks ?? []).find((x) => key(x.id) === key(t.id))
-      return u ? { ...t, ...u.patch } : t
-    })
-  const removed = new Set((cs.removeLinks ?? []).map(key))
-  const links = [...ctx.links.filter((l) => !removed.has(key(l.id))), ...(cs.addLinks ?? [])]
-  const reach = new Set<string>()
-  const stack = from.map(key)
-  while (stack.length) {
-    const k = stack.pop()!
-    for (const l of links) if (key(l.from) === k && !reach.has(key(l.to))) { reach.add(key(l.to)); stack.push(key(l.to)) }
-  }
-  const moves = autoSchedulePatches(tasks, links, ctx.calendar).filter((m) => reach.has(key(m.id)))
+  const after = applyChangeSet({ tasks: ctx.tasks, links: ctx.links }, cs)
+  const moves = cascade(after.tasks, after.links, ctx.calendar, from)
   if (!moves.length) return cs
   const upd = [...(cs.updateTasks ?? [])]
+  const added = [...(cs.addTasks ?? [])]
   for (const m of moves) {
+    const ai = added.findIndex((t) => key(t.id) === key(m.id))
+    if (ai >= 0) { added[ai] = { ...added[ai], ...m.patch }; continue }
     const i = upd.findIndex((u) => key(u.id) === key(m.id))
     if (i >= 0) upd[i] = { id: upd[i].id, patch: { ...upd[i].patch, ...m.patch } }
-    else if (!(cs.addTasks ?? []).some((t) => key(t.id) === key(m.id))) upd.push(m)
+    else upd.push({ id: m.id, patch: m.patch })
   }
-  const added = (cs.addTasks ?? []).map((t) => {
-    const m = moves.find((x) => key(x.id) === key(t.id))
-    return m ? { ...t, ...m.patch } : t
-  })
-  return { ...cs, addTasks: cs.addTasks ? added : undefined, updateTasks: upd }
+  return { ...cs, ...(cs.addTasks ? { addTasks: added } : {}), updateTasks: upd }
 }
 
 /** Insert `id` into an order before or after `anchor` (end when no anchor). */
@@ -93,7 +85,7 @@ export function bufferChangeSet(ctx: Ctx, selection: GanttId[], days = 5, extra:
   const sop = [...real].filter(isMilestone).sort((a, b) => span(cal, b).s - span(cal, a).s)[0]
   if (!sop) {
     const last = real.length ? real.reduce((a, b) => (span(cal, b).e > span(cal, a).e ? b : a)) : undefined
-    const start = last ? nextWork(cal, span(cal, last).e) : nextWork(cal, toDay(new Date().toISOString().slice(0, 10)))
+    const start = last ? nextWork(cal, span(cal, last).e) : nextWork(cal, todayDay())
     return {
       label: 'Add buffer',
       addTasks: [{ ...base, start: toIso(start), lane: last?.lane ?? null, meta: { department_id: last?.meta?.department_id ?? null } }],
@@ -129,7 +121,7 @@ export function bankBuildChangeSet(ctx: Ctx, selection: GanttId[], scheduling: {
   const sel = ctx.tasks.filter((t) => selection.some((s) => key(s) === key(t.id)))
   const downtime = ctx.tasks.filter((t) => t.kind === 'downtime' && !t.isIdea).sort((a, b) => span(cal, a).s - span(cal, b).s)[0]
   const anchor = sel.length ? sel.reduce((a, b) => (span(cal, b).s < span(cal, a).s ? b : a)) : downtime
-  const firstStart = ctx.tasks.length ? Math.min(...ctx.tasks.map((t) => span(cal, t).s)) : nextWork(cal, toDay(new Date().toISOString().slice(0, 10)))
+  const firstStart = ctx.tasks.length ? Math.min(...ctx.tasks.map((t) => span(cal, t).s)) : nextWork(cal, todayDay())
   const end = anchor ? span(cal, anchor).s : firstStart + days
   const start = startFor(cal, end, days)
   return {
@@ -219,8 +211,9 @@ export function withSuccessorMoves(ctx: Ctx, cs: ChangeSet): { cs: ChangeSet; mo
     .filter((u) => !changed.some((c) => key(c) === key(u.id)) && 'start' in u.patch)
     .map((u) => {
       const t = byKey.get(key(u.id))!
-      const from = span(cal, t).s, to = toDay(u.patch.start!)
-      return { id: u.id, name: t.name, from: t.start, to: u.patch.start!, days: to - from }
+      // In the plan calendar's units (working days in working mode).
+      const days = cal.idx(toDay(u.patch.start!)) - cal.idx(span(cal, t).s)
+      return { id: u.id, name: t.name, from: t.start, to: u.patch.start!, days }
     })
   return { cs: out, moved }
 }

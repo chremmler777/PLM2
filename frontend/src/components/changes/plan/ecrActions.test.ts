@@ -154,3 +154,42 @@ describe('successor moves after the baseline', () => {
     expect(withSuccessorMoves(plan(), cs)).toEqual({ cs, moved: [] })
   })
 })
+
+describe('successor moves follow summaries (backend cascade)', () => {
+  it('a moved leaf pushes the successors of its summary', () => {
+    const ctx = {
+      tasks: [t(1, '2026-10-05', 0, { name: 'S' }), t(2, '2026-10-05', 3, { parentId: 1 }), t(3, '2026-10-08', 2)],
+      links: [fs('s', 1, 3)],
+    }
+    const { moved } = withSuccessorMoves(ctx, { updateTasks: [{ id: 2, patch: { start: '2026-10-07' } }] })
+    expect(moved.map((m) => [m.id, m.to])).toEqual([[3, '2026-10-10']])
+  })
+
+  it('a link into a summary pushes every leaf below it', () => {
+    const ctx = {
+      tasks: [t(1, '2026-10-05', 3), t(2, '2026-10-05', 0, { name: 'S' }), t(3, '2026-10-08', 2, { parentId: 2 }), t(4, '2026-10-09', 1, { parentId: 2 })],
+      links: [fs('a', 1, 2)],
+    }
+    const { moved } = withSuccessorMoves(ctx, { updateTasks: [{ id: 1, patch: { start: '2026-10-08' } }] })
+    expect(moved.map((m) => [m.id, m.to]).sort()).toEqual([[3, '2026-10-11'], [4, '2026-10-11']])
+  })
+
+  it('a pinned successor stays and nothing is pulled earlier', () => {
+    const ctx = {
+      tasks: [t(1, '2026-10-05', 3), t(2, '2026-10-08', 2, { constraint: { type: 'mso', date: '2026-10-08' } }), t(3, '2026-10-20', 1)],
+      links: [fs('a', 1, 2), fs('b', 1, 3)],
+    }
+    const { moved } = withSuccessorMoves(ctx, { updateTasks: [{ id: 1, patch: { start: '2026-10-07' } }] })
+    expect(moved).toEqual([])
+  })
+
+  it('counts slip in working days in working mode', () => {
+    const ctx = {
+      tasks: [t(1, '2026-10-05', 5), t(2, '2026-10-12', 2)], links: [fs('a', 1, 2)],
+      calendar: { mode: 'working' as const, workdays: [1, 2, 3, 4, 5], holidays: [] },
+    }
+    // A moves Mon 5 -> Mon 12 (5 working days): B moves Mon 12 -> Mon 19, 5 working days.
+    const { moved } = withSuccessorMoves(ctx, { updateTasks: [{ id: 1, patch: { start: '2026-10-12' } }] })
+    expect(moved).toEqual([expect.objectContaining({ id: 2, to: '2026-10-19', days: 5 })])
+  })
+})

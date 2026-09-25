@@ -88,19 +88,62 @@ export interface Cal {
   mode: 'calendar' | 'working'
   isWork: (day: number) => boolean
   source: GanttCalendar
+  /**
+   * Counting days before `day` (working mode: working days since a fixed
+   * Monday; calendar mode: the day number). The scheduler works in this
+   * index space, exactly like the backend's `Calendar.idx`.
+   */
+  idx: (day: number) => number
+  /** The counting day with index `i` (inverse of idx on counting days). */
+  dateAt: (i: number) => number
 }
 
+const EPOCH = 10959 // 2000-01-03, a Monday
+
 export function makeCal(c?: Partial<GanttCalendar> | null): Cal {
-  const mode = c?.mode === 'working' ? 'working' : 'calendar'
-  const workdays = new Set((c?.workdays && c.workdays.length ? c.workdays : [1, 2, 3, 4, 5]))
-  const holidays = new Set((c?.holidays ?? []).filter(isIsoDay).map(toDay))
-  const source: GanttCalendar = {
-    mode, workdays: [...workdays].sort((a, b) => a - b), holidays: (c?.holidays ?? []).filter(isIsoDay),
-  }
-  // A calendar with no working day at all would loop forever: treat it as calendar mode.
-  const anyWork = [1, 2, 3, 4, 5, 6, 7].some((w) => workdays.has(w))
+  const requested = c?.mode === 'working' ? 'working' : 'calendar'
+  const wdList = (c?.workdays ?? [1, 2, 3, 4, 5]).filter((d) => d >= 1 && d <= 7)
+  const workdays = new Set(wdList)
+  const holidayList = (c?.holidays ?? []).filter(isIsoDay)
+  const holidays = new Set(holidayList.map(toDay))
+  // A working calendar without a single working day would never finish
+  // anything: it degrades to elapsed days (backend rule).
+  const mode = requested === 'working' && workdays.size > 0 ? 'working' : 'calendar'
+  const source: GanttCalendar = { mode: requested, workdays: [...workdays].sort((a, b) => a - b), holidays: holidayList }
   const isWork = (day: number) => workdays.has(isoWeekday(day)) && !holidays.has(day)
-  return { mode: anyWork ? mode : 'calendar', isWork, source }
+  if (mode === 'calendar') return { mode, isWork, source, idx: (d) => d, dateAt: (i) => i }
+  const perWeek = workdays.size
+  const prefix = [0]
+  for (let k = 0; k < 7; k++) prefix.push(prefix[k] + (workdays.has(k + 1) ? 1 : 0))
+  const hol = [...holidays].filter((h) => workdays.has(isoWeekday(h))).sort((a, b) => a - b)
+  const before = (d: number) => { // holidays strictly before d
+    let lo = 0, hi = hol.length
+    while (lo < hi) { const m = (lo + hi) >> 1; if (hol[m] < d) lo = m + 1; else hi = m }
+    return lo
+  }
+  const idx = (d: number) => {
+    const off = d - EPOCH
+    const weeks = Math.floor(off / 7)
+    return weeks * perWeek + prefix[off - weeks * 7] - before(d)
+  }
+  const dateAt = (i: number) => {
+    const guess = EPOCH + Math.floor(i / perWeek) * 7
+    let lo = guess - 14
+    while (idx(lo + 1) > i) lo -= 28
+    let hi = guess + 14
+    while (idx(hi + 1) < i + 1) hi += 28 + hol.length
+    while (lo < hi) {
+      const mid = lo + Math.floor((hi - lo) / 2)
+      if (idx(mid + 1) >= i + 1) hi = mid; else lo = mid + 1
+    }
+    return lo
+  }
+  return { mode, isWork, source, idx, dateAt }
+}
+
+/** Exclusive end day from start / end indexes (backend `end_from_idx`). */
+export function endFromIdx(cal: Cal, startI: number, endI: number): number {
+  return endI <= startI ? cal.dateAt(startI) : cal.dateAt(endI - 1) + 1
 }
 
 /** Shading helper: is this day off (weekend or holiday) in either mode? */

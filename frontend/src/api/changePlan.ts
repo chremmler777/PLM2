@@ -89,11 +89,12 @@ export const planApi = {
     fd.append('file', file, (file as File).name ?? 'plan.xml')
     fd.append('plan', plan)
     fd.append('replace', replace ? 'true' : 'false')
-    return client.post<PlanOut>(`${base(id)}/import`, fd).then((r) => r.data)
+    return client.post<PlanOut & { import_warnings?: string[] }>(`${base(id)}/import`, fd).then((r) => r.data)
   },
 
-  schedule: (id: number, plan: PlanKind) =>
-    client.post<PlanOut>(`${base(id)}/schedule`, { plan }).then((r) => r.data),
+  /** Forward pass on the server. On a baselined detailed plan it needs a reason and records deviations. */
+  schedule: (id: number, plan: PlanKind, reason?: string) =>
+    client.post<PlanOut>(`${base(id)}/schedule`, { plan, ...(reason ? { reason } : {}) }).then((r) => r.data),
 
   /** Downloads the MS Project XML; resolves with the filename used. */
   exportXml: (id: number, plan: PlanKind) => download(id, plan, 'xml'),

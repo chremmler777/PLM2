@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PlanOut, TaskOut } from '../../../types/changePlan'
 import {
-  ECR_KINDS, hasDateChanges, patchToEcr, persistLegacy, planToModel, serialized, sortOrders, supportOf,
-  taskToGantt, toLegacyCalls, toPlanChangeSet,
+  ECR_KINDS, SERVER_SLACK, hasDateChanges, patchToEcr, persistLegacy, planToModel, serialized, sortOrders, supportOf,
+  taskToGantt, toLegacyCalls, toPlanChangeSet, translateIdMap,
 } from './ecrAdapter'
 
 const task = (over: Partial<TaskOut> & { id: number }): TaskOut => ({
@@ -72,6 +72,12 @@ describe('PlanOut -> generic model', () => {
     expect(taskToGantt(task({ id: 1, constraint_type: 'asap' })).constraint).toBeNull()
   })
 
+  it('shows the server slack in the slack column', () => {
+    const t = taskToGantt(task({ id: 1, total_slack: 4 }))
+    expect(SERVER_SLACK.text!(t, {} as never)).toBe('4d')
+    expect(SERVER_SLACK.text!(taskToGantt(task({ id: 1 })), {} as never)).toBe('')
+  })
+
   it('has a style per ECR kind: buffers hatched, milestones as diamonds', () => {
     expect(ECR_KINDS.buffer.pattern).toBe('hatch')
     expect(ECR_KINDS.milestone.milestone).toBe(true)
@@ -131,7 +137,10 @@ describe('sort orders', () => {
 })
 
 describe('ChangeSet -> POST /plan/changes', () => {
-  const before = planToModel(planOut({ links: [] })).tasks
+  const before = planToModel(planOut({ links: [
+    { id: 40, from_task_id: 1, to_task_id: 2, type: 'FS', lag_days: 0 },
+    { id: 41, from_task_id: 1, to_task_id: 3, type: 'FS', lag_days: 0 },
+  ] }))
 
   it('creates, updates, deletes tasks and links in one body with temp ids', () => {
     const body = toPlanChangeSet({
@@ -152,6 +161,46 @@ describe('ChangeSet -> POST /plan/changes', () => {
       { id: 40, lag_days: -1 },
     ])
     expect(body.links_delete).toEqual([41])
+  })
+
+  it('sends a re-added task (undo of a delete) and its links under "re:" temp ids and maps them back', () => {
+    // Task 9 and link 77 were deleted on the server; undo brings them back with their old ids.
+    const body = toPlanChangeSet({
+      addTasks: [{ id: 9, name: 'Back', start: '2026-10-05', duration: 2, parentId: 1 }, { id: 10, name: 'Child', start: '2026-10-05', duration: 1, parentId: 9 }],
+      addLinks: [{ id: 77, from: 9, to: 2, type: 'FS', lagDays: 0 }],
+      updateTasks: [{ id: 9, patch: { notes: 'n' } }],
+    }, before)
+    expect(body.tasks_upsert.map((u) => u.id)).toEqual(['re:9', 're:10'])
+    expect(body.tasks_upsert[0]).toMatchObject({ name: 'Back', parent_id: 1, notes: 'n' })
+    expect(body.tasks_upsert[1]).toMatchObject({ parent_id: 're:9' })
+    expect(body.links_upsert).toEqual([{ id: 're:77', from_task_id: 're:9', to_task_id: 2, type: 'FS', lag_days: 0 }])
+    expect(translateIdMap({ 're:9': 101, 're:10': 102 }, { 're:77': 501 })).toEqual({ 9: 101, 10: 102, 77: 501 })
+  })
+
+  it('never turns an update of an unknown id into a create, and skips unknown ids in the order', () => {
+    const body = toPlanChangeSet({
+      updateTasks: [{ id: 'tmp-1', patch: { name: 'x' } }, { id: 99, patch: { name: 'y' } }],
+      updateLinks: [{ id: 'tmp-link', patch: { lagDays: 2 } }],
+      order: [2, 'tmp-1', 1, 3],
+    }, before)
+    expect(body.tasks_upsert.some((u) => u.id === 'tmp-1' || u.id === 99)).toBe(false)
+    expect(body.links_upsert).toEqual([])
+  })
+
+  it('merges an update of a new task or link into its create (temp ids kept)', () => {
+    const body = toPlanChangeSet({
+      addTasks: [{ id: 'tmp-1', name: 'N', start: '2026-10-05', duration: 1 }],
+      updateTasks: [{ id: 'tmp-1', patch: { duration: 4 } }],
+      addLinks: [{ id: 'tmp-l', from: 1, to: 'tmp-1', type: 'FS', lagDays: 0 }],
+      updateLinks: [{ id: 'tmp-l', patch: { type: 'SS', lagDays: 1 } }],
+    }, before)
+    expect(body.tasks_upsert).toEqual([expect.objectContaining({ id: 'tmp-1', name: 'N', duration_days: 4 })])
+    expect(body.links_upsert).toEqual([{ id: 'tmp-l', from_task_id: 1, to_task_id: 'tmp-1', type: 'SS', lag_days: 1 }])
+  })
+
+  it('does not create a task again that the server already has (reconcile)', () => {
+    const body = toPlanChangeSet({ addTasks: [{ id: 2, name: 'T2', start: '2026-10-05', duration: 5 }] }, before)
+    expect(body.tasks_upsert).toEqual([])
   })
 
   it('turns a new order into sort_order upserts merged with other fields', () => {

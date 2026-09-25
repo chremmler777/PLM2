@@ -900,3 +900,245 @@ describe('Gantt: export', () => {
     expect(onError).toHaveBeenCalledWith('The print window was blocked by the browser', undefined)
   })
 })
+
+describe('Gantt: review fixes', () => {
+  const tree = (): GanttTask[] => [
+    { id: 1, name: 'Alpha', start: '2026-10-05', duration: 5 },
+    { id: 10, name: 'Phase', start: '2026-10-05', duration: 0 },
+    { id: 11, name: 'Child', start: '2026-10-12', duration: 2, parentId: 10 },
+  ]
+  const drawLink = (from: string, target: Element) => {
+    fireEvent.pointerDown(screen.getByTestId(from), { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 20, clientY: 40 })
+    fireEvent.pointerUp(target, { clientX: 0, clientY: 40 })
+  }
+
+  // (1) undo of a delete re-adds under the old ids; the adapter maps them to new ones.
+  it('undo of a delete then remaps the re-added task, and redo deletes the new id', async () => {
+    const onChange = vi.fn(async (cs: ChangeSet) => (cs.addTasks?.length ? { idMap: { 1: 91, L1: 92 } } : undefined))
+    render(<Gantt tasks={base()} links={baseLinks()} onChange={onChange} defaultZoom="day" showToday={false} />)
+    fireEvent.click(screen.getByTestId('gantt-row-1'))
+    key('Delete')
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    key('z', { ctrlKey: true })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    expect(onChange.mock.calls[1][0].addTasks?.[0].id).toBe(1)
+    key('y', { ctrlKey: true })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(3))
+    expect(onChange.mock.calls[2][0].removeTasks).toEqual([91])
+    expect(onChange.mock.calls[2][0].removeLinks).toEqual([92])
+  })
+
+  // (2) a second draft named while the first insert is still saving.
+  it('a second draft named while the first save is in flight orders by the real id', async () => {
+    let release!: (v: { idMap: Record<string, number> }) => void
+    let n = 0
+    const onChange = vi.fn((cs: ChangeSet): Promise<{ idMap: Record<string, number> } | void> => (++n === 1
+      ? new Promise<{ idMap: Record<string, number> }>((r) => { release = r })
+      : Promise.resolve(void cs)))
+    render(<Gantt tasks={base()} links={[]} onChange={onChange} defaultZoom="day" showToday={false} />)
+    fireEvent.click(screen.getByTestId('gantt-row-3'))
+    fireEvent.click(screen.getByTestId('gantt-add-task'))
+    let ed = screen.getByTestId('gantt-cell-editor')
+    fireEvent.change(ed, { target: { value: 'First' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    const firstId = String(onChange.mock.calls[0][0].addTasks![0].id)
+    fireEvent.click(screen.getByTestId(`gantt-row-${firstId}`))
+    fireEvent.click(screen.getByTestId('gantt-add-task'))
+    ed = screen.getByTestId('gantt-cell-editor')
+    await act(async () => { release({ idMap: { [firstId]: 500 } }) })
+    fireEvent.change(ed, { target: { value: 'Second' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    const order = onChange.mock.calls[1][0].order!.map(String)
+    expect(order).not.toContain(firstId)
+    expect(order.indexOf('500')).toBe(order.length - 2)
+  })
+
+  // (4) summary rule in the UI.
+  it('refuses FF/SF drawn into a summary and a link to its own summary', async () => {
+    const { onChange, onError } = setup({ tasks: tree(), links: [] })
+    drawLink('gantt-connector-end-1', screen.getByTestId('gantt-connector-end-10'))
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('into a summary task are not allowed'), undefined)
+    drawLink('gantt-connector-end-11', screen.getByTestId('gantt-bar-shape-10'))
+    expect(onError).toHaveBeenLastCalledWith(expect.stringContaining('own summary'), undefined)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('allows FS drawn into a summary', async () => {
+    const { onChange, cs } = setup({ tasks: tree(), links: [] })
+    drawLink('gantt-connector-end-1', screen.getByTestId('gantt-bar-shape-10'))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().addLinks![0]).toMatchObject({ from: 1, to: 10, type: 'FS' })
+  })
+
+  it('refuses FF into a summary typed as a predecessor', () => {
+    const { onChange, onError } = setup({ tasks: tree(), links: [], columns: ['row', 'name', 'predecessors'] })
+    fireEvent.doubleClick(cell(10, 'predecessors'))
+    const ed = screen.getByTestId('gantt-cell-editor')
+    fireEvent.change(ed, { target: { value: '1FF' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('FF links into a summary'), undefined)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('the link popover into a summary offers no FF/SF', () => {
+    setup({ tasks: tree(), links: [{ id: 'x', from: 1, to: 10, type: 'FS', lagDays: 0 }] })
+    fireEvent.click(screen.getByTestId('gantt-link-hit-x'))
+    const opts = within(screen.getByTestId('gantt-link-popover')).getAllByRole('option').map((o) => (o as HTMLOptionElement).value)
+    expect(opts).toEqual(['FS', 'SS'])
+  })
+
+  it('the task dialog offers no must-start/finish-on for a summary', () => {
+    setup({ tasks: tree(), links: [] })
+    fireEvent.doubleClick(screen.getByTestId('gantt-bar-10'))
+    const opts = within(screen.getByTestId('gantt-task-dialog')).getByLabelText('Constraint').querySelectorAll('option')
+    expect([...opts].map((o) => o.value)).toEqual(['asap', 'snet', 'fnlt'])
+  })
+
+  it('a refused save rolls back only that change; the next one still goes out', async () => {
+    const onChange = vi.fn(async (cs: ChangeSet) => { if (cs.label === 'Move task' && onChange.mock.calls.length === 1) throw new Error('refused') })
+    const onError = vi.fn()
+    render(<Gantt tasks={base()} links={[]} onChange={onChange} onError={onError} defaultZoom="day" showToday={false} columns={['row', 'name', 'start']} />)
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    drag(screen.getByTestId('gantt-bar-shape-3'), 28)
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('refused', expect.any(Error)))
+    expect(cell(1, 'start').textContent).toBe('05.10.26')
+    expect(cell(3, 'start').textContent).toBe('16.10.26')
+    // Undo skips the refused move: it undoes the one that went through.
+    fireEvent.click(screen.getByTestId('gantt-undo'))
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(3))
+    expect(onChange.mock.calls[2][0].updateTasks).toEqual([{ id: 3, patch: { start: '2026-10-15' } }])
+  })
+
+  // (5) keys typed on toolbar buttons / dialogs do not reach the chart.
+  it('Delete on a toolbar button or Tab in a menu does not act on the selection', async () => {
+    const { onChange } = setup()
+    fireEvent.click(screen.getByTestId('gantt-row-1'))
+    fireEvent.keyDown(screen.getByTestId('gantt-zoom-week'), { key: 'Delete' })
+    fireEvent.keyDown(screen.getByTestId('gantt-undo'), { key: 'Tab' })
+    fireEvent.keyDown(screen.getByTestId('gantt-undo'), { key: 'z', ctrlKey: true })
+    fireEvent.contextMenu(screen.getByTestId('gantt-row-1'))
+    fireEvent.keyDown(screen.getByTestId('gantt-context-menu'), { key: 'Delete' })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).not.toHaveBeenCalled()
+    // In the chart the same key works.
+    fireEvent.keyDown(screen.getByTestId('gantt-scroller'), { key: 'Delete' })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+  })
+
+  // (8) the drag commits with the current model, not a stale closure.
+  it('a drag that starts before a model update commits against the new dates', async () => {
+    const { onChange, cs, rerender } = setup()
+    const shape = screen.getByTestId('gantt-bar-shape-1')
+    fireEvent.pointerDown(shape, { button: 0, clientX: 100, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 128, clientY: 10 })
+    rerender(<Gantt tasks={[{ ...base()[0], start: '2026-10-06' }, ...base().slice(1)]} links={baseLinks()} onChange={onChange}
+      columns={['row', 'name', 'start', 'end', 'duration', 'predecessors']} defaultZoom="day" showToday={false} />)
+    fireEvent.pointerUp(window, { clientX: 128, clientY: 10 })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().updateTasks).toEqual([{ id: 1, patch: { start: '2026-10-07' } }])
+  })
+
+  // (9) pointer moves that do not change the snapped day do not re-render.
+  it('ignores pointer moves inside the same day', async () => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame')
+    setup()
+    const shape = screen.getByTestId('gantt-bar-shape-1')
+    fireEvent.pointerDown(shape, { button: 0, clientX: 100, clientY: 10 })
+    const before = raf.mock.calls.length
+    for (const x of [104, 106, 108, 110, 112]) fireEvent.pointerMove(window, { clientX: x, clientY: 10 })
+    expect(raf.mock.calls.length - before).toBeLessThanOrEqual(1)
+    fireEvent.pointerUp(window, { clientX: 112, clientY: 10 })
+  })
+
+  // (12) lane grouping is a view: row numbers and stored order stay.
+  it('lane grouping keeps the stored order and row numbers', async () => {
+    const tasks: GanttTask[] = [
+      { id: 1, name: 'A', start: '2026-10-05', duration: 1, lane: 'X' },
+      { id: 2, name: 'B', start: '2026-10-05', duration: 1, lane: 'Y' },
+      { id: 3, name: 'C', start: '2026-10-05', duration: 1, lane: 'X' },
+    ]
+    const { onChange, cs } = setup({ tasks, links: [{ id: 'l', from: 3, to: 2, type: 'FS', lagDays: 0 }], groupByLane: true, hierarchy: true })
+    expect(cell(3, 'row').textContent).toBe('3')
+    expect(cell(2, 'predecessors').textContent).toBe('3')
+    fireEvent.click(screen.getByTestId('gantt-row-3'))
+    key('d', { ctrlKey: true })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().order!.slice(0, 3).map(String)).toEqual(['1', '2', '3'])
+  })
+
+  // (14) a cancelled pointer ends a row drag without a move.
+  it('pointercancel ends a row reorder without saving', async () => {
+    const { onChange } = setup()
+    fireEvent.pointerDown(cell(1, 'row'), { button: 0, clientY: 10 })
+    fireEvent.pointerMove(window, { clientY: 70 })
+    expect(screen.getByTestId('gantt-drop-line')).toBeTruthy()
+    fireEvent.pointerCancel(window, { clientY: 70 })
+    expect(screen.queryByTestId('gantt-drop-line')).toBeNull()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // (16) selection follows a temp id to the server id.
+  it('keeps the new task selected after its temp id is replaced', async () => {
+    const onChange = vi.fn(async (cs: ChangeSet) => ({ idMap: { [String(cs.addTasks![0].id)]: 70 } }))
+    const { rerender } = render(<Gantt tasks={base()} links={[]} onChange={onChange} defaultZoom="day" showToday={false} />)
+    fireEvent.click(screen.getByTestId('gantt-add-task'))
+    const ed = screen.getByTestId('gantt-cell-editor')
+    fireEvent.change(ed, { target: { value: 'New' } })
+    fireEvent.keyDown(ed, { key: 'Enter' })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    rerender(<Gantt tasks={[...base(), { id: 70, name: 'New', start: '2026-10-19', duration: 1 }]} links={[]} onChange={onChange} defaultZoom="day" showToday={false} />)
+    await waitFor(() => expect(screen.getByTestId('gantt-row-70').getAttribute('aria-selected')).toBe('true'))
+  })
+
+  // (17) cancelling the reason for an undo keeps the history entry.
+  it('an undo cancelled by beforeChange stays undoable', async () => {
+    let cancel = false
+    const { onChange } = setup({ beforeChange: (cs) => (cancel ? null : cs) })
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    cancel = true
+    key('z', { ctrlKey: true })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByTestId('gantt-redo') as HTMLButtonElement).disabled).toBe(true)
+    cancel = false
+    key('z', { ctrlKey: true })
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+  })
+
+  // (18) accessibility of links, bars and virtual rows.
+  it('links and bars are focusable with keyboard actions; rows carry aria-rowindex', async () => {
+    const { onChange, cs } = setup()
+    expect(screen.getByTestId('gantt-body').getAttribute('role')).toBe('group')
+    const hit = screen.getByTestId('gantt-link-hit-L1')
+    expect(hit.getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(hit, { key: 'Enter' })
+    expect(screen.getByTestId('gantt-link-popover')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByTestId('gantt-link-hit-L1'), { key: 'Delete' })
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(cs().removeLinks).toEqual(['L1'])
+    const bar = screen.getByTestId('gantt-bar-2')
+    expect(bar.getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(bar, { key: ' ' })
+    expect(screen.getByTestId('gantt-row-2').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('gantt-row-3').getAttribute('aria-rowindex')).toBe('3')
+  })
+
+  it('clears undo when the rights change (baseline set)', async () => {
+    const { onChange, rerender } = setup()
+    drag(screen.getByTestId('gantt-bar-shape-1'), 28)
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(false)
+    rerender(<Gantt tasks={base()} links={baseLinks()} onChange={onChange} rights={{ structure: false, links: false }}
+      columns={['row', 'name', 'start']} defaultZoom="day" showToday={false} />)
+    await waitFor(() => expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(true))
+  })
+})
