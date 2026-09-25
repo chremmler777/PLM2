@@ -1,0 +1,1186 @@
+/**
+ * Generic, MS-Project-like Gantt (spec 2026-09-25 §11). No module imports:
+ * hosts pass tasks, links, a calendar and rights, and receive every user
+ * action as one ChangeSet through `onChange` (their adapter persists it).
+ *
+ * Every action is applied locally at once (optimistic), queued (one save in
+ * flight), and reconciled with the host's next model; on an error the queue
+ * is dropped, the view falls back to the host model and `onError` is told.
+ */
+import {
+  forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState,
+  type ReactNode, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
+import {
+  diff, durationFromLastDay, endOf, isIsoDay, makeCal, nextWork, normStart, todayDay, toDay, toIso,
+} from './engine/calendar'
+import {
+  applyChangeSet, chainLinksChangeSet, duplicateChangeSet, isEmptyChangeSet, removeTasksChangeSet, unlinkChangeSet,
+} from './engine/changes'
+import { History } from './engine/history'
+import { formatPredecessors, predecessorChangeSet, tempId } from './engine/notation'
+import { exportCsv } from './engine/csv'
+import { exportMspdi } from './engine/mspdi'
+import { autoSchedulePatches, schedule, wouldCycle } from './engine/schedule'
+import { descendants, indent, key, leaves, moveRows, outdent } from './engine/tree'
+import type {
+  ChangeSet, GanttCalendar, GanttId, GanttLink, GanttModel, GanttTask, Issue, LinkType,
+} from './engine/types'
+import { LINK_TYPES } from './engine/types'
+import { linkViolated, validate } from './engine/validate'
+import { ChartBody, ChartHeader, HEADER_H, MARKER_STRIP, type GanttMarker, type LinkDraft, type TaskGeo } from './GanttChart'
+import { GridBody, GridHeader } from './GanttGrid'
+import { BUILTIN_COLUMNS, gridWidth, type CellContext, type ColumnKey, type GanttColumn } from './columns'
+import { ContextMenu, LinkPopover, TaskDialog, type MenuEntry } from './GanttPopups'
+import { buildChartSvg, downloadBlob, openPrint, svgToPng } from './exportImage'
+import {
+  PX_PER_DAY, ZOOMS, buildRows, snapDays, timelineRange, typeFromSides, unitFor, visibleWindow, xOf, zoomStep,
+  anchorX, barGeo, type Zoom,
+} from './layout'
+import { THEMES, resolveTheme, themeVars, v, type GanttKindStyle, type GanttThemeName } from './theme'
+import { useSaveQueue, type SaveQueueOptions } from './useSaveQueue'
+
+export interface GanttRights {
+  /** Add, delete, indent, reorder, duplicate, rename. Default true. */
+  structure?: boolean
+  /** Move and resize. Default true. */
+  dates?: boolean
+  /** Draw, edit and remove links. Default true. */
+  links?: boolean
+  /** Progress editing (per task possible). Default: same as dates. */
+  progress?: boolean | ((t: GanttTask) => boolean)
+  /** Fine grained override per field: name, lane, kind, isIdea, constraint, notes, start, duration, links, progress. */
+  field?: (t: GanttTask, field: string) => boolean
+}
+
+export interface GanttHandle {
+  focusTask: (id: GanttId) => void
+  undo: () => void
+  redo: () => void
+  fit: () => void
+  exportPng: () => Promise<void>
+  print: () => void
+  select: (ids: GanttId[]) => void
+  getModel: () => GanttModel
+  /** Run a ChangeSet through the same path as a user action (reason hook, undo, queue). */
+  apply: (cs: ChangeSet) => Promise<boolean>
+  /** Start a new (draft) row as "+ Task" does. */
+  insertTask: (milestone?: boolean) => void
+}
+
+export interface GanttProps {
+  tasks: GanttTask[]
+  links: GanttLink[]
+  calendar?: Partial<GanttCalendar> | null
+  rights?: GanttRights
+  /** Everything read-only (no toolbar edit buttons, no drag). */
+  readOnly?: boolean
+  onChange?: SaveQueueOptions['onChange']
+  /** Last look at a ChangeSet before it is applied: return it (maybe with meta), or null to cancel. */
+  beforeChange?: (cs: ChangeSet, model: GanttModel) => ChangeSet | null | Promise<ChangeSet | null>
+  onError?: (message: string, error?: unknown) => void
+  onNotify?: (message: string) => void
+  kinds?: Record<string, GanttKindStyle>
+  columns?: (ColumnKey | GanttColumn)[]
+  markers?: GanttMarker[]
+  showToday?: boolean
+  /** Baseline ghosts and slip tails (toolbar toggle starts here). */
+  showBaselines?: boolean
+  showProgress?: boolean
+  /** Critical path highlight on at start. */
+  criticalPath?: boolean
+  /** The host's critical ids (e.g. the server's); default the engine's. */
+  criticalIds?: GanttId[]
+  groupByLane?: boolean
+  /** Run a forward pass after every change and include the moves. */
+  autoSchedule?: boolean
+  linkTypes?: LinkType[]
+  allowLag?: boolean
+  /** Parents / summary tasks (indent, outdent). Default true. */
+  hierarchy?: boolean
+  constraints?: boolean
+  defaultZoom?: Zoom | 'fit'
+  /** CSS height of the scroll area. */
+  height?: number | string
+  rowHeight?: number
+  compact?: boolean
+  toolbar?: boolean
+  toolbarStart?: ReactNode
+  toolbarEnd?: ReactNode
+  /** Open the host's task editor; the built-in dialog is used otherwise. */
+  onTaskOpen?: (t: GanttTask) => void
+  onSelectionChange?: (ids: GanttId[]) => void
+  menuItems?: (ids: GanttId[]) => MenuEntry[]
+  /** Defaults for a new task (Insert, toolbar). */
+  newTask?: (ctx: { after?: GanttTask; parentId: GanttId | null; start: string; milestone: boolean }) => Partial<GanttTask>
+  /** Issues to flag (default: the engine's validation). */
+  issues?: Issue[]
+  theme?: GanttThemeName
+  exportName?: string
+  /** Replace the client side MS Project / CSV export (e.g. a server export). */
+  onExport?: (fmt: 'mspdi' | 'csv') => void
+  className?: string
+  /** Largest share of the width the table may take (columns drop out beyond it). Default 0.45. */
+  maxGridFraction?: number
+  /** Tasks flashed and scrolled to by the host (e.g. from a validation list). */
+  ariaLabel?: string
+}
+
+type DragMode = 'move' | 'start' | 'end' | 'progress'
+interface DragState { mode: DragMode; keys: string[]; delta: number; progress?: number }
+interface EditState { key: string; col: string }
+
+const DEFAULT_COLUMNS: ColumnKey[] = ['row', 'name', 'start', 'end', 'duration', 'predecessors']
+const today0 = () => todayDay()
+const isTextTarget = (el: EventTarget | null) => {
+  const t = el as HTMLElement | null
+  return !!t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable)
+}
+
+export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
+  const rowH = p.rowHeight ?? 28
+  const readOnly = !!p.readOnly || !!p.compact
+  const cal = useMemo(() => makeCal(p.calendar), [p.calendar])
+  const working = cal.mode === 'working'
+  const kinds = useMemo(() => p.kinds ?? {}, [p.kinds])
+  const linkTypes = p.linkTypes ?? LINK_TYPES
+  const allowLag = p.allowLag ?? true
+  const hierarchy = p.hierarchy ?? true
+  const theme = THEMES[p.theme ?? 'dark']
+
+  // ---------------------------------------------------------------- model + saves
+  const base = useMemo<GanttModel>(() => ({ tasks: p.tasks, links: p.links }), [p.tasks, p.links])
+  const history = useRef(new History())
+  const [, setHistTick] = useState(0)
+  const bumpHist = () => setHistTick((n) => n + 1)
+  const notifyError = useCallback((msg: string, e?: unknown) => {
+    if (p.onError) p.onError(msg, e)
+    else console.warn(`[gantt] ${msg}`, e ?? '')
+  }, [p])
+  const errMessage = (e: unknown) => {
+    const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+    if (typeof d === 'string') return d
+    if (d && typeof d === 'object' && 'message' in d) return String((d as { message: unknown }).message)
+    if (e instanceof Error && e.message) return e.message
+    return 'The change could not be saved'
+  }
+  const queue = useSaveQueue(base, {
+    onChange: p.onChange,
+    onError: (e) => { history.current.clear(); bumpHist(); notifyError(errMessage(e), e) },
+    onIdMap: (m) => history.current.remap(m),
+  })
+  const saved = queue.display
+  const modelRef = useRef(saved)
+  modelRef.current = saved
+  /** A new row that exists only locally until it gets a name (Escape or an empty name drops it). */
+  const [draft, setDraft] = useState<{ task: GanttTask; order: GanttId[] } | null>(null)
+  const model = useMemo(() => (draft ? applyChangeSet(saved, { addTasks: [draft.task], order: draft.order }) : saved), [saved, draft])
+  const draftKey = draft ? key(draft.task.id) : null
+
+  // ---------------------------------------------------------------- view state
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [selection, setSelection] = useState<string[]>([])
+  const [anchor, setAnchor] = useState<string | null>(null)
+  const [active, setActive] = useState<string | null>(null)
+  const [drag, setDrag] = useState<DragState | null>(null)
+  const [linkDraft, setLinkDraft] = useState<LinkDraft | null>(null)
+  const [linkPop, setLinkPop] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [editing, setEditing] = useState<EditState | null>(null)
+  const [dialogKey, setDialogKey] = useState<string | null>(null)
+  const [flashKey, setFlashKey] = useState<string | null>(null)
+  const [zoom, setZoom] = useState<Zoom | 'fit'>(p.defaultZoom ?? (p.compact ? 'week' : 'day'))
+  const [showCritical, setShowCritical] = useState(!!p.criticalPath)
+  const [showBaselines, setShowBaselines] = useState(p.showBaselines ?? false)
+  useEffect(() => { if (p.showBaselines !== undefined) setShowBaselines(p.showBaselines) }, [p.showBaselines])
+  const [dropLine, setDropLine] = useState<{ index: number; where: 'before' | 'after' } | null>(null)
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewport, setViewport] = useState({ w: 0, h: 0 })
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const today = today0()
+  const headerH = HEADER_H + ((p.markers?.length ?? 0) > 0 ? MARKER_STRIP : 0)
+
+  // ---------------------------------------------------------------- rights
+  const rights = useMemo(() => p.rights ?? {}, [p.rights])
+  const canStructure = !readOnly && (rights.structure ?? true)
+  const canDates = !readOnly && (rights.dates ?? true)
+  const canLinks = !readOnly && (rights.links ?? true)
+  const canField = useCallback((t: GanttTask, field: string): boolean => {
+    if (readOnly || t.readOnly) return false
+    if (rights.field) return rights.field(t, field)
+    switch (field) {
+      case 'start': case 'duration': return canDates
+      case 'links': return canLinks
+      case 'progress': return typeof rights.progress === 'function' ? rights.progress(t) : (rights.progress ?? canDates)
+      case 'notes': return canStructure || canDates
+      default: return canStructure
+    }
+  }, [readOnly, rights, canDates, canLinks, canStructure])
+  const canProgress = useCallback((t: GanttTask) => canField(t, 'progress'), [canField])
+
+  // ---------------------------------------------------------------- derived
+  const rowModel = useMemo(() => buildRows(model.tasks, { groupByLane: p.groupByLane, collapsed }), [model.tasks, p.groupByLane, collapsed])
+  const { rows, tree, rowNo, index } = rowModel
+  const sched = useMemo(() => schedule(model.tasks, model.links, p.calendar), [model.tasks, model.links, p.calendar])
+  const issues = useMemo(() => p.issues ?? validate(model.tasks, model.links, p.calendar), [p.issues, model.tasks, model.links, p.calendar])
+  const flagged = useMemo(() => new Set(issues.filter((i) => i.level === 'error' && i.taskId != null).map((i) => key(i.taskId!))), [issues])
+  const isSummaryKey = useCallback((k: string) => (tree.children.get(k)?.length ?? 0) > 0, [tree])
+
+  /** Patches the current drag would write (keyed by task key). */
+  const dragPatches = useMemo(() => {
+    const out = new Map<string, Partial<GanttTask>>()
+    if (!drag || (drag.delta === 0 && drag.mode !== 'progress')) return out
+    for (const k of drag.keys) {
+      const t = tree.byId.get(k)
+      if (!t) continue
+      const s = normStart(cal, toDay(t.start))
+      const e = endOf(cal, s, t.duration)
+      if (drag.mode === 'progress') { if (drag.progress != null) out.set(k, { progress: drag.progress }); continue }
+      if (drag.mode === 'move') {
+        out.set(k, { start: toIso(nextWork(cal, s + drag.delta)) })
+      } else if (drag.mode === 'end' && t.duration > 0) {
+        const ne = e + drag.delta
+        out.set(k, { duration: Math.max(1, working ? diff(cal, s, ne) : t.duration + drag.delta) })
+      } else if (drag.mode === 'start' && t.duration > 0) {
+        const ns = nextWork(cal, Math.min(s + drag.delta, e - 1))
+        const nd = Math.max(1, working ? diff(cal, ns, e) : e - ns)
+        out.set(k, { start: toIso(ns), duration: nd })
+      }
+    }
+    return out
+  }, [drag, tree, cal, working])
+
+  const geo = useMemo(() => {
+    const m = new Map<string, TaskGeo>()
+    for (const t of [...tree.order].reverse()) {
+      const k = key(t.id)
+      const kids = tree.children.get(k) ?? []
+      if (kids.length) {
+        const cs = kids.map((c) => m.get(key(c.id))!).filter(Boolean)
+        m.set(k, { s: Math.min(...cs.map((c) => c.s)), e: Math.max(...cs.map((c) => c.e)), milestone: false, summary: true })
+        continue
+      }
+      const patch = dragPatches.get(k)
+      const start = patch?.start ?? t.start
+      const dur = patch?.duration ?? t.duration
+      const s = isIsoDay(start) ? normStart(cal, toDay(start)) : today
+      m.set(k, { s, e: endOf(cal, s, Math.max(0, dur)), milestone: dur === 0, summary: false })
+    }
+    return m
+  }, [tree, dragPatches, cal, today])
+
+  const displayTask = useCallback((t: GanttTask): GanttTask => {
+    const patch = dragPatches.get(key(t.id))
+    return patch ? { ...t, ...patch } : t
+  }, [dragPatches])
+  const displayRows = useMemo(() => (dragPatches.size
+    ? rows.map((r) => (r.type === 'task' && dragPatches.has(key(r.task.id)) ? { ...r, task: displayTask(r.task) } : r))
+    : rows), [rows, dragPatches, displayTask])
+
+  const criticalSet = useMemo(() => {
+    if (!showCritical) return null
+    const ids = p.criticalIds ?? sched.criticalIds
+    const s = new Set(ids.map(key))
+    // Summaries over critical leaves count as critical too.
+    for (const t of tree.order) {
+      const k = key(t.id)
+      if (isSummaryKey(k) && leaves(tree, k).some((l) => s.has(key(l.id)))) s.add(k)
+    }
+    return s
+  }, [showCritical, p.criticalIds, sched, tree, isSummaryKey])
+
+  const brokenLinks = useMemo(() => {
+    const s = new Set<string>()
+    for (const l of model.links) {
+      const f = tree.byId.get(key(l.from)), t = tree.byId.get(key(l.to))
+      if (!f || !t || isSummaryKey(key(f.id)) || isSummaryKey(key(t.id))) continue
+      if (isIsoDay(f.start) && isIsoDay(t.start) && linkViolated(displayTask(f), displayTask(t), l, p.calendar)) s.add(key(l.id))
+    }
+    return s
+  }, [model.links, tree, isSummaryKey, displayTask, p.calendar])
+
+  const hasHierarchy = useMemo(() => tree.order.some((t) => (tree.depth.get(key(t.id)) ?? 0) > 0), [tree])
+  const viewW = viewport.w
+  const columns = useMemo<GanttColumn[]>(() => {
+    const list = p.compact ? ['name' as ColumnKey] : (p.columns ?? DEFAULT_COLUMNS)
+    let cols = list.map((c) => (typeof c === 'string' ? BUILTIN_COLUMNS[c] : c))
+      .map((c) => (p.compact && c.key === 'name' ? { ...c, width: 190 } : c))
+      // A WBS column without subtasks only repeats the row number.
+      .filter((c) => c.key !== 'wbs' || hasHierarchy)
+    // Keep the chart readable: the grid takes at most a share of the width.
+    const max = viewW ? Math.max(240, viewW * (p.maxGridFraction ?? 0.45)) : Infinity
+    const drop = ['slack', 'wbs', 'kind', 'lane', 'progress', 'predecessors', 'end', 'duration', 'start', 'row']
+    const width = () => cols.reduce((n, c) => n + c.width, 0)
+    if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(150, c.width - (width() - max)) } : c))
+    for (const k of drop) {
+      if (width() <= max) break
+      if (cols.length > 1) cols = cols.filter((c) => c.key !== k)
+    }
+    return cols
+  }, [p.columns, p.compact, p.maxGridFraction, hasHierarchy, viewW])
+  const gw = gridWidth(columns)
+
+  const cellCtx = useCallback((t: GanttTask): CellContext => {
+    const k = key(t.id)
+    const g = geo.get(k)
+    const summary = isSummaryKey(k)
+    return {
+      geo: g, rowNo: rowNo.get(k), wbs: tree.wbs.get(k),
+      predecessors: formatPredecessors(t.id, model.links, rowNo),
+      sched: sched.byId.get(t.id), kinds, summary, working,
+      summaryDuration: summary && g ? diff(cal, g.s, g.e) : undefined,
+    }
+  }, [geo, isSummaryKey, rowNo, tree, model.links, sched, kinds, working, cal])
+
+  // ---------------------------------------------------------------- scale
+  const allDays = useMemo(() => {
+    const d: number[] = []
+    geo.forEach((g) => { d.push(g.s, g.e) })
+    for (const t of model.tasks) {
+      if (t.baselineStart && isIsoDay(t.baselineStart)) d.push(toDay(t.baselineStart))
+      if (t.baselineEnd && isIsoDay(t.baselineEnd)) d.push(toDay(t.baselineEnd))
+    }
+    for (const m of p.markers ?? []) if (isIsoDay(m.date)) d.push(toDay(m.date))
+    if (p.showToday !== false) d.push(today)
+    return d
+  // The range follows committed data only (not live drags) so the canvas does not jump.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.tasks, p.markers, p.showToday, today, drag == null])
+  const chartViewW = Math.max(200, (viewport.w || 1000) - gw - 2)
+  const { range, ppd, unit } = useMemo(() => {
+    if (zoom === 'fit') {
+      const lo = Math.min(...allDays), hi = Math.max(...allDays)
+      const span = Math.max(7, hi - lo)
+      const pad = Math.max(2, Math.round(span * 0.03))
+      const r = { from: lo - pad, to: hi + pad + 1 }
+      const pp = Math.max(0.3, chartViewW / (r.to - r.from))
+      return { range: r, ppd: pp, unit: unitFor(pp) }
+    }
+    return { range: timelineRange(allDays, zoom), ppd: PX_PER_DAY[zoom], unit: zoom }
+  }, [zoom, allDays, chartViewW])
+  const chartW = (range.to - range.from) * ppd
+
+  // ---------------------------------------------------------------- viewport + virtualisation
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    const measure = () => setViewport({ w: el.clientWidth, h: el.clientHeight })
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  // Vertical scroll re-renders only when the rendered window would change (quantised
+  // to a few rows inside the overscan); the header follows horizontal scroll by itself.
+  const scrollFrame = useRef(0)
+  const onScroll = () => {
+    cancelAnimationFrame(scrollFrame.current)
+    scrollFrame.current = requestAnimationFrame(() => {
+      const el = scrollerRef.current
+      if (!el) return
+      const q = Math.floor(el.scrollTop / (rowH * 4)) * rowH * 4
+      setScrollTop((cur) => (cur === q ? cur : q))
+    })
+  }
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), [])
+  const win = viewport.h > 0
+    ? visibleWindow(scrollTop, viewport.h - headerH, rowH, rows.length)
+    : { first: 0, last: rows.length - 1 }
+
+  // Keep the day under the centre when the zoom changes.
+  const pendingCenter = useRef<number | null>(null)
+  const changeZoom = useCallback((z: Zoom | 'fit') => {
+    const el = scrollerRef.current
+    if (el && z !== 'fit') pendingCenter.current = range.from + (el.scrollLeft + chartViewW / 2) / ppd
+    setZoom(z)
+  }, [range.from, ppd, chartViewW])
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    if (zoom === 'fit') { el.scrollLeft = 0; return }
+    if (pendingCenter.current == null) return
+    el.scrollLeft = Math.max(0, (pendingCenter.current - range.from) * ppd - chartViewW / 2)
+    pendingCenter.current = null
+  }, [zoom, range.from, ppd, chartViewW])
+  const didInit = useRef(false)
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (!el || didInit.current || !model.tasks.length) return
+    didInit.current = true
+    if (zoom === 'fit') return
+    // Earliest bar (ideas included) or marker, with room for its label.
+    const days: number[] = []
+    geo.forEach((g) => days.push(g.s))
+    for (const m of p.markers ?? []) if (isIsoDay(m.date)) days.push(toDay(m.date))
+    const first = days.length ? Math.min(...days) : today
+    el.scrollLeft = Math.max(0, xOf(first, range, ppd) - 2 * ppd - 24)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model.tasks.length, range, ppd, today, zoom])
+  // Ctrl + wheel zooms.
+  useEffect(() => {
+    const el = scrollerRef.current
+    if (!el || p.compact) return
+    let last = 0
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const now = Date.now()
+      if (now - last < 180) return
+      last = now
+      setZoom((z) => zoomStep(z === 'fit' ? unitFor(ppd) : z, e.deltaY < 0 ? 1 : -1))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [p.compact, ppd])
+
+  // ---------------------------------------------------------------- selection
+  const selSet = useMemo(() => new Set(selection), [selection])
+  const onSelRef = useRef(p.onSelectionChange)
+  onSelRef.current = p.onSelectionChange
+  useEffect(() => {
+    onSelRef.current?.(selection.map((k) => tree.byId.get(k)?.id ?? k))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection])
+  // Drop selection entries whose task disappeared.
+  useEffect(() => {
+    setSelection((s) => (s.every((k) => tree.byId.has(k)) ? s : s.filter((k) => tree.byId.has(k))))
+    setActive((a) => (a && !tree.byId.has(a) ? null : a))
+  }, [tree])
+  const taskRows = useMemo(() => rows.flatMap((r) => (r.type === 'task' ? [key(r.task.id)] : [])), [rows])
+  const selectKey = (k: string, e?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => {
+    if (e?.shiftKey && anchor && taskRows.includes(anchor)) {
+      const a = taskRows.indexOf(anchor), b = taskRows.indexOf(k)
+      setSelection(taskRows.slice(Math.min(a, b), Math.max(a, b) + 1))
+    } else if (e?.ctrlKey || e?.metaKey) {
+      setSelection((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]))
+      setAnchor(k)
+    } else {
+      setSelection([k])
+      setAnchor(k)
+    }
+    setActive(k)
+  }
+  const idsOf = (keys: string[]) => keys.map((k) => tree.byId.get(k)?.id).filter((x): x is GanttId => x != null)
+
+  // ---------------------------------------------------------------- commit
+  const commit = useCallback(async (cs0: ChangeSet | null, opts: { history?: boolean } = {}): Promise<boolean> => {
+    if (!cs0 || isEmptyChangeSet(cs0)) return false
+    let cs = cs0
+    const before = modelRef.current
+    if (p.autoSchedule) {
+      const after = applyChangeSet(before, cs)
+      const moves = autoSchedulePatches(after.tasks, after.links, p.calendar)
+      if (moves.length) {
+        const upd = [...(cs.updateTasks ?? [])]
+        for (const m of moves) {
+          const i = upd.findIndex((u) => key(u.id) === key(m.id))
+          if (i >= 0) upd[i] = { id: upd[i].id, patch: { ...upd[i].patch, ...m.patch } }
+          else upd.push(m)
+        }
+        cs = { ...cs, updateTasks: upd }
+      }
+    }
+    if (p.beforeChange) {
+      const r = await p.beforeChange(cs, before)
+      if (!r) return false
+      cs = r
+    }
+    if (opts.history !== false) history.current.push(modelRef.current, cs)
+    queue.enqueue(cs)
+    bumpHist()
+    return true
+  }, [p, queue])
+
+  const undo = useCallback(async () => {
+    const cs = history.current.undo()
+    if (!cs) return
+    const ok = await commit(cs, { history: false })
+    if (!ok) history.current.redo()
+    bumpHist()
+  }, [commit])
+  const redo = useCallback(async () => {
+    const cs = history.current.redo()
+    if (!cs) return
+    const ok = await commit(cs, { history: false })
+    if (!ok) history.current.undo()
+    bumpHist()
+  }, [commit])
+
+  // ---------------------------------------------------------------- actions
+  const leafKeys = (keys: string[]) => {
+    const out = new Set<string>()
+    for (const k of keys) {
+      if (isSummaryKey(k)) descendants(tree, k).forEach((d) => { if (!isSummaryKey(key(d.id))) out.add(key(d.id)) })
+      else out.add(k)
+    }
+    return [...out].filter((k) => { const t = tree.byId.get(k); return t && canField(t, 'start') })
+  }
+
+  const patchesToChangeSet = (patches: Map<string, Partial<GanttTask>>, label: string): ChangeSet | null => {
+    const updateTasks: NonNullable<ChangeSet['updateTasks']> = []
+    patches.forEach((patch, k) => {
+      const t = tree.byId.get(k)
+      if (!t) return
+      const real: Partial<GanttTask> = {}
+      for (const [f, val] of Object.entries(patch)) {
+        if ((t as unknown as Record<string, unknown>)[f] !== val) (real as Record<string, unknown>)[f] = val
+      }
+      if (Object.keys(real).length) updateTasks.push({ id: t.id, patch: real })
+    })
+    return updateTasks.length ? { label, updateTasks } : null
+  }
+
+  const insertTask = (milestone = false) => {
+    if (draft) return
+    const after = active && active !== draftKey ? tree.byId.get(active) : undefined
+    const parentKey = after ? tree.parentOf.get(key(after.id)) ?? null : null
+    const parentId = parentKey ? tree.byId.get(parentKey)!.id : null
+    const g = after ? geo.get(key(after.id)) : undefined
+    const start = toIso(g ? (milestone ? g.e : nextWork(cal, g.e)) : nextWork(cal, sched.finish ? toDay(sched.finish) : today))
+    const extra = p.newTask?.({ after, parentId, start, milestone }) ?? {}
+    const t: GanttTask = {
+      id: tempId('task'), parentId, name: '', start,
+      duration: milestone ? 0 : 1, ...(after?.lane ? { lane: after.lane } : {}), ...extra,
+      ...(milestone ? { duration: 0 } : {}),
+    }
+    const order = tree.order.filter((x) => key(x.id) !== draftKey).map((x) => x.id)
+    let at = order.length
+    if (after) {
+      const sub = [after, ...descendants(tree, after.id)].map((x) => key(x.id))
+      at = Math.max(...sub.map((k) => order.findIndex((id) => key(id) === k))) + 1
+    }
+    order.splice(at, 0, t.id)
+    const k = key(t.id)
+    setDraft({ task: t, order })
+    setSelection([k]); setAnchor(k); setActive(k)
+    setEditing({ key: k, col: 'name' })
+  }
+  /** The draft row got its name: now it is a real change. */
+  const confirmDraft = (name: string) => {
+    const d = draft
+    setDraft(null)
+    if (!d || !name) return
+    void commit({ label: d.task.duration === 0 ? 'Insert milestone' : 'Insert task', addTasks: [{ ...d.task, name }], order: d.order })
+  }
+
+  const deleteSelection = () => {
+    if (!canStructure || !selection.length) return
+    if (draftKey && selection.includes(draftKey)) { setDraft(null); setEditing(null) }
+    const keys = selection.filter((k) => k !== draftKey)
+    if (keys.length) void commit(removeTasksChangeSet(saved, idsOf(keys)))
+    setSelection([])
+  }
+  const duplicate = (keys = selection) => {
+    if (!canStructure || !keys.length) return
+    void commit(duplicateChangeSet(model, idsOf(keys)))
+  }
+  const doIndent = (dir: 1 | -1) => {
+    if (!canStructure || !hierarchy || !selection.length) return
+    const cs = dir === 1 ? indent(tree.order, idsOf(selection)) : outdent(tree.order, idsOf(selection))
+    void commit(cs)
+  }
+  const linkSelection = () => {
+    if (!canLinks || selection.length < 2) return
+    const cs = chainLinksChangeSet({ tasks: tree.order, links: model.links }, idsOf(selection))
+    if (!cs) return
+    const bad = cs.addLinks!.find((l) => wouldCycle(model.tasks, model.links, l.from, l.to))
+    if (bad) { notifyError('Those links would create a loop'); return }
+    if (!linkTypes.includes('FS')) { notifyError('Finish-to-start links are not available here'); return }
+    void commit(cs)
+  }
+  const unlinkSelection = () => {
+    if (!canLinks || !selection.length) return
+    void commit(unlinkChangeSet(model, idsOf(selection)))
+  }
+
+  const addLink = (fromKey: string, fromSide: 'start' | 'end', toKey: string, toSide: 'start' | 'end') => {
+    const from = tree.byId.get(fromKey), to = tree.byId.get(toKey)
+    if (!from || !to || fromKey === toKey) return
+    const type = typeFromSides(fromSide, toSide)
+    if (!linkTypes.includes(type)) {
+      notifyError(`${type} links are not available here${linkTypes.length === 1 ? `: only ${linkTypes[0]}` : ''}`)
+      return
+    }
+    if (model.links.some((l) => key(l.from) === fromKey && key(l.to) === toKey)) { p.onNotify?.('These tasks are already linked'); return }
+    if (wouldCycle(model.tasks, model.links, from.id, to.id)) { notifyError('That link would create a loop'); return }
+    void commit({ label: 'Link tasks', addLinks: [{ id: tempId('link'), from: from.id, to: to.id, type, lagDays: 0 }] })
+  }
+
+  const focusTask = useCallback((id: GanttId) => {
+    const k = key(id)
+    // Expand collapsed ancestors / groups.
+    const t = tree.byId.get(k)
+    if (!t) return
+    setCollapsed((c) => {
+      const n = new Set(c)
+      let cur = tree.parentOf.get(k) ?? null
+      while (cur) { n.delete(cur); cur = tree.parentOf.get(cur) ?? null }
+      for (const x of [...n]) if (x.startsWith('group:')) n.delete(x)
+      return n.size === c.size ? c : n
+    })
+    setSelection([k]); setAnchor(k); setActive(k)
+    setFlashKey(k)
+    setTimeout(() => setFlashKey((f) => (f === k ? null : f)), 1600)
+    requestAnimationFrame(() => {
+      const el = scrollerRef.current
+      const i = rowModelRef.current.index.get(k)
+      if (!el || i == null) return
+      el.scrollTop = Math.max(0, i * rowH - 2 * rowH)
+      const g = geoRef.current.get(k)
+      if (g) el.scrollLeft = Math.max(0, xOf(g.s, rangeRef.current, ppdRef.current) - 60)
+    })
+  }, [tree, rowH])
+  const rowModelRef = useRef(rowModel); rowModelRef.current = rowModel
+  const geoRef = useRef(geo); geoRef.current = geo
+  const rangeRef = useRef(range); rangeRef.current = range
+  const ppdRef = useRef(ppd); ppdRef.current = ppd
+
+  // ---------------------------------------------------------------- exports
+  const exportName = p.exportName ?? 'plan'
+  const svgInput = () => ({
+    title: exportName, rows: buildRows(model.tasks, { groupByLane: p.groupByLane }).rows, columns, ctx: cellCtx, geo,
+    links: model.links, range, ppd, unit, cal, theme: resolveTheme(rootRef.current, theme), kinds,
+    markers: p.markers ?? [], today: p.showToday === false ? null : today, critical: criticalSet, showBaselines, rowH,
+  })
+  const exportPng = async () => {
+    try {
+      const { svg, width, height } = buildChartSvg(svgInput())
+      downloadBlob(await svgToPng(svg, width, height), `${exportName}.png`)
+    } catch (e) { notifyError(errMessage(e), e) }
+  }
+  const print = () => {
+    const { svg } = buildChartSvg(svgInput())
+    if (!openPrint(svg, exportName)) notifyError('The print window was blocked by the browser')
+  }
+  const exportData = (fmt: 'mspdi' | 'csv') => {
+    if (p.onExport) { p.onExport(fmt); return }
+    const text = fmt === 'mspdi'
+      ? exportMspdi(tree.order, model.links, { name: `${exportName}.xml`, title: exportName, calendar: p.calendar })
+      : exportCsv(tree.order, model.links, p.calendar)
+    downloadBlob(new Blob([text], { type: fmt === 'mspdi' ? 'application/xml' : 'text/csv' }), `${exportName}.${fmt === 'mspdi' ? 'xml' : 'csv'}`)
+  }
+
+  useImperativeHandle(ref, () => ({
+    focusTask, undo: () => void undo(), redo: () => void redo(), fit: () => changeZoom('fit'),
+    exportPng, print, select: (ids) => setSelection(ids.map(key)), getModel: () => modelRef.current,
+    apply: (cs) => commit(cs),
+    insertTask: (milestone) => insertTask(!!milestone),
+  }))
+
+  // ---------------------------------------------------------------- pointer: bars
+  const latest = useRef({ ppd, tree, geo, commit, cal })
+  latest.current = { ppd, tree, geo, commit, cal }
+
+  const onBarDown = (e: ReactPointerEvent, t: GanttTask, mode: DragMode) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    rootRef.current?.focus({ preventScroll: true })
+    setLinkPop(null); setMenu(null)
+    const k = key(t.id)
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey
+    const movable = mode === 'progress' ? canProgress(t) : canField(t, 'start')
+    let keys: string[]
+    if (mode === 'move') keys = leafKeys(selSet.has(k) && selection.length > 1 ? selection : [k])
+    else if (mode === 'progress') keys = [k]
+    else keys = leafKeys(selSet.has(k) && selection.length > 1 ? selection : [k]).filter((x) => (tree.byId.get(x)?.duration ?? 0) > 0)
+    const x0 = e.clientX, y0 = e.clientY
+    let moved = false
+    const g = geo.get(k)
+    const bx = g ? barGeo(g.s, g.e, range, ppd, g.milestone) : null
+    const startProgress = Math.round(t.progress ?? 0)
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0
+      if (!moved && Math.abs(dx) < 3 && Math.abs(ev.clientY - y0) < 3) return
+      moved = true
+      if (!movable || !keys.length) return
+      if (mode === 'progress' && bx) {
+        const pct = Math.max(0, Math.min(100, Math.round((startProgress + (dx / Math.max(1, bx.w)) * 100) / 5) * 5))
+        setDrag({ mode, keys, delta: 0, progress: pct })
+      } else setDrag({ mode, keys, delta: snapDays(dx, latest.current.ppd) })
+    }
+    const onUp = async (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (!moved) {
+        setDrag(null)
+        selectKey(k, { ctrlKey: additive && !ev.shiftKey, metaKey: false, shiftKey: ev.shiftKey })
+        return
+      }
+      if (!movable || !keys.length) { setDrag(null); return }
+      const dx = ev.clientX - x0
+      const final: DragState = mode === 'progress' && bx
+        ? { mode, keys, delta: 0, progress: Math.max(0, Math.min(100, Math.round((startProgress + (dx / Math.max(1, bx.w)) * 100) / 5) * 5)) }
+        : { mode, keys, delta: snapDays(dx, latest.current.ppd) }
+      setDrag(final)
+      const patches = computePatches(final)
+      const label = mode === 'progress' ? 'Progress' : mode === 'move' ? (keys.length > 1 ? `Move ${keys.length} tasks` : 'Move task') : 'Resize task'
+      await latest.current.commit(patchesToChangeSetRef.current(patches, label))
+      setDrag(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+  const patchesToChangeSetRef = useRef(patchesToChangeSet)
+  patchesToChangeSetRef.current = patchesToChangeSet
+
+  /** Same rules as dragPatches, for a given state (used at pointer up). */
+  const computePatches = (d: DragState) => {
+    const out = new Map<string, Partial<GanttTask>>()
+    for (const k of d.keys) {
+      const t = tree.byId.get(k)
+      if (!t) continue
+      const s = normStart(cal, toDay(t.start))
+      const e = endOf(cal, s, t.duration)
+      if (d.mode === 'progress') { if (d.progress != null) out.set(k, { progress: d.progress }); continue }
+      if (d.delta === 0) continue
+      if (d.mode === 'move') out.set(k, { start: toIso(nextWork(cal, s + d.delta)) })
+      else if (d.mode === 'end' && t.duration > 0) out.set(k, { duration: Math.max(1, working ? diff(cal, s, e + d.delta) : t.duration + d.delta) })
+      else if (d.mode === 'start' && t.duration > 0) {
+        const ns = nextWork(cal, Math.min(s + d.delta, e - 1))
+        out.set(k, { start: toIso(ns), duration: Math.max(1, working ? diff(cal, ns, e) : e - ns) })
+      }
+    }
+    return out
+  }
+
+  // ---------------------------------------------------------------- pointer: links
+  const svgPoint = (cx: number, cy: number) => {
+    const r = svgRef.current?.getBoundingClientRect()
+    return { x: cx - (r?.left ?? 0), y: cy - (r?.top ?? 0) }
+  }
+  const onLinkHandleDown = (e: ReactPointerEvent, t: GanttTask, side: 'start' | 'end') => {
+    if (e.button !== 0 || !canLinks) return
+    e.stopPropagation()
+    e.preventDefault()
+    const k = key(t.id)
+    const i = index.get(k)
+    const g = geo.get(k)
+    if (i == null || !g) return
+    const b = barGeo(g.s, g.e, range, ppd, g.milestone)
+    const x1 = anchorX(b, side) + (side === 'start' ? -5 : 5)
+    const y1 = i * rowH + rowH / 2
+    let moved = false
+    const onMove = (ev: PointerEvent) => {
+      moved = true
+      const pt = svgPoint(ev.clientX, ev.clientY)
+      setLinkDraft({ x1, y1, x2: pt.x, y2: pt.y })
+    }
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      setLinkDraft(null)
+      if (!moved) return
+      const el = (typeof document.elementFromPoint === 'function' ? document.elementFromPoint(ev.clientX, ev.clientY) : null)
+        ?? (ev.target as Element | null)
+      const hit = el?.closest?.('[data-task-id]')
+      const toKey = hit?.getAttribute('data-task-id')
+      if (!toKey || toKey === k) return
+      let toSide = (el?.getAttribute?.('data-side') as 'start' | 'end' | null) ?? null
+      if (!toSide) {
+        const tg = geoRef.current.get(toKey)
+        const pt = svgPoint(ev.clientX, ev.clientY)
+        if (tg) {
+          const tb = barGeo(tg.s, tg.e, rangeRef.current, ppdRef.current, tg.milestone)
+          toSide = pt.x > tb.x + tb.w / 2 && !tg.milestone ? 'end' : 'start'
+        } else toSide = 'start'
+      }
+      addLinkRef.current(k, side, toKey, toSide)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+  const addLinkRef = useRef(addLink)
+  addLinkRef.current = addLink
+
+  // ---------------------------------------------------------------- pointer: row reorder
+  const onReorderDown = (e: ReactPointerEvent, t: GanttTask) => {
+    if (e.button !== 0 || !canStructure) return
+    const k = key(t.id)
+    const y0 = e.clientY
+    let target: { index: number; where: 'before' | 'after' } | null = null
+    const gridEl = (e.currentTarget as HTMLElement).closest('[data-testid="gantt-grid"]') as HTMLElement | null
+    const onMove = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientY - y0) < 4 && !target) return
+      const top = gridEl?.getBoundingClientRect().top ?? 0
+      const y = ev.clientY - top
+      const i = Math.max(0, Math.min(rows.length - 1, Math.floor(y / rowH)))
+      const where: 'before' | 'after' = y - i * rowH < rowH / 2 ? 'before' : 'after'
+      target = { index: i, where }
+      setDropLine(target)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setDropLine(null)
+      if (!target) return
+      const r = rows[target.index]
+      const keys = selSet.has(k) ? selection : [k]
+      if (r.type === 'group') {
+        // Dropped on a group header: first task of that group, before it.
+        const next = rows.slice(target.index + 1).find((x) => x.type === 'task')
+        if (next?.type !== 'task') return
+        moveTo(keys, key(next.task.id), 'before', r.label)
+        return
+      }
+      moveTo(keys, key(r.task.id), target.where, p.groupByLane ? (r.group ?? undefined) : undefined)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  const moveTo = (keys: string[], targetKey: string, where: 'before' | 'after', lane?: string) => {
+    const cs = moveRows(tree.order, idsOf(keys), tree.byId.get(targetKey)!.id, where)
+    const lanePatches = lane !== undefined && p.groupByLane
+      ? keys.map((k) => tree.byId.get(k)!).filter((t) => (t.lane ?? '').trim() !== (lane === 'Unassigned' ? '' : lane))
+        .map((t) => ({ id: t.id, patch: { lane: lane === 'Unassigned' ? null : lane } }))
+      : []
+    if (!cs && !lanePatches.length) return
+    void commit({ label: cs?.label ?? 'Move row', updateTasks: [...(cs?.updateTasks ?? []), ...lanePatches], ...(cs?.order ? { order: cs.order } : {}) })
+  }
+
+  // ---------------------------------------------------------------- grid edits
+  const commitEdit = (t: GanttTask, col: GanttColumn, value: string) => {
+    setEditing(null)
+    const k = key(t.id)
+    const val = value.trim()
+    if (k === draftKey) { if (col.key === 'name') confirmDraft(val); return }
+    const patch = (pt: Partial<GanttTask>, label: string) => void commit(patchesToChangeSet(new Map([[k, pt]]), label))
+    switch (col.key) {
+      case 'name':
+        if (!val) { notifyError('A task needs a name'); return }
+        patch({ name: val }, 'Rename task'); return
+      case 'lane': patch({ lane: val || null }, 'Change lane'); return
+      case 'start':
+        if (!isIsoDay(val)) return
+        patch({ start: val }, 'Change start'); return
+      case 'end': {
+        if (!isIsoDay(val)) return
+        if (t.duration === 0) { patch({ start: val }, 'Move milestone'); return }
+        const s = normStart(cal, toDay(t.start))
+        if (toDay(val) < s) { notifyError('The finish cannot be before the start'); return }
+        patch({ duration: durationFromLastDay(cal, s, toDay(val)) }, 'Change finish'); return
+      }
+      case 'duration': {
+        // An emptied field keeps the value (Number('') would turn the task into a milestone).
+        if (val === '') return
+        const n = Math.round(Number(val.replace(/[a-z]+$/i, '')))
+        if (!Number.isFinite(n) || n < 0) { notifyError('The duration must be 0 or more days'); return }
+        patch({ duration: n }, 'Change duration'); return
+      }
+      case 'progress': {
+        if (val === '') return
+        const n = Math.round(Number(val.replace('%', '')))
+        if (!Number.isFinite(n)) return
+        patch({ progress: Math.max(0, Math.min(100, n)) }, 'Progress'); return
+      }
+      case 'predecessors': {
+        const { changes, errors } = predecessorChangeSet(t.id, val, tree.order, model.links, cal.mode)
+        if (errors.length) { notifyError(errors[0]); return }
+        if (!changes) return
+        const added = [...(changes.addLinks ?? []), ...(changes.updateLinks ?? []).map((u) => ({ ...model.links.find((l) => key(l.id) === key(u.id))!, ...u.patch }))]
+        const badType = added.find((l) => !linkTypes.includes(l.type))
+        if (badType) { notifyError(`${badType.type} links are not available here`); return }
+        if (!allowLag && added.some((l) => l.lagDays !== 0)) { notifyError('Lag and lead are not available here'); return }
+        const after = applyChangeSet(model, changes)
+        if (schedule(after.tasks, after.links, p.calendar).cycle.length) { notifyError('Those predecessors would create a loop'); return }
+        void commit(changes)
+        return
+      }
+      default: {
+        const custom = col as GanttColumn & { apply?: (value: string, t: GanttTask) => Partial<GanttTask> | null }
+        const pt = custom.apply?.(val, t)
+        if (pt) patch(pt, `Change ${col.title}`)
+      }
+    }
+  }
+  const canEditCell = (t: GanttTask, col: GanttColumn) => {
+    if (!col.edit) return false
+    const k = key(t.id)
+    if (k === draftKey) return col.key === 'name'
+    if (isSummaryKey(k) && ['start', 'end', 'duration', 'progress'].includes(col.key)) return false
+    return canField(t, col.field ?? col.key)
+  }
+
+  // ---------------------------------------------------------------- keyboard
+  const nudge = useRef<{ keys: string[]; delta: number; timer: ReturnType<typeof setTimeout> | null } | null>(null)
+  useEffect(() => () => { if (nudge.current?.timer) clearTimeout(nudge.current.timer) }, [])
+  const flushNudge = async () => {
+    const n = nudge.current
+    nudge.current = null
+    if (!n || n.delta === 0) { setDrag(null); return }
+    const d: DragState = { mode: 'move', keys: n.keys, delta: n.delta }
+    await commit(patchesToChangeSetRef.current(computePatchesRef.current(d), n.keys.length > 1 ? `Move ${n.keys.length} tasks` : 'Move task'))
+    setDrag(null)
+  }
+  const computePatchesRef = useRef(computePatches)
+  computePatchesRef.current = computePatches
+  const flushRef = useRef(flushNudge)
+  flushRef.current = flushNudge
+
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (isTextTarget(e.target) || p.compact) return
+    const mod = e.ctrlKey || e.metaKey
+    const k = e.key
+    if (k === 'Escape') { setSelection([]); setEditing(null); setDraft(null); setMenu(null); setLinkPop(null); return }
+    if (mod && (k === 'z' || k === 'Z')) { e.preventDefault(); if (e.shiftKey) void redo(); else void undo(); return }
+    if (mod && (k === 'y' || k === 'Y')) { e.preventDefault(); void redo(); return }
+    if (mod && (k === 'a' || k === 'A')) { e.preventDefault(); setSelection(taskRows); return }
+    if (mod && (k === 'd' || k === 'D')) { e.preventDefault(); duplicate(); return }
+    if (mod && (k === 'c' || k === 'C')) { clipboard.current = [...selection]; return }
+    if (mod && (k === 'v' || k === 'V')) { e.preventDefault(); duplicate(clipboard.current.filter((x) => tree.byId.has(x))); return }
+    if (k === 'Insert') { e.preventDefault(); if (canStructure) insertTask(); return }
+    if (k === 'Tab') { if (!canStructure || !hierarchy || !selection.length) return; e.preventDefault(); doIndent(e.shiftKey ? -1 : 1); return }
+    if ((k === 'Delete' || k === 'Backspace') && selection.length) { e.preventDefault(); deleteSelection(); return }
+    if ((k === 'Enter' || k === 'F2') && active) {
+      e.preventDefault()
+      const t = tree.byId.get(active)
+      if (t && canField(t, 'name') && k === 'F2') setEditing({ key: active, col: 'name' })
+      else if (t) openTask(t)
+      return
+    }
+    if (k === 'ArrowUp' || k === 'ArrowDown') {
+      e.preventDefault()
+      if (!taskRows.length) return
+      const i = active ? taskRows.indexOf(active) : -1
+      const ni = Math.max(0, Math.min(taskRows.length - 1, i + (k === 'ArrowDown' ? 1 : -1)))
+      const nk = taskRows[ni]
+      selectKey(nk, { shiftKey: e.shiftKey })
+      const el = scrollerRef.current
+      if (el) {
+        const idx = index.get(nk) ?? 0
+        const top = idx * rowH, bottom = top + rowH
+        const viewTop = el.scrollTop, viewBottom = el.scrollTop + el.clientHeight - headerH
+        if (top < viewTop) el.scrollTop = top
+        else if (bottom > viewBottom && el.clientHeight) el.scrollTop = bottom - (el.clientHeight - headerH)
+      }
+      return
+    }
+    if ((k === 'ArrowLeft' || k === 'ArrowRight') && selection.length && canDates) {
+      e.preventDefault()
+      const step = (k === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 7 : 1)
+      const keys = nudge.current?.keys ?? leafKeys(selection)
+      if (!keys.length) return
+      if (nudge.current?.timer) clearTimeout(nudge.current.timer)
+      const delta = (nudge.current?.delta ?? 0) + step
+      nudge.current = { keys, delta, timer: setTimeout(() => { void flushRef.current() }, 450) }
+      setDrag({ mode: 'move', keys, delta })
+    }
+  }
+  const clipboard = useRef<string[]>([])
+
+  const openTask = (t: GanttTask) => {
+    if (p.onTaskOpen) p.onTaskOpen(t)
+    else setDialogKey(key(t.id))
+  }
+
+  // ---------------------------------------------------------------- menu
+  const menuEntries = (): MenuEntry[] => {
+    const ids = idsOf(selection)
+    const one = selection.length === 1 ? tree.byId.get(selection[0]) : undefined
+    const items: MenuEntry[] = []
+    if (one) items.push({ label: 'Task information', onSelect: () => openTask(one), shortcut: 'Enter', testId: 'gantt-menu-open' })
+    if (one) items.push({ label: 'Scroll to task', onSelect: () => focusTask(one.id) })
+    if (canStructure) {
+      items.push('separator')
+      items.push({ label: 'Insert task', onSelect: () => insertTask(), shortcut: 'Ins', testId: 'gantt-menu-insert' })
+      items.push({ label: 'Insert milestone', onSelect: () => insertTask(true), testId: 'gantt-menu-milestone' })
+      items.push({ label: 'Duplicate', onSelect: () => duplicate(), shortcut: 'Ctrl+D', disabled: !ids.length, testId: 'gantt-menu-duplicate' })
+      if (hierarchy) {
+        items.push({ label: 'Indent', onSelect: () => doIndent(1), shortcut: 'Tab', disabled: !ids.length, testId: 'gantt-menu-indent' })
+        items.push({ label: 'Outdent', onSelect: () => doIndent(-1), shortcut: 'Shift+Tab', disabled: !ids.length, testId: 'gantt-menu-outdent' })
+      }
+    }
+    if (canLinks) {
+      items.push('separator')
+      items.push({ label: 'Link tasks', onSelect: linkSelection, disabled: ids.length < 2, testId: 'gantt-menu-link' })
+      items.push({ label: 'Unlink tasks', onSelect: unlinkSelection, disabled: !ids.length, testId: 'gantt-menu-unlink' })
+    }
+    const extra = p.menuItems?.(ids) ?? []
+    if (extra.length) items.push('separator', ...extra)
+    if (canStructure) {
+      items.push('separator')
+      items.push({ label: ids.length > 1 ? `Delete ${ids.length} tasks` : 'Delete task', onSelect: deleteSelection, danger: true, disabled: !ids.length, shortcut: 'Del', testId: 'gantt-menu-delete' })
+    }
+    while (items[0] === 'separator') items.shift()
+    return items.filter((x, i, a) => !(x === 'separator' && a[i - 1] === 'separator'))
+  }
+  const openMenu = (e: React.MouseEvent, t: GanttTask) => {
+    if (p.compact) return
+    e.preventDefault()
+    const k = key(t.id)
+    if (!selSet.has(k)) { setSelection([k]); setAnchor(k) }
+    setActive(k)
+    setMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  // ---------------------------------------------------------------- render
+  const vars = themeVars(theme)
+  const bodyH = Math.max(rows.length, 1) * rowH
+  const heightCss = p.height ?? (p.compact ? 320 : '70vh')
+  const popLink = linkPop ? model.links.find((l) => key(l.id) === linkPop.id) : undefined
+  const linkLabel = (l: GanttLink) => {
+    const f = tree.byId.get(key(l.from)), t = tree.byId.get(key(l.to))
+    const lag = l.lagDays ? ` ${l.lagDays > 0 ? '+' : ''}${l.lagDays}d` : ''
+    return `${l.type}${lag}: #${rowNo.get(key(l.from)) ?? '?'} ${f?.name ?? ''} to #${rowNo.get(key(l.to)) ?? '?'} ${t?.name ?? ''}`
+  }
+  const dialogTask = dialogKey ? tree.byId.get(dialogKey) : undefined
+  const hasBaselines = model.tasks.some((t) => t.baselineStart)
+  const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40'
+  const btnStyle = { borderColor: v('gridLine'), background: v('panel'), color: v('text') }
+  const TB = ({ label, onClick, disabled, testId, title, pressed }: { label: ReactNode; onClick: () => void; disabled?: boolean; testId: string; title: string; pressed?: boolean }) => (
+    <button type="button" className={btn} style={pressed ? { ...btnStyle, background: v('accent'), color: '#fff', borderColor: v('accent') } : btnStyle}
+      onClick={onClick} disabled={disabled} data-testid={testId} title={title} aria-label={title} aria-pressed={pressed}>{label}</button>
+  )
+  const [exportOpen, setExportOpen] = useState(false)
+
+  return (
+    <div ref={rootRef} tabIndex={-1} onKeyDown={onKeyDown} data-testid="gantt-root" data-theme={p.theme ?? 'dark'}
+      className={`space-y-2 ${p.className ?? ''}`} style={{ ...(vars as React.CSSProperties), outline: 'none' }}
+      aria-label={p.ariaLabel ?? 'Gantt planner'}>
+      {p.toolbar !== false && !p.compact && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="gantt-toolbar" role="toolbar" aria-label="Gantt tools">
+          {p.toolbarStart}
+          {!readOnly && (canStructure || canDates || canLinks) && (
+            <>
+              <TB label="Undo" onClick={() => void undo()} disabled={!history.current.canUndo} testId="gantt-undo"
+                title={history.current.undoLabel ? `Undo ${history.current.undoLabel} (Ctrl+Z)` : 'Undo (Ctrl+Z)'} />
+              <TB label="Redo" onClick={() => void redo()} disabled={!history.current.canRedo} testId="gantt-redo" title="Redo (Ctrl+Y)" />
+            </>
+          )}
+          {canStructure && (
+            <>
+              <span className="mx-0.5 h-5 w-px" style={{ background: v('gridLine') }} />
+              <TB label="+ Task" onClick={() => insertTask()} testId="gantt-add-task" title="Insert a task after the selected row (Insert)" />
+              <TB label="+ Milestone" onClick={() => insertTask(true)} testId="gantt-add-milestone" title="Insert a milestone" />
+              {hierarchy && (
+                <>
+                  <TB label="Indent" onClick={() => doIndent(1)} disabled={!selection.length} testId="gantt-indent" title="Indent: make the selection subtasks (Tab)" />
+                  <TB label="Outdent" onClick={() => doIndent(-1)} disabled={!selection.length} testId="gantt-outdent" title="Outdent (Shift+Tab)" />
+                </>
+              )}
+            </>
+          )}
+          {canLinks && (
+            <>
+              <TB label="Link" onClick={linkSelection} disabled={selection.length < 2} testId="gantt-link-selected" title="Link the selected tasks finish-to-start" />
+              <TB label="Unlink" onClick={unlinkSelection} disabled={!selection.length} testId="gantt-unlink" title="Remove the links between the selected tasks" />
+            </>
+          )}
+          {canStructure && (
+            <TB label="Delete" onClick={deleteSelection} disabled={!selection.length} testId="gantt-delete" title="Delete the selected tasks (Del)" />
+          )}
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {queue.saving && (
+              <span className="flex items-center gap-1.5 text-[11px]" style={{ color: v('textMuted') }} data-testid="gantt-saving" role="status">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: v('accent') }} />Saving
+              </span>
+            )}
+            <TB label="Critical path" onClick={() => setShowCritical((x) => !x)} pressed={showCritical} testId="gantt-critical-toggle" title="Show the critical path" />
+            {hasBaselines && (
+              <TB label="Baseline" onClick={() => setShowBaselines((x) => !x)} pressed={showBaselines} testId="gantt-baseline-toggle" title="Show baselines and slip" />
+            )}
+            <div className="inline-flex overflow-hidden rounded-md border" role="group" aria-label="Zoom" style={{ borderColor: v('gridLine') }}>
+              {[...ZOOMS, 'fit' as const].map((z) => (
+                <button key={z} type="button" aria-pressed={zoom === z} data-testid={`gantt-zoom-${z}`}
+                  aria-label={z === 'fit' ? 'Fit the plan to the width' : `Zoom to ${z}s`}
+                  className="px-2 py-1 text-xs capitalize"
+                  style={zoom === z ? { background: v('accent'), color: '#fff' } : { background: v('panel'), color: v('textMuted') }}
+                  onClick={() => changeZoom(z)}>{z}</button>
+              ))}
+            </div>
+            <div className="relative">
+              <TB label="Export" onClick={() => setExportOpen((o) => !o)} testId="gantt-export" title="Export or print the plan" />
+              {exportOpen && (
+                <ContextMenu x={(rootRef.current?.getBoundingClientRect().right ?? 400) - 220} y={(rootRef.current?.getBoundingClientRect().top ?? 0) + 34}
+                  onClose={() => setExportOpen(false)} items={[
+                    { label: 'Chart image (.png)', onSelect: () => void exportPng(), testId: 'gantt-export-png' },
+                    { label: 'Print', onSelect: print, testId: 'gantt-export-print' },
+                    'separator',
+                    { label: 'MS Project (.xml)', onSelect: () => exportData('mspdi'), testId: 'gantt-export-xml' },
+                    { label: 'Spreadsheet (.csv)', onSelect: () => exportData('csv'), testId: 'gantt-export-csv' },
+                  ]} />
+              )}
+            </div>
+            {p.toolbarEnd}
+          </div>
+        </div>
+      )}
+
+      <div ref={scrollerRef} onScroll={onScroll} data-testid="gantt-scroller" tabIndex={0}
+        aria-label="Plan chart. Arrow keys select rows; with tasks selected, left and right move them."
+        className="relative overflow-auto rounded-lg border outline-none focus-visible:ring-1"
+        style={{ height: heightCss, maxHeight: p.compact ? 320 : undefined, borderColor: v('gridLine'), background: v('bg') }}>
+        <div style={{ width: gw + chartW, position: 'relative' }}>
+          <div className="sticky top-0 z-20 flex" style={{ height: headerH }}>
+            <div className="sticky left-0 z-30 border-r" style={{ borderColor: v('gridLine'), background: v('headerBg') }}>
+              <GridHeader columns={columns} height={headerH} />
+            </div>
+            <ChartHeader range={range} ppd={ppd} unit={unit} today={p.showToday === false ? null : today}
+              markers={p.markers ?? []} scrollerRef={scrollerRef} cal={cal} />
+          </div>
+          <div className="flex" style={{ height: bodyH }}>
+            <div className="sticky left-0 z-10 border-r" style={{ borderColor: v('gridLine'), background: v('bg') }}>
+              <GridBody columns={columns} rows={displayRows} rowH={rowH} first={win.first} last={win.last}
+                selected={selSet} flashKey={flashKey} flagged={flagged} pending={queue.pendingIds} ctx={cellCtx}
+                canEdit={canEditCell} canReorder={canStructure} editing={editing} dropLine={dropLine}
+                onRowClick={(e, t) => { if (!p.compact) selectKey(key(t.id), e) }}
+                onRowDoubleClick={(t) => { if (!p.compact) openTask(t) }}
+                onRowContext={openMenu}
+                onToggle={(rk) => setCollapsed((c) => { const n = new Set(c); if (n.has(rk)) n.delete(rk); else n.add(rk); return n })}
+                onStartEdit={(t, col) => setEditing({ key: key(t.id), col })}
+                onCommitEdit={commitEdit}
+                onCancelEdit={() => { if (editing?.key === draftKey) setDraft(null); setEditing(null) }}
+                onReorderDown={onReorderDown} />
+            </div>
+            <ChartBody uid={uid} rows={displayRows} rowH={rowH} first={win.first} last={win.last} range={range} ppd={ppd}
+              unit={unit} cal={cal} geo={geo} links={model.links} kinds={kinds} selected={selSet} critical={criticalSet}
+              showBaselines={showBaselines} showProgress={p.showProgress ?? false} pending={queue.pendingIds}
+              flashKey={flashKey} markers={p.markers ?? []} today={p.showToday === false ? null : today}
+              linkLabels={linkLabel} brokenLinks={brokenLinks}
+              canDrag={(t) => !p.compact && canField(t, 'start')} canLink={canLinks}
+              canProgress={(t) => !p.compact && canProgress(t)}
+              linkDraft={linkDraft} svgRef={svgRef}
+              onBarDown={p.compact ? undefined : onBarDown}
+              onLinkHandleDown={onLinkHandleDown}
+              onLinkClick={(e, l) => { if (!p.compact) setLinkPop({ id: key(l.id), x: e.clientX, y: e.clientY }) }}
+              onBackgroundDown={p.compact ? undefined : (e) => {
+                rootRef.current?.focus({ preventScroll: true })
+                if (!(e.shiftKey || e.ctrlKey || e.metaKey)) setSelection([])
+              }}
+              onBarContext={openMenu}
+              onBarDoubleClick={(t) => { if (!p.compact) openTask(t) }} />
+          </div>
+        </div>
+      </div>
+
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuEntries()} onClose={() => setMenu(null)} />}
+      {popLink && linkPop && (
+        <LinkPopover x={linkPop.x} y={linkPop.y} link={popLink} title={linkLabel(popLink)} types={linkTypes}
+          allowLag={allowLag} canEdit={canLinks} unit={working ? 'working days' : 'days'}
+          onClose={() => setLinkPop(null)}
+          onDelete={() => { setLinkPop(null); void commit({ label: 'Remove link', removeLinks: [popLink.id] }) }}
+          onSave={(patch) => {
+            setLinkPop(null)
+            if (patch.type !== popLink.type && !linkTypes.includes(patch.type)) return
+            void commit({ label: 'Edit link', updateLinks: [{ id: popLink.id, patch }] })
+          }} />
+      )}
+      {dialogTask && (
+        <TaskDialog task={dialogTask} working={working} allowConstraints={p.constraints ?? true}
+          canField={(f) => canField(dialogTask, f) && !(isSummaryKey(key(dialogTask.id)) && ['start', 'duration', 'progress'].includes(f))}
+          onClose={() => setDialogKey(null)}
+          onSave={(pt) => void commit(patchesToChangeSet(new Map([[key(dialogTask.id), pt]]), 'Edit task'))} />
+      )}
+    </div>
+  )
+})
+
+export default Gantt

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { filenameFrom, planApi } from './changePlan'
 
-const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
+const clientMocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(), put: vi.fn() }))
 vi.mock('./client', () => ({ default: clientMocks, API_BASE_URL: '/plm2/api' }))
 
 describe('plan api', () => {
@@ -44,6 +44,35 @@ describe('plan api', () => {
     expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/changes/7/plan/deviations/9/escalate', { note: 'tell them' })
     await planApi.publishPlan(7)
     expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/changes/7/bank-build/publish')
+  })
+
+  it('hits the 088 link, batch, calendar and import endpoints', async () => {
+    await planApi.createLink(7, 'quote', { from_task_id: 1, to_task_id: 2, type: 'SS', lag_days: -1 })
+    expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/changes/7/plan/links',
+      { plan: 'quote', from_task_id: 1, to_task_id: 2, type: 'SS', lag_days: -1 })
+    await planApi.patchLink(7, 9, { lag_days: 2 })
+    expect(clientMocks.patch).toHaveBeenLastCalledWith('/v1/changes/7/plan/links/9', { lag_days: 2 })
+    await planApi.deleteLink(7, 9)
+    expect(clientMocks.delete).toHaveBeenLastCalledWith('/v1/changes/7/plan/links/9')
+    const changes = { tasks_upsert: [{ id: 'tmp-1', name: 'x' }], tasks_delete: [], links_upsert: [], links_delete: [] }
+    await planApi.applyChanges(7, 'detailed', changes)
+    expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/changes/7/plan/changes', { plan: 'detailed', changes })
+    await planApi.applyChanges(7, 'detailed', changes, 'late')
+    expect(clientMocks.post).toHaveBeenLastCalledWith('/v1/changes/7/plan/changes', { plan: 'detailed', changes, reason: 'late' })
+    const cal = { mode: 'working' as const, workdays: [1, 2, 3, 4, 5], holidays: ['2026-12-25'] }
+    await planApi.setCalendar(7, 'quote', cal)
+    expect(clientMocks.put).toHaveBeenLastCalledWith('/v1/changes/7/plan/calendar', cal, { params: { plan: 'quote' } })
+  })
+
+  it('uploads an MS Project file as multipart with plan and replace', async () => {
+    const file = new File(['<Project/>'], 'p.xml', { type: 'application/xml' })
+    await planApi.importXml(7, 'detailed', file, true)
+    const [url, body] = clientMocks.post.mock.calls[clientMocks.post.mock.calls.length - 1]
+    expect(url).toBe('/v1/changes/7/plan/import')
+    expect(body).toBeInstanceOf(FormData)
+    expect((body as FormData).get('plan')).toBe('detailed')
+    expect((body as FormData).get('replace')).toBe('true')
+    expect(((body as FormData).get('file') as File).name).toBe('p.xml')
   })
 
   it('downloads the MS Project export as a blob under the server filename', async () => {

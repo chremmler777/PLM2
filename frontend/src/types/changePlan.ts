@@ -42,10 +42,38 @@ export interface TaskOut {
   notes: string | null
   slack_days?: number | null
   is_critical?: boolean
+  /** Migration 088 (optional until the backend serves them). */
+  parent_id?: number | null
+  constraint_type?: PlanConstraintType | null
+  /** Exclusive for fnlt / mfo, like end_date. */
+  constraint_date?: string | null
+  wbs?: string | null
+  is_summary?: boolean
+  total_slack?: number | null
+  free_slack?: number | null
   created_by?: number | null
   created_at?: string | null
   updated_by?: number | null
   updated_at?: string | null
+}
+
+export type PlanConstraintType = 'asap' | 'snet' | 'fnlt' | 'mso' | 'mfo'
+export type PlanLinkType = 'FS' | 'SS' | 'FF' | 'SF'
+
+export interface PlanLink {
+  id: number
+  from_task_id: number
+  to_task_id: number
+  type: PlanLinkType
+  /** Days in the plan calendar's unit; negative = lead. */
+  lag_days: number
+}
+
+export interface PlanCalendar {
+  mode: 'calendar' | 'working'
+  /** ISO weekdays, Monday = 1. */
+  workdays: number[]
+  holidays: string[]
 }
 
 export interface Issue {
@@ -80,6 +108,52 @@ export interface PlanOut {
   summary: PlanSummary
   validation: { errors: Issue[]; warnings: Issue[] }
   deadlines: PlanDeadline[]
+  /** Migration 088: typed links and the plan calendar. Absent on older servers. */
+  links?: PlanLink[]
+  calendar?: PlanCalendar | null
+}
+
+/** Answer of POST /plan/changes: the plan plus temp id maps. */
+export interface PlanChangesOut extends PlanOut {
+  id_map?: Record<string, number>
+  link_id_map?: Record<string, number>
+}
+
+export type TempId = number | string
+
+export interface TaskUpsert {
+  id?: TempId
+  name?: string
+  kind?: TaskKind
+  lane?: string | null
+  department_id?: number | null
+  start_date?: string
+  duration_days?: number
+  predecessors?: TempId[]
+  is_idea?: boolean
+  sort_order?: number
+  progress_pct?: number
+  actual_start?: string | null
+  actual_finish?: string | null
+  notes?: string | null
+  parent_id?: TempId | null
+  constraint_type?: PlanConstraintType | null
+  constraint_date?: string | null
+}
+
+export interface LinkUpsert {
+  id?: TempId
+  from_task_id?: TempId
+  to_task_id?: TempId
+  type?: PlanLinkType
+  lag_days?: number
+}
+
+export interface PlanChangeSet {
+  tasks_upsert: TaskUpsert[]
+  tasks_delete: number[]
+  links_upsert: LinkUpsert[]
+  links_delete: number[]
 }
 
 export interface TaskCreate {
@@ -108,6 +182,10 @@ export interface TaskPatch {
   progress_pct?: number
   actual_start?: string | null
   actual_finish?: string | null
+  sort_order?: number
+  parent_id?: number | null
+  constraint_type?: PlanConstraintType | null
+  constraint_date?: string | null
   reason?: string
 }
 

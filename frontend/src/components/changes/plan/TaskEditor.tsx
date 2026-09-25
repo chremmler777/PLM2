@@ -1,9 +1,13 @@
 /**
- * Right-side drawer for one task. Editors change everything; a member of the
- * task's department (track mode) changes progress and actual dates only;
- * everyone else reads.
+ * Task panel docked under the chart (it never covers the timeline). Editors
+ * change everything before the baseline; after it only dates (as a
+ * deviation) and notes. A member of the task's department (track mode)
+ * changes progress and actual dates only; everyone else reads.
+ *
+ * A server update (drag, auto-schedule, another user) refreshes only the
+ * fields the user has not touched, so typing is never wiped.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { TaskKind, TaskOut, TaskPatch } from '../../../types/changePlan'
 import { TASK_KINDS } from '../../../types/changePlan'
 import {
@@ -17,7 +21,7 @@ interface Props {
   tasks: TaskOut[]
   rowNo: Map<number, number>
   departments: { id: number; name: string }[]
-  /** Name, kind, lane, links, notes. */
+  /** Name, kind, lane, links, idea (structure; false after the baseline). */
   canEdit: boolean
   /** Start and duration. */
   canDates: boolean
@@ -64,12 +68,37 @@ const formOf = (t: TaskOut): Form => ({
   actual_finish: t.actual_finish ?? '',
 })
 
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
 export default function TaskEditor(p: Props) {
   const { task } = p
   const [f, setF] = useState<Form>(() => formOf(task))
-  // A server update (drag, auto-schedule) refreshes the form.
-  useEffect(() => { setF(formOf(task)) }, [task])
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((prev) => ({ ...prev, [k]: v }))
+  const touched = useRef(new Set<keyof Form>())
+  const lastId = useRef(task.id)
+  useEffect(() => {
+    const fresh = formOf(task)
+    if (lastId.current !== task.id) {
+      // Another task: start over.
+      lastId.current = task.id
+      touched.current.clear()
+      setF(fresh)
+      return
+    }
+    setF((prev) => {
+      const next = { ...prev }
+      for (const k of Object.keys(fresh) as (keyof Form)[]) {
+        // A touched field that now matches the server was saved: untouch it.
+        if (touched.current.has(k) && same(prev[k], fresh[k])) touched.current.delete(k)
+        if (!touched.current.has(k)) (next as Record<string, unknown>)[k] = fresh[k]
+      }
+      return next
+    })
+  }, [task])
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
+    touched.current.add(k)
+    setF((prev) => ({ ...prev, [k]: v }))
+  }
+  const canNotes = p.canEdit || p.canDates
 
   const milestone = f.kind === 'milestone'
   const dur = milestone ? 0 : Math.max(0, Math.floor(Number(f.duration) || 0))
@@ -98,8 +127,8 @@ export default function TaskEditor(p: Props) {
       const preds = [...f.predecessors].sort((a, b) => a - b)
       if (preds.join(',') !== [...task.predecessors].sort((a, b) => a - b).join(',')) out.predecessors = preds
       if (f.is_idea !== task.is_idea) out.is_idea = f.is_idea
-      if ((f.notes.trim() || null) !== (task.notes ?? null)) out.notes = f.notes.trim() || null
     }
+    if (canNotes && (f.notes.trim() || null) !== (task.notes ?? null)) out.notes = f.notes.trim() || null
     if (p.canDates && startOk) {
       if (f.start_date !== task.start_date) out.start_date = f.start_date
       if (dur !== task.duration_days) out.duration_days = dur
@@ -119,9 +148,9 @@ export default function TaskEditor(p: Props) {
   const col = KIND_COLOR[task.kind] ?? KIND_COLOR.work
 
   return (
-    <aside role="dialog" aria-label={`Task ${task.name}`} data-testid="task-editor"
+    <aside role="region" aria-label={`Task ${task.name}`} data-testid="task-editor"
       onKeyDown={(e) => { if (e.key === 'Escape') p.onClose() }}
-      className="fixed inset-y-0 right-0 z-40 flex w-full max-w-[380px] flex-col border-l border-slate-700 bg-slate-900 shadow-2xl">
+      className="flex flex-col rounded-lg border border-slate-700 bg-slate-900">
       <header className="flex items-start gap-2 border-b border-slate-700 px-4 py-3">
         <span className="mt-1 h-3 w-3 shrink-0 rounded-sm" style={{ background: col.fill }} />
         <div className="min-w-0 flex-1">
@@ -137,7 +166,7 @@ export default function TaskEditor(p: Props) {
           className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200">&#10005;</button>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      <div className="grid gap-4 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
         {readOnly && (
           <p className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
             Read only. Plan editors (PM, Sales, Scheduling, change lead) change the plan.
@@ -155,6 +184,7 @@ export default function TaskEditor(p: Props) {
             <select id="te-kind" className={field} value={f.kind} disabled={!p.canEdit}
               onChange={(e) => {
                 const k = e.target.value as TaskKind
+                touched.current.add('kind'); touched.current.add('duration')
                 setF((prev) => ({ ...prev, kind: k, duration: k === 'milestone' ? '0' : (prev.duration === '0' ? '1' : prev.duration) }))
               }}>
               {TASK_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
@@ -198,7 +228,7 @@ export default function TaskEditor(p: Props) {
           </div>
         </div>
         {p.baselineSet && p.canDates && (
-          <p className="text-[11px] text-amber-300/90">Timing is validated. Moving dates asks for a reason and records a deviation.</p>
+          <p className="text-[11px] text-amber-300/90">Timing is validated. A date change asks for a reason, moves the successors along and records deviations.</p>
         )}
         {startOk && !milestone && dur > 0 && (
           <p className="-mt-2 text-[11px] text-slate-500">Next task can start {fmtIso(addDaysIso(f.start_date, dur))}.</p>
@@ -237,7 +267,7 @@ export default function TaskEditor(p: Props) {
 
         <div>
           <label className={label} htmlFor="te-notes">Notes</label>
-          <textarea id="te-notes" rows={3} className={field} value={f.notes} disabled={!p.canEdit}
+          <textarea id="te-notes" rows={3} className={field} value={f.notes} disabled={!canNotes}
             onChange={(e) => set('notes', e.target.value)} />
         </div>
 

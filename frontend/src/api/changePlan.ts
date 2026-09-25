@@ -4,8 +4,8 @@
  */
 import client from './client'
 import type {
-  BulkDateUpdate, FeedbackVerdict, PlanDeviation, PlanFeedback, PlanKind, PlanOut,
-  TaskCreate, TaskPatch,
+  BulkDateUpdate, FeedbackVerdict, PlanCalendar, PlanChangeSet, PlanChangesOut, PlanDeviation, PlanFeedback,
+  PlanKind, PlanLinkType, PlanOut, TaskCreate, TaskPatch,
 } from '../types/changePlan'
 
 const base = (id: number) => `/v1/changes/${id}/plan`
@@ -62,6 +62,35 @@ export const planApi = {
 
   deleteTask: (id: number, taskId: number) =>
     client.delete<PlanOut>(`${base(id)}/tasks/${taskId}`).then((r) => r.data),
+
+  /** Migration 088: typed links. */
+  createLink: (id: number, plan: PlanKind, body: { from_task_id: number; to_task_id: number; type: PlanLinkType; lag_days: number }) =>
+    client.post<PlanOut>(`${base(id)}/links`, { plan, ...body }).then((r) => r.data),
+
+  patchLink: (id: number, linkId: number, body: { type?: PlanLinkType; lag_days?: number }) =>
+    client.patch<PlanOut>(`${base(id)}/links/${linkId}`, body).then((r) => r.data),
+
+  deleteLink: (id: number, linkId: number) =>
+    client.delete<PlanOut>(`${base(id)}/links/${linkId}`).then((r) => r.data),
+
+  /** One ChangeSet, applied atomically by the server (temp ids allowed). */
+  applyChanges: (id: number, plan: PlanKind, changes: PlanChangeSet, reason?: string) =>
+    client.post<PlanChangesOut>(`${base(id)}/changes`, {
+      plan, changes, ...(reason ? { reason } : {}),
+    }).then((r) => r.data),
+
+  /** Plan calendar (one per change); answers the PlanOut of `plan`. */
+  setCalendar: (id: number, plan: PlanKind, calendar: PlanCalendar) =>
+    client.put<PlanOut>(`${base(id)}/calendar`, calendar, { params: { plan } }).then((r) => r.data),
+
+  /** MS Project XML into a plan (multipart). */
+  importXml: (id: number, plan: PlanKind, file: File | Blob, replace = false) => {
+    const fd = new FormData()
+    fd.append('file', file, (file as File).name ?? 'plan.xml')
+    fd.append('plan', plan)
+    fd.append('replace', replace ? 'true' : 'false')
+    return client.post<PlanOut>(`${base(id)}/import`, fd).then((r) => r.data)
+  },
 
   schedule: (id: number, plan: PlanKind) =>
     client.post<PlanOut>(`${base(id)}/schedule`, { plan }).then((r) => r.data),

@@ -1,0 +1,415 @@
+import { describe, expect, it } from 'vitest'
+import { autoSchedulePatches, findCycle, schedule, wouldCycle } from './schedule'
+import type { GanttCalendar, GanttLink, GanttTask, LinkType, ScheduleOptions } from './types'
+
+const CAL: Partial<GanttCalendar> = { mode: 'calendar', workdays: [1, 2, 3, 4, 5], holidays: [] }
+const WORK: Partial<GanttCalendar> = { mode: 'working', workdays: [1, 2, 3, 4, 5], holidays: [] }
+
+const T = (id: string | number, start: string, duration: number, more: Partial<GanttTask> = {}): GanttTask =>
+  ({ id, name: `T${id}`, start, duration, ...more })
+let n = 0
+const L = (from: string | number, to: string | number, type: LinkType = 'FS', lagDays = 0): GanttLink =>
+  ({ id: `l${n++}`, from, to, type, lagDays })
+
+function run(tasks: GanttTask[], links: GanttLink[] = [], cal = CAL, opts?: ScheduleOptions) {
+  const r = schedule(tasks, links, cal, opts)
+  const get = (id: string | number) => r.byId.get(id)!
+  return { r, get }
+}
+
+describe('single tasks', () => {
+  it('keeps a lone task and makes it critical', () => {
+    const { get, r } = run([T('A', '2026-10-05', 5)])
+    expect(get('A')).toMatchObject({ start: '2026-10-05', end: '2026-10-10', totalSlack: 0, freeSlack: 0, critical: true })
+    expect(r.start).toBe('2026-10-05')
+    expect(r.finish).toBe('2026-10-10')
+    expect(r.criticalIds).toEqual(['A'])
+  })
+  it('treats a negative duration as zero', () => {
+    const { get } = run([T('A', '2026-10-05', -3)])
+    expect(get('A').end).toBe('2026-10-05')
+  })
+  it('snaps a weekend start in working mode', () => {
+    const { get } = run([T('A', '2026-10-10', 2)], [], WORK)
+    expect(get('A')).toMatchObject({ start: '2026-10-12', end: '2026-10-14' })
+  })
+  it('moves a start that falls on a holiday', () => {
+    const { get } = run([T('A', '2026-10-05', 2)], [], { ...WORK, holidays: ['2026-10-05'] })
+    expect(get('A')).toMatchObject({ start: '2026-10-06', end: '2026-10-08' })
+  })
+  it('stretches over a holiday inside the task', () => {
+    const { get } = run([T('A', '2026-10-05', 3)], [], { ...WORK, holidays: ['2026-10-06'] })
+    expect(get('A').end).toBe('2026-10-09')
+  })
+  it('leaves an empty plan without dates', () => {
+    const r = schedule([], [], CAL)
+    expect(r.start).toBeNull()
+    expect(r.finish).toBeNull()
+    expect(r.criticalIds).toEqual([])
+  })
+  it('reports progress, clamped', () => {
+    const { get } = run([T('A', '2026-10-05', 5, { progress: 140 }), T('B', '2026-10-05', 5, { progress: -5 })])
+    expect(get('A').progress).toBe(100)
+    expect(get('B').progress).toBe(0)
+  })
+})
+
+describe('link types, calendar mode', () => {
+  const A = T('A', '2026-10-05', 5) // ends 10
+  it('FS pushes the successor to the predecessor end', () => {
+    expect(run([A, T('B', '2026-10-05', 2)], [L('A', 'B')]).get('B').start).toBe('2026-10-10')
+  })
+  it('FS with a positive lag', () => {
+    expect(run([A, T('B', '2026-10-05', 2)], [L('A', 'B', 'FS', 3)]).get('B').start).toBe('2026-10-13')
+  })
+  it('FS with a lead (negative lag)', () => {
+    expect(run([A, T('B', '2026-10-01', 2)], [L('A', 'B', 'FS', -2)]).get('B').start).toBe('2026-10-08')
+  })
+  it('never pulls a later successor earlier (push mode)', () => {
+    const { get } = run([A, T('B', '2026-10-20', 2)], [L('A', 'B')])
+    expect(get('B').start).toBe('2026-10-20')
+    expect(get('A').totalSlack).toBe(10)
+    expect(get('A').freeSlack).toBe(10)
+    expect(get('B').critical).toBe(true)
+    expect(get('A').critical).toBe(false)
+  })
+  it('SS with a lag', () => {
+    expect(run([A, T('B', '2026-10-01', 2)], [L('A', 'B', 'SS', 2)]).get('B').start).toBe('2026-10-07')
+  })
+  it('SS with a lead', () => {
+    expect(run([A, T('B', '2026-10-01', 2)], [L('A', 'B', 'SS', -2)]).get('B').start).toBe('2026-10-03')
+  })
+  it('FF with a lag moves the successor end', () => {
+    const { get } = run([A, T('B', '2026-10-05', 3)], [L('A', 'B', 'FF', 1)])
+    expect(get('B')).toMatchObject({ start: '2026-10-08', end: '2026-10-11' })
+  })
+  it('FF with a lead can leave the successor where it is', () => {
+    const { get } = run([A, T('B', '2026-10-05', 3)], [L('A', 'B', 'FF', -2)])
+    expect(get('B')).toMatchObject({ start: '2026-10-05', end: '2026-10-08' })
+  })
+  it('SF with zero lag: successor ends when the predecessor starts', () => {
+    const { get } = run([A, T('B', '2026-10-01', 3)], [L('A', 'B', 'SF')])
+    expect(get('B')).toMatchObject({ start: '2026-10-02', end: '2026-10-05' })
+  })
+  it('SF with a lag', () => {
+    const { get } = run([A, T('B', '2026-10-01', 3)], [L('A', 'B', 'SF', 4)])
+    expect(get('B')).toMatchObject({ start: '2026-10-06', end: '2026-10-09' })
+  })
+  it('takes the latest of several predecessors', () => {
+    const { get } = run([A, T('B', '2026-10-05', 8), T('C', '2026-10-05', 1)], [L('A', 'C'), L('B', 'C')])
+    expect(get('C').start).toBe('2026-10-13')
+  })
+  it('cascades through a chain', () => {
+    const { get } = run([A, T('B', '2026-10-05', 2), T('C', '2026-10-05', 2)], [L('A', 'B'), L('B', 'C')])
+    expect(get('C')).toMatchObject({ start: '2026-10-12', end: '2026-10-14' })
+  })
+  it('ignores links to unknown tasks', () => {
+    const { get, r } = run([A], [L('A', 'Z'), L('Y', 'A')])
+    expect(get('A').start).toBe('2026-10-05')
+    expect(r.cycle).toEqual([])
+  })
+  it('works with numeric ids', () => {
+    const r = schedule([T(1, '2026-10-05', 2), T(2, '2026-10-05', 2)], [L(1, 2)], CAL)
+    expect(r.byId.get(2)!.start).toBe('2026-10-07')
+  })
+})
+
+describe('link types, working mode', () => {
+  it('FS over a weekend', () => {
+    const { get } = run([T('A', '2026-10-08', 3), T('B', '2026-10-05', 1)], [L('A', 'B')], WORK)
+    expect(get('A').end).toBe('2026-10-13')
+    expect(get('B').start).toBe('2026-10-13')
+  })
+  it('FS from a Friday finish starts on Monday', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-05', 1)], [L('A', 'B')], WORK)
+    expect(get('B')).toMatchObject({ start: '2026-10-12', end: '2026-10-13' })
+  })
+  it('FS lag counts working days', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-05', 3)], [L('A', 'B', 'FS', 2)], WORK)
+    expect(get('B')).toMatchObject({ start: '2026-10-14', end: '2026-10-17' })
+  })
+  it('FS lead counts working days back', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-01', 2)], [L('A', 'B', 'FS', -1)], WORK)
+    expect(get('B')).toMatchObject({ start: '2026-10-09', end: '2026-10-13' })
+  })
+  it('FS landing on a holiday moves to the next working day', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-05', 1)], [L('A', 'B')], { ...WORK, holidays: ['2026-10-12'] })
+    expect(get('B').start).toBe('2026-10-13')
+  })
+  it('SS lag over a weekend snaps to Monday', () => {
+    const { get } = run([T('A', '2026-10-08', 5), T('B', '2026-10-05', 1)], [L('A', 'B', 'SS', 2)], WORK)
+    expect(get('B').start).toBe('2026-10-12')
+  })
+  it('FF with zero lag ends together', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-05', 2)], [L('A', 'B', 'FF')], WORK)
+    expect(get('B')).toMatchObject({ start: '2026-10-08', end: '2026-10-10' })
+  })
+  it('SF with a lag in working days', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('B', '2026-10-01', 2)], [L('A', 'B', 'SF', 3)], WORK)
+    expect(get('B')).toMatchObject({ start: '2026-10-06', end: '2026-10-08' })
+  })
+  it('a milestone after a Friday finish sits on Monday', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('M', '2026-10-05', 0)], [L('A', 'M')], WORK)
+    expect(get('M')).toMatchObject({ start: '2026-10-12', end: '2026-10-12', totalSlack: 0, critical: true })
+  })
+  it('slack counts working days', () => {
+    const { get } = run([T('A', '2026-10-05', 10), T('B', '2026-10-05', 5)], [], WORK)
+    expect(get('B').totalSlack).toBe(5)
+  })
+  it('supports a Sunday to Thursday week', () => {
+    const cal = { mode: 'working' as const, workdays: [7, 1, 2, 3, 4], holidays: [] }
+    const { get } = run([T('A', '2026-10-07', 2), T('B', '2026-10-05', 1)], [L('A', 'B')], cal)
+    // Wed 7 + Thu 8 -> exclusive Fri 9, next working day Sun 11.
+    expect(get('B').start).toBe('2026-10-11')
+  })
+})
+
+describe('mixed chains and slack', () => {
+  it('chain SS, FF, FS lead: everything critical', () => {
+    const tasks = [T('A', '2026-10-05', 4), T('B', '2026-10-01', 3), T('C', '2026-10-01', 2), T('D', '2026-10-01', 1)]
+    const links = [L('A', 'B', 'SS', 1), L('B', 'C', 'FF', 2), L('C', 'D', 'FS', -1)]
+    const { get, r } = run(tasks, links)
+    expect(get('B')).toMatchObject({ start: '2026-10-06', end: '2026-10-09' })
+    expect(get('C')).toMatchObject({ start: '2026-10-09', end: '2026-10-11' })
+    expect(get('D')).toMatchObject({ start: '2026-10-10', end: '2026-10-11' })
+    expect(r.criticalIds).toEqual(['A', 'B', 'C', 'D'])
+  })
+  it('parallel branches: the short branch has slack', () => {
+    const tasks = [T('A', '2026-10-05', 2), T('B', '2026-10-05', 5), T('C', '2026-10-05', 2), T('D', '2026-10-05', 1)]
+    const { get } = run(tasks, [L('A', 'B'), L('A', 'C'), L('B', 'D'), L('C', 'D')])
+    expect(get('D').start).toBe('2026-10-12')
+    expect(get('C')).toMatchObject({ totalSlack: 3, freeSlack: 3, critical: false, lateStart: '2026-10-10', lateEnd: '2026-10-12' })
+    expect(get('B').critical).toBe(true)
+    expect(get('A').critical).toBe(true)
+  })
+  it('free slack is smaller than total slack when the successor has slack', () => {
+    const tasks = [T('A', '2026-10-05', 10), T('B', '2026-10-05', 2), T('C', '2026-10-10', 2)]
+    const { get } = run(tasks, [L('B', 'C')])
+    expect(get('C')).toMatchObject({ totalSlack: 3, freeSlack: 3 })
+    expect(get('B')).toMatchObject({ totalSlack: 6, freeSlack: 3 })
+  })
+  it('free slack through an SS link', () => {
+    const tasks = [T('A', '2026-10-05', 10), T('B', '2026-10-05', 2), T('C', '2026-10-09', 2)]
+    const { get } = run(tasks, [L('B', 'C', 'SS', 1)])
+    expect(get('B').freeSlack).toBe(3)
+  })
+  it('a milestone at the end of the chain is critical', () => {
+    const { get } = run([T('A', '2026-10-05', 5), T('M', '2026-10-01', 0)], [L('A', 'M')])
+    expect(get('M')).toMatchObject({ start: '2026-10-10', end: '2026-10-10', totalSlack: 0, critical: true })
+  })
+})
+
+describe('push vs pull', () => {
+  const tasks = [T('A', '2026-10-05', 3), T('B', '2026-10-20', 2), T('C', '2026-10-20', 2)]
+  const links = [L('A', 'C')]
+  it('push keeps later starts', () => {
+    const { get } = run(tasks, links)
+    expect(get('B').start).toBe('2026-10-20')
+    expect(get('C').start).toBe('2026-10-20')
+  })
+  it('pull starts free tasks at the project start and linked ones after their predecessors', () => {
+    const { get } = run(tasks, links, CAL, { pull: true })
+    expect(get('B').start).toBe('2026-10-05')
+    expect(get('C').start).toBe('2026-10-08')
+  })
+  it('pull honours an explicit project start', () => {
+    const { get } = run(tasks, links, CAL, { pull: true, projectStart: '2026-10-01' })
+    expect(get('A').start).toBe('2026-10-01')
+    expect(get('C').start).toBe('2026-10-04')
+  })
+  it('pull still respects snet', () => {
+    const t2 = [T('A', '2026-10-05', 3), T('B', '2026-10-20', 2, { constraint: { type: 'snet', date: '2026-10-07' } })]
+    expect(run(t2, [], CAL, { pull: true }).get('B').start).toBe('2026-10-07')
+  })
+  it('autoSchedulePatches lists only moved tasks', () => {
+    const p = autoSchedulePatches([T('A', '2026-10-05', 3), T('B', '2026-10-05', 1), T('C', '2026-10-20', 1)], [L('A', 'B'), L('A', 'C')], CAL)
+    expect(p).toEqual([{ id: 'B', patch: { start: '2026-10-08' } }])
+  })
+  it('autoSchedulePatches in pull mode moves tasks earlier', () => {
+    const p = autoSchedulePatches([T('A', '2026-10-05', 3), T('C', '2026-10-20', 1)], [L('A', 'C')], CAL, { pull: true })
+    expect(p).toEqual([{ id: 'C', patch: { start: '2026-10-08' } }])
+  })
+  it('autoSchedulePatches never patches summaries', () => {
+    const p = autoSchedulePatches([T('S', '2026-01-01', 0), T('A', '2026-10-05', 1, { parentId: 'S' })], [], CAL)
+    expect(p).toEqual([])
+  })
+})
+
+describe('constraints', () => {
+  it('asap has no effect', () => {
+    expect(run([T('A', '2026-10-05', 3, { constraint: { type: 'asap' } })]).get('A').start).toBe('2026-10-05')
+  })
+  it('snet pushes a task later', () => {
+    expect(run([T('A', '2026-10-05', 3, { constraint: { type: 'snet', date: '2026-10-07' } })]).get('A').start).toBe('2026-10-07')
+  })
+  it('snet earlier than the start keeps the start (push)', () => {
+    expect(run([T('A', '2026-10-05', 3, { constraint: { type: 'snet', date: '2026-10-01' } })]).get('A').start).toBe('2026-10-05')
+  })
+  it('snet on a Sunday in working mode starts Monday', () => {
+    const { get } = run([T('A', '2026-10-05', 1, { constraint: { type: 'snet', date: '2026-10-11' } })], [], WORK)
+    expect(get('A').start).toBe('2026-10-12')
+  })
+  it('mso pins the start, even earlier than planned', () => {
+    const { get, r } = run([T('A', '2026-10-10', 3, { constraint: { type: 'mso', date: '2026-10-07' } })])
+    expect(get('A').start).toBe('2026-10-07')
+    expect(r.issues).toEqual([])
+  })
+  it('mso before a predecessor ends: conflict and negative slack', () => {
+    const tasks = [T('A', '2026-10-05', 5), T('B', '2026-10-05', 2, { constraint: { type: 'mso', date: '2026-10-08' } })]
+    const { get, r } = run(tasks, [L('A', 'B')])
+    expect(get('B').start).toBe('2026-10-08')
+    expect(get('A').totalSlack).toBe(-2)
+    expect(get('A').critical).toBe(true)
+    expect(r.issues.map((i) => i.code)).toEqual(['constraint_conflict'])
+    expect(r.issues[0]).toMatchObject({ level: 'warning', taskId: 'B' })
+  })
+  it('mfo pins the (exclusive) finish', () => {
+    const { get } = run([T('A', '2026-10-01', 3, { constraint: { type: 'mfo', date: '2026-10-12' } })])
+    expect(get('A')).toMatchObject({ start: '2026-10-09', end: '2026-10-12' })
+  })
+  it('mfo in working mode', () => {
+    const { get } = run([T('A', '2026-10-01', 2, { constraint: { type: 'mfo', date: '2026-10-13' } })], [], WORK)
+    expect(get('A')).toMatchObject({ start: '2026-10-09', end: '2026-10-13' })
+  })
+  it('mfo conflicting with a predecessor is reported', () => {
+    const tasks = [T('A', '2026-10-05', 5), T('B', '2026-10-05', 2, { constraint: { type: 'mfo', date: '2026-10-09' } })]
+    const { r } = run(tasks, [L('A', 'B')])
+    expect(r.issues.map((i) => i.code)).toContain('constraint_conflict')
+  })
+  it('fnlt met: slack against the constraint date', () => {
+    const { get, r } = run([T('A', '2026-10-05', 3, { constraint: { type: 'fnlt', date: '2026-10-10' } }), T('B', '2026-10-05', 10)])
+    expect(get('A').totalSlack).toBe(2)
+    expect(r.issues).toEqual([])
+  })
+  it('fnlt missed: warning and negative slack', () => {
+    const { get, r } = run([T('A', '2026-10-05', 5, { constraint: { type: 'fnlt', date: '2026-10-08' } })])
+    expect(get('A').totalSlack).toBe(-2)
+    expect(get('A').critical).toBe(true)
+    expect(r.issues[0]).toMatchObject({ code: 'constraint_conflict', taskId: 'A' })
+  })
+  it('fnlt does not move the task forward', () => {
+    expect(run([T('A', '2026-10-05', 5, { constraint: { type: 'fnlt', date: '2026-10-08' } })]).get('A').start).toBe('2026-10-05')
+  })
+  it('a constraint without a date is ignored', () => {
+    expect(run([T('A', '2026-10-05', 3, { constraint: { type: 'snet', date: null } })]).get('A').start).toBe('2026-10-05')
+  })
+})
+
+describe('idea tasks', () => {
+  it('are left out of the finish, slack and critical path', () => {
+    const { get, r } = run([T('A', '2026-10-05', 5), T('I', '2026-10-05', 20, { isIdea: true })])
+    expect(r.finish).toBe('2026-10-10')
+    expect(get('I')).toMatchObject({ totalSlack: null, freeSlack: null, critical: false })
+    expect(get('A').critical).toBe(true)
+  })
+  it('are still scheduled forward and can push real tasks', () => {
+    const { get } = run([T('I', '2026-10-05', 3, { isIdea: true }), T('A', '2026-10-05', 2)], [L('I', 'A')])
+    expect(get('A').start).toBe('2026-10-08')
+    expect(get('I').critical).toBe(false)
+  })
+  it('children of an idea summary count as ideas', () => {
+    const { get, r } = run([T('S', '2026-10-05', 0, { isIdea: true }), T('A', '2026-10-05', 9, { parentId: 'S' }), T('B', '2026-10-05', 2)])
+    expect(r.finish).toBe('2026-10-07')
+    expect(get('A').totalSlack).toBeNull()
+  })
+  it('a plan of only ideas has no finish', () => {
+    expect(run([T('I', '2026-10-05', 3, { isIdea: true })]).r.finish).toBeNull()
+  })
+})
+
+describe('summary tasks', () => {
+  it('roll up start, end and weighted progress', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 3, { parentId: 'S', progress: 100 }), T('B', '2026-10-10', 2, { parentId: 'S', progress: 0 })]
+    const { get } = run(tasks)
+    expect(get('S')).toMatchObject({ start: '2026-10-05', end: '2026-10-12', isSummary: true, progress: 60 })
+  })
+  it('roll up nested levels', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('S2', '2026-01-01', 0, { parentId: 'S' }), T('A', '2026-10-05', 3, { parentId: 'S2' }), T('B', '2026-10-20', 1, { parentId: 'S' })]
+    const { get } = run(tasks)
+    expect(get('S2')).toMatchObject({ start: '2026-10-05', end: '2026-10-08' })
+    expect(get('S')).toMatchObject({ start: '2026-10-05', end: '2026-10-21' })
+  })
+  it('take the minimum slack of their leaves and are critical with them', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 3, { parentId: 'S' }), T('B', '2026-10-05', 10, { parentId: 'S' })]
+    const { get } = run(tasks)
+    expect(get('A').totalSlack).toBe(7)
+    expect(get('S')).toMatchObject({ totalSlack: 0, critical: true, freeSlack: null })
+  })
+  it('a summary with only slack leaves is not critical', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 3, { parentId: 'S' }), T('X', '2026-10-05', 10)]
+    expect(run(tasks).get('S')).toMatchObject({ totalSlack: 7, critical: false })
+  })
+  it('a link into a summary applies to every leaf', () => {
+    const tasks = [T('X', '2026-10-05', 5), T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-06', 1, { parentId: 'S' })]
+    const { get } = run(tasks, [L('X', 'S')])
+    expect(get('A').start).toBe('2026-10-10')
+    expect(get('B').start).toBe('2026-10-10')
+    expect(get('S')).toMatchObject({ start: '2026-10-10', end: '2026-10-12' })
+  })
+  it('an FF link into a summary bounds every leaf end', () => {
+    const tasks = [T('X', '2026-10-05', 5), T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 4, { parentId: 'S' })]
+    const { get } = run(tasks, [L('X', 'S', 'FF')])
+    expect(get('A').start).toBe('2026-10-08')
+    expect(get('B').start).toBe('2026-10-06')
+  })
+  it('an FS link out of a summary waits for its last leaf', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 6, { parentId: 'S' }), T('Y', '2026-10-05', 1)]
+    const { get } = run(tasks, [L('S', 'Y')])
+    expect(get('Y').start).toBe('2026-10-11')
+    expect(get('A').totalSlack).toBe(4)
+    expect(get('B').critical).toBe(true)
+  })
+  it('an SS link out of a summary uses its earliest leaf start', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-07', 2, { parentId: 'S' }), T('B', '2026-10-05', 6, { parentId: 'S' }), T('Y', '2026-10-01', 1)]
+    expect(run(tasks, [L('S', 'Y', 'SS', 1)]).get('Y').start).toBe('2026-10-06')
+  })
+  it('a constraint on a summary pushes its leaves', () => {
+    const tasks = [T('S', '2026-01-01', 0, { constraint: { type: 'snet', date: '2026-10-08' } }), T('A', '2026-10-05', 2, { parentId: 'S' })]
+    expect(run(tasks).get('A').start).toBe('2026-10-08')
+  })
+  it('links into nested summaries reach the deepest leaves', () => {
+    const tasks = [T('X', '2026-10-05', 3), T('S', '2026-01-01', 0), T('S2', '2026-01-01', 0, { parentId: 'S' }), T('A', '2026-10-05', 1, { parentId: 'S2' })]
+    expect(run(tasks, [L('X', 'S')]).get('A').start).toBe('2026-10-08')
+  })
+})
+
+describe('cycles', () => {
+  it('detects a two-task loop and keeps the planned dates', () => {
+    const { r, get } = run([T('A', '2026-10-05', 3), T('B', '2026-10-05', 2)], [L('A', 'B'), L('B', 'A')])
+    expect(new Set(r.cycle)).toEqual(new Set(['A', 'B']))
+    expect(get('B').start).toBe('2026-10-05')
+    expect(get('A').totalSlack).toBeNull()
+    expect(r.criticalIds).toEqual([])
+    expect(r.issues[0]).toMatchObject({ code: 'cycle', level: 'error' })
+  })
+  it('detects a self link', () => {
+    expect(run([T('A', '2026-10-05', 3)], [L('A', 'A')]).r.cycle).toEqual(['A'])
+  })
+  it('detects a link from a child to its own summary', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' })]
+    expect(run(tasks, [L('A', 'S')]).r.cycle.length).toBeGreaterThan(0)
+  })
+  it('detects a three-task loop', () => {
+    const tasks = [T('A', '2026-10-05', 1), T('B', '2026-10-05', 1), T('C', '2026-10-05', 1), T('D', '2026-10-05', 1)]
+    const r = findCycle(tasks, [L('A', 'B'), L('B', 'C'), L('C', 'A'), L('C', 'D')])
+    expect(new Set(r).has('A')).toBe(true)
+  })
+  it('findCycle is empty for a DAG', () => {
+    expect(findCycle([T('A', '2026-10-05', 1), T('B', '2026-10-05', 1)], [L('A', 'B')])).toEqual([])
+  })
+  it('wouldCycle', () => {
+    const tasks = [T('A', '2026-10-05', 1), T('B', '2026-10-05', 1), T('C', '2026-10-05', 1)]
+    const links = [L('A', 'B'), L('B', 'C')]
+    expect(wouldCycle(tasks, links, 'C', 'A')).toBe(true)
+    expect(wouldCycle(tasks, links, 'A', 'C')).toBe(false)
+    expect(wouldCycle(tasks, links, 'B', 'B')).toBe(true)
+  })
+  it('autoSchedulePatches does nothing on a cycle', () => {
+    expect(autoSchedulePatches([T('A', '2026-10-05', 3), T('B', '2026-10-05', 2)], [L('A', 'B'), L('B', 'A')], CAL)).toEqual([])
+  })
+  it('rolls summaries up even on a cycle', () => {
+    const tasks = [T('S', '2026-01-01', 0), T('A', '2026-10-05', 2, { parentId: 'S' }), T('B', '2026-10-05', 1)]
+    const { get } = run(tasks, [L('B', 'B')])
+    expect(get('S')).toMatchObject({ start: '2026-10-05', end: '2026-10-07', totalSlack: null })
+  })
+})

@@ -1,39 +1,43 @@
 /**
- * The change plan as an MS-Project-like Gantt (spec 2026-09-25 §4, §9).
+ * The change plan (spec 2026-09-25 §4, §9, §11): the ECR adapter around the
+ * generic Gantt in `components/gantt`.
  *
- * Left: tasks grouped by swimlane. Right: the timeline. Bars move and resize
- * by drag (snapped to days), links are drawn from the dot at a bar's end onto
- * another bar, a selection moves as a block. Every change is rendered locally
- * first and then replaced by the server's PlanOut, which owns validation, the
- * summary and the critical path. After "Timing validated" a date change asks
- * for a reason and becomes a deviation.
+ * It fetches `['change', id, 'plan', plan]`, maps PlanOut to the generic
+ * model, and persists every ChangeSet the Gantt emits: through the atomic
+ * `POST /plan/changes` when the server has migration 088 (detected by `links`
+ * in PlanOut), else as the older REST calls (finish-to-start links only).
+ * Saves of one plan run one at a time, also across components; a failed save
+ * refetches the plan (the Gantt rolls its optimistic view back).
  *
- * The component fetches its own plan (`['change', id, 'plan', plan]`) and owns
- * every plan mutation.
+ * ECR rules kept here: after "Timing validated" only dates (with a reason,
+ * successors carried along) and notes change; the seed, buffer and bank build
+ * presets; the validation strip; exports and import via the backend.
  */
-import {
-  useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
-  type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-} from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
 import { useDepartments } from '../../../hooks/queries/useWorkflows'
-import type { BulkDateUpdate, PlanOut, TaskCreate, TaskKind, TaskOut, TaskPatch } from '../../../types/changePlan'
-import ReasonDialog from '../ReasonDialog'
+import type { PlanOut, TaskOut, TaskPatch } from '../../../types/changePlan'
+import { Gantt, type GanttHandle } from '../../gantt/Gantt'
+import type { GanttMarker } from '../../gantt/GanttChart'
+import type { ColumnKey } from '../../gantt/columns'
+import { endOf, fmtShort, makeCal, normStart, toDay } from '../../gantt/engine/calendar'
+import { buildTree, key } from '../../gantt/engine/tree'
+import type { ApplyResult, ChangeSet, GanttId, GanttModel, GanttTask } from '../../gantt/engine/types'
+import { buildRows } from '../../gantt/layout'
 import ConfirmDialog from './ConfirmDialog'
-import { GridBody, GridHeader } from './GanttGrid'
-import GanttToolbar, { btn, btnPrimary, type AddPreset, type AlignAction } from './GanttToolbar'
-import { TimelineBody, TimelineHeader, type LinkPreview } from './GanttTimeline'
+import DeviationDialog, { type MovedTask } from './DeviationDialog'
+import PlanToolbar, { btn, btnPrimary, type AlignAction } from './GanttToolbar'
 import TaskEditor from './TaskEditor'
 import ValidationList from './ValidationList'
 import {
-  HEADER_H, PX_PER_DAY, ROW_H, applyDrag, deadlineColor, buildRows, createsCycle, diffUpdates, endOf,
-  fmtDay, gridWidth, groupByLane, inclusiveEnd, laneOf, matchTo, rowNumbers, runParallel, snapDays,
-  snapToPredecessors, taskGeo, timelineRange, toDay, toIso, todayDay, xOf, zoomStep,
-  type Geo, type Zoom,
-} from './ganttMath'
+  bankBuildChangeSet, bufferChangeSet, matchSelection, runParallel, snapToLinks, withSuccessorMoves,
+} from './ecrActions'
+import {
+  ECR_KINDS, hasDateChanges, persistLegacy, planToModel, serialized, toLegacyCalls, toPlanChangeSet,
+} from './ecrAdapter'
+import { deadlineColor } from './ganttMath'
 
 export interface GanttPlannerProps {
   changeId: number
@@ -43,6 +47,10 @@ export interface GanttPlannerProps {
   /** read-only small view (offer preview) */
   compact?: boolean
   onPlanChange?: (p: PlanOut) => void
+  /** Hide the seed buttons (the host offers its own). */
+  hideSeed?: boolean
+  /** CSS height of the chart area. */
+  height?: number | string
 }
 
 const errDetail = (e: unknown): string | undefined => {
@@ -50,438 +58,178 @@ const errDetail = (e: unknown): string | undefined => {
   if (typeof d === 'string') return d
   if (Array.isArray(d)) return d.map((x) => (x as { msg?: string })?.msg ?? String(x)).join('; ')
   if (d && typeof d === 'object' && 'message' in d) return String((d as { message: unknown }).message)
+  if (e instanceof Error && e.message) return e.message
   return undefined
 }
 
-interface DragState {
-  mode: 'move' | 'resize'
-  ids: number[]
-  delta: number
-}
-
-interface PointerStart {
-  kind: 'bar' | 'link'
-  task: TaskOut
-  mode: 'move' | 'resize'
-  x0: number
-  y0: number
-  additive: boolean
-  moved: boolean
-  ids: number[]
-}
-
+interface ReasonAsk { cs: ChangeSet; changed: MovedTask[]; moved: MovedTask[]; resolve: (cs: ChangeSet | null) => void }
 interface ConfirmState { title: string; body?: string; label: string; danger?: boolean; run: () => void }
-interface ReasonState { updates: BulkDateUpdate[]; links?: { id: number; predecessors: number[] }[]; patch?: { id: number; body: TaskPatch } }
 
-export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = false, onPlanChange }: GanttPlannerProps) {
+export default function GanttPlanner({
+  changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height,
+}: GanttPlannerProps) {
   const qc = useQueryClient()
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
-  const { data, isLoading, isError } = useQuery({
-    queryKey, queryFn: () => planApi.get(changeId, plan),
-  })
+  const { data, isLoading, isError } = useQuery({ queryKey, queryFn: () => planApi.get(changeId, plan) })
   const { data: deptData } = useDepartments()
   const departments = useMemo(
     () => (deptData ?? []).filter((d) => d.is_active !== false).map((d) => ({ id: d.id, name: d.name })),
     [deptData])
-
   const onPlanChangeRef = useRef(onPlanChange)
   onPlanChangeRef.current = onPlanChange
   useEffect(() => { if (data) onPlanChangeRef.current?.(data) }, [data])
 
-  const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
+  const ganttRef = useRef<GanttHandle>(null)
   const track = mode === 'track'
-  const [zoom, setZoom] = useState<Zoom>(compact ? 'week' : 'day')
-  const [critical, setCritical] = useState(false)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [selection, setSelection] = useState<number[]>([])
+  const [groupByLane, setGroupByLane] = useState(true)
+  const [selection, setSelection] = useState<GanttId[]>([])
   const [editorId, setEditorId] = useState<number | null>(null)
-  const [overrides, setOverrides] = useState<Map<number, Geo>>(new Map())
-  const [drag, setDrag] = useState<DragState | null>(null)
-  const [nudge, setNudge] = useState<{ ids: number[]; delta: number } | null>(null)
-  const [linkPreview, setLinkPreview] = useState<LinkPreview | null>(null)
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
-  const [reasonFor, setReasonFor] = useState<ReasonState | null>(null)
-  const [flashId, setFlashId] = useState<number | null>(null)
   const [showIssues, setShowIssues] = useState(false)
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null)
+  const [reasonAsk, setReasonAsk] = useState<ReasonAsk | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [blank, setBlank] = useState(false)
 
-  const scrollerRef = useRef<HTMLDivElement>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  const tasks = useMemo(() => data?.tasks ?? [], [data])
+  const model = useMemo(() => (data ? planToModel(data) : null), [data])
+  const modern = !!model?.support.modern
   const baselineSet = !!data?.baseline_set
   const canEdit = !compact && !!data?.can_edit
-  const canDates = !compact && !!data?.can_edit_dates
   const canStructure = canEdit && !baselineSet
+  const canDates = !compact && !!data?.can_edit_dates
   const progressDepts = data?.progress_department_ids
-  const canProgressOn = useCallback((t: TaskOut) => !compact && track
-    && (canEdit || (t.department_id != null && (progressDepts ?? []).includes(t.department_id))),
-  [compact, track, canEdit, progressDepts])
+  const summaryIds = useMemo(() => new Set((data?.tasks ?? []).filter((t) => t.is_summary).map((t) => t.id)), [data])
+  const byId = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data])
 
-  // ---------------------------------------------------------------- geometry
-  const groups = useMemo(() => groupByLane(tasks), [tasks])
-  const rowNo = useMemo(() => rowNumbers(groups), [groups])
-  const rows = useMemo(() => buildRows(groups, collapsed), [groups, collapsed])
-  const baseGeos = useMemo(() => {
-    const m = new Map(tasks.map((t) => [t.id, taskGeo(t)]))
-    overrides.forEach((g, id) => { if (m.has(id)) m.set(id, g) })
-    return m
-  }, [tasks, overrides])
-  const geos = useMemo(() => {
-    let g = baseGeos
-    if (drag && drag.delta !== 0) g = applyDrag(g, drag.mode, drag.ids, drag.delta)
-    if (nudge && nudge.delta !== 0) g = applyDrag(g, 'move', nudge.ids, nudge.delta)
-    return g
-  }, [baseGeos, drag, nudge])
+  const canProgressOn = useCallback((deptId: number | null | undefined) => !compact && track
+    && (canEdit || (deptId != null && (progressDepts ?? []).includes(deptId))), [compact, track, canEdit, progressDepts])
 
-  const today = todayDay()
-  const ppd = PX_PER_DAY[zoom]
-  const deadlines = useMemo(() => data?.deadlines ?? [], [data])
-  const range = useMemo(
-    () => timelineRange(tasks, deadlines.map((d) => toDay(d.date)), today, zoom),
-    // The range follows server data, not live drags, so the canvas does not jump.
-    [tasks, deadlines, today, zoom])
-  const gw = gridWidth({ compact, track })
-  const timelineW = (range.to - range.from) * ppd
-
-  const issueIds = useMemo(() => new Set(
-    (data?.validation.errors ?? []).map((i) => i.task_id).filter((x): x is number => x != null)), [data])
-
-  // ---------------------------------------------------------------- mutations
-  const mut = useMutation({
-    mutationFn: (fn: () => Promise<PlanOut>) => fn(),
-    onSuccess: (p) => {
-      qc.setQueryData(queryKey, p)
-      setOverrides(new Map())
-      qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
-      qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
-      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+  const rights = useMemo(() => ({
+    structure: canStructure,
+    dates: canDates,
+    links: canStructure,
+    field: (t: GanttTask, f: string) => {
+      if (compact) return false
+      switch (f) {
+        case 'start': case 'duration': return canDates
+        case 'notes': return canEdit || canDates
+        case 'progress': return canProgressOn(t.meta?.department_id as number | null | undefined)
+        default: return canStructure // name, lane, kind, isIdea, constraint, links
+      }
     },
-    onError: (e: unknown) => {
+  }), [compact, canStructure, canDates, canEdit, canProgressOn])
+
+  // ---------------------------------------------------------------- persistence
+  // The server's plan as of the last answer: the "before" of the next save (saves are serialized).
+  const serverRef = useRef<PlanOut | null>(null)
+  useEffect(() => { if (data) serverRef.current = data }, [data])
+  const afterSave = useCallback((out: PlanOut | null) => {
+    if (out) { serverRef.current = out; qc.setQueryData(queryKey, out) }
+    qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
+    qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
+    if (plan === 'quote') qc.invalidateQueries({ queryKey: ['change', changeId, 'offers'] })
+  }, [qc, queryKey, changeId, plan])
+
+  const onChange = useCallback((cs: ChangeSet): Promise<ApplyResult> => serialized(`${changeId}:${plan}`, async () => {
+    const reason = typeof cs.meta?.reason === 'string' ? cs.meta.reason : undefined
+    // Not the Gantt's view: that already shows this ChangeSet (optimistic).
+    const server = serverRef.current ? planToModel(serverRef.current) : model
+    const before: GanttModel = { tasks: server?.tasks ?? [], links: server?.links ?? [] }
+    try {
+      if (modern) {
+        const out = await planApi.applyChanges(changeId, plan, toPlanChangeSet(cs, before.tasks), reason)
+        afterSave(out)
+        return { idMap: { ...(out.id_map ?? {}), ...(out.link_id_map ?? {}) } }
+      }
+      const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
+      const { plan: out, idMap } = await persistLegacy(calls, {
+        createTask: (b) => planApi.createTask(changeId, b),
+        patchTask: (id, b) => planApi.patchTask(changeId, id, b),
+        bulkPatch: (u, r) => planApi.bulkPatch(changeId, plan, u, r),
+        deleteTask: (id) => planApi.deleteTask(changeId, id),
+      }, before.tasks.map((t) => t.id).filter((x): x is number => typeof x === 'number'))
+      afterSave(out)
+      return { idMap }
+    } catch (e) {
+      // Part of a multi-call save may have landed: the server copy is the truth.
+      qc.invalidateQueries({ queryKey })
+      throw e
+    }
+  }), [changeId, plan, modern, model, afterSave, qc, queryKey])
+
+  /** After the baseline, a date change needs a reason and carries its successors. */
+  const beforeChange = useCallback((cs: ChangeSet, m: GanttModel): Promise<ChangeSet | null> | ChangeSet => {
+    if (!baselineSet || !hasDateChanges(cs)) return cs
+    const { cs: full, moved } = withSuccessorMoves({ tasks: m.tasks, links: m.links, calendar: model?.calendar }, cs)
+    const cal = makeCal(model?.calendar)
+    const byKey = new Map(m.tasks.map((t) => [key(t.id), t]))
+    const changed: MovedTask[] = (cs.updateTasks ?? []).filter((u) => 'start' in u.patch || 'duration' in u.patch).map((u) => {
+      const t = byKey.get(key(u.id))!
+      const s0 = normStart(cal, toDay(t.start))
+      const e0 = endOf(cal, s0, t.duration)
+      const s1 = normStart(cal, toDay(u.patch.start ?? t.start))
+      const e1 = endOf(cal, s1, u.patch.duration ?? t.duration)
+      return { id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start, days: e1 - e0 }
+    })
+    return new Promise((resolve) => setReasonAsk({ cs: full, changed, moved, resolve }))
+  }, [baselineSet, model])
+
+  const apply = (cs: ChangeSet | null) => {
+    if (!cs) { toast.info?.('Nothing to change'); return }
+    void ganttRef.current?.apply(cs)
+  }
+
+  // ---------------------------------------------------------------- selection + editor
+  const onSelectionChange = useCallback((ids: GanttId[]) => {
+    setSelection(ids)
+    setEditorId((cur) => {
+      if (cur == null) return cur
+      if (ids.length > 1) return null
+      if (ids.length === 1 && typeof ids[0] === 'number' && ids[0] !== cur) return ids[0]
+      return cur
+    })
+  }, [])
+  useEffect(() => { if (editorId != null && !byId.has(editorId)) setEditorId(null) }, [byId, editorId])
+
+  const saveFromEditor = (t: TaskOut, patch: TaskPatch) => {
+    const g: Partial<GanttTask> = {}
+    if (patch.name !== undefined) g.name = patch.name
+    if (patch.kind !== undefined) g.kind = patch.kind
+    if (patch.lane !== undefined) g.lane = patch.lane
+    if (patch.start_date !== undefined) g.start = patch.start_date
+    if (patch.duration_days !== undefined) g.duration = patch.duration_days
+    if (patch.is_idea !== undefined) g.isIdea = patch.is_idea
+    if (patch.notes !== undefined) g.notes = patch.notes
+    if (patch.progress_pct !== undefined) g.progress = patch.progress_pct
+    if (patch.actual_start !== undefined) g.actualStart = patch.actual_start
+    if (patch.actual_finish !== undefined) g.actualEnd = patch.actual_finish
+    if (patch.department_id !== undefined) g.meta = { ...(model?.tasks.find((x) => x.id === t.id)?.meta ?? {}), department_id: patch.department_id }
+    const cs: ChangeSet = { label: 'Edit task', updateTasks: Object.keys(g).length ? [{ id: t.id, patch: g }] : [] }
+    if (patch.predecessors) {
+      const links = ganttRef.current?.getModel().links ?? model?.links ?? []
+      const into = links.filter((l) => l.to === t.id)
+      const want = new Set(patch.predecessors)
+      cs.removeLinks = into.filter((l) => typeof l.from === 'number' && !want.has(l.from)).map((l) => l.id)
+      cs.addLinks = [...want].filter((pid) => !into.some((l) => l.from === pid))
+        .map((pid) => ({ id: `link-${t.id}-${pid}-${Date.now()}`, from: pid, to: t.id, type: 'FS' as const, lagDays: 0 }))
+    }
+    apply(cs)
+  }
+
+  // ---------------------------------------------------------------- server actions
+  const runServer = async (fn: () => Promise<PlanOut>, done?: string) => {
+    setBusy(true)
+    try {
+      const out = await serialized(`${changeId}:${plan}`, fn)
+      afterSave(out)
+      if (done) toast.success?.(done)
+    } catch (e) {
       toast.error(errDetail(e) ?? 'Could not save the plan')
-      setOverrides(new Map())
-    },
-  })
-  const run = (fn: () => Promise<PlanOut>, after?: (p: PlanOut) => void) =>
-    mut.mutate(fn, after ? { onSuccess: after } : undefined)
-
-  const sendDates = (s: ReasonState, reason?: string) => run(async () => {
-    let out: PlanOut | undefined
-    for (const l of s.links ?? []) out = await planApi.patchTask(changeId, l.id, { predecessors: l.predecessors })
-    if (s.updates.length) out = await planApi.bulkPatch(changeId, plan, s.updates, reason)
-    if (s.patch) out = await planApi.patchTask(changeId, s.patch.id, { ...s.patch.body, ...(reason ? { reason } : {}) })
-    return out ?? planApi.get(changeId, plan)
-  })
-
-  /** Render the new dates now, then save (asking for a reason after baseline). */
-  const commitDates = (updates: BulkDateUpdate[], links?: ReasonState['links']) => {
-    if (updates.length === 0 && !links?.length) return
-    setOverrides((prev) => {
-      const next = new Map(prev)
-      for (const u of updates) {
-        const t = tasks.find((x) => x.id === u.id)
-        if (!t) continue
-        const g = prev.get(u.id) ?? taskGeo(t)
-        next.set(u.id, {
-          start: u.start_date ? toDay(u.start_date) : g.start,
-          dur: u.duration_days ?? g.dur,
-        })
-      }
-      return next
-    })
-    const s: ReasonState = { updates, links }
-    if (baselineSet && updates.length > 0) setReasonFor(s)
-    else sendDates(s)
+      qc.invalidateQueries({ queryKey })
+    } finally { setBusy(false) }
   }
-
-  // ---------------------------------------------------------------- selection
-  const selectedSet = useMemo(() => new Set(selection), [selection])
-  const select = (t: TaskOut, additive: boolean, openEditor: boolean) => {
-    if (additive) {
-      setSelection((s) => (s.includes(t.id) ? s.filter((x) => x !== t.id) : [...s, t.id]))
-      return
-    }
-    setSelection([t.id])
-    if (openEditor) setEditorId(t.id)
-  }
-  const clearSelection = () => { setSelection([]); setEditorId(null) }
-
-  // Drop selection entries whose task disappeared.
-  useEffect(() => {
-    const ids = new Set(tasks.map((t) => t.id))
-    setSelection((s) => (s.every((x) => ids.has(x)) ? s : s.filter((x) => ids.has(x))))
-    setEditorId((e) => (e != null && !ids.has(e) ? null : e))
-  }, [tasks])
-
-  // ---------------------------------------------------------------- pointer
-  const latest = useRef({ geos: baseGeos, tasks, ppd, canDates, canEdit, selection })
-  latest.current = { geos: baseGeos, tasks, ppd, canDates, canEdit, selection }
-  const commitRef = useRef(commitDates)
-  commitRef.current = commitDates
-  const selectRef = useRef(select)
-  selectRef.current = select
-  const runRef = useRef(run)
-  runRef.current = run
-
-  const svgPoint = (clientX: number, clientY: number) => {
-    const r = svgRef.current?.getBoundingClientRect()
-    return { x: clientX - (r?.left ?? 0), y: clientY - (r?.top ?? 0) }
-  }
-
-  const beginPointer = (start: PointerStart) => {
-    const onMove = (e: PointerEvent) => {
-      const dx = e.clientX - start.x0
-      if (!start.moved && Math.abs(dx) < 3 && Math.abs(e.clientY - start.y0) < 3) return
-      start.moved = true
-      if (start.kind === 'link') {
-        const g = latest.current.geos.get(start.task.id)
-        const idx = rowsRef.current.findIndex((r) => r.type === 'task' && r.task.id === start.task.id)
-        if (!g || idx < 0) return
-        const pt = svgPoint(e.clientX, e.clientY)
-        setLinkPreview({
-          x1: xOf(endOf(g), rangeRef.current, latest.current.ppd) + 6, y1: idx * ROW_H + ROW_H / 2,
-          x2: pt.x, y2: pt.y,
-        })
-        return
-      }
-      if (!latest.current.canDates) return
-      setDrag({ mode: start.mode, ids: start.ids, delta: snapDays(dx, latest.current.ppd) })
-    }
-    const onUp = (e: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', onUp)
-      if (start.kind === 'link') {
-        setLinkPreview(null)
-        if (!start.moved) return
-        const el = typeof document.elementFromPoint === 'function'
-          ? document.elementFromPoint(e.clientX, e.clientY) : null
-        const hit = el?.closest?.('[data-task-id]')
-        const toId = hit ? Number(hit.getAttribute('data-task-id')) : NaN
-        addLink(start.task.id, toId)
-        return
-      }
-      setDrag(null)
-      const delta = snapDays(e.clientX - start.x0, latest.current.ppd)
-      if (!start.moved || delta === 0 || !latest.current.canDates) {
-        if (!start.moved) selectRef.current(start.task, start.additive, !start.additive)
-        return
-      }
-      const next = applyDrag(latest.current.geos, start.mode, start.ids, delta)
-      const only = new Map([...next].filter(([id]) => start.ids.includes(id)))
-      commitRef.current(diffUpdates(latest.current.tasks, only))
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
-  }
-
-  const onBarPointerDown = (e: ReactPointerEvent, task: TaskOut, m: 'move' | 'resize') => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    e.preventDefault()
-    scrollerRef.current?.focus({ preventScroll: true })
-    const additive = e.shiftKey || e.ctrlKey || e.metaKey
-    const sel = latest.current.selection
-    const ids = m === 'resize' ? [task.id] : (sel.includes(task.id) && sel.length > 1 ? sel : [task.id])
-    beginPointer({ kind: 'bar', task, mode: m, x0: e.clientX, y0: e.clientY, additive, moved: false, ids })
-  }
-
-  const onLinkStart = (e: ReactPointerEvent, task: TaskOut) => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    e.preventDefault()
-    beginPointer({ kind: 'link', task, mode: 'move', x0: e.clientX, y0: e.clientY, additive: false, moved: false, ids: [] })
-  }
-
-  const addLink = (fromId: number, toId: number) => {
-    const target = latest.current.tasks.find((t) => t.id === toId)
-    if (!target || toId === fromId) return
-    if (target.predecessors.includes(fromId)) { toast.info?.('These tasks are already linked'); return }
-    if (createsCycle(latest.current.tasks, fromId, toId)) {
-      toast.error('That link would create a loop')
-      return
-    }
-    runRef.current(() => planApi.patchTask(changeId, toId, { predecessors: [...target.predecessors, fromId] }))
-  }
-
-  const onLinkClick = (fromId: number, toId: number) => {
-    const from = tasks.find((t) => t.id === fromId)
-    const to = tasks.find((t) => t.id === toId)
-    if (!from || !to) return
-    setConfirm({
-      title: 'Remove this link?',
-      body: `#${rowNo.get(toId)} ${to.name} will no longer wait for #${rowNo.get(fromId)} ${from.name}. Dates do not move.`,
-      label: 'Remove link', danger: true,
-      run: () => run(() => planApi.patchTask(changeId, toId, { predecessors: to.predecessors.filter((p) => p !== fromId) })),
-    })
-  }
-
-  const rowsRef = useRef(rows)
-  rowsRef.current = rows
-  const rangeRef = useRef(range)
-  rangeRef.current = range
-
-  const onRowClick = (e: ReactMouseEvent, t: TaskOut) => {
-    const additive = e.shiftKey || e.ctrlKey || e.metaKey
-    select(t, additive, !additive)
-  }
-
-  // ---------------------------------------------------------------- keyboard
-  const nudgeRef = useRef<{ ids: number[]; delta: number } | null>(null)
-  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const flushNudge = () => {
-    const n = nudgeRef.current
-    nudgeRef.current = null
-    setNudge(null)
-    if (!n || n.delta === 0) return
-    const next = applyDrag(latest.current.geos, 'move', n.ids, n.delta)
-    const only = new Map([...next].filter(([id]) => n.ids.includes(id)))
-    commitRef.current(diffUpdates(latest.current.tasks, only))
-  }
-  const flushRef = useRef(flushNudge)
-  flushRef.current = flushNudge
-  useEffect(() => () => { if (nudgeTimer.current) clearTimeout(nudgeTimer.current) }, [])
-
-  const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (compact) return
-    const target = e.target as HTMLElement
-    if (target !== scrollerRef.current && /INPUT|TEXTAREA|SELECT/.test(target.tagName)) return
-    if (e.key === 'Escape') { clearSelection(); return }
-    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && selection.length > 0 && canDates) {
-      e.preventDefault()
-      const step = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 7 : 1)
-      const cur = nudgeRef.current ?? { ids: selection, delta: 0 }
-      nudgeRef.current = { ids: cur.ids, delta: cur.delta + step }
-      setNudge({ ...nudgeRef.current })
-      if (nudgeTimer.current) clearTimeout(nudgeTimer.current)
-      nudgeTimer.current = setTimeout(() => flushRef.current(), 450)
-      return
-    }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selection.length > 0 && canStructure) {
-      e.preventDefault()
-      askDelete(selection)
-    }
-  }
-
-  // ---------------------------------------------------------------- zoom
-  const pendingCenter = useRef<number | null>(null)
-  const changeZoom = useCallback((z: Zoom) => {
-    const el = scrollerRef.current
-    if (el) {
-      const visible = Math.max(el.clientWidth - gw, 100)
-      pendingCenter.current = rangeRef.current.from + (el.scrollLeft + visible / 2) / PX_PER_DAY[zoomRef.current]
-    }
-    setZoom(z)
-  }, [gw])
-  const zoomRef = useRef(zoom)
-  zoomRef.current = zoom
-  useLayoutEffect(() => {
-    const el = scrollerRef.current
-    if (!el || pendingCenter.current == null) return
-    const visible = Math.max(el.clientWidth - gw, 100)
-    el.scrollLeft = Math.max(0, (pendingCenter.current - range.from) * ppd - visible / 2)
-    pendingCenter.current = null
-  }, [zoom, range.from, ppd, gw])
-
-  useEffect(() => {
-    const el = scrollerRef.current
-    if (!el || compact) return
-    let last = 0
-    const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return
-      e.preventDefault()
-      const now = Date.now()
-      if (now - last < 180) return
-      last = now
-      changeZoom(zoomStep(zoomRef.current, e.deltaY < 0 ? 1 : -1))
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [changeZoom, compact, data])
-
-  // First view: scroll to the plan start.
-  const didInitScroll = useRef(false)
-  useLayoutEffect(() => {
-    const el = scrollerRef.current
-    if (!el || didInitScroll.current || !data) return
-    didInitScroll.current = true
-    const first = data.summary.start ? toDay(data.summary.start) : today
-    el.scrollLeft = Math.max(0, xOf(first, range, ppd) - 3 * ppd - 16)
-  }, [data, range, ppd, today])
-
-  // ---------------------------------------------------------------- actions
-  const focusTask = (id: number) => {
-    const t = tasks.find((x) => x.id === id)
-    if (!t) return
-    const lane = laneOf(t)
-    if (collapsed.has(lane)) setCollapsed((c) => { const n = new Set(c); n.delete(lane); return n })
-    setSelection([id])
-    setFlashId(id)
-    setTimeout(() => setFlashId((f) => (f === id ? null : f)), 1600)
-    requestAnimationFrame(() => {
-      const el = scrollerRef.current
-      if (!el) return
-      const idx = buildRows(groups, new Set([...collapsed].filter((l) => l !== lane)))
-        .findIndex((r) => r.type === 'task' && r.task.id === id)
-      if (idx >= 0) el.scrollTop = Math.max(0, idx * ROW_H - 2 * ROW_H)
-      el.scrollLeft = Math.max(0, xOf(toDay(t.start_date), range, ppd) - 60)
-    })
-  }
-
-  const newTask = (kind: TaskKind, preset?: AddPreset) => {
-    const anchor = selection.length === 1 ? tasks.find((t) => t.id === selection[0]) : undefined
-    const start = anchor ? toIso(endOf(taskGeo(anchor)))
-      : data?.summary.finish ?? toIso(today)
-    const body: TaskCreate = {
-      plan, kind, start_date: start,
-      name: preset === 'buffer' ? 'Safety buffer' : preset === 'bank_build' ? 'Bank build (idea)'
-        : preset === 'milestone' ? 'Milestone' : 'New task',
-      duration_days: kind === 'milestone' ? 0 : preset === 'bank_build' ? 10 : 5,
-      lane: preset === 'bank_build' ? 'Scheduling' : anchor?.lane ?? null,
-      department_id: preset === 'bank_build' ? null : anchor?.department_id ?? null,
-      predecessors: anchor && preset !== 'bank_build' ? [anchor.id] : [],
-      is_idea: preset === 'bank_build',
-    }
-    if (preset === 'bank_build') {
-      const sched = departments.find((d) => d.name === 'Scheduling')
-      if (sched) body.department_id = sched.id
-    }
-    const before = new Set(tasks.map((t) => t.id))
-    run(() => planApi.createTask(changeId, body), (p) => {
-      const created = p.tasks.find((t) => !before.has(t.id))
-      if (created) { setSelection([created.id]); setEditorId(created.id) }
-    })
-  }
-
-  const align = (a: AlignAction) => {
-    if (a === 'snap') {
-      const u = snapToPredecessors(tasks, selection)
-      if (!u.length) { toast.info?.('Already aligned to their predecessors'); return }
-      commitDates(u)
-    } else if (a === 'match_start' || a === 'match_end') {
-      commitDates(matchTo(tasks, selection, a === 'match_start' ? 'start' : 'end'))
-    } else {
-      const { links, updates } = runParallel(tasks, selection)
-      commitDates(updates, links)
-    }
-  }
-
-  const askDelete = (ids: number[]) => {
-    const names = ids.map((id) => tasks.find((t) => t.id === id)?.name).filter(Boolean)
-    setConfirm({
-      title: ids.length === 1 ? `Delete "${names[0]}"?` : `Delete ${ids.length} tasks?`,
-      body: 'Links to the deleted tasks are removed too.',
-      label: 'Delete', danger: true,
-      run: () => run(async () => {
-        let out: PlanOut | undefined
-        for (const id of ids) out = await planApi.deleteTask(changeId, id)
-        return out!
-      }, () => { setSelection([]); setEditorId(null) }),
-    })
-  }
-
   const seed = (replace: boolean) => {
-    const go = () => run(() => planApi.seed(changeId, plan, replace))
+    const go = () => void runServer(() => planApi.seed(changeId, plan, replace))
     if (!replace) { go(); return }
     setConfirm({
       title: 'Replace the plan?',
@@ -491,41 +239,74 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
       label: 'Replace plan', danger: true, run: go,
     })
   }
-
-  const exportPlan = (fmt: 'xml' | 'csv') => {
-    const p = fmt === 'xml' ? planApi.exportXml(changeId, plan) : planApi.exportCsv(changeId, plan)
+  const importFile = (file: File) => {
+    const hasTasks = (data?.tasks.length ?? 0) > 0
+    const go = (replace: boolean) => void runServer(() => planApi.importXml(changeId, plan, file, replace), 'Plan imported')
+    if (!hasTasks) { go(false); return }
+    setConfirm({
+      title: 'Import and replace the plan?',
+      body: `Every task of this plan is replaced by the tasks in ${file.name}.`,
+      label: 'Import and replace', danger: true, run: () => go(true),
+    })
+  }
+  const exportPlan = (fmt: 'mspdi' | 'csv') => {
+    const p = fmt === 'mspdi' ? planApi.exportXml(changeId, plan) : planApi.exportCsv(changeId, plan)
     p.catch((e: unknown) => toast.error(errDetail(e) ?? 'Export failed'))
   }
 
-  const saveTask = (t: TaskOut, patch: TaskPatch) => {
-    const dateChange = patch.start_date !== undefined || patch.duration_days !== undefined
-    if (baselineSet && dateChange) {
-      setOverrides((prev) => new Map(prev).set(t.id, {
-        start: patch.start_date ? toDay(patch.start_date) : toDay(t.start_date),
-        dur: patch.duration_days ?? t.duration_days,
-      }))
-      setReasonFor({ updates: [], patch: { id: t.id, body: patch } })
-      return
-    }
-    run(() => planApi.patchTask(changeId, t.id, patch))
+  const ctx = () => {
+    const m = ganttRef.current?.getModel() ?? { tasks: model?.tasks ?? [], links: model?.links ?? [] }
+    return { tasks: buildTree(m.tasks).order, links: m.links, calendar: model?.calendar }
   }
+  const align = (a: AlignAction) => {
+    const c = ctx()
+    apply(a === 'snap' ? snapToLinks(c, selection) : a === 'parallel' ? runParallel(c, selection)
+      : matchSelection(c, selection, a === 'match_start' ? 'start' : 'end'))
+  }
+  const addBuffer = () => apply(bufferChangeSet(ctx(), selection, 5))
+  const addBankBuild = () => {
+    const sched = departments.find((d) => d.name === 'Scheduling')
+    apply(bankBuildChangeSet(ctx(), selection, { lane: 'Scheduling', departmentId: sched?.id ?? null }))
+  }
+
+  const newTask = useCallback(({ after, milestone }: { after?: GanttTask; milestone: boolean }): Partial<GanttTask> => ({
+    kind: milestone ? 'milestone' : 'work',
+    meta: { department_id: (after?.meta?.department_id as number | null | undefined) ?? null },
+  }), [])
+
+  // ---------------------------------------------------------------- derived view
+  const markers = useMemo<GanttMarker[]>(() => (data?.deadlines ?? []).map((d) => ({
+    id: d.key, date: d.date, label: d.label, color: deadlineColor(d.key),
+  })), [data])
+  const rowNo = useMemo(() => {
+    if (!model) return new Map<number, number>()
+    const r = buildRows(model.tasks, { groupByLane })
+    const m = new Map<number, number>()
+    r.rowNo.forEach((n, k) => m.set(Number(k), n))
+    return m
+  }, [model, groupByLane])
+  const columns = useMemo<ColumnKey[]>(() => (track
+    ? ['row', 'name', 'start', 'end', 'duration', 'predecessors', 'progress']
+    : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', 'slack'] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
+  const issues = useMemo(() => (data ? [...data.validation.errors, ...data.validation.warnings.map((w) => ({ ...w, warn: true }))]
+    .map((i) => ({ code: i.code, message: i.message, taskId: i.task_id, level: ('warn' in i ? 'warning' : 'error') as 'warning' | 'error' })) : []), [data])
+
+  // Keep the "Add a task" path of the empty state: once the Gantt shows, start a draft row.
+  useEffect(() => {
+    if (blank && ganttRef.current) { ganttRef.current.insertTask(false); setBlank(false) }
+  }, [blank])
 
   // ---------------------------------------------------------------- render
   if (isLoading) {
     return <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">Loading plan...</div>
   }
-  if (isError || !data) {
+  if (isError || !data || !model) {
     return <div className="rounded-lg border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300">Could not load the plan. Reload the page to try again.</div>
   }
 
   const seedLabel = plan === 'quote' ? 'Seed from costing' : 'Seed from quote plan'
-  const empty = tasks.length === 0
-  const s = data.summary
-  const nErr = data.validation.errors.length
-  const nWarn = data.validation.warnings.length
-  const editorTask = editorId != null ? tasks.find((t) => t.id === editorId) : undefined
-
-  if (empty) {
+  const empty = data.tasks.length === 0
+  if (empty && !blank) {
     return (
       <div className="rounded-lg border border-dashed border-slate-600 bg-slate-900 p-6 text-center" data-testid="gantt-empty">
         {compact ? (
@@ -539,9 +320,10 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
                 : 'Start from the quote plan the customer saw, then refine it with every team. Or add the first task yourself.'}
             </p>
             <div className="mt-4 flex justify-center gap-2">
-              <button type="button" className={btnPrimary} onClick={() => seed(false)} disabled={mut.isPending}
-                data-testid="gantt-seed">{seedLabel}</button>
-              <button type="button" className={btn} onClick={() => newTask('work')} disabled={mut.isPending}>+ Add a task</button>
+              {!hideSeed && (
+                <button type="button" className={btnPrimary} onClick={() => seed(false)} disabled={busy} data-testid="gantt-seed">{seedLabel}</button>
+              )}
+              <button type="button" className={btn} onClick={() => setBlank(true)} disabled={busy} data-testid="gantt-add-first">+ Add a task</button>
             </div>
           </>
         ) : (
@@ -554,6 +336,16 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
     )
   }
 
+  const s = data.summary
+  const nErr = data.validation.errors.length
+  const nWarn = data.validation.warnings.length
+  const cal = makeCal(model.calendar)
+  // Shown from the tasks (non-idea leaves), inclusive last day; summary.finish is exclusive like end_date.
+  const real = data.tasks.filter((t) => !t.is_idea && !summaryIds.has(t.id))
+  const spans = real.map((t) => { const st = normStart(cal, toDay(t.start_date)); return { s: st, e: endOf(cal, st, t.duration_days), ms: t.duration_days === 0 } })
+  const firstDay = spans.length ? Math.min(...spans.map((x) => x.s)) : (s.start ? toDay(s.start) : null)
+  const lastDay = spans.length ? Math.max(...spans.map((x) => (x.ms ? x.s : x.e - 1))) : (s.finish ? toDay(s.finish) - 1 : null)
+  const editorTask = editorId != null ? byId.get(editorId) : undefined
   const stat = (label: string, value: string, tone = 'text-slate-100') => (
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
@@ -561,37 +353,13 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
     </div>
   )
 
-  // Shown inclusive, from the committed plan (ideas do not count).
-  const real = tasks.filter((t) => !t.is_idea).map(taskGeo)
-  const firstDay = real.length ? Math.min(...real.map((g) => g.start)) : (s.start ? toDay(s.start) : null)
-  const lastDay = real.length ? Math.max(...real.map(inclusiveEnd)) : null
-  const chartHeight = HEADER_H + Math.max(rows.length, 1) * ROW_H
-
   return (
     <div className="space-y-2" data-testid="gantt-planner">
       {!compact && (
-        <GanttToolbar
-          canStructure={canStructure} canDates={canDates} canSchedule={canEdit && !baselineSet}
-          empty={empty} seedLabel={seedLabel}
-          zoom={zoom} onZoom={changeZoom} critical={critical} onCritical={setCritical}
-          onAddTask={(k) => newTask(k)}
-          onAddPreset={(p) => newTask(p === 'milestone' ? 'milestone' : p === 'buffer' ? 'buffer' : 'bank_build', p)}
-          onSchedule={() => run(() => planApi.schedule(changeId, plan))}
-          onExport={exportPlan}
-          onSeed={canStructure ? () => seed(true) : undefined}
-          saving={mut.isPending}
-          selectionCount={selection.length}
-          onAlign={align}
-          onDeleteSelection={canStructure ? () => askDelete(selection) : undefined}
-          onClearSelection={clearSelection}
-        />
-      )}
-
-      {!compact && (
         <div className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2" data-testid="gantt-summary">
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-7 items-center">
-            {stat('Start', fmtDay(firstDay))}
-            {stat('Finish', fmtDay(lastDay))}
+          <div className="grid grid-cols-3 items-center gap-3 sm:grid-cols-7">
+            {stat('Start', fmtShort(firstDay))}
+            {stat('Finish', fmtShort(lastDay))}
             {stat('Duration', `${s.duration_days} d, ${Math.round((s.duration_days / 7) * 10) / 10} wk`)}
             {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
             {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
@@ -603,78 +371,63 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
                   ? 'border-red-700 bg-red-950/50 text-red-200'
                   : nWarn > 0 ? 'border-amber-700 bg-amber-950/40 text-amber-200'
                     : 'border-emerald-800 bg-emerald-950/40 text-emerald-200'}`}>
-                {nErr + nWarn === 0 ? 'No issues'
-                  : `${nErr} error${nErr === 1 ? '' : 's'}, ${nWarn} warning${nWarn === 1 ? '' : 's'}`}
+                {nErr + nWarn === 0 ? 'No issues' : `${nErr} error${nErr === 1 ? '' : 's'}, ${nWarn} warning${nWarn === 1 ? '' : 's'}`}
               </button>
             </div>
           </div>
           {showIssues && (
             <div className="mt-2 border-t border-slate-700 pt-2">
               <ValidationList errors={data.validation.errors} warnings={data.validation.warnings}
-                rowNo={rowNo} onFocusTask={focusTask} />
+                rowNo={rowNo} onFocusTask={(id) => ganttRef.current?.focusTask(id)} />
             </div>
           )}
         </div>
       )}
 
-      <div ref={scrollerRef} tabIndex={0} onKeyDown={onKeyDown}
-        aria-label="Plan chart. Select tasks, then use arrow keys to move them."
-        data-testid="gantt-scroller"
-        className={`relative overflow-auto rounded-lg border border-slate-700 bg-slate-900 outline-none focus-visible:border-sky-700 ${compact ? 'max-h-[320px]' : 'max-h-[70vh]'}`}
-        style={{ minHeight: Math.min(chartHeight + 2, compact ? 320 : 240) }}>
-        <div style={{ width: gw + timelineW }}>
-          <div className="sticky top-0 z-20 flex" style={{ height: HEADER_H }}>
-            <div className="sticky left-0 z-30 border-r border-slate-700 bg-slate-900">
-              <GridHeader compact={compact} track={track} />
-            </div>
-            <TimelineHeader range={range} ppd={ppd} zoom={zoom} today={today} deadlines={deadlines}
-              scrollerRef={scrollerRef} />
-          </div>
-          <div className="flex">
-            <div className="sticky left-0 z-10 border-r border-slate-700 bg-slate-900">
-              <GridBody rows={rows} geos={geos} rowNo={rowNo} selected={selectedSet} flashId={flashId}
-                issueIds={issueIds} compact={compact} track={track}
-                onToggleLane={(l) => setCollapsed((c) => {
-                  const n = new Set(c)
-                  if (n.has(l)) n.delete(l); else n.add(l)
-                  return n
-                })}
-                onRowClick={compact ? undefined : onRowClick} />
-            </div>
-            <TimelineBody rows={rows} geos={geos} range={range} ppd={ppd} zoom={zoom} today={today}
-              deadlines={deadlines} track={track} critical={critical} criticalIds={s.critical_ids}
-              selected={selectedSet} flashId={flashId} rowNo={rowNo}
-              canDrag={canDates} canLink={canEdit} linkPreview={linkPreview} svgRef={svgRef} uid={uid}
-              onBarPointerDown={compact ? undefined : onBarPointerDown}
-              onLinkStart={onLinkStart} onLinkClick={onLinkClick}
-              onBackgroundPointerDown={compact ? undefined : (e) => {
-                if (!(e.shiftKey || e.ctrlKey || e.metaKey)) clearSelection()
-              }} />
-          </div>
-        </div>
-      </div>
+      <Gantt ref={ganttRef} tasks={model.tasks} links={model.links} calendar={model.calendar}
+        rights={rights} readOnly={compact} compact={compact}
+        onChange={onChange} beforeChange={beforeChange}
+        onError={(m) => toast.error(m)} onNotify={(m) => toast.info?.(m)}
+        kinds={ECR_KINDS} columns={columns} markers={markers}
+        showBaselines={track} showProgress={track} criticalIds={s.critical_ids}
+        groupByLane={groupByLane}
+        linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern} hierarchy={modern} constraints={modern}
+        defaultZoom={compact ? 'week' : 'day'} height={height ?? (compact ? 300 : '62vh')}
+        issues={issues}
+        newTask={newTask}
+        onTaskOpen={(t) => { if (typeof t.id === 'number') setEditorId(t.id) }}
+        onSelectionChange={onSelectionChange}
+        exportName={`change-${changeId}-${plan}`}
+        onExport={exportPlan}
+        toolbarStart={!compact ? (
+          <PlanToolbar canStructure={canStructure} canDates={canDates} empty={empty}
+            seedLabel={seedLabel} onSeed={canStructure && !hideSeed ? () => seed(true) : undefined}
+            onBuffer={addBuffer} onBankBuild={addBankBuild}
+            onSchedule={canStructure ? () => void runServer(() => planApi.schedule(changeId, plan)) : undefined}
+            selectionCount={selection.length} onAlign={align}
+            groupByLane={groupByLane} onGroupByLane={setGroupByLane}
+            onImport={canStructure && modern ? importFile : undefined} />
+        ) : undefined}
+        ariaLabel={`${plan === 'quote' ? 'Quote' : 'Detailed'} plan`} />
 
       {!compact && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500" aria-label="Legend">
-          {deadlines.map((d) => (
-            <span key={d.key} className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-0 border-l-2 border-dashed" style={{ borderColor: deadlineColor(d.key) }} />
-              {d.label}
-            </span>
-          ))}
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-0 border-l-2 border-sky-400" />Today</span>
           {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
-          {track && <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-3 rounded-sm bg-red-500" />Slip</span>}
-          {canDates && <span>Drag bars to move, drag the right edge to resize, drag the dot at the end onto another bar to link. Ctrl+scroll zooms.</span>}
+          {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
+          {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}
         </div>
       )}
 
       {editorTask && !compact && (
-        <TaskEditor task={editorTask} tasks={tasks} rowNo={rowNo} departments={departments}
-          canEdit={canEdit} canDates={canDates} canProgress={canProgressOn(editorTask)}
-          track={track} baselineSet={baselineSet} saving={mut.isPending}
-          onSave={(patch) => saveTask(editorTask, patch)}
-          onDelete={canStructure ? () => askDelete([editorTask.id]) : undefined}
+        <TaskEditor task={editorTask} tasks={data.tasks} rowNo={rowNo} departments={departments}
+          canEdit={canStructure} canDates={canDates && !summaryIds.has(editorTask.id)}
+          canProgress={canProgressOn(editorTask.department_id)}
+          track={track} baselineSet={baselineSet} saving={busy}
+          onSave={(patch) => saveFromEditor(editorTask, patch)}
+          onDelete={canStructure ? () => setConfirm({
+            title: `Delete "${editorTask.name}"?`, body: 'Links to the deleted task are removed too.', label: 'Delete', danger: true,
+            run: () => { apply({ label: 'Delete task', removeTasks: [editorTask.id], removeLinks: model.links.filter((l) => l.from === editorTask.id || l.to === editorTask.id).map((l) => l.id) }); setEditorId(null) },
+          }) : undefined}
           onClose={() => setEditorId(null)} />
       )}
 
@@ -682,11 +435,10 @@ export default function GanttPlanner({ changeId, plan, mode = 'plan', compact = 
         confirmLabel={confirm?.label} danger={confirm?.danger}
         onConfirm={() => confirm?.run()} onClose={() => setConfirm(null)} />
 
-      <ReasonDialog open={!!reasonFor} title="Record a deviation" label="Why does this move?"
-        warning="This is recorded as a deviation and PM/Sales decide to lock or escalate it."
-        submitLabel="Save move"
-        onSubmit={(reason) => { const r = reasonFor; setReasonFor(null); if (r) sendDates(r, reason) }}
-        onClose={() => { setReasonFor(null); setOverrides(new Map()) }} />
+      <DeviationDialog open={!!reasonAsk} changed={reasonAsk?.changed ?? []} moved={reasonAsk?.moved ?? []}
+        onSubmit={(reason) => { const r = reasonAsk; setReasonAsk(null); r?.resolve({ ...r.cs, meta: { ...(r.cs.meta ?? {}), reason } }) }}
+        onClose={() => { const r = reasonAsk; setReasonAsk(null); r?.resolve(null) }} />
     </div>
   )
 }
+
