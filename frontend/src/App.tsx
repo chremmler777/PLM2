@@ -26,6 +26,7 @@ import ChangesPage from './pages/ChangesPage';
 import ChangeDetailPage from './pages/ChangeDetailPage';
 import ReportsPage from './pages/ReportsPage';
 import PnlPage from './pages/PnlPage';
+import CostSheetPage from './pages/CostSheetPage';
 import ProcessMapPage from './pages/ProcessMapPage';
 import AppLayout from './components/layout/AppLayout';
 
@@ -197,6 +198,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProcessMapPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cost-sheet"
+        element={
+          <ProtectedRoute>
+            <CostSheetPage />
           </ProtectedRoute>
         }
       />

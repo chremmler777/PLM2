@@ -56,6 +56,7 @@ from app.api.v1.changes.actual_costs import router as change_actual_costs_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.pnl import router as pnl_router
+from app.api.v1.cost_sheet import router as cost_sheet_router
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router)
@@ -96,5 +97,6 @@ api_router.include_router(catalog_parts_router)
 api_router.include_router(paints_router)
 api_router.include_router(reports_router)
 api_router.include_router(pnl_router)
+api_router.include_router(cost_sheet_router)
 
 __all__ = ["api_router"]

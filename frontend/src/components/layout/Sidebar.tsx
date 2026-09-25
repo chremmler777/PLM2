@@ -60,6 +60,7 @@ export default function Sidebar() {
 
   const setupItems = [
     { path: '/workflows', label: 'Workflows', icon: '⚙️' },
+    { path: '/cost-sheet', label: 'Cost sheet', icon: '🧾' },
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';
