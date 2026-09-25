@@ -357,6 +357,56 @@ describe('CockpitSummary waits', () => {
       .toEqual([{ kind: 'advance', to: 'released' }])
   })
 
+  it('offers a quiet "Start implementation" alongside timing validation, for the deviation retry loop', () => {
+    const base = { customer_relevant: true, pm_signed_by: 1, quality_signed_by: 2, timing_validated_at: null }
+    expect(nextStepFor({ ...base, status: 'approved', customer_response: 'accepted' } as never)).toEqual([
+      { kind: 'go', key: 'validate-timing', label: 'Validate the timing', tab: 'timing' },
+      { kind: 'advance', to: 'in_implementation', label: t('cockpit.startImplementation'), hint: t('cockpit.startImplementationHint') },
+    ])
+  })
+
+  it('renders "Start implementation" as a secondary, quiet button with its tooltip, and advances on click', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary change={change({
+      status: 'approved', customer_response: 'accepted', pm_signed_by: 1, quality_signed_by: 2,
+      timing_validated_at: null,
+    })} gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false} />))
+    const primary = screen.getByRole('button', { name: 'Validate the timing' })
+    expect(primary.className).toContain('bg-sky-600')
+    const secondary = screen.getByRole('button', { name: t('cockpit.startImplementation') })
+    expect(secondary.className).not.toContain('bg-sky-600')
+    expect((secondary as HTMLButtonElement).disabled).toBe(false)
+    expect(secondary.title).toBe(t('cockpit.startImplementationHint'))
+    fireEvent.click(secondary)
+    expect(onAdvance).toHaveBeenCalledWith('in_implementation')
+  })
+
+  it('at costing, an internal change without internal_approved_at is sent to Approval instead of straight to Approved', () => {
+    expect(nextStepFor({
+      status: 'costing', customer_relevant: false, customer_response: 'pending',
+      pm_signed_by: null, quality_signed_by: null, timing_validated_at: null, internal_approved_at: null,
+    } as never)).toEqual([{ kind: 'go', key: 'internal-approval', label: t('internal.approve'), tab: 'offer' }])
+    expect(nextStepFor({
+      status: 'costing', customer_relevant: false, customer_response: 'pending',
+      pm_signed_by: null, quality_signed_by: null, timing_validated_at: null, internal_approved_at: '2026-09-20',
+    } as never)).toEqual([{ kind: 'advance', to: 'approved' }])
+    // A customer-relevant change never sees the internal-approval step.
+    expect(nextStepFor({
+      status: 'costing', customer_relevant: true, customer_response: 'pending',
+      pm_signed_by: null, quality_signed_by: null, timing_validated_at: null, internal_approved_at: null,
+    } as never)).toEqual([{ kind: 'advance', to: 'quoting' }])
+  })
+
+  it('the Approve internal costs step is gated by needs("internal-approval") like any other', () => {
+    render(wrap(<CockpitSummary change={change({
+      status: 'costing', customer_relevant: false, internal_approved_at: null,
+    })} gates={[]} pendingDeviations={0} onAdvance={vi.fn()} advancing={false}
+      needs={(k) => (k === 'internal-approval' ? 'Needs the Project Manager' : null)} />))
+    const btn = screen.getByRole('button', { name: t('internal.approve') }) as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(btn.title).toBe('Needs the Project Manager')
+  })
+
   it('F3: at quoting the next step jumps to the offer tab, no Quoted/Approved/Rejected buttons', () => {
     const onGo = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'quoting', customer_relevant: true })}

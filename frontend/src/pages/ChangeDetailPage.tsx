@@ -165,7 +165,7 @@ export default function ChangeDetailPage() {
     enabled: !!change && change.status === 'in_validation',
   });
   // The detailed plan's progress, for the "end implementation" confirmation.
-  const { data: detailedPlan } = useQuery({
+  const { data: detailedPlan, isLoading: detailedPlanLoading } = useQuery({
     queryKey: ['change', changeId, 'plan', 'detailed'],
     queryFn: () => planApi.get(changeId, 'detailed'),
     enabled: confirmTo === 'in_validation',
@@ -188,6 +188,19 @@ export default function ChangeDetailPage() {
     queryKey: ['change-my-actions', changeId],
     queryFn: () => changesApi.myActions(changeId),
   });
+  // Resume (on_hold): the status held before the hold, read off the
+  // changelog's status entries rather than assumed — a change can be held
+  // from any status, not only in_assessment.
+  const { data: changelog } = useQuery({
+    queryKey: ['change', changeId, 'changelog'],
+    queryFn: () => changesApi.changelog(changeId),
+    enabled: !!change && change.status === 'on_hold',
+  });
+  const resumeTo = (() => {
+    const holdEntries = (changelog ?? []).filter((e) => e.field_name === 'status' && e.new_value === 'on_hold');
+    const lastHold = holdEntries[holdEntries.length - 1];
+    return lastHold?.old_value || 'in_assessment';
+  })();
   const { data: departments = [] } = useDepartments();
   const { isAdmin: isRealAdmin, userId } = useAuth();
   // The whole point of acts-as is walking the flow through a department's
@@ -273,11 +286,12 @@ export default function ChangeDetailPage() {
   });
   if (isLoading || !change) return <div className="p-6 text-slate-400">Loading…</div>;
 
-  // A deep link into a tab the viewer or the phase does not allow — a
-  // governance tab without authz, or any later-phase tab while capturing —
-  // falls back to overview rather than rendering a blank/forbidden tab.
-  // Old names (?tab=commercial, ?tab=implementation) land on the tab for the
-  // change's stage; anything unknown is overview.
+  // No ?tab, or one that doesn't resolve (old names like ?tab=commercial,
+  // ?tab=implementation, or anything unknown), opens on the tab the change's
+  // current phase is worked on — not always "overview" any more. A deep link
+  // into a tab the viewer or the phase does not allow — a governance tab
+  // without authz, or any later-phase tab while capturing — still falls back
+  // to overview rather than rendering a blank/forbidden tab (below).
   const tab: Tab = resolveChangeTab(rawTab, change.status) ?? defaultTabFor(change.status);
   const effectiveTab: Tab =
     (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || isTabLocked(change.status, tab)
@@ -303,7 +317,11 @@ export default function ChangeDetailPage() {
         : 'Needs Sales, the Project Manager or the change lead';
       case 'offer':
       case 'answer': return canEditQuotedPrice ? null : 'Needs Sales or the change lead';
-      case 'signoff': return canSignPm || canSignQuality ? null : 'Needs the Project Manager and Quality';
+      // Only the missing side gates the step: a viewer who can sign PM but
+      // not Quality is still let through once PM is the only side left open.
+      case 'signoff': return ((!change.pm_signed_by && canSignPm) || (!change.quality_signed_by && canSignQuality))
+        ? null : 'Needs the Project Manager and Quality';
+      case 'internal-approval': return canApproveInternalCosts ? null : 'Needs the Project Manager';
       case 'validate-timing': return canEditPlan || canPublishTiming ? null
         : 'Needs the Project Manager, Scheduling or Sales';
       case 'to:released':
@@ -335,13 +353,13 @@ export default function ChangeDetailPage() {
         consequence: 'Implementation ends and the departments start validating. Sending the change back to '
           + 'implementation later needs a reason and is recorded.',
         open: [
-          ...(notDone.length ? [`${notDone.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'} not finished (plan ${avg} % done)`] : []),
+          ...(notDone.length ? [`${notDone.length} of ${tasks.length} task${tasks.length === 1 ? '' : 's'} not finished (plan ${avg}% done)`] : []),
           ...(owing.length ? [`Progress report due: ${owing.join(', ')}`] : []),
           ...(openPlanDeviations ? [`${openPlanDeviations} plan deviation${openPlanDeviations === 1 ? '' : 's'} open`] : []),
         ],
         allClear: 'Every task is finished and reported.',
         confirmLabel: 'Move to validation',
-        loading: !detailedPlan,
+        loading: detailedPlanLoading,
       };
     }
     if (confirmTo === 'released') {
@@ -391,7 +409,7 @@ export default function ChangeDetailPage() {
           )}
           {change.status === 'on_hold' && (
             <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
-                    onClick={() => advance('in_assessment')}>Resume</button>
+                    onClick={() => advance(resumeTo)}>Resume</button>
           )}
           {CANCELLABLE.includes(change.status) && (
             <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"

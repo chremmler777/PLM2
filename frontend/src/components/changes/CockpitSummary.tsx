@@ -49,7 +49,7 @@ interface Props {
 /** One next step: a place to go and do the work, or a status to move to. */
 export type NextStep =
   | { kind: 'go'; key: string; label: string; tab: string }
-  | { kind: 'advance'; to: ChangeStatus }
+  | { kind: 'advance'; to: ChangeStatus; label?: string; hint?: string }
 
 /**
  * What the cockpit offers as the next step. Transitions that a dedicated act
@@ -58,9 +58,14 @@ export type NextStep =
  * are not raw buttons: the step points at where that act is done.
  */
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
-  | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at'>): NextStep[] {
+  | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>): NextStep[] {
   const s = change.status
   if (s === 'costing') {
+    // An internal change needs its costs approved (Approval tab) before it can
+    // advance; a customer-relevant one moves straight to quoting.
+    if (!change.customer_relevant && !change.internal_approved_at) {
+      return [{ kind: 'go', key: 'internal-approval', label: t('internal.approve'), tab: 'offer' }]
+    }
     return [{ kind: 'advance', to: change.customer_relevant ? 'quoting' : 'approved' }]
   }
   if (s === 'quoting') return [{ kind: 'go', key: 'offer', label: 'Build and send the offer', tab: 'offer' }]
@@ -75,7 +80,16 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
     return [{ kind: 'advance', to: 'approved' }]
   }
   if (s === 'approved' && !change.timing_validated_at) {
-    return [{ kind: 'go', key: 'validate-timing', label: 'Validate the timing', tab: 'timing' }]
+    // Timing validation gates implementation, but only softly on the backend:
+    // offer "Start implementation" too so a refusal surfaces the deviation
+    // banner (propose a deviation, then retry) instead of a dead end.
+    return [
+      { kind: 'go', key: 'validate-timing', label: 'Validate the timing', tab: 'timing' },
+      {
+        kind: 'advance', to: 'in_implementation',
+        label: t('cockpit.startImplementation'), hint: t('cockpit.startImplementationHint'),
+      },
+    ]
   }
   return (NEXT_STATUS[s] ?? []).map((to) => ({ kind: 'advance', to }))
 }
@@ -278,9 +292,9 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                 <button key={key} type="button" data-testid={`next-${key.replace(':', '-')}`}
                   className={cls}
                   disabled={!!denied || (st.kind === 'advance' && advancing)}
-                  title={denied ?? undefined}
+                  title={denied ?? (st.kind === 'advance' ? st.hint : undefined) ?? undefined}
                   onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab) : onAdvance(st.to))}>
-                  {st.kind === 'go' ? st.label : `→ ${STATUS_LABELS[st.to]}`}
+                  {st.kind === 'go' ? st.label : (st.label ?? `→ ${STATUS_LABELS[st.to]}`)}
                 </button>
               )
             })}

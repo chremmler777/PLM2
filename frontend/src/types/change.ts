@@ -145,6 +145,12 @@ export interface ChangelogEntry {
   performed_by: number;
   performed_at: string;
   notes?: string | null;
+  /** Which field changed, and its before/after — absent on most rows, and
+      blanked server-side for a money-carrying field when the viewer may not
+      read prices. */
+  field_name?: string | null;
+  old_value?: string | null;
+  new_value?: string | null;
 }
 
 export interface ChangeRequest {

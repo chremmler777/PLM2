@@ -10,7 +10,7 @@ import type {
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
-  ValidationState, ValidationCheckKey,
+  ValidationState, ValidationCheckKey, ChangelogEntry,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -85,6 +85,9 @@ export const changesApi = {
 
   myActions: (id: number): Promise<MyActionsResponse> =>
     client.get(`/v1/changes/${id}/my-actions`).then((r) => r.data),
+
+  changelog: (id: number): Promise<ChangelogEntry[]> =>
+    client.get(`/v1/changes/${id}/changelog`).then((r) => r.data),
 
   myEscalations: (): Promise<Escalation[]> =>
     client.get('/v1/changes/my-escalations').then((r) => r.data),

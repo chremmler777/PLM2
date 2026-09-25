@@ -48,8 +48,8 @@ describe('PnlCard', () => {
     render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
     expect(await screen.findByText('Revenue')).toBeDefined()
     expect(screen.getByText('Margin')).toBeDefined()
-    expect(screen.getByText('5.000,00')).toBeDefined()
-    expect(await screen.findByText('3.000,00')).toBeDefined()
+    expect(screen.getByText('5.000,00 EUR')).toBeDefined()
+    expect(await screen.findByText('3.000,00 EUR')).toBeDefined()
   })
 
   it('shows Approved budget and "vs. approved budget" label for an internal change', async () => {
@@ -57,8 +57,8 @@ describe('PnlCard', () => {
     render(wrap(<PnlCard change={change({ customer_relevant: false, internal_approved_amount: 3000 })} />))
     expect(await screen.findByText('Approved budget')).toBeDefined()
     expect(screen.getByText('vs. approved budget')).toBeDefined()
-    expect(screen.getByText('3.000,00')).toBeDefined()
-    expect(await screen.findByText('1.000,00')).toBeDefined()
+    expect(screen.getByText('3.000,00 EUR')).toBeDefined()
+    expect(await screen.findByText('1.000,00 EUR')).toBeDefined()
   })
 
   it('is hidden before costing (in_assessment)', () => {
@@ -104,9 +104,10 @@ describe('PnlCard', () => {
     expect(screen.getByTestId('pnl-actual-extra-scrap_quote').textContent)
       .toContain(t('actuals.extra.scrap_quote'))
     expect(screen.getByTestId('pnl-actual-extra-weight_delta').textContent).toContain('250')
-    expect(screen.getByTestId('pnl-actuals-total').textContent).toBe('2.250,00')
-    // Actual total minus plan: 2.250 - 1.500.
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('+750,00')
+    expect(screen.getByTestId('pnl-actuals-total').textContent).toBe('2.250,00 EUR')
+    // The backend's own delta (internal actual vs. plan) wins over any
+    // client-side recompute — extras never enter it.
+    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('+250,00')
   })
 
   it('renders exactly as before when the payload carries no actuals', async () => {
@@ -150,23 +151,43 @@ describe('PnlCard', () => {
       },
     } as never)
     const { container } = render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })} />))
-    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('900,00')
+    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('900,00 EUR')
     expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-100,00')
     expect(screen.getByTestId('pnl-actual-dept-2').textContent).toContain('Development')
     expect(container.textContent).not.toContain('NaN')
   })
 
-  it('delta is the actual total minus the plan, extras included', async () => {
+  it('delta is like for like: internal actual vs. plan, never the extras-inflated total', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue({
       ...summation({ grand_total: 13629.5 }),
       actuals: {
         departments: [{ department_id: 2, booked_hours: 0, actual_cost: 0, plan_cost: 1129.5 }],
+        // A planned scrap quote is not an overrun: the backend's variance
+        // (internal actual 0 vs. internal plan 13629.5) leaves it out, and
+        // the delta must too, even though the extra inflates the total.
         extras: [{ key: 'scrap_quote', amount: 1050 }],
         total_actual: 0, total_plan: 13629.5, total_extras: 1050, variance: -13629.5,
       },
     } as never)
     render(wrap(<PnlCard change={change({ status: 'released', customer_relevant: true })} />))
-    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.050,00')
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-12.579,50')
+    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.050,00 EUR')
+    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-13.629,50')
+    // The extra still shows, as its own line, not folded into the delta.
+    expect(screen.getByTestId('pnl-actual-extra-scrap_quote').textContent).toContain('1.050,00')
+  })
+
+  it('falls back to internal actual minus plan when the backend sends no delta/variance', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation({ grand_total: 2000 }),
+      actuals: {
+        by_department: [{ department_id: 2, hours: 10, internal_cost: 900, plan_internal_cost: 1000 }],
+        extras: [{ key: 'scrap_quote', amount: 500 }],
+        internal_cost: 900, plan_internal_cost: 1000, extra_cost: 500, total_cost: 1400,
+      },
+    } as never)
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })} />))
+    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.400,00 EUR')
+    // 900 - 1000, not 1400 - 1000.
+    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-100,00')
   })
 })

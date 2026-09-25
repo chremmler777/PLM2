@@ -156,6 +156,11 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     de: 'Entscheidung im Scoping-Termin festhalten - Freigabe, Rückfrage oder Ablehnung →',
     en: 'Record the decision in the scoping meeting - proceed, needs info or reject →',
   },
+  'cockpit.startImplementation': { de: 'Umsetzung starten', en: 'Start implementation' },
+  'cockpit.startImplementationHint': {
+    de: 'Benötigt validiertes Timing oder eine genehmigte Abweichung',
+    en: 'Needs validated timing or an approved deviation',
+  },
   'cockpit.gate': { de: 'Gate', en: 'Gate' },
   'cockpit.resolveGate': { de: 'Gate auf dem D1-Tab entscheiden', en: 'Decide this gate on the D1 tab' },
   'actions.title': { de: 'Deine Aufgaben', en: 'Your actions' },

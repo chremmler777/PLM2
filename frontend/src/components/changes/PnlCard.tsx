@@ -1,16 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
+import { formatMoney } from '../../lib/format';
 import type { ChangeDetail, ChangeStatus, PnlActualExtra, PnlActuals } from '../../types/change';
 
 const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment'];
 /** Stages where booked hours exist, so an actuals block is expected. */
 const ACTUALS_STATUSES: ChangeStatus[] = ['in_implementation', 'in_validation', 'released', 'closed'];
 
-const moneyFmt = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-/** "13.629,50": always two decimals, de-DE grouping. */
-const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined || !Number.isFinite(v) ? '-' : moneyFmt.format(v);
+/** "13.629,50 EUR" via the shared formatter — same money format everywhere. */
+const fmtMoney = (v: number | null | undefined, currency?: string | null) =>
+  v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, currency);
 
 function marginAccent(v: number | null | undefined): string {
   if (v === null || v === undefined || Math.abs(v) < 0.005) return 'text-slate-400';
@@ -82,9 +82,11 @@ function normalizeActuals(raw: PnlActuals | Record<string, unknown>) {
   const extraCost = num(a.extra_cost) ?? num(a.total_extras) ?? extraSum
   const total = num(a.total_cost) ?? internal + extraCost
   const plan = num(a.plan_internal_cost) ?? num(a.total_plan)
-  // Actual minus plan, on the same total the card shows (extras included):
-  // the backend's variance leaves the extras out.
-  const delta = plan !== null ? total - plan : num(a.delta) ?? num(a.variance)
+  // Like for like: internal actual vs. internal plan (the backend's own
+  // variance, when it sends one), never total (which includes extras the
+  // plan never carried — a planned scrap quote is not an overrun). Extras
+  // are shown as their own line instead.
+  const delta = num(a.delta) ?? num(a.variance) ?? (plan !== null ? internal - plan : null)
   const unrated = typeof a.unrated === 'boolean' ? a.unrated
     : typeof a.unrated_hours === 'boolean' ? a.unrated_hours
     : rows.some((r) => r.unrated)

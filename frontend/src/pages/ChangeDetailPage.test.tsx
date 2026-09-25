@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ChangeDetailPage from './ChangeDetailPage'
 import { changesApi } from '../api/changes'
+import { planApi } from '../api/changePlan'
 import { useDepartments } from '../hooks/queries/useWorkflows'
 import type { ChangeDetail } from '../types/change'
 import { t } from '../i18n/cmLabels'
@@ -67,12 +68,15 @@ vi.mock('../api/changes', () => ({
     listConcerns: vi.fn().mockResolvedValue([]),
     approveInternalCosts: vi.fn().mockResolvedValue({}),
     transition: vi.fn().mockResolvedValue({}),
+    changelog: vi.fn().mockResolvedValue([]),
   },
 }))
 vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
 vi.mock('../api/changePlan', () => ({
   planApi: {
     feedback: vi.fn().mockResolvedValue({ revision: 1, required: [], all_confirmed: true, validated_at: null, validated_by_name: null }),
+    get: vi.fn().mockResolvedValue({ tasks: [] }),
+    deviations: vi.fn().mockResolvedValue([]),
   },
 }))
 vi.mock('../api/plants', () => ({
@@ -100,10 +104,23 @@ vi.mock('../components/changes/ReasonDialog', () => ({ default: () => <div>mock-
 vi.mock('../components/changes/ImpactTree', () => ({ default: () => <div>mock-impact-tree</div> }))
 vi.mock('../components/changes/ImplementationPanel', () => ({ default: () => <div>mock-implementation-panel</div> }))
 vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>mock-lifecycle-stepper</div> }))
+// F10/finding 6: `needs` is a plain function prop — CockpitSummary itself is
+// mocked out (its own tests cover rendering), so it's exercised here by
+// probing it for the keys these tests care about.
+const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
-  default: ({ waits = [] }: { waits?: { key: string; text: string }[] }) => (
+  default: ({ waits = [], needs, onAdvance }: {
+    waits?: { key: string; text: string }[]
+    needs?: (step: string) => string | null
+    onAdvance?: (to: string) => void
+  }) => (
     <div>mock-cockpit-summary
       {waits.map((w) => <p key={w.key} data-testid={`wait-${w.key}`}>{w.text}</p>)}
+      {needs && NEEDS_PROBE_KEYS.map((k) => (
+        <p key={k} data-testid={`needs-${k}`}>{needs(k) ?? 'allowed'}</p>
+      ))}
+      {/* Drives the confirm dialogs the same way the real advance buttons would. */}
+      <button type="button" onClick={() => onAdvance?.('in_validation')}>mock-advance-in_validation</button>
     </div>
   ),
 }))
@@ -805,5 +822,127 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     change.status = 'in_assessment' as ChangeDetail['status']
     wrap('/changes/1')
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeDefined()
+  })
+})
+
+describe('ChangeDetailPage needs("signoff") gates only the missing side (finding 6)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    change.pm_signed_by = null
+    change.quality_signed_by = null
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  it('lets a PM member sign off when only their own side is still missing', async () => {
+    change.status = 'quoted' as ChangeDetail['status']
+    change.pm_signed_by = null
+    change.quality_signed_by = 2 // Quality already signed
+    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 5, name: 'Project Manager' }],
+    } as never)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [5] } as never)
+    wrap('/changes/1')
+    expect((await screen.findByTestId('needs-signoff')).textContent).toBe('allowed')
+  })
+
+  it('still refuses when the viewer\'s own side is already signed and only the other side is open', async () => {
+    change.status = 'quoted' as ChangeDetail['status']
+    change.pm_signed_by = 7 // this PM member already signed
+    change.quality_signed_by = null // Quality is the one still missing
+    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 5, name: 'Project Manager' }],
+    } as never)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [5] } as never)
+    wrap('/changes/1')
+    expect((await screen.findByTestId('needs-signoff')).textContent).toBe('Needs the Project Manager and Quality')
+  })
+})
+
+describe('ChangeDetailPage internal-approval step gating (finding 3)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    vi.mocked(useDepartments).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDepartments>)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
+  })
+
+  it('needs("internal-approval") is open for a PM member, refused for anyone else', async () => {
+    change.status = 'costing' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', userId: 7 }
+    vi.mocked(useDepartments).mockReturnValue({
+      data: [{ id: 5, name: 'Project Manager' }],
+    } as never)
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] } as never)
+    wrap('/changes/1')
+    expect((await screen.findByTestId('needs-internal-approval')).textContent).toBe('Needs the Project Manager')
+    cleanup()
+    vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [5] } as never)
+    wrap('/changes/1')
+    expect((await screen.findByTestId('needs-internal-approval')).textContent).toBe('allowed')
+  })
+})
+
+describe('ChangeDetailPage end-implementation confirm loading (finding 8)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    vi.mocked(planApi.get).mockResolvedValue({ tasks: [] } as never)
+  })
+
+  it('shows "Checking" only while the detailed plan is actually loading, not forever once it errors', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    let failWith!: (e: unknown) => void
+    vi.mocked(planApi.get).mockImplementation(() => new Promise((_resolve, reject) => { failWith = reject }))
+    wrap('/changes/1')
+    fireEvent.click(await screen.findByText('mock-advance-in_validation'))
+    const dialog = await screen.findByTestId('confirm-in_validation')
+    expect(dialog.textContent).toContain('Checking what is still open')
+    failWith(new Error('boom'))
+    // Previously this used `!detailedPlan`, which stays true forever on an
+    // error — the dialog would say "Checking" for good. isLoading clears once
+    // the query settles, even into an error.
+    await waitFor(() => expect(dialog.textContent).not.toContain('Checking what is still open'))
+  })
+})
+
+describe('ChangeDetailPage Resume goes back to the status before the hold (finding 9)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([])
+  })
+
+  it('reads the changelog for the status entry that led into on_hold and resumes to its old_value', async () => {
+    change.status = 'on_hold' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'status_changed', action_description: 'captured -> scoping', performed_by: 1,
+        performed_at: '2026-07-01T00:00:00', field_name: 'status', old_value: 'captured', new_value: 'scoping' },
+      { id: 2, action: 'status_changed', action_description: 'costing -> on_hold', performed_by: 1,
+        performed_at: '2026-08-01T00:00:00', field_name: 'status', old_value: 'costing', new_value: 'on_hold' },
+    ] as never)
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Resume' })
+    // Resume is clickable before the changelog resolves too — its target is
+    // read fresh at click time, so wait for the query before clicking rather
+    // than racing it.
+    await waitFor(() => expect(changesApi.changelog).toHaveBeenCalledWith(1))
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+      expect(changesApi.transition).toHaveBeenCalledWith(1, 'costing', { to: 'costing' })
+    })
+  })
+
+  it('falls back to in_assessment when the changelog carries no on_hold entry', async () => {
+    change.status = 'on_hold' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([] as never)
+    wrap('/changes/1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }))
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'in_assessment', { to: 'in_assessment' }))
   })
 })
