@@ -12,7 +12,7 @@ from typing import List
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -25,23 +25,49 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 async def _local_contacts(db: AsyncSession) -> List[dict]:
     rows = (await db.execute(
-        select(User.full_name, User.username, User.email)
+        select(User.id, User.full_name, User.username, User.email)
         .where(User.is_active.is_(True))
         .order_by(User.full_name, User.username)
     )).all()
     return _people([
-        {"name": full_name or username, "email": email, "source": "local"}
-        for full_name, username, email in rows
+        {"name": full_name or username, "email": email, "source": "local",
+         "user_id": uid, "username": username}
+        for uid, full_name, username, email in rows
     ])
+
+
+async def _resolve_hub(db: AsyncSession, entries: List[dict]) -> List[dict]:
+    """Hub entries carry no PLM2 identity: match each to the User with the
+    same email (case-insensitive), so an attendee picked from the hub is
+    stored as that user. Unmatched entries keep user_id None."""
+    emails = {(e.get("email") or "").strip().lower()
+              for e in entries if isinstance(e, dict) and e.get("email")}
+    by_email: dict = {}
+    if emails:
+        for uid, username, email in (await db.execute(
+                select(User.id, User.username, User.email).where(
+                    func.lower(User.email).in_(emails),
+                    User.is_active.is_(True)))).all():
+            by_email.setdefault((email or "").strip().lower(), (uid, username))
+    out = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        hit = by_email.get((e.get("email") or "").strip().lower())
+        out.append({**e, "user_id": hit[0] if hit else None,
+                    "username": hit[1] if hit else None})
+    return out
 
 
 def _people(entries: List[dict]) -> List[dict]:
     """Only people (spec §16): no service tokens, smoke-test or admin
-    accounts, no entry without a real mailbox; one row per name."""
+    accounts, no entry without a real mailbox; one row per name. An entry
+    that IS a PLM2 user (user_id set) is a person whatever its mail domain."""
     from app.services.early_stage_service import EarlyStageService
     seen, out = set(), []
     for e in entries:
-        if not isinstance(e, dict) or not EarlyStageService.is_person_contact(e):
+        if not isinstance(e, dict) or not EarlyStageService.is_person_contact(
+                e, is_user=e.get("user_id") is not None):
             continue
         key = (e.get("name") or "").strip().lower()
         if key in seen:
@@ -57,8 +83,9 @@ async def list_contacts(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """[{name, email, source}] for attendee autofill. Hub directory when
-    configured, else local users."""
+    """[{name, email, source, user_id, username}] for attendee autofill.
+    Hub directory when configured (entries resolved to PLM2 users by
+    email), else local users."""
     settings = get_settings()
     base = settings.hub_api_base.rstrip("/")
     if not base:
@@ -73,7 +100,7 @@ async def list_contacts(
             )
         if resp.status_code == 200:
             data = resp.json()
-            return _people(data) if isinstance(data, list) else data
+            return _people(await _resolve_hub(db, data)) if isinstance(data, list) else data
     except httpx.HTTPError:
         pass
     # Hub unreachable or errored — degrade to local rather than 500 the picker.

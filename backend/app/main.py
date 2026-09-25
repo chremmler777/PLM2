@@ -116,25 +116,29 @@ async def seed_test_data():
             # The ECR nine in order, then Quality (co-signs approvals), then
             # the non-ECR roles kept for history (see migration 043 — they are
             # deactivated there, this list only creates what is missing).
+            # Retired roles are created RETIRED (is_active False): a fresh
+            # database must not offer them where 043 took them away. The
+            # seed-era names 043 renamed (R&D, Tooling Engineer,
+            # Planner/Scheduler) are never created at all.
             departments_data = [
-                ("Sales", "action", 1),
-                ("Project Manager", "action", 2),
-                ("APQP", "action", 3),
-                ("Tool Engineer", "action", 4),
-                ("Manufacturing Engineer", "action", 5),
-                ("Process Engineer", "action", 6),
-                ("Development", "action", 7),
-                ("Scheduling", "info", 8),
-                ("Packaging Engineer", "action", 9),
-                ("Quality", "action", 10),
-                ("Logistics", "action", 11),
-                ("Production", "action", 12),
-                ("Purchasing", "action", 13),
-                ("Production control", "action", 14),
-                ("Operations Manager", "info", 15),
-                ("Developer", "action", 16),
+                ("Sales", "action", 1, True),
+                ("Project Manager", "action", 2, True),
+                ("APQP", "action", 3, True),
+                ("Tool Engineer", "action", 4, True),
+                ("Manufacturing Engineer", "action", 5, True),
+                ("Process Engineer", "action", 6, True),
+                ("Development", "action", 7, True),
+                ("Scheduling", "info", 8, True),
+                ("Packaging Engineer", "action", 9, True),
+                ("Quality", "action", 10, True),
+                ("Logistics", "action", 11, False),
+                ("Production", "action", 12, False),
+                ("Purchasing", "action", 13, False),
+                ("Production control", "action", 14, False),
+                ("Operations Manager", "info", 15, False),
+                ("Developer", "action", 16, False),
             ]
-            for dept_name, flow_type, sort_order in departments_data:
+            for dept_name, flow_type, sort_order, active in departments_data:
                 result = await session.execute(
                     select(Department).where(Department.name == dept_name)
                 )
@@ -143,7 +147,7 @@ async def seed_test_data():
                     dept = Department(
                         name=dept_name,
                         flow_type=flow_type,
-                        is_active=True,
+                        is_active=active,
                         sort_order=sort_order,
                     )
                     session.add(dept)

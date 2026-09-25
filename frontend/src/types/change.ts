@@ -61,6 +61,8 @@ export interface RoutingDepartment {
   status: 'pending' | 'active' | 'submitted' | 'waived' | null;
   verdict: string | null;
   assessment_id: number | null;
+  /** A declined letter awaiting the lead's decision. */
+  pending_rasic_letter?: RasicLetter | null;
 }
 
 export interface RoutingStage {
@@ -109,7 +111,7 @@ export interface ChangeRouting {
 export interface DeviationRequest {
   op: 'add' | 'remove' | 'reletter';
   department_id: number;
-  rasic_letter?: 'R' | 'A' | 'S' | 'C';
+  rasic_letter?: RasicLetter;
   stage_order?: number;
   /** Required for op 'add': the audit reason the lead decides on. */
   reason?: string;
@@ -358,6 +360,8 @@ export interface ChangeNegotiation {
 }
 
 export interface ChangeDetail extends ChangeRequest {
+  /** The project's plant (Project.plant_id). */
+  project_plant_id?: number | null;
   impacted_items: ImpactedItem[];
   assessments: Assessment[];
   attachments: Attachment[];
@@ -585,6 +589,8 @@ export interface Gate {
   gate_key: GateKey;
   decision: 'yes' | 'no' | 'na';
   decided_by?: number | null;
+  /** The decider's full name, resolved by the backend. */
+  decided_by_name?: string | null;
   decided_at?: string | null;
   remark?: string | null;
 }
@@ -697,7 +703,13 @@ export interface ImplementationProgress {
   items: ImplementationItem[];
 }
 
-export interface MeetingParticipant { name: string; user_id?: number | null }
+export interface MeetingParticipant {
+  name: string;
+  user_id?: number | null;
+  /** From the contact picker: lets the backend resolve user_id when missing. */
+  username?: string | null;
+  email?: string | null;
+}
 
 export type MeetingChannel = 'meeting' | 'chat' | 'email';
 

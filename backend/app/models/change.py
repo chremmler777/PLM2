@@ -64,7 +64,12 @@ ATTACHMENT_KINDS = ("general", "info_request", "info_response",
                     "mother_plant_timing")
 
 BLOCKING_LETTERS = ("R", "A")
-TASK_LETTERS = ("R", "A", "S", "C")
+# Every letter a department can carry on a change's routing. "I" (Informed) is
+# told about the change and nothing more: no assessment row, no answer owed,
+# never waited on by any gate. Only ASSESSMENT_LETTERS get an assessment row
+# (and a task to answer it, blocking for R/A, noted for S/C).
+TASK_LETTERS = ("R", "A", "S", "C", "I")
+ASSESSMENT_LETTERS = ("R", "A", "S", "C")
 ASSESSMENT_STATUSES = ("pending", "active", "submitted", "waived")
 
 # Maps a WfInstanceTask.status onto the assessment status vocabulary, so a

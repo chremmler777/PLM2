@@ -69,13 +69,13 @@ async def test_the_checklist_definitions_are_served_per_department(
     assert res.status_code == 200, res.text
     items = res.json()
     keys = [i["key"] for i in items]
-    assert keys == ["cycle_time_change", "scrap_increase", "maintenance_increase",
-                    "threed_change", "dimensional_risk", "visual_risk",
-                    "work_instruction_update", "new_process",
-                    "sparepart_required", "modification_internal",
-                    "modification_external", "prototyping_required",
-                    "matching_required"]
-    assert all(i["extra"] is False for i in items)      # Tool Engineer has no extras
+    # Four common items, then the Tool Engineer's own list.
+    assert keys[:4] == ["work_instruction_update", "modification_internal",
+                        "modification_external", "timing_risk"]
+    assert keys[4:] == ["tool_modification", "moldflow_simulation",
+                        "matching_required", "maintenance_increase",
+                        "sparepart_required", "scrap_increase"]
+    assert [i["extra"] for i in items] == [False] * 4 + [True] * 6
     spare = next(i for i in items if i["key"] == "sparepart_required")
     assert spare["label_de"] == "Ersatzteil erforderlich"
     assert spare["label_en"] == "Spare part required"
@@ -90,7 +90,8 @@ async def test_the_checklist_definitions_are_served_per_department(
         "/api/v1/changes/reference/assessment-checklist"
         f"?department_id={apqp_id}", headers=admin_auth)
     extras = [i for i in res.json() if i["extra"]]
-    assert [i["key"] for i in extras] == ["pfmea_update", "control_plan_update"]
+    assert [i["key"] for i in extras] == ["pfmea_update", "control_plan_update",
+                                          "ppap_resubmission", "imds_update"]
 
 
 async def test_development_extra_carries_its_choices(
@@ -177,12 +178,12 @@ async def test_legacy_rows_are_still_accepted(client, admin_auth, tab):
 async def test_checklist_coexists_with_department_specific_keys(
         client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        answered("Tool Engineer", yes={"new_process"}),
+                        answered("Tool Engineer", yes={"tool_modification"}),
                         packaging_impacted=False)
     assert res.status_code == 200, res.text
     body = res.json()["details"]
     assert body["packaging_impacted"] is False
-    assert len(body["impacts"]) == 13
+    assert len(body["impacts"]) == 10
 
 
 async def test_not_feasible_requires_the_explanation_document(
@@ -251,18 +252,21 @@ async def test_rfq_expectation_is_reported_not_enforced(client, admin_auth, tab)
 
 async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
     """Cycle time is charged per part; everything else is a one-off."""
-    res = await _submit(client, admin_auth, tab, answered(
+    # A stored answer from before the checklist changed (cycle time used to
+    # be common) still resubmits and still seeds its lifecycle line.
+    impacts = answered(
         "Tool Engineer",
-        yes={"cycle_time_change", "sparepart_required", "modification_external",
-             "prototyping_required"},
-        remarks={"cycle_time_change": "+0.4s"}))
+        yes={"sparepart_required", "modification_external", "matching_required"})
+    impacts.insert(0, {"key": "cycle_time_change", "answer": "yes",
+                       "impacted": True, "remark": "+0.4s"})
+    res = await _submit(client, admin_auth, tab, impacts)
     assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")
     lines = (await client.get(url, headers=admin_auth)).json()
     assert [l["activity_label"] for l in lines] == [
-        "Cycle time change", "Spare part required",
-        "External modification (supplier)", "Prototyping required"]
+        "Cycle time change", "External modification (supplier)",
+        "Matching/sampling required", "Spare part required"]
     assert [l["cost_kind"] for l in lines] == [
         "lifecycle", "one_time", "one_time", "one_time"]
     assert all(l["activity_id"] is None for l in lines)   # keys, not catalog ids
@@ -273,7 +277,7 @@ async def test_costing_seeds_from_the_checked_keys(client, admin_auth, tab):
 
 async def test_seeding_stays_idempotent_with_keys(client, admin_auth, tab):
     res = await _submit(client, admin_auth, tab,
-                        answered("Tool Engineer", yes={"new_process"}))
+                        answered("Tool Engineer", yes={"tool_modification"}))
     assert res.status_code == 200, res.text
     url = (f"/api/v1/changes/{tab['change_id']}"
            f"/assessments/{tab['assessment_id']}/cost-lines")

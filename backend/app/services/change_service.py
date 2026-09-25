@@ -105,6 +105,26 @@ IMPACT_LOCKED_STATUSES = ("in_implementation", "in_validation", "released",
                           "closed", "rejected", "cancelled")
 
 
+# my-tasks kinds the cockpit (my_actions) lists under its own name.
+STAGE_TASK_EQUIV = {"create_quote": "offer_build", "obtain_info": "needs_info"}
+# Where a stage task is done (mirrors the task list's TASK_TAB).
+STAGE_TASK_TAB = {
+    "kickoff": "overview", "scoping_wrapup": "scoping", "impact_confirm": "impacted",
+    "customer_response": "overview", "obtain_info": "scoping",
+    "close_question": "scoping", "send_rejection": "scoping",
+    "costing_input": "commercial", "costing_update": "commercial",
+    "create_quote": "commercial", "bank_build": "implementation",
+    "publish_plan": "implementation", "progress_report": "implementation",
+    "escalate_risk": "implementation", "update_quote": "implementation",
+}
+
+# A finished change's D1 master data and gates are the record: closed,
+# cancelled and rejected changes refuse edits to them.
+D1_LOCKED_STATUSES = ("closed", "cancelled", "rejected")
+D1_FIELDS = ("issuer", "car_line", "is_series", "cm_internal", "cm_external",
+             "implementation_mode", "affected_plant_ids")
+
+
 class ChangeError(ValueError):
     """Raised for invalid change operations; mapped to HTTP 400 in the router."""
 
@@ -199,6 +219,9 @@ class ChangeService:
         session: AsyncSession, change: ChangeRequest, gate_key: str,
         decision: str, user_id: int, *, remark: Optional[str] = None,
     ) -> ChangeGate:
+        if change.status in D1_LOCKED_STATUSES:
+            raise ChangeError(
+                f"The change is {change.status}: its gates can no longer be decided")
         if gate_key not in GATE_KEYS:
             raise ChangeError(f"Unknown gate '{gate_key}'")
         if decision not in GATE_DECISIONS:
@@ -881,8 +904,9 @@ class ChangeService:
         instance (the revisions' ECN flows and the change's own
         assessment/costing flow) is closed: open tasks waived with `why` as
         their note; a revision flow is canceled (its checks were not all
-        done: the record says so), the change's own flow completed. Returns
-        the closed instance ids."""
+        done: the record says so), the change's own flow completed, unless
+        the change was rejected: then its own flow never finished either and
+        is canceled too. Returns the closed instance ids."""
         from app.models.workflow import WfInstance, WfInstanceTask
         instances = (await session.execute(
             select(WfInstance).where(
@@ -902,7 +926,7 @@ class ChangeService:
             for t in open_tasks:
                 t.status = "waived"
                 t.notes = (f"{t.notes}\n{why}" if t.notes else why)
-            if inst.change_id is not None:
+            if inst.change_id is not None and change.status != "rejected":
                 inst.status = "completed"
                 inst.completed_at = now
             else:
@@ -1911,6 +1935,428 @@ class ChangeService:
         return change
 
     @staticmethod
+    def _action_key(a: dict) -> tuple:
+        """Identity of a cockpit action / task row across the two builders:
+        the kind (under the cockpit's name for it) plus what tells two rows
+        of one kind apart."""
+        kind = STAGE_TASK_EQUIV.get(a["kind"], a["kind"])
+        return (kind, a.get("assessment_id"), a.get("issue_id"),
+                a.get("escalation_id"), a.get("action_id"),
+                a.get("department_id") if kind in (
+                    "costing_input", "costing_update", "plan_feedback",
+                    "info_ack", "release_check", "progress_report") else None)
+
+    @staticmethod
+    async def stage_tasks(db: AsyncSession, user: User, open_changes: list,
+                          dep_ids: set) -> list[dict]:
+        """The stage-responsibility rows of the task list: every open errand
+        a change's stage hands this user (kickoff "Hand over to scoping",
+        "Wrap up scoping", the quote, the customer response, bank build,
+        costing input, progress reports, questions ...). ONE builder shared
+        by GET /changes/my-tasks (all open changes) and my_actions (one
+        change), so the list and the cockpit can never disagree about what
+        is owed. Rows carry change identity + deadline context; the caller
+        dedupes and labels. Batched lookups: a handful of queries for the
+        whole list, not per change."""
+        from app.services.meeting_service import MeetingService
+        tasks: list[dict] = []
+        dep_ids = set(dep_ids or ())
+
+        async def _base(c) -> dict:
+            """Shared shape: identity plus the ACTIVE deadline's context, computed
+            by the service so the badge here and the badge on the change agree."""
+            kind = c.active_deadline
+            due = (c.release_due_date if kind == "release"
+                   else c.required_by_date if kind == "quote" else None)
+            state = await ChangeService.deadline_state(db, c)
+            return {
+                "change_id": c.id, "change_number": c.change_number, "title": c.title,
+                "project_id": c.project_id, "project_number": c.project_number,
+                "project_name": c.project_name,
+                "due_date": due, "overdue": state == "overdue",
+            }
+
+        can_capture = await ChangeService.user_can_start_change(db, user)
+        is_pm = await MeetingService.user_is_pm(db, user)
+        # Settling a concern has no admin shortcut, so the task that asks for it
+        # follows membership too (MeetingService.user_is_pm_member).
+        is_pm_member = await MeetingService.user_is_pm_member(db, user)
+        can_confirm = await ChangeService.user_can_confirm_impact(db, user)
+        in_sales = await ChangeService._user_in_department(db, user, "Sales")
+        in_scheduling = await ChangeService._user_in_department(
+            db, user, ChangeService.SCHEDULING_DEPARTMENT)
+
+        # Batch the per-stage lookups once for the whole list, instead of a few
+        # queries per change: departments by name, draft / latest sent offers,
+        # detailed-plan presence and feedback, release-check rows.
+        from app.models.change_offer import ChangeOffer
+        from app.models.change_plan import ChangePlanFeedback, ChangePlanTask
+        from app.models.change_validation import ChangeReleaseCheck
+        from app.services import release_checklist
+        from app.services.offer_service import EXPIRY_WARNING_DAYS, OfferService
+        dept_by_name = {n: i for i, n in (await db.execute(
+            select(Department.id, Department.name))).all()}
+
+        def _ids(*statuses):
+            return [c.id for c in open_changes if c.status in statuses]
+
+        # Changes with an open validation issue (spec §12), once for the list.
+        from app.models.change_validation_issue import (
+            ISSUE_DONE_STATUSES, ValidationIssue,
+        )
+        from app.services.validation_issue_service import ValidationIssueService
+        vi_ids = _ids("approved", "in_implementation", "in_validation")
+        issue_change_ids = set((await db.execute(
+            select(ValidationIssue.change_id).where(
+                ValidationIssue.change_id.in_(vi_ids),
+                ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)).distinct()
+        )).scalars().all()) if vi_ids else set()
+
+        drafts: dict = {}
+        latest_sent: dict = {}
+        offer_ids = _ids("quoting", "quoted") if in_sales else []
+        if offer_ids:
+            for o in (await db.execute(
+                    select(ChangeOffer).where(
+                        ChangeOffer.change_id.in_(offer_ids),
+                        ChangeOffer.status.in_(("draft", "sent")))
+                    .order_by(ChangeOffer.version))).scalars().all():
+                # ordered by version: the last one per change wins
+                (drafts if o.status == "draft" else latest_sent)[o.change_id] = o
+        planned: set = set()
+        feedback: dict = {}
+        approved_ids = [c.id for c in open_changes
+                        if c.status == "approved" and c.timing_validated_at is None]
+        if dep_ids and approved_ids:
+            planned = {cid for (cid,) in (await db.execute(
+                select(ChangePlanTask.change_id).where(
+                    ChangePlanTask.change_id.in_(approved_ids),
+                    ChangePlanTask.plan == "detailed").distinct())).all()}
+            if planned:
+                for r in (await db.execute(
+                        select(ChangePlanFeedback).where(
+                            ChangePlanFeedback.change_id.in_(planned))
+                        .order_by(ChangePlanFeedback.id))).scalars().all():
+                    feedback.setdefault(r.change_id, {})[r.department_id] = r
+        # Mother-plant side track (spec §14): open "Read and understood"
+        # receipts of the caller's departments, and which changes have informed
+        # anybody yet (the PM's "Send information" errand).
+        from app.models.change_info import ChangeInfoReceipt
+        from app.services import mother_plants as mp
+        from app.services.mother_plant_service import MotherPlantService
+        mp_ids = [c.id for c in open_changes if mp.is_mother_plant(c)]
+        info_open = await MotherPlantService.open_receipts_for(db, mp_ids, dep_ids)
+        informed_ids = set((await db.execute(
+            select(ChangeInfoReceipt.change_id).where(
+                ChangeInfoReceipt.change_id.in_(mp_ids)).distinct()
+        )).scalars().all()) if mp_ids else set()
+        informed_depts: dict = {}
+        if mp_ids and approved_ids:
+            for cid, did in (await db.execute(
+                    select(ChangeInfoReceipt.change_id, ChangeInfoReceipt.department_id)
+                    .where(ChangeInfoReceipt.change_id.in_(
+                        [i for i in mp_ids if i in approved_ids])))).all():
+                informed_depts.setdefault(cid, set()).add(did)
+        release_rows: dict = {}
+        validation_ids = _ids("in_validation") if dep_ids else []
+        if validation_ids:
+            for r in (await db.execute(select(ChangeReleaseCheck).where(
+                    ChangeReleaseCheck.change_id.in_(validation_ids)))).scalars().all():
+                release_rows.setdefault(r.change_id, {})[r.check_key] = r
+
+        for c in open_changes:
+            if c.status == "captured" and (
+                    can_capture or (is_pm and mp.is_mother_plant(c))):
+                # a mother-plant change is captured by Project Management
+                tasks.append({**await _base(c), "kind": "kickoff",
+                              "missing": await ChangeService.kickoff_missing(db, c),
+                              # project team: a mother-plant kickoff is PM's role
+                              "role_department_id": (dept_by_name.get("Project Manager")
+                                                     if mp.is_mother_plant(c) else None)})
+            elif c.status == "scoping":
+                if is_pm:
+                    tasks.append({
+                        **await _base(c), "kind": "scoping_wrapup",
+                        "impact_confirmed": c.impact_confirmed_at is not None,
+                        "has_decision": any(m.decision in ("proceed", "reject")
+                                            for m in c.meetings),
+                    })
+                if can_confirm and c.impact_confirmed_at is None:
+                    tasks.append({**await _base(c), "kind": "impact_confirm"})
+
+            elif (c.status == "rejected" and in_sales and c.customer_relevant
+                    and c.rejection_sent_at is None):
+                tasks.append({
+                    **await _base(c), "kind": "send_rejection",
+                    # Tells the UI which half of the job is left: write the
+                    # explanation, or confirm it went out.
+                    "has_letter": await ChangeService.has_rejection_letter(db, c),
+                })
+            # The quoting stage IS Sales' open task: costing is wrapped up and the
+            # offer has to be written from it. has_price says which half is left —
+            # put a number on it, then send it (-> quoted).
+            elif c.status == "quoting" and in_sales and c.customer_relevant:
+                draft = drafts.get(c.id)
+                tasks.append({
+                    **await _base(c), "kind": "create_quote",
+                    "has_price": c.quoted_price is not None,
+                    # The offer document is the quote now: whether a draft exists
+                    # says which half of "build and send the offer" is left.
+                    "has_offer_draft": draft is not None,
+                    "offer_id": draft.id if draft is not None else None,
+                    "target_tab": "offer",
+                    "hint": "Build and send the offer",
+                })
+            elif (c.status == "quoted" and in_sales and c.customer_relevant
+                    and c.customer_response in (None, "pending")):
+                tasks.append({**await _base(c), "kind": "customer_response"})
+
+            # The scheduling block. Acceptance leaves two errands in sequence:
+            # Scheduling decides how the change reaches the line, then Sales tells
+            # the customer what was planned. Neither is a transition gate — the
+            # row IS the pressure.
+            elif c.status == "approved":
+                if in_scheduling and c.bank_build_mode is None:
+                    tasks.append({
+                        **await _base(c), "kind": "bank_build",
+                        "hint": "Decide running change vs planned scrap and "
+                                "outline the plan",
+                    })
+                if (in_sales and c.customer_relevant
+                        and c.bank_build_mode is not None
+                        and c.plan_published_at is None):
+                    tasks.append({
+                        **await _base(c), "kind": "publish_plan",
+                        "mode": c.bank_build_mode,
+                        "scrap_quote_price": c.scrap_quote_price,
+                    })
+
+            # The offer is valid for 30 days from receipt: a week before it runs
+            # out (or once it has) the customer has to be chased or a new
+            # version sent.
+            if c.status == "quoted" and in_sales and c.customer_relevant:
+                offer = latest_sent.get(c.id)
+                if (offer is not None and offer.valid_until is not None
+                        and OfferService.days_left(offer) <= EXPIRY_WARNING_DAYS):
+                    tasks.append({
+                        **await _base(c), "kind": "offer_expiring",
+                        "offer_id": offer.id, "version": offer.version,
+                        "valid_until": offer.valid_until,
+                        "days_left": OfferService.days_left(offer),
+                        "target_tab": "offer",
+                    })
+
+            # Mother plant: "Read and understood" for each informed department
+            # of the caller; "Send information" for the PM at scoping until
+            # somebody is informed; "Inform the mother plant" once the timing is
+            # validated (the customer publish does not exist here).
+            if mp.is_mother_plant(c):
+                for r in info_open.get(c.id, []):
+                    tasks.append({
+                        **await _base(c), "kind": "info_ack",
+                        "department_id": r.department_id, "receipt_id": r.id,
+                        "target_tab": "mother",
+                        "hint": (f"Read the change from {mp.plant_name(c)} and "
+                                 "confirm: read and understood"),
+                    })
+                if (c.status == "scoping" and c.id not in informed_ids
+                        and await MotherPlantService.may_send(db, c, user)):
+                    tasks.append({
+                        **await _base(c), "kind": "info_send",
+                        "target_tab": "mother",
+                        "hint": "Send information to the team",
+                    })
+                if (c.status in ("approved", "in_implementation")
+                        and c.timing_validated_at is not None
+                        and c.plan_published_at is None
+                        and await MotherPlantService.may_send(db, c, user)):
+                    tasks.append({
+                        **await _base(c), "kind": "inform_mother_plant",
+                        "target_tab": "timing",
+                        "hint": (f"Inform {mp.plant_name(c)} of the validated "
+                                 "timing"),
+                    })
+
+            # The detailed plan waits on every responsible team's confirmation;
+            # each unconfirmed one is that department's errand.
+            # Same rule as ChangePlanService.feedback_state, on preloaded rows.
+            if (c.status == "approved" and dep_ids
+                    and c.timing_validated_at is None and c.id in planned):
+                required = {a.department_id for a in c.assessments
+                            if a.rasic_letter in BLOCKING_LETTERS}
+                if mp.is_mother_plant(c):
+                    # no assessments: the informed departments and Scheduling
+                    required |= informed_depts.get(c.id, set())
+                    required |= {dept_by_name[n] for n in ("Scheduling",)
+                                 if n in dept_by_name}
+                else:
+                    required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
+                                 if n in dept_by_name}
+                latest = feedback.get(c.id, {})
+                revision = int(c.plan_revision or 0)
+                for did in sorted(required & dep_ids):
+                    r = latest.get(did)
+                    stale = bool(r is not None and r.plan_revision < revision)
+                    if r is not None and r.verdict == "confirmed" and not stale:
+                        continue
+                    tasks.append({
+                        **await _base(c), "kind": "plan_feedback",
+                        "department_id": did,
+                        "stale": stale, "target_tab": "timing",
+                        "hint": "Confirm the detailed plan or raise a concern",
+                    })
+
+            # Stage 10: open release-checklist items, per owner department.
+            if c.status == "in_validation" and dep_ids:
+                rows = release_rows.get(c.id, {})
+                by_name = dept_by_name
+                open_by_dept: dict = {}
+                for key in release_checklist.CHECK_KEYS:
+                    r = rows.get(key)
+                    if r is not None and r.status in ("done", "na"):
+                        continue
+                    did = (r.department_id if r is not None
+                           else by_name.get(release_checklist.owner_for(key)))
+                    if did in dep_ids:
+                        open_by_dept.setdefault(did, []).append(key)
+                for did, keys in sorted(open_by_dept.items()):
+                    tasks.append({
+                        **await _base(c), "kind": "release_check",
+                        "department_id": did, "check_keys": keys,
+                        "open_count": len(keys), "target_tab": "release",
+                    })
+
+            # Costing is a queue too: a department that called the change feasible
+            # owes a number, and "no lines at all" is silence rather than a zero.
+            if c.status == "costing" and dep_ids:
+                pending = await ChangeService.costing_pending_department_ids(db, c)
+                for dept_id in sorted(set(pending) & dep_ids):
+                    tasks.append({
+                        **await _base(c), "kind": "costing_input",
+                        "department_id": dept_id,
+                    })
+
+            # Stage 8 is a cadence, not a milestone: while the change is being
+            # implemented, every implementing department owes a progress report
+            # at least twice a week, and a flag raised in one of those reports is
+            # Sales' errand until they take it somewhere.
+            if c.status == "in_implementation":
+                from app.services.implementation_service import ImplementationService
+                impl = await ImplementationService.state(db, c, user)
+                for row in impl["departments"]:
+                    if row["owes_report"] and row["department_id"] in dep_ids:
+                        tasks.append({
+                            **await _base(c), "kind": "progress_report",
+                            "department_id": row["department_id"],
+                            "last_report_at": row["last_report_at"],
+                            "hint": "Report progress at least twice a week",
+                        })
+                # "No unresolved escalation for it yet" needs no separate check:
+                # at_risk_open is already false once ANY escalation (open or
+                # resolved) answers the flag, so a row here means nobody has taken
+                # this risk anywhere.
+                flagged = [row["department_id"] for row in impl["departments"]
+                           if row["at_risk_open"]]
+                if in_sales and flagged:
+                    tasks.append({
+                        **await _base(c), "kind": "escalate_risk",
+                        "department_ids": flagged,
+                        "hint": "Take it to the customer, or escalate internally",
+                    })
+
+            # Validation issues (spec §12): contain / root cause / fix actions for
+            # the owner department, the route for PM / lead, the customer
+            # decision and "quote the fix" for Sales, and every unacknowledged
+            # escalation the caller was notified of. Same rights as the cockpit
+            # (ValidationIssueService.my_actions).
+            if c.id in issue_change_ids:
+                for item in await ValidationIssueService.my_actions(db, c, user):
+                    tasks.append({
+                        **await _base(c), **item, "hint": item["label"],
+                    })
+
+            # Stage 9's one commercial errand: the sampled part came off the scale
+            # at a different weight than the quote was built on. Not tied to a
+            # status — the delta stays owed whether the change is still validating
+            # or went back round to implementation — and cleared by the explicit
+            # acknowledgement (POST /validation/weight-ack), never by guessing at a
+            # quoted_price edit that may have happened for another reason.
+            if in_sales:
+                from app.services.validation_service import ValidationService
+                if ValidationService.weight_delta_open(c):
+                    delta = ValidationService.weight_delta(c)
+                    tasks.append({
+                        **await _base(c), "kind": "update_quote",
+                        "delta_g": delta,
+                        "estimated_part_weight_g": c.estimated_part_weight_g,
+                        "validated_part_weight_g": c.validated_part_weight_g,
+                        "hint": f"Validated part weight is {delta:+g} g against the "
+                                "estimate — update the quote or record the decision",
+                    })
+
+            # Independent of the stage chain: a question can be waiting on Sales at
+            # any live status, and it is one errand per change however many people
+            # asked. Cleared per question by answering it.
+            if in_sales:
+                questions = ChangeService.unanswered_questions(c)
+                if questions:
+                    newest = questions[-1]
+                    tasks.append({
+                        **await _base(c), "kind": "obtain_info",
+                        "reason": newest.note,
+                        "question_count": len(questions),
+                        "concern_id": newest.id,
+                        "department_id": newest.department_id,
+                    })
+
+            # The other half of the same loop: an answer is waiting on the side
+            # that asked. Addressed to the person who asked and to Project
+            # Management, the standing arbiter — mirroring withdraw_concern's
+            # rule. A department only owns the flag (any member may close it)
+            # while the change is in assessment; a scoping question's attribution
+            # is a label and hands its department nothing. An answered question
+            # nobody is told to review stalls exactly like an unanswered one.
+            answered = ChangeService.answered_questions(c)
+            if answered:
+                # Under acts-as the personal requester errand steps aside with the
+                # real memberships — the task list shows the department's view.
+                am_requester = (getattr(user, "acts_as_department_id", None)
+                                is None)
+                mine = [q for q in answered
+                        if is_pm_member
+                        or (am_requester and q.raised_by == user.id)
+                        or (c.status == "in_assessment"
+                            and q.department_id is not None
+                            and q.department_id in dep_ids)]
+                if mine:
+                    newest = mine[-1]
+                    tasks.append({
+                        **await _base(c), "kind": "close_question",
+                        "reason": newest.answer_note,
+                        "question_count": len(mine),
+                        "concern_id": newest.id,
+                        "department_id": newest.department_id,
+                        "question_note": newest.note,
+                    })
+
+        # Post-quote scope change (spec §16): costing reopens for the affected
+        # departments only, until a newer offer or an approved deviation covers it.
+        if dep_ids:
+            from app.services.early_stage_service import EarlyStageService as _ES
+            for c in open_changes:
+                mine_depts = set(c.scope_change_department_ids or []) & dep_ids
+                if not (c.scope_changed_after_quote and mine_depts):
+                    continue
+                state = await _ES.scope_change_state(db, c)
+                if state and not state["covered"]:
+                    for d in sorted(mine_depts):
+                        tasks.append({**await _base(c), "kind": "costing_update",
+                                      "department_id": d,
+                                      "reason": c.scope_change_reason})
+
+        return tasks
+
+    @staticmethod
     async def my_actions(
         session: AsyncSession, change: ChangeRequest, user: User,
     ) -> list[dict]:
@@ -2104,6 +2550,38 @@ class ChangeService:
                         "gate_key": gate.gate_key,
                     })
 
+        # The stage-responsibility rows of the task list, from the SAME
+        # builder GET /changes/my-tasks uses (stage_tasks): "Hand over to
+        # scoping", "Wrap up scoping", the customer response, bank build,
+        # costing input ... Every task-list row of this change is an action
+        # here; a kind the cockpit already lists under its own name
+        # (create_quote = offer_build, obtain_info = needs_info) is not
+        # listed twice.
+        if change.status not in ("released", "closed", "cancelled"):
+            from app.services import cm_labels
+            have = {ChangeService._action_key(a) for a in actions}
+            for r in await ChangeService.stage_tasks(session, user, [change], dept_ids):
+                key = ChangeService._action_key(r)
+                if key in have:
+                    continue
+                have.add(key)
+                kind = r["kind"]
+                item = {k: v for k, v in r.items()
+                        if k not in ("change_id", "change_number", "title",
+                                     "project_id", "project_number",
+                                     "project_name", "mine", "hint", "overdue",
+                                     "due_date")}
+                item["label"] = (r.get("label")
+                                 or (cm_labels.TASK_KIND[kind][0]
+                                     if kind in cm_labels.TASK_KIND
+                                     else cm_labels.label("task_kind", kind)))
+                if r.get("hint") and r.get("hint") != item["label"]:
+                    item["hint"] = r["hint"]
+                item["target_tab"] = (r.get("target_tab")
+                                      or STAGE_TASK_TAB.get(kind, "overview"))
+                item["_owned"] = bool(r.get("mine"))
+                actions.append(item)
+
         # Project team (spec §18): each item carries the viewer's role on it.
         # "main" items are theirs; "backup" items (the project has another
         # responsible for the owing department) show in a muted "As backup"
@@ -2177,8 +2655,9 @@ class ChangeService:
             n = await ChangePlanService.open_deviation_count(session, change)
             if n and await ChangePlanService.may_decide_deviation(session, change, user):
                 out.append({"kind": "plan_deviation",
-                            "label": f"Decide {n} plan deviation(s): lock or "
-                                     "escalate to the customer",
+                            "label": f"Decide {n} move(s) with plan "
+                                     "deviations: lock or escalate to the "
+                                     "customer",
                             "target_tab": "timing", "count": n})
 
         if change.status == "in_validation":
@@ -2524,7 +3003,9 @@ class ChangeService:
             raise ChangeError("details.impacts must be a list")
         dept = await session.get(Department, department_id)
         dept_name = dept.name if dept is not None else None
-        allowed_keys = checklist.keys_for(dept_name)
+        # Current items plus the legacy ones: an answer stored before the
+        # checklist changed resubmits as it is (only current items are owed).
+        allowed_keys = checklist.accepted_keys_for(dept_name)
         answered: set[str] = set()
         catalog = None
         for entry in impacts:
@@ -2899,8 +3380,10 @@ class ChangeService:
             await WorkflowService.complete_task(
                 session, a.wf_instance_task_id, "approved",
                 notes or f"Assessment: {verdict}", user_id)
+            advanced = True
         else:
             a.status = "submitted"   # S/C payload-only; unlinked legacy rows too
+            advanced = False
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "assessment_submitted",
@@ -2908,6 +3391,11 @@ class ChangeService:
             field_name="verdict", new_value=verdict,
             for_department_id=department_id,
         )
+        if advanced:
+            # Completing the task may have started the next stage: a
+            # deviation-added row there gets its task now.
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return a
 
     @staticmethod

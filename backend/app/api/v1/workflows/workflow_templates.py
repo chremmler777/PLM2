@@ -1,6 +1,6 @@
 """Workflow template designer API endpoints."""
 import json
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
@@ -28,11 +28,19 @@ async def get_department_name(db: AsyncSession, dept_id: int) -> str:
 
 
 @router.get("/departments", response_model=list[DepartmentResponse])
-async def list_departments(db: AsyncSession = Depends(get_db)):
-    """List all available departments/roles."""
-    result = await db.execute(
-        select(Department).order_by(Department.sort_order, Department.name)
-    )
+async def list_departments(
+    include_retired: bool = Query(
+        False, description="Also list retired (inactive) departments: admin "
+                           "screens that edit or name historical routings"),
+    db: AsyncSession = Depends(get_db),
+):
+    """The departments/roles to offer. Active ones only by default: a retired
+    role (migration 043) is no pick for a new routing, meeting or task.
+    ``?include_retired=1`` lists them too, for the designer and history."""
+    q = select(Department).order_by(Department.sort_order, Department.name)
+    if not include_retired:
+        q = q.where(Department.is_active.is_(True))
+    result = await db.execute(q)
     return result.scalars().all()
 
 

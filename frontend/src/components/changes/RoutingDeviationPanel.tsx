@@ -23,9 +23,9 @@ import { deviationWaitKey } from '../../lib/scopingRules'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeRouting, DeviationRequest } from '../../types/change'
 
-// I (informed) joins once the routing engine accepts it (backend TASK_LETTERS).
-type Letter = 'R' | 'A' | 'S' | 'C'
-const LETTERS: Letter[] = ['R', 'A', 'S', 'C']
+// I (informed): notified only, no task, never waited on (backend TASK_LETTERS).
+type Letter = 'R' | 'A' | 'S' | 'C' | 'I'
+const LETTERS: Letter[] = ['R', 'A', 'S', 'C', 'I']
 
 const fieldCls =
   'mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none'

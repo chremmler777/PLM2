@@ -102,3 +102,62 @@ async def test_gate_decide_requires_lead_or_admin(client, eng_auth, admin_auth, 
     ok = await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
                           json={"decision": "yes"}, headers=admin_auth)
     assert ok.status_code == 200, ok.text
+
+
+async def _gate_change(client, eng_auth, seed):
+    res = await client.post("/api/v1/changes", json={
+        "project_id": seed["project_id"], "title": "g", "change_type": "physical_part",
+        "lead_id": seed["engineer_id"]}, headers=eng_auth)
+    return res.json()["id"]
+
+
+async def test_gate_rows_carry_the_deciders_name(client, eng_auth, seed):
+    cid = await _gate_change(client, eng_auth, seed)
+    put = await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+                           json={"decision": "yes"}, headers=eng_auth)
+    assert put.json()["decided_by_name"] == "Engineer"
+    lst = (await client.get(f"/api/v1/changes/{cid}/gates", headers=eng_auth)).json()
+    g = next(g for g in lst if g["gate_key"] == "feasibility")
+    assert g["decided_by"] == seed["engineer_id"]
+    assert g["decided_by_name"] == "Engineer"
+
+
+@pytest.mark.parametrize("status", ["closed", "cancelled", "rejected"])
+async def test_finished_change_refuses_gate_and_d1_edits(
+        client, eng_auth, seed, session_factory, status):
+    from app.models.change import ChangeRequest
+    cid = await _gate_change(client, eng_auth, seed)
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = status
+        await s.commit()
+    put = await client.put(f"/api/v1/changes/{cid}/gates/feasibility",
+                           json={"decision": "yes"}, headers=eng_auth)
+    assert put.status_code == 400 and status in put.json()["detail"]
+    res = await client.patch(f"/api/v1/changes/{cid}", json={"car_line": "G65"},
+                             headers=eng_auth)
+    assert res.status_code == 400, res.text
+    assert "D1" in res.json()["detail"] and "car_line" in res.json()["detail"]
+    # resending an unchanged D1 value (the panel sends every field) is fine
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    res = await client.patch(f"/api/v1/changes/{cid}",
+                             json={"car_line": detail.get("car_line")}, headers=eng_auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_detail_carries_part_labels_and_project_plant(client, eng_auth, seed, session_factory):
+    from app.models.entities import Project
+    cid = await _gate_change(client, eng_auth, seed)
+    pres = await client.post("/api/v1/parts", json={
+        "project_id": seed["project_id"], "part_number": "PL-77", "name": "Bracket",
+        "part_type": "sub_assembly", "data_classification": "confidential"}, headers=eng_auth)
+    add = await client.post(f"/api/v1/changes/{cid}/impacted-items",
+                            json={"part_id": pres.json()["id"]}, headers=eng_auth)
+    assert add.status_code == 200, add.text
+    assert (add.json()["part_number"], add.json()["part_name"]) == ("PL-77", "Bracket")
+    detail = (await client.get(f"/api/v1/changes/{cid}", headers=eng_auth)).json()
+    item = detail["impacted_items"][0]
+    assert (item["part_number"], item["part_name"]) == ("PL-77", "Bracket")
+    async with session_factory() as s:
+        plant_id = (await s.get(Project, seed["project_id"])).plant_id
+    assert detail["project_plant_id"] == plant_id

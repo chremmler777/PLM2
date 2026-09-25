@@ -493,6 +493,10 @@ class EarlyStageService:
         )).scalar_one_or_none()
         if inst is not None:
             await WorkflowService._maybe_advance_stage(session, inst)
+            # The stage that just started may carry a deviation-added row
+            # the engine did not create a task for.
+            from app.services.change_routing_service import ChangeRoutingService
+            await ChangeRoutingService.repair_stage_tasks(session, change, None)
 
     @staticmethod
     async def supersede_assessments(session: AsyncSession, change: ChangeRequest,
@@ -1015,17 +1019,26 @@ class EarlyStageService:
                            "test", "plm2-service", "service", "system", "bot")
 
     @staticmethod
-    def is_person_contact(entry: dict) -> bool:
+    def is_person_contact(entry: dict, *, is_user: bool = False) -> bool:
         """A contact the attendee picker should offer: a real mailbox, not a
-        service token, a smoke-test or an admin account."""
+        service token, a smoke-test or an admin account.
+
+        is_user: the entry is an actual PLM2 User row (a local user, or a hub
+        entry resolved to one by email). Its mail domain proves nothing then:
+        a real colleague on an on-prem ``.local`` or a seeded example.com
+        address is still a person; only the name checks apply."""
         email = (entry.get("email") or "").strip().lower()
         name = (entry.get("name") or "").strip().lower()
-        if "@" not in email:
+        if "@" not in email and not is_user:
             return False
         local, _, domain = email.partition("@")
-        if domain.endswith(".local") or domain in ("example.com", "example.org"):
+        if not is_user and (domain.endswith(".local")
+                            or domain in ("example.com", "example.org")):
             return False
-        for probe in (local, name):
+        username = (entry.get("username") or "").strip().lower()
+        for probe in (local, username, name):
+            if not probe:
+                continue
             if any(probe == p or probe.startswith(p + "-") or probe.startswith(p + ".")
                    or probe.startswith(p + "_") or (p in ("admin", "e2e") and probe.startswith(p))
                    for p in EarlyStageService.NON_PERSON_PREFIXES):

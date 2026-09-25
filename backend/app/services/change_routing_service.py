@@ -4,16 +4,18 @@ release. Standard is read from the flow designer (WfTemplate); falls back to the
 legacy TYPE_DISCIPLINES dict when no ChangeRoutingStandard mapping exists.
 """
 from __future__ import annotations
+import copy
 from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.change import (
     ChangeRequest, ChangeAssessment, ChangeMeeting, ChangeRouting, ChangeRoutingStandard,
-    BLOCKING_LETTERS, TASK_LETTERS,
+    ASSESSMENT_LETTERS, BLOCKING_LETTERS, TASK_LETTERS,
 )
 from app.models.workflow import (
     Department, WfTemplate, WfStage, WfStep, WfStepRasic, WfTemplateHistory,
@@ -182,7 +184,7 @@ class ChangeRoutingService:
 
         for stage in stages:
             for dep in stage["departments"]:
-                if dep["rasic_letter"] not in TASK_LETTERS:
+                if dep["rasic_letter"] not in ASSESSMENT_LETTERS:
                     continue  # I => notification only, no row
                 # Every new row is created pending; execution state now lives on the
                 # engine task (linked lazily by _create_stage_tasks), and
@@ -219,6 +221,8 @@ class ChangeRoutingService:
             if tmpl_id is not None:
                 await WorkflowService.start_change_workflow(
                     session, change.id, tmpl_id, user_id)
+        # Belt and braces: any stage-1 row the engine did not give a task.
+        await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
 
     @staticmethod
@@ -230,16 +234,32 @@ class ChangeRoutingService:
         department the scoping room added to stage 1 (or re-lettered away
         from the template's letter) got an assessment row but no task: the
         UI showed "Later stage / nothing to submit" while the gate kept
-        waiting on it. This links or creates the missing task, idempotently:
-        a row that already has one is untouched, so running it twice changes
-        nothing. A row that was answered anyway (payload submit) gets an
-        approved task mirroring the answer; an unanswered R/A row of a
-        change that is already finished gets a waived task, so it lands on
-        nobody's list. Returns the repaired assessment ids."""
+        waiting on it. A deviation-added row of a later stage still starts
+        without one (the engine creates tasks from the template and the
+        snapshot only). This links or creates the missing task, idempotently.
+
+        Run from the write paths that open the gap (meeting proceed /
+        routing build, routing deviations, stage wake-up, assessment submit)
+        and from the admin POST /routing/repair; never from a read. The
+        change's instance row is locked (SELECT ... FOR UPDATE on Postgres)
+        and the unlinked rows and existing tasks are read inside the lock, so
+        two concurrent repairs cannot both insert a task for the same row.
+
+        What the created task looks like:
+          * an answered row: approved, mirroring the answer
+          * a row of the CURRENT stage, change still live: active (R/A,
+            department notified) or noted (S/C)
+          * a row of an already-passed stage, or an unanswered R/A row of a
+            finished change: waived (R/A) or noted (S/C): nothing is owed
+            any more, so it lands on nobody's list
+        The stage advance is re-checked afterwards (an approved or waived
+        task can complete it). ``user_id`` None logs a system action.
+        Returns the repaired assessment ids."""
         inst = (await session.execute(
             select(WfInstance).where(
                 WfInstance.change_id == change.id,
                 WfInstance.status == "active")
+            .with_for_update()
         )).scalar_one_or_none()
         if inst is None:
             return []
@@ -247,9 +267,10 @@ class ChangeRoutingService:
             select(ChangeAssessment).where(
                 ChangeAssessment.change_id == change.id,
                 ChangeAssessment.wf_instance_task_id.is_(None),
-                ChangeAssessment.rasic_letter.in_(TASK_LETTERS),
+                ChangeAssessment.rasic_letter.in_(ASSESSMENT_LETTERS),
                 ChangeAssessment.stage_order <= inst.current_stage_order)
             .order_by(ChangeAssessment.id)
+            .execution_options(populate_existing=True)
         )).scalars().all()
         if not rows:
             return []
@@ -263,49 +284,75 @@ class ChangeRoutingService:
         )).scalars().all()
         finished = change.status in ("released", "closed", "rejected", "cancelled")
         repaired: list[int] = []
+        created_any = False
+        notify_depts: set[int] = set()
         for a in rows:
+            # Idempotent: an unlinked task of this instance for the same
+            # stage + department + letter is this row's task; link it.
             task = next((t for t in tasks
                          if t.id not in linked and t.stage_order == a.stage_order
                          and t.department_id == a.department_id
                          and t.rasic_letter == a.rasic_letter), None)
             if task is None:
                 is_blocking = a.rasic_letter in BLOCKING_LETTERS
+                passed = a.stage_order < inst.current_stage_order
+                answered = a.submitted_at is not None
+                live = is_blocking and not answered and not passed and not finished
                 task = WfInstanceTask(
                     instance_id=inst.id, stage_order=a.stage_order,
                     step_id=await _match_step_id(
                         session, inst.template_id, a.stage_order,
                         a.department_id, a.rasic_letter),
                     department_id=a.department_id, rasic_letter=a.rasic_letter,
-                    status="active" if is_blocking else "noted",
+                    status="active" if live else "noted",
                     is_actionable=is_blocking,
                     due_date=(a.due_date or datetime.utcnow()
                               + timedelta(days=DEFAULT_TASK_DUE_DAYS))
-                    if is_blocking else None,
+                    if live else None,
                 )
-                if is_blocking and a.submitted_at is not None:
+                if is_blocking and answered:
                     task.status = "approved"
                     task.decision = "approved"
                     task.completed_by = a.submitted_by
                     task.completed_at = a.submitted_at
                     task.owner_id = a.owner_id or a.submitted_by
                     task.accepted_at = a.accepted_at or a.submitted_at
-                elif is_blocking and finished:
+                elif is_blocking and not live:
                     task.status = "waived"
-                    task.notes = (f"Created by the routing repair after the "
-                                  f"change was {change.status}; nothing owed")
+                    task.notes = (
+                        f"Created by the routing repair after the change was "
+                        f"{change.status}; nothing owed" if finished else
+                        f"Created by the routing repair after stage "
+                        f"{a.stage_order} had passed; nothing owed")
+                elif live:
+                    notify_depts.add(a.department_id)
                 session.add(task)
                 await session.flush()
                 tasks = list(tasks) + [task]
+                created_any = True
             a.wf_instance_task_id = task.id
             linked.add(task.id)
             repaired.append(a.id)
         await session.flush()
+        if notify_depts:
+            await NotificationService.notify_team(
+                session, change.project_id, sorted(notify_depts),
+                title=f"Assessment task: {change.change_number}",
+                body=f"Your department has an assessment to give on '{change.title}'.",
+                link=f"/changes/{change.id}?tab=assessments",
+            )
+        if created_any:
+            await WorkflowService._maybe_advance_stage(session, inst)
         from app.services.change_service import ChangeService
+        actor = user_id or change.lead_id or change.raised_by
+        text = (f"Routing repair: {len(repaired)} assessment row(s) got their "
+                "missing workflow task")
+        extra: dict = {"assessment_ids": repaired}
+        if user_id is None:
+            text += " (automatic)"
+            extra["system"] = True
         await ChangeService.append_changelog(
-            session, change, "routing_repaired",
-            f"Routing repair: {len(repaired)} assessment row(s) got their "
-            "missing workflow task", user_id,
-            new_value={"assessment_ids": repaired})
+            session, change, "routing_repaired", text, actor, new_value=extra)
         return repaired
 
     @staticmethod
@@ -423,9 +470,37 @@ class ChangeRoutingService:
 
         if op == "add":
             if rasic_letter not in TASK_LETTERS:
-                raise ValueError("add requires a task letter (R/A/S/C)")
+                raise ValueError("add requires a RASIC letter (R/A/S/C/I)")
             order = stage_order or target_stage
-            if existing is None:
+            if existing is None and rasic_letter == "I":
+                # Informed: told, nothing owed. No assessment row and no task
+                # (nothing for a gate to wait on); the department sits on the
+                # routing snapshot, flagged until the lead decides, so a
+                # rejection can take it off again.
+                snap = copy.deepcopy(routing.standard_snapshot or {"stages": []})
+                st = next((x for x in snap.setdefault("stages", [])
+                           if x["stage_order"] == order), None)
+                if st is None:
+                    st = {"stage_order": order, "departments": []}
+                    snap["stages"].append(st)
+                    snap["stages"].sort(key=lambda x: x["stage_order"])
+                if any(d["department_id"] == department_id and d["rasic_letter"] == "I"
+                       for d in st["departments"]):
+                    raise ValueError("The department is already I")
+                st["departments"].append({"department_id": department_id,
+                                          "rasic_letter": "I",
+                                          "pending_deviation": True})
+                routing.standard_snapshot = snap
+                flag_modified(routing, "standard_snapshot")
+                await session.flush()
+                await NotificationService.notify_team(
+                    session, change.project_id, [department_id],
+                    title=f"For your information: {change.change_number}",
+                    body=(f"Your department is informed about '{change.title}'. "
+                          "Nothing to answer."),
+                    link=f"/changes/{change.id}",
+                )
+            elif existing is None:
                 new_status = "active" if order <= await ChangeRoutingService._max_active_order(session, change) else "pending"
                 new_row = ChangeAssessment(
                     change_id=change.id, department_id=department_id, verdict="pending",
@@ -490,7 +565,7 @@ class ChangeRoutingService:
             desc = f"removed dept {department_id}"
         elif op == "reletter":
             if rasic_letter not in TASK_LETTERS:
-                raise ValueError("reletter requires a task letter (R/A/S/C)")
+                raise ValueError("reletter requires a RASIC letter (R/A/S/C/I)")
             if existing is None:
                 raise ValueError("no assessment to reletter")
             # "Not our responsibility" (spec §16 P1-3): a department that has
@@ -530,6 +605,8 @@ class ChangeRoutingService:
                 body=f"{desc.capitalize()}: needs your approval.",
                 link=f"/changes/{change.id}?tab=assessments",
             )
+        # A row the op added to a started stage without a task gets one now.
+        await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
 
     @staticmethod
@@ -571,6 +648,28 @@ class ChangeRoutingService:
             raise ValueError(f"Only the change lead may {verb} this deviation")
 
     @staticmethod
+    def _settle_pending_informed(routing: ChangeRouting, *, keep: bool) -> list[int]:
+        """Decide the Informed departments a pending deviation put on the
+        snapshot: approved (keep) drops the pending flag, rejected removes the
+        entries. Returns the department ids touched."""
+        snap = copy.deepcopy(routing.standard_snapshot or {"stages": []})
+        touched: list[int] = []
+        for st in snap.get("stages", []):
+            deps = []
+            for d in st["departments"]:
+                if d.get("pending_deviation"):
+                    touched.append(d["department_id"])
+                    if not keep:
+                        continue
+                    d = {k: v for k, v in d.items() if k != "pending_deviation"}
+                deps.append(d)
+            st["departments"] = deps
+        if touched:
+            routing.standard_snapshot = snap
+            flag_modified(routing, "standard_snapshot")
+        return touched
+
+    @staticmethod
     async def reject_deviation(session: AsyncSession, change: ChangeRequest, user_id: int,
                                reason: str, *, acting: bool = False) -> ChangeRouting:
         """Reject the pending deviation and undo what it added.
@@ -587,7 +686,10 @@ class ChangeRoutingService:
             raise ValueError("A reason is required to reject a routing deviation")
         standard = {(d["department_id"], st["stage_order"]): d["rasic_letter"]
                     for st in routing.standard_snapshot.get("stages", [])
-                    for d in st["departments"]}
+                    for d in st["departments"] if not d.get("pending_deviation")}
+        # An Informed department the deviation put on the routing comes off
+        # again (it never had a row or a task).
+        uninformed = ChangeRoutingService._settle_pending_informed(routing, keep=False)
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
@@ -638,7 +740,7 @@ class ChangeRoutingService:
             session, change, "routing_deviation_rejected",
             f"Routing deviation rejected: {reason.strip()}", user_id,
             notes=reason.strip(),
-            new_value={"removed_department_ids": removed,
+            new_value={"removed_department_ids": removed + uninformed,
                        "restored_department_ids": [a.department_id for a in relettered],
                        "declines_refused_department_ids": [a.department_id for a in declined]})
         if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
@@ -686,6 +788,7 @@ class ChangeRoutingService:
             )).scalar_one_or_none()
             if inst is not None:
                 await WorkflowService._maybe_advance_stage(session, inst)
+        ChangeRoutingService._settle_pending_informed(routing, keep=True)
         routing.deviation_status = "approved"
         routing.deviation_approved_by = user_id
         routing.deviation_approved_at = datetime.utcnow()
@@ -693,6 +796,7 @@ class ChangeRoutingService:
         await ChangeService.append_changelog(
             session, change, "routing_deviation_approved", "Routing deviation approved", user_id,
             new_value={"relettered_department_ids": relettered} if relettered else None)
+        await ChangeRoutingService.repair_stage_tasks(session, change, None)
         return routing
 
     @staticmethod

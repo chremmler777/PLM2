@@ -79,22 +79,49 @@ class MeetingService:
     async def _validate_rasic(session: AsyncSession,
                               rasic: Optional[dict]) -> tuple[Optional[dict], list[int]]:
         """Normalise the room's RASIC call: int keys, upper-case letters out of
-        R/A/S/C ("I" for Informed is taken as Consulted — the engine owes an
-        informed department nothing more than it owes a consulted one), known
+        R/A/S/C/I (I = Informed: notified, no task, never waited on), known
         departments only. Returns (map with str keys for JSON, ordered ids)."""
         if rasic is None:
             return None, []
         out: dict[str, str] = {}
         for k, v in rasic.items():
             letter = (v or "").strip().upper()
-            if letter == "I":
-                letter = "C"
             if letter not in TASK_LETTERS:
                 raise ChangeError(
-                    f"Invalid RASIC letter '{v}' for department {k}: one of R, A, S, C")
+                    f"Invalid RASIC letter '{v}' for department {k}: one of R, A, S, C, I")
             out[str(int(k))] = letter
         ids = await MeetingService._validate_departments(session, [int(k) for k in out])
         return out, ids
+
+    @staticmethod
+    async def resolve_participants(session: AsyncSession,
+                                   participants: Optional[list]) -> list[dict]:
+        """Attendees as {name, user_id}: a given user_id is kept when that
+        user exists; without one the picker's username, then email, finds
+        the PLM2 user (case-insensitive). Free-text names stay free text."""
+        out: list[dict] = []
+        for p in participants or []:
+            if not isinstance(p, dict):
+                p = p.model_dump() if hasattr(p, "model_dump") else {"name": str(p)}
+            name = (p.get("name") or "").strip()
+            uid = p.get("user_id")
+            user = await session.get(User, uid) if uid else None
+            username = (p.get("username") or "").strip().lower()
+            email = (p.get("email") or "").strip().lower()
+            if user is None and username:
+                user = (await session.execute(select(User).where(
+                    func.lower(User.username) == username))).scalars().first()
+            if user is None and email:
+                user = (await session.execute(select(User).where(
+                    func.lower(User.email) == email))).scalars().first()
+            entry = {"name": name or (user.full_name or user.username if user else ""),
+                     "user_id": user.id if user is not None else None}
+            if email:
+                entry["email"] = email
+            if not entry["name"]:
+                continue
+            out.append(entry)
+        return out
 
     @staticmethod
     async def create_meeting(
@@ -122,7 +149,9 @@ class MeetingService:
             await MeetingService._validate_departments(session, selected_department_ids or [])
         meeting = ChangeMeeting(
             change_id=change.id, meeting_date=meeting_date or datetime.utcnow(),
-            channel=channel, participants=participants or [], notes=notes,
+            channel=channel,
+            participants=await MeetingService.resolve_participants(session, participants),
+            notes=notes,
             selected_department_ids=dept_ids, department_rasic=rasic,
             cost_carrier=MeetingService._validate_cost_carrier(cost_carrier),
             created_by=user.id)
@@ -211,6 +240,9 @@ class MeetingService:
                 keep = {str(i) for i in fields["selected_department_ids"]}
                 fields["department_rasic"] = {k: v for k, v in meeting.department_rasic.items()
                                               if k in keep}
+        if fields.get("participants") is not None:
+            fields["participants"] = await MeetingService.resolve_participants(
+                session, fields["participants"])
         if "cost_carrier" in fields:
             fields["cost_carrier"] = MeetingService._validate_cost_carrier(
                 fields["cost_carrier"])
@@ -295,7 +327,7 @@ class MeetingService:
                 from app.services import assessment_checklist as checklist
                 dept_for_keys = (await session.get(Department, department_id)
                                  if department_id is not None else None)
-                if checklist_key not in checklist.keys_for(
+                if checklist_key not in checklist.accepted_keys_for(
                         dept_for_keys.name if dept_for_keys else None):
                     raise ChangeError(
                         f"'{checklist_key}' is not a checklist item for this department")

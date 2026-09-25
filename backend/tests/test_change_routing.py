@@ -21,7 +21,9 @@ async def test_routing_models_importable_and_columns_exist(session_factory):
                                     template_version=1, updated_by=1))
         await s.commit()
     assert BLOCKING_LETTERS == ("R", "A")
-    assert TASK_LETTERS == ("R", "A", "S", "C")
+    assert TASK_LETTERS == ("R", "A", "S", "C", "I")
+    from app.models.change import ASSESSMENT_LETTERS
+    assert ASSESSMENT_LETTERS == ("R", "A", "S", "C")
 
 
 @pytest_asyncio.fixture
@@ -707,3 +709,112 @@ async def test_reject_restores_a_relettered_department(
             ChangeAssessment.stage_order == 1))).scalar_one()
         assert row.rasic_letter == "R" and row.pending_rasic_letter is None
         assert row.task is None or row.task.is_actionable
+
+
+async def test_informed_deviation_adds_no_row_no_gate_and_is_undone_on_reject(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """RASIC I: the department is told (a notification), gets no assessment
+    row and no task, and no gate waits on it. A rejection takes it off."""
+    from app.models.change import ChangeAssessment
+    from app.models.notification import Notification
+    from app.models.workflow import UserDepartment
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "I", "stage_order": 1,
+        "reason": "MfgEng should know"}, headers=auth)
+    assert res.status_code == 200, res.text
+    deps = {d["department_id"]: d for st in res.json()["stages"] for d in st["departments"]
+            if st["stage_order"] == 1}
+    assert deps[mfg]["rasic_letter"] == "I" and deps[mfg]["tier"] == "info"
+    assert deps[mfg]["assessment_id"] is None
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == c["id"])
+            & (ChangeAssessment.department_id == mfg)))).scalars().all()
+        assert rows == []
+        notes = (await s.execute(select(Notification).where(
+            Notification.title.like("For your information%")))).scalars().all()
+        assert notes, "the informed department is notified"
+    # Nobody's my-tasks carry it.
+    mine = (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+    assert not any(t.get("department_id") == mfg for t in mine
+                   if t.get("change_id") == c["id"])
+    # The stage-state never waits on it.
+    st = (await client.get(f"/api/v1/changes/{c['id']}/stage-state", headers=auth))
+    if st.status_code == 200:
+        body = st.json()
+        waiting = (body.get("assessment") or {}).get("waiting_on") or []
+        assert all(w["department_id"] != mfg for w in waiting)
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
+                            json={"reason": "not needed"}, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    ids = {d["department_id"] for st in res.json()["stages"] for d in st["departments"]}
+    assert mfg not in ids
+
+
+async def test_informed_deviation_approved_does_not_block_costing(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "I", "stage_order": 1,
+        "reason": "FYI"}, headers=auth)
+    assert res.status_code == 200, res.text
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    dep = next(d for st in res.json()["stages"] for d in st["departments"]
+               if d["department_id"] == mfg)
+    assert dep["rasic_letter"] == "I"
+    detail = (await client.get(f"/api/v1/changes/{c['id']}", headers=auth)).json()
+    for a in detail["assessments"]:
+        if a["rasic_letter"] in ("R", "A"):
+            await client.post(f"/api/v1/changes/{c['id']}/assessments",
+                              json={"department_id": a["department_id"], "verdict": "feasible"},
+                              headers=auth)
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+
+
+async def test_routing_shows_the_approved_letter_after_a_decline(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    """Item 7: after an approved re-letter the routing read returns the row's
+    current letter, not the snapshot's original one."""
+    auth = await _login(client)
+    admin_auth = await _login_admin(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    te = departments["Tool Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "reletter", "department_id": te, "rasic_letter": "C", "stage_order": 1,
+        "reason": "not ours"}, headers=auth)
+    assert res.status_code == 200, res.text
+    dep = next(d for st in res.json()["stages"] for d in st["departments"]
+               if d["department_id"] == te and st["stage_order"] == 1)
+    assert dep["rasic_letter"] == "R" and dep["pending_rasic_letter"] == "C"
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/approve",
+                            headers=admin_auth)
+    assert res.status_code == 200, res.text
+    dep = next(d for st in res.json()["stages"] for d in st["departments"]
+               if d["department_id"] == te and st["stage_order"] == 1)
+    assert dep["rasic_letter"] == "C" and dep["tier"] == "optional"
+    assert dep["pending_rasic_letter"] is None
+
+
+async def test_deviation_added_row_outside_snapshot_is_on_the_routing(
+        client, seed, ecr_template, departments, departments_member, session_factory):
+    auth = await _login(client)
+    c = await _api_change_in_assessment(client, auth, seed, session_factory)
+    mfg = departments["Manufacturing Engineer"]
+    res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation", json={
+        "op": "add", "department_id": mfg, "rasic_letter": "R", "stage_order": 1,
+        "reason": "forgot"}, headers=auth)
+    assert res.status_code == 200, res.text
+    dep = next(d for st in res.json()["stages"] for d in st["departments"]
+               if d["department_id"] == mfg)
+    assert dep["rasic_letter"] == "R" and dep["assessment_id"] is not None

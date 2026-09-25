@@ -1020,6 +1020,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'routingDev.letter.A': { de: 'A: verantwortet (verbindlich)', en: 'A: accountable (blocking)' },
   'routingDev.letter.S': { de: 'S: unterstützt', en: 'S: supports' },
   'routingDev.letter.C': { de: 'C: wird informiert', en: 'C: consulted, no answer owed' },
+  'routingDev.letter.I': { de: 'I: Informiert (nur benachrichtigt)', en: 'I: Informed (notified only)' },
   'routingDev.reason': { de: 'Warum wurde die Abteilung vergessen bzw. warum ist sie betroffen?',
     en: 'Why was this department left out, or why is it impacted after all?' },
   'routingDev.templateHint': {

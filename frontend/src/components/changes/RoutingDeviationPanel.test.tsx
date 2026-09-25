@@ -52,3 +52,24 @@ describe('RoutingDeviationPanel wait line', () => {
     expect(screen.getByTestId('routing-deviation-waiting').textContent).toBe(t('routingDev.waitingForLead'))
   })
 })
+
+describe('RoutingDeviationPanel add dialog', () => {
+  afterEach(cleanup)
+
+  it('offers I (Informed) next to R, A, S and C', async () => {
+    auth.current = { userId: 5 }
+    const { fireEvent } = await import('@testing-library/react')
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RoutingDeviationPanel changeId={7} routing={routing({ deviation_status: 'none', has_deviation: false })}
+          departments={[{ id: 4, name: 'Quality' } as never]} routedIds={[]}
+          stageOrder={1} canAdd canDecide={false} leadId={9} />
+      </QueryClientProvider>)
+    fireEvent.click(screen.getByTestId('add-department-button'))
+    const values = Array.from(document.querySelectorAll('input[name="rasic"]'))
+      .map((i) => (i as HTMLInputElement).value)
+    expect(values).toEqual(['R', 'A', 'S', 'C', 'I'])
+    expect(screen.getByText(t('routingDev.letter.I'))).toBeTruthy()
+    expect(t('routingDev.letter.I')).toMatch(/Informed|Informiert/)
+  })
+})

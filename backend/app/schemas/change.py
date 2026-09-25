@@ -127,6 +127,10 @@ class ImpactedItemResponse(BaseModel):
     eng_level_after: Optional[str] = None
     is_lead: bool = False
     resulting_revision_id: Optional[int] = None
+    # The article itself, so a list of impacted items reads without a lookup
+    # per row. Filled in one batch by the endpoints (fill_part_labels).
+    part_number: Optional[str] = None
+    part_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -424,6 +428,8 @@ class ChangeResponse(BaseModel):
                 data, "info_open_department_ids", [])
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
+            row["project_plant_id"] = (data.project.plant_id
+                                       if data.project is not None else None)
             return row
         return data
 
@@ -432,6 +438,8 @@ class ChangeResponse(BaseModel):
 
 
 class ChangeDetailResponse(ChangeResponse):
+    # The project's plant (Project.plant_id): the plant the change is made in.
+    project_plant_id: Optional[int] = None
     impacted_items: List[ImpactedItemResponse] = []
     assessments: List[AssessmentResponse] = []
     attachments: List[AttachmentResponse] = []
@@ -924,7 +932,7 @@ class CostingPositionResponse(BaseModel):
     # The rate the line is priced with (spec §15 phase 2): the snapshot taken
     # when it was costed. rate None + rate_missing = "No rate in the cost
     # sheet" (not counted, never 0). rate_label reads e.g. "Cost sheet v2,
-    # Tool Engineer, Engineer, 21,50 USD/h". line_value = hours (trials) x
+    # Tool Engineer, Engineer, 21.50 USD/h". line_value = hours (trials) x
     # rate, in rate_currency; currency is the money currency of est_cost and
     # the offers (the costing plant's).
     rate: Optional[float] = None
@@ -984,6 +992,7 @@ class GateResponse(BaseModel):
     gate_key: str
     decision: str
     decided_by: Optional[int] = None
+    decided_by_name: Optional[str] = None
     decided_at: Optional[datetime] = None
     remark: Optional[str] = None
 
@@ -994,6 +1003,10 @@ class GateResponse(BaseModel):
 class MeetingParticipant(BaseModel):
     name: str
     user_id: Optional[int] = None
+    # From the contact picker: used to find the PLM2 user behind a name
+    # when user_id is missing (the backend resolves and stores user_id).
+    username: Optional[str] = None
+    email: Optional[str] = None
 
 
 class MeetingCreate(BaseModel):

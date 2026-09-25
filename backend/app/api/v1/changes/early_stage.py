@@ -2,6 +2,7 @@
 """Early stages polish (spec 2026-09-25 §16): capture, scoping, assessment.
 
     GET  /changes/{id}/stage-state                          cockpit data
+    GET  /changes/{id}/cockpit                              one-call bundle
     GET  /changes/{id}/assessments/{aid}/draft              checklist draft
     PUT  /changes/{id}/assessments/{aid}/draft              save it
     POST /changes/{id}/impacted-items/{item_id}/make-lead   lead item
@@ -41,6 +42,32 @@ async def stage_state(change_id: int,
     which buttons the caller gets (spec §16)."""
     change = await _change(db, change_id, current_user)
     return await EarlyStageService.stage_state(db, change, current_user)
+
+
+@router.get("/{change_id}/cockpit")
+async def cockpit(change_id: int,
+                  current_user: User = Depends(get_current_user),
+                  db: AsyncSession = Depends(get_db)):
+    """The cockpit in one request: stage-state, the caller's actions (with
+    memberships), gates, transition deviations and concerns. Each part is
+    exactly what its own endpoint returns (the same functions build it), so
+    a screen can move to this bundle one panel at a time."""
+    from fastapi.encoders import jsonable_encoder
+    from app.api.v1.changes import changes as ch
+    change = await _change(db, change_id, current_user)
+    state = await EarlyStageService.stage_state(db, change, current_user)
+    actions = await ch.get_my_actions(change_id, current_user=current_user, db=db)
+    gates = await ch.get_gates(change_id, current_user=current_user, db=db)
+    deviations = await ch.list_deviations(change_id, current_user=current_user, db=db)
+    concerns = await ch.list_concerns(change_id, current_user=current_user, db=db)
+    return jsonable_encoder({
+        "change_id": change_id,
+        "stage_state": state,
+        "my_actions": actions,
+        "gates": gates,
+        "deviations": deviations,
+        "concerns": concerns,
+    })
 
 
 @router.get("/{change_id}/assessments/{assessment_id}/draft")
