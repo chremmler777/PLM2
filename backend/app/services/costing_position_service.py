@@ -103,6 +103,46 @@ class CostingPositionService:
             return None
         return set(await WorkflowService.effective_department_ids(session, actor))
 
+    @staticmethod
+    async def quote_department_ids(
+        session: AsyncSession, attachments,
+    ) -> dict[int, int | None]:
+        """attachment id -> the department whose costing position the vendor
+        quote belongs to, for every vendor_quote / offer-linked attachment in
+        `attachments`. None when the offer or position is gone (an orphaned
+        quote has no owner, so only the full readers may see it)."""
+        quotes = [a for a in attachments
+                  if a.costing_offer_id is not None or a.kind == "vendor_quote"]
+        if not quotes:
+            return {}
+        offer_ids = {a.costing_offer_id for a in quotes
+                     if a.costing_offer_id is not None}
+        dept_by_offer: dict[int, int] = {}
+        if offer_ids:
+            dept_by_offer = dict((await session.execute(
+                select(CostingOffer.id, CostingPosition.department_id)
+                .join(CostingPosition,
+                      CostingPosition.id == CostingOffer.position_id)
+                .where(CostingOffer.id.in_(offer_ids)))).all())
+        return {a.id: dept_by_offer.get(a.costing_offer_id) for a in quotes}
+
+    @staticmethod
+    async def unreadable_attachment_ids(
+        session: AsyncSession, change: ChangeRequest, actor: User,
+        attachments,
+    ) -> set[int]:
+        """The vendor quotes among `attachments` that `actor` may not read: a
+        quote is its offer's price on paper, so it follows the same rule as
+        the position it belongs to (readable_department_ids)."""
+        visible = await CostingPositionService.readable_department_ids(
+            session, change, actor)
+        if visible is None:
+            return set()
+        owners = await CostingPositionService.quote_department_ids(
+            session, attachments)
+        return {aid for aid, dept in owners.items()
+                if dept is None or dept not in visible}
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------

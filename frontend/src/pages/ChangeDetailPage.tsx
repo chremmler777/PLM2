@@ -641,7 +641,9 @@ export default function ChangeDetailPage() {
               )}
             </div>
           )}
-          <PnlCard change={change} departments={departments} />
+          {/* The P&L reads /summation, which only the cost roles may: mounting
+              it for anyone else fires a request that can only 403. */}
+          {canSeeCosts && <PnlCard change={change} departments={departments} />}
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
               the people entitled to see it. */}

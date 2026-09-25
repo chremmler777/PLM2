@@ -2396,6 +2396,19 @@ class ChangeService:
     ) -> ChangeAssessment:
         if verdict not in ASSESSMENT_VERDICTS:
             raise ChangeError(f"Invalid verdict '{verdict}'")
+        # Only the department answers for itself (or an admin). Blocking R/A
+        # rows get this from WorkflowService.complete_task; S/C letters,
+        # unlinked rows and bare submits never reach the engine, so the same
+        # guard is applied here, for every path, before anything is written.
+        from app.services.workflow_service import WorkflowService
+        actor = await session.get(User, user_id)
+        if actor is None:
+            raise ChangeError("Actor not found")
+        if actor.effective_role != "admin" and not await WorkflowService.actor_in_department(
+                session, actor, department_id):
+            raise ChangeError(
+                "Only members of the assessed department (or an admin) may "
+                "submit its assessment")
         # A "not feasible" is the answer that stops a change dead, and it is
         # the one the customer will ask to see in writing. So it arrives with
         # the document that explains it — specifically a change_ppt filed

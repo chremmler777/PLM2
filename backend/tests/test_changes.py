@@ -220,10 +220,12 @@ async def _advance_to_quoted(client, auth, seed, departments, admin_auth, sessio
                       json={"part_id": part_id}, headers=auth)
     await advance_to_assessment(client, auth, session_factory, change["id"])
     res = await client.get(f"/api/v1/changes/{change['id']}", headers=auth)
+    # Each department answers for itself; the admin stands in for all of them
+    # (a non-member may not submit a department's assessment).
     for a in res.json()["assessments"]:
         await client.post(f"/api/v1/changes/{change['id']}/assessments",
                           json={"department_id": a["department_id"], "verdict": "feasible"},
-                          headers=auth)
+                          headers=admin_auth)
     await _transition(client, auth, change["id"], "costing")
     # Writing the offer is its own stage now: costing -> quoting -> quoted.
     await _transition(client, auth, change["id"], "quoting")

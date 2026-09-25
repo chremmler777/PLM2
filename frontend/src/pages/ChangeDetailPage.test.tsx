@@ -615,6 +615,18 @@ describe('ChangeDetailPage costing tab', () => {
     expect(screen.queryByTestId('costing-reopen')).toBeNull()
   })
 
+  it('mounts the P&L card (which reads /summation) only for the cost roles', async () => {
+    change.status = 'costing' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
+    wrap('/changes/1?tab=costing')
+    await screen.findByTestId('costing-stage')
+    expect(screen.queryByText('mock-pnl-card')).toBeNull()
+    cleanup()
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1?tab=costing')
+    expect(await screen.findByText('mock-pnl-card')).toBeDefined()
+  })
+
   it('opens the offer tab at quote creation', async () => {
     change.status = 'quoting' as ChangeDetail['status']
     change.customer_relevant = true

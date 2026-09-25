@@ -942,7 +942,14 @@ async def get_change(
         a.has_change_ppt = state.get("has_change_ppt", False)
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
-    return await _price_safe(db, change, current_user, ChangeDetailResponse)
+    out = await _price_safe(db, change, current_user, ChangeDetailResponse)
+    # Vendor quotes follow their costing position's read rule here too.
+    from app.services.costing_position_service import CostingPositionService
+    hidden = await CostingPositionService.unreadable_attachment_ids(
+        db, change, current_user, change.attachments)
+    if hidden:
+        out.attachments = [a for a in out.attachments if a.id not in hidden]
+    return out
 
 
 @router.get("/{change_id}/my-actions")
@@ -1002,7 +1009,7 @@ async def get_implementation_progress(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return await ChangeService.implementation_progress(db, change)
@@ -1019,7 +1026,7 @@ async def recommended_departments(
     from app.services.change_routing_service import ChangeRoutingService
     from app.models.change import BLOCKING_LETTERS
     from app.models.workflow import Department
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
     try:
@@ -1062,7 +1069,7 @@ async def assessment_objects(
 @router.get("/{change_id}/routing", response_model=RoutingResponse)
 async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
     routing = change.routing
@@ -1098,7 +1105,7 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
 async def post_deviation(change_id: int, body: DeviationRequest,
                          db: AsyncSession = Depends(get_db),
                          current_user: User = Depends(get_current_user)):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
     from app.services.change_routing_service import ChangeRoutingService
@@ -1117,7 +1124,7 @@ async def post_deviation(change_id: int, body: DeviationRequest,
 async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
                            db: AsyncSession = Depends(get_db),
                            current_user: User = Depends(get_current_user)):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
     from app.services.change_routing_service import ChangeRoutingService
@@ -1132,7 +1139,7 @@ async def reject_deviation(change_id: int, body: RoutingDeviationDecision,
 @router.post("/{change_id}/routing/deviation/approve", response_model=RoutingResponse)
 async def approve_deviation(change_id: int, db: AsyncSession = Depends(get_db),
                             current_user: User = Depends(get_current_user)):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(404, "Change not found")
     from app.services.change_routing_service import ChangeRoutingService
@@ -1151,7 +1158,7 @@ async def transition_change(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     # The quote stage is Sales' own: starting the offer and declaring it sent
@@ -1231,7 +1238,7 @@ async def add_impacted_item(
     change_id: int, body: ImpactedItemCreate,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1252,7 +1259,7 @@ async def remove_impacted_item(
     change_id: int, item_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1267,7 +1274,7 @@ async def get_impact_tree(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return await ChangeService.get_impact_tree(db, change)
@@ -1278,7 +1285,7 @@ async def suggest_impact_rollups(
     change_id: int, body: ImpactSuggestIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     suggested = await ChangeService.suggest_rollups(
@@ -1291,7 +1298,7 @@ async def apply_impact_selection(
     change_id: int, body: ImpactSelectionIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     if current_user.effective_role != "admin" and change.lead_id != current_user.id:
@@ -1317,7 +1324,7 @@ async def seed_impacted_items(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
@@ -1332,7 +1339,7 @@ async def confirm_impact(
 ):
     """Task 18: Development confirms the lead-proposed impacted-item set.
     Development membership only — an admin does it via acts-as."""
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     if not await ChangeService.user_can_confirm_impact(db, current_user):
@@ -1357,7 +1364,7 @@ async def submit_assessment(
     change_id: int, body: AssessmentSubmit,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1385,7 +1392,7 @@ async def accept_assessment(
     change_id: int, assessment_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1403,7 +1410,7 @@ async def assign_assessment(
     change_id: int, assessment_id: int, body: AssessmentAssignIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1422,7 +1429,7 @@ async def set_assessment_due_date(
     change_id: int, assessment_id: int, body: AssessmentDueDateIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -1440,7 +1447,7 @@ async def update_change(
     change_id: int, body: ChangeUpdate,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     fields = body.model_dump(exclude_unset=True)
@@ -1531,7 +1538,7 @@ async def sign_off(
     change_id: int, body: SignOffRequest,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     if body.role in SIGN_OFF_ROLES and not await ChangeService.user_can_sign_off(
@@ -1686,7 +1693,7 @@ async def upload_attachment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     contents = await file.read()
@@ -1722,9 +1729,21 @@ async def download_attachment(
     change_id: int, attachment_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    from app.services.costing_position_service import CostingPositionService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
     att = await db.get(ChangeAttachment, attachment_id)
-    if not att or att.change_id != change_id or not os.path.exists(att.stored_path):
+    if not att or att.change_id != change.id or not os.path.exists(att.stored_path):
         raise HTTPException(status_code=404, detail="Attachment not found")
+    # A vendor quote is its offer's price on paper: readable by whoever may
+    # read that costing position, nobody else.
+    if att.id in await CostingPositionService.unreadable_attachment_ids(
+            db, change, current_user, [att]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only that department, Project Management, Sales, the "
+                   "change lead or an admin may read this vendor quote")
     return FileResponse(att.stored_path, filename=att.filename,
                         media_type=att.content_type or "application/octet-stream")
 
@@ -1734,12 +1753,22 @@ async def delete_attachment(
     change_id: int, attachment_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     att = await db.get(ChangeAttachment, attachment_id)
     if not att or att.change_id != change_id:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    # A vendor quote goes with its offer: only whoever may write that costing
+    # position may remove it (same rule as filing it).
+    from app.services.costing_position_service import CostingPositionService
+    owners = await CostingPositionService.quote_department_ids(db, [att])
+    if att.id in owners and not await CostingPositionService.may_write(
+            db, change, owners[att.id] or 0, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of the costing department, Project "
+                   "Management or an admin may remove that vendor quote")
     # Baseline documents freeze once scoping ends — the record a decision was
     # made on can't be removed afterwards (VDA/IATF traceability).
     from app.models.change import SCOPING_STATUSES
@@ -1800,10 +1829,20 @@ async def put_cost_lines(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     from app.services.cost_service import CostService, CostError
-    change = await ChangeService.get_change(db, change_id)
+    from app.services.costing_position_service import CostingPositionService
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     a = await db.get(ChangeAssessment, aid)
     if not change or not a or a.change_id != change_id:
         raise HTTPException(status_code=404, detail="Assessment not found")
+    # Same write rule as the costing positions: the department itself while
+    # the change is in costing, Project Management and admins at any time.
+    if not await CostingPositionService.may_write(
+            db, change, a.department_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only a member of that department while the change is in "
+                   "costing, Project Management or an admin may change its "
+                   "cost lines")
     try:
         lines = await CostService.replace_cost_lines(
             db, change, a, [l.model_dump() for l in body.lines], current_user.id)
@@ -2114,7 +2153,7 @@ async def put_gate(
     change_id: int, gate_key: str, body: GateDecisionIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     if current_user.effective_role != "admin" and change.lead_id != current_user.id:
@@ -2134,7 +2173,7 @@ async def list_deviations(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     return change.transition_deviations
@@ -2145,7 +2184,7 @@ async def propose_deviation(
     change_id: int, body: DeviationProposeIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -2163,7 +2202,7 @@ async def decide_deviation(
     change_id: int, dev_id: int, body: DeviationDecideIn,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
     try:
@@ -2714,9 +2753,14 @@ async def validation_state(
     releasing exactly as before.
     """
     from app.services.validation_service import ValidationService
+    from app.services.price_redaction import PriceViewer
     change = await _implementation_change(db, change_id, current_user)
     state = await ValidationService.state(db, change)
     await db.commit()
+    # The acknowledgement note is Sales' word on the quote update (often an
+    # amount): the cost roles read it, everybody else sees that it happened.
+    if not await PriceViewer(db, current_user).may_read(change):
+        state["weight_ack_note"] = None
     return state
 
 

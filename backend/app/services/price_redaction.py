@@ -45,6 +45,16 @@ MONEY_FIELD_NAMES = frozenset(("cost_impact", "internal_approved_amount"))
 OFFER_NOTE_KEYS = frozenset(("note", "expired_override_reason"))
 
 
+# Actions whose free-text notes are internal cost talk (the weight-delta
+# acknowledgement that updates the quote; internal_costs_approved is handled
+# above with its description).
+# The description of these carries no free text and is kept.
+NOTE_ONLY_ACTIONS = frozenset(("weight_delta_acknowledged",))
+
+# Free-text fields of the change header that carry the same talk.
+CHANGE_NOTE_FIELDS = ("internal_approval_note", "weight_delta_ack_note")
+
+
 def _is_offer_action(action: Optional[str]) -> bool:
     return bool(action) and action.startswith("offer_")
 
@@ -100,6 +110,7 @@ def redact_changelog_text(action: str, description: str,
         notes = None
     elif action == "internal_costs_approved":
         desc = "Internal costs approved"
+        notes = None
     elif action == "costing_offer_added":
         desc = re.sub(r":\s*-?[\d.,]+\s*$", "", desc)
     elif action == "negotiation_final":
@@ -108,6 +119,21 @@ def redact_changelog_text(action: str, description: str,
         notes = None
     elif action == "bank_build_decided":
         desc = re.sub(r"\s*\(scrap quote [^)]*\)", "", desc)
+    elif action == "vendor_chosen":
+        # "... on 'label' - {reason}": why Sales went against the department
+        # is commercial talk (the vendors' prices, a margin), same as the
+        # offer change note.
+        if notes and desc.endswith(f" \u2014 {notes}"):
+            desc = desc[:-len(f" \u2014 {notes}")]
+        else:
+            desc = re.sub(r"(on '.*?')\s+\u2014\s.*$", r"\1", desc, flags=re.S)
+        notes = None
+    elif action == "costing_reopened":
+        # The reopen reason names the numbers that were wrong.
+        desc = "Costing reopened"
+        notes = None
+    elif action in NOTE_ONLY_ACTIONS:
+        notes = None
     return desc, notes
 
 
@@ -137,9 +163,9 @@ def redact_audit_row(row) -> dict:
 
 
 def redact_change_out(out: Any) -> Any:
-    """Null the header's money fields on a pydantic change response, and the
-    per-department cost_impact of its assessments (detail response)."""
-    for f in CHANGE_PRICE_FIELDS:
+    """Null the header's money fields (and its cost notes) on a pydantic
+    change response, and the per-department cost_impact of its assessments (detail response)."""
+    for f in CHANGE_PRICE_FIELDS + CHANGE_NOTE_FIELDS:
         if hasattr(out, f):
             setattr(out, f, None)
     for a in getattr(out, "assessments", None) or []:

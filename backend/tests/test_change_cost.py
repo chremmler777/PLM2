@@ -246,15 +246,18 @@ async def _captured_change_with_assessment(client, eng_auth, seed, session_facto
         return cid, a.id, dep.id, plant.id
 
 
-async def test_put_and_get_cost_lines_and_summation(client, eng_auth, seed, session_factory):
+async def test_put_and_get_cost_lines_and_summation(client, eng_auth, admin_auth,
+                                                   seed, session_factory):
     cid, aid, dep_id, plant_id = await _captured_change_with_assessment(
         client, eng_auth, seed, session_factory)
+    # Writing follows the costing rule (the department in costing, PM, admin);
+    # the lead engineer reads.
     put = await client.put(
         f"/api/v1/changes/{cid}/assessments/{aid}/cost-lines",
         json={"lines": [{"plant_id": plant_id, "cost_kind": "one_time",
                          "demand_hours": 3.0, "external_cost": 10.0,
                          "activity_label": "Angebot"}]},
-        headers=eng_auth)
+        headers=admin_auth)
     assert put.status_code == 200, put.text
     assert put.json()[0]["internal_cost"] == 150.0
     got = await client.get(f"/api/v1/changes/{cid}/assessments/{aid}/cost-lines", headers=eng_auth)
