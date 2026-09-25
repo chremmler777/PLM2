@@ -1384,3 +1384,16 @@ newest pending-or-active major; a `batch_id` groups a package's intakes;
 My Tasks gets an IntakeSection (`GET /v1/intakes/my`); PartDetail banner +
 intake panel; ItemRow and RevisionTimeline pending chips; project structure
 payload flag `intake_pending`. Migration 096 `revision_intakes` (see map).
+
+## 18. Project team: one responsible per role, others are backup (2026-09-25)
+Per project, one responsible user per role (department). The responsible
+leads that role's tasks on the project's changes: they count on their
+badge / My Tasks / Your actions and notifications go to them. Every other
+member of the department is backup: sees the task and may act, but it does
+not count on their counter; the UI marks it "Backup" with "Main: <name>".
+No responsible set -> today's behaviour (whole department counts). The
+change lead defaults to the project's Project Manager responsible. Backup
+actions are audited as "<backup> for <main>". Table project_responsibles
+(unique project + department), migration 097, API GET/PUT
+/projects/{id}/team (PM members or admin), "Project team" card on the
+project page.
