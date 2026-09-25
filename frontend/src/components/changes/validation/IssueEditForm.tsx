@@ -7,9 +7,11 @@ import { useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { IssueCategory, IssueOut, IssuePatch, IssueSeverity } from '../../../types/validationIssue'
 import { Field, Segmented, Toggle } from '../offer/ui'
+import FieldGroup from '../../common/FieldGroup'
 import { inputCls } from '../offer/offerFormat'
 import { CATEGORY_LABEL, SEVERITY } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import { btnSm } from '../../common/buttonStyles'
 
 interface Draft {
   title: string; description: string; severity: IssueSeverity; category: IssueCategory
@@ -73,11 +75,11 @@ export default function IssueEditForm({ changeId, issue, departments, onDone }: 
           </select>
         </Field>
       </div>
-      <Field label="Severity">
-        <Segmented<string> value={String(d.severity)} testId="edit-severity"
+      <FieldGroup legend="Severity">
+        <Segmented<string> value={String(d.severity)} testId="edit-severity" ariaLabel="Severity"
           onChange={(v) => set('severity', Number(v) as IssueSeverity)}
           options={([1, 2, 3] as IssueSeverity[]).map((s) => ({ value: String(s), label: SEVERITY[s].label }))} />
-      </Field>
+      </FieldGroup>
       <Field label="Tool or equipment number (optional)">
         <input data-testid="edit-tool" value={d.affected_tool_ref} maxLength={120}
           onChange={(e) => set('affected_tool_ref', e.target.value)} className={`${inputCls} w-full`} />
@@ -94,10 +96,10 @@ export default function IssueEditForm({ changeId, issue, departments, onDone }: 
       <div className="flex items-center gap-2">
         <button type="button" data-testid="edit-submit" disabled={!ok || save.isPending}
           onClick={() => save.mutate(undefined)}
-          className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+          className={btnSm.primary}>
           Save changes
         </button>
-        <button type="button" onClick={onDone} className="px-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+        <button type="button" onClick={onDone} className={btnSm.ghost}>Cancel</button>
       </div>
     </div>
   )

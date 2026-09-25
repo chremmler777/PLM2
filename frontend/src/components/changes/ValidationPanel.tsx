@@ -20,7 +20,6 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { validationIssuesKey } from '../../api/validationIssues'
 import { t } from '../../i18n/cmLabels'
@@ -33,9 +32,9 @@ import type { IssueOut } from '../../types/validationIssue'
 import { isIssueOpen, issueCode } from '../../types/validationIssue'
 import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDialog'
 import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { toastError } from '../../lib/apiError'
+import { Check, X } from 'lucide-react'
+import { btnSm } from '../common/buttonStyles'
 
 const onDay = (iso?: string | null) => formatDate(iso)
 
@@ -80,7 +79,7 @@ export const openIssueForCheck = (issues: IssueOut[], deptId: number, key: strin
     && (i.check_department_id ?? i.department_id) === deptId)
 
 function CheckRow({
-  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG, openIssue, onRaise,
+  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG, openIssue, onRaise, hasCosting = true,
 }: {
   changeId: number
   deptId: number
@@ -93,6 +92,8 @@ function CheckRow({
   openIssue?: IssueOut
   /** Offered on a failed check without an open issue, to those who may raise. */
   onRaise?: () => void
+  /** False on a change without a costing (mother plant): no planned figure to compare with. */
+  hasCosting?: boolean
 }) {
   const qc = useQueryClient()
   const key = String(check.check_key)
@@ -117,7 +118,7 @@ function CheckRow({
       // a re-check closes (pass) or reopens (fail) the issues linked to it
       qc.invalidateQueries({ queryKey: validationIssuesKey(changeId) })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the check'),
+    onError: (e: unknown) => toastError(e, 'Could not record the check'),
   })
 
   const valueNumber = Number(value)
@@ -139,11 +140,11 @@ function CheckRow({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-slate-200 text-sm">{checkLabel(key, check.label_en)}</span>
         <span data-testid={`validation-status-${id}`}
-          className={`rounded px-1.5 py-0 text-[10px] leading-tight font-semibold ${chip}`}>
+          className={`rounded px-1.5 py-0 text-[11px] leading-tight font-semibold ${chip}`}>
           {t(`validation.status.${check.status}`)}
         </span>
         {check.checked_at && (
-          <span data-testid={`validation-checkedby-${id}`} className="text-xs text-slate-500">
+          <span data-testid={`validation-checkedby-${id}`} className="text-xs text-slate-400">
             {t('validation.checkedBy')
               .replace('{who}', check.checked_by_name ?? '-')
               .replace('{d}', onDay(check.checked_at))}
@@ -155,7 +156,7 @@ function CheckRow({
               e.preventDefault()
               document.querySelector(`[data-testid="issue-card-${openIssue.id}"]`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
             }}
-            className="ml-auto rounded border border-amber-800 bg-amber-950/40 px-1.5 py-0 text-[10px] leading-tight text-amber-200 hover:bg-amber-950/70">
+            className="ml-auto rounded border border-amber-800 bg-amber-950/40 px-1.5 py-0 text-[11px] leading-tight text-amber-200 hover:bg-amber-950/70">
             {issueCode(openIssue)} open
           </a>
         )}
@@ -170,7 +171,7 @@ function CheckRow({
       {/* Development's row says what "raised" is supposed to mean, so the box is
           not ticked against somebody's private definition of it. */}
       {key === 'revision_bump' && checkLabel(key, check.label_en) !== t('validation.hint.revision_bump') && (
-        <p data-testid={`validation-hint-${id}`} className="text-xs text-slate-500">
+        <p data-testid={`validation-hint-${id}`} className="text-xs text-slate-400">
           {t('validation.hint.revision_bump')}
         </p>
       )}
@@ -190,11 +191,13 @@ function CheckRow({
               {num(check.value)} s
             </span>
           )}
-          <span data-testid={`validation-assumption-${id}`} className="text-xs text-slate-400">
-            {plannedCycleMin != null
-              ? t('validation.cycleAssumption').replace('{x}', num(plannedCycleMin))
-              : t('validation.cycleNoAssumption')}
-          </span>
+          {(hasCosting || plannedCycleMin != null) && (
+            <span data-testid={`validation-assumption-${id}`} className="text-xs text-slate-400">
+              {plannedCycleMin != null
+                ? t('validation.cycleAssumption').replace('{x}', num(plannedCycleMin))
+                : t('validation.cycleNoAssumption')}
+            </span>
+          )}
         </div>
       )}
       {key === 'weight' && (
@@ -208,15 +211,18 @@ function CheckRow({
           {!mayWrite && check.value != null && (
             <span className="text-xs text-slate-200 tabular-nums">{num(check.value)} g</span>
           )}
-          <span data-testid={`validation-estimate-${id}`} className="text-xs text-slate-400">
-            {weightEstimateG != null
-              ? t('validation.weightEstimate').replace('{x}', num(weightEstimateG))
-              : t('validation.weightNoEstimate')}
-          </span>
+          {(hasCosting || weightEstimateG != null) && (
+            <span data-testid={`validation-estimate-${id}`} className="text-xs text-slate-400">
+              {weightEstimateG != null
+                ? t('validation.weightEstimate').replace('{x}', num(weightEstimateG))
+                : t('validation.weightNoEstimate')}
+            </span>
+          )}
         </div>
       )}
 
-      {check.note && (
+      {/* The note says why a check failed; once it passes the old reason is history. */}
+      {check.note && check.status === 'failed' && (
         <p data-testid={`validation-note-text-${id}`} className="text-xs text-slate-300">
           {check.note}
         </p>
@@ -236,10 +242,10 @@ function CheckRow({
             <button type="button" data-testid={`validation-fail-confirm-${id}`}
               disabled={note.trim() === '' || post.isPending}
               onClick={() => post.mutate({ status: 'failed' })}
-              className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
+              className={btnSm.danger}>
               {t('validation.fail')}
             </button>
-            <button type="button" className="text-xs text-slate-400 hover:text-slate-200 px-1"
+            <button type="button" className={btnSm.ghost}
               onClick={() => { setFailing(false); setNote('') }}>
               {t('common.cancel')}
             </button>
@@ -250,12 +256,14 @@ function CheckRow({
           <button type="button" data-testid={`validation-pass-${id}`}
             disabled={!mayPass || post.isPending}
             onClick={() => post.mutate({ status: 'passed' })}
-            className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
+            className={btnSm.secondary}>
+            <Check aria-hidden="true" size={14} className="text-emerald-400" />
             {t('validation.pass')}
           </button>
           <button type="button" data-testid={`validation-fail-${id}`}
             onClick={() => setFailing(true)}
-            className="border border-red-800 text-red-200 hover:bg-red-950/50 px-2.5 py-1 rounded text-xs">
+            className={btnSm.secondary}>
+            <X aria-hidden="true" size={14} className="text-red-400" />
             {t('validation.fail')}
           </button>
         </div>
@@ -265,7 +273,7 @@ function CheckRow({
 }
 
 function DepartmentBlock({
-  changeId, dept, name, mine, editable, state, issues, onRaise,
+  changeId, dept, name, mine, editable, state, issues, onRaise, hasCosting,
 }: {
   changeId: number
   dept: ValidationDepartmentState
@@ -275,6 +283,7 @@ function DepartmentBlock({
   state: ValidationState
   issues: IssueOut[]
   onRaise?: (p: RaisePrefill) => void
+  hasCosting?: boolean
 }) {
   const open = departmentOpenChecks(dept)
   return (
@@ -283,12 +292,13 @@ function DepartmentBlock({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-slate-100 font-medium">{name}</span>
         {mine && (
-          <span className="rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[10px] leading-tight">
+          <span className="rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[11px] leading-tight">
             {t('costing.yourBucket')}
           </span>
         )}
         <span data-testid={`validation-open-${dept.department_id}`}
-          className={`ml-auto rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${
+          title={`${liveChecks(dept).length - open} of ${liveChecks(dept).length} checks passed`}
+          className={`ml-auto rounded px-1.5 py-0 text-[11px] leading-tight font-medium tabular-nums ${
             open > 0 ? 'bg-amber-900/70 text-amber-200' : 'bg-emerald-900/70 text-emerald-200'}`}>
           {`${liveChecks(dept).length - open}/${liveChecks(dept).length}`}
         </span>
@@ -296,7 +306,7 @@ function DepartmentBlock({
       <ul className="space-y-1">
         {dept.checks.map((c) => (
           <CheckRow key={String(c.check_key)} changeId={changeId}
-            deptId={dept.department_id} check={c} editable={editable} mine={mine}
+            deptId={dept.department_id} check={c} editable={editable} mine={mine} hasCosting={hasCosting}
             plannedCycleMin={state.planned_cycle_time_min_per_part}
             weightEstimateG={state.weight_estimate_g}
             openIssue={openIssueForCheck(issues, dept.department_id, String(c.check_key))}
@@ -315,7 +325,7 @@ function DepartmentBlock({
 
 export default function ValidationPanel({
   changeId, status, departments, myDepartmentIds, canSeeAll,
-  canAcknowledge = false, canEscalate = false, canRaiseAny = false,
+  canAcknowledge = false, canEscalate = false, canRaiseAny = false, hasCosting = true,
 }: {
   changeId: number
   status: string
@@ -329,6 +339,11 @@ export default function ValidationPanel({
   canEscalate?: boolean
   /** PM, the change lead, admin raise an issue on any failed check; members on their own. */
   canRaiseAny?: boolean
+  /**
+   * False on a change without a costing (a mother-plant change): the cycle
+   * time and weight rows then do not say "no cycle time in the costing".
+   */
+  hasCosting?: boolean
 }) {
   const qc = useQueryClient()
   const editable = status === 'in_validation'
@@ -349,7 +364,7 @@ export default function ValidationPanel({
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not acknowledge the delta'),
+    onError: (e: unknown) => toastError(e, 'Could not acknowledge the delta'),
   })
 
   const escalate = useMutation({
@@ -362,7 +377,7 @@ export default function ValidationPanel({
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'release'] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not return the change'),
+    onError: (e: unknown) => toastError(e, 'Could not return the change'),
   })
 
   const anyFailed = (state?.departments ?? []).some((d) => d.checks.some((c) => c.status === 'failed'))
@@ -388,7 +403,7 @@ export default function ValidationPanel({
         <span className="font-medium text-slate-100">{t('validation.title')}</span>
         <p className="text-xs text-slate-400 mt-0.5">{t('validation.intro')}</p>
         {!editable && (
-          <p data-testid="validation-readonly" className="text-xs text-slate-500 mt-0.5">
+          <p data-testid="validation-readonly" className="text-xs text-slate-400 mt-0.5">
             {t('validation.readOnly')}
           </p>
         )}
@@ -417,7 +432,7 @@ export default function ValidationPanel({
                 className={`flex-1 min-w-[10rem] ${fieldCls}`} />
               <button type="button" data-testid="validation-weight-ack"
                 disabled={ack.isPending} onClick={() => ack.mutate()}
-                className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50">
+                className={btnSm.primary}>
                 {t('validation.acknowledge')}
               </button>
             </div>
@@ -435,7 +450,7 @@ export default function ValidationPanel({
         <DepartmentBlock key={d.department_id} changeId={changeId} dept={d}
           name={deptName(d.department_id)}
           mine={myDepartmentIds.includes(d.department_id)}
-          editable={editable} state={state} issues={issues}
+          editable={editable} state={state} issues={issues} hasCosting={hasCosting}
           onRaise={raiseStatus && (canRaiseAny || myDepartmentIds.includes(d.department_id)) ? setRaise : undefined} />
       ))}
 
@@ -450,7 +465,7 @@ export default function ValidationPanel({
       {canEscalate && editable && !allPassed && (
         <button type="button" data-testid="validation-escalate"
           onClick={() => setEscalateOpen(true)}
-          className="border border-amber-700 text-amber-200 hover:bg-amber-950/40 px-2.5 py-1 rounded text-xs">
+          className={btnSm.secondary}>
           {t('validation.escalate')}
         </button>
       )}

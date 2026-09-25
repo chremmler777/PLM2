@@ -12,6 +12,8 @@ import type { TaskKind, TaskOut, TaskPatch } from '../../../types/changePlan'
 import { TASK_KINDS } from '../../../types/changePlan'
 import { KIND_COLOR, KIND_LABEL, laneOf } from './ganttMath'
 import { btn, btnPrimary } from './GanttToolbar'
+import { X } from 'lucide-react'
+import { btnIcon } from '../../common/buttonStyles'
 import {
   durationFromLastDay, endOf, lastDay, makeCal, normStart, toDay, toIso, todayDay,
 } from '../../gantt/engine/calendar'
@@ -54,7 +56,7 @@ interface Props {
 }
 
 const field = 'w-full rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-sm text-slate-100 [color-scheme:dark] disabled:opacity-60'
-const label = 'block text-[10px] font-medium uppercase tracking-wide text-slate-500 mb-1'
+const label = 'block text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1'
 
 interface Form {
   name: string
@@ -132,15 +134,18 @@ export default function TaskEditor(p: Props) {
     setF((prev) => ({ ...prev, [k]: v }))
   }
   const canNotes = p.canEdit || p.canDates
-  // The server refuses actual dates later than tomorrow.
-  const maxActual = toIso(todayDay() + 1)
+  // Actual dates lie in the past or today, in the viewer's own calendar. (The
+  // server allows one more day, for viewers in another time zone.)
+  const maxActual = toIso(todayDay())
 
   const cal = useMemo(() => makeCal(p.calendar), [p.calendar])
   const working = cal.mode === 'working'
   const milestone = f.kind === 'milestone'
   const dur = milestone ? 0 : Math.max(0, Math.floor(Number(f.duration) || 0))
   const startOk = /^\d{4}-\d{2}-\d{2}$/.test(f.start_date) && inYearRange(f.start_date)
-  const actualsOk = [f.actual_start, f.actual_finish].every((a) => !a || a <= maxActual)
+  const actualFuture = [f.actual_start, f.actual_finish].some((a) => !!a && a > maxActual)
+  const actualOrder = !!f.actual_start && !!f.actual_finish && f.actual_finish < f.actual_start
+  const actualsOk = !actualFuture && !actualOrder
   const endIncl = startOk ? toIso(lastDay(cal, toDay(f.start_date), dur)) : ''
   const constraintOk = f.constraint_type === 'asap' || (/^\d{4}-\d{2}-\d{2}$/.test(f.constraint_date) && inYearRange(f.constraint_date))
   const readOnly = !p.canEdit && !p.canDates && !p.canProgress
@@ -208,7 +213,7 @@ export default function TaskEditor(p: Props) {
       <header className="flex items-start gap-2 border-b border-slate-700 px-4 py-3">
         <span className="mt-1 h-3 w-3 shrink-0 rounded-sm" style={{ background: col.fill }} />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] uppercase tracking-wide text-slate-500">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">
             #{p.rowNo.get(task.id)} {KIND_LABEL[task.kind]} {task.is_idea ? '(idea)' : ''}
           </p>
           <h3 className="truncate text-sm font-semibold text-slate-100">{task.name}</h3>
@@ -217,7 +222,7 @@ export default function TaskEditor(p: Props) {
           </p>
         </div>
         <button type="button" onClick={p.onClose} aria-label="Close task editor"
-          className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200">&#10005;</button>
+          className={btnIcon}><X aria-hidden="true" size={16} /></button>
       </header>
 
       <div className="grid gap-4 px-4 py-4 md:grid-cols-2 xl:grid-cols-3">
@@ -258,7 +263,7 @@ export default function TaskEditor(p: Props) {
             <option value="">None</option>
             {p.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          <p className="mt-1 text-[11px] text-slate-500">Members of this department report progress on the task.</p>
+          <p className="mt-1 text-[11px] text-slate-400">Members of this department report progress on the task.</p>
         </div>
 
         <div className="grid grid-cols-[minmax(0,1fr)_60px_minmax(0,1fr)] gap-2">
@@ -286,7 +291,7 @@ export default function TaskEditor(p: Props) {
           <p className="text-[11px] text-amber-300/90">Timing is validated. A date change asks for a reason, moves the successors along and records deviations.</p>
         )}
         {startOk && !milestone && dur > 0 && (
-          <p className="-mt-2 text-[11px] text-slate-500">
+          <p className="-mt-2 text-[11px] text-slate-400">
             Next task can start {formatDateInput(toIso(normStart(cal, endOf(cal, toDay(f.start_date), dur))))}.
           </p>
         )}
@@ -319,7 +324,7 @@ export default function TaskEditor(p: Props) {
         <div>
           <span className={label}>Starts after</span>
           {others.length === 0 ? (
-            <p className="text-xs text-slate-500">No other tasks yet.</p>
+            <p className="text-xs text-slate-400">No other tasks yet.</p>
           ) : (
             <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-slate-700 p-1.5" role="group"
               aria-label="Predecessors">
@@ -330,7 +335,7 @@ export default function TaskEditor(p: Props) {
                     aria-label={`Starts after #${p.rowNo.get(o.id)} ${o.name}`}
                     onChange={(e) => set('predecessors', e.target.checked
                       ? [...f.predecessors, o.id] : f.predecessors.filter((x) => x !== o.id))} />
-                  <span className="w-6 text-right tabular-nums text-slate-500">{p.rowNo.get(o.id)}</span>
+                  <span className="w-6 text-right tabular-nums text-slate-400">{p.rowNo.get(o.id)}</span>
                   <span className="truncate">{o.name}</span>
                 </label>
               ))}
@@ -346,7 +351,7 @@ export default function TaskEditor(p: Props) {
             onChange={(e) => set('is_idea', e.target.checked)} />
           <span>
             Idea block
-            <span className="block text-[11px] text-slate-500">A proposal (for example a parallel bank build). Not on the critical path, never pushes committed work, holds no tasks; must be resolved before timing is validated.</span>
+            <span className="block text-[11px] text-slate-400">A proposal (for example a parallel bank build). Not on the critical path, never pushes committed work, holds no tasks; must be resolved before timing is validated.</span>
           </span>
         </label>
         )}
@@ -381,8 +386,13 @@ export default function TaskEditor(p: Props) {
                   onChange={(iso) => set('actual_finish', iso)} />
               </div>
             </div>
+            {(actualFuture || actualOrder) && (
+              <p role="alert" data-testid="te-actual-error" className="text-[11px] text-red-300">
+                {actualFuture ? 'Actual dates cannot lie in the future.' : 'The actual finish cannot be before the actual start.'}
+              </p>
+            )}
             {task.baseline_start && (
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-slate-400">
                 Baseline {formatDateInput(task.baseline_start)}
                 {task.baseline_finish ? ` to ${formatDateInput(toIso(toDay(task.baseline_finish) - (task.duration_days > 0 ? 1 : 0)))}` : ''}
               </p>

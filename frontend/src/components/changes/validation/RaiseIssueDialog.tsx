@@ -7,6 +7,9 @@ import { useEffect, useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { IssueCategory, IssueSeverity } from '../../../types/validationIssue'
 import { Field, Segmented } from '../offer/ui'
+import Dialog from '../../common/Dialog'
+import Button from '../../common/Button'
+import FieldGroup from '../../common/FieldGroup'
 import { inputCls } from '../offer/offerFormat'
 import { CATEGORY_LABEL, SEVERITY, categoryForCheck } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
@@ -50,21 +53,26 @@ export default function RaiseIssueDialog({ open, changeId, departments, prefill,
     ...(tool.trim() ? { affected_tool_ref: tool.trim() } : {}),
   }), { error: 'Could not raise the issue', onDone: onClose })
 
-  if (!open) return null
   const ok = title.trim() && description.trim() && dept != null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-label="Raise issue">
-      <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-800 p-5 shadow-2xl">
-        <h3 className="text-base font-semibold text-slate-100">Raise a validation issue</h3>
-        <p className="mt-0.5 text-sm text-slate-400">
-          {prefill?.checkLabel
-            ? `From the failed check "${prefill.checkLabel}". The owner department contains it and finds the cause; PM or the lead decides the route.`
-            : 'The owner department contains it and finds the cause; PM or the lead decides the route.'}
-        </p>
-        <div className="mt-4 space-y-3">
+    <Dialog open={open} onClose={onClose} title="Raise a validation issue" size="lg" busy={save.isPending}
+      closeOnBackdrop={false} data-testid="raise-dialog"
+      description={prefill?.checkLabel
+        ? `From the failed check "${prefill.checkLabel}". The owner department contains it and finds the cause; PM or the lead decides the route.`
+        : 'The owner department contains it and finds the cause; PM or the lead decides the route.'}
+      footer={(
+        <>
+          <Button onClick={onClose} disabled={save.isPending}>Cancel</Button>
+          <Button variant="primary" data-testid="raise-submit" disabled={!ok} loading={save.isPending}
+            onClick={() => save.mutate(undefined)}>
+            Raise issue
+          </Button>
+        </>
+      )}>
+        <div className="space-y-3">
           <Field label="Title">
-            <input data-testid="raise-title" value={title} onChange={(e) => setTitle(e.target.value)}
+            <input data-testid="raise-title" data-autofocus value={title} onChange={(e) => setTitle(e.target.value)}
               maxLength={200} className={`${inputCls} w-full`} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -84,14 +92,12 @@ export default function RaiseIssueDialog({ open, changeId, departments, prefill,
               </select>
             </Field>
           </div>
-          <Field label="Severity">
-            <Segmented<string> value={String(severity)} testId="raise-severity"
+          <FieldGroup legend="Severity"
+            hint={severity === 3 ? 'Blocks production: containment is required before a route, and the issue starts at level 2.' : undefined}>
+            <Segmented<string> value={String(severity)} testId="raise-severity" ariaLabel="Severity"
               onChange={(v) => setSeverity(Number(v) as IssueSeverity)}
               options={([1, 2, 3] as IssueSeverity[]).map((s) => ({ value: String(s), label: SEVERITY[s].label }))} />
-          </Field>
-          {severity === 3 && (
-            <p className="text-[11px] text-rose-300">Blocks production: containment is required before a route, and the issue starts at level 2.</p>
-          )}
+          </FieldGroup>
           <Field label="Tool or equipment number (optional)">
             <input data-testid="raise-tool" value={tool} onChange={(e) => setTool(e.target.value)}
               maxLength={120} className={`${inputCls} w-full`} />
@@ -101,16 +107,6 @@ export default function RaiseIssueDialog({ open, changeId, departments, prefill,
               onChange={(e) => setDescription(e.target.value)} className={`${inputCls} w-full`} />
           </Field>
         </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">Cancel</button>
-          <button type="button" data-testid="raise-submit" disabled={!ok || save.isPending}
-            onClick={() => save.mutate(undefined)}
-            className="rounded-lg bg-rose-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-600 disabled:opacity-50">
-            Raise issue
-          </button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

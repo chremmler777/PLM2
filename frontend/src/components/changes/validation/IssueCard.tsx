@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { validationIssuesApi, validationIssuesKey } from '../../../api/validationIssues'
 import type { IssueAct, IssueOut } from '../../../types/validationIssue'
 import { isIssueOpen, issueCode } from '../../../types/validationIssue'
-import { formatDate } from '../../../lib/format'
+import { formatCalendarDate, formatDate } from '../../../lib/format'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import {
   ACT_LABEL, CATEGORY_LABEL, DECISION_CHIP, DECISION_LABEL, FIX_ROUTES, ROUTE, SEVERITY,
@@ -26,13 +26,15 @@ import ActionsChecklist from './ActionsChecklist'
 import IssueDropzone from './IssueDropzone'
 import IssueEditForm from './IssueEditForm'
 import { useIssueMutation } from './useIssueMutation'
+import { ChevronRight } from 'lucide-react'
+import { btnSm } from '../../common/buttonStyles'
 
 /** Inline acts that are a single text: containment, root cause, closure note. */
 type TextAct = 'contain' | 'root_cause' | 'close'
-const TEXT_ACT: Record<TextAct, { placeholder: string; submit: string }> = {
-  contain: { placeholder: 'Immediate action: hold parts, protect the bank, run the old state', submit: 'Save containment' },
-  root_cause: { placeholder: 'Why it failed (5 why, measured, confirmed)', submit: 'Save root cause' },
-  close: { placeholder: 'Closure note: how the fix was confirmed', submit: 'Close issue' },
+const TEXT_ACT: Record<TextAct, { label: string; placeholder: string; submit: string }> = {
+  contain: { label: 'Containment', placeholder: 'Immediate action: hold parts, protect the bank, run the old state', submit: 'Save containment' },
+  root_cause: { label: 'Root cause', placeholder: 'Why it failed (5 why, measured, confirmed)', submit: 'Save root cause' },
+  close: { label: 'Closure note', placeholder: 'Closure note: how the fix was confirmed', submit: 'Close issue' },
 }
 
 function TextActForm({ act, onSubmit, onCancel, busy, issueId }: {
@@ -42,15 +44,15 @@ function TextActForm({ act, onSubmit, onCancel, busy, issueId }: {
   return (
     <div data-testid={`issue-form-${act}-${issueId}`} className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
       <textarea autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
-        data-testid={`issue-text-${act}-${issueId}`}
+        data-testid={`issue-text-${act}-${issueId}`} aria-label={TEXT_ACT[act].label}
         placeholder={TEXT_ACT[act].placeholder} className={`${inputCls} w-full`} />
       <div className="flex items-center gap-2">
         <button type="button" data-testid={`issue-text-submit-${act}-${issueId}`}
           disabled={!text.trim() || busy} onClick={() => onSubmit(text.trim())}
-          className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+          className={btnSm.primary}>
           {TEXT_ACT[act].submit}
         </button>
-        <button type="button" onClick={onCancel} className="px-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+        <button type="button" onClick={onCancel} className={btnSm.ghost}>Cancel</button>
       </div>
     </div>
   )
@@ -69,14 +71,14 @@ function QuoteFixForm({ changeId, issue, onDone }: { changeId: number; issue: Is
         {' '}and Sales' task closes. This cannot be taken back.
       </p>
       <input data-testid={`issue-quote-note-${issue.id}`} value={note} onChange={(e) => setNote(e.target.value)}
-        placeholder="Quote number, sent to whom (optional)" className={`${inputCls} w-full`} />
+        placeholder="Quote number, sent to whom (optional)" aria-label="Quote note" className={`${inputCls} w-full`} />
       <div className="flex items-center gap-2">
         <button type="button" data-testid={`issue-quote-confirm-${issue.id}`} disabled={quote.isPending}
           onClick={() => quote.mutate(undefined)}
-          className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+          className={btnSm.primary}>
           Fix quoted to the customer
         </button>
-        <button type="button" onClick={onDone} className="px-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+        <button type="button" onClick={onDone} className={btnSm.ghost}>Cancel</button>
       </div>
     </div>
   )
@@ -92,7 +94,7 @@ function Fact({ label, children, testId }: { label: string; children: React.Reac
 }
 
 const by = (name?: string | null, at?: string | null) =>
-  name || at ? <span className="text-[11px] text-slate-500"> ({[name, at ? formatDate(at) : null].filter(Boolean).join(', ')})</span> : null
+  name || at ? <span className="text-[11px] text-slate-400"> ({[name, at ? formatDate(at) : null].filter(Boolean).join(', ')})</span> : null
 
 export default function IssueCard({
   changeId, changeStatus, issue, viewer, departments, releaseDueDate, defaultOpen, highlight = false,
@@ -172,13 +174,13 @@ export default function IssueCard({
   const primaryButton = !primary && canQuote ? (
     <button type="button" data-testid={`issue-primary-${issue.id}`} data-act="quote_fix"
       onClick={() => { setExpanded(true); setActive('quote_fix') }}
-      className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500">
+      className={btnSm.primary}>
       Quote the fix
     </button>
   ) : primary ? (
     <button type="button" data-testid={`issue-primary-${issue.id}`} data-act={primary}
       disabled={ack.isPending} onClick={() => run(primary)}
-      className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+      className={btnSm.primary}>
       {ACT_LABEL[primary]}
     </button>
   ) : recheckWaits ? (
@@ -189,7 +191,7 @@ export default function IssueCard({
   ) : fourEyes ? (
     <button type="button" data-testid={`issue-primary-${issue.id}`} data-act="route" disabled
       title="You raised this issue. Another PM or the change lead decides the route (4 eyes)."
-      className="cursor-not-allowed rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white opacity-50">
+      className={btnSm.primary}>
       {ACT_LABEL.route}
     </button>
   ) : null
@@ -206,17 +208,19 @@ export default function IssueCard({
       <header className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" onClick={() => setExpanded((x) => !x)} aria-expanded={expanded}
           aria-label={`${expanded ? 'Collapse' : 'Expand'} ${code}`}
-          className="mt-0.5 text-slate-500 hover:text-slate-300">
-          <span className={`inline-block transition-transform ${expanded ? 'rotate-90' : ''}`}>▸</span>
+          className="mt-0.5 rounded text-slate-400 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+          <ChevronRight aria-hidden="true" size={16} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs font-semibold text-slate-400">{code}</span>
+            <span className="font-mono text-xs font-semibold text-slate-300">{code}</span>
             <h4 className={`text-sm font-medium ${open ? 'text-slate-100' : 'text-slate-400'}`}>{issue.title}</h4>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span data-testid={`issue-severity-${issue.id}`}
-              className={`rounded-md border px-1.5 py-0.5 ${SEVERITY[issue.severity].chip}`}>{SEVERITY[issue.severity].label}</span>
+            <span data-testid={`issue-severity-${issue.id}`} title={`Severity ${issue.severity} of 3: ${SEVERITY[issue.severity].label}`}
+              className={`rounded-md border px-1.5 py-0.5 ${SEVERITY[issue.severity].chip}`}>
+              <span className="sr-only">Severity: </span>{SEVERITY[issue.severity].label}
+            </span>
             {open && <EscalationBadge level={issue.escalation_level ?? 1} unacknowledged={issueNeedsAck(issue)} />}
             <span data-testid={`issue-status-${issue.id}`}
               className="rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-300">{statusChipLabel(issue)}</span>
@@ -233,7 +237,7 @@ export default function IssueCard({
             {!decision && issue.customer_inform && open && (
               <span className="rounded-md border border-slate-600 px-1.5 py-0.5 text-slate-300">Customer to be informed</span>
             )}
-            <span className="text-slate-500">
+            <span className="text-slate-400">
               {CATEGORY_LABEL[issue.category]}{deptName ? ` · ${deptName}` : ''}
             </span>
           </div>
@@ -241,7 +245,7 @@ export default function IssueCard({
         <div className="flex flex-col items-end gap-1">
           {primaryButton}
           {fourEyes && !primary && (
-            <span data-testid={`issue-four-eyes-${issue.id}`} className="max-w-[16rem] text-right text-[11px] text-slate-500">
+            <span data-testid={`issue-four-eyes-${issue.id}`} className="max-w-[16rem] text-right text-[11px] text-slate-400">
               You raised {code}: another PM or the lead decides the route.
             </span>
           )}
@@ -284,17 +288,17 @@ export default function IssueCard({
           <div className="grid gap-3 sm:grid-cols-2">
             <Fact label="What happened">
               {issue.description}
-              <span className="text-[11px] text-slate-500"> ({issue.created_by_name ?? '-'}, {formatDate(issue.created_at)})</span>
+              <span className="text-[11px] text-slate-400"> ({issue.created_by_name ?? '-'}, {formatDate(issue.created_at)})</span>
               {issue.affected_tool_ref && <div className="text-[11px] text-slate-400">Tool / equipment: {issue.affected_tool_ref}</div>}
               {issue.affected_part_number && <div className="text-[11px] text-slate-400">Part: {issue.affected_part_number}</div>}
             </Fact>
             <Fact label="Containment" testId={`issue-containment-${issue.id}`}>
               {issue.containment ? <>{issue.containment}{by(issue.contained_by_name, issue.contained_at)}</>
-                : <span className="text-slate-500">{issue.severity === 3 ? 'Needed before the route: production is blocked.' : 'Not recorded.'}</span>}
+                : <span className="text-slate-400">{issue.severity === 3 ? 'Needed before the route: production is blocked.' : 'Not recorded.'}</span>}
             </Fact>
             <Fact label="Root cause" testId={`issue-rootcause-${issue.id}`}>
               {issue.root_cause ? <>{issue.root_cause}{by(issue.root_cause_by_name, issue.root_cause_at)}</>
-                : <span className="text-slate-500">
+                : <span className="text-slate-400">
                   {issue.route === 'customer_concession' ? 'Open; the customer accepts the part as it is.' : 'Owner department finds it before the route.'}
                 </span>}
             </Fact>
@@ -314,7 +318,7 @@ export default function IssueCard({
                     </div>
                   )}
                 </>
-              ) : <span className="text-slate-500">PM or the lead decides once cause{issue.severity === 3 ? ' and containment are' : ' is'} known.</span>}
+              ) : <span className="text-slate-400">PM or the lead decides once cause{issue.severity === 3 ? ' and containment are' : ' is'} known.</span>}
             </Fact>
             {(issue.customer_inform || decision) && (
               <Fact label="Customer" testId={`issue-customer-${issue.id}`}>
@@ -322,9 +326,9 @@ export default function IssueCard({
                   <>
                     {DECISION_LABEL[decision]}{issue.customer_decision_note ? `: ${issue.customer_decision_note}` : ''}
                     {by(issue.customer_decided_by_name, issue.customer_decided_at)}
-                    {issue.concession_until && <div className="text-[11px] text-slate-400">Concession until {formatDate(issue.concession_until)}</div>}
+                    {issue.concession_until && <div className="text-[11px] text-slate-400">Concession until {formatCalendarDate(issue.concession_until)}</div>}
                   </>
-                ) : <span className="text-slate-500">Sales records the customer's decision.</span>}
+                ) : <span className="text-slate-400">Sales records the customer's decision.</span>}
               </Fact>
             )}
             <Fact label="Extra cost">
@@ -359,7 +363,7 @@ export default function IssueCard({
 
           {(secondary.length > 0 || canEdit || (canQuote && !!primary) || canLateCost) && (
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-2">
-              <span className="text-[11px] text-slate-500">Also:</span>
+              <span className="text-[11px] text-slate-400">Also:</span>
               {secondary.map((a) => (
                 <button key={a} type="button" data-testid={`issue-act-${a}-${issue.id}`} onClick={() => run(a)}
                   className="text-[11px] text-sky-300 hover:text-sky-200">{ACT_LABEL[a]}</button>

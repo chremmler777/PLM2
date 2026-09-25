@@ -5,11 +5,12 @@
 import { useEffect, useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { IssueActionOut, IssueOut } from '../../../types/validationIssue'
-import { daysUntil, formatDate, todayIso } from '../../../lib/format'
+import { daysUntil, formatCalendarDate, formatDate, todayIso } from '../../../lib/format'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import type { IssueViewer } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import DateInput from '../../gantt/DateInput'
+import { btnSm } from '../../common/buttonStyles'
 
 export const mayTick = (a: IssueActionOut, v: IssueViewer) =>
   a.status === 'open' && (a.can_done ?? (!!v.canManage || !!v.isAdmin
@@ -56,7 +57,7 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
         )}
       </div>
       {issue.actions.length === 0 && !adding && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-400">
           {issue.route ? 'No fix actions on this route.' : 'Fix actions are set when the route is decided.'}
         </p>
       )}
@@ -72,11 +73,11 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
                 onChange={() => { if (tick) done.mutate(a.id) }}
                 className="mt-0.5 h-3.5 w-3.5 accent-emerald-500" />
               <div className="min-w-0 flex-1 text-xs">
-                <span className={a.status === 'done' ? 'text-slate-500 line-through' : 'text-slate-200'}>{a.description}</span>
-                <span className="ml-2 text-[11px] text-slate-500">
+                <span className={a.status === 'done' ? 'text-slate-400 line-through' : 'text-slate-200'}>{a.description}</span>
+                <span className="ml-2 text-[11px] text-slate-400">
                   {[a.owner_name, deptName(a)].filter(Boolean).join(', ')}
                   {a.due_date && (
-                    <span className={overdue ? 'text-rose-300' : ''}>{` · due ${formatDate(a.due_date)}${overdue ? ', overdue' : ''}`}</span>
+                    <span className={overdue ? 'text-rose-300' : ''}>{` · due ${formatCalendarDate(a.due_date)}${overdue ? ', overdue' : ''}`}</span>
                   )}
                   {a.status === 'done' && a.done_at ? ` · done ${formatDate(a.done_at)}${a.done_by_name ? ` by ${a.done_by_name}` : ''}` : ''}
                 </span>
@@ -99,7 +100,7 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
             onChange={setDue} className={`${inputCls} w-32`} />
           <button type="button" data-testid={`issue-action-save-${issue.id}`}
             disabled={!text.trim() || add.isPending} onClick={() => add.mutate(undefined)}
-            className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50">Add</button>
+            className={btnSm.primary}>Add</button>
           <button type="button" onClick={() => setAdding(false)}
             className="px-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
         </div>

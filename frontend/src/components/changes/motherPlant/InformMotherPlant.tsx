@@ -9,11 +9,10 @@ import { motherPlantApi, motherPlantKey } from '../../../api/motherPlant'
 import { formatDate } from '../../../lib/format'
 import type { ChangeRequest } from '../../../types/change'
 import { plantName, plantText } from '../../../lib/plantName'
+import { btnPrimary } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-
-const primary = 'rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40'
+const primary = btnPrimary
 
 export default function InformMotherPlant({ change, canInform, timingValidated }: {
   change: ChangeRequest; canInform: boolean; timingValidated: boolean
@@ -27,7 +26,7 @@ export default function InformMotherPlant({ change, canInform, timingValidated }
       qc.invalidateQueries({ queryKey: ['change-my-actions', change.id] })
       toast.success(plantText('mp.informed', change.mother_plant_name))
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record it'),
+    onError: (e: unknown) => toastError(e, 'Could not record it'),
   })
   const live = ['approved', 'in_implementation'].includes(change.status)
   const plant = plantName(change.mother_plant_name)

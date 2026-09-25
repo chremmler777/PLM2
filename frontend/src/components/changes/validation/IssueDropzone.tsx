@@ -52,7 +52,7 @@ export default function IssueDropzone({ changeId, issue, canAttach, onUploaded, 
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-400">
           Nothing filed yet. Drop photos, measurement reports or the customer's mail (.msg, .eml) here.
         </p>
       )}

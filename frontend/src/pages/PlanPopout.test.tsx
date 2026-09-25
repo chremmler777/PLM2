@@ -50,6 +50,13 @@ describe('PlanPopout', () => {
     expect(mocks.planner).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'in_implementation', hideSeed: true }))
   })
 
+  it('shows the status and a way back to the change', async () => {
+    mount('/changes/6/plan/detailed')
+    await waitFor(() => expect(screen.getByTestId('plan-popout-status').textContent).toBeTruthy())
+    expect(screen.getByTestId('plan-popout-open-change').getAttribute('href')).toBe('/changes/6?tab=timing')
+    expect(screen.getByTestId('plan-popout-close')).toBeTruthy()
+  })
+
   it('refuses an unknown plan', () => {
     mount('/changes/6/plan/other')
     expect(screen.getByTestId('plan-popout-invalid')).toBeTruthy()

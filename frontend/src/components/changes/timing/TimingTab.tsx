@@ -10,6 +10,7 @@
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Check, Download } from 'lucide-react'
 import { planApi } from '../../../api/changePlan'
 import { CHANGE_STATUS_ORDER, type ChangeRequest, type ChangeStatus } from '../../../types/change'
 import BankBuildCard from '../BankBuildCard'
@@ -20,9 +21,9 @@ import { formatDate } from '../../../lib/format'
 import DeviationsPanel from './DeviationsPanel'
 import TeamFeedbackPanel from './TeamFeedbackPanel'
 import InformMotherPlant from '../motherPlant/InformMotherPlant'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { closingFigures } from '../release/closingFigures'
+import { toastError } from '../../../lib/apiError'
+import { btnPrimary, btnSm } from '../../common/buttonStyles'
 
 const phase = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus)
 
@@ -48,21 +49,24 @@ export interface TimingTabProps {
   canInformMotherPlant?: boolean
 }
 
-const btn = 'rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40'
-const primary = 'rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40'
+const btn = btnSm.secondary
+const primary = btnPrimary
 
 function Step({ n, title, detail, state }: {
   n: number; title: string; detail: string; state: 'done' | 'current' | 'todo'
 }) {
+  // Done reads as done (filled, check); the current step reads as the one to
+  // do (outlined in the accent); later steps stay quiet.
   const dot = state === 'done' ? 'bg-emerald-600 text-white border-emerald-500'
-    : state === 'current' ? 'bg-sky-700 text-white border-sky-500' : 'bg-slate-900 text-slate-500 border-slate-600'
+    : state === 'current' ? 'bg-slate-900 text-sky-200 border-sky-400' : 'bg-slate-900 text-slate-400 border-slate-600'
   return (
     <li className="flex min-w-0 flex-1 items-start gap-2" data-testid={`timing-step-${n}`} data-state={state}>
       <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${dot}`}>
-        {state === 'done' ? '✓' : n}
+        {state === 'done' ? <Check aria-hidden="true" size={12} strokeWidth={3} /> : n}
       </span>
+      <span className="sr-only">{state === 'done' ? 'Done:' : state === 'current' ? 'Next:' : 'Later:'}</span>
       <div className="min-w-0">
-        <p className={`text-sm ${state === 'todo' ? 'text-slate-500' : 'text-slate-100'}`}>{title}</p>
+        <p className={`text-sm ${state === 'todo' ? 'text-slate-400' : 'text-slate-100'}`}>{title}</p>
         <p className="truncate text-xs text-slate-400">{detail}</p>
       </div>
     </li>
@@ -102,6 +106,9 @@ export default function TimingTab({
   const confirmed = required.filter((r) => r.verdict === 'confirmed' && !r.stale).length
   const ideas = tasks.filter((t) => t.is_idea).length
   const errors = plan?.validation.errors.length ?? 0
+  // Where the plan finish stands against the baseline now (the lead times
+  // under the tracking are the quoted ones and do not move with it).
+  const planSlip = closingFigures(tasks).slip
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['change', id] })
@@ -110,21 +117,21 @@ export default function TimingTab({
   const seed = useMutation({
     mutationFn: () => planApi.seed(id, 'detailed'),
     onSuccess: (p) => { qc.setQueryData(['change', id, 'plan', 'detailed'], p); invalidateAll() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not create the detailed plan'),
+    onError: (e: unknown) => toastError(e, 'Could not create the detailed plan'),
   })
   const validate = useMutation({
     mutationFn: () => planApi.validateTiming(id),
     onSuccess: () => { toast.success('Timing validated. The baseline is set.'); invalidateAll() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not validate the timing'),
+    onError: (e: unknown) => toastError(e, 'Could not validate the timing'),
   })
   const publish = useMutation({
     mutationFn: () => planApi.publishPlan(id),
     onSuccess: () => { toast.success('Plan published to the customer'); invalidateAll() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not publish the plan'),
+    onError: (e: unknown) => toastError(e, 'Could not publish the plan'),
   })
   const exportAs = (fmt: 'xml' | 'csv') =>
     (fmt === 'xml' ? planApi.exportXml(id, 'detailed') : planApi.exportCsv(id, 'detailed'))
-      .catch((e: unknown) => toast.error(errDetail(e) ?? 'Export failed'))
+      .catch((e: unknown) => toastError(e, 'Could not export the plan'))
 
   // Why "Validate timing" is not available yet, in the words of the backend guard.
   const blockers: string[] = []
@@ -156,7 +163,7 @@ export default function TimingTab({
       <section className="rounded-lg border border-slate-700 bg-slate-800 p-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-xs uppercase tracking-wide text-slate-500">Timing</h3>
+            <h3 className="text-xs uppercase tracking-wide text-slate-400">Timing</h3>
             <p className="mt-1 text-sm text-slate-200">
               {baseline
                 ? 'Timing is validated. Track progress against the baseline; every date move is recorded as a deviation.'
@@ -165,8 +172,10 @@ export default function TimingTab({
           </div>
           {tasks.length > 0 && (
             <div className="flex gap-2">
-              <button type="button" className={btn} onClick={() => exportAs('xml')} aria-label="Export to MS Project">MS Project</button>
-              <button type="button" className={btn} onClick={() => exportAs('csv')} aria-label="Export as CSV">CSV</button>
+              <button type="button" className={btn} onClick={() => exportAs('xml')} aria-label="Export to MS Project">
+                <Download aria-hidden="true" size={14} />MS Project</button>
+              <button type="button" className={btn} onClick={() => exportAs('csv')} aria-label="Export as CSV">
+                <Download aria-hidden="true" size={14} />CSV</button>
             </div>
           )}
         </div>
@@ -210,7 +219,7 @@ export default function TimingTab({
                   onClick={() => validate.mutate()} data-testid="timing-validate">Validate timing</button>
                 {blockers.length > 0 ? (
                   <ul className="space-y-0.5 text-xs text-amber-200/90" data-testid="timing-blockers">
-                    {blockers.map((b) => <li key={b} className="flex gap-1.5"><span className="text-amber-400">&#8226;</span>{b}</li>)}
+                    {blockers.map((b) => <li key={b} className="flex gap-1.5"><span aria-hidden="true" className="text-amber-400">&#8226;</span>{b}</li>)}
                   </ul>
                 ) : (
                   <p className="text-xs text-slate-400">Every team confirmed. Validating sets the baseline; later date changes need a reason.</p>
@@ -261,7 +270,7 @@ export default function TimingTab({
         <details open data-testid="timing-revisions" className="rounded-lg border border-slate-700 bg-slate-800">
           <summary className="cursor-pointer px-4 py-2.5 text-sm text-slate-200">
             Revisions (ECN): check workflows
-            <span className="ml-2 text-xs text-slate-500">the release waits until every one is complete</span>
+            <span className="ml-2 text-xs text-slate-400">the release waits until every one is complete</span>
           </summary>
           <div className="border-t border-slate-700 p-4">
             <ImplementationPanel changeId={id} />
@@ -297,11 +306,13 @@ export default function TimingTab({
       )}
 
       {/* Publishing lives in the Timing card above: only a validated timing goes to the customer. */}
-      <BankBuildCard change={change} canSetMode={canSetBankBuild} canPublish={canPublish} hidePublish />
+      <BankBuildCard change={change} canSetMode={canSetBankBuild} canPublish={canPublish} hidePublish
+        motherPlant={motherPlant} />
 
       {implementing && (
         <ImplementationTracking changeId={id} status={status} departments={departments}
-          myDepartmentIds={myDepartmentIds} canSeeAll={canSeeAll} canEscalate={canPublish} />
+          myDepartmentIds={myDepartmentIds} canSeeAll={canSeeAll} canEscalate={canPublish}
+          planSlipDays={baseline ? planSlip : null} />
       )}
     </div>
   )

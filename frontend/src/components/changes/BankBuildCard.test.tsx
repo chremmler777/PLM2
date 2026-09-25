@@ -170,3 +170,18 @@ describe('BankBuildCard', () => {
       .toContain(t('bankbuild.mode.running_change'))
   })
 })
+
+describe('BankBuildCard on a mother-plant change', () => {
+  afterEach(cleanup)
+  it('names the mother plant instead of Sales and the customer, and has no publish block', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <BankBuildCard change={change({ mother_plant_name: 'KTX Weissenburg (WUG)' })} canSetMode canPublish motherPlant />
+      </QueryClientProvider>)
+    const intro = screen.getByTestId('bank-build-intro').textContent ?? ''
+    expect(intro).toContain('KTX Weissenburg hears about it')
+    expect(intro).not.toContain('customer')
+    expect(screen.queryByTestId('bank-build-publish-state')).toBeNull()
+  })
+})
+

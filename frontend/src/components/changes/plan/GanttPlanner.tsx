@@ -22,8 +22,9 @@ import type { PlanCalendar, PlanOut, TaskOut, TaskPatch } from '../../../types/c
 import { Gantt, type GanttHandle } from '../../gantt/Gantt'
 import type { GanttMarker } from '../../gantt/GanttChart'
 import type { ColumnKey, GanttColumn } from '../../gantt/columns'
+import type { Zoom } from '../../gantt/layout'
 import { autoSchedulePatches } from '../../gantt/engine/schedule'
-import { endOf, fmtShort, makeCal, normStart, toDay } from '../../gantt/engine/calendar'
+import { endOf, fmtShort, lastDay as lastDayOf, makeCal, normStart, toDay, toIso } from '../../gantt/engine/calendar'
 import { buildTree, key, rowNumbers } from '../../gantt/engine/tree'
 import type { ApplyResult, ChangeSet, GanttId, GanttModel, GanttTask } from '../../gantt/engine/types'
 import CalendarDialog, { type CalendarSave } from '../../gantt/CalendarDialog'
@@ -40,6 +41,7 @@ import {
   translateIdMap,
 } from './ecrAdapter'
 import { deadlineColor } from './ganttMath'
+import { apiErrorMessage } from '../../../lib/apiError'
 
 export interface GanttPlannerProps {
   changeId: number
@@ -64,22 +66,27 @@ export interface GanttPlannerProps {
   focusTaskId?: number
   /** CSS height of the chart area. */
   height?: number | string
+  /** Opening zoom; default Week, or Fit for a plan nobody edits (read only, ended change). */
+  defaultZoom?: Zoom | 'fit'
 }
 
+/** The server's reason (string, 422 list or {message}), else a thrown Error's message. */
 const errDetail = (e: unknown): string | undefined => {
-  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof d === 'string') return d
-  if (Array.isArray(d)) return d.map((x) => (x as { msg?: string })?.msg ?? String(x)).join('; ')
-  if (d && typeof d === 'object' && 'message' in d) return String((d as { message: unknown }).message)
+  const msg = apiErrorMessage(e, '')
+  if (msg) return msg
   if (e instanceof Error && e.message) return e.message
   return undefined
 }
+
+/** A plan nobody works on any more: shown whole, without the progress column. */
+const ENDED = ['released', 'closed', 'rejected', 'cancelled']
 
 interface ReasonAsk { cs: ChangeSet; changed: MovedTask[]; moved: MovedTask[]; resolve: (cs: ChangeSet | null) => void }
 interface ConfirmState { title: string; body?: string; label: string; danger?: boolean; run: () => void }
 
 export default function GanttPlanner({
   changeId, plan, mode = 'plan', compact = false, onPlanChange, hideSeed = false, height, status, changeNumber, inWindow = false, focusTaskId,
+  defaultZoom,
 }: GanttPlannerProps) {
   const qc = useQueryClient()
   const queryKey = useMemo(() => ['change', changeId, 'plan', plan], [changeId, plan])
@@ -261,9 +268,17 @@ export default function GanttPlanner({
     const full = cs
     const cal = makeCal(model?.calendar)
     const byKey = new Map(m.tasks.map((t) => [key(t.id), t]))
+    // Each row shows the finish before and after (the last day worked), which
+    // is what moves when a task grows; its start may not move at all.
+    const finish = (start: string, duration: number) => toIso(lastDayOf(cal, normStart(cal, toDay(start)), duration))
     const moved: MovedTask[] = (cs.updateTasks ?? []).filter((u) => derived.has(key(u.id)) && u.patch.start).map((u) => {
       const t = byKey.get(key(u.id))!
-      return { id: t.id, name: t.name, from: t.start, to: u.patch.start!, days: cal.idx(toDay(u.patch.start!)) - cal.idx(normStart(cal, toDay(t.start))) }
+      const dur = u.patch.duration ?? t.duration
+      return {
+        id: t.id, name: t.name, from: t.start, to: u.patch.start!,
+        fromEnd: finish(t.start, t.duration), toEnd: finish(u.patch.start!, dur),
+        days: cal.idx(toDay(u.patch.start!)) - cal.idx(normStart(cal, toDay(t.start))),
+      }
     })
     const changed: MovedTask[] = (cs.updateTasks ?? []).filter((u) => !derived.has(key(u.id)) && ('start' in u.patch || 'duration' in u.patch)).map((u) => {
       const t = byKey.get(key(u.id))!
@@ -272,7 +287,11 @@ export default function GanttPlanner({
       const s1 = normStart(cal, toDay(u.patch.start ?? t.start))
       const e1 = endOf(cal, s1, u.patch.duration ?? t.duration)
       // Slip in the plan calendar's units (working days in working mode).
-      return { id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start, days: cal.idx(e1) - cal.idx(e0) }
+      return {
+        id: t.id, name: t.name, from: t.start, to: u.patch.start ?? t.start,
+        fromEnd: finish(t.start, t.duration), toEnd: finish(u.patch.start ?? t.start, u.patch.duration ?? t.duration),
+        days: cal.idx(e1) - cal.idx(e0),
+      }
     })
     return new Promise((resolve) => setReasonAsk({ cs: full, changed, moved, resolve }))
   }, [baselineSet, model, modern])
@@ -405,7 +424,7 @@ export default function GanttPlanner({
   }
   const exportPlan = (fmt: 'mspdi' | 'csv') => {
     const p = fmt === 'mspdi' ? planApi.exportXml(changeId, plan) : planApi.exportCsv(changeId, plan)
-    p.catch((e: unknown) => toast.error(errDetail(e) ?? 'Export failed'))
+    p.catch((e: unknown) => toast.error(errDetail(e) ?? 'Could not export the plan'))
   }
 
   const ctx = () => {
@@ -461,10 +480,14 @@ export default function GanttPlanner({
     return m
   }, [model])
   // Tracking preset (G17): planned vs baseline vs actual.
+  const ended = status != null && ENDED.includes(status)
+  // One preset per mode, the same in the tab and the pop-out window. Listed by
+  // importance: a narrow view drops columns from the end and says so.
   const columns = useMemo<(ColumnKey | GanttColumn)[]>(() => (track
-    // Listed by importance: narrow screens drop columns from the end.
-    ? ['row', 'name', 'start', 'end', 'progress', 'baselineStart', 'baselineEnd', 'actualStart', 'actualEnd', 'variance', 'predecessors']
-    : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', SERVER_SLACK] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
+    ? (['row', 'name', 'start', 'end', 'progress', 'variance', 'baselineStart', 'baselineEnd', 'actualStart', 'actualEnd', 'predecessors'] as ColumnKey[])
+      // An ended change is not tracked any more: a column of 0% reads as work left undone.
+      .filter((c) => !(ended && c === 'progress'))
+    : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', SERVER_SLACK] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern, ended])
   const issues = useMemo(() => (data ? [...data.validation.errors, ...data.validation.warnings.map((w) => ({ ...w, warn: true }))]
     .map((i) => ({ code: i.code, message: i.message, taskId: i.task_id, level: ('warn' in i ? 'warning' : 'error') as 'warning' | 'error' })) : []), [data])
 
@@ -479,7 +502,7 @@ export default function GanttPlanner({
 
   // ---------------------------------------------------------------- render
   if (isLoading) {
-    return <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">Loading plan...</div>
+    return <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 text-sm text-slate-400">Loading plan…</div>
   }
   if (isError || !data || !model) {
     return <div className="rounded-lg border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-300">Could not load the plan. Reload the page to try again.</div>
@@ -525,6 +548,7 @@ export default function GanttPlanner({
     )
   }
 
+  const readOnlyView = ended || (!canEdit && !canDates)
   const s = data.summary
   const nErr = data.validation.errors.length
   const nWarn = data.validation.warnings.length
@@ -540,7 +564,7 @@ export default function GanttPlanner({
   const editorTask = editorId != null ? byId.get(editorId) : undefined
   const stat = (label: string, value: string, tone = 'text-slate-100') => (
     <div className="shrink-0">
-      <p className="text-[10px] uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">{label}</p>
       <p className={`whitespace-nowrap text-sm font-medium tabular-nums ${tone}`}>{value}</p>
     </div>
   )
@@ -556,7 +580,9 @@ export default function GanttPlanner({
         showBaselines={track} showProgress={track} criticalIds={s.critical_ids}
         groupByLane={groupByLane} autoSchedule={autoSchedule}
         linkTypes={modern ? ['FS', 'SS', 'FF', 'SF'] : ['FS']} allowLag={modern} hierarchy={modern} constraints={modern}
-        defaultZoom={compact ? 'week' : 'day'} height={height ?? (compact ? 300 : '62vh')}
+        // Week shows a whole plan's first months; a plan nobody edits opens fitted to the width.
+        defaultZoom={defaultZoom ?? (compact ? 'week' : readOnlyView ? 'fit' : 'week')} height={height ?? (compact ? 300 : '62vh')}
+        fitRows={!compact && !inWindow}
         issues={issues}
         newTask={newTask}
         onTaskOpen={(t) => { if (typeof t.id === 'number') setEditorId(t.id) }}
@@ -612,7 +638,7 @@ export default function GanttPlanner({
         below={compact ? undefined : (
           <>
           {!compact && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500" aria-label="Legend">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-400" aria-label="Legend">
               {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-4 rounded bg-slate-400/60" />Baseline</span>}
               {track && <span className="flex items-center gap-1.5"><span className="inline-block h-1 w-3 rounded-sm bg-red-500" />Slip</span>}
               {canDates && <span>Drag bars to move, their edges to resize, the dots at the ends onto another bar to link. Double-click or Enter opens a task. Ctrl+scroll zooms, Ctrl+Z undoes.</span>}

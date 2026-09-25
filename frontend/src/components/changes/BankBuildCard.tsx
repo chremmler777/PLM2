@@ -19,14 +19,13 @@
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { BankBuildMode, ChangeRequest } from '../../types/change'
 import { formatDate, formatMoney } from '../../lib/format'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { toastError } from '../../lib/apiError'
+import { plantName } from '../../lib/plantName'
+import { btnSm } from '../common/buttonStyles'
 
 const MODES: BankBuildMode[] = ['running_change', 'planned_scrap']
 
@@ -36,16 +35,25 @@ interface Props {
   change: Pick<ChangeRequest,
     'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price' | 'scrap_price_set'
     | 'bank_build_set_by_name' | 'bank_build_set_at'
-    | 'plan_published_by_name' | 'plan_published_at'>
+    | 'plan_published_by_name' | 'plan_published_at'> & { mother_plant_name?: string | null }
   /** Scheduling / PM / change lead / admin — the page derives it. */
   canSetMode?: boolean
   /** Sales / change lead / admin. */
   canPublish?: boolean
   /** Inside the Timing tab the tab's own card publishes the validated plan. */
   hidePublish?: boolean
+  /**
+   * A change from the mother plant: nothing is published to a customer, the
+   * mother plant hears about the validated timing instead. The intro says so
+   * and the publish block stays hidden.
+   */
+  motherPlant?: boolean
 }
 
-export default function BankBuildCard({ change, canSetMode = false, canPublish = false, hidePublish = false }: Props) {
+export default function BankBuildCard({
+  change, canSetMode = false, canPublish = false, hidePublish: hide = false, motherPlant = false,
+}: Props) {
+  const hidePublish = hide || motherPlant
   const qc = useQueryClient()
   const [mode, setMode] = useState<BankBuildMode | null>(change.bank_build_mode ?? null)
   const [note, setNote] = useState(change.bank_build_note ?? '')
@@ -77,13 +85,13 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
       ...(mode === 'planned_scrap' && priceEdited && priceOk ? { scrap_quote_price: priceValue } : {}),
     }),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the bank-build plan'),
+    onError: (e: unknown) => toastError(e, 'Could not save the bank-build plan'),
   })
 
   const publish = useMutation({
     mutationFn: () => changesApi.publishBankBuildPlan(change.id),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not publish the plan'),
+    onError: (e: unknown) => toastError(e, 'Could not publish the plan'),
   })
 
   return (
@@ -91,7 +99,11 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
       className="rounded-lg border border-slate-700 bg-slate-800 p-3 space-y-3 text-sm">
       <div>
         <span className="font-medium text-slate-100">{t('bankbuild.title')}</span>
-        <p className="text-xs text-slate-400 mt-0.5">{t('bankbuild.intro')}</p>
+        <p className="text-xs text-slate-400 mt-0.5" data-testid="bank-build-intro">
+          {motherPlant
+            ? `How does the change reach the line? Scheduling decides; ${plantName(change.mother_plant_name)} hears about it with the validated timing.`
+            : t('bankbuild.intro')}
+        </p>
       </div>
 
       {editable ? (
@@ -141,7 +153,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
             <button type="button" data-testid="bank-build-save"
               disabled={!mode || missingPrice || save.isPending}
               onClick={() => save.mutate()}
-              className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs disabled:opacity-50">
+              className={btnSm.primary}>
               {save.isPending ? t('saving') : t('save')}
             </button>
             {missingPrice && (
@@ -169,13 +181,13 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
             <p className="text-xs text-slate-300 whitespace-pre-wrap">{change.bank_build_note}</p>
           )}
           {change.bank_build_set_at && (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               {t('bankbuild.setBy')
                 .replace('{x}', change.bank_build_set_by_name ?? '-')
                 .replace('{d}', onDay(change.bank_build_set_at))}
             </p>
           )}
-          {!canSetMode && <p className="text-xs text-slate-500">{t('bankbuild.readOnly')}</p>}
+          {!canSetMode && <p className="text-xs text-slate-400">{t('bankbuild.readOnly')}</p>}
         </div>
       )}
 
@@ -194,7 +206,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
             <button type="button" data-testid="bank-build-publish"
               disabled={!change.bank_build_mode || publish.isPending}
               onClick={() => publish.mutate()}
-              className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-xs disabled:opacity-50">
+              className={btnSm.primary}>
               {t('bankbuild.publish')}
             </button>
             {!change.bank_build_mode && (

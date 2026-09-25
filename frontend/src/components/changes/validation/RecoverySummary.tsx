@@ -5,11 +5,12 @@
  */
 import { Link } from 'react-router-dom'
 import type { IssueRecoveryOut } from '../../../types/validationIssue'
-import { formatDate, formatDayMonth } from '../../../lib/format'
+import { formatCalendarDate } from '../../../lib/format'
 import { sectionLabel } from '../offer/offerFormat'
 import { workingDaysBetween } from './issueModel'
 
-const short = (iso?: string | null) => formatDayMonth(iso)
+/** "14 Nov": a calendar day (date or midnight datetime) without its year, never shifted. */
+const short = (iso?: string | null) => formatCalendarDate(iso).replace(/ \d{4}$/, '')
 
 /** The figures the card shows, server counts first, Mon to Fri as a fallback. */
 export function recoveryFigures(r: IssueRecoveryOut) {
@@ -45,11 +46,11 @@ export default function RecoverySummary({ changeId, recovery: r }: {
   const late = slipDeadline != null && slipDeadline > 0
   const tone = (n: number | null) => n == null ? 'text-slate-100' : n > 0 ? 'text-rose-300' : 'text-emerald-300'
   const cells: [string, string, string, string?, string?][] = [
-    ['Recovery finish', 'finish', formatDate(r.finish)],
-    ['Plan finish', 'plan-finish', formatDate(r.plan_finish),
+    ['Recovery finish', 'finish', formatCalendarDate(r.finish)],
+    ['Plan finish', 'plan-finish', formatCalendarDate(r.plan_finish),
       slipBaseline != null ? `${slipBaseline > 0 ? '+' : ''}${slipBaseline} wd vs baseline ${short(r.baseline_finish)}` : 'no baseline',
       tone(slipBaseline)],
-    ['Release deadline', 'deadline', formatDate(r.release_due_date),
+    ['Release deadline', 'deadline', formatCalendarDate(r.release_due_date),
       slipDeadline == null ? 'no deadline set'
         : slipDeadline > 0 ? `${slipDeadline} wd late` : slipDeadline === 0 ? 'on the day' : `${-slipDeadline} wd to spare`,
       tone(slipDeadline)],
@@ -71,7 +72,7 @@ export default function RecoverySummary({ changeId, recovery: r }: {
       <div className="mt-2 grid grid-cols-3 gap-3">
         {cells.map(([label, id, value, sub, subTone]) => (
           <div key={id}>
-            <div className="text-[11px] text-slate-500">{label}</div>
+            <div className="text-[11px] text-slate-400">{label}</div>
             <div data-testid={`recovery-${id}`} className="text-sm font-semibold tabular-nums text-slate-100">{value}</div>
             {sub && <div data-testid={`recovery-${id}-sub`} className={`text-[11px] tabular-nums ${subTone ?? 'text-slate-400'}`}>{sub}</div>}
           </div>

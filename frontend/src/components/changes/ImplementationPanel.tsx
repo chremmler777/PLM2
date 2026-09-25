@@ -1,19 +1,16 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import type { ImplementationItem } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
 import ReasonDialog from './ReasonDialog';
 import CADUploader from '../CADUploader';
 import RevisionWorkflowSection from '../workflows/RevisionWorkflowSection';
+import { toastError } from '../../lib/apiError'
 
 interface Props {
   changeId: number;
 }
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 export default function ImplementationPanel({ changeId }: Props) {
   const qc = useQueryClient();
@@ -36,7 +33,7 @@ export default function ImplementationPanel({ changeId }: Props) {
       setSignTarget(null);
       invalidate();
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Sign-off failed'),
+    onError: (e: unknown) => toastError(e, 'Could not sign off the revision'),
   });
 
   if (isLoading || !data) return <div className="text-slate-400 text-sm">…</div>;
@@ -64,7 +61,7 @@ export default function ImplementationPanel({ changeId }: Props) {
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-slate-100 font-medium">
                 {item.part_name}{' '}
-                <span className="text-slate-500 text-xs">{item.part_number}</span>
+                <span className="text-slate-400 text-xs">{item.part_number}</span>
               </span>
               {item.revision_name ? (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-purple-900 text-purple-100">

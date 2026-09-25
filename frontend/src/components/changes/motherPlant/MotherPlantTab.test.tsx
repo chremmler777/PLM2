@@ -97,4 +97,17 @@ describe('MotherPlantTab', () => {
     wrap()
     await screen.findByText('Project Management sends the information to the team.')
   })
+
+  it('after close an unanswered confirmation reads "not confirmed", not an amber "open"', async () => {
+    api.get.mockResolvedValue(state({ receipts: [{
+      id: 2, department_id: 4, department_name: 'Tool Engineer', sent_by: 1, sent_by_name: 'PM',
+      sent_at: '2026-09-02T08:00:00', acknowledged_by: null, acknowledged_by_name: null, acknowledged_at: null, note: null,
+    }] as MotherPlantState['receipts'], can_send: false }))
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}>
+      <MotherPlantTab change={{ ...change, status: 'closed' } as ChangeRequest} departments={departments} />
+    </QueryClientProvider>)
+    expect((await screen.findByTestId('mother-plant-receipt-unconfirmed-4')).textContent).toBe('not confirmed')
+  })
 })
+

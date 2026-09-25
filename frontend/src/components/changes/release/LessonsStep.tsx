@@ -5,7 +5,6 @@
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import type {
   LessonCategory, LessonIn, LessonSeverity, LessonType, ReleaseState,
@@ -13,9 +12,9 @@ import type {
 import { fmtDate, inputCls } from '../offer/offerFormat'
 import { Field } from '../offer/ui'
 import { releaseKey } from './releaseKeys'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { Check } from 'lucide-react'
+import { btnSm } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 
 const CATEGORIES: LessonCategory[] = [
   'design', 'manufacturing', 'quality', 'supplier', 'logistics', 'project_management', 'tooling', 'other',
@@ -58,13 +57,13 @@ export default function LessonsStep({
       ...(form.recommendation?.trim() ? { recommendation: form.recommendation.trim() } : { recommendation: undefined }),
     }),
     onSuccess: () => { setForm(EMPTY); setAdding(false); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the lesson'),
+    onError: (e: unknown) => toastError(e, 'Could not save the lesson'),
   })
   const complete = useMutation({
     mutationFn: () => changeReleaseApi.completeLessons(changeId,
       items.length === 0 ? noneReason.trim() : undefined),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not complete the step'),
+    onError: (e: unknown) => toastError(e, 'Could not complete the step'),
   })
 
   const set = <K extends keyof LessonIn>(k: K, v: LessonIn[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -73,7 +72,7 @@ export default function LessonsStep({
   return (
     <div className="space-y-3">
       {items.length === 0 ? (
-        <p className="text-xs text-slate-500">No lessons linked to this change yet.</p>
+        <p className="text-xs text-slate-400">No lessons linked to this change yet.</p>
       ) : (
         <ul className="divide-y divide-slate-700/60 rounded-lg border border-slate-700">
           {items.map((l) => (
@@ -81,7 +80,7 @@ export default function LessonsStep({
               <span className="min-w-0 flex-1 text-slate-100">{l.title}</span>
               <span className="text-[11px] text-slate-400">{human(String(l.lesson_type))}</span>
               <span className={`text-[11px] ${SEV_TONE[String(l.severity)] ?? 'text-slate-400'}`}>{human(String(l.severity))}</span>
-              <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] text-slate-300">{human(String(l.status))}</span>
+              <span className="rounded border border-slate-600 px-1.5 py-0 text-[11px] text-slate-300">{human(String(l.status))}</span>
             </li>
           ))}
         </ul>
@@ -125,9 +124,9 @@ export default function LessonsStep({
           </Field>
           <div className="flex justify-end gap-2 sm:col-span-3">
             <button type="button" onClick={() => { setAdding(false); setForm(EMPTY) }}
-              className="px-2 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+              className={btnSm.ghost}>Cancel</button>
             <button type="button" data-testid="lesson-submit" disabled={!canSubmit} onClick={() => add.mutate()}
-              className="rounded-lg bg-sky-600 px-3 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50">
+              className={btnSm.primary}>
               Save lesson
             </button>
           </div>
@@ -136,27 +135,28 @@ export default function LessonsStep({
 
       {done ? (
         <p data-testid="lessons-done" className="text-xs text-emerald-400">
-          ✓ Step completed{lessons.done_by_name ? ` by ${lessons.done_by_name}` : ''}{lessons.done_at ? `, ${fmtDate(lessons.done_at)}` : ''}
+          <Check aria-hidden="true" size={12} className="mr-1 inline" />Step completed{lessons.done_by_name ? ` by ${lessons.done_by_name}` : ''}{lessons.done_at ? `, ${fmtDate(lessons.done_at)}` : ''}
           {lessons.none_reason ? <span className="text-slate-400">. No lessons: {lessons.none_reason}</span> : null}
         </p>
       ) : canComplete ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-700/60 pt-3">
           {items.length === 0 && (
             <input data-testid="lessons-none-reason" value={noneReason} onChange={(e) => setNoneReason(e.target.value)}
-              placeholder="No lessons, because ..." className={`${inputCls} min-w-0 flex-1`} />
+              aria-label="Why there are no lessons" aria-describedby="lessons-none-hint"
+              placeholder="No lessons, because…" className={`${inputCls} min-w-0 flex-1`} />
           )}
           <button type="button" data-testid="lessons-complete"
             disabled={(items.length === 0 && !noneReason.trim()) || complete.isPending}
             onClick={() => complete.mutate()}
-            className="rounded-lg border border-emerald-700 px-3 py-1 text-xs text-emerald-200 hover:bg-emerald-900/40 disabled:opacity-50">
+            className={btnSm.secondary}>
             Complete lessons step
           </button>
           {items.length === 0 && (
-            <span className="w-full text-[11px] text-slate-500">Add at least one lesson, or say why there is none.</span>
+            <span id="lessons-none-hint" className="w-full text-[11px] text-slate-400">Add at least one lesson, or say why there is none.</span>
           )}
         </div>
       ) : (
-        <p className="text-[11px] text-slate-500">PM, the change lead or an admin completes this step.</p>
+        <p className="text-[11px] text-slate-400">PM, the change lead or an admin completes this step.</p>
       )}
     </div>
   )

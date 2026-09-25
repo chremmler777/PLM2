@@ -57,7 +57,7 @@ const renderPlanner = (props: Partial<Parameters<typeof GanttPlanner>[0]> = {}) 
   qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <GanttPlanner changeId={7} plan="detailed" {...props} />
+      <GanttPlanner changeId={7} plan="detailed" defaultZoom="day" {...props} />
     </QueryClientProvider>)
 }
 
@@ -839,4 +839,18 @@ describe('GanttPlanner (ECR adapter)', () => {
       expect(screen.queryByTestId('gantt-open-window')).toBeNull()
     })
   })
+
+  it('opens at Week for editors, fitted for a closed change, whose tracker has no Done column', async () => {
+    vi.mocked(planApi.get).mockResolvedValue(modernOut())
+    renderPlanner({ defaultZoom: undefined })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-zoom-week').getAttribute('aria-pressed')).toBe('true')
+    cleanup()
+    vi.mocked(planApi.get).mockResolvedValue(modernOut({ baseline_set: true, can_edit: false, can_edit_dates: false }))
+    renderPlanner({ defaultZoom: undefined, mode: 'track', status: 'closed' })
+    await screen.findByTestId('gantt-planner')
+    expect(screen.getByTestId('gantt-zoom-fit').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('gantt-row-1').querySelector('[data-col="progress"]')).toBeNull()
+  })
 })
+

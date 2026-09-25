@@ -1,25 +1,37 @@
+import { Check } from 'lucide-react'
 import type { IssueOut } from '../../../types/validationIssue'
-import { issueSteps } from './issueModel'
+import { issueSteps, type StepState } from './issueModel'
 
-/** Raised, Contained, Root cause, Route, Fixing, Re-validation, Closed. */
+/** Read aloud before each step: what the chip's look says. */
+const SR: Record<StepState, string> = { done: 'done', current: 'next', todo: 'to do', skipped: 'skipped' }
+
+/**
+ * Raised, Contained, Root cause, Route, Fixing, Re-validation, Closed.
+ * Done steps are filled with a check; the current step is the next one to
+ * do, so it is outlined (dashed) rather than filled: a filled chip would read
+ * as already reached.
+ */
 export default function IssueStepper({ issue }: { issue: IssueOut }) {
   const steps = issueSteps(issue)
   return (
-    <ol data-testid={`issue-stepper-${issue.id}`} className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
+    <ol data-testid={`issue-stepper-${issue.id}`} aria-label={`Progress of the issue`}
+      className="flex flex-wrap items-center gap-x-1 gap-y-1.5">
       {steps.map((s, i) => (
         <li key={s.key} data-testid={`issue-step-${issue.id}-${s.key}`} data-state={s.state}
           title={s.note} className="flex items-center gap-1">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] ${
             s.state === 'done' ? 'bg-emerald-950/50 text-emerald-300'
-              : s.state === 'current' ? 'bg-sky-950/60 text-sky-200 ring-1 ring-sky-700'
-                : s.state === 'skipped' ? 'text-slate-600 line-through'
-                  : 'text-slate-500'}`}>
-            <span className={`flex h-3.5 w-3.5 items-center justify-center rounded-full text-[9px] font-semibold ${
+              : s.state === 'current' ? 'border border-dashed border-sky-500 text-sky-200'
+                : s.state === 'skipped' ? 'text-slate-400 line-through'
+                  : 'text-slate-400'}`}>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[11px] font-semibold ${
               s.state === 'done' ? 'bg-emerald-600 text-white'
-                : s.state === 'current' ? 'bg-sky-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
-              {s.state === 'done' ? '✓' : i + 1}
+                : s.state === 'current' ? 'border border-sky-500 text-sky-200' : 'bg-slate-700 text-slate-300'}`}>
+              {s.state === 'done' ? <Check aria-hidden="true" size={10} strokeWidth={3} /> : i + 1}
             </span>
+            <span className="sr-only">{SR[s.state]}:</span>
             {s.label}
+            {s.state === 'current' && s.note && <span className="text-sky-300/80">({s.note})</span>}
           </span>
           {i < steps.length - 1 && <span className="h-px w-2 bg-slate-700" aria-hidden />}
         </li>

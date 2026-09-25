@@ -235,3 +235,28 @@ describe('ValidationPanel', () => {
     expect(screen.queryByTestId('validation-escalate')).toBeNull()
   })
 })
+
+describe('ValidationPanel: stale notes and missing costing', () => {
+  afterEach(cleanup)
+  it('shows the fail note only while the check is failed', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({ departments: [{ department_id: 4, checks: [
+      check({ status: 'passed', note: 'burr on the edge' }),
+      check({ check_key: 'measured', status: 'failed', note: 'out of tolerance' }),
+    ] }] }) as never)
+    render_({ status: 'released' })
+    await screen.findByTestId('validation-check-4-measured')
+    expect(screen.queryByTestId('validation-note-text-4-sampled')).toBeNull()
+    expect(screen.getByTestId('validation-note-text-4-measured').textContent).toBe('out of tolerance')
+  })
+
+  it('a change without a costing does not claim the costing lacks a cycle time', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({ departments: [{ department_id: 4, checks: [
+      check({ check_key: 'cycle_time' }), check({ check_key: 'weight' }),
+    ] }] }) as never)
+    render_({ hasCosting: false })
+    await screen.findByTestId('validation-check-4-cycle_time')
+    expect(screen.queryByTestId('validation-assumption-4-cycle_time')).toBeNull()
+    expect(screen.queryByTestId('validation-estimate-4-weight')).toBeNull()
+  })
+})
+

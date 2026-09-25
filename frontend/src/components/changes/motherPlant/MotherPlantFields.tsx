@@ -62,16 +62,16 @@ export default function MotherPlantFields({ value, onChange, plants }: {
           <label htmlFor="sc-mp-sop" className="block text-sm text-slate-300 mb-1">SOP date</label>
           <DateInput id="sc-mp-sop" aria-label="SOP date" value={value.sop}
             className={field} onChange={(iso) => set({ sop: iso })} commitOnChange />
-          <p className="mt-1 text-xs text-slate-500">Becomes the release deadline when the change is approved.</p>
+          <p className="mt-1 text-xs text-slate-400">Becomes the release deadline when the change is approved.</p>
         </div>
         <div>
           <label htmlFor="sc-mp-timing" className="block text-sm text-slate-300 mb-1">
-            Their timing <span className="text-slate-500">(MS Project .xml, optional)</span>
+            Their timing <span className="text-slate-400">(MS Project .xml, optional)</span>
           </label>
           <input id="sc-mp-timing" type="file" accept=".xml,application/xml,text/xml"
             className="block w-full text-xs text-slate-300 file:mr-2 file:rounded file:border-0 file:bg-slate-700 file:px-2 file:py-1 file:text-slate-100"
             onChange={(e) => set({ timingFile: e.target.files?.[0] ?? null })} />
-          <p className="mt-1 text-xs text-slate-500">Seeds the detailed plan at approval; without it the plan starts from the SOP.</p>
+          <p className="mt-1 text-xs text-slate-400">Seeds the detailed plan at approval; without it the plan starts from the SOP.</p>
         </div>
       </div>
       <div>

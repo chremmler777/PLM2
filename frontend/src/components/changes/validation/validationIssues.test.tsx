@@ -256,7 +256,7 @@ describe('customer decision', () => {
     wrap(<CustomerDecisionForm changeId={7} issue={withMail} />)
     fireEvent.click(screen.getByTestId('customer-decision-accept_deviation'))
     fireEvent.change(screen.getByTestId('customer-note'), { target: { value: 'Accepted in writing' } })
-    fireEvent.change(screen.getByTestId('customer-concession-until'), { target: { value: '2026-12-31' } })
+    fireEvent.change(screen.getByTestId('customer-concession-until').querySelector('input')!, { target: { value: '2026-12-31' } })
     fireEvent.click(screen.getByTestId('customer-submit'))
     await waitFor(() => expect(validationIssuesApi.customer).toHaveBeenCalledWith(7, 11, {
       decision: 'accept_deviation', note: 'Accepted in writing', concession_until: '2026-12-31',
@@ -269,7 +269,7 @@ describe('customer decision', () => {
     fireEvent.change(screen.getByTestId('customer-note'), { target: { value: 'New SOP agreed' } })
     expect(screen.getByTestId('customer-blocked').textContent).toBe('Enter the new release date')
     expect(screen.getByTestId('issue-customer-form-11').textContent).toContain('Now 3 Nov 2026')
-    fireEvent.change(screen.getByTestId('customer-new-date'), { target: { value: '2026-11-20' } })
+    fireEvent.change(screen.getByTestId('customer-new-date').querySelector('input')!, { target: { value: '2026-11-20' } })
     fireEvent.click(screen.getByTestId('customer-submit'))
     await waitFor(() => expect(validationIssuesApi.customer).toHaveBeenCalledWith(7, 11, {
       decision: 'new_timing', note: 'New SOP agreed', new_release_due_date: '2026-11-20',
@@ -295,7 +295,7 @@ describe('escalation', () => {
     expect(screen.getByTestId('escalation-badge-l1').className).toContain('slate')
     expect(screen.getByTestId('escalation-badge-l2').className).toContain('amber')
     expect(screen.getByTestId('escalation-badge-l3').className).toContain('rose')
-    expect(container.textContent).toContain('L3 Management and customer')
+    expect(container.textContent).toContain('Level 3 (management and customer)')
   })
 
   it('acknowledge from the history and as the primary act', async () => {

@@ -203,8 +203,8 @@ describe('TimingTab', () => {
       canDecideDeviation: true, canSetBankBuild: true })
 
     const row = await screen.findByTestId('deviation-5')
-    expect(row.textContent).toContain('9 Oct 2026')
-    expect(row.textContent).toContain('12 Oct 2026')
+    expect(row.textContent).toContain('9 Oct 26')
+    expect(row.textContent).toContain('12 Oct 26')
     expect(screen.getByTestId('deviation-slip-5').className).toContain('text-red-300')
     expect(screen.getByTestId('gantt-stub').dataset.mode).toBe('track')
     expect(screen.getByTestId('impl-stub').dataset.escalate).toBe('true')

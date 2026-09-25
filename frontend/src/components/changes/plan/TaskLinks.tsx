@@ -4,6 +4,8 @@
  * out at once as a ChangeSet (one undo step). Old dependencies are listed
  * read-only.
  */
+import { X } from 'lucide-react'
+import { btnSm } from '../../common/buttonStyles'
 import { useEffect, useRef, useState } from 'react'
 import { tempId } from '../../gantt/engine/notation'
 import { key } from '../../gantt/engine/tree'
@@ -78,7 +80,7 @@ export default function TaskLinks(p: Props) {
     const editable = p.canEdit && !l.readOnly
     return (
       <li key={String(l.id)} className="flex items-center gap-1.5" data-testid={`task-link-${key(l.id)}`}>
-        <span className="w-6 text-right tabular-nums text-slate-500">{other?.row ?? ''}</span>
+        <span className="w-6 text-right tabular-nums text-slate-400">{other?.row ?? ''}</span>
         <span className="min-w-0 flex-1 truncate text-slate-200" title={other?.name}>{other?.name ?? otherKey}</span>
         <select aria-label={`Type of the link with ${other?.name ?? otherKey}`} className={field} value={l.type} disabled={!editable}
           onChange={(e) => p.onChange({ label: 'Edit link', updateLinks: [{ id: l.id, patch: { type: e.target.value as LinkType } }] })}>
@@ -89,10 +91,10 @@ export default function TaskLinks(p: Props) {
             onCommit={(n) => p.onChange({ label: 'Edit link', updateLinks: [{ id: l.id, patch: { lagDays: n } }] })} />
         )}
         {l.readOnly ? (
-          <span className="text-[10px] text-slate-500" title="Old dependency, re-draw to edit">old</span>
+          <span className="text-[11px] text-slate-400" title="Old dependency, re-draw to edit">old</span>
         ) : p.canEdit && (
-          <button type="button" aria-label={`Remove the link with ${other?.name ?? otherKey}`} className="rounded px-1 text-red-300 hover:bg-slate-800"
-            onClick={() => p.onChange({ label: 'Remove link', removeLinks: [l.id] })}>&#10005;</button>
+          <button type="button" aria-label={`Remove the link with ${other?.name ?? otherKey}`} className="rounded p-1 text-red-300 hover:bg-slate-800"
+            onClick={() => p.onChange({ label: 'Remove link', removeLinks: [l.id] })}><X aria-hidden="true" size={14} /></button>
         )}
       </li>
     )
@@ -117,10 +119,10 @@ export default function TaskLinks(p: Props) {
     const a = adding?.dir === dir ? adding : null
     return (
       <div>
-        <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+        <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">
           {dir === 'pred' ? 'Predecessors' : 'Successors'}
         </p>
-        {list.length === 0 && <p className="text-xs text-slate-500">None.</p>}
+        {list.length === 0 && <p className="text-xs text-slate-400">None.</p>}
         <ul className="space-y-1 text-xs" data-testid={`task-links-${dir}`}>{list.map((l) => row(l, dir))}</ul>
         {p.canEdit && (a ? (
           <div className="mt-1.5 flex items-center gap-1.5">
@@ -140,8 +142,8 @@ export default function TaskLinks(p: Props) {
               <input aria-label="New link lag" type="number" className={`${field} w-14`} value={a.lag} title={`Lag in ${p.unit}`}
                 onChange={(e) => setAdding({ ...a, lag: e.target.value })} />
             )}
-            <button type="button" className="rounded bg-sky-600 px-2 py-0.5 text-white disabled:opacity-40" disabled={!a.other} onClick={add}>Add</button>
-            <button type="button" className="rounded px-1 text-slate-400 hover:bg-slate-800" onClick={() => setAdding(null)} aria-label="Cancel">&#10005;</button>
+            <button type="button" className={btnSm.primary} disabled={!a.other} onClick={add}>Add</button>
+            <button type="button" className="rounded px-1 text-slate-400 hover:bg-slate-800" onClick={() => setAdding(null)} aria-label="Cancel"><X aria-hidden="true" size={14} /></button>
           </div>
         ) : (
           <button type="button" className="mt-1 text-xs text-sky-300 hover:text-sky-200" data-testid={`task-link-add-${dir}`}

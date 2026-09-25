@@ -90,7 +90,7 @@ export const ChartHeader = memo(function ChartHeader({ range, ppd, unit, today, 
             {off && <rect x={t.x} y={23} width={t.w} height={HEADER_H - 23} style={{ fill: v('offDay') }} />}
             <line x1={t.x + 0.5} x2={t.x + 0.5} y1={23} y2={HEADER_H} style={{ stroke: v('rowLine') }} />
             {t.label && (
-              <text x={t.x + t.w / 2} y={37} fontSize={10} textAnchor="middle"
+              <text x={t.x + t.w / 2} y={37} fontSize={11} textAnchor="middle"
                 style={{ fill: unit === 'day' && t.day === today ? v('today') : v('textFaint') }}>{t.label}</text>
             )}
           </g>

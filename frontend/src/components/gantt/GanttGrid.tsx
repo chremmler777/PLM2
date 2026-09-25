@@ -44,7 +44,7 @@ export function GridHeader({ columns, height = HEADER_H, extra }: { columns: Gan
   // All short or none: "Base start" next to "B. finish" reads as two things.
   const abbreviate = columns.some((c) => c.short && textWidth(c.title.toUpperCase(), 10) + 12 > c.width)
   return (
-    <div className="relative flex items-end border-b text-[10px] uppercase tracking-wide"
+    <div className="relative flex items-end border-b text-[11px] uppercase tracking-wide"
       style={{ height, width: gridWidth(columns), background: v('headerBg'), borderColor: v('gridLine'), color: v('textFaint') }}
       role="row" data-testid="gantt-grid-header">
       {extra && <div className="absolute left-1 top-1 normal-case tracking-normal">{extra}</div>}
@@ -80,7 +80,7 @@ export function ColumnPicker({ all, shown, dropped, open, onOpen, onToggle }: {
     <div ref={ref} className="relative">
       <button type="button" data-testid="gantt-columns" aria-expanded={open} aria-haspopup="dialog"
         title={n ? `${n} column${n === 1 ? '' : 's'} did not fit: choose the columns` : 'Choose the columns'}
-        className="rounded border px-1.5 py-0.5 text-[10px] hover:brightness-125"
+        className="rounded border px-1.5 py-0.5 text-[11px] hover:brightness-125"
         style={{ borderColor: n ? v('accent') : v('gridLine'), color: n ? v('accent') : v('textFaint'), background: v('panel') }}
         onClick={(e) => { e.stopPropagation(); onOpen(!open) }}>
         {n ? `+${n} column${n === 1 ? '' : 's'}` : 'Columns'}
@@ -95,7 +95,7 @@ export function ColumnPicker({ all, shown, dropped, open, onOpen, onToggle }: {
               <input type="checkbox" checked={on.has(c.key)} disabled={c.key === 'name'}
                 onChange={(e) => onToggle(c.key, e.target.checked)} />
               <span className="flex-1">{c.title || c.key}</span>
-              {dropped.includes(c.key) && <span className="text-[10px]" style={{ color: v('textFaint') }}>no room</span>}
+              {dropped.includes(c.key) && <span className="text-[11px]" style={{ color: v('textFaint') }}>no room</span>}
             </label>
           ))}
         </div>
@@ -156,9 +156,9 @@ export const GridBody = memo(function GridBody(p: GridProps) {
           style={{ top, height: p.rowH, width, background: v('groupBg'), borderColor: v('gridLine') }}
           aria-expanded={!r.collapsed} aria-label={`${r.collapsed ? 'Expand' : 'Collapse'} ${r.label}`}
           onClick={() => p.onToggle(r.key)}>
-          <span className={`text-[10px] transition-transform ${r.collapsed ? '' : 'rotate-90'}`} style={{ color: v('textFaint') }}>&#9656;</span>
-          <span className="truncate text-[10px] font-semibold uppercase tracking-wide" style={{ color: v('text') }}>{r.label}</span>
-          <span className="text-[10px]" style={{ color: v('textFaint') }}>{r.count}</span>
+          <span className={`text-[11px] transition-transform ${r.collapsed ? '' : 'rotate-90'}`} style={{ color: v('textFaint') }}>&#9656;</span>
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wide" style={{ color: v('text') }}>{r.label}</span>
+          <span className="text-[11px]" style={{ color: v('textFaint') }}>{r.count}</span>
         </button>,
       )
       continue
@@ -194,7 +194,7 @@ export const GridBody = memo(function GridBody(p: GridProps) {
             content = (
               <span className="flex min-w-0 items-center gap-1" style={{ paddingLeft: r.depth * 14 }}>
                 {r.summary ? (
-                  <button type="button" className="w-3 shrink-0 text-[10px]" style={{ color: v('textFaint') }}
+                  <button type="button" className="w-3 shrink-0 text-[11px]" style={{ color: v('textFaint') }}
                     aria-label={`${r.collapsed ? 'Expand' : 'Collapse'} ${t.name}`} aria-expanded={!r.collapsed}
                     data-testid={`gantt-toggle-${k}`}
                     onClick={(e) => { e.stopPropagation(); p.onToggle(k) }}>
@@ -203,7 +203,7 @@ export const GridBody = memo(function GridBody(p: GridProps) {
                 ) : <span className="w-3 shrink-0" />}
                 {p.flagged.has(k) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-label="Has a plan issue" />}
                 {t.isIdea && (
-                  <span className="shrink-0 rounded border border-dashed px-1 text-[9px] font-semibold uppercase"
+                  <span className="shrink-0 rounded border border-dashed px-1 text-[11px] font-semibold uppercase"
                     style={{ borderColor: v('idea'), color: v('idea') }}>idea</span>
                 )}
                 <span className={`truncate ${r.summary ? 'font-semibold' : ''}`} title={t.name}>

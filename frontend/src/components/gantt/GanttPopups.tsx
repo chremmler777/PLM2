@@ -97,7 +97,7 @@ export function LinkPopover(p: {
       <p className="font-semibold">{p.title}</p>
       {p.note && <p data-testid="gantt-link-note" style={{ color: v('textMuted') }}>{p.note}</p>}
       <label className="block">
-        <span className="mb-0.5 block text-[10px] uppercase tracking-wide" style={{ color: v('textFaint') }}>Type</span>
+        <span className="mb-0.5 block text-[11px] uppercase tracking-wide" style={{ color: v('textFaint') }}>Type</span>
         <select aria-label="Link type" value={type} disabled={!p.canEdit} onChange={(e) => setType(e.target.value as LinkType)}
           className="w-full rounded border px-1.5 py-1 [color-scheme:dark]" style={{ background: v('bg'), borderColor: v('gridLine'), color: v('text') }}>
           {types.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
@@ -105,7 +105,7 @@ export function LinkPopover(p: {
       </label>
       {p.allowLag && (
         <label className="block">
-          <span className="mb-0.5 block text-[10px] uppercase tracking-wide" style={{ color: v('textFaint') }}>
+          <span className="mb-0.5 block text-[11px] uppercase tracking-wide" style={{ color: v('textFaint') }}>
             Lag in {p.unit} (negative = lead)
           </span>
           <input aria-label="Lag" type="number" min={-LIMITS.maxLag} max={LIMITS.maxLag} value={lag} disabled={!p.canEdit} onChange={(e) => setLag(e.target.value)}
@@ -167,7 +167,7 @@ export function TaskDialog(p: {
   const ok = f.name.trim() !== '' && isIsoDay(f.start) && inYearRange(f.start) && constraintOk && dur <= LIMITS.maxDuration
   const field = 'w-full rounded border px-2 py-1 text-sm [color-scheme:dark] disabled:opacity-50'
   const fs = { background: v('bg'), borderColor: v('gridLine'), color: v('text') }
-  const lab = 'mb-0.5 block text-[10px] uppercase tracking-wide'
+  const lab = 'mb-0.5 block text-[11px] uppercase tracking-wide'
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onPointerDown={(e) => { if (e.target === e.currentTarget) p.onClose() }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={`Task information: ${t.name}`} data-testid="gantt-task-dialog"

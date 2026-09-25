@@ -6,10 +6,12 @@
 import { useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { CustomerDecision, IssueOut } from '../../../types/validationIssue'
-import { formatDate, todayIso } from '../../../lib/format'
+import { formatCalendarDate, todayIso } from '../../../lib/format'
+import DateInput from '../../gantt/DateInput'
 import { inputCls } from '../offer/offerFormat'
 import { DECISION_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import { btnSm } from '../../common/buttonStyles'
 
 const OPTIONS: CustomerDecision[] = ['accept_deviation', 'require_fix', 'new_timing', 'pending']
 
@@ -66,31 +68,35 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
         </p>
       )}
       {decision === 'accept_deviation' && (
-        <label className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          Concession until (empty = permanent)
-          <input type="date" data-testid="customer-concession-until" value={until}
-            onChange={(e) => setUntil(e.target.value)} className={inputCls} />
-        </label>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <span>Concession until (empty = permanent)</span>
+          <span data-testid="customer-concession-until" className="inline-block w-36">
+            <DateInput aria-label="Concession until" value={until} commitOnChange
+              onChange={setUntil} className={`${inputCls} w-full`} />
+          </span>
+        </div>
       )}
       {decision === 'new_timing' && (
-        <label className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          New release date
-          <input type="date" data-testid="customer-new-date" value={newDate} min={todayIso()}
-            onChange={(e) => setNewDate(e.target.value)} className={inputCls} />
-          <span className="text-[11px] text-slate-500">
-            Now {formatDate(deadline)}. Updates the release deadline (reason "VI-{issue.number}").
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <span>New release date</span>
+          <span data-testid="customer-new-date" className="inline-block w-36">
+            <DateInput aria-label="New release date" value={newDate} min={todayIso()} commitOnChange
+              onChange={setNewDate} className={`${inputCls} w-full`} />
           </span>
-        </label>
+          <span className="text-[11px] text-slate-400">
+            Now {formatCalendarDate(deadline)}. Updates the release deadline (reason "VI-{issue.number}").
+          </span>
+        </div>
       )}
       <textarea data-testid="customer-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
         placeholder="What the customer said, who, when" className={`${inputCls} w-full`} />
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="customer-submit" disabled={!!blocked || save.isPending}
           onClick={() => save.mutate(undefined)}
-          className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+          className={btnSm.primary}>
           Record decision
         </button>
-        {blocked && <span data-testid="customer-blocked" className="text-[11px] text-slate-500">{blocked}</span>}
+        {blocked && <span data-testid="customer-blocked" className="text-[11px] text-slate-400">{blocked}</span>}
       </div>
     </div>
   )

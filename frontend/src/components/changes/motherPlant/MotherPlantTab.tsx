@@ -17,17 +17,17 @@ import { toast } from 'sonner'
 import { API_BASE_URL } from '../../../api/client'
 import { changesApi } from '../../../api/changes'
 import { motherPlantApi, motherPlantKey, type MotherPlantState } from '../../../api/motherPlant'
-import { formatDate, formatDateTime } from '../../../lib/format'
+import { formatCalendarDate, formatDate, formatDateTime } from '../../../lib/format'
 import type { ChangeRequest } from '../../../types/change'
 import { t } from '../../../i18n/cmLabels'
 import { plantText } from '../../../lib/plantName'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { Check } from 'lucide-react'
+import { btnPrimary, btnSm } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 
 const card = 'rounded-lg border border-slate-700 bg-slate-800 p-4'
-const primary = 'rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40'
-const small = 'rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40'
+const primary = btnPrimary
+const small = btnSm.secondary
 
 export interface MotherPlantTabProps {
   change: ChangeRequest
@@ -69,28 +69,28 @@ function Source({ change, state, onUploaded }: {
       onUploaded()
       toast.success('File attached')
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not attach the file'),
+    onError: (e: unknown) => toastError(e, 'Could not attach the file'),
   })
   const href = (aid: number) => `${API_BASE_URL}/v1/changes/${change.id}/attachments/${aid}/download`
   // Their timing seeds the plan at approval; after that it is a record.
   const timingOpen = ['captured', 'scoping'].includes(change.status)
   return (
     <section className={card} data-testid="mother-plant-source">
-      <h3 className="text-xs uppercase tracking-wide text-slate-500">{plantText('mp.from', state.mother_plant_name)}</h3>
+      <h3 className="text-xs uppercase tracking-wide text-slate-400">{plantText('mp.from', state.mother_plant_name)}</h3>
       <dl className="mt-2 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
         <div>
-          <dt className="text-xs text-slate-500">{t('mp.plantLabel')}</dt>
+          <dt className="text-xs text-slate-400">{t('mp.plantLabel')}</dt>
           <dd className="text-slate-100">{state.mother_plant_name ?? '-'}</dd>
         </div>
         <div>
-          <dt className="text-xs text-slate-500">Their reference</dt>
+          <dt className="text-xs text-slate-400">Their reference</dt>
           <dd className="font-mono text-slate-100">{state.mother_plant_ref ?? '-'}</dd>
         </div>
         <div>
-          <dt className="text-xs text-slate-500">SOP</dt>
+          <dt className="text-xs text-slate-400">SOP</dt>
           <dd className="text-slate-100" data-testid="mother-plant-sop-date">
-            {formatDate(state.mother_plant_sop)}
-            <span className="ml-2 text-xs text-slate-500">
+            {formatCalendarDate(state.mother_plant_sop)}
+            <span className="ml-2 text-xs text-slate-400">
               {change.release_due_date ? 'is the release deadline' : 'becomes the release deadline at approval'}
             </span>
           </dd>
@@ -99,15 +99,15 @@ function Source({ change, state, onUploaded }: {
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
-          <p className="text-xs text-slate-500">Their documents</p>
+          <p className="text-xs text-slate-400">Their documents</p>
           {state.documents.length === 0 ? (
-            <p className="mt-1 text-sm text-slate-500">No documents yet.</p>
+            <p className="mt-1 text-sm text-slate-400">No documents yet.</p>
           ) : (
             <ul className="mt-1 space-y-0.5 text-sm">
               {state.documents.map((d) => (
                 <li key={d.id}>
                   <a className="text-sky-300 hover:underline" href={href(d.id)} download={d.filename}>{d.filename}</a>
-                  <span className="ml-2 text-xs text-slate-500">{formatDate(d.created_at)}{d.uploaded_by_name ? `, ${d.uploaded_by_name}` : ''}</span>
+                  <span className="ml-2 text-xs text-slate-400">{formatDate(d.created_at)}{d.uploaded_by_name ? `, ${d.uploaded_by_name}` : ''}</span>
                 </li>
               ))}
             </ul>
@@ -119,19 +119,19 @@ function Source({ change, state, onUploaded }: {
           </label>
         </div>
         <div>
-          <p className="text-xs text-slate-500">Their timing (MS Project)</p>
+          <p className="text-xs text-slate-400">Their timing (MS Project)</p>
           {state.timing_attachment ? (
             <p className="mt-1 text-sm">
               <a className="text-sky-300 hover:underline" href={href(state.timing_attachment.id)}
                 download={state.timing_attachment.filename} data-testid="mother-plant-timing-file">
                 {state.timing_attachment.filename}
               </a>
-              <span className="ml-2 text-xs text-slate-500">
+              <span className="ml-2 text-xs text-slate-400">
                 {['captured', 'scoping'].includes(change.status) ? 'seeds the detailed plan at approval' : 'the detailed plan started from it'}
               </span>
             </p>
           ) : (
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-400">
               No timing file. The detailed plan starts from the SOP milestone.
             </p>
           )}
@@ -167,7 +167,7 @@ function InformTeam({ change, state, departments, onDone }: {
   const send = useMutation({
     mutationFn: () => motherPlantApi.sendInfo(change.id, { department_ids: [...picked], message: message.trim() || undefined }),
     onSuccess: (s) => { toast.success('Information sent to the team'); setMessage(''); setPicked(new Set()); onDone(s) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not send the information'),
+    onError: (e: unknown) => toastError(e, 'Could not send the information'),
   })
   const active = departments.filter((d) => d.is_active !== false && !informed.has(d.id))
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -181,7 +181,7 @@ function InformTeam({ change, state, departments, onDone }: {
   return (
     <section className={card} data-testid="mother-plant-inform">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-xs uppercase tracking-wide text-slate-500">Inform the team</h3>
+        <h3 className="text-xs uppercase tracking-wide text-slate-400">Inform the team</h3>
         {state.receipts.length > 0 && (
           <span className="text-xs text-slate-400" data-testid="mother-plant-receipt-count">
             {done} of {state.receipts.length} read and understood
@@ -197,7 +197,7 @@ function InformTeam({ change, state, departments, onDone }: {
       {state.receipts.length > 0 && (
         <table className="mt-3 w-full text-sm" data-testid="mother-plant-receipts">
           <thead>
-            <tr className="text-left text-xs text-slate-500">
+            <tr className="text-left text-xs text-slate-400">
               <th className="py-1 pr-3 font-normal">Department</th>
               <th className="py-1 pr-3 font-normal">Sent</th>
               <th className="py-1 pr-3 font-normal">Read and understood</th>
@@ -207,7 +207,8 @@ function InformTeam({ change, state, departments, onDone }: {
           <tbody>
             {state.receipts.map((r) => (
               <ReceiptRow key={r.id} changeId={change.id} receipt={r}
-                mine={state.my_open_receipt_ids.includes(r.id)} onDone={onDone} />
+                mine={state.my_open_receipt_ids.includes(r.id)} onDone={onDone}
+                ended={ENDED.includes(change.status)} />
             ))}
           </tbody>
         </table>
@@ -243,15 +244,19 @@ function InformTeam({ change, state, departments, onDone }: {
   )
 }
 
-function ReceiptRow({ changeId, receipt: r, mine, onDone }: {
+/** After the change ended an open confirmation is history, not a to-do. */
+const ENDED = ['released', 'closed', 'rejected', 'cancelled']
+
+function ReceiptRow({ changeId, receipt: r, mine, onDone, ended = false }: {
   changeId: number; receipt: MotherPlantState['receipts'][number]; mine: boolean
   onDone: (s?: MotherPlantState) => void
+  ended?: boolean
 }) {
   const [note, setNote] = useState('')
   const ack = useMutation({
     mutationFn: () => motherPlantApi.acknowledge(changeId, r.id, note.trim() || undefined),
     onSuccess: (s) => { toast.success(`${r.department_name ?? 'Department'}: read and understood`); onDone(s) },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not confirm'),
+    onError: (e: unknown) => toastError(e, 'Could not confirm'),
   })
   return (
     <tr className="border-t border-slate-700/60 align-top" data-testid={`mother-plant-receipt-${r.department_id}`}>
@@ -259,7 +264,12 @@ function ReceiptRow({ changeId, receipt: r, mine, onDone }: {
       <td className="py-1.5 pr-3 text-xs text-slate-400">{formatDate(r.sent_at)}{r.sent_by_name ? `, ${r.sent_by_name}` : ''}</td>
       <td className="py-1.5 pr-3">
         {r.acknowledged_at ? (
-          <span className="text-emerald-300">✓ {r.acknowledged_by_name ?? ''} <span className="text-xs text-slate-400">{formatDateTime(r.acknowledged_at)}</span></span>
+          <span className="inline-flex flex-wrap items-center gap-1 text-emerald-300">
+            <Check aria-hidden="true" size={14} />{r.acknowledged_by_name ?? ''}
+            <span className="text-xs text-slate-400">{formatDateTime(r.acknowledged_at)}</span>
+          </span>
+        ) : ended ? (
+          <span className="text-xs text-slate-400" data-testid={`mother-plant-receipt-unconfirmed-${r.department_id}`}>not confirmed</span>
         ) : mine ? (
           <div className="flex flex-wrap items-center gap-2">
             <input aria-label={`Note back from ${r.department_name ?? 'department'}`} maxLength={2000}

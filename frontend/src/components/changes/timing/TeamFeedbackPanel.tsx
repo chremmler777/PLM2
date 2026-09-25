@@ -5,13 +5,11 @@
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
 import type { FeedbackVerdict, PlanFeedback, PlanFeedbackRow } from '../../../types/changePlan'
 import { formatDate } from '../../../lib/format'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { btnSm } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 
 interface Props {
   changeId: number
@@ -52,7 +50,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save your answer'),
+    onError: (e: unknown) => toastError(e, 'Could not save your answer'),
   })
 
   const rows = feedback?.required ?? []
@@ -62,7 +60,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
   return (
     <section className="rounded-lg border border-slate-700 bg-slate-800 p-4 space-y-3" data-testid="team-feedback">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-xs uppercase tracking-wide text-slate-500">Team confirmation</h3>
+        <h3 className="text-xs uppercase tracking-wide text-slate-400">Team confirmation</h3>
         {rows.length > 0 && (
           <span className="text-xs text-slate-400 tabular-nums">{confirmed} of {rows.length} confirmed</span>
         )}
@@ -83,7 +81,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
       )}
 
       {!feedback ? (
-        <p className="text-sm text-slate-400">Loading...</p>
+        <p className="text-sm text-slate-400">Loading confirmations…</p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-slate-400">No team needs to confirm this plan.</p>
       ) : (
@@ -99,7 +97,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                   <span className={`rounded-full border px-2 py-0.5 text-[11px] ${CHIP[chip].cls}`}
                     data-testid={`feedback-chip-${r.department_id}`}>{CHIP[chip].label}</span>
                   {r.by_name && (
-                    <span className="text-[11px] text-slate-500">{r.by_name}, {formatDate(r.at)}</span>
+                    <span className="text-[11px] text-slate-400">{r.by_name}, {formatDate(r.at)}</span>
                   )}
                   {mine && canRespond && !open && (
                     <div className="ml-auto flex gap-2">
@@ -107,7 +105,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                         <button type="button" disabled={post.isPending}
                           data-testid={`feedback-confirm-${r.department_id}`}
                           aria-label={`Confirm timing for ${r.department_name}`}
-                          className="rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+                          className={btnSm.primary}
                           onClick={() => post.mutate({ department_id: r.department_id, verdict: 'confirmed' })}>
                           Confirm timing
                         </button>
@@ -115,7 +113,7 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                       <button type="button"
                         data-testid={`feedback-concern-${r.department_id}`}
                         aria-label={`Raise a timing concern for ${r.department_name}`}
-                        className="rounded-md border border-rose-700 px-2.5 py-1 text-xs text-rose-200 hover:bg-rose-950/50"
+                        className={btnSm.secondary}
                         onClick={() => { setConcernFor(r.department_id); setNote('') }}>
                         Raise concern
                       </button>
@@ -133,11 +131,11 @@ export default function TeamFeedbackPanel({ changeId, feedback, myDepartmentIds,
                       placeholder="What does not work, and what would? For example: tool rework needs 3 more weeks."
                       className="w-full rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-sm text-slate-100 placeholder-slate-500" />
                     <div className="flex justify-end gap-2">
-                      <button type="button" className="rounded-md border border-slate-600 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700"
+                      <button type="button" className={btnSm.ghost}
                         onClick={() => setConcernFor(null)}>Cancel</button>
                       <button type="button" disabled={!note.trim() || post.isPending}
                         data-testid={`feedback-concern-submit-${r.department_id}`}
-                        className="rounded-md bg-rose-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-600 disabled:opacity-50"
+                        className={btnSm.primary}
                         onClick={() => post.mutate({ department_id: r.department_id, verdict: 'concern', note: note.trim() })}>
                         Send concern
                       </button>

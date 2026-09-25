@@ -9,10 +9,11 @@ import { formatMoney } from '../../../lib/format'
 import { NumField, Segmented } from '../offer/ui'
 import { BEARER_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import { btnSm } from '../../common/buttonStyles'
 
 export function CostLine({ issue, canSeeCosts }: { issue: IssueOut; canSeeCosts: boolean }) {
   const set = issue.cost_set ?? issue.extra_cost != null
-  if (!set) return <span data-testid={`issue-cost-${issue.id}`} className="text-xs text-slate-500">No extra cost recorded</span>
+  if (!set) return <span data-testid={`issue-cost-${issue.id}`} className="text-xs text-slate-400">No extra cost recorded</span>
   return (
     <span data-testid={`issue-cost-${issue.id}`} className="text-xs text-slate-300">
       {canSeeCosts && issue.extra_cost != null
@@ -41,7 +42,7 @@ export default function CostForm({ changeId, issue, onDone, late = false }: {
       <div className="flex flex-wrap items-center gap-2">
         <NumField value={amount} onChange={setAmount} ariaLabel="Extra cost" testId="cost-amount"
           placeholder="Extra cost" className="w-36" />
-        <span className="text-xs text-slate-500">{issue.currency ?? 'EUR'}</span>
+        <span className="text-xs text-slate-400">{issue.currency ?? 'EUR'}</span>
         <Segmented<CostBearer> value={bearer} onChange={setBearer} testId="cost-bearer"
           options={(['internal', 'supplier', 'customer'] as CostBearer[]).map((b) => ({ value: b, label: BEARER_LABEL[b] }))} />
       </div>
@@ -58,7 +59,7 @@ export default function CostForm({ changeId, issue, onDone, late = false }: {
       )}
       <button type="button" data-testid="cost-submit" disabled={amount == null || amount < 0 || save.isPending}
         onClick={() => save.mutate(undefined)}
-        className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+        className={btnSm.primary}>
         Save cost
       </button>
     </div>

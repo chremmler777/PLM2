@@ -1,11 +1,26 @@
 /**
  * Reason for a date change after "Timing validated". Shows what the change
- * does, including the successors it carries along, before it is recorded.
+ * does, including the successors it carries along, before it is recorded:
+ * each row reads finish before to finish after (the last day worked), since a
+ * task that grows keeps its start and only its finish moves.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import Dialog from '../../common/Dialog'
+import Button from '../../common/Button'
 import { fmtShort, toDay } from '../../gantt/engine/calendar'
 
-export interface MovedTask { id: string | number; name: string; from: string; to: string; days: number }
+export interface MovedTask {
+  id: string | number
+  name: string
+  /** Start before and after (ISO). */
+  from: string
+  to: string
+  /** Last day before and after (ISO); the start stands in when missing. */
+  fromEnd?: string
+  toEnd?: string
+  /** Slip in plan units (working days in a working calendar). */
+  days: number
+}
 
 interface Props {
   open: boolean
@@ -17,44 +32,68 @@ interface Props {
 
 const signed = (n: number) => `${n > 0 ? '+' : ''}${n} d`
 
+function Rows({ list, testId, label }: { list: MovedTask[]; testId: string; label: string }) {
+  return (
+    <table className="w-full text-xs" data-testid={testId}>
+      <caption className="sr-only">{label}</caption>
+      <thead className="sr-only">
+        <tr><th scope="col">Task</th><th scope="col">Finish before and after</th><th scope="col">Slip</th></tr>
+      </thead>
+      <tbody>
+        {list.map((m) => (
+          <tr key={String(m.id)}>
+            <td className="max-w-0 truncate py-0.5 pr-2 text-slate-200" title={m.name}>{m.name}</td>
+            <td className="whitespace-nowrap py-0.5 pr-2 tabular-nums text-slate-400">
+              {fmtShort(toDay(m.fromEnd ?? m.from))} <span className="text-slate-400">to</span> {fmtShort(toDay(m.toEnd ?? m.to))}
+            </td>
+            <td className={`w-14 whitespace-nowrap py-0.5 text-right tabular-nums ${m.days > 0 ? 'text-red-300' : m.days < 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
+              {signed(m.days)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export default function DeviationDialog({ open, changed, moved, onSubmit, onClose }: Props) {
   const [reason, setReason] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { if (open) { setReason(''); setTimeout(() => ref.current?.focus(), 0) } }, [open])
-  if (!open) return null
-  const row = (m: MovedTask) => (
-    <li key={String(m.id)} className="flex items-center gap-2">
-      <span className="min-w-0 flex-1 truncate text-slate-200">{m.name}</span>
-      <span className="tabular-nums text-slate-400">{fmtShort(toDay(m.from))} to {fmtShort(toDay(m.to))}</span>
-      <span className={`w-12 text-right tabular-nums ${m.days > 0 ? 'text-red-300' : 'text-emerald-300'}`}>{signed(m.days)}</span>
-    </li>
-  )
+  const count = changed.length + moved.length
+  const submit = () => { if (reason.trim()) { const r = reason.trim(); setReason(''); onSubmit(r) } }
+  const close = () => { setReason(''); onClose() }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true"
-      aria-label="Record a deviation" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
-      <div className="w-full max-w-lg rounded-xl bg-slate-800 p-5 shadow-xl">
-        <h3 className="mb-2 text-base font-semibold text-slate-100">Record a deviation</h3>
-        <p role="alert" className="mb-3 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-          Timing is validated. This is recorded as a deviation per task and PM/Sales decide to lock or escalate it.
-        </p>
+    <Dialog open={open} onClose={close} title="Record a deviation" size="lg" initialFocus={ref}
+      closeOnBackdrop={false}
+      description={`Timing is validated, so the move is recorded with your reason${count > 1 ? ` on all ${count} tasks, listed as one group` : ''}. PM or Sales then lock it or escalate it to the customer.`}
+      footer={(
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!reason.trim()} onClick={submit}>Save move</Button>
+        </>
+      )}>
+      <div className="space-y-3">
         {changed.length > 0 && (
-          <ul className="mb-2 space-y-1 text-xs" data-testid="deviation-changed">{changed.map(row)}</ul>
-        )}
-        {moved.length > 0 && (
-          <div className="mb-3">
-            <p className="mb-1 text-xs font-medium text-slate-300">Moves successors too:</p>
-            <ul className="max-h-40 space-y-1 overflow-y-auto text-xs" data-testid="deviation-successors">{moved.map(row)}</ul>
+          <div>
+            <p className="mb-1 text-[11px] text-slate-400">Finish, before and after</p>
+            <Rows list={changed} testId="deviation-changed" label="Moved tasks" />
           </div>
         )}
-        <label className="mb-1 block text-sm text-slate-400" htmlFor="deviation-reason">Why does this move?</label>
-        <textarea id="deviation-reason" ref={ref} value={reason} onChange={(e) => setReason(e.target.value)}
-          className="min-h-[80px] w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100" />
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700" onClick={onClose}>Cancel</button>
-          <button type="button" className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-500 disabled:opacity-50"
-            disabled={!reason.trim()} onClick={() => onSubmit(reason.trim())}>Save move</button>
+        {moved.length > 0 && (
+          <div>
+            <p className="mb-1 text-[11px] text-slate-400">Pushed along by their links</p>
+            <div className="max-h-40 overflow-y-auto overscroll-contain">
+              <Rows list={moved} testId="deviation-successors" label="Successors moved along" />
+            </div>
+          </div>
+        )}
+        <div>
+          <label className="mb-1 block text-sm text-slate-300" htmlFor="deviation-reason">Why does this move?</label>
+          <textarea id="deviation-reason" ref={ref} value={reason} onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() } }}
+            className="min-h-[80px] w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400" />
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

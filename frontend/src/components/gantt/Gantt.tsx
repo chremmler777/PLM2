@@ -129,6 +129,12 @@ export interface GanttProps {
   defaultZoom?: Zoom | 'fit'
   /** CSS height of the scroll area. */
   height?: number | string
+  /**
+   * Size the scroll area to its rows instead of a fixed height: never taller
+   * than `height`, never shorter than this many pixels (default 320). Full
+   * screen always fills the window.
+   */
+  fitRows?: boolean | { min?: number }
   rowHeight?: number
   compact?: boolean
   toolbar?: boolean
@@ -184,7 +190,7 @@ const isTextTarget = (el: EventTarget | null) => {
 /** Keys typed on a button, menu, dialog or toolbar belong to that control, not to the chart. */
 const isControlTarget = (el: EventTarget | null) => {
   const t = el as Element | null
-  return !!t?.closest?.('button,a,[role=menu],[role=menuitem],[role=dialog],[role=toolbar],[role=listbox]')
+  return !!t?.closest?.('button,a,[role=menu],[role=menuitem],[role=dialog],[role=alertdialog],dialog,[role=toolbar],[role=listbox]')
 }
 
 /** A callback with a stable identity that always runs the latest closure (memoised children). */
@@ -1123,7 +1129,14 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       }
       case 'actualStart': case 'actualEnd': {
         if (val !== '' && !isIsoDay(val)) { notifyError(readDateInput(val).error ?? `Type the date as ${DATE_EXAMPLE}`); return }
-        if (val && val > toIso(todayDay() + 1)) { notifyError('Actual dates cannot lie in the future'); return }
+        // Today in the viewer's own calendar is the latest actual date (the
+        // server keeps a day of slack for time zones; the grid does not need it).
+        if (val && val > toIso(todayDay())) { notifyError('Actual dates cannot lie in the future'); return }
+        const otherStart = col.key === 'actualEnd' ? t.actualStart : val
+        const otherEnd = col.key === 'actualStart' ? t.actualEnd : val
+        if (otherStart && otherEnd && otherEnd < otherStart) {
+          notifyError('The actual finish cannot be before the actual start'); return
+        }
         patch(col.key === 'actualStart' ? { actualStart: val || null } : { actualEnd: val || null }, 'Actual dates'); return
       }
       case 'progress': {
@@ -1314,7 +1327,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       if (e.key !== 'Escape' || e.defaultPrevented) return
       const t = e.target as Element | null
       if (t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || (t as HTMLElement).isContentEditable)) return
-      if (document.querySelector('[role=dialog], [role=menu], [data-testid=date-popover]')) return
+      // A dialog on top (the app's native <dialog>, a confirm) owns Escape.
+      if (document.querySelector('[role=dialog], [role=alertdialog], dialog[open], [role=menu], [data-testid=date-popover]')) return
       e.preventDefault()
       setFull(false)
     }
@@ -1380,11 +1394,18 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
   // ---------------------------------------------------------------- render
   const vars = themeVars(theme)
   const bodyH = Math.max(rows.length, 1) * rowH
-  const heightCss = p.height ?? (p.compact ? 320 : '70vh')
+  const baseHeight = p.height ?? (p.compact ? 320 : '70vh')
+  // Rows plus header plus room for a horizontal scrollbar: a short plan does
+  // not reserve a screen of empty grid under its last task.
+  const fitMin = typeof p.fitRows === 'object' ? p.fitRows.min ?? 320 : 320
+  const heightCss = p.fitRows
+    ? `min(${typeof baseHeight === 'number' ? `${baseHeight}px` : baseHeight}, ${Math.max(fitMin, headerH + bodyH + 16)}px)`
+    : baseHeight
   const popLink = linkPop ? model.links.find((l) => key(l.id) === linkPop.id) : undefined
   const dialogTask = dialogKey ? tree.byId.get(dialogKey) : undefined
   const hasBaselines = model.tasks.some((t) => t.baselineStart)
-  const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40'
+  const btn = 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 '
+    + 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400'
   const btnStyle = { borderColor: v('gridLine'), background: v('panel'), color: v('text') }
   const TB = ({ label, onClick, disabled, testId, title, pressed }: { label: ReactNode; onClick: (e?: React.MouseEvent) => void; disabled?: boolean; testId: string; title: string; pressed?: boolean }) => (
     <button type="button" className={btn} style={pressed ? { ...btnStyle, background: v('accent'), color: '#fff', borderColor: v('accent') } : btnStyle}
@@ -1406,9 +1427,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         <div className="flex shrink-0 items-center gap-3 border-b pb-2" style={{ borderColor: v('gridLine') }} data-testid="gantt-full-header">
           <h2 className="truncate text-sm font-semibold" style={{ color: v('text') }}>{p.title ?? p.ariaLabel ?? 'Plan'}</h2>
           <span className="text-[11px]" style={{ color: v('textFaint') }}>Esc or Ctrl+Shift+F closes</span>
-          <button type="button" className="ml-auto rounded-md border px-2 py-1 text-xs" data-testid="gantt-full-close"
+          <button type="button" className={`ml-auto ${btn}`} data-testid="gantt-full-close"
             style={{ borderColor: v('gridLine'), color: v('text'), background: v('panel') }}
-            aria-label="Close full screen" onClick={() => setFull(false)}>Close &#10005;</button>
+            aria-label="Close full screen" onClick={() => setFull(false)}>
+            Close
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
         </div>
       )}
       {p.above != null && (
@@ -1457,7 +1481,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             {queue.saving && (
               <span className="flex items-center gap-1.5 text-[11px]" style={{ color: v('textMuted') }} data-testid="gantt-saving" role="status">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: v('accent') }} />Saving
+                <span className="h-1.5 w-1.5 motion-safe:animate-pulse rounded-full" style={{ background: v('accent') }} />Saving
               </span>
             )}
             <TB label="Critical path" onClick={() => setShowCritical((x) => !x)} pressed={showCritical} testId="gantt-critical-toggle" title="Show the critical path" />
@@ -1468,7 +1492,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
               {[...ZOOMS, 'fit' as const].map((z) => (
                 <button key={z} type="button" aria-pressed={zoom === z} data-testid={`gantt-zoom-${z}`}
                   aria-label={z === 'fit' ? 'Fit the plan to the width' : `Zoom to ${z}s`}
-                  className="px-2 py-1 text-xs capitalize"
+                  className="px-2 py-1 text-xs capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400"
                   style={zoom === z ? { background: v('accent'), color: '#fff' } : { background: v('panel'), color: v('textMuted') }}
                   onClick={() => changeZoom(z)}>{z}</button>
               ))}
@@ -1491,7 +1515,11 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
               <button type="button" className={btn} style={full ? { ...btnStyle, background: v('accent'), color: '#fff', borderColor: v('accent') } : btnStyle}
                 onClick={() => setFull((f) => !f)} data-testid="gantt-full-screen" aria-pressed={full}
                 aria-label="Full screen" title={full ? 'Leave full screen (Esc, Ctrl+Shift+F)' : 'Full screen (Ctrl+Shift+F)'}>
-                <span aria-hidden="true">{full ? '\u2923' : '\u2922'}</span>
+                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  {full
+                    ? <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+                    : <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />}
+                </svg>
               </button>
             )}
           </div>

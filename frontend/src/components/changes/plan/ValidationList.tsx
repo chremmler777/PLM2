@@ -20,7 +20,7 @@ export default function ValidationList({ errors, warnings, rowNo, onFocusTask }:
         <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
         <span className="text-slate-200">{i.message}</span>
         {i.task_id != null && rowNo.has(i.task_id) && (
-          <span className="shrink-0 text-slate-500">#{rowNo.get(i.task_id)}</span>
+          <span className="shrink-0 text-slate-400">#{rowNo.get(i.task_id)}</span>
         )}
       </>
     )

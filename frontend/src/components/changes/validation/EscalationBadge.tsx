@@ -1,7 +1,7 @@
 import type { EscalationLevel } from '../../../types/validationIssue'
 import { LEVEL } from './issueModel'
 
-/** "L2 Project": slate for the department, amber for the project, rose for management and customer. */
+/** "Level 2 (project)", "L2" when compact: slate for the department, amber for the project, rose for management and customer. */
 export default function EscalationBadge({ level, compact = false, unacknowledged = false }: {
   level?: EscalationLevel | null
   compact?: boolean
@@ -16,9 +16,9 @@ export default function EscalationBadge({ level, compact = false, unacknowledged
     <span data-testid={`escalation-badge-l${level}`}
       title={`Escalation level ${level}: ${l.who}${pulse ? ', not acknowledged yet' : ''}`}
       className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${l.chip}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${l.dot} ${pulse ? 'animate-pulse' : ''}`}
+      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${l.dot} ${pulse ? 'motion-safe:animate-pulse' : ''}`}
         data-testid={pulse ? 'escalation-dot-pulse' : undefined} />
-      {compact ? l.label : `${l.label} ${l.who}`}
+      {compact ? l.label : `Level ${level} (${l.who.toLowerCase()})`}
     </span>
   )
 }

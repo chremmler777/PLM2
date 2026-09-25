@@ -14,6 +14,9 @@ import { inputCls, sectionLabel } from '../offer/offerFormat'
 import { FIX_ROUTES, ROUTE } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import DateInput from '../../gantt/DateInput'
+import { X } from 'lucide-react'
+import Dialog from '../../common/Dialog'
+import Button from '../../common/Button'
 
 const ORDER: IssueRoute[] = ['internal_rework', 'supplier_rework', 'design_change', 'customer_concession', 'follow_up_change']
 
@@ -108,14 +111,21 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
   const cons = route ? routeConsequences(route, issue, changeStatus) : null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog"
-      aria-label={`Decide the route for ${issueCode(issue)}`}>
-      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-2xl">
-        <div className="border-b border-slate-700/70 px-5 py-4">
-          <h3 className="text-base font-semibold text-slate-100">Decide the route for {issueCode(issue)}</h3>
-          <p className="mt-0.5 text-sm text-slate-400">{issue.title}</p>
-        </div>
-        <div className="space-y-4 overflow-y-auto px-5 py-4">
+    <Dialog open={open} onClose={onClose} size="lg" busy={save.isPending} closeOnBackdrop={false}
+      title={`Decide the route for ${issueCode(issue)}`} description={issue.title} data-testid="route-dialog"
+      footer={(
+        <>
+          {missing.length > 0 && (
+            <span data-testid="route-missing" className="mr-auto text-[11px] text-slate-400">{missing[0]}</span>
+          )}
+          <Button onClick={onClose} disabled={save.isPending}>Cancel</Button>
+          <Button variant="primary" data-testid="route-submit" disabled={missing.length > 0} loading={save.isPending}
+            onClick={() => save.mutate(undefined)}>
+            Decide route
+          </Button>
+        </>
+      )}>
+        <div className="space-y-4">
           <div role="radiogroup" aria-label="Route" className="space-y-1.5">
             {ORDER.map((r) => {
               const blocked = routeBlockedReason(issue, r)
@@ -148,7 +158,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
               <ul className="space-y-1">
                 {cons.lines.map((l) => (
                   <li key={l} className="flex gap-2 text-xs text-slate-300">
-                    <span className="text-slate-500">•</span><span>{l}</span>
+                    <span aria-hidden="true" className="text-slate-400">•</span><span>{l}</span>
                   </li>
                 ))}
               </ul>
@@ -158,7 +168,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
           {route === 'supplier_rework' && (
             <div className="flex flex-wrap items-center gap-3">
               <input data-testid="route-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Supplier name" className={`${inputCls} min-w-0 flex-1`} />
+                placeholder="Supplier name" aria-label="Supplier name" className={`${inputCls} min-w-0 flex-1`} />
               <label className="flex items-center gap-2 text-xs text-slate-300">
                 <Toggle checked={chargeback} onChange={setChargeback} label="Chargeback" testId="route-chargeback" />
                 Chargeback (supplier pays)
@@ -178,7 +188,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
               <div className={sectionLabel}>Fix actions</div>
               {rows.map((row, idx) => (
                 <div key={idx} className="flex flex-wrap items-center gap-2">
-                  <input data-testid={`route-action-${idx}`} value={row.description}
+                  <input data-testid={`route-action-${idx}`} value={row.description} aria-label={`Fix action ${idx + 1}`}
                     onChange={(e) => setRows(rows.map((x, j) => j === idx ? { ...x, description: e.target.value } : x))}
                     placeholder="What is done" className={`${inputCls} min-w-0 flex-1`} />
                   <select aria-label="Owner department" value={row.department_id ?? ''}
@@ -193,36 +203,23 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
                     className={`${inputCls} w-32`} />
                   {rows.length > 1 && (
                     <button type="button" aria-label="Remove action" onClick={() => setRows(rows.filter((_, j) => j !== idx))}
-                      className="px-1 text-slate-500 hover:text-rose-300">✕</button>
+                      className="rounded p-1 text-slate-400 hover:text-rose-300"><X aria-hidden="true" size={14} /></button>
                   )}
                 </div>
               ))}
               <button type="button" data-testid="route-action-add"
                 onClick={() => setRows([...rows, emptyRow(issue.department_id ?? null)])}
                 className="text-xs text-sky-300 hover:text-sky-200">+ Add action</button>
-              <p className="text-[11px] text-slate-500">Without a due date a recovery block lasts 5 working days.</p>
+              <p className="text-[11px] text-slate-400">Without a due date a recovery block lasts 5 working days.</p>
             </div>
           )}
 
           <label className="block">
-            <span className="mb-1 block text-[11px] text-slate-500">Reason (required, recorded on the change)</span>
+            <span className="mb-1 block text-[11px] text-slate-400">Reason (required, recorded on the change)</span>
             <textarea data-testid="route-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
               className={`${inputCls} w-full`} />
           </label>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-700/70 px-5 py-3">
-          {missing.length > 0 && (
-            <span data-testid="route-missing" className="mr-auto text-[11px] text-slate-500">{missing[0]}</span>
-          )}
-          <button type="button" onClick={onClose}
-            className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">Cancel</button>
-          <button type="button" data-testid="route-submit" disabled={missing.length > 0 || save.isPending}
-            onClick={() => save.mutate(undefined)}
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
-            Decide route
-          </button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

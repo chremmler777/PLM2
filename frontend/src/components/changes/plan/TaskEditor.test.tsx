@@ -93,4 +93,12 @@ describe('TaskEditor', () => {
     render(<TaskEditor {...base} task={task()} onSave={vi.fn()} />)
     expect(screen.getByText('Idea block')).toBeTruthy()
   })
+
+  it('says why actual dates cannot be saved: a finish before the start, a date in the future', () => {
+    const tracking = { ...base, canEdit: false, canDates: false, canProgress: true, track: true }
+    const { rerender } = render(<TaskEditor {...tracking} task={task({ actual_start: '2026-01-10', actual_finish: '2026-01-05' })} onSave={vi.fn()} />)
+    expect(screen.getByTestId('te-actual-error').textContent).toBe('The actual finish cannot be before the actual start.')
+    rerender(<TaskEditor {...tracking} task={task({ id: 2, actual_start: '2099-01-10', actual_finish: null })} onSave={vi.fn()} />)
+    expect(screen.getByTestId('te-actual-error').textContent).toBe('Actual dates cannot lie in the future.')
+  })
 })

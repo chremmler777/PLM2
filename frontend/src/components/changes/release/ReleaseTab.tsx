@@ -5,22 +5,27 @@
  * closing summary puts plan against actual.
  */
 import { useState, type ReactNode } from 'react'
+import { Check, ChevronRight, CircleCheck, Hourglass } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../../api/changes'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import { planApi } from '../../../api/changePlan'
 import type { ChangeDetail } from '../../../types/change'
-import type { TaskOut } from '../../../types/changePlan'
+import { closingFigures } from './closingFigures'
+import { formatCalendarDate } from '../../../lib/format'
 import ValidationPanel from '../ValidationPanel'
 import ImplementationPanel from '../ImplementationPanel'
 import PnlCard from '../PnlCard'
 import { StepSection } from '../offer/ui'
-import { fmtDate, sectionLabel } from '../offer/offerFormat'
+import { sectionLabel } from '../offer/offerFormat'
 import ReleaseChecklist from './ReleaseChecklist'
 import { releaseKey } from './releaseKeys'
 import LessonsStep from './LessonsStep'
 import IssuesPanel, { issueBlockers, useValidationIssues } from '../validation/IssuesPanel'
 import { isIssueOpen } from '../../../types/validationIssue'
+import { btnPrimary } from '../../common/buttonStyles'
+
+export { closingFigures }
 
 export interface ReleaseTabProps {
   change: ChangeDetail
@@ -52,43 +57,7 @@ export function releaseBlockers(guard: string[], issues: Parameters<typeof issue
 
 const AFTER: string[] = ['released', 'closed']
 
-const DAY = 86_400_000
-const dayOf = (iso: string) => {
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
-  return Math.round(Date.UTC(y, m - 1, d) / DAY)
-}
-const isoOf = (day: number) => new Date(day * DAY).toISOString().slice(0, 10)
-/** The last day a span occupies, as the Timing grid shows it: a milestone sits on its start. */
-const lastDayOf = (start: number, endExcl: number) => (endExcl > start ? endExcl - 1 : start)
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
-
-/**
- * Plan against baseline and actual, read the way the Timing tab reads it:
- * finishes are the inclusive last day of the latest real task.
- */
-export function closingFigures(tasks: TaskOut[]) {
-  const real = tasks.filter((t) => !t.is_idea && !t.is_summary)
-  // end_date is the server's own, exclusive and calendar-aware (weekends,
-  // holidays, constraints) — start_date + duration_days is plain day
-  // arithmetic and can disagree with it.
-  const planEnds = real.map((t) => lastDayOf(dayOf(t.start_date), dayOf(t.end_date)))
-  const baseEnds = real.filter((t) => t.baseline_start && t.baseline_finish)
-    .map((t) => lastDayOf(dayOf(t.baseline_start!), dayOf(t.baseline_finish!)))
-  const planned = planEnds.length ? Math.max(...planEnds) : null
-  const baseline = baseEnds.length ? Math.max(...baseEnds) : null
-  const open = real.filter((t) => !t.actual_finish && (t.progress_pct ?? 0) < 100).length
-  const finished = real.filter((t) => !!t.actual_finish).map((t) => dayOf(t.actual_finish!))
-  const actual = real.length > 0 && open === 0 && finished.length ? Math.max(...finished) : null
-  const slipped = real.filter((t) => t.baseline_finish && dayOf(t.end_date) > dayOf(t.baseline_finish)).length
-  const against = actual ?? planned
-  const slip = baseline != null && against != null ? against - baseline : null
-  return {
-    planned: planned != null ? isoOf(planned) : null,
-    baseline: baseline != null ? isoOf(baseline) : null,
-    actual: actual != null ? isoOf(actual) : null,
-    open, slipped, slip, count: real.length,
-  }
-}
 
 function ClosingSummary({ change, departments, canSeeCosts }: {
   change: ChangeDetail; departments: { id: number; name: string }[]; canSeeCosts: boolean
@@ -105,15 +74,15 @@ function ClosingSummary({ change, departments, canSeeCosts }: {
     f.open ? `${plural(f.open, 'task')} open` : null,
   ].filter(Boolean).join(', ')
   const cells: [string, string, string, string?][] = [
-    ['Baseline finish', 'baseline-finish', fmtDate(f.baseline)],
-    ['Planned finish', 'planned-finish', fmtDate(f.planned)],
-    ['Actual finish', 'actual-finish', f.actual ? fmtDate(f.actual) : f.open ? plural(f.open, 'open task') : '-'],
+    ['Baseline finish', 'baseline-finish', formatCalendarDate(f.baseline)],
+    ['Planned finish', 'planned-finish', formatCalendarDate(f.planned)],
+    ['Actual finish', 'actual-finish', f.actual ? formatCalendarDate(f.actual) : f.open ? plural(f.open, 'open task') : '-'],
     ['Against baseline', 'against-baseline', slipText, detail || undefined],
   ]
   return (
     <section data-testid="release-summary" className="rounded-xl border border-emerald-900/70 bg-emerald-950/10 p-4 space-y-4">
       <div className="flex items-center gap-2">
-        <span className="text-emerald-400">✓</span>
+        <CircleCheck aria-hidden="true" size={16} className="text-emerald-400" />
         <h3 className="text-sm font-semibold text-slate-100">
           {change.status === 'closed' ? 'Change closed' : 'Change released'}
         </h3>
@@ -143,7 +112,7 @@ function Collapsible({ title, children, testId }: { title: string; children: Rea
     <section data-testid={testId} className="rounded-xl border border-slate-700 bg-slate-800/40">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
         className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-800/60">
-        <span className={`text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+        <ChevronRight aria-hidden="true" size={14} className={`text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`} />
         {title}
       </button>
       {open && <div className="border-t border-slate-700/70 p-4">{children}</div>}
@@ -186,10 +155,6 @@ export default function ReleaseTab({
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-100">Release</h2>
-        <p className="mt-0.5 text-xs text-slate-400">
-          The work is done. Departments confirm it holds, the owners tick the release checklist, the team records its
-          lessons, then PM releases the change and closes it.
-        </p>
         <ol data-testid="release-progress" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {steps.map(([label, done, id], i) => (
             <li key={id}>
@@ -199,8 +164,11 @@ export default function ReleaseTab({
               }}
                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${done
                   ? 'border-emerald-800 bg-emerald-950/30 text-emerald-200' : 'border-slate-700 bg-slate-900/40 text-slate-300'}`}>
-                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${done
-                  ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>{done ? '✓' : i + 1}</span>
+                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold ${done
+                  ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                  {done ? <Check aria-hidden="true" size={12} strokeWidth={3} /> : i + 1}
+                </span>
+                <span className="sr-only">{done ? 'Done:' : 'To do:'}</span>
                 {label}
               </a>
             </li>
@@ -223,7 +191,7 @@ export default function ReleaseTab({
         <ValidationPanel changeId={change.id} status={change.status}
           departments={departments} myDepartmentIds={myDepartmentIds}
           canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll}
-          canRaiseAny={canManage} />
+          canRaiseAny={canManage} hasCosting={change.origin !== 'mother_plant'} />
       </StepSection>
 
       <StepSection id="release-checklist" n={2} title="Release checklist" done={checklistDone}
@@ -236,7 +204,7 @@ export default function ReleaseTab({
         {release ? (
           <ReleaseChecklist changeId={change.id} checks={release.checks} myDepartmentIds={myDepartmentIds}
             canManage={canManage} editable={inValidation} />
-        ) : <p className="text-xs text-slate-500">Loading checklist</p>}
+        ) : <p className="text-xs text-slate-400">Loading checklist</p>}
       </StepSection>
 
       <StepSection id="release-lessons" n={3} title="Lessons learned" done={lessonsDone}
@@ -255,7 +223,9 @@ export default function ReleaseTab({
                 className="rounded-lg border border-amber-900/60 bg-amber-950/20 px-3 py-2">
                 <ul data-testid="release-blockers" className="space-y-1">
                   {blockers.map((b) => (
-                    <li key={b} className="text-xs text-amber-300">⏳ {b}</li>
+                    <li key={b} className="flex gap-1.5 text-xs text-amber-300">
+                      <Hourglass aria-hidden="true" size={12} className="mt-0.5 shrink-0" />{b}
+                    </li>
                   ))}
                 </ul>
                 {canManage && (
@@ -269,22 +239,24 @@ export default function ReleaseTab({
               <button type="button" data-testid="release-change"
                 disabled={advancing}
                 onClick={() => onAdvance('released')}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50">
+                className={btnPrimary}>
                 Release change
               </button>
-            ) : <p className="text-xs text-slate-500">PM releases the change once every step is done.</p>}
+            ) : <p className="text-xs text-slate-400">PM releases the change once every step is done.</p>}
           </div>
         )}
         {change.status === 'released' && (
           canManage ? (
             <button type="button" data-testid="close-change" disabled={advancing}
               onClick={() => onAdvance('closed')}
-              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+              className={btnPrimary}>
               Close change
             </button>
-          ) : <p className="text-xs text-slate-500">Released. PM closes the change.</p>
+          ) : <p className="text-xs text-slate-400">Released. PM closes the change.</p>
         )}
-        {change.status === 'closed' && <p className="text-xs text-emerald-400">✓ Closed.</p>}
+        {change.status === 'closed' && (
+          <p className="inline-flex items-center gap-1 text-xs text-emerald-400"><Check aria-hidden="true" size={12} />Closed.</p>
+        )}
       </StepSection>
 
       <Collapsible title="Revisions (ECN)" testId="release-revisions">

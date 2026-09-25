@@ -87,7 +87,7 @@ export default function CalendarDialog(p: Props) {
       <div ref={panel} className="w-full max-w-md space-y-4 rounded-xl border border-slate-700 bg-slate-800 p-5 text-sm text-slate-200 shadow-xl">
         <h3 className="text-base font-semibold text-slate-100">Plan calendar</h3>
         <fieldset className="space-y-1" disabled={!p.canEdit}>
-          <legend className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Durations count</legend>
+          <legend className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Durations count</legend>
           <label className="flex items-center gap-2"><input type="radio" name="cal-mode" checked={mode === 'calendar'}
             onChange={() => { setMode('calendar'); setConvert(null) }} /> Calendar days (every day counts)</label>
           <label className="flex items-center gap-2"><input type="radio" name="cal-mode" checked={mode === 'working'}
@@ -107,7 +107,7 @@ export default function CalendarDialog(p: Props) {
           </fieldset>
         )}
         <fieldset disabled={!p.canEdit}>
-          <legend className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">Working days</legend>
+          <legend className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Working days</legend>
           <div className="flex flex-wrap gap-2">
             {DAYS.map(([d, name]) => (
               <label key={d} className="flex items-center gap-1">
@@ -120,7 +120,7 @@ export default function CalendarDialog(p: Props) {
           {workdays.length === 0 && <p className="mt-1 text-xs text-red-300">At least one working day is needed.</p>}
         </fieldset>
         <div>
-          <p className="mb-1 text-[10px] uppercase tracking-wide text-slate-500">
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
             Holidays {mode === 'calendar' ? '(shading only in calendar days)' : ''}
           </p>
           <ul className="max-h-36 space-y-0.5 overflow-y-auto" data-testid="calendar-holidays">

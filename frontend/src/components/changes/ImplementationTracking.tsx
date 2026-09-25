@@ -18,7 +18,6 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
@@ -27,9 +26,7 @@ import type {
   ImplEscalationDirection, ImplReport,
 } from '../../types/change'
 import { formatDate } from '../../lib/format'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { toastError } from '../../lib/apiError'
 
 const onDay = (iso?: string | null) => formatDate(iso)
 
@@ -41,8 +38,11 @@ const DIRECTIONS: ImplEscalationDirection[] = ['customer', 'internal']
 const fieldCls =
   'bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100'
 
+/** Local copy: the lead times are what the vendors quoted, not where the plan stands. */
+export const QUOTED_LEAD_TIMES = 'Quoted vendor lead times'
+
 /**
- * What the outside world costs in time, taken from the favourite offer of each
+ * What the outside world costs in time, taken from the favorite offer of each
  * external position — the same rule the costing board uses to decide which
  * vendor counts. One line under the header, because implementation timing is
  * argued against these numbers and nobody should have to open another tab.
@@ -57,7 +57,7 @@ export function vendorLeadTimeLine(positions: CostPosition[]): string | null {
       return `${p.label}: ${fav.lead_time_days} ${unit} (${fav.vendor_name})`
     })
     .filter((s): s is string => s !== null)
-  return parts.length > 0 ? `${t('impl2.vendorLeadTimes')}: ${parts.join(' · ')}` : null
+  return parts.length > 0 ? `${QUOTED_LEAD_TIMES}: ${parts.join(' · ')}` : null
 }
 
 function EscalationList({ items, changeId, editable, canEscalate, testPrefix }: {
@@ -79,11 +79,11 @@ function EscalationList({ items, changeId, editable, canEscalate, testPrefix }: 
       qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-escalations'] })
       qc.invalidateQueries({ queryKey: ['change', changeId, 'impl-state'] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not resolve the escalation'),
+    onError: (e: unknown) => toastError(e, 'Could not resolve the escalation'),
   })
 
   if (items.length === 0) {
-    return <p className="text-xs text-slate-500">{t('impl2.noEscalations')}</p>
+    return <p className="text-xs text-slate-400">{t('impl2.noEscalations')}</p>
   }
   return (
     <ul className="space-y-1">
@@ -95,7 +95,7 @@ function EscalationList({ items, changeId, editable, canEscalate, testPrefix }: 
               : 'border-amber-800 bg-amber-950/30 text-amber-100'}`}>
           <span className="flex items-start gap-2">
             <span data-testid={`impl-escalation-direction-${e.id}`}
-              className="flex-shrink-0 rounded bg-slate-800/80 px-1.5 py-0 text-[10px] leading-tight font-semibold">
+              className="flex-shrink-0 rounded bg-slate-800/80 px-1.5 py-0 text-[11px] leading-tight font-semibold">
               {t(`impl2.direction.${e.direction}`)}
             </span>
             <span className="min-w-0 flex-1">
@@ -189,12 +189,12 @@ function DepartmentBlock({
       ...(bookingNote.trim() !== '' ? { note: bookingNote.trim() } : {}),
     }),
     onSuccess: () => { setHours(''); setBookingNote(''); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not book the time'),
+    onError: (e: unknown) => toastError(e, 'Could not book the time'),
   })
   const removeBooking = useMutation({
     mutationFn: (bookingId: number) => changesApi.deleteImplBooking(changeId, bookingId),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not delete the booking'),
+    onError: (e: unknown) => toastError(e, 'Could not delete the booking'),
   })
   const addReport = useMutation({
     mutationFn: () => changesApi.addImplReport(changeId, {
@@ -202,7 +202,7 @@ function DepartmentBlock({
       ...(atRisk && riskNote.trim() !== '' ? { risk_note: riskNote.trim() } : {}),
     }),
     onSuccess: () => { setReportNote(''); setAtRisk(false); setRiskNote(''); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the report'),
+    onError: (e: unknown) => toastError(e, 'Could not save the report'),
   })
   // The escalation answers the newest at-risk report of this department — that
   // is also the only link the block has to find its own escalations again.
@@ -213,7 +213,7 @@ function DepartmentBlock({
       ...(riskReport ? { report_id: riskReport.id } : {}),
     }),
     onSuccess: () => { setEscalating(false); setEscalationNote(''); invalidate() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not escalate'),
+    onError: (e: unknown) => toastError(e, 'Could not escalate'),
   })
 
   const hoursValue = Number(hours)
@@ -229,7 +229,7 @@ function DepartmentBlock({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-slate-100 font-medium">{name}</span>
         {isMine && (
-          <span className="rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[10px] leading-tight">
+          <span className="rounded bg-sky-900/70 text-sky-200 px-1.5 py-0 text-[11px] leading-tight">
             {t('costing.yourBucket')}
           </span>
         )}
@@ -239,7 +239,7 @@ function DepartmentBlock({
           title={state.last_report_at
             ? t('impl2.lastReport').replace('{d}', onDay(state.last_report_at))
             : undefined}
-          className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${
+          className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium ${
             state.owes_report
               ? 'bg-amber-900/70 text-amber-200'
               : neverReported ? 'bg-slate-700 text-slate-300'
@@ -249,7 +249,7 @@ function DepartmentBlock({
         </span>
         {state.at_risk_open && (
           <span data-testid={`impl-atrisk-${id}`}
-            className="rounded bg-red-900/80 text-red-100 px-1.5 py-0 text-[10px] leading-tight font-semibold">
+            className="rounded bg-red-900/80 text-red-100 px-1.5 py-0 text-[11px] leading-tight font-semibold">
             {t('impl2.atRisk')}
           </span>
         )}
@@ -262,7 +262,7 @@ function DepartmentBlock({
       <div className="space-y-1">
         <p className="text-xs font-medium text-slate-400">{t('impl2.booked')}</p>
         {bookings.length === 0 ? (
-          <p className="text-xs text-slate-500">{t('impl2.noBookings')}</p>
+          <p className="text-xs text-slate-400">{t('impl2.noBookings')}</p>
         ) : (
           <ul className="space-y-0.5">
             {bookings.map((b) => (
@@ -312,7 +312,7 @@ function DepartmentBlock({
       <div className="space-y-1 border-t border-slate-700 pt-2">
         <p className="text-xs font-medium text-slate-400">{t('impl2.reports')}</p>
         {reports.length === 0 ? (
-          <p className="text-xs text-slate-500">{t('impl2.noReports')}</p>
+          <p className="text-xs text-slate-400">{t('impl2.noReports')}</p>
         ) : (
           <ul className="space-y-1">
             {reports.map((r) => (
@@ -321,7 +321,7 @@ function DepartmentBlock({
                 <span className="flex items-start gap-2">
                   {r.at_risk && (
                     <span data-testid={`impl-report-risk-${r.id}`}
-                      className="flex-shrink-0 rounded bg-red-900/80 text-red-100 px-1.5 py-0 text-[10px] leading-tight font-semibold">
+                      className="flex-shrink-0 rounded bg-red-900/80 text-red-100 px-1.5 py-0 text-[11px] leading-tight font-semibold">
                       {t('impl2.atRisk')}
                     </span>
                   )}
@@ -331,7 +331,7 @@ function DepartmentBlock({
                       <span data-testid={`impl-report-risknote-${r.id}`}
                         className="block text-red-200/90">{r.risk_note}</span>
                     )}
-                    <span className="block text-slate-500">
+                    <span className="block text-slate-400">
                       {r.created_by_name ?? '-'}{r.created_at ? ` · ${onDay(r.created_at)}` : ''}
                     </span>
                   </span>
@@ -437,7 +437,7 @@ function DepartmentBlock({
 }
 
 export default function ImplementationTracking({
-  changeId, status, departments, myDepartmentIds, canSeeAll, canEscalate = false,
+  changeId, status, departments, myDepartmentIds, canSeeAll, canEscalate = false, planSlipDays = null,
 }: {
   changeId: number
   status: string
@@ -447,6 +447,11 @@ export default function ImplementationTracking({
   canSeeAll: boolean
   /** Sales, the change lead and admins raise and settle escalations. */
   canEscalate?: boolean
+  /**
+   * Plan finish against the baseline in days (+ late), when a baseline
+   * exists: said next to the quoted lead times, which do not move with it.
+   */
+  planSlipDays?: number | null
 }) {
   // The backend only takes writes while the work is running; afterwards the
   // card is the record, for the implementing department too.
@@ -509,12 +514,17 @@ export default function ImplementationTracking({
         <span className="font-medium text-slate-100">{t('impl2.title')}</span>
         <p className="text-xs text-slate-400 mt-0.5">{t('impl2.intro')}</p>
         {leadTimes && (
-          <p data-testid="impl-vendor-leadtimes" className="text-xs text-slate-500 mt-0.5">
+          <p data-testid="impl-vendor-leadtimes" className="text-xs text-slate-400 mt-0.5">
             {leadTimes}
+            {planSlipDays != null && planSlipDays !== 0 && (
+              <span data-testid="impl-plan-slip" className={planSlipDays > 0 ? 'text-amber-300' : 'text-emerald-300'}>
+                {`. The plan finish is ${planSlipDays > 0 ? `${planSlipDays} d later` : `${-planSlipDays} d earlier`} than the baseline.`}
+              </span>
+            )}
           </p>
         )}
         {!editable && (
-          <p data-testid="impl-tracking-readonly" className="text-xs text-slate-500 mt-0.5">
+          <p data-testid="impl-tracking-readonly" className="text-xs text-slate-400 mt-0.5">
             {t('impl2.readOnly')}
           </p>
         )}

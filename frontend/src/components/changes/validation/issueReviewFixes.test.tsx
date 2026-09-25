@@ -97,6 +97,19 @@ describe('F1 where the issues live', () => {
     expect(screen.getByText('Back in implementation')).toBeDefined()
   })
 
+  it('only the first open issue opens by itself; the others show their header and stepper', async () => {
+    vi.mocked(validationIssuesApi.list).mockResolvedValue([
+      issue({ id: 11, escalation_level: 2 }), issue({ id: 13, number: 4, title: 'Second' }),
+    ])
+    qcWrap(<IssuesPanel changeId={7} changeStatus="in_validation" departments={departments}
+      viewer={{}} canRaise={false} />)
+    await screen.findByTestId('issue-card-13')
+    const toggle = (id: number) => screen.getByTestId(`issue-card-${id}`).querySelector('button[aria-expanded]')!
+    expect(toggle(11).getAttribute('aria-expanded')).toBe('true')
+    expect(toggle(13).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByTestId('issue-stepper-13')).toBeDefined()
+  })
+
   it('cockpit issue actions open the issue tab for the status with the issue id', () => {
     const onAction = vi.fn()
     const change = {

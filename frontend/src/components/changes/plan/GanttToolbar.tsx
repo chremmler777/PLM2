@@ -5,13 +5,14 @@
  * the chart.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
+import { btnSm } from '../../common/buttonStyles'
 
-export const btn =
-  'inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed'
-export const btnPrimary =
-  'inline-flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed'
+/** The shared small buttons (components/common/buttonStyles), re-exported for the planner. */
+export const btn = btnSm.secondary
+export const btnPrimary = btnSm.primary
 
-const menuItem = 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40'
+const menuItem = 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-slate-800 focus-visible:bg-slate-800 focus-visible:outline-none disabled:opacity-40'
 
 export function Menu({ label, ariaLabel, children, testId, disabled }: {
   label: ReactNode; ariaLabel: string; children: (close: () => void) => ReactNode; testId?: string; disabled?: boolean
@@ -28,7 +29,7 @@ export function Menu({ label, ariaLabel, children, testId, disabled }: {
     <div className="relative" ref={ref}>
       <button type="button" className={btn} aria-haspopup="menu" aria-expanded={open} disabled={disabled}
         aria-label={ariaLabel} data-testid={testId} onClick={() => setOpen((o) => !o)}>
-        {label}<span className="text-[9px] text-slate-500">&#9662;</span>
+        {label}<ChevronDown aria-hidden="true" size={12} className="text-slate-400" />
       </button>
       {open && (
         <div role="menu" className="absolute left-0 z-40 mt-1 min-w-[200px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-xl">

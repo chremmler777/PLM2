@@ -5,14 +5,13 @@
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import type { ReleaseCheck, ReleaseCheckStatus } from '../../../types/changeRelease'
 import { fmtDate, inputCls, sectionLabel } from '../offer/offerFormat'
 import { releaseKey } from './releaseKeys'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+import { Check } from 'lucide-react'
+import { btnSm } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 
 const CHIP: Record<ReleaseCheckStatus, { label: string; on: string }> = {
   open: { label: 'Open', on: 'bg-slate-700 text-slate-100' },
@@ -35,7 +34,7 @@ function CheckRow({ changeId, check, canEdit }: {
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the check'),
+    onError: (e: unknown) => toastError(e, 'Could not save the check'),
   })
 
   const pick = (s: ReleaseCheckStatus) => {
@@ -53,7 +52,7 @@ function CheckRow({ changeId, check, canEdit }: {
           <div className={`text-sm ${check.status === 'open' ? 'text-slate-100' : 'text-slate-400'}`}>{check.label}</div>
           {check.hint && <div className="text-[11px] text-sky-300/80">{check.hint}</div>}
           {check.status !== 'open' && (check.by_name || check.note) && (
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-slate-400">
               {check.by_name}{check.at ? `, ${fmtDate(check.at)}` : ''}{check.note ? `: ${check.note}` : ''}
             </div>
           )}
@@ -84,7 +83,7 @@ function CheckRow({ changeId, check, canEdit }: {
           <button type="button" data-testid={`release-check-${check.key}-confirm`}
             disabled={(editing === 'na' && !note.trim()) || save.isPending}
             onClick={() => save.mutate({ status: editing, ...(note.trim() ? { note: note.trim() } : {}) })}
-            className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50">
+            className={btnSm.primary}>
             {editing === 'na' ? 'Mark not applicable' : 'Mark done'}
           </button>
           <button type="button" onClick={() => setEditing(null)} className="px-1 text-xs text-slate-400 hover:text-slate-200">
@@ -113,7 +112,7 @@ export default function ReleaseChecklist({
     groups.set(k, [...(groups.get(k) ?? []), c])
   }
   if (checks.length === 0) {
-    return <p className="text-xs text-slate-500">The checklist appears when the change reaches validation.</p>
+    return <p className="text-xs text-slate-400">The checklist appears when the change reaches validation.</p>
   }
   return (
     <div className="space-y-4">
@@ -123,8 +122,8 @@ export default function ReleaseChecklist({
           <div key={dept}>
             <div className="mb-1.5 flex items-center gap-2">
               <span className={sectionLabel}>{dept}</span>
-              <span className={`text-[11px] ${open ? 'text-amber-300' : 'text-emerald-400'}`}>
-                {open ? `${open} open` : '✓ complete'}
+              <span className={`inline-flex items-center gap-1 text-[11px] ${open ? (editable ? 'text-amber-300' : 'text-slate-400') : 'text-emerald-400'}`}>
+                {open ? `${open} open` : <><Check aria-hidden="true" size={12} />complete</>}
               </span>
             </div>
             <ul className="space-y-1.5">

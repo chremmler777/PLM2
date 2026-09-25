@@ -59,7 +59,7 @@ export default function EscalationHistory({ changeId, issue, canEscalate, canDee
         )}
       </div>
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-500">Level 1: the owner department and PM know about {issueCode(issue)}.</p>
+        <p className="text-xs text-slate-400">Level 1: the owner department and PM know about {issueCode(issue)}.</p>
       ) : (
         <ol className="space-y-1.5">
           {rows.map((e) => (
@@ -68,7 +68,7 @@ export default function EscalationHistory({ changeId, issue, canEscalate, canDee
               <EscalationBadge level={e.level} compact unacknowledged={needsAck(e)} />
               <div className="min-w-0 flex-1 text-xs">
                 <div className="text-slate-200">{e.reason}</div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-[11px] text-slate-400">
                   {formatDateTime(e.created_at)}{e.created_by_name ? `, ${e.created_by_name}` : ', automatic'}
                   {e.notified ? `. Told: ${e.notified}` : ''}
                 </div>

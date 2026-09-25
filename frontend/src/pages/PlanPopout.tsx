@@ -5,18 +5,38 @@
  * window, refetches on focus, and hears saves from other windows through the
  * planner's BroadcastChannel, so both windows stay current.
  */
-import { useEffect } from 'react';
+import { useEffect, type MouseEvent } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { planApi } from '../api/changePlan';
+import { ExternalLink, X } from 'lucide-react';
 import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
+import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import GanttPlanner from '../components/changes/plan/GanttPlanner';
+import { btnSm } from '../components/common/buttonStyles';
 
 const phase = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const statusOf = (e: unknown) => (e as { response?: { status?: number } })?.response?.status;
 /** A plan that does not exist or is not ours to see stays so: no retries. */
 const retry = (count: number, e: unknown) => ![401, 403, 404].includes(statusOf(e) ?? 0) && count < 2;
+
+/**
+ * "Open change" brings the window that opened this one to the change (its
+ * Timing tab) instead of loading the whole app in the small window; without
+ * an opener it is a plain link.
+ */
+function openInMain(e: MouseEvent<HTMLAnchorElement>, href: string) {
+  const opener = window.opener as Window | null;
+  if (!opener || opener.closed) return;
+  try {
+    opener.location.href = href;
+    opener.focus();
+    e.preventDefault();
+  } catch {
+    // Another origin: let the link open normally.
+  }
+}
 
 export default function PlanPopout() {
   const params = useParams<{ changeId: string; plan: string }>();
@@ -57,15 +77,29 @@ export default function PlanPopout() {
   return (
     <div className="h-screen flex flex-col bg-slate-900 text-slate-100">
       <header data-testid="plan-popout-header"
-        className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2 border-b border-slate-700 bg-slate-800">
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 border-b border-slate-700 bg-slate-800">
         <span className="text-xs text-slate-400">{label}</span>
         <span className="font-semibold tabular-nums">{number}</span>
-        <span className="text-slate-300">{change?.title}</span>
+        {status && (
+          <span data-testid="plan-popout-status"
+            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_PILL[status as ChangeStatus] ?? 'bg-slate-700 text-slate-200'}`}>
+            {STATUS_LABELS[status as ChangeStatus] ?? status}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate text-slate-300" title={change?.title}>{change?.title}</span>
+        <a href={`/changes/${id}?tab=timing`} data-testid="plan-popout-open-change"
+          onClick={(e) => openInMain(e, `/changes/${id}?tab=timing`)} className={btnSm.secondary}>
+          <ExternalLink aria-hidden="true" size={14} />Open change
+        </a>
+        <button type="button" data-testid="plan-popout-close" onClick={() => window.close()}
+          className={btnSm.ghost} aria-label="Close this window">
+          <X aria-hidden="true" size={14} />Close
+        </button>
       </header>
       <main className="flex-1 min-h-0 overflow-auto p-3">
         <GanttPlanner changeId={id} plan={plan} changeNumber={change?.change_number}
           mode={track ? 'track' : 'plan'} status={plan === 'detailed' ? status : undefined}
-          hideSeed={plan === 'detailed'} height="calc(100vh - 11rem)" inWindow focusTaskId={focusTaskId} />
+          hideSeed={plan === 'detailed'} height="calc(100vh - 12rem)" inWindow focusTaskId={focusTaskId} />
       </main>
     </div>
   );

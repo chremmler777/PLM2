@@ -12,6 +12,7 @@ import IssueCard from './IssueCard'
 import RaiseIssueDialog from './RaiseIssueDialog'
 import type { IssueViewer } from './issueModel'
 import { STATUS_LABEL } from './issueModel'
+import { btnSm } from '../../common/buttonStyles'
 
 /** Open first, then by escalation level, severity, number. */
 export const sortIssues = (list: IssueOut[]) => [...list].sort((a, b) =>
@@ -65,9 +66,13 @@ export default function IssuesPanel({
     if (focusIssueId != null && closed.some((i) => i.id === focusIssueId)) setShowClosed(true)
   }, [focusIssueId, closed.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Only the first open issue (the most escalated) opens by itself; the rest
+  // show their header and stepper and open on a click, so three issues do
+  // not stack three sets of drop zones and escalation boxes.
   const card = (i: IssueOut) => (
     <IssueCard key={i.id} changeId={changeId} changeStatus={changeStatus} issue={i} viewer={viewer}
-      departments={departments} releaseDueDate={releaseDueDate} highlight={focusIssueId === i.id} />
+      departments={departments} releaseDueDate={releaseDueDate} highlight={focusIssueId === i.id}
+      defaultOpen={focusIssueId === i.id || (isIssueOpen(i) && open[0]?.id === i.id)} />
   )
 
   return (
@@ -82,7 +87,7 @@ export default function IssuesPanel({
         )}
         {raiseOk && (
           <button type="button" data-testid="issue-raise" onClick={() => setRaising(true)}
-            className="ml-auto rounded-lg border border-slate-600 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-700">
+            className={`ml-auto ${btnSm.secondary}`}>
             Raise issue
           </button>
         )}

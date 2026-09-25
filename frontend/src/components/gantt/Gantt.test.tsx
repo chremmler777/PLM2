@@ -1257,6 +1257,30 @@ describe('Gantt: read-only (legacy) links', () => {
   })
 })
 
+describe('Gantt: actual dates', () => {
+  afterEach(cleanup)
+  const tracked = () => setup({
+    showProgress: true, columns: ['row', 'name', 'actualStart', 'actualEnd'],
+    tasks: [{ ...base()[0], actualStart: '2026-01-10' }, base()[1], base()[2]],
+  })
+
+  it('refuses an actual finish before the actual start', () => {
+    const { onChange, onError } = tracked()
+    editCell(1, 'actualEnd', '2026-01-05')
+    expect(onError).toHaveBeenCalledWith('The actual finish cannot be before the actual start', undefined)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('refuses an actual date after today, tomorrow included', () => {
+    const { onChange, onError } = tracked()
+    const d = new Date(); d.setDate(d.getDate() + 1)
+    const tomorrow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    editCell(1, 'actualEnd', tomorrow)
+    expect(onError).toHaveBeenCalledWith('Actual dates cannot lie in the future', undefined)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
 describe('Gantt: full screen', () => {
   const full = () => String(screen.getByTestId('gantt-root').getAttribute('data-full-screen') === 'true')
 
@@ -1330,6 +1354,21 @@ describe('Gantt: full screen', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(full()).toBe('true')
     dlg.remove()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full()).toBe('false')
+  })
+
+  it('Escape leaves full screen alone while a native dialog or an alert dialog is open', () => {
+    setup()
+    fireEvent.click(screen.getByTestId('gantt-full-screen'))
+    const native = document.createElement('dialog'); native.setAttribute('open', ''); document.body.appendChild(native)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full()).toBe('true')
+    native.remove()
+    const alert = document.createElement('div'); alert.setAttribute('role', 'alertdialog'); document.body.appendChild(alert)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(full()).toBe('true')
+    alert.remove()
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(full()).toBe('false')
   })
