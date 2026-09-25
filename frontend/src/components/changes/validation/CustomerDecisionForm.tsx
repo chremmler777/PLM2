@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { validationIssuesApi } from '../../../api/validationIssues'
 import type { CustomerDecision, IssueOut } from '../../../types/validationIssue'
-import { formatDate } from '../../../lib/format'
+import { formatDate, todayIso } from '../../../lib/format'
 import { inputCls } from '../offer/offerFormat'
 import { DECISION_LABEL } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
@@ -16,13 +16,15 @@ const OPTIONS: CustomerDecision[] = ['accept_deviation', 'require_fix', 'new_tim
 export const hasCustomerMail = (i: IssueOut) => (i.attachments ?? []).some((a) => a.kind === 'customer_email')
 
 /** Why this decision cannot be saved yet, or null. */
-export function customerDecisionBlocked(i: IssueOut, d: CustomerDecision | null, note: string, newDate: string): string | null {
+export function customerDecisionBlocked(i: IssueOut, d: CustomerDecision | null, note: string, newDate: string,
+  today: string = todayIso()): string | null {
   if (!d) return 'Pick what the customer decided'
   if (!note.trim()) return 'Add a note (what was agreed, with whom)'
   if (d === 'accept_deviation' && i.route === 'customer_concession' && !hasCustomerMail(i)) {
     return 'File the customer mail into this issue first'
   }
   if (d === 'new_timing' && !newDate) return 'Enter the new release date'
+  if (d === 'new_timing' && newDate < today) return 'The new release date cannot be in the past'
   return null
 }
 
@@ -73,7 +75,7 @@ export default function CustomerDecisionForm({ changeId, issue, releaseDueDate, 
       {decision === 'new_timing' && (
         <label className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           New release date
-          <input type="date" data-testid="customer-new-date" value={newDate}
+          <input type="date" data-testid="customer-new-date" value={newDate} min={todayIso()}
             onChange={(e) => setNewDate(e.target.value)} className={inputCls} />
           <span className="text-[11px] text-slate-500">
             Now {formatDate(deadline)}. Updates the release deadline (reason "VI-{issue.number}").

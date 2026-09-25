@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PnlCard from './PnlCard'
 import type { ChangeDetail, Summation } from '../../types/change'
 import { changesApi } from '../../api/changes'
-import { t } from '../../i18n/cmLabels'
 
 vi.mock('../../api/changes', () => ({
   changesApi: { getSummation: vi.fn() },
@@ -99,56 +98,6 @@ describe('PnlCard', () => {
     expect(changesApi.getSummation).not.toHaveBeenCalled()
   })
 
-  it('adds an Actuals section when the payload carries one', async () => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue({
-      ...summation({ grand_total: 2000 }),
-      actuals: {
-        by_department: [
-          { department_id: 2, hours: 12, rate: 100, internal_cost: 1200,
-            plan_internal_cost: 1000 },
-          { department_id: 4, hours: 5, rate: null, internal_cost: 0, unrated: true },
-        ],
-        internal_cost: 1200,
-        plan_internal_cost: 1500,
-        extras: [
-          { key: 'scrap_quote', amount: 800 },
-          { key: 'weight_delta', amount: 250 },
-        ],
-        extra_cost: 1050,
-        total_cost: 2250,
-        delta: 250,
-      },
-    } as never)
-    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 5000 })}
-      departments={[{ id: 2, name: 'Development' }, { id: 4, name: 'Tool Engineer' }]} />))
-
-    expect(await screen.findByTestId('pnl-actuals')).toBeDefined()
-    // Per department: booked hours, what they cost, and what was planned.
-    const dev = screen.getByTestId('pnl-actual-dept-2')
-    expect(dev.textContent).toContain('Development')
-    expect(dev.textContent).toContain('12 h')
-    expect(dev.textContent).toContain('1.200,00')
-    expect(dev.textContent).toContain('1.000,00')
-    // Unpriced hours are called out rather than counted as zero in silence.
-    expect(screen.getByTestId('pnl-actual-unrated-4')).toBeDefined()
-    expect(screen.getByText(t('actuals.unratedHint'))).toBeDefined()
-    // The extras the plan did not carry, named.
-    expect(screen.getByTestId('pnl-actual-extra-scrap_quote').textContent)
-      .toContain(t('actuals.extra.scrap_quote'))
-    expect(screen.getByTestId('pnl-actual-extra-weight_delta').textContent).toContain('250')
-    expect(screen.getByTestId('pnl-actuals-total').textContent).toBe('2.250,00 EUR')
-    // The backend's own delta (internal actual vs. plan) wins over any
-    // client-side recompute — extras never enter it.
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('+250,00')
-  })
-
-  it('renders exactly as before when the payload carries no actuals', async () => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue(summation({ grand_total: 2000 }))
-    render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
-    expect(await screen.findByText('Revenue')).toBeDefined()
-    expect(screen.queryByTestId('pnl-actuals')).toBeNull()
-  })
-
   it('is hidden for scoping and captured statuses', () => {
     render(wrap(<PnlCard change={change({ status: 'scoping' })} />))
     expect(screen.queryByText('Revenue')).toBeNull()
@@ -157,70 +106,74 @@ describe('PnlCard', () => {
     expect(screen.queryByText('Revenue')).toBeNull()
   })
 
-  it('never shows NaN: reads the backend ActualsBlock shape and hides an empty block in costing', async () => {
-    const block = {
-      departments: [], extras: [], total_actual: 0, total_plan: 0,
-      total_booked_hours: 0, total_extras: 0, unrated_hours: false, variance: 0,
-    }
+  it('no longer shows the old Actuals block (actual total and delta), even when the payload carries one', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue({
-      ...summation({ grand_total: 2000 }), actuals: block,
-    } as never)
-    const { container } = render(wrap(<PnlCard change={change({ status: 'costing', customer_relevant: true })} />))
-    expect(await screen.findByText('Revenue')).toBeDefined()
-    expect(container.textContent).not.toContain('NaN')
+      ...summation(),
+      actuals: { by_department: [{ department_id: 1, hours: 10, internal_cost: 900 }], total_cost: 900, delta: -100 },
+    } as Summation)
+    ovaMock.mockResolvedValue(ova)
+    costListMock.mockResolvedValue({ items: [], total: 0, can_write: false, writable_department_ids: null, cost_role: true })
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByTestId('pnl-offer-vs-actual')
     expect(screen.queryByTestId('pnl-actuals')).toBeNull()
+    expect(screen.queryByTestId('pnl-actuals-total')).toBeNull()
+    expect(screen.queryByTestId('pnl-actuals-delta')).toBeNull()
   })
 
-  it('totals the backend ActualsBlock once work is booked', async () => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue({
-      ...summation({ grand_total: 2000 }),
-      actuals: {
-        departments: [{ department_id: 2, department_name: 'Development', booked_hours: 10,
-          hourly_rate: 90, actual_cost: 900, plan_cost: 1000, variance: -100, unrated: false }],
-        extras: [{ key: 'weight_delta', label: 'Weight', amount: null }],
-        total_actual: 900, total_plan: 1000, total_booked_hours: 10,
-        total_extras: 0, unrated_hours: false, variance: -100,
-      },
-    } as never)
-    const { container } = render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })} />))
-    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('900,00 EUR')
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-100,00')
-    expect(screen.getByTestId('pnl-actual-dept-2').textContent).toContain('Development')
-    expect(container.textContent).not.toContain('NaN')
+  it('while running: actual margin to date and the forecast margin sit in separate, labelled columns', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue({ ...ova, in_progress: true, actual_margin: 19592, actual_margin_pct: 72.85,
+      forecast_margin: -1800, forecast_margin_pct: -6.69, variance: -1800,
+      lines: ova.lines.map((l) => ({ ...l, forecast: l.key === 'internal' ? 1000 : l.actual })) })
+    costListMock.mockResolvedValue({ items: [], total: 0, can_write: false, writable_department_ids: null, cost_role: true })
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByTestId('pnl-offer-vs-actual')
+    expect(screen.getByText('Actual to date')).toBeDefined()
+    expect(screen.getByTestId('ova-forecast-head').textContent).toBe('Forecast')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19.592,00 EUR')
+    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1.800,00 EUR')
+    expect(screen.queryByText('Margin (forecast)')).toBeNull()
+    // the internal line: 1.050 booked, 1.000 forecast
+    const internal = screen.getByTestId('ova-line-internal').textContent ?? ''
+    expect(internal).toContain('1.050,00 EUR')
+    expect(internal).toContain('1.000,00 EUR')
   })
 
-  it('delta is like for like: internal actual vs. plan, never the extras-inflated total', async () => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue({
-      ...summation({ grand_total: 13629.5 }),
-      actuals: {
-        departments: [{ department_id: 2, booked_hours: 0, actual_cost: 0, plan_cost: 1129.5 }],
-        // A planned scrap quote is not an overrun: the backend's variance
-        // (internal actual 0 vs. internal plan 13629.5) leaves it out, and
-        // the delta must too, even though the extra inflates the total.
-        extras: [{ key: 'scrap_quote', amount: 1050 }],
-        total_actual: 0, total_plan: 13629.5, total_extras: 1050, variance: -13629.5,
-      },
-    } as never)
-    render(wrap(<PnlCard change={change({ status: 'released', customer_relevant: true })} />))
-    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.050,00 EUR')
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-13.629,50')
-    // The extra still shows, as its own line, not folded into the delta.
-    expect(screen.getByTestId('pnl-actual-extra-scrap_quote').textContent).toContain('1.050,00')
+  it('once released there is no forecast column: the actual is the end', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue({ ...ova, in_progress: false })
+    costListMock.mockResolvedValue({ items: [], total: 0, can_write: false, writable_department_ids: null, cost_role: true })
+    render(wrap(<PnlCard change={change({ status: 'released', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByTestId('pnl-offer-vs-actual')
+    expect(screen.queryByTestId('ova-forecast-head')).toBeNull()
+    expect(screen.queryByTestId('ova-forecast-margin')).toBeNull()
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1.250,00 EUR')
   })
 
-  it('falls back to internal actual minus plan when the backend sends no delta/variance', async () => {
-    vi.mocked(changesApi.getSummation).mockResolvedValue({
-      ...summation({ grand_total: 2000 }),
-      actuals: {
-        by_department: [{ department_id: 2, hours: 10, internal_cost: 900, plan_internal_cost: 1000 }],
-        extras: [{ key: 'scrap_quote', amount: 500 }],
-        internal_cost: 900, plan_internal_cost: 1000, extra_cost: 500, total_cost: 1400,
-      },
-    } as never)
-    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })} />))
-    expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.400,00 EUR')
-    // 900 - 1000, not 1400 - 1000.
-    expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-100,00')
+  it('a department member (no cost role) gets only their own actual costs, and no P&L request', async () => {
+    costListMock.mockResolvedValue({ items: [
+      { id: 5, change_id: 7, department_id: 28, department_name: 'Development', category: 'scrap',
+        vendor_name: null, amount: 120, cost_date: '2026-09-20', note: 'Scrapped samples', attachment_id: null,
+        created_by: 9, created_by_name: 'Dev', created_at: '2026-09-20T08:00:00', can_delete: true },
+    ], total: 120, can_write: true, writable_department_ids: [28], cost_role: false })
+    render(wrap(<PnlCard canSeeCosts={false}
+      change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 3000 })}
+      departments={[{ id: 28, name: 'Development' }, { id: 27, name: 'Tool Engineer' }]} />))
+    expect((await screen.findByTestId('actual-cost-5')).textContent).toContain('Scrapped samples')
+    expect(screen.getByText('Actual costs of your department')).toBeDefined()
+    expect(screen.queryByText('Revenue')).toBeNull()
+    expect(screen.queryByTestId('pnl-offer-vs-actual')).toBeNull()
+    expect(changesApi.getSummation).not.toHaveBeenCalled()
+    expect(ovaMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('actual-cost-open'))
+    const dept = screen.getByLabelText('Department') as HTMLSelectElement
+    expect([...dept.options].map((o) => o.textContent)).toEqual(['Choose', 'Development'])
+  })
+
+  it('a department member sees nothing before implementation', () => {
+    render(wrap(<PnlCard canSeeCosts={false} change={change({ status: 'costing' })} />))
+    expect(screen.queryByTestId('pnl-department-costs')).toBeNull()
+    expect(costListMock).not.toHaveBeenCalled()
   })
 
   it('shows no offer-vs-actual block before implementation', async () => {

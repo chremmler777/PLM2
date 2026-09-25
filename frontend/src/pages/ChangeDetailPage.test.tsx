@@ -71,13 +71,26 @@ vi.mock('../api/changes', () => ({
     changelog: vi.fn().mockResolvedValue([]),
   },
 }))
-vi.mock('../components/changes/PnlCard', () => ({ default: () => <div>mock-pnl-card</div> }))
+vi.mock('../components/changes/PnlCard', () => ({
+  default: ({ canSeeCosts }: { canSeeCosts?: boolean }) =>
+    <div>{canSeeCosts === false ? 'mock-pnl-department-only' : 'mock-pnl-card'}</div>,
+}))
 vi.mock('../api/changePlan', () => ({
   planApi: {
     feedback: vi.fn().mockResolvedValue({ revision: 1, required: [], all_confirmed: true, validated_at: null, validated_by_name: null }),
     get: vi.fn().mockResolvedValue({ tasks: [] }),
     deviations: vi.fn().mockResolvedValue([]),
   },
+}))
+const { issuesList } = vi.hoisted(() => ({ issuesList: vi.fn() }))
+vi.mock('../api/validationIssues', () => ({
+  validationIssuesKey: (id: number) => ['change', id, 'validation-issues'],
+  validationIssuesApi: { list: (...a: unknown[]) => issuesList(...a) },
+}))
+vi.mock('../components/changes/validation/IssuesPanel', () => ({
+  default: (p: { title?: string; focusIssueId?: number | null; changeStatus: string }) => (
+    <div data-testid="mock-issues-panel">{`${p.title} status=${p.changeStatus} focus=${p.focusIssueId}`}</div>
+  ),
 }))
 vi.mock('../api/plants', () => ({
   plantsApi: { list: vi.fn().mockResolvedValue([]) },
@@ -132,17 +145,19 @@ vi.mock('../components/changes/offer/OfferTab', () => ({
   ),
 }))
 vi.mock('../components/changes/timing/TimingTab', () => ({
-  default: (p: { canEditPlan: boolean; canPublish: boolean; canSetBankBuild?: boolean; canDecideDeviation?: boolean; isAdmin?: boolean }) => (
+  default: (p: { canEditPlan: boolean; canPublish: boolean; canSetBankBuild?: boolean; canDecideDeviation?: boolean; isAdmin?: boolean; issues?: React.ReactNode }) => (
     <div data-testid="mock-timing-tab">
+      {p.issues}
       <span data-testid="timing-rights">edit={String(p.canEditPlan)} publish={String(p.canPublish)}</span>
       <span data-testid="timing-rights-2">bank={String(p.canSetBankBuild)} decide={String(p.canDecideDeviation)} admin={String(p.isAdmin)}</span>
     </div>
   ),
 }))
 vi.mock('../components/changes/release/ReleaseTab', () => ({
-  default: (p: { canManage: boolean; onAdvance?: (to: string) => void }) => (
+  default: (p: { canManage: boolean; onAdvance?: (to: string) => void; focusIssueId?: number | null }) => (
     <div>
       <div data-testid="mock-release-tab">manage={String(p.canManage)}</div>
+      <div data-testid="mock-release-focus">focus={String(p.focusIssueId)}</div>
       <button type="button" onClick={() => p.onAdvance?.('closed')}>mock-close</button>
     </div>
   ),
@@ -615,12 +630,13 @@ describe('ChangeDetailPage costing tab', () => {
     expect(screen.queryByTestId('costing-reopen')).toBeNull()
   })
 
-  it('mounts the P&L card (which reads /summation) only for the cost roles', async () => {
+  it('mounts the full P&L card (which reads /summation) only for the cost roles; others get their department part', async () => {
     change.status = 'costing' as ChangeDetail['status']
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
     wrap('/changes/1?tab=costing')
     await screen.findByTestId('costing-stage')
     expect(screen.queryByText('mock-pnl-card')).toBeNull()
+    expect(screen.getByText('mock-pnl-department-only')).toBeDefined()
     cleanup()
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1?tab=costing')
@@ -973,5 +989,57 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
     wrap('/changes/1')
     fireEvent.click(await screen.findByRole('button', { name: 'Resume' }))
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'in_assessment', { to: 'in_assessment' }))
+  })
+})
+
+describe('ChangeDetailPage validation issues after the loop back (review F1)', () => {
+  const issue = (over: Record<string, unknown> = {}) => ({
+    id: 21, change_id: 1, number: 1, title: 'Clip hole out of tolerance', status: 'fixing', severity: 2,
+    category: 'dimensional', description: 'x', created_by: 5, created_at: '2026-09-24T08:00:00',
+    actions: [], attachments: [], escalation_level: 1, escalations: [], ...over,
+  })
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    issuesList.mockReset()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('keeps the Release tab open in implementation once an issue exists, and shows the issues on Timing', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    issuesList.mockResolvedValue([issue()])
+    wrap('/changes/1?tab=timing&issue=21')
+    const panel = await screen.findByTestId('mock-issues-panel')
+    expect(panel.textContent).toBe('Validation issues / recovery status=in_implementation focus=21')
+    await waitFor(() => expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(screen.getByRole('button', { name: /Release/ }))
+    expect(await screen.findByTestId('mock-release-tab')).toBeDefined()
+  })
+
+  it('passes a deep-linked issue to the Release tab', async () => {
+    change.status = 'in_validation' as ChangeDetail['status']
+    issuesList.mockResolvedValue([issue({ status: 'open' })])
+    wrap('/changes/1?tab=release&issue=21')
+    expect((await screen.findByTestId('mock-release-focus')).textContent).toBe('focus=21')
+  })
+
+  it('without issues the Release tab stays locked in implementation and Timing has no issues section', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    issuesList.mockResolvedValue([])
+    wrap('/changes/1?tab=timing')
+    await screen.findByTestId('mock-timing-tab')
+    expect(screen.queryByTestId('mock-issues-panel')).toBeNull()
+    expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('the end-implementation dialog names the issues still fixing', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_implementation' as ChangeDetail['status']
+    issuesList.mockResolvedValue([issue()])
+    vi.mocked(planApi.get).mockResolvedValue({ tasks: [] } as never)
+    wrap('/changes/1?tab=timing')
+    await screen.findByTestId('mock-issues-panel')
+    fireEvent.click(screen.getByRole('button', { name: 'mock-advance-in_validation' }))
+    expect((await screen.findByTestId('confirm-info')).textContent).toContain('Still fixing: VI-1 Clip hole out of tolerance')
   })
 })

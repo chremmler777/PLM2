@@ -68,11 +68,28 @@ export const STATUS_HINTS: Partial<Record<ChangeStatus, string>> = {
   closed: 'Wrapped up',
 }
 
+/**
+ * Mother-plant side track (spec §14): no assessment, costing or quote. The
+ * mother plant engineered and sold the change; scoping informs the team and
+ * goes straight to approved (the backend refuses everything else).
+ */
+export const MOTHER_PLANT_STEP_ORDER: ChangeStatus[] = [
+  'captured', 'scoping', 'approved', 'in_implementation', 'in_validation', 'released', 'closed',
+]
+
+/** NEXT_STATUS for one change: the mother-plant side track leaves scoping for approved. */
+export function nextStatusesFor(status: ChangeStatus, origin?: string | null): ChangeStatus[] {
+  if (origin === 'mother_plant' && status === 'scoping') return ['approved', 'rejected']
+  return NEXT_STATUS[status] ?? []
+}
+
 /** On-path step order for a given branch: customer-relevant changes keep `quoted`,
  * non-customer-relevant (internal) changes skip it. Mirrors the backend, which treats
  * any falsy customer_relevant (false OR null/undefined — e.g. a legacy change captured
  * before the flag existed) as internal, so `undefined` is treated as internal too. */
-export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
+export function branchStepOrder(customerRelevant?: boolean, origin?: string | null): ChangeStatus[] {
+  // The mother-plant side track (spec §14) shows only the stages it uses.
+  if (origin === 'mother_plant') return MOTHER_PLANT_STEP_ORDER
   return !customerRelevant
     // An internal change is never offered, so neither quoting step applies.
     ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoting' && s !== 'quoted')
@@ -83,10 +100,11 @@ export function branchStepOrder(customerRelevant?: boolean): ChangeStatus[] {
  * if `status` is off-path (on_hold/rejected/cancelled). */
 export function stepPosition(
   status: ChangeStatus,
-  customerRelevant?: boolean
+  customerRelevant?: boolean,
+  origin?: string | null,
 ): { index: number; total: number } | null {
   if (OFF_PATH_STATUSES.includes(status)) return null
-  const order = branchStepOrder(customerRelevant)
+  const order = branchStepOrder(customerRelevant, origin)
   const index = order.indexOf(status)
   if (index === -1) return null
   return { index, total: order.length }
@@ -116,13 +134,19 @@ export const stepperLabel = (s: ChangeStatus): string => STEPPER_LABELS[s] ?? ST
  */
 export type ChangeTab =
   | 'overview' | 'scoping' | 'impacted' | 'assessments'
-  | 'costing' | 'offer' | 'timing' | 'release' | 'd1' | 'audit'
+  | 'costing' | 'offer' | 'mother' | 'timing' | 'release' | 'd1' | 'audit'
 
 export const EVERYDAY_TABS: ChangeTab[] = [
   'overview', 'scoping', 'impacted', 'assessments', 'costing', 'offer', 'timing', 'release',
 ]
+/** Mother plant (spec §14): Assessments, Costing and Offer become one "Mother plant" tab. */
+export const MOTHER_PLANT_TABS: ChangeTab[] = [
+  'overview', 'scoping', 'impacted', 'mother', 'timing', 'release',
+]
+export const everydayTabsFor = (origin?: string | null): ChangeTab[] =>
+  origin === 'mother_plant' ? MOTHER_PLANT_TABS : EVERYDAY_TABS
 export const GOVERNANCE_TABS: ChangeTab[] = ['d1', 'audit']
-export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, ...GOVERNANCE_TABS]
+export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, 'mother', ...GOVERNANCE_TABS]
 
 /** Each phase-bound tab opens when the change reaches its phase. */
 export const TAB_UNLOCK_STATUS: Partial<Record<ChangeTab, ChangeStatus>> = {
@@ -151,7 +175,10 @@ export const STATUS_ACTIVE_TAB: Partial<Record<ChangeStatus, ChangeTab>> = {
  * internal change at costing is approved by PM on the Approval (offer) tab
  * while the departments still enter lines on costing, so both are active.
  */
-export function activeTabsFor(status: string, customerRelevant?: boolean | null): ChangeTab[] {
+export function activeTabsFor(status: string, customerRelevant?: boolean | null,
+  origin?: string | null): ChangeTab[] {
+  // Mother plant: scoping is informing the team, worked on its own tab.
+  if (origin === 'mother_plant' && status === 'scoping') return ['mother']
   const tab = STATUS_ACTIVE_TAB[status as ChangeStatus]
   if (!tab) return []
   if (status === 'costing' && !customerRelevant) return ['costing', 'offer']
@@ -165,8 +192,14 @@ const RELEASE_STAGE: string[] = ['in_validation', 'released', 'closed']
  * `commercial` and `implementation` tabs resolve to the new tab for the
  * change's stage. Unknown names come back as null.
  */
-export function resolveChangeTab(raw: string | null | undefined, status: string): ChangeTab | null {
+export function resolveChangeTab(raw: string | null | undefined, status: string,
+  origin?: string | null): ChangeTab | null {
   if (!raw) return null
+  // A mother-plant change has no assessment, costing or offer: those names
+  // (and their aliases) land on its Mother plant tab.
+  if (origin === 'mother_plant'
+    && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting'].includes(raw)) return 'mother'
+  if (origin !== 'mother_plant' && raw === 'mother') return null
   if (raw === 'commercial') return status === 'costing' ? 'costing' : 'offer'
   if (raw === 'implementation') return RELEASE_STAGE.includes(status) ? 'release' : 'timing'
   if (raw === 'quote' || raw === 'quoting') return 'offer'
@@ -184,6 +217,7 @@ export function changeTabLabel(raw: string, customerRelevant?: boolean | null, s
     case 'assessments': return 'Assessments'
     case 'costing': return 'Costing'
     case 'offer': return customerRelevant ? 'Offer' : 'Approval'
+    case 'mother': return 'Mother plant'
     case 'timing': return 'Timing'
     case 'release': return 'Release'
     case 'd1': return 'D1'

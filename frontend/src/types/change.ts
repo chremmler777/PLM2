@@ -115,7 +115,9 @@ export type AttachmentKind =
   /** Saved customer correspondence (.msg/.eml/pdf). Change-level, no assessment. */
   | 'customer_email'
   /** A vendor's written quote, filed under the offer it belongs to. */
-  | 'vendor_quote';
+  | 'vendor_quote'
+  /** The mother plant's timing (MS Project XML); seeds the detailed plan. */
+  | 'mother_plant_timing';
 
 export interface Attachment {
   id: number;
@@ -253,7 +255,20 @@ export interface ChangeRequest {
   lessons_done_at?: string | null;
   lessons_done_by?: number | null;
   lessons_none_reason?: string | null;
+  /** Where the change comes from (spec §14): customer, internal, or the
+   *  mother-plant side track (no assessment, costing or quote). */
+  origin?: ChangeOrigin;
+  mother_plant_name?: string | null;
+  mother_plant_ref?: string | null;
+  /** The mother plant's SOP (YYYY-MM-DD); the release deadline at approval. */
+  mother_plant_sop?: string | null;
+  /** Mother plant: first "Send information", and who has not confirmed yet. */
+  info_sent_at?: string | null;
+  info_department_ids?: number[];
+  info_open_department_ids?: number[];
 }
+
+export type ChangeOrigin = 'customer' | 'internal' | 'mother_plant';
 
 /** Running change vs planned scrap — the two ways a change reaches the line. */
 export type BankBuildMode = 'running_change' | 'planned_scrap';
@@ -461,7 +476,13 @@ export interface ActivityRef { id: number; department_id: number; label: string;
 
 export type MyActionKind =
   | 'assessment' | 'wf_task' | 'deviation_decision' | 'routing_deviation_decision'
-  | 'gate' | 'impact_confirm' | 'transition';
+  | 'gate' | 'impact_confirm' | 'transition'
+  /** Mother plant (spec §14). */
+  | 'info_send' | 'info_ack' | 'inform_mother_plant'
+  /** Validation issues (spec §12): the viewer's owed act on one issue. */
+  | 'validation_issue_contain' | 'validation_issue_root_cause' | 'validation_issue_route'
+  | 'validation_issue_action' | 'validation_issue_customer' | 'validation_issue_quote'
+  | 'validation_issue_close' | 'validation_issue_escalation';
 
 export interface MyAction {
   kind: MyActionKind;
@@ -471,6 +492,10 @@ export interface MyAction {
   task_id?: number | null;
   deviation_id?: number | null;
   gate_key?: GateKey | null;
+  /** validation_issue_*: the issue the act is on (deep link ?issue=<id>). */
+  issue_id?: number | null;
+  escalation_id?: number | null;
+  level?: number | null;
 }
 
 export interface MyActionsResponse {

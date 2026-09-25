@@ -7,6 +7,7 @@
  * or escalate. The bank-build decision and the department tracking of stage 8
  * sit underneath, unchanged.
  */
+import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { planApi } from '../../../api/changePlan'
@@ -17,6 +18,7 @@ import GanttPlanner from '../plan/GanttPlanner'
 import { formatDate } from '../../../lib/format'
 import DeviationsPanel from './DeviationsPanel'
 import TeamFeedbackPanel from './TeamFeedbackPanel'
+import InformMotherPlant from '../motherPlant/InformMotherPlant'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -36,6 +38,13 @@ export interface TimingTabProps {
   canDecideDeviation?: boolean
   /** Admin answers the team confirmation for any department. */
   isAdmin?: boolean
+  /**
+   * Validation issues and their recovery, while a fix loops the change back
+   * to implementation: shown above the plan the recovery blocks sit in.
+   */
+  issues?: ReactNode
+  /** Mother plant (spec §14): PM, lead, admin stamp "Inform mother plant". */
+  canInformMotherPlant?: boolean
 }
 
 const btn = 'rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-700 disabled:opacity-40'
@@ -61,7 +70,8 @@ function Step({ n, title, detail, state }: {
 
 export default function TimingTab({
   change, departments, myDepartmentIds, canEditPlan, canPublish, canSeeAll,
-  canSetBankBuild = false, canDecideDeviation = false, isAdmin = false,
+  canSetBankBuild = false, canDecideDeviation = false, isAdmin = false, issues,
+  canInformMotherPlant = false,
 }: TimingTabProps) {
   const qc = useQueryClient()
   const id = change.id
@@ -131,6 +141,8 @@ export default function TimingTab({
   const canValidate = canEditPlan || canPublish
   const timingValidated = !!change.timing_validated_at || !!feedback?.validated_at
   const internal = !change.customer_relevant
+  // Mother plant: no customer publish; the validated timing goes back to them.
+  const motherPlant = change.origin === 'mother_plant'
 
   const step1: 'done' | 'current' = tasks.length > 0 ? 'done' : 'current'
   // Until the feedback arrives the confirmations are unknown: keep step 2 open.
@@ -184,7 +196,7 @@ export default function TimingTab({
             canEditPlan ? (
               <div className="flex flex-wrap items-center gap-3">
                 <button type="button" className={primary} disabled={seed.isPending} onClick={() => seed.mutate()}
-                  data-testid="timing-seed">Create detailed plan from quote plan</button>
+                  data-testid="timing-seed">{motherPlant ? 'Create detailed plan' : 'Create detailed plan from quote plan'}</button>
                 <span className="text-xs text-slate-400">Copies every block of the quote plan, links and ideas included. Then refine it with the teams.</span>
               </div>
             ) : (
@@ -208,6 +220,8 @@ export default function TimingTab({
                 {waiting.length > 0 ? 'Waiting for every team to confirm. PM, Scheduling or Sales then validate the timing.' : 'Every team confirmed. PM, Scheduling or Sales validate the timing next.'}
               </p>
             )
+          ) : motherPlant ? (
+            <InformMotherPlant change={change} canInform={canInformMotherPlant} timingValidated={timingValidated} />
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               {change.plan_published_at ? (
@@ -238,6 +252,12 @@ export default function TimingTab({
           )}
         </div>
       </section>
+
+      {issues && (
+        <section data-testid="timing-issues" className="rounded-lg border border-amber-900/60 bg-slate-800 p-4">
+          {issues}
+        </section>
+      )}
 
       {plan && tasks.length > 0 && !plan.can_edit && !plan.can_edit_dates && (
         <p data-testid="timing-readonly"

@@ -3,7 +3,7 @@
  * tab's validation step. Open issues first, the most escalated on top;
  * closed ones fold away under one line.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { validationIssuesApi, validationIssuesKey } from '../../../api/validationIssues'
 import type { IssueOut } from '../../../types/validationIssue'
@@ -37,7 +37,8 @@ export function useValidationIssues(changeId: number, enabled = true) {
 }
 
 export default function IssuesPanel({
-  changeId, changeStatus, departments, viewer, canRaise, releaseDueDate,
+  changeId, changeStatus, departments, viewer, canRaise, releaseDueDate, focusIssueId = null,
+  title = 'Validation issues', hint,
 }: {
   changeId: number
   changeStatus: string
@@ -46,6 +47,11 @@ export default function IssuesPanel({
   /** Routed department members, PM, lead, admin. */
   canRaise: boolean
   releaseDueDate?: string | null
+  /** Deep link ?issue=<id>: that card is opened, scrolled to and ringed. */
+  focusIssueId?: number | null
+  title?: string
+  /** One muted line under the title (where the panel sits, what it is for). */
+  hint?: string
 }) {
   const { data: issues = [], isLoading } = useValidationIssues(changeId)
   const [raising, setRaising] = useState(false)
@@ -54,16 +60,20 @@ export default function IssuesPanel({
   const open = sorted.filter(isIssueOpen)
   const closed = sorted.filter((i) => !isIssueOpen(i))
   const raiseOk = canRaise && RAISE_STATUSES.includes(changeStatus)
+  // A closed issue named by the deep link unfolds the closed list.
+  useEffect(() => {
+    if (focusIssueId != null && closed.some((i) => i.id === focusIssueId)) setShowClosed(true)
+  }, [focusIssueId, closed.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const card = (i: IssueOut) => (
     <IssueCard key={i.id} changeId={changeId} changeStatus={changeStatus} issue={i} viewer={viewer}
-      departments={departments} releaseDueDate={releaseDueDate} />
+      departments={departments} releaseDueDate={releaseDueDate} highlight={focusIssueId === i.id} />
   )
 
   return (
     <section data-testid="validation-issues" className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-slate-100">Validation issues</span>
+        <span className="font-medium text-slate-100">{title}</span>
         {issues.length > 0 && (
           <span data-testid="validation-issues-count"
             className={`text-xs ${open.length ? 'text-amber-300' : 'text-emerald-400'}`}>
@@ -77,6 +87,8 @@ export default function IssuesPanel({
           </button>
         )}
       </div>
+
+      {hint && <p className="text-xs text-slate-400">{hint}</p>}
 
       {isLoading ? null : issues.length === 0 ? (
         <p data-testid="validation-issues-empty" className="rounded-lg border border-dashed border-slate-700 px-3 py-2.5 text-xs text-slate-400">

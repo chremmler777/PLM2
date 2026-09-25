@@ -37,6 +37,9 @@ export type IssueAct =
   | 'add_action' | 'action_done' | 'close' | 'acknowledge' | 'escalate'
   | 'edit' | 'attach'
 
+/** Acts the card shows outside the step flow (backend `extra_acts`). */
+export type IssueExtraAct = 'quote_fix' | 'deescalate'
+
 export interface IssueActionOut {
   id: number
   issue_id?: number
@@ -65,6 +68,9 @@ export interface IssueEscalationOut {
   acknowledged_at?: string | null
   /** The viewer is among the named roles and it is not acknowledged yet. */
   can_acknowledge?: boolean
+  /** Still owed an acknowledgement: level 2 or 3, not a de-escalation. */
+  needs_ack?: boolean
+  trigger?: string | null
 }
 
 /**
@@ -129,6 +135,9 @@ export interface IssueOut {
   cost_set?: boolean
   cost_bearer?: CostBearer | null
   currency?: string | null
+  /** Sales quoted a customer-paid fix to the customer. */
+  fix_quoted_at?: string | null
+  fix_quoted_by_name?: string | null
   follow_up_change_id?: number | null
   follow_up_change_number?: string | null
   status: IssueStatus
@@ -140,8 +149,13 @@ export interface IssueOut {
   created_at: string
   updated_at?: string | null
   actions: IssueActionOut[]
-  attachments: Attachment[]
+  /** can_delete: the backend's word on removing this file, when sent. */
+  attachments: (Attachment & { can_delete?: boolean })[]
   next_acts?: IssueAct[]
+  extra_acts?: IssueExtraAct[]
+  /** raised, contained, root_cause, route, fixing, revalidation, closed. */
+  step?: string | null
+  escalation?: { level?: EscalationLevel | null; unacknowledged?: boolean } | null
   escalation_level?: EscalationLevel | null
   escalations?: IssueEscalationOut[]
   recovery?: IssueRecoveryOut | null
@@ -163,7 +177,7 @@ export interface IssueCreate {
 
 export type IssuePatch = Partial<Pick<IssueCreate,
   'title' | 'description' | 'severity' | 'category' | 'department_id'
-  | 'affected_part_id' | 'affected_tool_ref'>>
+  | 'affected_part_id' | 'affected_tool_ref'>> & { customer_inform?: boolean }
 
 export interface IssueActionIn {
   description: string

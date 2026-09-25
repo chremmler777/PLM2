@@ -4,8 +4,8 @@
  * Kept free of React so the rules are tested on their own.
  */
 import type {
-  CostBearer, CustomerDecision, EscalationLevel, IssueAct, IssueCategory, IssueOut,
-  IssueRoute, IssueSeverity,
+  CostBearer, CustomerDecision, EscalationLevel, IssueAct, IssueCategory, IssueEscalationOut,
+  IssueOut, IssueRoute, IssueSeverity,
 } from '../../../types/validationIssue'
 import { isIssueOpen } from '../../../types/validationIssue'
 
@@ -74,6 +74,30 @@ export const STATUS_LABEL: Record<IssueOut['status'], string> = {
   accepted: 'Accepted by customer',
   transferred: 'Transferred',
 }
+
+/**
+ * The status chip in the card header. The backend keeps an issue "open"
+ * until the route is decided, so the chip names the furthest step reached
+ * before that: a recorded root cause reads "Root cause found".
+ */
+export function statusChipLabel(i: Pick<IssueOut, 'status' | 'contained_at' | 'root_cause_at' | 'step'>): string {
+  if (i.status === 'open' || i.status === 'contained') {
+    if (i.root_cause_at || i.step === 'root_cause') return 'Root cause found'
+    if (i.contained_at || i.step === 'contained') return 'Contained'
+  }
+  return STATUS_LABEL[i.status]
+}
+
+/**
+ * An escalation still owed an acknowledgement: level 2 or 3, not a lowering.
+ * The backend's `needs_ack` wins when sent.
+ */
+export const needsAck = (e: Pick<IssueEscalationOut, 'needs_ack' | 'acknowledged_at' | 'level' | 'trigger'>): boolean =>
+  e.needs_ack ?? (!e.acknowledged_at && e.level >= 2 && e.trigger !== 'deescalate')
+
+/** Whether the issue waits on an acknowledgement (drives the badge's pulse). */
+export const issueNeedsAck = (i: Pick<IssueOut, 'escalation' | 'escalations'>): boolean =>
+  i.escalation?.unacknowledged ?? (i.escalations ?? []).some(needsAck)
 
 /** A failed check proposes its category (spec §12 Raise). */
 export const CATEGORY_FROM_CHECK: Record<string, IssueCategory> = {

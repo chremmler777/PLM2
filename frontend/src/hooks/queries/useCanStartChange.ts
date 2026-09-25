@@ -15,9 +15,13 @@ import client from '../../api/client';
 
 export interface ChangePermissions {
   can_start_change: boolean;
+  /** Mother-plant side track (spec §14): starters plus Project Management. */
+  can_start_mother_plant?: boolean;
+  mother_plants?: string[];
+  default_mother_plant?: string;
 }
 
-export function useCanStartChange(): boolean {
+export function useChangePermissions(): ChangePermissions | undefined {
   const { data } = useQuery<ChangePermissions>({
     queryKey: ['change-permissions'],
     // An unreachable or absent endpoint answers "allowed" rather than rejecting:
@@ -32,5 +36,11 @@ export function useCanStartChange(): boolean {
     staleTime: 5 * 60 * 1000,
     retry: false,
   });
-  return data?.can_start_change !== false;
+  return data;
+}
+
+/** A change may be started at all: an ordinary one, or one from the mother plant. */
+export function useCanStartChange(): boolean {
+  const data = useChangePermissions();
+  return data?.can_start_change !== false || data?.can_start_mother_plant === true;
 }

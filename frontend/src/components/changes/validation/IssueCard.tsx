@@ -3,7 +3,7 @@
  * what the customer said, what it costs, what the recovery does to the
  * timing, and one primary button for the viewer's next act.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { validationIssuesApi, validationIssuesKey } from '../../../api/validationIssues'
@@ -12,8 +12,8 @@ import { isIssueOpen, issueCode } from '../../../types/validationIssue'
 import { formatDate } from '../../../lib/format'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import {
-  ACT_LABEL, CATEGORY_LABEL, DECISION_CHIP, DECISION_LABEL, FIX_ROUTES, ROUTE, SEVERITY, STATUS_LABEL,
-  issueActs, primaryAct, raiserBlocked, type IssueViewer,
+  ACT_LABEL, CATEGORY_LABEL, DECISION_CHIP, DECISION_LABEL, FIX_ROUTES, ROUTE, SEVERITY,
+  issueActs, issueNeedsAck, primaryAct, raiserBlocked, statusChipLabel, type IssueViewer,
 } from './issueModel'
 import IssueStepper from './IssueStepper'
 import EscalationBadge from './EscalationBadge'
@@ -24,6 +24,7 @@ import CustomerDecisionForm from './CustomerDecisionForm'
 import CostForm, { CostLine } from './CostForm'
 import ActionsChecklist from './ActionsChecklist'
 import IssueDropzone from './IssueDropzone'
+import IssueEditForm from './IssueEditForm'
 import { useIssueMutation } from './useIssueMutation'
 
 /** Inline acts that are a single text: containment, root cause, closure note. */
@@ -55,6 +56,32 @@ function TextActForm({ act, onSubmit, onCancel, busy, issueId }: {
   )
 }
 
+/** Sales confirms the customer-paid fix went out as a quote (POST fix-quoted). */
+function QuoteFixForm({ changeId, issue, onDone }: { changeId: number; issue: IssueOut; onDone: () => void }) {
+  const [note, setNote] = useState('')
+  const quote = useIssueMutation(changeId, () => validationIssuesApi.fixQuoted(changeId, issue.id, note.trim()),
+    { error: 'Could not record the quote', onDone })
+  return (
+    <div role="dialog" aria-label={`Quote the fix of ${issueCode(issue)}`} data-testid={`issue-quote-form-${issue.id}`}
+      className="space-y-2 rounded-lg border border-sky-800/70 bg-sky-950/20 p-3">
+      <p className="text-xs text-slate-200">
+        The customer pays this fix. Confirm that the quote for it went to the customer: it is recorded on {issueCode(issue)}
+        {' '}and Sales' task closes. This cannot be taken back.
+      </p>
+      <input data-testid={`issue-quote-note-${issue.id}`} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder="Quote number, sent to whom (optional)" className={`${inputCls} w-full`} />
+      <div className="flex items-center gap-2">
+        <button type="button" data-testid={`issue-quote-confirm-${issue.id}`} disabled={quote.isPending}
+          onClick={() => quote.mutate(undefined)}
+          className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+          Fix quoted to the customer
+        </button>
+        <button type="button" onClick={onDone} className="px-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 function Fact({ label, children, testId }: { label: string; children: React.ReactNode; testId?: string }) {
   return (
     <div data-testid={testId}>
@@ -68,7 +95,7 @@ const by = (name?: string | null, at?: string | null) =>
   name || at ? <span className="text-[11px] text-slate-500"> ({[name, at ? formatDate(at) : null].filter(Boolean).join(', ')})</span> : null
 
 export default function IssueCard({
-  changeId, changeStatus, issue, viewer, departments, releaseDueDate, defaultOpen,
+  changeId, changeStatus, issue, viewer, departments, releaseDueDate, defaultOpen, highlight = false,
 }: {
   changeId: number
   changeStatus: string
@@ -77,11 +104,19 @@ export default function IssueCard({
   departments: { id: number; name: string }[]
   releaseDueDate?: string | null
   defaultOpen?: boolean
+  /** Deep link target (?issue=<id>): scrolled to, opened and ringed. */
+  highlight?: boolean
 }) {
   const qc = useQueryClient()
   const open = isIssueOpen(issue)
-  const [expanded, setExpanded] = useState(defaultOpen ?? open)
-  const [active, setActive] = useState<IssueAct | null>(null)
+  const [expanded, setExpanded] = useState(defaultOpen ?? (open || highlight))
+  const [active, setActive] = useState<IssueAct | 'quote_fix' | null>(null)
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!highlight) return
+    setExpanded(true)
+    ref.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }, [highlight])
   const code = issueCode(issue)
 
   const acts = issueActs(issue, viewer)
@@ -90,8 +125,10 @@ export default function IssueCard({
     && (!!viewer.canManage) && raiserBlocked(issue, viewer)
   const primary = primaryAct(acts)
   const secondary = acts.filter((a) => a !== primary && !['attach', 'edit', 'escalate', 'add_action', 'action_done'].includes(a))
-  const unacked = (issue.escalations ?? []).filter((e) => !e.acknowledged_at)
-  const myAck = unacked.find((e) => e.can_acknowledge)
+  const extra = issue.extra_acts ?? []
+  const canQuote = open && extra.includes('quote_fix') && !issue.fix_quoted_at
+  const canEdit = open && acts.includes('edit')
+  const myAck = (issue.escalations ?? []).find((e) => !e.acknowledged_at && e.can_acknowledge)
 
   const contain = useIssueMutation(changeId, (t: string) => validationIssuesApi.contain(changeId, issue.id, t),
     { error: 'Could not save the containment', onDone: () => setActive(null) })
@@ -112,7 +149,13 @@ export default function IssueCard({
     setActive(a)
   }
 
-  const primaryButton = primary ? (
+  const primaryButton = !primary && canQuote ? (
+    <button type="button" data-testid={`issue-primary-${issue.id}`} data-act="quote_fix"
+      onClick={() => { setExpanded(true); setActive('quote_fix') }}
+      className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500">
+      Quote the fix
+    </button>
+  ) : primary ? (
     <button type="button" data-testid={`issue-primary-${issue.id}`} data-act={primary}
       disabled={ack.isPending} onClick={() => run(primary)}
       className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
@@ -130,8 +173,9 @@ export default function IssueCard({
   const decision = issue.customer_decision
 
   return (
-    <article data-testid={`issue-card-${issue.id}`} data-status={issue.status}
-      className={`rounded-xl border ${open
+    <article ref={ref} data-testid={`issue-card-${issue.id}`} data-status={issue.status}
+      data-highlight={highlight ? 'true' : undefined}
+      className={`scroll-mt-4 rounded-xl border ${highlight ? 'ring-2 ring-sky-500/70 ' : ''}${open
         ? issue.escalation_level === 3 ? 'border-rose-900/70' : issue.escalation_level === 2 ? 'border-amber-900/60' : 'border-slate-700'
         : 'border-slate-800'} bg-slate-900/30`}>
       <header className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
@@ -148,8 +192,9 @@ export default function IssueCard({
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span data-testid={`issue-severity-${issue.id}`}
               className={`rounded-md border px-1.5 py-0.5 ${SEVERITY[issue.severity].chip}`}>{SEVERITY[issue.severity].label}</span>
-            {open && <EscalationBadge level={issue.escalation_level ?? 1} unacknowledged={unacked.length > 0} />}
-            <span className="rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-300">{STATUS_LABEL[issue.status]}</span>
+            {open && <EscalationBadge level={issue.escalation_level ?? 1} unacknowledged={issueNeedsAck(issue)} />}
+            <span data-testid={`issue-status-${issue.id}`}
+              className="rounded-md border border-slate-700 px-1.5 py-0.5 text-slate-300">{statusChipLabel(issue)}</span>
             {issue.route && (
               <span data-testid={`issue-route-${issue.id}`} className="rounded-md border border-sky-900 bg-sky-950/40 px-1.5 py-0.5 text-sky-200">
                 {ROUTE[issue.route].label}
@@ -195,6 +240,10 @@ export default function IssueCard({
               onDone={() => setActive(null)} />
           )}
           {active === 'cost' && <CostForm changeId={changeId} issue={issue} onDone={() => setActive(null)} />}
+          {active === 'edit' && (
+            <IssueEditForm changeId={changeId} issue={issue} departments={departments} onDone={() => setActive(null)} />
+          )}
+          {active === 'quote_fix' && <QuoteFixForm changeId={changeId} issue={issue} onDone={() => setActive(null)} />}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Fact label="What happened">
@@ -244,6 +293,11 @@ export default function IssueCard({
             )}
             <Fact label="Extra cost">
               <CostLine issue={issue} canSeeCosts={!!viewer.canSeeCosts} />
+              {issue.fix_quoted_at && (
+                <div data-testid={`issue-fix-quoted-${issue.id}`} className="text-[11px] text-slate-400">
+                  Fix quoted to the customer{by(issue.fix_quoted_by_name, issue.fix_quoted_at)}
+                </div>
+              )}
             </Fact>
             {issue.closure_note && (
               <Fact label="Closed">
@@ -261,18 +315,27 @@ export default function IssueCard({
             </div>
           )}
 
-          <IssueDropzone changeId={changeId} issue={issue} canAttach={open && (acts.includes('attach') || acts.length > 0 || fourEyes)}
+          <IssueDropzone changeId={changeId} issue={issue} viewer={viewer} canAttach={open && (acts.includes('attach') || acts.length > 0 || fourEyes)}
             onUploaded={() => qc.invalidateQueries({ queryKey: validationIssuesKey(changeId) })} />
 
-          <EscalationHistory changeId={changeId} issue={issue} canEscalate={open && acts.includes('escalate')} />
+          <EscalationHistory changeId={changeId} issue={issue} canEscalate={open && acts.includes('escalate')}
+            canDeescalate={open && extra.includes('deescalate')} />
 
-          {secondary.length > 0 && (
+          {(secondary.length > 0 || canEdit || (canQuote && !!primary)) && (
             <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-2">
               <span className="text-[11px] text-slate-500">Also:</span>
               {secondary.map((a) => (
                 <button key={a} type="button" data-testid={`issue-act-${a}-${issue.id}`} onClick={() => run(a)}
                   className="text-[11px] text-sky-300 hover:text-sky-200">{ACT_LABEL[a]}</button>
               ))}
+              {canQuote && !!primary && (
+                <button type="button" data-testid={`issue-act-quote_fix-${issue.id}`} onClick={() => setActive('quote_fix')}
+                  className="text-[11px] text-sky-300 hover:text-sky-200">Quote the fix</button>
+              )}
+              {canEdit && (
+                <button type="button" data-testid={`issue-act-edit-${issue.id}`} onClick={() => setActive('edit')}
+                  className="text-[11px] text-sky-300 hover:text-sky-200">Edit issue</button>
+              )}
             </div>
           )}
         </div>

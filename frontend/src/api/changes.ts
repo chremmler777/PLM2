@@ -25,6 +25,9 @@ export const changesApi = {
     project_id: number; title: string; change_type: string;
     reason?: string; description?: string; priority?: string; lead_id?: number;
     customer_relevant?: boolean;
+    /** Mother-plant side track (spec §14). */
+    origin?: 'customer' | 'internal' | 'mother_plant';
+    mother_plant_name?: string; mother_plant_ref?: string; mother_plant_sop?: string;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
 
   update: (id: number, body: Record<string, unknown>) =>

@@ -18,6 +18,8 @@ export interface TransitionConfirm {
   final?: boolean
   /** Still loading what is open. */
   loading?: boolean
+  /** Worth knowing before the step, never holding it (shown muted). */
+  info?: string[]
 }
 
 export default function TransitionConfirmDialog({
@@ -52,6 +54,11 @@ export default function TransitionConfirmDialog({
         ) : confirm.allClear ? (
           <p data-testid="confirm-clear" className="text-sm text-emerald-300">✓ {confirm.allClear}</p>
         ) : null}
+        {!confirm.loading && (confirm.info?.length ?? 0) > 0 && (
+          <ul data-testid="confirm-info" className="mt-2 space-y-1 text-xs text-slate-400">
+            {confirm.info!.map((o) => <li key={o}>ℹ {o}</li>)}
+          </ul>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose}
             className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">

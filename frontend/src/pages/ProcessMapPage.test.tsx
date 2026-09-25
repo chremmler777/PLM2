@@ -32,7 +32,9 @@ describe('ProcessMapPage', () => {
     }
     expect(screen.getByTestId('procmap-node-quoting').textContent).toContain('Sales')
     expect(screen.getByTestId('procmap-node-scoping').textContent).toContain('PM')
-    expect(screen.getByTestId('procmap-node-approved').textContent).toContain('Customer')
+    // The open work at approved is the teams' timing confirmation.
+    expect(screen.getByTestId('procmap-node-approved').textContent).toContain('Team')
+    expect(screen.getByTestId('procmap-node-approved').textContent).not.toContain('Customer')
   })
 
   it('runs one arrow from each stage into the next', () => {
@@ -183,6 +185,9 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-edge-mp-origin').getAttribute('marker-end'))
       .toBe('url(#arrow-mp)')
     expect(screen.getByTestId('procmap-node-mp-join').textContent).toContain('mother-plant SOP')
+    // The side track is built now.
+    expect(screen.getByTestId('procmap-mp-state').textContent).toBe('built')
+    expect(lane).not.toContain('to build')
   })
 
   it('runs a deadline rail beside the flow', () => {
@@ -220,9 +225,11 @@ describe('ProcessMapPage', () => {
       screen.getByTestId(`procmap-node-${key}`).querySelector('rect')?.getAttribute('stroke')
     expect(strokeOf('captured')).toBe('#34d399')   // built
     expect(strokeOf('quoted')).toBe('#34d399')     // built
-    expect(strokeOf('costing')).toBe('#fbbf24')    // partial
+    // The weight check (estimate at costing, weighing at validation, Sales
+    // re-quote task) is built: costing is not partial because of it.
+    expect(strokeOf('costing')).toBe('#34d399')
     expect(strokeOf('in_validation')).toBe('#fbbf24')
-    expect(screen.getByTestId('procmap-status-costing').textContent).toBe('Partial')
+    expect(screen.getByTestId('procmap-status-costing').textContent).toBe('Built')
     expect(screen.getByTestId('procmap-status-quoting').textContent).toBe('Built')
     expect(screen.getByTestId('procmap-legend').textContent).toContain('To build')
   })
@@ -235,7 +242,8 @@ describe('ProcessMapPage', () => {
     }
     const costing = screen.getByTestId('procmap-detail-costing').textContent ?? ''
     expect(costing).toContain('internal hours and external positions')
-    expect(costing).toContain('Partial')
+    expect(costing).toContain('Built')
+    expect(costing).toContain('compared with the weighed part at validation')
     expect(screen.getByTestId('procmap-detail-in_validation').textContent)
       .toContain('A failed check becomes a validation issue')
   })

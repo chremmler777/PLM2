@@ -82,10 +82,10 @@ const STAGES: Stage[] = [
     what: 'Each routed department answers the impact checklist and submits a verdict: feasible, feasible with conditions, or not feasible, the last hard-requiring the Change PPT. Risks are a register, not a hold: typed, rated 1 to 3, and severity 3 travels to Sales for the offer. Routing deviations wait for approval; a recall sends the whole assessment back to scoping.',
   },
   {
-    key: 'costing', name: 'Costing', badge: 'Team', state: 'partial',
+    key: 'costing', name: 'Costing', badge: 'Team', state: 'built',
     sub: 'Cost lines, lead times, vendor offers', task: 'task: costing_input',
     responsible: 'Departments; PM runs it; PM and Sales see all',
-    artifacts: 'cost lines with lead time; vendor quotes + favorite vote; internal hours; weight estimate (comparison at validation to build)',
+    artifacts: 'cost lines with lead time; vendor quotes + favorite vote; internal hours; weight estimate (compared with the weighed part at validation)',
     what: 'Each department states its internal hours and external positions, an estimate or vendor quotes with document, cost, shipping and lead time, and votes a favorite vendor. A department whose assessment marked nothing impacted owes no costing input. The planned P&L starts here. When costing closes, the cost carrier decides the branch: a customer change goes to the offer, an internal change to internal approval.',
   },
   {
@@ -104,7 +104,7 @@ const STAGES: Stage[] = [
     what: 'Negotiation rounds are logged against an offer version; a new version records what changed. Each sent version is valid 30 days from customer receipt. Three ways out: the customer declines and the change ends as rejected, a further round loops back, or the customer accepts a sent, unexpired version (an expired one needs an override reason) with PM and Quality sign-off, and the release deadline is born.',
   },
   {
-    key: 'approved', name: 'Approved: timing', badge: 'Customer', state: 'built',
+    key: 'approved', name: 'Approved: timing', badge: 'Team', state: 'built',
     sub: 'Detailed plan, team confirms, baseline',
     task: 'tasks: plan_feedback · timing_validate',
     responsible: 'Sales records acceptance / PM approves internal; then PM + Scheduling + all teams',
@@ -123,7 +123,7 @@ const STAGES: Stage[] = [
     key: 'in_validation', name: 'Validation', badge: 'Team', state: 'partial',
     sub: 'Checks, release checklist, lessons', task: 'tasks: release_check · lessons_step',
     responsible: 'Each department (its own checks); PM',
-    artifacts: 'check results; release checklist (13 items); lessons learned; validation issues (in build); weight and revision flows (to build)',
+    artifacts: 'check results; release checklist (13 items); lessons learned; validation issues (in build); weighed part vs estimate with the Sales re-quote task; revision flow (to build)',
     what: 'Tool sampled, measured, cycle time taken, each department on its own checks. A failed check becomes a validation issue: contained, root cause found, and routed by PM or lead to internal rework, supplier rework, design change, customer concession or a follow-up change, with an escalation level from department to management and customer. Release waits for the checklist, the lessons step and no open issue.',
   },
   {
@@ -149,8 +149,8 @@ const BUILD_ORDER = [
   'Validation issues: raise from a failed check, containment, root cause, route, customer decision, escalation ladder (in build).',
   'Recovery group in the Gantt for a fix route, with the new customer timing when it passes the release deadline (in build).',
   'P&L offer vs doing: actual cost entries, offer-vs-actual table, P&L page columns (in build).',
-  'Mother-plant side track: origin, inform-the-team receipts, scoping to approved with the SOP as release deadline (to build).',
-  'Weight estimate at costing compared at validation, delta back to Sales as a quote update (to build).',
+  'Mother-plant side track: origin, inform-the-team receipts, scoping to approved with the SOP as release deadline (built).',
+  'Weight estimate at costing compared at validation, delta back to Sales as a quote update (built).',
   'Revision-level bump validated per customer statement (to build).',
   'Future tool: resource levelling beyond the Gantt planner.',
 ]
@@ -500,8 +500,8 @@ function MotherPlantLane() {
         fontWeight={600}>
         LANE M · SIDE TRACK: CHANGE FROM THE MOTHER PLANT (origin mother_plant)
       </text>
-      <text x={PNL_X - 14} y={LANE_Y + 20} fill={STROKE.to_build} fontSize={10}
-        textAnchor="end">to build</text>
+      <text x={PNL_X - 14} y={LANE_Y + 20} fill={STROKE.built} fontSize={10}
+        textAnchor="end" data-testid="procmap-mp-state">built</text>
       <Box x={xs[0]} y={y} w={bw} h={NH} stroke={MP} badge="PM"
         name="Capture" sub="KTX Weissenburg (WUG) default"
         task="or KTX Solingen · ref · SOP" testId="procmap-mp-capture" />
@@ -806,7 +806,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="weight delta" lx={CX0 + CW + 6} ly={mid(Y.validation, NH) - 7} />
         <Box x={RX} y={Y.validation} w={RW} h={NH} stroke={CROSS} badge="Sales"
           name="Quote update" sub="validated weight → additional cost"
-          task="to build" testId="procmap-node-weight-update" />
+          task="task: update_quote" testId="procmap-node-weight-update" />
         <Decision y={Y.checks} name="Checks passed?"
           lines={['sampled · measured · cycle time · revision']}
           testId="procmap-decision-checks" />

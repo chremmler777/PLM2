@@ -32,9 +32,15 @@ function Chip({ line, currency }: { line: OvaLine; currency: string }) {
  * Offer versus doing: the plan frozen at acceptance against what the change
  * really cost, line by line, then both margins, the slip and the piece price
  * effect. The server computes every number; this only lays them out.
+ *
+ * While the change still runs, "Actual" is what is booked so far and a
+ * separate "Forecast" column carries the expected end (cost lines below plan
+ * count at plan until release). The variance is always forecast against plan.
+ * Once released the forecast is the actual, and the column goes.
  */
 export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
   const cur = data.currency
+  const running = !!data.in_progress
   const marginTone = varianceTone(data.variance, data.planned_margin, 1)
   const t = data.timing
   const slip = t.slip_days
@@ -43,11 +49,14 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
       <div className="flex items-baseline gap-2 flex-wrap mb-2">
         <span className="text-xs text-slate-400 uppercase tracking-wide">Offer vs actual</span>
         <span className="text-xs text-slate-500">
+          {/* Mother plant (spec §14): no offer basis, actual local costs only. */}
+          {data.basis === 'none' ? 'No plan: change from the mother plant, actual local costs only' : <>
           Plan from the {BASIS_LABEL[data.basis] ?? data.basis}
           {data.offer_version
             ? (data.basis === 'costing' ? `, revenue from offer v${data.offer_version}` : ` v${data.offer_version}`)
             : ''}
           {data.frozen_at ? `, frozen ${formatDate(data.frozen_at)}` : ''}
+          </>}
         </span>
       </div>
 
@@ -57,8 +66,9 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
             <tr>
               <th className="py-1 pr-2 font-medium" />
               <th className="py-1 px-2 font-medium text-right">Planned</th>
-              <th className="py-1 px-2 font-medium text-right">Actual</th>
-              <th className="py-1 pl-2 font-medium text-right">Variance</th>
+              <th className="py-1 px-2 font-medium text-right">{running ? 'Actual to date' : 'Actual'}</th>
+              {running && <th className="py-1 px-2 font-medium text-right" data-testid="ova-forecast-head">Forecast</th>}
+              <th className="py-1 pl-2 font-medium text-right">{running ? 'Variance (forecast)' : 'Variance'}</th>
             </tr>
           </thead>
           <tbody>
@@ -71,21 +81,26 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
                 </td>
                 <td className="py-1 px-2 text-right tabular-nums">{money(l.planned, cur)}</td>
                 <td className="py-1 px-2 text-right tabular-nums">{money(l.actual, cur)}</td>
+                {running && <td className="py-1 px-2 text-right tabular-nums text-slate-300">{money(l.forecast ?? l.actual, cur)}</td>}
                 <td className="py-1 pl-2 text-right"><Chip line={l} currency={cur} /></td>
               </tr>
             ))}
             <tr className="border-t border-slate-600 font-semibold text-slate-100">
-              <td className="py-1.5 pr-2">
-                {data.in_progress ? 'Margin (forecast)' : 'Margin'}
-              </td>
+              <td className="py-1.5 pr-2">Margin</td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-planned-margin">
                 {money(data.planned_margin, cur)}
                 <span className="font-normal text-slate-500">{pct(data.planned_margin_pct)}</span>
               </td>
               <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-actual-margin">
-                {money(data.forecast_margin ?? data.actual_margin, cur)}
-                <span className="font-normal text-slate-500">{pct(data.forecast_margin_pct ?? data.actual_margin_pct)}</span>
+                {money(data.actual_margin, cur)}
+                <span className="font-normal text-slate-500">{pct(data.actual_margin_pct)}</span>
               </td>
+              {running && (
+                <td className="py-1.5 px-2 text-right tabular-nums" data-testid="ova-forecast-margin">
+                  {money(data.forecast_margin ?? data.actual_margin, cur)}
+                  <span className="font-normal text-slate-500">{pct(data.forecast_margin_pct ?? data.actual_margin_pct)}</span>
+                </td>
+              )}
               <td className="py-1.5 pl-2 text-right">
                 {data.variance !== null && (
                   <span data-testid="ova-margin-variance" data-tone={marginTone}
@@ -95,11 +110,11 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
                 )}
               </td>
             </tr>
-            {data.in_progress && (
+            {running && (
               <tr className="text-slate-500">
-                <td colSpan={4} className="pt-0.5 text-[11px]" data-testid="ova-to-date">
-                  Still running: cost lines below plan count at plan until release, so only overruns move the forecast.
-                  Margin to date {money(data.actual_margin, cur)}.
+                <td colSpan={5} className="pt-0.5 text-[11px]" data-testid="ova-to-date">
+                  Still running: actual to date is what is booked so far. The forecast counts cost lines below plan at
+                  plan until release, so only overruns move it; the variance compares the forecast with the plan.
                 </td>
               </tr>
             )}

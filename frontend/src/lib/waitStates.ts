@@ -14,6 +14,7 @@ import type {
 import type { IssueOut } from '../types/validationIssue'
 import { isIssueOpen, issueCode } from '../types/validationIssue'
 import { formatDate } from './format'
+import { issueTabFor } from './issueTabs'
 
 /** The slice of GET /plan/feedback the waits need. */
 export interface PlanFeedbackLite {
@@ -27,11 +28,13 @@ export interface WaitState {
   key: string
   text: string
   /** Where the work happens, for the "take me there" affordance. */
-  tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'costing' | 'offer' | 'timing' | 'release'
+  tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'costing' | 'offer' | 'mother' | 'timing' | 'release'
   /** Worth knowing, not holding anything up yet (shown muted). */
   info?: boolean
   /** An escalation line: 2 amber, 3 rose. */
   level?: 1 | 2 | 3
+  /** The validation issue the line is about: the link opens its card. */
+  issueId?: number
 }
 
 /** The slice of a validation issue the waits need. */
@@ -51,9 +54,11 @@ const dayMonth = (iso?: string | null) => (iso ? formatDate(iso).slice(0, 5) : '
  * ("Escalation L3: VI-2 Tool cannot run, customer informed 25.09"), then one
  * line per open issue (more than three fold into one line).
  */
-export function issueWaits(issues: IssueLite[]): WaitState[] {
+export function issueWaits(issues: IssueLite[], status = 'in_validation'): WaitState[] {
   const open = issues.filter(isIssueOpen)
   if (open.length === 0) return []
+  // The tab that shows the issues for this status (Timing during a loop back).
+  const tab = issueTabFor(status)
   const waits: WaitState[] = []
   const level = (i: IssueLite) => i.escalation_level ?? 1
   const top = [...open].sort((a, b) => level(b) - level(a) || b.severity - a.severity || a.number - b.number)[0]
@@ -69,7 +74,8 @@ export function issueWaits(issues: IssueLite[]): WaitState[] {
     waits.push({
       key: 'issue-escalation',
       text: `Escalation L${level(top)}: ${issueCode(top)} ${top.title}${tail ? `, ${tail}` : ''}`,
-      tab: 'release',
+      tab,
+      issueId: top.id,
       level: level(top) as 2 | 3,
     })
   }
@@ -77,14 +83,15 @@ export function issueWaits(issues: IssueLite[]): WaitState[] {
     waits.push({
       key: 'validation-issues',
       text: `${open.length} validation issues open: ${open.map(issueCode).join(', ')}`,
-      tab: 'release',
+      tab,
     })
   } else {
     for (const i of open) {
       waits.push({
         key: `validation-issue-${i.id}`,
         text: `${issueCode(i)} open: ${excerpt(i.title, 60)} (${STATUS_WORDS[i.status]})`,
-        tab: 'release',
+        tab,
+        issueId: i.id,
       })
     }
   }
@@ -137,7 +144,8 @@ const isSubmitted = (a: Pick<Assessment, 'submitted_at' | 'verdict'>) =>
 export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
     | 'rejection_sent_at' | 'costing_pending_department_ids'
-    | 'bank_build_mode' | 'plan_published_at' | 'timing_validated_at'>,
+    | 'bank_build_mode' | 'plan_published_at' | 'timing_validated_at'>
+    & Partial<Pick<ChangeRequest, 'origin' | 'info_sent_at' | 'info_open_department_ids'>>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
@@ -324,7 +332,7 @@ export function resolveWaitStates(
   // Validation issues: open ones hold the release, and the loop back keeps
   // them alive while the fix is implemented.
   const issueLines = ['in_validation', 'in_implementation'].includes(change.status)
-    ? issueWaits(more.validationIssues ?? []) : []
+    ? issueWaits(more.validationIssues ?? [], change.status) : []
   waits.push(...issueLines)
 
   // Open plan deviations: PM/Sales lock or escalate them. Worth knowing while
@@ -359,6 +367,33 @@ export function resolveWaitStates(
         tab: /plan deviation/i.test(b) ? 'timing' : 'release',
       })
     })
+  }
+
+  // Mother plant (spec §14): the team is informed before approval (a hard
+  // gate); "Read and understood" still open is worth knowing, never a gate;
+  // the validated timing goes back to the mother plant, not to a customer.
+  if (change.origin === 'mother_plant') {
+    if (change.status === 'scoping' && !change.info_sent_at) {
+      waits.push({ key: 'mother-inform-team', text: 'Team not informed yet: send the information', tab: 'mother' })
+    }
+    const open = change.info_open_department_ids ?? []
+    if (open.length > 0 && !['closed', 'cancelled'].includes(change.status)) {
+      waits.push({
+        key: 'mother-receipts',
+        text: `Read and understood open: ${open.map(departmentName).join(', ')}`,
+        tab: 'mother',
+        info: true,
+      })
+    }
+    if (['approved', 'in_implementation'].includes(change.status)
+      && (change.timing_validated_at || planFeedback?.validated_at) && !change.plan_published_at) {
+      waits.push({
+        key: 'mother-inform-timing',
+        text: 'Mother plant not informed of the validated timing yet',
+        tab: 'timing',
+        info: true,
+      })
+    }
   }
 
   // A rejected customer change is not finished until the customer has been told.

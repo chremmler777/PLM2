@@ -25,8 +25,11 @@ import { changeReleaseApi } from '../api/changeRelease';
 import { validationIssuesApi, validationIssuesKey } from '../api/validationIssues';
 import { releaseKey } from '../components/changes/release/releaseKeys';
 import PnlCard from '../components/changes/PnlCard';
+import IssuesPanel from '../components/changes/validation/IssuesPanel';
+import { releaseOpenByIssues } from '../lib/issueTabs';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import ChangeAttachments from '../components/changes/ChangeAttachments';
+import MotherPlantTab from '../components/changes/motherPlant/MotherPlantTab';
 import CustomerMailLog from '../components/changes/CustomerMailLog';
 import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
@@ -37,7 +40,7 @@ import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import {
-  STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
+  STATUS_LABELS, OFF_PATH_STATUSES, everydayTabsFor, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, type ChangeTab,
   decodeLogValue,
 } from '../lib/changeStatus';
@@ -59,8 +62,10 @@ const CANCELLABLE: string[] = [
   'approved', 'in_implementation', 'in_validation', 'on_hold',
 ];
 /** Where a change opens without ?tab: the tab its current phase is worked on. */
-const defaultTabFor = (status: string): Tab =>
-  STATUS_ACTIVE_TAB[status as ChangeStatus] ?? (status === 'closed' ? 'release' : 'overview');
+const defaultTabFor = (status: string, origin?: string | null): Tab =>
+  // Mother plant (spec §14): scoping is informing the team, on its own tab.
+  origin === 'mother_plant' && status === 'scoping' ? 'mother'
+  : STATUS_ACTIVE_TAB[status as ChangeStatus] ?? (status === 'closed' ? 'release' : 'overview');
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
   const from = TAB_UNLOCK_STATUS[tb];
@@ -84,7 +89,11 @@ export default function ChangeDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rawTab = searchParams.get('tab');
   // Always explicit: without ?tab the page opens on the phase's tab.
-  const setTab = (t: Tab) => setSearchParams({ tab: t }, { replace: true });
+  // ?issue=<id> rides along when a link names a validation issue.
+  const setTab = (t: Tab, issueId?: number) => setSearchParams(
+    issueId != null ? { tab: t, issue: String(issueId) } : { tab: t }, { replace: true });
+  const issueParam = Number(searchParams.get('issue'));
+  const focusIssueId = Number.isInteger(issueParam) && issueParam > 0 ? issueParam : null;
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
   // Bumped on every reported block, even an identical one, so the banner's
   // scroll-into-view effect re-fires on a second, otherwise-unchanged block.
@@ -273,6 +282,10 @@ export default function ChangeDetailPage() {
   const canDecideDeviation = isAdmin || isChangeLead || isPmMember || isSalesMember;
   // Release checklist rows beyond the owner department, and the lessons step.
   const canManageRelease = isAdmin || isChangeLead || isPmMember;
+  // Mother plant (spec §14): informing the team, scoping -> approved and the
+  // "Inform mother plant" stamp are the PM's (lead, admin).
+  const motherPlant = change?.origin === 'mother_plant';
+  const canRunMotherPlant = isAdmin || isChangeLead || isPmMember;
 
   const transition = useMutation({
     mutationFn: (vars: {
@@ -301,12 +314,18 @@ export default function ChangeDetailPage() {
   // into a tab the viewer or the phase does not allow — a governance tab
   // without authz, or any later-phase tab while capturing — still falls back
   // to overview rather than rendering a blank/forbidden tab (below).
-  const tab: Tab = resolveChangeTab(rawTab, change.status) ?? defaultTabFor(change.status);
+  const tab: Tab = resolveChangeTab(rawTab, change.status, change.origin)
+    ?? defaultTabFor(change.status, change.origin);
+  // Once a validation issue exists the Release tab stays open through a loop
+  // back to implementation: the validation record never disappears.
+  const tabLocked = (tb: Tab) => isTabLocked(change.status, tb)
+    && !(tb === 'release' && releaseOpenByIssues(change.status, validationIssues.length));
   const effectiveTab: Tab =
-    (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || isTabLocked(change.status, tab)
+    (GOVERNANCE_TABS.includes(tab) && !canSeeGovernance) || tabLocked(tab)
       ? 'overview' : tab;
   // Actions and waits may still name old tabs; resolve them the same way.
-  const goTab = (raw: string) => setTab(resolveChangeTab(raw, change.status) ?? 'overview');
+  const goTab = (raw: string, issueId?: number) =>
+    setTab(resolveChangeTab(raw, change.status, change.origin) ?? 'overview', issueId);
 
   const advance = (to: string) => {
     if (to === 'cancelled') { setCancelOpen(true); return; }
@@ -333,6 +352,10 @@ export default function ChangeDetailPage() {
       case 'internal-approval': return canApproveInternalCosts ? null : 'Needs the Project Manager';
       case 'validate-timing': return canEditPlan || canPublishTiming ? null
         : 'Needs the Project Manager, Scheduling or Sales';
+      case 'info-send':
+      case 'inform-mother': return canRunMotherPlant ? null : 'Needs the Project Manager or the change lead';
+      case 'to:approved': return !motherPlant || canRunMotherPlant ? null
+        : 'Needs the Project Manager or the change lead';
       case 'to:released':
       case 'to:closed': return canManageRelease ? null : 'Needs the Project Manager or the change lead';
       default: return null;
@@ -367,6 +390,11 @@ export default function ChangeDetailPage() {
           ...(openPlanDeviations ? [`${openPlanDeviations} plan deviation${openPlanDeviations === 1 ? '' : 's'} open`] : []),
         ],
         allClear: 'Every task is finished and reported.',
+        // Info only, never a guard: issues whose fix is still running.
+        info: validationIssues.filter((i) => i.status === 'fixing').length
+          ? [`Still fixing: ${validationIssues.filter((i) => i.status === 'fixing')
+            .map((i) => `VI-${i.number} ${i.title}`).join(', ')}`]
+          : undefined,
         confirmLabel: 'Move to validation',
         loading: detailedPlanLoading,
       };
@@ -427,7 +455,8 @@ export default function ChangeDetailPage() {
         </div>
       </div>
 
-      <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant} />
+      <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant}
+        origin={change.origin} />
 
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
@@ -517,9 +546,10 @@ export default function ChangeDetailPage() {
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
-        {EVERYDAY_TABS.map((tb) => {
-          const locked = isTabLocked(change.status, tb);
-          const isActivePhase = !locked && activeTabsFor(change.status, change.customer_relevant).includes(tb);
+        {everydayTabsFor(change.origin).map((tb) => {
+          const locked = tabLocked(tb);
+          const isActivePhase = !locked
+            && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
           // Scoping leaves two jobs on the impact tab — pick the impacted items,
           // then confirm the set. Both are done when the confirmation lands.
           const openWork = tb === 'impacted'
@@ -571,7 +601,8 @@ export default function ChangeDetailPage() {
           <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
-          <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />
+          {/* A mother-plant change is never customer relevant here. */}
+          {!motherPlant && <CustomerRelevantEditor change={change} canEdit={isAdmin || isChangeLead} />}
 
           {/* Customer correspondence sits above the document lists: it is what
               everyone comes looking for, and it belongs to no phase. */}
@@ -596,11 +627,27 @@ export default function ChangeDetailPage() {
           canConfirm={canConfirmImpact} />
       )}
 
+      {effectiveTab === 'mother' && motherPlant && (
+        <MotherPlantTab change={change} departments={departments} />
+      )}
+
       {effectiveTab === 'timing' && change && (
         <TimingTab change={change} departments={departments}
           myDepartmentIds={myActions?.memberships ?? []}
           canEditPlan={canEditPlan} canPublish={canPublishTiming} canSeeAll={canSeeCosts}
-          canSetBankBuild={canSetBankBuild} canDecideDeviation={canDecideDeviation} isAdmin={isAdmin} />
+          canSetBankBuild={canSetBankBuild} canDecideDeviation={canDecideDeviation} isAdmin={isAdmin}
+          canInformMotherPlant={canRunMotherPlant}
+          issues={change.status === 'in_implementation' && validationIssues.length > 0 ? (
+            <IssuesPanel changeId={change.id} changeStatus={change.status} departments={departments}
+              title="Validation issues / recovery"
+              hint="The change is back in implementation to fix these. The recovery blocks are in the plan below; once the fix is done, validation starts again."
+              viewer={{
+                id: actingAs ? null : userId, isAdmin, canManage: canManageRelease, isSales: isSalesMember,
+                canSeeCosts, myDepartmentIds: myActions?.memberships ?? [],
+              }}
+              canRaise={canManageRelease}
+              releaseDueDate={change.release_due_date} focusIssueId={focusIssueId} />
+          ) : undefined} />
       )}
 
       {effectiveTab === 'release' && change && (
@@ -609,7 +656,7 @@ export default function ChangeDetailPage() {
           canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
           canManage={canManageRelease}
           viewerId={actingAs ? null : userId} isAdmin={isAdmin} isSales={isSalesMember}
-          onAdvance={advance} advancing={transition.isPending} />
+          onAdvance={advance} advancing={transition.isPending} focusIssueId={focusIssueId} />
       )}
 
       {effectiveTab === 'assessments' && (
@@ -649,9 +696,10 @@ export default function ChangeDetailPage() {
               )}
             </div>
           )}
-          {/* The P&L reads /summation, which only the cost roles may: mounting
-              it for anyone else fires a request that can only 403. */}
-          {canSeeCosts && <PnlCard change={change} departments={departments} />}
+          {/* The P&L reads /summation, which only the cost roles may: anyone
+              else gets their own department's actual costs only, and no
+              request that can only 403. */}
+          <PnlCard change={change} departments={departments} canSeeCosts={canSeeCosts} />
           {/* Costing is department work first: each bucket holds its own lines
               and lead time; the whole picture lives in the summation below, for
               the people entitled to see it. */}

@@ -81,6 +81,19 @@ describe('TimingTab', () => {
     window.history.pushState({}, '', '/')
   })
 
+  it('shows the validation issues section above the plan when the page hands one in', async () => {
+    renderTab({ change: change({ status: 'in_implementation' }), issues: <p>VI-1 recovery</p> })
+    const section = await screen.findByTestId('timing-issues')
+    expect(section.textContent).toContain('VI-1 recovery')
+    // above the Gantt
+    const gantt = await screen.findByTestId('gantt-stub')
+    expect(section.compareDocumentPosition(gantt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    cleanup()
+    renderTab({ change: change({ status: 'in_implementation' }) })
+    await screen.findByTestId('gantt-stub')
+    expect(screen.queryByTestId('timing-issues')).toBeNull()
+  })
+
   it('shows a retryable error when the confirmations fail to load', async () => {
     vi.mocked(planApi.feedback).mockRejectedValue(new Error('boom'))
     renderTab()

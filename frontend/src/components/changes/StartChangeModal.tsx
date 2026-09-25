@@ -8,6 +8,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { t } from '../../i18n/cmLabels';
 import { groupItems } from '../../lib/itemCategory';
 import type { ChangeType } from '../../types/change';
+import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
+import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
+import MotherPlantFields, {
+  emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
+} from './motherPlant/MotherPlantFields';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
@@ -108,6 +113,12 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   // (so the distinction stays visible) but cannot be chosen, and the customer
   // branch is preselected rather than forcing a choice with one legal answer.
   const [customerRelevant, setCustomerRelevant] = useState<boolean | undefined>(true);
+  // Third origin (spec §14): a change engineered and sold by the mother plant.
+  const permissions = useChangePermissions();
+  const motherPlants = permissions?.mother_plants ?? FALLBACK_MOTHER_PLANTS;
+  const [fromMotherPlant, setFromMotherPlant] = useState(false);
+  const [motherPlant, setMotherPlant] = useState<MotherPlantDraft>(
+    () => emptyMotherPlantDraft(FALLBACK_MOTHER_PLANTS[0]));
   const [submitting, setSubmitting] = useState(false);
   // Server-side refusals (e.g. 403 for a user outside a change-starting
   // department) are shown in place, not only as a toast that scrolls away.
@@ -169,13 +180,14 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   if (!projectId) missing.push('project');
   if (picked.length === 0) missing.push('affected item');
   if (!reason.trim()) missing.push('reason');
-  if (customerRelevant !== true) missing.push('cost carrier');
+  if (fromMotherPlant) missing.push(...motherPlantMissing(motherPlant));
+  else if (customerRelevant !== true) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
 
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
-    if (customerRelevant !== true) return;
+    if (customerRelevant !== true && !fromMotherPlant) return;
     setSubmitting(true);
     setCreateError(null);
     try {
@@ -185,8 +197,16 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         change_type: changeType,
         reason: reason.trim() || undefined,
         lead_id: userId ?? undefined,
-        // Never leaves as false — the backend refuses internal changes for now.
-        customer_relevant: true,
+        ...(fromMotherPlant
+          ? {
+            // Not customer relevant here: the mother plant handles the customer.
+            customer_relevant: false, origin: 'mother_plant' as const,
+            mother_plant_name: motherPlant.name,
+            mother_plant_ref: motherPlant.ref.trim() || undefined,
+            mother_plant_sop: motherPlant.sop,
+          }
+          // Never leaves as false — the backend refuses internal changes for now.
+          : { customer_relevant: true }),
       });
       // Sequential on purpose: the lead item must land first, and a partial
       // failure has to name the parts that did not attach so they can be added
@@ -203,6 +223,26 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         toast.error(
           `Could not attach ${failed.join(', ')}. Add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
         );
+      }
+      if (fromMotherPlant) {
+        // Their documents and timing file ride along; a refused file is named,
+        // the change itself stands.
+        const uploads: [File, 'general' | 'mother_plant_timing'][] = [
+          ...motherPlant.documents.map((f) => [f, 'general'] as [File, 'general']),
+          ...(motherPlant.timingFile
+            ? [[motherPlant.timingFile, 'mother_plant_timing'] as [File, 'mother_plant_timing']] : []),
+        ];
+        const refused: string[] = [];
+        for (const [f, kind] of uploads) {
+          try {
+            await changesApi.uploadAttachment(change.id, f, { kind });
+          } catch (e) {
+            refused.push(`${f.name}${errDetail(e) ? ` (${errDetail(e)})` : ''}`);
+          }
+        }
+        if (refused.length > 0) {
+          toast.error(`Could not attach ${refused.join(', ')}. Add it on the Mother plant tab.`);
+        }
       }
       onClose();
       navigate(`/changes/${change.id}`);
@@ -451,8 +491,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 type="radio"
                 name="sc-customer-relevant"
                 className="mt-1"
-                checked={customerRelevant === true}
-                onChange={() => setCustomerRelevant(true)}
+                checked={customerRelevant === true && !fromMotherPlant}
+                onChange={() => { setCustomerRelevant(true); setFromMotherPlant(false); }}
               />
               <span>
                 <span className="text-slate-100">{t('start.customerChange')}</span>
@@ -475,8 +515,34 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <span className="block text-xs text-amber-300/80">{t('start.internalLater')}</span>
               </span>
             </label>
+            {/* Mother plant (spec §14): starters and Project Management. */}
+            {permissions?.can_start_mother_plant !== false && (
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="sc-customer-relevant"
+                  className="mt-1"
+                  checked={fromMotherPlant}
+                  onChange={() => {
+                    setFromMotherPlant(true);
+                    setMotherPlant((d) => (motherPlants.includes(d.name)
+                      ? d : { ...d, name: permissions?.default_mother_plant ?? motherPlants[0] }));
+                  }}
+                />
+                <span>
+                  <span className="text-slate-100">Change from mother plant</span>
+                  <span className="block text-xs text-slate-500">
+                    Engineered and sold by the mother plant; we inform the team and take over their timing.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
         </fieldset>
+
+        {fromMotherPlant && (
+          <MotherPlantFields value={motherPlant} onChange={setMotherPlant} plants={motherPlants} />
+        )}
 
         {createError && (
           <p role="alert" data-testid="start-error"

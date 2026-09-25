@@ -6,12 +6,15 @@ import { StageResponsibleBadge } from './StageResponsibleBadge'
 export default function LifecycleStepper({
   status,
   customerRelevant,
+  origin,
 }: {
   status: ChangeStatus
   customerRelevant?: boolean
+  /** 'mother_plant' shows only the stages that side track uses (spec §14). */
+  origin?: string | null
 }) {
   const offPath = OFF_PATH_STATUSES.includes(status)
-  const order = branchStepOrder(customerRelevant)
+  const order = branchStepOrder(customerRelevant, origin)
   const idx = order.indexOf(status)
   return (
     <div className="flex items-center gap-1 text-xs flex-wrap">
@@ -24,7 +27,10 @@ export default function LifecycleStepper({
         // At capture, the scoping node says who takes over next rather than
         // repeating its generic hint.
         const hint = status === 'captured' && s === 'scoping'
-          ? t('tab.scopingHandoff') : t(`stepper.hint.${s}`)
+          ? t('tab.scopingHandoff')
+          // Mother plant: no meeting decides, the PM informs the team.
+          : origin === 'mother_plant' && s === 'scoping' ? 'Lock the impact, inform the team'
+          : t(`stepper.hint.${s}`)
         return (
           <div key={s} className="flex items-center gap-1">
             <div className="flex flex-col items-center">

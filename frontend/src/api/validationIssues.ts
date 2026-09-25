@@ -47,6 +47,14 @@ export const validationIssuesApi = {
   escalate: (changeId: number, iid: number, body: { level: EscalationLevel; reason: string }) =>
     client.post<IssueOut>(`${base(changeId)}/${iid}/escalate`, body).then((r) => r.data),
 
+  /** Lower the level (PM, admin) with a reason. */
+  deescalate: (changeId: number, iid: number, body: { level?: EscalationLevel; reason: string }) =>
+    client.post<IssueOut>(`${base(changeId)}/${iid}/deescalate`, body).then((r) => r.data),
+
+  /** Sales records that the customer-paid fix was quoted to the customer. */
+  fixQuoted: (changeId: number, iid: number, note?: string) =>
+    client.post<IssueOut>(`${base(changeId)}/${iid}/fix-quoted`, { note: note || null }).then((r) => r.data),
+
   acknowledge: (changeId: number, iid: number, eid: number) =>
     client.post<IssueOut>(`${base(changeId)}/${iid}/escalations/${eid}/acknowledge`, {}).then((r) => r.data),
 }

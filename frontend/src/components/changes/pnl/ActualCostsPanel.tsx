@@ -72,7 +72,9 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   return (
     <div data-testid="pnl-actual-costs" className="md:col-span-3 border-t border-slate-700 pt-3">
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-400 uppercase tracking-wide">Actual costs</span>
+        <span className="text-xs text-slate-400 uppercase tracking-wide">
+          {data.cost_role ? 'Actual costs' : 'Actual costs of your department'}
+        </span>
         <span className="text-xs text-slate-500 tabular-nums">{formatMoney(data.total)}</span>
         {data.can_write && !open && (
           <button type="button" data-testid="actual-cost-open"
@@ -158,7 +160,10 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-[11px] text-slate-500">No supplier invoice or other cost entered yet.</p>
+        <p className="mt-1 text-[11px] text-slate-500">
+          {data.cost_role ? 'No supplier invoice or other cost entered yet.'
+            : 'Nothing booked to your department yet. Enter supplier invoices, scrap or other costs your department carried.'}
+        </p>
       )}
     </div>
   )

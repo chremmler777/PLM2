@@ -70,7 +70,7 @@ export default function ChangesPage() {
             </thead>
             <tbody>
               {changes.map((c) => {
-                const pos = stepPosition(c.status, c.customer_relevant);
+                const pos = stepPosition(c.status, c.customer_relevant, c.origin);
                 return (
                 <tr key={c.id} className="border-t border-slate-700 hover:bg-slate-800/60">
                   <td className="px-4 py-3 max-w-[14rem]">

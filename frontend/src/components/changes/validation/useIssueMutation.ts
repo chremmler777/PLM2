@@ -3,9 +3,24 @@ import { toast } from 'sonner'
 import { validationIssuesKey } from '../../../api/validationIssues'
 import { releaseKey } from '../release/releaseKeys'
 
+/**
+ * The server's reason as text. A 409 from the plan answers an object
+ * ({ message, ... }); a 422 a list of { msg }. All read as one sentence.
+ */
 export const errDetail = (e: unknown): string | undefined => {
   const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  return typeof d === 'string' ? d : undefined
+  if (typeof d === 'string') return d
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    const o = d as { message?: unknown; detail?: unknown }
+    if (typeof o.message === 'string') return o.message
+    if (typeof o.detail === 'string') return o.detail
+  }
+  if (Array.isArray(d)) {
+    const msgs = d.map((x) => (x && typeof x === 'object' ? (x as { msg?: unknown }).msg : null))
+      .filter((m): m is string => typeof m === 'string')
+    if (msgs.length) return msgs.join('; ')
+  }
+  return undefined
 }
 
 /**

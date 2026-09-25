@@ -37,6 +37,8 @@ export interface ReleaseTabProps {
   isAdmin?: boolean
   /** Sales records the customer's decision on validation issues. */
   isSales?: boolean
+  /** Deep link ?issue=<id>: the issue card to open and scroll to. */
+  focusIssueId?: number | null
 }
 
 /**
@@ -88,7 +90,9 @@ export function closingFigures(tasks: TaskOut[]) {
   }
 }
 
-function ClosingSummary({ change, departments }: { change: ChangeDetail; departments: { id: number; name: string }[] }) {
+function ClosingSummary({ change, departments, canSeeCosts }: {
+  change: ChangeDetail; departments: { id: number; name: string }[]; canSeeCosts: boolean
+}) {
   const { data: plan } = useQuery({
     queryKey: ['change', change.id, 'plan', 'detailed'],
     queryFn: () => planApi.get(change.id, 'detailed'),
@@ -128,7 +132,7 @@ function ClosingSummary({ change, departments }: { change: ChangeDetail; departm
           ))}
         </div>
       )}
-      <PnlCard change={change} departments={departments} />
+      <PnlCard change={change} departments={departments} canSeeCosts={canSeeCosts} />
     </section>
   )
 }
@@ -149,7 +153,7 @@ function Collapsible({ title, children, testId }: { title: string; children: Rea
 
 export default function ReleaseTab({
   change, departments, myDepartmentIds, canSeeAll, canAcknowledge, canManage, onAdvance, advancing,
-  viewerId = null, isAdmin = false, isSales = false,
+  viewerId = null, isAdmin = false, isSales = false, focusIssueId = null,
 }: ReleaseTabProps) {
   const { data: release } = useQuery({
     queryKey: releaseKey(change.id),
@@ -204,7 +208,7 @@ export default function ReleaseTab({
         </ol>
       </div>
 
-      {after && <ClosingSummary change={change} departments={departments} />}
+      {after && <ClosingSummary change={change} departments={departments} canSeeCosts={canSeeAll} />}
 
       <StepSection id="release-validation" n={1} title="Validation checks" done={validationDone}
         right={openIssues > 0 ? (
@@ -215,7 +219,7 @@ export default function ReleaseTab({
         <IssuesPanel changeId={change.id} changeStatus={change.status} departments={departments}
           viewer={{ id: viewerId, isAdmin, canManage, isSales, canSeeCosts: canSeeAll, myDepartmentIds }}
           canRaise={canManage || (validation?.departments ?? []).some((d) => myDepartmentIds.includes(d.department_id))}
-          releaseDueDate={change.release_due_date} />
+          releaseDueDate={change.release_due_date} focusIssueId={focusIssueId} />
         <ValidationPanel changeId={change.id} status={change.status}
           departments={departments} myDepartmentIds={myDepartmentIds}
           canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll}

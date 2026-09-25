@@ -1,11 +1,12 @@
 import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction } from '../../types/change'
-import { STATUS_LABELS, STATUS_PILL, NEXT_STATUS, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
 import { formatDate } from '../../lib/format'
+import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
 
 interface Props {
   change: ChangeDetail
@@ -26,7 +27,7 @@ interface Props {
   actions?: MyAction[]
   /** Called with an action's target_tab when its button is clicked — the
       page jumps to where the action is performed. */
-  onAction?: (targetTab: string) => void
+  onAction?: (targetTab: string, issueId?: number) => void
   /** F11: whether the current viewer can see the D1/Audit governance tabs.
       Gate rows jump there via onResolveGate — for viewers who can't see those
       tabs the row must not offer a dead-end jump affordance. Defaults to
@@ -36,7 +37,7 @@ interface Props {
       by" — the one place a viewer looks to see why nothing is moving. */
   waits?: WaitState[]
   /** Called with a wait's tab when its row is clicked. */
-  onGo?: (tab: string) => void
+  onGo?: (tab: string, issueId?: number) => void
   /**
    * Who may take a next step: null when the viewer may, otherwise the words
    * for the tooltip ("Needs Sales"). Keys are the step keys of nextStepFor
@@ -58,8 +59,24 @@ export type NextStep =
  * are not raw buttons: the step points at where that act is done.
  */
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
-  | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>): NextStep[] {
+  | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
+  & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at'>>): NextStep[] {
   const s = change.status
+  // Mother plant (spec §14): scoping informs the team, then goes straight to
+  // approved; the validated timing is told to the mother plant, not published.
+  if (change.origin === 'mother_plant') {
+    if (s === 'scoping') {
+      return change.info_sent_at
+        ? [{ kind: 'advance', to: 'approved' }]
+        : [{ kind: 'go', key: 'info-send', label: 'Send information to the team', tab: 'mother' }]
+    }
+    if (s === 'approved' && change.timing_validated_at && !change.plan_published_at) {
+      return [
+        { kind: 'go', key: 'inform-mother', label: 'Inform the mother plant', tab: 'timing' },
+        { kind: 'advance', to: 'in_implementation', label: t('cockpit.startImplementation') },
+      ]
+    }
+  }
   if (s === 'costing') {
     // An internal change needs its costs approved (Approval tab) before it can
     // advance; a customer-relevant one moves straight to quoting.
@@ -91,7 +108,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
       },
     ]
   }
-  return (NEXT_STATUS[s] ?? []).map((to) => ({ kind: 'advance', to }))
+  return nextStatusesFor(s, change.origin).map((to) => ({ kind: 'advance', to }))
 }
 
 /** "Decide 1 plan deviation(s)" reads "Decide 1 plan deviation"; 2 get their s. */
@@ -99,7 +116,8 @@ export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
 
 export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, waits = [], onGo, needs = () => null }: Props) {
-  const next = (NEXT_STATUS[change.status] ?? []).filter((s) =>
+  const motherPlant = change.origin === 'mother_plant'
+  const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
     // internal one is approved outright and never sees either quoting step.
     change.status !== 'costing'
@@ -166,10 +184,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <div className="flex flex-wrap gap-2">
             {actions.map((a, i) => (
               <button
-                key={`${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? i}`}
+                key={`${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? i}`}
                 type="button"
+                data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : undefined}
                 className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg text-sm"
-                onClick={() => onAction?.(a.target_tab)}>
+                // An issue act opens the tab that shows the issues now (Timing
+                // during a loop back), whatever tab the server named.
+                onClick={() => (isIssueActionKind(a.kind)
+                  ? onAction?.(issueTabFor(change.status), a.issue_id ?? undefined)
+                  : onAction?.(a.target_tab))}>
                 {pluralizeLabel(a.label)}
               </button>
             ))}
@@ -193,7 +216,19 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <QuotedFactChip change={change} />
         ) : change.customer_relevant ? (
           <DeadlineEditor change={change} kind="quote" />
+        ) : motherPlant && change.mother_plant_sop ? (
+          // Until approval makes it the release deadline, the SOP is a fact.
+          <span data-testid="mother-plant-sop"
+            className="inline-flex items-center rounded-full border border-purple-700/60 bg-purple-950/40 px-2 py-0.5 text-xs text-purple-200">
+            SOP {formatDate(change.mother_plant_sop)}
+          </span>
         ) : null}
+        {motherPlant && (
+          <p data-testid="mother-plant-origin" className="mt-2 text-xs text-purple-300">
+            From the mother plant: {change.mother_plant_name ?? '-'}
+            {change.mother_plant_ref ? ` · ${change.mother_plant_ref}` : ''}
+          </p>
+        )}
         <p className="mt-3 text-sm text-slate-300">
           {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '-'}</span>
         </p>
@@ -221,7 +256,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                 {w.tab && onGo ? (
                   <button type="button"
                     className="text-left hover:underline decoration-dotted underline-offset-2"
-                    onClick={() => onGo(w.tab!)}>
+                    onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
                     {w.info ? 'ℹ' : '⏳'} {w.text} <span className="text-xs opacity-70">→ {tabName(w.tab)}</span>
                   </button>
                 ) : <>{w.info ? 'ℹ' : '⏳'} {w.text}</>}
@@ -272,7 +307,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ✓ {t('kickoff.ready')}
           </p>
         )}
-        {DECIDED_BY_MEETING.includes(change.status) ? (
+        {DECIDED_BY_MEETING.includes(change.status) && !motherPlant ? (
           // The decision lives in the meeting record, not on a button here.
           <button
             className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"

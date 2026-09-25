@@ -85,7 +85,9 @@ export interface PnlFilters {
   date_to?: string;
 }
 
-export type PnlBasis = 'accepted_offer' | 'sent_offer' | 'internal_approval' | 'costing';
+export type PnlBasis = 'accepted_offer' | 'sent_offer' | 'internal_approval' | 'costing'
+  /** Mother plant (spec §14): no offer basis, actual local costs only. */
+  | 'none';
 
 export interface OvaLine {
   key: string;
