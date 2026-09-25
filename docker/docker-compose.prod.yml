@@ -55,6 +55,18 @@ services:
       # search answers 503 "not configured"; the rest of PLM keeps working.
       MATERIALDB_BASE_URL: ${MATERIALDB_BASE_URL:-}
       MATERIALDB_SERVICE_TOKEN: ${MATERIALDB_SERVICE_TOKEN:-}
+      # Issuing company on the customer offer PDF. Empty = the KTX Toccoa
+      # default in backend/app/services/company_profile.py; lists (address,
+      # footer) are separated by '|'.
+      KTX_COMPANY_LEGAL_NAME: ${KTX_COMPANY_LEGAL_NAME:-}
+      KTX_COMPANY_ADDRESS: ${KTX_COMPANY_ADDRESS:-}
+      KTX_COMPANY_PHONE: ${KTX_COMPANY_PHONE:-}
+      KTX_COMPANY_FAX: ${KTX_COMPANY_FAX:-}
+      KTX_COMPANY_EMAIL: ${KTX_COMPANY_EMAIL:-}
+      KTX_COMPANY_WEBSITE: ${KTX_COMPANY_WEBSITE:-}
+      KTX_COMPANY_FOOTER: ${KTX_COMPANY_FOOTER:-}
+      KTX_COMPANY_SIGNATURE_NAME: ${KTX_COMPANY_SIGNATURE_NAME:-}
+      KTX_COMPANY_SIGNATURE_TITLE: ${KTX_COMPANY_SIGNATURE_TITLE:-}
     volumes:
       - upload_data:/app/storage/uploads
       - gltf_data:/app/storage/gltf
