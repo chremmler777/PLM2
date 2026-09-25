@@ -99,7 +99,7 @@ export const pmChapter: ContentChapter = {
         {
           steps: [
             { title: 'Record it', body: '"+ Record a meeting" on the "Scoping" tab: channel, "Meeting date", "Participants". Attendance only, not responsibility.' },
-            { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supports", "Consulted / informed" or "Not involved". The standard routing is pre-selected; the room overrules it.' },
+            { title: 'Set who assesses', body: 'Under "Impacted departments" give each department a letter: "Responsible (assesses)", "Accountable (assesses)", "Supportive", "Consulted", "Informed (notified only)" or "Not involved". The standard routing is pre-selected; the room overrules it.' },
             { title: 'Confirm the cost carrier', body: '"Cost carrier" is required before the assessment can start. Flipping it is audited and Sales is notified.' },
             { title: 'Decide', body: '"Proceed & start assessment", "Needs more info" or "Reject". Proceed starts the assessment for every R and A department.' },
           ],
@@ -289,7 +289,7 @@ export const pmTasks: PracticeTaskSpec[] = [
     screen: { kind: 'scoping', change: 'CR-TRAIN-0005' },
     brief:
       'The team met today about CR-TRAIN-0005. Tool Engineer and Development assess, APQP ' +
-      'supports, Manufacturing Engineer is kept informed, Packaging is not involved. The ' +
+      'supports, Manufacturing Engineer is consulted, Packaging is not involved. The ' +
       'customer pays. Record the meeting and start the assessment.',
     why:
       'The letters decide who assesses, not who was in the room. A wrong letter is a ' +
@@ -303,7 +303,7 @@ export const pmTasks: PracticeTaskSpec[] = [
       { assert: 'a meeting exists with decision proceed', hint: 'No meeting with the decision "Proceed & start assessment" yet.' },
       { assert: 'department_rasic gives Tool Engineer and Development R or A', hint: 'Tool Engineer and Development assess: give them R or A.' },
       { assert: 'APQP is S and Packaging Engineer is not R or A', hint: 'APQP supports and Packaging is not involved. Check their letters.' },
-      { assert: 'Manufacturing Engineer is C', hint: 'Manufacturing Engineer is kept informed: "Consulted / informed".' },
+      { assert: 'Manufacturing Engineer is C', hint: 'Manufacturing Engineer is consulted: "Consulted" (C), not "Informed" (I).' },
       { assert: 'the cost carrier is customer', hint: 'The customer pays: the cost carrier is "Customer (customer relevant)".' },
       { assert: 'change.status is in_assessment', hint: 'The change has not moved to assessment. Did the meeting decide to proceed?' },
     ],

@@ -8,8 +8,15 @@ import {
   StartWorkflowRequest, CompleteTaskRequest, CancelWorkflowRequest,
 } from '../types/workflow';
 
+/**
+ * Every department, retired ones included (is_active false). The endpoint
+ * lists active ones only by default; the full list is what name lookups on
+ * old routings, meetings and tasks need. Pickers filter to is_active
+ * themselves (see activeDepartments in lib/departments).
+ */
 export const getDepartments = async (): Promise<Department[]> => {
-  const response = await client.get('/v1/workflow-templates/departments');
+  const response = await client.get('/v1/workflow-templates/departments',
+    { params: { include_retired: 1 } });
   return response.data;
 };
 

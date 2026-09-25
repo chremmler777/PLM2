@@ -20,7 +20,7 @@ import NotResponsibleDialog from './NotResponsibleDialog'
 import ConcernStrip from './ConcernStrip'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
-import { impactedCount, impactsOf, choiceLabel } from './departmentForms/ActivityChecklist'
+import { impactedCount, impactsOf, choiceLabel, checklistItemLabel } from './departmentForms/ActivityChecklist'
 import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
@@ -611,8 +611,8 @@ function ImpactAnswers({ departmentId, details, riskKeys, lang = 'en' }: {
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
-  const labelOf = (i: { key?: string; label?: string }) =>
-    i.label ?? defs.find((d) => d.key === i.key)?.label_en ?? i.key ?? ''
+  // Earlier checklist keys (no longer served) still read by name.
+  const labelOf = (i: { key?: string; label?: string }) => checklistItemLabel(i, defs, lang)
   return (
     <ul className="text-xs text-slate-400 space-y-0.5"
       data-testid={`bucket-impacts-${departmentId}`}>

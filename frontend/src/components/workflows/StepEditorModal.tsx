@@ -19,9 +19,9 @@ const RASIC_LETTERS = ['R', 'A', 'S', 'C', 'I'];
 const RASIC_LEGEND: [string, string][] = [
   ['R', 'Responsible: does the work, blocking'],
   ['A', 'Accountable: final authority, blocking'],
-  ['S', 'Supports: provides resources'],
+  ['S', 'Supportive: provides resources'],
   ['C', 'Consulted: asked for input, no answer owed'],
-  ['I', 'Informed: kept in the loop'],
+  ['I', 'Informed: notified only, no task'],
 ];
 
 interface StepData {

@@ -40,6 +40,18 @@ describe('TaskEditor', () => {
     expect((screen.getByLabelText('Notes') as HTMLTextAreaElement).value).toBe('b from someone else')
   })
 
+  it('names a retired owner the task holds and offers only active ones otherwise', () => {
+    const departments = [
+      { id: 11, name: 'Tool Engineer', is_active: false },
+      { id: 12, name: 'Quality', is_active: true },
+      { id: 13, name: 'Old Lab', is_active: false },
+    ]
+    render(<TaskEditor {...base} departments={departments} task={task()} onSave={vi.fn()} />)
+    const opts = Array.from((screen.getByLabelText('Owner department') as HTMLSelectElement).options)
+      .map((o) => o.textContent)
+    expect(opts).toEqual(['None', 'Tool Engineer (retired)', 'Quality'])
+  })
+
   it('starts over for another task', () => {
     const { rerender } = render(<TaskEditor {...base} task={task()} onSave={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'typing' } })

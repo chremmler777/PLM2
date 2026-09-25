@@ -12,6 +12,7 @@ import { inputCls } from '../offer/offerFormat'
 import { CATEGORY_LABEL, SEVERITY } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import { btnSm } from '../../common/buttonStyles'
+import { departmentLabel } from '../../../lib/departments'
 
 interface Draft {
   title: string; description: string; severity: IssueSeverity; category: IssueCategory
@@ -41,7 +42,7 @@ export function issuePatch(i: IssueOut, d: Draft): IssuePatch {
 export default function IssueEditForm({ changeId, issue, departments, onDone }: {
   changeId: number
   issue: IssueOut
-  departments: { id: number; name: string }[]
+  departments: { id: number; name: string; is_active?: boolean }[]
   onDone: () => void
 }) {
   const [d, setD] = useState<Draft>(() => draftOf(issue))
@@ -71,7 +72,7 @@ export default function IssueEditForm({ changeId, issue, departments, onDone }: 
             onChange={(e) => set('department_id', e.target.value ? Number(e.target.value) : null)}
             className={`${inputCls} w-full`}>
             <option value="">Pick a department</option>
-            {departments.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            {departments.map((x) => <option key={x.id} value={x.id}>{departmentLabel(x)}</option>)}
           </select>
         </Field>
       </div>

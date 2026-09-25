@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { preferredDepartmentId } from './departments'
+import { departmentLabel, pickableDepartments, preferredDepartmentId } from './departments'
 
 const depts = [
   { id: 2, name: 'Quality' },
@@ -23,5 +23,21 @@ describe('preferredDepartmentId', () => {
   it('has nothing to pick for a user in no listed department', () => {
     expect(preferredDepartmentId([], depts)).toBeUndefined()
     expect(preferredDepartmentId([99], depts)).toBeUndefined()
+  })
+})
+
+describe('retired departments in pickers', () => {
+  const all = [
+    { id: 1, name: 'Quality', is_active: true },
+    { id: 2, name: 'Old Lab', is_active: false },
+    { id: 3, name: 'Old Shop', is_active: false },
+  ]
+  it('offers active ones plus a retired one the record already holds', () => {
+    expect(pickableDepartments(all).map((d) => d.id)).toEqual([1])
+    expect(pickableDepartments(all, [2, null]).map((d) => d.id)).toEqual([1, 2])
+  })
+  it('marks a retired one "(retired)"', () => {
+    expect(departmentLabel(all[0])).toBe('Quality')
+    expect(departmentLabel(all[1])).toBe('Old Lab (retired)')
   })
 })

@@ -21,3 +21,25 @@ export function preferredDepartmentId<T extends { id: number; name: string }>(
   return departments.find(
     (d) => d.name === MASTER_DEPARTMENT && membershipIds.includes(d.id))?.id
 }
+
+/**
+ * A department as a picker option reads it: a retired one (is_active false)
+ * carries "(retired)" so an existing value on an old record still shows
+ * what it is without inviting new work onto it.
+ */
+export function departmentLabel(d: { name: string; is_active?: boolean | null }): string {
+  return d.is_active === false ? `${d.name} (retired)` : d.name
+}
+
+/**
+ * The departments a picker offers: the active ones, plus any retired one a
+ * record already holds (keepIds), so the current value stays selectable and
+ * named instead of silently blanking the select.
+ */
+export function pickableDepartments<T extends { id: number; is_active?: boolean | null }>(
+  all: T[],
+  keepIds: (number | null | undefined)[] = [],
+): T[] {
+  const keep = new Set(keepIds.filter((x): x is number => x != null))
+  return all.filter((d) => d.is_active !== false || keep.has(d.id))
+}

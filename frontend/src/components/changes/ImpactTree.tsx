@@ -220,7 +220,10 @@ export default function ImpactTree({
   const dirty = added.length + removed.length > 0
 
   // Names, not ids, wherever a part is mentioned.
+  // The impacted items carry their part number (backend fills it), so a
+  // part no longer in the tree still reads by name; the tree fills the rest.
   const nameOf = new Map<number, string>()
+  change?.impacted_items?.forEach((i) => { if (i.part_number) nameOf.set(i.part_id, i.part_number) })
   const walk = (n: ImpactTreeNode) => { nameOf.set(n.part_id, n.part_number); n.children.forEach(walk) }
   data.tree.forEach(walk)
 

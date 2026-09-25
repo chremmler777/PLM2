@@ -17,6 +17,7 @@ import DateInput from '../../gantt/DateInput'
 import { X } from 'lucide-react'
 import Dialog from '../../common/Dialog'
 import Button from '../../common/Button'
+import { departmentLabel } from '../../../lib/departments'
 
 const ORDER: IssueRoute[] = ['internal_rework', 'supplier_rework', 'design_change', 'customer_concession', 'follow_up_change']
 
@@ -63,7 +64,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
   changeId: number
   changeStatus: string
   issue: IssueOut
-  departments: { id: number; name: string }[]
+  departments: { id: number; name: string; is_active?: boolean }[]
   onClose: () => void
 }) {
   const [route, setRoute] = useState<IssueRoute | null>(null)
@@ -196,7 +197,7 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
                       ? { ...x, department_id: e.target.value ? Number(e.target.value) : null } : x))}
                     className={inputCls}>
                     <option value="">Department</option>
-                    {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    {departments.map((d) => <option key={d.id} value={d.id}>{departmentLabel(d)}</option>)}
                   </select>
                   <DateInput aria-label="Due date" value={row.due_date} commitOnChange
                     onChange={(iso) => setRows((rs) => rs.map((x, j) => j === idx ? { ...x, due_date: iso } : x))}

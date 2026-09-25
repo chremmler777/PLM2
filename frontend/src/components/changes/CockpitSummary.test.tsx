@@ -101,6 +101,43 @@ describe('CockpitSummary', () => {
     expect(screen.getByTestId('your-actions').textContent).toContain('Decide deviation #3')
   })
 
+  it('lists stage-task actions by label, links their target_tab, and skips the step twins', () => {
+    const onAction = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'quoting' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onAction={onAction}
+      actions={[
+        // create_quote is the task list's name for the offer step: not twice.
+        { kind: 'create_quote', label: 'Create the quote', target_tab: 'commercial' },
+        { kind: 'costing_update', label: 'Costing update after scope change',
+          target_tab: 'commercial', department_id: 4, hint: 'Scope changed' },
+        { kind: 'bank_build', label: 'Decide the bank build', target_tab: 'implementation' },
+        { kind: 'scoping_wrapup', label: 'Wrap up scoping', target_tab: 'scoping' },
+      ] as MyAction[]} />))
+    const box = screen.getByTestId('your-actions')
+    expect(box.textContent).not.toContain('Create the quote')
+    expect(screen.getAllByText('Build and send the offer')).toHaveLength(1)
+    const costing = screen.getByTestId('action-costing_update')
+    expect(costing.getAttribute('title')).toBe('Scope changed')
+    fireEvent.click(costing)
+    expect(onAction).toHaveBeenLastCalledWith('commercial')
+    fireEvent.click(screen.getByTestId('action-bank_build'))
+    expect(onAction).toHaveBeenLastCalledWith('implementation')
+    fireEvent.click(screen.getByTestId('action-scoping_wrapup'))
+    expect(onAction).toHaveBeenLastCalledWith('scoping')
+  })
+
+  it('does not list kickoff next to the hand-over-to-scoping button', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'captured' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[
+        { kind: 'kickoff', label: 'Hand over to scoping', target_tab: 'overview' },
+        { kind: 'deviation_decision', label: 'Decide deviation #3', target_tab: 'overview', deviation_id: 3 },
+      ] as MyAction[]} />))
+    expect(screen.getByTestId('next-to-scoping')).toBeTruthy()
+    expect(screen.getByTestId('your-actions').textContent).not.toContain('Hand over to scoping')
+  })
+
   it('compact bar: the same next step and the blockers count, from one source', () => {
     const onShowOverview = vi.fn()
     render(wrap(<CockpitSummary variant="compact" change={change({ status: 'in_validation' })}

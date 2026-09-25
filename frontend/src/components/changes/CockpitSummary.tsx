@@ -99,10 +99,19 @@ export interface ReviewProgress {
 
 /** Your-actions kinds that are the same job as a next step: listed once, as the step. */
 const SAME_JOB_AS_STEP: Record<string, string[]> = {
-  offer: ['offer_build'],
+  // create_quote is the task list's name for offer_build (backend
+  // STAGE_TASK_EQUIV); either one is the "Build and send the offer" step.
+  offer: ['offer_build', 'create_quote'],
   'validate-timing': ['timing_validate'],
   'lock-impact': ['impact_confirm'],
   review: ['review_answer'],
+  'send-rejection': ['send_rejection'],
+  'info-send': ['info_send'],
+  'inform-mother': ['inform_mother_plant'],
+  answer: ['customer_response'],
+  // Advance steps are keyed "to:<status>": handing over to scoping is the
+  // kickoff task.
+  'to:scoping': ['kickoff'],
 }
 
 /** A gate's state in words, keyed on its decision like the backend's gate_message:
@@ -412,13 +421,13 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // project has another responsible for the role) are listed apart, muted,
   // with the main's name; they stay actionable. An action that is the same
   // job as a next-step button is listed once, as the step.
-  const stepKeys = buttons.map((st) => (st.kind === 'advance' ? '' : st.key))
+  const stepKeys = buttons.map((st) => (st.kind === 'advance' ? `to:${st.to}` : st.key))
   const sameJob = (a: MyAction) => stepKeys.some((k) => (SAME_JOB_AS_STEP[k] ?? []).includes(a.kind))
   const shownActions = actions.filter((a) => !sameJob(a))
   const mainActions = shownActions.filter((a) => a.role !== 'backup')
   const backupActions = shownActions.filter((a) => a.role === 'backup')
   const actionKey = (a: MyAction, i: number) =>
-    `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? i}`
+    `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? a.department_id ?? a.offer_id ?? i}`
   // An issue act opens the tab that shows the issues now (Timing during a
   // loop back), whatever tab the server named.
   const runAction = (a: MyAction) => (isIssueActionKind(a.kind)
@@ -541,7 +550,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <button
             key={actionKey(a, i)}
             type="button"
-            title={t('team.backupHint')}
+            title={a.hint ? `${a.hint} · ${t('team.backupHint')}` : t('team.backupHint')}
             className={`${btnBase} ${btnSizes.md} h-auto min-h-9 whitespace-normal flex-col items-start py-1.5 text-left border border-slate-600 text-slate-300 hover:bg-slate-700`}
             onClick={() => runAction(a)}>
             {pluralizeLabel(a.label)}
@@ -564,7 +573,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               <button
                 key={actionKey(a, i)}
                 type="button"
-                data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : undefined}
+                data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : `action-${a.kind}`}
+                title={a.hint ?? undefined}
                 className={actionCls}
                 onClick={() => runAction(a)}>
                 {pluralizeLabel(a.label)}

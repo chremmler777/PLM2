@@ -10,6 +10,7 @@ import * as workflowApi from '../api/workflows';
 import { toast } from 'sonner';
 import StepEditorModal from '../components/workflows/StepEditorModal';
 import WorkflowFlowChart from '../components/workflows/WorkflowFlowChart';
+import { departmentLabel } from '../lib/departments';
 
 // Draft types for local editor state (id fields are optional)
 type DraftStage = Omit<WfStage, 'id' | 'template_id'> & { id?: number; template_id?: number };
@@ -501,7 +502,10 @@ function StageEditor({ stage, departments, onEditStep, onAddStep, onDeleteStep, 
 function StepCard({ step, departments, onEdit, onDelete }: any) {
   const rasicLetters = step.rasic_assignments.map((r: any) => r.rasic_letter).join('');
   const deptNames = step.rasic_assignments
-    .map((r: any) => departments.find((d: Department) => d.id === r.department_id)?.name)
+    .map((r: any) => {
+      const d = departments.find((x: Department) => x.id === r.department_id);
+      return d ? departmentLabel(d) : `#${r.department_id}`;
+    })
     .filter(Boolean)
     .join(', ');
 

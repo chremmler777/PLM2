@@ -21,8 +21,9 @@ const CARRIER_OPEN = new Set(['captured', 'scoping']);
 /** The gate answers as people say them. */
 const DECISION_LABEL: Record<'yes' | 'no' | 'na', string> = { yes: 'Yes', no: 'No', na: 'N/A' };
 
-/** The backend may name the decider; older responses carry only the id. */
-type NamedGate = Gate & { decided_by_name?: string | null };
+/** The backend names the decider (decided_by_name); an older response
+ *  carries only the id, and the lead candidates name it instead. */
+type NamedGate = Gate;
 
 const inputCls =
   'bg-slate-900 border border-slate-600 rounded-md px-2 py-1 text-slate-100 text-xs ' +

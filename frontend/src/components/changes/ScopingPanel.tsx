@@ -23,15 +23,25 @@ import type {
   Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, MeetingParticipant, RasicLetter,
 } from '../../types/change'
 import { carrierOf, isPersonContact } from '../../lib/scopingRules'
+import { departmentLabel, pickableDepartments } from '../../lib/departments'
 
 /** The room's letters, in the order the picker shows them. I (informed) is an
  *  FYI: no assessment, nothing blocks on it. */
 const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
 
 /** An attendee as picked. A directory person is a colleague (and carries
- *  their user id once the contacts API sends it); a typed name that matched
- *  nobody is an external guest. `guest` is UI-only and never sent. */
-type Attendee = MeetingParticipant & { email?: string | null; guest?: boolean }
+ *  their user id, username and email as the contacts API sends them); a
+ *  typed name that matched nobody is an external guest. `guest` is UI-only
+ *  and never sent. */
+type Attendee = MeetingParticipant & { guest?: boolean }
+/** What the backend gets: the name plus whatever identifies the PLM2 user
+ *  (user_id, else username / email for it to resolve). A guest is a name. */
+const toParticipant = ({ name, user_id, username, email }: Attendee): MeetingParticipant => ({
+  name,
+  ...(user_id != null ? { user_id } : {}),
+  ...(username ? { username } : {}),
+  ...(email ? { email } : {}),
+})
 const attendeeKey = (a: Attendee) => (a.user_id != null ? `u${a.user_id}` : `n${a.name.toLowerCase()}`)
 
 const DECISION_LABEL: Record<string, string> = {
@@ -133,7 +143,8 @@ export default function ScopingPanel(
   })
   const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
   const fromContact = (c: Contact): Attendee =>
-    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
+    ({ name: c.name, user_id: c.user_id ?? null, username: c.username ?? null,
+       email: c.email ?? null, guest: false })
   const appendParticipant = (a: Attendee | null) => {
     if (!a || !a.name.trim()) return
     const next = { ...a, name: a.name.trim() }
@@ -173,8 +184,7 @@ export default function ScopingPanel(
     mutationFn: () => changesApi.createMeeting(changeId, {
       meeting_date: date ? `${date}T12:00:00Z` : undefined,
       channel,
-      participants: participants.map(({ name, user_id }) =>
-        (user_id != null ? { name, user_id } : { name })),
+      participants: participants.map(toParticipant),
       selected_department_ids: deptIds,
       department_rasic: deptRasic,
       ...(carrier ? { cost_carrier: carrier } : {}),
@@ -730,9 +740,10 @@ export default function ScopingPanel(
             {/* One row per department: name left, its letter right. A row
                 without a letter is not involved and reads muted. Retired
                 departments stay resolvable by name on old records but are
-                never offered for new work. */}
+                never offered for new work; one a carried-over call still
+                holds shows "(retired)" so it can be taken off. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 border-t border-slate-700/70">
-              {departments.filter((d) => d.is_active).map((d) => {
+              {pickableDepartments(departments, deptIds).map((d) => {
                 const isRec = recommendedIds.includes(d.id)
                 const letter = deptRasic[d.id]
                 return (
@@ -744,7 +755,7 @@ export default function ScopingPanel(
                       title={isRec ? t('meeting.recommended') : undefined}
                       className={`min-w-0 truncate text-left text-sm rounded px-1 -mx-1 transition-colors ${
                         letter ? 'text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-                      {d.name}
+                      {departmentLabel(d)}
                     </button>
                     <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
                       role="group" aria-label={`${d.name} RASIC`}>

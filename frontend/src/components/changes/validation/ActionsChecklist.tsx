@@ -11,6 +11,7 @@ import type { IssueViewer } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
 import DateInput from '../../gantt/DateInput'
 import { btnSm } from '../../common/buttonStyles'
+import { departmentLabel } from '../../../lib/departments'
 
 export const mayTick = (a: IssueActionOut, v: IssueViewer) =>
   a.status === 'open' && (a.can_done ?? (!!v.canManage || !!v.isAdmin
@@ -22,7 +23,7 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
   issue: IssueOut
   viewer: IssueViewer
   canAdd: boolean
-  departments: { id: number; name: string }[]
+  departments: { id: number; name: string; is_active?: boolean }[]
   /** Bumped by the card's add_action button: opens the add row. */
   addRequest?: number
 }) {
@@ -94,7 +95,7 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
           <select aria-label="Owner department" value={dept ?? ''}
             onChange={(e) => setDept(e.target.value ? Number(e.target.value) : null)} className={inputCls}>
             <option value="">Department</option>
-            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {departments.map((d) => <option key={d.id} value={d.id}>{departmentLabel(d)}</option>)}
           </select>
           <DateInput aria-label="Due date" min={todayIso()} value={due} commitOnChange
             onChange={setDue} className={`${inputCls} w-32`} />

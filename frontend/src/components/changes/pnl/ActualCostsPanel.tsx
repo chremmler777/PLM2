@@ -11,6 +11,7 @@ import ConfirmDialog from '../../common/ConfirmDialog'
 import { btnIcon, btnSm } from '../../common/buttonStyles'
 import DateInput from '../../gantt/DateInput'
 import type { ActualCost, ActualCostCategory } from '../../../types/pnl'
+import { departmentLabel } from '../../../lib/departments'
 
 const CATEGORY_LABEL: Record<ActualCostCategory, string> = {
   external: 'Supplier invoice',
@@ -38,7 +39,7 @@ const input = 'bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs te
  */
 export default function ActualCostsPanel({ changeId, departments = [] }: {
   changeId: number
-  departments?: { id: number; name: string }[]
+  departments?: { id: number; name: string; is_active?: boolean }[]
 }) {
   const qc = useQueryClient()
   const { data } = useQuery({
@@ -169,7 +170,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
               onChange={(e) => setDept(e.target.value ? Number(e.target.value) : '')}>
               {allowed === null && <option value="">None</option>}
               {allowed !== null && <option value="">Choose</option>}
-              {deptOptions.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              {deptOptions.map((d) => <option key={d.id} value={d.id}>{departmentLabel(d)}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-0.5 text-[11px] text-slate-400 col-span-2 md:col-span-6">Note

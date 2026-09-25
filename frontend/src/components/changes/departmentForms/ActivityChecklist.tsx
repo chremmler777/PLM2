@@ -63,11 +63,58 @@ export function restToNo(
   defs: ChecklistItemDef[], value: Record<string, unknown>,
 ): Record<string, unknown> {
   const impacts = impactsOf(value)
+  const served = new Set(defs.map((d) => d.key))
   const answered = new Set(impacts.filter((i) => i.key && i.answer).map((i) => i.key!))
-  const rest = impacts.filter((i) => !(i.key && !i.answer))
+  // An earlier item (key no longer served) is kept exactly as stored.
+  const rest = impacts.filter((i) => !(i.key && !i.answer && served.has(i.key)))
   const filled = defs.filter((d) => !answered.has(d.key))
     .map((d) => ({ key: d.key, answer: 'no' as const, impacted: false, bulk: true }))
   return { ...value, impacts: [...rest, ...filled] }
+}
+
+/**
+ * Labels for checklist keys the served list may no longer carry (backend
+ * LEGACY_ITEMS: the 13-item common list before 2026-09-25). A stored answer
+ * keeps its key forever, so it still needs a name after the list changed.
+ */
+const EARLIER_ITEM_LABELS: Record<string, { de: string; en: string }> = {
+  cycle_time_change: { de: 'Zykluszeitänderung', en: 'Cycle time change' },
+  scrap_increase: { de: 'Ausschusserhöhung', en: 'Scrap increase' },
+  maintenance_increase: { de: 'Erhöhter Wartungsaufwand', en: 'Increased maintenance' },
+  threed_change: { de: '3D-Änderung erforderlich', en: '3D change necessary' },
+  dimensional_risk: { de: 'Maßliches Risiko', en: 'Dimensional risk' },
+  visual_risk: { de: 'Optisches Risiko', en: 'Visual risk' },
+  work_instruction_update: { de: 'Arbeitsanweisung aktualisieren', en: 'Work instruction update' },
+  new_process: { de: 'Neuer Prozess', en: 'New process' },
+  sparepart_required: { de: 'Ersatzteil erforderlich', en: 'Spare part required' },
+  modification_internal: { de: 'Interne Änderung/Umbau', en: 'Internal modification' },
+  modification_external: { de: 'Externe Änderung/Umbau (Lieferant)', en: 'External modification (supplier)' },
+  prototyping_required: { de: 'Prototypen/Musterbau erforderlich', en: 'Prototyping required' },
+  matching_required: { de: 'Abmusterung/Matching erforderlich', en: 'Matching/sampling required' },
+}
+
+/** A stored answer's name: its free label, the served checklist's label,
+ *  else the earlier checklist's, else the key made readable. */
+export function checklistItemLabel(
+  i: { key?: string; label?: string }, defs: ChecklistItemDef[], lang: 'de' | 'en' = 'en',
+): string {
+  if (i.label) return i.label
+  if (!i.key) return ''
+  const def = defs.find((d) => d.key === i.key)
+  if (def) return lang === 'de' ? def.label_de : def.label_en
+  const earlier = EARLIER_ITEM_LABELS[i.key]
+  if (earlier) return earlier[lang]
+  const words = i.key.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** Keyed answers to items the served checklist no longer lists: kept as
+ *  given (never re-asked, never dropped) and sent back unchanged. */
+export function earlierAnswers(
+  defs: ChecklistItemDef[], value: Record<string, unknown> | null | undefined,
+): ImpactItem[] {
+  const served = new Set(defs.map((d) => d.key))
+  return impactsOf(value).filter((i) => i.key !== undefined && !served.has(i.key))
 }
 
 /** Keys are capped where the backend caps them (change_concerns.checklist_key). */
@@ -107,7 +154,7 @@ export default function ActivityChecklist({
   /** Mark the rows still unanswered (after the submit form's "jump to open"). */
   highlightOpen?: boolean
 }) {
-  const { data: items = [] } = useQuery({
+  const { data: items = [], isSuccess: itemsLoaded } = useQuery({
     queryKey: ['assessment-checklist', departmentId],
     queryFn: () => changesApi.assessmentChecklist(departmentId),
   })
@@ -137,6 +184,13 @@ export default function ActivityChecklist({
     && c.checklist_key === riskKeyOf(id))
   const impacts = impactsOf(value)
   const legacy = impacts.filter(isLegacy)
+  // Answers to items the served checklist no longer lists: shown read-only
+  // under "Earlier checklist items" and carried back unchanged. Only once
+  // the list is loaded, or every answer would look earlier while it loads.
+  const servedKeys = new Set(items.map((i) => i.key))
+  const isEarlier = (i: ImpactItem) =>
+    itemsLoaded && i.key !== undefined && !servedKeys.has(i.key)
+  const earlier = impacts.filter(isEarlier)
 
   const answerFor = (id: string): ImpactItem =>
     impacts.find((i) => !isLegacy(i) && idOf(i) === id)
@@ -146,9 +200,10 @@ export default function ActivityChecklist({
 
   const put = (next: ImpactItem) => {
     const rest = impacts.filter((i) => isLegacy(i) || idOf(i) !== idOf(next))
-    // Untouched rows carry no weight; a No is an answer and is kept.
+    // Untouched rows carry no weight; a No is an answer and is kept. Earlier
+    // items are never edited here, so they stay exactly as stored.
     const kept = [...rest, next].filter(
-      (i) => isLegacy(i) || i.answer !== undefined || i.impacted
+      (i) => isLegacy(i) || isEarlier(i) || i.answer !== undefined || i.impacted
         || (i.remark ?? '').trim() !== '')
     onChange({ ...value, impacts: kept })
   }
@@ -285,7 +340,7 @@ export default function ActivityChecklist({
     <div className="space-y-1">
       <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('check.title', lang)}</p>
       <p className="text-[11px] text-slate-500">{t('check.hint', lang)}</p>
-      {items.length === 0 && freeLines.length === 0 && legacy.length === 0 ? (
+      {items.length === 0 && freeLines.length === 0 && legacy.length === 0 && earlier.length === 0 ? (
         <p className="text-xs text-slate-600">{t('check.empty', lang)}</p>
       ) : (
         <ul className="divide-y divide-slate-700/40 rounded border border-slate-700/60 bg-slate-900/30 px-2">
@@ -321,6 +376,29 @@ export default function ActivityChecklist({
             </li>
           ))}
         </ul>
+      )}
+      {earlier.length > 0 && (
+        <div data-testid="check-earlier" className="pt-1">
+          <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('check.earlier', lang)}</p>
+          <p className="text-[11px] text-slate-500">{t('check.earlierHint', lang)}</p>
+          <ul className="mt-1 divide-y divide-slate-700/40 rounded border border-slate-700/60 bg-slate-900/20 px-2">
+            {earlier.map((i) => {
+              const yes = i.answer ? i.answer === 'yes' : i.impacted
+              return (
+                <li key={`earlier-${i.key}`} data-testid={`check-earlier-${i.key}`}
+                  className="py-1 text-xs text-slate-400">
+                  {yes
+                    ? <Check role="img" aria-label={t('check.yes', lang)} size={12} className="mr-1 inline align-[-2px]" />
+                    : <Minus role="img" aria-label={t('check.no', lang)} size={12} className="mr-1 inline align-[-2px]" />}
+                  <span className={yes ? 'text-slate-200' : ''}>{checklistItemLabel(i, items, lang)}</span>
+                  <span className="ml-1 text-slate-500">({t(yes ? 'check.yes' : 'check.no', lang)})</span>
+                  {i.choice ? ` · ${choiceLabel(i.choice, lang)}` : ''}
+                  {i.remark ? `: ${i.remark}` : ''}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
       )}
       <button type="button" data-testid="check-add-item"
         onClick={() => setFreeLines((f) => [...f, ''])}

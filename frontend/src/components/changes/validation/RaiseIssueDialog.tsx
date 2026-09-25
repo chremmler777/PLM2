@@ -13,6 +13,7 @@ import FieldGroup from '../../common/FieldGroup'
 import { inputCls } from '../offer/offerFormat'
 import { CATEGORY_LABEL, SEVERITY, categoryForCheck } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import { departmentLabel } from '../../../lib/departments'
 
 export interface RaisePrefill {
   checkKey?: string
@@ -25,7 +26,7 @@ export interface RaisePrefill {
 export default function RaiseIssueDialog({ open, changeId, departments, prefill, onClose }: {
   open: boolean
   changeId: number
-  departments: { id: number; name: string }[]
+  departments: { id: number; name: string; is_active?: boolean }[]
   prefill?: RaisePrefill | null
   onClose: () => void
 }) {
@@ -88,7 +89,7 @@ export default function RaiseIssueDialog({ open, changeId, departments, prefill,
               <select data-testid="raise-department" value={dept ?? ''}
                 onChange={(e) => setDept(e.target.value ? Number(e.target.value) : null)} className={`${inputCls} w-full`}>
                 <option value="">Pick a department</option>
-                {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {departments.map((d) => <option key={d.id} value={d.id}>{departmentLabel(d)}</option>)}
               </select>
             </Field>
           </div>

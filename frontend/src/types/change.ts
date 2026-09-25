@@ -630,7 +630,18 @@ export type MyActionKind =
   /** Re-validation: the check's department answers the linked check again. */
   | 'validation_issue_recheck'
   /** Re-validation failed with every fix action done: a new action is owed. */
-  | 'validation_issue_add_action';
+  | 'validation_issue_add_action'
+  /** Spec §8 kinds the cockpit names itself. */
+  | 'offer_build' | 'offer_expiring' | 'plan_feedback' | 'timing_validate'
+  | 'plan_deviation' | 'release_check' | 'lessons_step' | 'needs_info'
+  /** Stage tasks shared with My Tasks (one builder): label + target_tab
+   *  (overview, scoping, commercial, implementation, or a tab name). */
+  | 'kickoff' | 'scoping_wrapup' | 'customer_response' | 'close_question'
+  | 'send_rejection' | 'costing_input' | 'costing_update' | 'create_quote'
+  | 'bank_build' | 'publish_plan' | 'progress_report' | 'escalate_risk'
+  | 'update_quote' | 'obtain_info' | 'deadline'
+  /** A kind added later still renders from its label and target_tab. */
+  | (string & NonNullable<unknown>);
 
 export interface MyAction {
   kind: MyActionKind;
@@ -644,6 +655,12 @@ export interface MyAction {
   issue_id?: number | null;
   escalation_id?: number | null;
   level?: number | null;
+  /** Stage tasks: the department the task is owed by, the offer it is on. */
+  department_id?: number | null;
+  offer_id?: number | null;
+  count?: number | null;
+  /** Extra context beyond the label (shown as the button's tooltip). */
+  hint?: string | null;
   /** Project team (spec §18): backup items show in a muted "As backup" group. */
   role?: TeamRole;
   main_name?: string | null;

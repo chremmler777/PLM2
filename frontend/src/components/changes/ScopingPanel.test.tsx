@@ -193,13 +193,14 @@ describe('ScopingPanel attendees', () => {
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
-      { name: 'Cody Brown', user_id: 42 }, { name: 'Supplier guest' },
+      { name: 'Cody Brown', user_id: 42, username: 'cody', email: 'cody@ktx.io' }, { name: 'Supplier guest' },
     ])
     vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
   })
 
-  // Today GET /v1/contacts sends no user_id: a directory pick is still a
-  // colleague, never styled as a guest. Only typed free text is a guest.
+  // A contact without a user_id is still a colleague, never styled as a
+  // guest: its email goes along so the backend can find the PLM2 user.
+  // Only typed free text is a guest.
   it('treats a directory pick without a user id as a colleague, not a guest', async () => {
     vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
     vi.mocked(changesApi.createMeeting).mockClear()
@@ -220,7 +221,7 @@ describe('ScopingPanel attendees', () => {
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
     expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
-      { name: 'Dana Lee' }, { name: 'Supplier guest' },
+      { name: 'Dana Lee', email: 'dana@ktx.io' }, { name: 'Supplier guest' },
     ])
   })
 

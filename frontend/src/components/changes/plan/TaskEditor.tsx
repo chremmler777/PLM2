@@ -23,12 +23,14 @@ import {
 import DateInput from '../../gantt/DateInput'
 import { formatDateInput } from '../../gantt/dateText'
 import TaskLinks from './TaskLinks'
+import { departmentLabel, pickableDepartments } from '../../../lib/departments'
 
 interface Props {
   task: TaskOut
   tasks: TaskOut[]
   rowNo: Map<number, number>
-  departments: { id: number; name: string }[]
+  /** Every department, retired ones included (is_active false). */
+  departments: { id: number; name: string; is_active?: boolean }[]
   /** Name, kind, lane, links, idea (structure; false after the baseline). */
   canEdit: boolean
   /** Start and duration. */
@@ -157,7 +159,8 @@ export default function TaskEditor(p: Props) {
   const readOnly = !p.canEdit && !p.canDates && !p.canProgress
 
   const laneOptions = useMemo(() => {
-    const s = new Set<string>(['Customer', 'Supplier', ...p.departments.map((d) => d.name)])
+    const s = new Set<string>(['Customer', 'Supplier',
+      ...p.departments.filter((d) => d.is_active !== false).map((d) => d.name)])
     p.tasks.forEach((t) => { if (t.lane) s.add(t.lane) })
     return [...s].sort((a, b) => a.localeCompare(b))
   }, [p.departments, p.tasks])
@@ -267,7 +270,8 @@ export default function TaskEditor(p: Props) {
           <select id="te-dept" className={field} value={f.department_id} disabled={!p.canEdit}
             onChange={(e) => set('department_id', e.target.value)}>
             <option value="">None</option>
-            {p.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {pickableDepartments(p.departments, [task.department_id]).map((d) =>
+              <option key={d.id} value={d.id}>{departmentLabel(d)}</option>)}
           </select>
           <p className="mt-1 text-[11px] text-slate-400">Members of this department report progress on the task.</p>
         </div>

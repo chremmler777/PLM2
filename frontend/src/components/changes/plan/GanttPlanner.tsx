@@ -105,7 +105,9 @@ export default function GanttPlanner({
   })
   const { data: deptData } = useDepartments()
   const departments = useMemo(
-    () => (deptData ?? []).filter((d) => d.is_active !== false).map((d) => ({ id: d.id, name: d.name })),
+    // All of them, retired included: the task editor offers the active ones
+    // and still names a retired owner an older task holds.
+    () => (deptData ?? []).map((d) => ({ id: d.id, name: d.name, is_active: d.is_active })),
     [deptData])
   const onPlanChangeRef = useRef(onPlanChange)
   onPlanChangeRef.current = onPlanChange
@@ -439,7 +441,7 @@ export default function GanttPlanner({
   }
   const addBuffer = () => apply(bufferChangeSet(ctx(), selection, 5))
   const addBankBuild = () => {
-    const sched = departments.find((d) => d.name === 'Scheduling')
+    const sched = departments.find((d) => d.name === 'Scheduling' && d.is_active !== false)
     const cs = bankBuildChangeSet(ctx(), selection, { lane: 'Scheduling', departmentId: sched?.id ?? null })
     if (typeof cs.meta?.warning === 'string') toast.warning?.(cs.meta.warning)
     apply(cs)

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import ActivityChecklist, { checklistProgress, riskKeyOf } from './ActivityChecklist'
+import ActivityChecklist, {
+  checklistItemLabel, checklistProgress, earlierAnswers, restToNo, riskKeyOf,
+} from './ActivityChecklist'
 
 const DEFS = [
   { key: 'cycle_time_change', label_de: 'Zykluszeit', label_en: 'Cycle time change', extra: false },
@@ -190,5 +192,51 @@ describe('ActivityChecklist Rest → No marks', () => {
     fireEvent.click(await screen.findByTestId('check-yes-threed_change'))
     const row = onChange.mock.calls[0][0].impacts.find((i: { key: string }) => i.key === 'threed_change')
     expect(row).toEqual({ key: 'threed_change', answer: 'yes', impacted: true })
+  })
+})
+
+describe('ActivityChecklist earlier checklist items', () => {
+  afterEach(cleanup)
+  // Stored answers to keys the served checklist no longer lists.
+  const EARLIER = [
+    { key: 'scrap_increase', answer: 'yes' as const, impacted: true, remark: 'more purge' },
+    { key: 'visual_risk', answer: 'no' as const, impacted: false },
+    { key: 'retired_key_x', impacted: true },
+  ]
+
+  it('shows them read-only under "Earlier checklist items", named', async () => {
+    render(wrap(<ActivityChecklist departmentId={2} value={{ impacts: EARLIER }} onChange={() => {}} />))
+    const box = await screen.findByTestId('check-earlier')
+    expect(box.textContent).toContain('Earlier checklist items')
+    expect(screen.getByTestId('check-earlier-scrap_increase').textContent).toContain('Scrap increase')
+    expect(screen.getByTestId('check-earlier-scrap_increase').textContent).toContain('more purge')
+    expect(screen.getByTestId('check-earlier-visual_risk').textContent).toContain('Visual risk')
+    expect(screen.getByTestId('check-earlier-retired_key_x').textContent).toContain('Retired key x')
+    // Read-only: no Yes/No buttons for them.
+    expect(screen.queryByTestId('check-yes-scrap_increase')).toBeNull()
+  })
+
+  it('keeps them unchanged when a served row is answered', async () => {
+    const onChange = vi.fn()
+    render(wrap(<ActivityChecklist departmentId={2} value={{ impacts: EARLIER }} onChange={onChange} />))
+    await screen.findByTestId('check-earlier')
+    fireEvent.click(screen.getByTestId('check-no-threed_change'))
+    const sent = onChange.mock.calls[0][0].impacts
+    for (const e of EARLIER) expect(sent).toContainEqual(e)
+    expect(sent).toContainEqual({ key: 'threed_change', answer: 'no', impacted: false })
+  })
+
+  it('restToNo leaves them as stored', () => {
+    const out = restToNo(DEFS, { impacts: EARLIER }).impacts as unknown[]
+    for (const e of EARLIER) expect(out).toContainEqual(e)
+    expect(out).toHaveLength(EARLIER.length + DEFS.length)
+  })
+
+  it('earlierAnswers and checklistItemLabel', () => {
+    expect(earlierAnswers(DEFS, { impacts: [...EARLIER, { key: 'threed_change', answer: 'no', impacted: false }] })
+      .map((i) => i.key)).toEqual(['scrap_increase', 'visual_risk', 'retired_key_x'])
+    expect(checklistItemLabel({ key: 'scrap_increase' }, DEFS, 'de')).toBe('Ausschusserhöhung')
+    expect(checklistItemLabel({ key: 'threed_change' }, DEFS)).toBe('3D change necessary')
+    expect(checklistItemLabel({ label: 'Free line' }, DEFS)).toBe('Free line')
   })
 })
