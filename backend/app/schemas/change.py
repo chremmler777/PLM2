@@ -1,4 +1,5 @@
 """Pydantic schemas for Change Management."""
+import json
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -214,6 +215,21 @@ class ChangelogResponse(BaseModel):
     old_value: Optional[str] = None
     new_value: Optional[str] = None
 
+    @field_validator("old_value", "new_value", mode="before")
+    @classmethod
+    def _decode_json_string(cls, v: Any) -> Any:
+        """The changelog stores its values as JSON text, so a status reads
+        '"on_hold"' in the column. A JSON string goes out as its plain value
+        ('on_hold'); JSON objects, numbers and non-JSON text stay as stored."""
+        if isinstance(v, str) and v.startswith('"'):
+            try:
+                decoded = json.loads(v)
+            except ValueError:
+                return v
+            if isinstance(decoded, str):
+                return decoded
+        return v
+
     class Config:
         from_attributes = True
 
@@ -304,6 +320,9 @@ class ChangeResponse(BaseModel):
     bank_build_mode: Optional[str] = None
     bank_build_note: Optional[str] = None
     scrap_quote_price: Optional[float] = None
+    # Whether a scrap quote price is on record. Never redacted: a viewer who
+    # may not read the price still needs to know one exists (reads "set").
+    scrap_price_set: bool = False
     bank_build_set_by: Optional[int] = None
     bank_build_set_by_name: Optional[str] = None
     bank_build_set_at: Optional[datetime] = None
@@ -350,6 +369,7 @@ class ChangeResponse(BaseModel):
             row["quoted_on_time"] = data.quoted_on_time
             row["blocked_department_ids"] = data.blocked_department_ids
             row["negotiated_final_price"] = data.negotiated_final_price
+            row["scrap_price_set"] = data.scrap_quote_price is not None
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
             return row

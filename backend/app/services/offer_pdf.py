@@ -111,25 +111,42 @@ def plant_line(name, location) -> str:
     return ", ".join(x for x in (name, location) if x)
 
 
-def spread_cbd(lines: list[dict], hidden: float) -> list[float]:
-    """The customer's cost breakdown: `hidden` (factors not shown as their
-    own line, folded risk surcharges) spread over the included cost lines in
-    proportion to their amounts, each rounded to the cent; the last line
-    absorbs the rounding difference so the lines add up to exactly
-    sum(amounts) + hidden. Equal shares when the amounts sum to zero."""
+# The line a hidden amount goes on when no cost line can carry it.
+EXTRA_CBD_LABEL = "Engineering and handling"
+
+
+def spread_cbd(lines: list[dict], hidden: float,
+               target: float | None = None) -> list[tuple[str, float]]:
+    """The customer's cost breakdown as (label, amount) rows: `hidden`
+    (factors not shown as their own line, folded risk surcharges) spread over
+    the included cost lines with a positive amount, in proportion to those
+    amounts, each rounded to the cent. Credit and zero lines keep their own
+    amount (a share proportional to a negative amount would blow the others
+    up). The last positive line absorbs the rounding difference so the rows
+    add up to exactly `target` (default sum(amounts) + hidden: the caller
+    passes what the printed total leaves for the breakdown once the other
+    printed rows are taken off, each as rounded on the page). With no
+    positive line the hidden amount is its own row, EXTRA_CBD_LABEL."""
     amounts = [round(_f(l.get("amount")), 2) for l in lines]
-    if not amounts:
-        return []
-    target = round(sum(amounts) + hidden, 2)
-    base = sum(amounts)
-    if abs(hidden) < 0.005:
-        return amounts
-    if abs(base) >= 0.005:
-        out = [round(a + hidden * a / base, 2) for a in amounts]
-    else:
-        out = [round(a + hidden / len(amounts), 2) for a in amounts]
-    out[-1] = round(target - sum(out[:-1]), 2)
-    return out
+    labels = [l.get("label") or "" for l in lines]
+    if target is None:
+        target = sum(amounts) + hidden
+    target = round(target, 2)
+    pos = [i for i, a in enumerate(amounts) if a > 0]
+    out = list(amounts)
+    if pos:
+        base = sum(amounts[i] for i in pos)
+        if abs(hidden) >= 0.005:
+            for i in pos:
+                out[i] = round(amounts[i] + hidden * amounts[i] / base, 2)
+        last = pos[-1]
+        out[last] = round(target - (sum(out) - out[last]), 2)
+        return list(zip(labels, out))
+    rows = list(zip(labels, out))
+    rest = round(target - sum(out), 2)
+    if abs(rest) >= 0.005:
+        rows.append((EXTRA_CBD_LABEL, rest))
+    return rows
 
 
 def _d(v) -> str:
@@ -454,15 +471,23 @@ def render_offer_pdf(ctx: dict) -> bytes:
             hidden += _f(totals.get("risks_total"))
         included = [l for l in data.get("cost_lines") or []
                     if isinstance(l, dict) and l.get("include", True)]
-        amounts = spread_cbd(included, hidden)
+        # Every row below the cost basis is printed rounded to the cent; the
+        # breakdown takes what the printed total leaves, so the page adds up.
+        risks_row = (round(_f(totals.get("risks_total")), 2)
+                     if show_risk and _f(totals.get("risks_total")) else 0.0)
+        free_rows = [round(_f(ff.get("amount")), 2)
+                     for ff in data.get("free_fields") or []
+                     if isinstance(ff, dict) and _f(ff.get("amount"))]
+        target = (round(_f(totals.get("total_one_time")), 2)
+                  - sum(round(_f(f.get("amount")), 2) for f in shown_factors)
+                  - risks_row - round(_f(totals.get("scrap")), 2) - sum(free_rows))
+        cbd = spread_cbd(included, hidden, target)
         # No category column: internal vs external is our business.
         rows = [[_p("Cost breakdown", head_c), _p("Amount", head_r)]]
-        for line, amount in zip(included, amounts):
-            rows.append([_p(line.get("label"), cell, CELL_TEXT_MAX),
+        for label, amount in cbd:
+            rows.append([_p(label, cell, CELL_TEXT_MAX),
                          _p(_money(amount, cur), cell_r)])
-        if not included and abs(hidden) >= 0.005:
-            rows.append([_p("Costs", cell), _p(_money(hidden, cur), cell_r)])
-        basis = round(sum(amounts), 2) if included else round(hidden, 2)
+        basis = round(sum(a for _, a in cbd), 2)
         rows.append([_p("Cost basis", cell_b), _p(_money(basis, cur), cell_rb)])
         subtotal = [len(rows) - 1]
         for f in shown_factors:

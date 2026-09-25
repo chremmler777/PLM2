@@ -1228,6 +1228,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Remaining stock is scrapped and the bank is rebuilt.',
   },
   'bankbuild.scrapPrice': { de: 'Ausschuss-Angebotspreis', en: 'Scrap quote price' },
+  'bankbuild.scrapPriceHidden': { de: 'gesetzt (verborgen)', en: 'set (hidden)' },
   'bankbuild.scrapPriceHint': {
     de: 'Die Ausschusskosten trägt der Kunde - als zusätzliches Angebot.',
     en: 'The customer bears the scrap cost - as an additional quote.',

@@ -146,7 +146,7 @@ export default function ReleaseTab({
   const after = AFTER.includes(change.status)
 
   const validationDone = after || ((validation?.departments?.length ?? 0) > 0
-    && (validation?.departments ?? []).every((d) => d.checks.every((c) => c.status === 'passed')))
+    && (validation?.departments ?? []).every((d) => d.checks.every((c) => c.retired || c.status === 'passed')))
   const checklistDone = after || (!!release && release.checks.length > 0 && release.open_count === 0)
   const lessonsDone = !!release?.lessons?.done_at
   const releasedDone = after

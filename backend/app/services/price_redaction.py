@@ -30,19 +30,32 @@ SCALAR_PRICE_ACTIONS = frozenset((
     "cost_lines_updated", "internal_costs_approved", "quoted_price_updated",
 ))
 
-# The four money fields of the change header.
+# The money fields of the change header (negotiated_final_price is the
+# detail response's read-through of the final negotiation round).
 CHANGE_PRICE_FIELDS = ("estimated_cost", "quoted_price", "scrap_quote_price",
-                       "internal_approved_amount")
+                       "internal_approved_amount", "negotiated_final_price")
 
 # ChangeChangelog.field_name values whose old_value/new_value hold a raw
 # money amount — blanked for a non-price viewer same as everything else.
 MONEY_FIELD_NAMES = frozenset(("cost_impact", "internal_approved_amount"))
 
 
+# Free text an offer_* entry carries that is internal commercial talk (the
+# change note on a sent offer, why an expired offer was accepted anyway).
+OFFER_NOTE_KEYS = frozenset(("note", "expired_override_reason"))
+
+
+def _is_offer_action(action: Optional[str]) -> bool:
+    return bool(action) and action.startswith("offer_")
+
+
 def redact_value(value: Any, action: Optional[str] = None) -> Any:
-    """A logged value with every price blanked (None), structure kept."""
+    """A logged value with every price blanked (None), structure kept. For
+    an offer_* action the internal note keys are blanked too."""
     if isinstance(value, dict):
-        return {k: (None if k in PRICE_KEYS else redact_value(v))
+        hidden = PRICE_KEYS | OFFER_NOTE_KEYS if _is_offer_action(action) \
+            else PRICE_KEYS
+        return {k: (None if k in hidden else redact_value(v))
                 for k, v in value.items()}
     if isinstance(value, list):
         return [redact_value(v) for v in value]
@@ -80,6 +93,11 @@ def redact_changelog_text(action: str, description: str,
         if notes:
             desc = _TRAILING_NOTE.sub("", desc)
             notes = None
+    elif _is_offer_action(action) and notes:
+        # offer_accepted "... after expiry (why)": the override reason is
+        # internal, same as the offer_sent change note.
+        desc = _TRAILING_NOTE.sub("", desc)
+        notes = None
     elif action == "internal_costs_approved":
         desc = "Internal costs approved"
     elif action == "costing_offer_added":
@@ -119,10 +137,14 @@ def redact_audit_row(row) -> dict:
 
 
 def redact_change_out(out: Any) -> Any:
-    """Null the header's money fields on a pydantic change response."""
+    """Null the header's money fields on a pydantic change response, and the
+    per-department cost_impact of its assessments (detail response)."""
     for f in CHANGE_PRICE_FIELDS:
         if hasattr(out, f):
             setattr(out, f, None)
+    for a in getattr(out, "assessments", None) or []:
+        if hasattr(a, "cost_impact"):
+            a.cost_impact = None
     return out
 
 
@@ -149,3 +171,16 @@ class PriceViewer:
         if change is not None and change.lead_id == self.user.id:
             return True
         return await self._base()
+
+
+async def price_scope(session, viewer, stmt):
+    """`stmt` (selecting from or joined to ChangeRequest) narrowed to the
+    changes whose prices `viewer` may read: all of them for the user-level
+    cost roles (admin, PM, Sales), else only the changes they lead. A None
+    viewer is an internal caller and is not narrowed."""
+    if viewer is None:
+        return stmt
+    if await PriceViewer(session, viewer)._base():
+        return stmt
+    from app.models.change import ChangeRequest
+    return stmt.where(ChangeRequest.lead_id == viewer.id)

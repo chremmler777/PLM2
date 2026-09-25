@@ -211,19 +211,25 @@ class ReportService:
 
     @staticmethod
     async def cost(session: AsyncSession, viewer: Optional[User]) -> dict:
+        from app.services.price_redaction import price_scope
         cost_expr = AssessmentCostLine.internal_cost + AssessmentCostLine.external_cost
 
-        budget_rows = (await session.execute(_org_scope(
+        # Budgets and costs are money: only the changes whose prices the
+        # viewer may read (price_redaction.price_scope) are rolled up.
+        async def _scope(stmt):
+            return await price_scope(session, viewer, _org_scope(stmt, viewer))
+
+        budget_rows = (await session.execute(await _scope(
             select(ChangeRequest.project_id, func.sum(ChangeRequest.estimated_cost))
-            .group_by(ChangeRequest.project_id), viewer,
+            .group_by(ChangeRequest.project_id),
         ))).all()
 
-        actual_rows = (await session.execute(_org_scope(
+        actual_rows = (await session.execute(await _scope(
             select(ChangeRequest.project_id, func.sum(cost_expr))
             .select_from(AssessmentCostLine)
             .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
             .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
-            .group_by(ChangeRequest.project_id), viewer,
+            .group_by(ChangeRequest.project_id),
         ))).all()
 
         project_ids = {pid for pid, _ in (*budget_rows, *actual_rows) if pid is not None}
@@ -248,13 +254,13 @@ class ReportService:
             merged[pid]["actual"] = actual or 0.0
         projects = list(merged.values())
 
-        plant_rows = (await session.execute(_org_scope(
+        plant_rows = (await session.execute(await _scope(
             select(AssessmentCostLine.plant_id, Plant.name, func.sum(cost_expr))
             .select_from(AssessmentCostLine)
             .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
             .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
             .join(Plant, Plant.id == AssessmentCostLine.plant_id)
-            .group_by(AssessmentCostLine.plant_id, Plant.name), viewer,
+            .group_by(AssessmentCostLine.plant_id, Plant.name),
         ))).all()
         plants = [{"plant_id": pid, "name": name, "actual": actual or 0.0}
                   for pid, name, actual in plant_rows]

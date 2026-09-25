@@ -920,6 +920,8 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
 
   it('reads the changelog for the status entry that led into on_hold and resumes to its old_value', async () => {
     change.status = 'on_hold' as ChangeDetail['status']
+    // The API shape: ChangelogResponse decodes the stored JSON text, so a
+    // status arrives as a plain value.
     vi.mocked(changesApi.changelog).mockResolvedValue([
       { id: 1, action: 'status_changed', action_description: 'captured -> scoping', performed_by: 1,
         performed_at: '2026-07-01T00:00:00', field_name: 'status', old_value: 'captured', new_value: 'scoping' },
@@ -935,6 +937,21 @@ describe('ChangeDetailPage Resume goes back to the status before the hold (findi
     await waitFor(() => {
       fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
       expect(changesApi.transition).toHaveBeenCalledWith(1, 'costing', { to: 'costing' })
+    })
+  })
+
+  it('reads JSON-encoded changelog values too (the stored column shape)', async () => {
+    change.status = 'on_hold' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 2, action: 'status_changed', action_description: 'quoted -> on_hold', performed_by: 1,
+        performed_at: '2026-08-01T00:00:00', field_name: 'status', old_value: '"quoted"', new_value: '"on_hold"' },
+    ] as never)
+    wrap('/changes/1')
+    await screen.findByRole('button', { name: 'Resume' })
+    await waitFor(() => expect(changesApi.changelog).toHaveBeenCalledWith(1))
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+      expect(changesApi.transition).toHaveBeenCalledWith(1, 'quoted', { to: 'quoted' })
     })
   })
 

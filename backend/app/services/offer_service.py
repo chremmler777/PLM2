@@ -112,8 +112,8 @@ def read_number(text: str) -> Optional[float]:
     ("1.234" = 1234, "1.234,5" = 1234.5, "1,5" = 1.5); a lone dot that is not
     a thousands group is a decimal point ("1.5", "0.125", "1.2345"); "1,234.50"
     (comma groups, dot last) is 1234.5. None for anything else ("1.23.4",
-    "1,2,3", "1_000", "abc")."""
-    t = re.sub(r"\s", "", text).replace("\u00a0", "").replace("'", "")
+    "1,2,3", "1_000", "1'234", "abc")."""
+    t = re.sub(r"\s", "", text).replace("\u00a0", "")
     if not t:
         return None
     if "," in t and "." in t and t.rfind(".") > t.rfind(","):
@@ -396,6 +396,11 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
             _num(b.get("value")) if b else None)
         if a and b:
             add(f"Risk {label} shown", bool(a.get("show")), bool(b.get("show")))
+            add(f"Risk {k} label", a.get("label") or "", b.get("label") or "")
+            add(f"Risk {label} severity", a.get("severity"), b.get("severity"))
+            add(f"Risk {label} department", a.get("department") or "",
+                b.get("department") or "")
+            add(f"Risk {label} note", a.get("note") or "", b.get("note") or "")
     add("Risk surcharges shown on offer", bool(prev.get("show_risk_surcharge")),
         bool(cur.get("show_risk_surcharge")))
     pc, cc = prev.get("changeover") or {}, cur.get("changeover") or {}
@@ -417,6 +422,7 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
     pt_, ct_ = prev.get("timing") or {}, cur.get("timing") or {}
     add("Timing included", bool(pt_.get("include", True)), bool(ct_.get("include", True)))
     add("Timing weeks from order", pt_.get("weeks_from_order"), ct_.get("weeks_from_order"))
+    add("Timing disclaimer", pt_.get("disclaimer") or "", ct_.get("disclaimer") or "")
     add("Timing milestones",
         [(m.get("label"), m.get("date")) for m in pt_.get("milestones") or []],
         [(m.get("label"), m.get("date")) for m in ct_.get("milestones") or []])
@@ -444,6 +450,30 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
     prec, crec = prev.get("recipient") or {}, cur.get("recipient") or {}
     for k in ("company", "contact", "address"):
         add(f"Recipient {k}", prec.get(k) or "", crec.get(k) or "")
+    return out
+
+
+def snapshot_diff(prev: Optional[dict], cur: dict) -> list[dict]:
+    """What the PDF shows besides the offer data (the quote plan, the
+    impacted parts), the previous version's frozen snapshot against the one
+    this version would freeze now. A previous version without a snapshot
+    (sent before snapshots existed) has nothing to compare: no rows."""
+    if not isinstance(prev, dict):
+        return []
+    out = []
+
+    def tasks(snap):
+        return [(t.get("name"), t.get("start"), int(_num(t.get("duration"))))
+                for t in snap.get("tasks") or [] if isinstance(t, dict)]
+
+    def items(snap):
+        return [(i.get("number"), i.get("name") or "", i.get("index") or "")
+                for i in snap.get("items") or [] if isinstance(i, dict)]
+
+    for field, fn in (("Quote plan", tasks), ("Impacted parts", items)):
+        before, after = fn(prev), fn(cur)
+        if before != after:
+            out.append({"field": field, "before": before, "after": after})
     return out
 
 
@@ -826,19 +856,25 @@ class OfferService:
             raise ChangeError(
                 "The offer includes timing but the quote plan is empty - plan "
                 "it first or leave timing out")
+        snapshot = await OfferService._snapshot(session, change)
         if offer.version >= 2:
             prev = await OfferService._previous_sent(session, change, offer)
-            changed = [d for d in await OfferService._diff_against(
-                session, change, prev, offer) if d["field"] != "Note to the customer"] \
-                if prev is not None else True
-            if prev is not None and not changed:
-                raise ChangeError(
-                    f"Nothing changed since v{prev.version}; change the offer "
-                    f"or keep v{prev.version}")
+            if prev is not None:
+                changed = [d for d in await OfferService._diff_against(
+                    session, change, prev, offer)
+                    if d["field"] != "Note to the customer"]
+                # The plan or the parts on the PDF moved: that is a change the
+                # customer sees too, even with the offer data untouched.
+                changed += snapshot_diff(
+                    (prev.data or {}).get(SNAPSHOT_KEY), snapshot)
+                if not changed:
+                    raise ChangeError(
+                        f"Nothing changed since v{prev.version}; change the "
+                        f"offer or keep v{prev.version}")
         received = received_at or date.today()
         OfferService._check_received(received)
         data = copy.deepcopy(offer.data or {})
-        data[SNAPSHOT_KEY] = await OfferService._snapshot(session, change)
+        data[SNAPSHOT_KEY] = snapshot
         offer.data = data
         for prev in await OfferService.list_offers(session, change):
             if prev.id != offer.id and prev.status == "sent":
@@ -1120,6 +1156,23 @@ class OfferService:
         }
 
     @staticmethod
+    def _legacy_pdf_defaults(change: ChangeRequest, offer: ChangeOffer,
+                             out: dict) -> None:
+        """A version sent before snapshots existed went out with every factor
+        as its own line and the change's description as its scope (neither
+        the 'show' flag nor scope_text existed yet). Its PDF is re-rendered
+        the way it was sent, not with today's defaults."""
+        raw = offer.data if isinstance(offer.data, dict) else {}
+        unflagged = {f.get("key") for f in raw.get("factors") or []
+                     if isinstance(f, dict) and "show" not in f}
+        for f in (out["data"].get("factors") or []) + \
+                (out["totals"].get("factors") or []):
+            if isinstance(f, dict) and f.get("key") in unflagged:
+                f["show"] = True
+        if not str(raw.get("scope_text") or "").strip():
+            out["data"]["scope_text"] = (change.description or "").strip()
+
+    @staticmethod
     async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
                         offer: ChangeOffer) -> bytes:
         """A draft renders from the change as it is now; a version that went
@@ -1128,6 +1181,8 @@ class OfferService:
         from app.services.offer_pdf import render_offer_pdf
         out = (await OfferService.serialize(session, change, [offer]))[0]
         snap = (offer.data or {}).get(SNAPSHOT_KEY) if offer.status != "draft" else None
+        if offer.status != "draft" and not isinstance(snap, dict):
+            OfferService._legacy_pdf_defaults(change, offer, out)
         if not isinstance(snap, dict):
             snap = await OfferService._snapshot(session, change)
 

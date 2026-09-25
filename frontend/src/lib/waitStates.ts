@@ -238,7 +238,7 @@ export function resolveWaitStates(
   // different consequence — a validated weight the quote has not caught up with.
   if (change.status === 'in_validation' && validation) {
     const owing = (validation.departments ?? [])
-      .filter((d) => d.checks.some((c) => c.status !== 'passed')).length
+      .filter((d) => d.checks.some((c) => !c.retired && c.status !== 'passed')).length
     if (owing > 0) {
       waits.push({
         key: 'validation-checks',

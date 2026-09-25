@@ -191,3 +191,20 @@ export function changeTabLabel(raw: string, customerRelevant?: boolean | null, s
     default: return tb ? tb[0].toUpperCase() + tb.slice(1) : tb
   }
 }
+
+/** A changelog value as plain text. The API returns plain values, but the
+ *  column stores JSON text ('"on_hold"'), so an older backend or a cached
+ *  response may still carry the encoded form: decode a JSON string, keep
+ *  anything else as it is. */
+export function decodeLogValue(v: string | null | undefined): string | null {
+  if (v == null) return null
+  if (v.startsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(v)
+      if (typeof parsed === 'string') return parsed
+    } catch {
+      // not JSON: keep the text
+    }
+  }
+  return v
+}

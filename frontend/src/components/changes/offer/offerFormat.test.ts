@@ -24,6 +24,11 @@ describe('parseNum (German input)', () => {
     ['1.2345', 1.2345],
     ['1.234,56', 1234.56],
     ['0.125,5', null],
+    // en-US with both separators, same as the backend's read_number
+    ['1,234.50', 1234.5],
+    ['12,345,678.9', 12345678.9],
+    ['12,34.5', null],
+    ["1'234", null],
   ] as const)('%s -> %s', (input, out) => {
     expect(parseNum(input)).toBe(out)
   })

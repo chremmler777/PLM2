@@ -38,6 +38,7 @@ import { t } from '../i18n/cmLabels';
 import {
   STATUS_LABELS, OFF_PATH_STATUSES, EVERYDAY_TABS, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, type ChangeTab,
+  decodeLogValue,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
@@ -197,9 +198,10 @@ export default function ChangeDetailPage() {
     enabled: !!change && change.status === 'on_hold',
   });
   const resumeTo = (() => {
-    const holdEntries = (changelog ?? []).filter((e) => e.field_name === 'status' && e.new_value === 'on_hold');
+    const holdEntries = (changelog ?? []).filter(
+      (e) => e.field_name === 'status' && decodeLogValue(e.new_value) === 'on_hold');
     const lastHold = holdEntries[holdEntries.length - 1];
-    return lastHold?.old_value || 'in_assessment';
+    return decodeLogValue(lastHold?.old_value) || 'in_assessment';
   })();
   const { data: departments = [] } = useDepartments();
   const { isAdmin: isRealAdmin, userId } = useAuth();

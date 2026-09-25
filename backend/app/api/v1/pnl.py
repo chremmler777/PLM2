@@ -78,5 +78,11 @@ async def change_actuals(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if change is None:
         raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.negotiation_service import NegotiationService
+    if not await NegotiationService.may_read(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Project Management, Sales, the change lead or an "
+                   "admin may read a change's actuals")
     summation = await CostService.summation(db, change)
     return {"change_id": change.id, "actuals": summation["actuals"]}

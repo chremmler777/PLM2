@@ -121,8 +121,10 @@ async def test_get_summation_out_of_org_scope_is_404(client, eng_auth, org_b_aut
     res = await client.get(f"/api/v1/changes/{change_b['id']}/summation", headers=eng_auth)
     assert res.status_code == 404, res.text
 
+    # In scope, the summation is still money: org B's engineer is no cost
+    # role, so the answer is the permission refusal, not the 404.
     res = await client.get(f"/api/v1/changes/{change_b['id']}/summation", headers=org_b_auth)
-    assert res.status_code == 200, res.text
+    assert res.status_code == 403, res.text
 
 
 async def test_get_gates_out_of_org_scope_is_404(client, eng_auth, org_b_auth, seed, org_b):

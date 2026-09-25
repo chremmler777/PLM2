@@ -235,6 +235,9 @@ export interface ChangeRequest {
   bank_build_note?: string | null;
   /** Only set for planned scrap: the additional quote the customer bears. */
   scrap_quote_price?: number | null;
+  /** A scrap quote price is on record. Never redacted: a viewer who may not
+   *  read prices (scrap_quote_price null) still knows one exists. */
+  scrap_price_set?: boolean;
   bank_build_set_by_name?: string | null;
   bank_build_set_at?: string | null;
   /** Set once Sales has put the plan in front of the customer. */
@@ -822,6 +825,9 @@ export interface ValidationCheck {
   note?: string | null;
   checked_by_name?: string | null;
   checked_at?: string | null;
+  /** No longer in the catalog: kept for the record when it was answered,
+   *  never owed. Every count and gate skips it (the backend does too). */
+  retired?: boolean;
 }
 
 export interface ValidationDepartmentState {

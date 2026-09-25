@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { STATUS_LABELS, NEXT_STATUS, STATUS_PILL, OFF_PATH_STATUSES, STATUS_HINTS, stepPosition } from './changeStatus'
+import { STATUS_LABELS, NEXT_STATUS, STATUS_PILL, OFF_PATH_STATUSES, STATUS_HINTS, stepPosition, decodeLogValue } from './changeStatus'
 import { CHANGE_STATUS_ORDER } from '../types/change'
 import { t } from '../i18n/cmLabels'
 
@@ -80,5 +80,16 @@ describe('activeTabsFor', () => {
     expect(activeTabsFor('quoted', true)).toEqual(['offer'])
     expect(activeTabsFor('approved', false)).toEqual(['timing'])
     expect(activeTabsFor('on_hold', true)).toEqual([])
+  })
+})
+
+describe('decodeLogValue', () => {
+  it('decodes a JSON string and keeps everything else', () => {
+    expect(decodeLogValue('"on_hold"')).toBe('on_hold')
+    expect(decodeLogValue('on_hold')).toBe('on_hold')
+    expect(decodeLogValue('{"mode": "x"}')).toBe('{"mode": "x"}')
+    expect(decodeLogValue('"unterminated')).toBe('"unterminated')
+    expect(decodeLogValue(null)).toBeNull()
+    expect(decodeLogValue(undefined)).toBeNull()
   })
 })

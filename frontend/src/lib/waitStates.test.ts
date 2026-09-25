@@ -276,6 +276,18 @@ describe('resolveWaitStates', () => {
     expect(waits[0].tab).toBe('release')
   })
 
+  it('does not wait on a retired validation row', () => {
+    const waits = resolveWaitStates(
+      change({ status: 'in_validation' }), [], deptName, [], {}, {
+        departments: [
+          { department_id: 2, checks: [
+            { check_key: 'sampled', status: 'passed' },
+            { check_key: 'old_check', status: 'open', retired: true }] },
+        ],
+      })
+    expect(waits).toEqual([])
+  })
+
   it('names the unacknowledged weight delta as its own wait, on Sales', () => {
     const state = {
       departments: [{ department_id: 4, checks: [

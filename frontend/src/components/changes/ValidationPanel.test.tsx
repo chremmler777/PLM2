@@ -43,6 +43,12 @@ describe('validation helpers', () => {
     ] } as never)).toBe(2)
   })
 
+  it('never counts a retired row as owed', () => {
+    expect(departmentOpenChecks({ department_id: 4, checks: [
+      check({ status: 'passed' }), check({ check_key: 'old', status: 'open', retired: true }),
+    ] } as never)).toBe(0)
+  })
+
   it('asks for an acknowledgement only on a non-zero, unanswered delta', () => {
     expect(weightAckOutstanding(state({ weight_delta_g: 12 }) as never)).toBe(true)
     expect(weightAckOutstanding(state({ weight_delta_g: 0 }) as never)).toBe(false)
@@ -204,6 +210,17 @@ describe('ValidationPanel', () => {
     expect(screen.getByTestId('validation-checkedby-4-sampled').textContent)
       .toContain('Tim Tool')
     expect(screen.queryByTestId('validation-pass-4-sampled')).toBeNull()
+    expect(screen.queryByTestId('validation-escalate')).toBeNull()
+  })
+
+  it('counts only live checks and offers no escalation when only a retired row is open', async () => {
+    vi.mocked(changesApi.validationState).mockResolvedValue(state({
+      departments: [{ department_id: 4, checks: [
+        check({ status: 'passed' }), check({ check_key: 'old', status: 'open', retired: true }),
+      ] }],
+    }) as never)
+    render_({ canEscalate: true })
+    expect((await screen.findByTestId('validation-open-4')).textContent).toBe('1/1')
     expect(screen.queryByTestId('validation-escalate')).toBeNull()
   })
 

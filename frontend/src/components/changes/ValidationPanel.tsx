@@ -53,9 +53,13 @@ const checkLabel = (key: string, given?: string | null): string => {
   return label === `validation.check.${key}` ? key : label
 }
 
+/** The checks still asked: a retired row is on the record, never owed. */
+const liveChecks = (d: ValidationDepartmentState): ValidationDepartmentState['checks'] =>
+  d.checks.filter((c) => !c.retired)
+
 /** Anything that is not an explicit pass is still owed. */
 export const departmentOpenChecks = (d: ValidationDepartmentState): number =>
-  d.checks.filter((c) => c.status !== 'passed').length
+  liveChecks(d).filter((c) => c.status !== 'passed').length
 
 /**
  * Is the commercial side of validation settled? A delta of zero (or none yet)
@@ -252,7 +256,7 @@ function DepartmentBlock({
         <span data-testid={`validation-open-${dept.department_id}`}
           className={`ml-auto rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${
             open > 0 ? 'bg-amber-900/70 text-amber-200' : 'bg-emerald-900/70 text-emerald-200'}`}>
-          {`${dept.checks.length - open}/${dept.checks.length}`}
+          {`${liveChecks(dept).length - open}/${liveChecks(dept).length}`}
         </span>
       </div>
       <ul className="space-y-1">
@@ -322,7 +326,7 @@ export default function ValidationPanel({
   const all = state.departments ?? []
   // Nothing to send back once every check has passed.
   const allPassed = all.length > 0 && all.every((d) => d.checks.length > 0
-    && d.checks.every((c) => c.status === 'passed'))
+    && liveChecks(d).every((c) => c.status === 'passed'))
   const visible = canSeeAll
     ? all
     : all.filter((d) => myDepartmentIds.includes(d.department_id))

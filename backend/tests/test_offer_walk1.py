@@ -193,12 +193,15 @@ async def test_show_flags_default_and_totals_unchanged():
 async def test_spread_cbd_keeps_the_sum_to_the_cent():
     from app.services.offer_pdf import spread_cbd
     lines = [{"amount": 100}, {"amount": 200}, {"amount": 33.33}]
-    out = spread_cbd(lines, 10.01)
+    out = [a for _, a in spread_cbd(lines, 10.01)]
     assert round(sum(out), 2) == round(333.33 + 10.01, 2)
     assert out[0] < out[1] and out[0] > 100
-    assert spread_cbd(lines, 0) == [100, 200, 33.33]
-    assert spread_cbd([{"amount": 0}, {"amount": 0}, {"amount": 0}], 1) == [0.33, 0.33, 0.34]
-    assert spread_cbd([], 5) == []
+    assert [a for _, a in spread_cbd(lines, 0)] == [100, 200, 33.33]
+    # No positive line to carry it: the hidden amount is its own row.
+    assert spread_cbd([{"amount": 0, "label": "A"}, {"amount": 0, "label": "B"}], 1) \
+        == [("A", 0), ("B", 0), ("Engineering and handling", 1)]
+    assert spread_cbd([], 5) == [("Engineering and handling", 5)]
+    assert spread_cbd([], 0) == []
 
 
 def _pdf_ctx(data, *, status="sent", currency="EUR", change_note=None):
@@ -284,6 +287,8 @@ NUMBER_VECTORS = [
     ("1.2345", 1.2345), ("1.234,56", 1234.56), ("0.125,5", None),
     # backend extras: en-US with both separators, and junk
     ("1,234.50", 1234.5), ("1_000", None), ("12,34.5", None),
+    # Swiss apostrophe grouping is refused, as on the frontend
+    ("1'234", None), ("1'234,50", None),
 ]
 
 

@@ -5,6 +5,7 @@ import ReleaseTab, { closingFigures } from './ReleaseTab'
 import ReleaseChecklist from './ReleaseChecklist'
 import LessonsStep from './LessonsStep'
 import { changeReleaseApi } from '../../../api/changeRelease'
+import { changesApi } from '../../../api/changes'
 import type { ChangeDetail } from '../../../types/change'
 import type { ReleaseCheck, ReleaseState } from '../../../types/changeRelease'
 
@@ -154,6 +155,18 @@ describe('ReleaseTab', () => {
     // The page's advance runs the transition; a refusal opens its DeviationBanner.
     fireEvent.click(btn)
     expect(onAdvance).toHaveBeenCalledWith('released')
+  })
+
+  it('counts validation done with only a retired row still open', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    vi.mocked(changesApi.validationState).mockResolvedValue({ departments: [{ department_id: 4, checks: [
+      { check_key: 'sampled', status: 'passed' },
+      { check_key: 'old_check', status: 'open', retired: true },
+    ] }] } as never)
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing={false} />)
+    await waitFor(() => expect(screen.getByRole('link', { name: /Validation checks/ }).className)
+      .toContain('border-emerald-800'))
   })
 
   it('disables Release only while a transition runs', async () => {

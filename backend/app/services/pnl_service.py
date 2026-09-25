@@ -70,6 +70,10 @@ class PnlService:
             stmt = stmt.where(ChangeRequest.raised_at < datetime.combine(
                 parsed_to, datetime.min.time()) + timedelta(days=1))
         stmt = _org_scope(stmt, viewer)
+        # Revenue and margin are prices: only the changes the viewer may read
+        # prices for (price_redaction.PriceViewer) are in their P&L.
+        from app.services.price_redaction import price_scope
+        stmt = await price_scope(session, viewer, stmt)
         changes = (await session.execute(stmt)).scalars().all()
         if not changes:
             return []

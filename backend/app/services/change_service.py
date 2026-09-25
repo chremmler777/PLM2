@@ -68,7 +68,7 @@ ALLOWED_TRANSITIONS = {
     "in_implementation": {"in_validation", "on_hold", "cancelled"},
     "in_validation":     {"released", "in_implementation", "on_hold", "cancelled"},
     "released":          {"closed"},
-    "on_hold":           {"scoping", "in_assessment", "costing", "quoting",
+    "on_hold":           {"captured", "scoping", "in_assessment", "costing", "quoting",
                           "quoted", "approved",
                           "in_implementation", "in_validation", "cancelled"},
     # Rejection is reversible: a change rejected in error goes back to scoping
@@ -767,13 +767,14 @@ class ChangeService:
         # HARD: a hold is resumed into the stage it was taken from.
         # Implementation starts once, out of 'approved', after the timing is
         # validated; resuming a hold taken earlier must not jump there.
-        if change.status == "on_hold" and to_status == "in_implementation":
+        # With the pre-hold status on record, that status (or cancelled) is
+        # the only way out of the hold.
+        if change.status == "on_hold" and to_status != "cancelled":
             before = await ChangeService._status_before_hold(session, change)
-            if before is not None and before not in ("in_implementation",
-                                                      "in_validation"):
+            if before is not None and before != "on_hold" and to_status != before:
                 raise ChangeError(
-                    "Resume to the stage the change was in; implementation "
-                    "starts after the timing is validated")
+                    f"Resume to the stage the change was in before the hold: "
+                    f"'{before}' (or cancel it)")
 
         # HARD precondition: recall (in_assessment -> scoping) is a correction for
         # a premature submit, not a silent undo of real work. Allowed only while no
@@ -1537,6 +1538,10 @@ class ChangeService:
                 "The bank build is planned after acceptance, while the change "
                 "is approved")
         if mode == "planned_scrap":
+            if scrap_quote_price is None and change.scrap_quote_price is not None:
+                # Omitted (the caller's view had the price redacted, or the
+                # user did not touch it): the stored quote stands.
+                scrap_quote_price = float(change.scrap_quote_price)
             if scrap_quote_price is None or scrap_quote_price <= 0:
                 raise ChangeError(
                     "Planned scrap requires an additional scrap quote price: "

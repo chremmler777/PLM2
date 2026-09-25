@@ -69,6 +69,34 @@ describe('BankBuildCard', () => {
     }))
   })
 
+  it('keeps a hidden scrap price: saves without it and says one is set', async () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_price_set: true }) })
+    expect((screen.getByTestId('bank-build-scrap-price') as HTMLInputElement).placeholder)
+      .toBe(t('bankbuild.scrapPriceHidden'))
+    expect(screen.queryByTestId('bank-build-need-price')).toBeNull()
+    fireEvent.change(screen.getByTestId('bank-build-note'), { target: { value: 'moved to CW40' } })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenCalledWith(7, {
+      mode: 'planned_scrap', note: 'moved to CW40',
+    }))
+  })
+
+  it('sends the scrap price only when it was edited', async () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_quote_price: 900, scrap_price_set: true }) })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenLastCalledWith(7, { mode: 'planned_scrap' }))
+    fireEvent.change(screen.getByTestId('bank-build-scrap-price'), { target: { value: '950' } })
+    fireEvent.click(screen.getByTestId('bank-build-save'))
+    await waitFor(() => expect(changesApi.setBankBuild).toHaveBeenLastCalledWith(7, {
+      mode: 'planned_scrap', scrap_quote_price: 950,
+    }))
+  })
+
+  it('reads "set (hidden)" to a viewer who may not read the price', () => {
+    wrap({ change: change({ bank_build_mode: 'planned_scrap', scrap_price_set: true }), canSetMode: false })
+    expect(screen.getByTestId('bank-build-price-hidden').textContent).toBe(t('bankbuild.scrapPriceHidden'))
+  })
+
   it('holds the save shut until a mode is picked', () => {
     wrap()
     expect((screen.getByTestId('bank-build-save') as HTMLButtonElement).disabled).toBe(true)

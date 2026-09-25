@@ -121,6 +121,11 @@ async def test_planned_scrap_needs_a_scrap_quote(client, admin_auth, seed, roles
                                  "note": "scrap 1200 pcs"}, headers=sched)
     assert res.status_code == 200, res.text
     assert res.json()["bank_build_mode"] == "planned_scrap"
+    # Scheduling writes the price but is no cost role: it reads back only
+    # that one is set; an admin reads the amount.
+    assert res.json()["scrap_quote_price"] is None
+    assert res.json()["scrap_price_set"] is True
+    res = await client.get(f"/api/v1/changes/{cid}", headers=admin_auth)
     assert res.json()["scrap_quote_price"] == 4200.50
 
 

@@ -1189,17 +1189,28 @@ async def transition_change(
                 detail="Only Project Management, Sales, the change lead or an "
                        "admin may send a change back from validation to "
                        "implementation")
-    # Releasing and closing are the programme's calls: Project Management,
-    # the change lead or an admin (acting-as aware, like the release tab).
-    # (Only for a hop that exists: an illegal one keeps its 400.)
+    # Releasing and closing a released change are the programme's calls:
+    # Project Management, the change lead or an admin (acting-as aware, like
+    # the release tab). (Only for a hop that exists: an illegal one keeps its
+    # 400.)
     if (body.to_status in ("released", "closed") and body.to_status
             in ALLOWED_TRANSITIONS.get(change.status, set())):
         from app.services.release_service import ReleaseService
-        if not await ReleaseService.is_pm_or_lead(db, change, current_user):
+        allowed = await ReleaseService.is_pm_or_lead(db, change, current_user)
+        # Closing a rejection is the end of the customer conversation (the
+        # letter went out): Sales closes it too.
+        if (not allowed and change.status == "rejected"
+                and body.to_status == "closed"):
+            allowed = await ChangeService._user_in_department(
+                db, current_user, "Sales")
+        if not allowed:
             raise HTTPException(
                 status_code=403,
-                detail="Only Project Management, the change lead or an admin "
-                       f"may move a change to '{body.to_status}'")
+                detail=("Only Sales, Project Management, the change lead or an "
+                        "admin may close a rejected change"
+                        if change.status == "rejected" else
+                        "Only Project Management, the change lead or an admin "
+                        f"may move a change to '{body.to_status}'"))
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
@@ -1760,11 +1771,23 @@ async def get_cost_lines(
     a deleted line stays deleted.
     """
     from app.services.cost_service import CostService
+    from app.services.costing_position_service import CostingPositionService
     a = await db.get(ChangeAssessment, aid)
     if not a or a.change_id != change_id:
         raise HTTPException(status_code=404, detail="Assessment not found")
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
-    if change is not None and await CostService.seed_from_checklist(
+    if change is None:
+        raise HTTPException(status_code=404, detail="Change not found")
+    # The cost roles read every department's grid; a department member reads
+    # their own department's only (same rule as the costing positions).
+    visible = await CostingPositionService.readable_department_ids(
+        db, change, current_user)
+    if visible is not None and a.department_id not in visible:
+        raise HTTPException(
+            status_code=403,
+            detail="Only that department, Project Management, Sales, the "
+                   "change lead or an admin may read its cost lines")
+    if await CostService.seed_from_checklist(
             db, change, a, current_user.id):
         await db.commit()
         await db.refresh(a, ["cost_lines"])
@@ -2063,9 +2086,15 @@ async def get_summation(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     from app.services.cost_service import CostService
+    from app.services.negotiation_service import NegotiationService
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    if not await NegotiationService.may_read(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Project Management, Sales, the change lead or an "
+                   "admin may read the cost summation")
     return await CostService.summation(db, change)
 
 

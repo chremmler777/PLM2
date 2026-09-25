@@ -34,7 +34,7 @@ const onDay = (iso?: string | null) => formatDate(iso)
 
 interface Props {
   change: Pick<ChangeRequest,
-    'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price'
+    'id' | 'status' | 'bank_build_mode' | 'bank_build_note' | 'scrap_quote_price' | 'scrap_price_set'
     | 'bank_build_set_by_name' | 'bank_build_set_at'
     | 'plan_published_by_name' | 'plan_published_at'>
   /** Scheduling / PM / change lead / admin — the page derives it. */
@@ -51,6 +51,14 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
   const [note, setNote] = useState(change.bank_build_note ?? '')
   const [price, setPrice] = useState(
     change.scrap_quote_price != null ? String(change.scrap_quote_price) : '')
+  // The price is sent only when the user touched it: a viewer who may not
+  // read prices gets null here, and saving that back must not wipe (or be
+  // refused for) the quote on record. The backend keeps the stored price
+  // when none is sent.
+  const [priceEdited, setPriceEdited] = useState(false)
+  const priceHidden = change.scrap_quote_price == null && !!change.scrap_price_set
+  const priceOnRecord = change.bank_build_mode === 'planned_scrap'
+    && (change.scrap_quote_price != null || !!change.scrap_price_set)
 
   const published = !!change.plan_published_at
   // The backend only accepts the decision while the change sits at `approved`;
@@ -58,7 +66,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
   const editable = canSetMode && change.status === 'approved'
   const priceValue = Number(price.trim())
   const priceOk = price.trim() !== '' && !Number.isNaN(priceValue)
-  const missingPrice = mode === 'planned_scrap' && !priceOk
+  const missingPrice = mode === 'planned_scrap' && !priceOk && (priceEdited || !priceOnRecord)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['change', change.id] })
 
@@ -66,7 +74,7 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
     mutationFn: () => changesApi.setBankBuild(change.id, {
       mode: mode as BankBuildMode,
       ...(note.trim() !== '' ? { note: note.trim() } : {}),
-      ...(mode === 'planned_scrap' ? { scrap_quote_price: priceValue } : {}),
+      ...(mode === 'planned_scrap' && priceEdited && priceOk ? { scrap_quote_price: priceValue } : {}),
     }),
     onSuccess: invalidate,
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the bank-build plan'),
@@ -112,7 +120,8 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
                 {t('bankbuild.scrapPrice')}
               </label>
               <input type="number" data-testid="bank-build-scrap-price"
-                value={price} onChange={(e) => setPrice(e.target.value)}
+                value={price} onChange={(e) => { setPrice(e.target.value); setPriceEdited(true) }}
+                placeholder={priceHidden ? t('bankbuild.scrapPriceHidden') : undefined}
                 className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 w-40" />
               <p data-testid="bank-build-scrap-hint" className="text-xs text-amber-300 mt-1">
                 {t('bankbuild.scrapPriceHint')}
@@ -151,7 +160,9 @@ export default function BankBuildCard({ change, canSetMode = false, canPublish =
           </p>
           {change.bank_build_mode === 'planned_scrap' && (
             <p className="text-xs text-slate-400">
-              {t('bankbuild.scrapPrice')}: {formatMoney(change.scrap_quote_price)}
+              {t('bankbuild.scrapPrice')}: {priceHidden
+                ? <span data-testid="bank-build-price-hidden">{t('bankbuild.scrapPriceHidden')}</span>
+                : formatMoney(change.scrap_quote_price)}
             </p>
           )}
           {change.bank_build_note && (
