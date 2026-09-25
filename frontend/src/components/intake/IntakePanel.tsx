@@ -7,15 +7,14 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import Button from '../common/Button'
+import { toastError } from '../../lib/apiError'
 import { intakesApi, ROUTE_LABELS, suggestionReason, type Intake } from '../../api/intakes'
 import { usePartIntakes } from '../../hooks/queries/useIntakes'
-import { formatDate } from '../../lib/format'
+import { formatCalendarDate, formatDate } from '../../lib/format'
 import { STATUS_LABELS } from '../../lib/changeStatus'
 import type { ChangeStatus } from '../../types/change'
 import RouteDialog from './RouteDialog'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 export default function IntakePanel({ partId, onDecided }: { partId: number; onDecided?: () => void }) {
   const qc = useQueryClient()
@@ -33,7 +32,7 @@ export default function IntakePanel({ partId, onDecided }: { partId: number; onD
       qc.invalidateQueries({ queryKey: ['changes'] })
       onDecided?.()
     },
-    onError: (e) => toast.error(errDetail(e) ?? 'Could not decide the route'),
+    onError: (e) => { toastError(e, 'Could not decide the route') },
   })
   const intakes = data?.intakes ?? []
   if (intakes.length === 0) return null
@@ -49,7 +48,7 @@ export default function IntakePanel({ partId, onDecided }: { partId: number; onD
               Index {i.revision_name}{i.customer_index ? ` (customer ${i.customer_index})` : ''} pending triage
             </p>
             <p className="mt-0.5 text-sm text-amber-100/70">
-              {i.source_label}, received {formatDate(i.received_at)}{i.received_by_name ? ` by ${i.received_by_name}` : ''}
+              {i.source_label}, received {formatCalendarDate(i.received_at)}{i.received_by_name ? ` by ${i.received_by_name}` : ''}
               {`. ${i.file_count} file${i.file_count === 1 ? '' : 's'}`}
               {i.active_revision_name ? `. Active until decided: ${i.active_revision_name}` : '. Nothing is active until decided'}
             </p>
@@ -59,10 +58,9 @@ export default function IntakePanel({ partId, onDecided }: { partId: number; onD
             </p>
           </div>
           {i.can_decide ? (
-            <button data-testid={`triage-${i.id}`} onClick={() => setDeciding(i)}
-              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500">
+            <Button variant="primary" data-testid={`triage-${i.id}`} onClick={() => setDeciding(i)}>
               Decide the route
-            </button>
+            </Button>
           ) : (
             <p className="max-w-xs text-xs text-slate-400" data-testid="intake-readonly">
               Development decides the route of a new index. Files and BOM of the pending index can still be completed.

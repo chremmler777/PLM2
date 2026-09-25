@@ -47,6 +47,8 @@ vi.mock('../../api/changes', () => ({
     update: vi.fn(),
     getSummation: vi.fn(),
     listCostPositions: vi.fn(),
+    getImpactTree: vi.fn(),
+    leadCandidates: vi.fn(),
   },
 }));
 
@@ -86,6 +88,11 @@ describe('D1MasterPanel', () => {
     });
     (changesApi.listCostPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     (plantsApi.list as ReturnType<typeof vi.fn>).mockResolvedValue(PLANTS);
+    (changesApi.getImpactTree as ReturnType<typeof vi.fn>).mockResolvedValue({
+      tree: [{ part_id: 99, part_number: '20-1994-001', name: 'Underride cover', children: [] }],
+      impacted_part_ids: [99],
+    });
+    (changesApi.leadCandidates as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 42, name: 'Petra Quality' }]);
   });
   afterEach(() => { cleanup(); });
 
@@ -96,16 +103,19 @@ describe('D1MasterPanel', () => {
     expect(screen.getByText(/Technical release\?/i)).toBeDefined();
   });
 
-  it('renders yes/no/na buttons for each gate', () => {
+  it('renders Yes / No / N/A buttons for each gate, the decision pressed', () => {
     render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
-    const yesBtns = screen.getAllByRole('button', { name: 'yes' });
+    const yesBtns = screen.getAllByRole('button', { name: 'Yes' });
     expect(yesBtns.length).toBe(3);
+    expect(screen.getAllByRole('button', { name: 'N/A' }).length).toBe(3);
+    expect(yesBtns[0].getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('group', { name: /Feasible\?/i })).toBeTruthy();
   });
 
   it('calls putGate when a decision button is clicked', async () => {
     const { changesApi } = await import('../../api/changes');
     render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true) });
-    const noBtns = screen.getAllByRole('button', { name: 'no' });
+    const noBtns = screen.getAllByRole('button', { name: 'No' });
     await act(async () => { fireEvent.click(noBtns[0]); });
     await waitFor(() => {
       expect(changesApi.putGate).toHaveBeenCalledWith(1, 'feasibility', { decision: 'no' });
@@ -196,6 +206,8 @@ describe('D1MasterPanel', () => {
       { gate_key: 'budget', decision: 'no', decided_by: null, decided_at: null, remark: null },
       { gate_key: 'release', decision: 'na', decided_by: null, decided_at: null, remark: null },
     ];
+    const { changesApi } = await import('../../api/changes');
+    (changesApi.getGates as ReturnType<typeof vi.fn>).mockResolvedValue(gatesWithMeta);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     qc.setQueryData(['change-gates', 1], gatesWithMeta);
     qc.setQueryData(['change', 1], CHANGE);
@@ -205,8 +217,33 @@ describe('D1MasterPanel', () => {
     );
     render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
     await waitFor(() => {
-      expect(screen.getByText(/#42/)).toBeDefined();
+      expect(screen.getByTestId('d1-gate-decided-feasibility').textContent)
+        .toBe('Decided by Petra Quality on 15 Mar 2026');
     });
+    expect(screen.queryByText(/#42/)).toBeNull();
+  });
+
+  it('names impacted items by part number and name, never "Part 99"', async () => {
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => expect(screen.getByTestId('d1-item-10').textContent).toContain('20-1994-001'));
+    expect(screen.getByTestId('d1-item-10').textContent).toContain('Underride cover');
+    expect(screen.queryByText(/Part 99/)).toBeNull();
+  });
+
+  it('is a read-only record once the change is closed', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change-gates', 1], GATES);
+    qc.setQueryData(['change', 1], { ...CHANGE, status: 'closed' });
+    qc.setQueryData(['plants'], PLANTS);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
+    expect((await screen.findByTestId('d1-panel')).getAttribute('data-readonly')).toBe('true');
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
+    screen.getAllByRole('button', { name: 'Yes' }).forEach((b) =>
+      expect((b as HTMLButtonElement).disabled).toBe(true));
   });
 
   it('renders lead part indicator', async () => {

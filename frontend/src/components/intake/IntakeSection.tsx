@@ -6,10 +6,11 @@
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { intakeKeys, intakesApi, ROUTE_LABELS } from '../../api/intakes'
-import { formatDate } from '../../lib/format'
+import { formatCalendarDate } from '../../lib/format'
 import { isBackup } from '../../lib/myTasks'
 import { t } from '../../i18n/cmLabels'
 import BackupChip from '../common/BackupChip'
+import { btnSm } from '../common/buttonStyles'
 
 export default function IntakeSection() {
   const navigate = useNavigate()
@@ -56,10 +57,10 @@ export default function IntakeSection() {
                   {i.part_name}
                   <span className="block text-xs text-slate-500">{i.project_name}</span>
                 </td>
-                <td className="px-4 py-3 text-xs text-slate-400">{formatDate(i.received_at)}</td>
+                <td className="px-4 py-3 text-xs text-slate-400">{formatCalendarDate(i.received_at)}</td>
                 <td className="px-4 py-3 text-right">
                   <button onClick={() => navigate(`/parts/${i.part_id}`)}
-                    className="text-xs px-3 py-1 rounded border border-slate-600 text-slate-200 hover:bg-slate-700 whitespace-nowrap">
+                    className={btnSm.secondary}>
                     Decide the route
                   </button>
                 </td>
@@ -80,7 +81,7 @@ export default function IntakeSection() {
                 <td className="px-4 py-3 text-xs text-slate-400">-</td>
                 <td className="px-4 py-3 text-right">
                   <button onClick={() => navigate(`/changes/${r.change_id}?tab=review`)}
-                    className="text-xs px-3 py-1 rounded border border-slate-600 text-slate-200 hover:bg-slate-700 whitespace-nowrap">
+                    className={btnSm.secondary}>
                     Answer
                   </button>
                 </td>

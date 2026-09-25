@@ -7,8 +7,12 @@
  * A department's work never appears outside its own row, so there is exactly one
  * place to look for it.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Check, ChevronDown, ChevronRight, Cog, FileText, Flag, Gauge, Package, Paperclip,
+  TriangleAlert, Wrench, X,
+} from 'lucide-react'
 import { changesApi } from '../../api/changes'
 import AssessmentSubmitForm from './AssessmentSubmitForm'
 import RoutingDeviationPanel from './RoutingDeviationPanel'
@@ -21,18 +25,21 @@ import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
-import { formatDate } from '../../lib/format'
+import { formatCalendarDate } from '../../lib/format'
 import type {
   ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
 } from '../../types/change'
 
-const OBJECT_ICON: Record<string, string> = {
-  tool: '🛠', equipment: '⚙️', gauge: '📐', document: '📄', part: '🔩',
+const OBJECT_ICON: Record<string, ReactNode> = {
+  tool: <Wrench size={14} />, equipment: <Cog size={14} />, gauge: <Gauge size={14} />,
+  document: <FileText size={14} />, part: <Package size={14} />,
 }
 
-const VERDICT_ICON: Record<string, string> = {
-  feasible: '✓', feasible_with_conditions: '≈', not_feasible: '✗',
+const VERDICT_ICON: Record<string, ReactNode> = {
+  feasible: <Check size={16} />,
+  feasible_with_conditions: <TriangleAlert size={15} />,
+  not_feasible: <X size={16} />,
 }
 
 const VERDICT_TONE: Record<string, string> = {
@@ -41,7 +48,8 @@ const VERDICT_TONE: Record<string, string> = {
   not_feasible: 'text-red-300',
 }
 
-type State = 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold' | 'queued' | 'declined'
+type State =
+  | 'waiting' | 'in_work' | 'submitted' | 'waived' | 'on_hold' | 'queued' | 'declined' | 'optional'
 
 const STATE_STYLE: Record<State, string> = {
   waiting: 'bg-slate-700 text-slate-300',
@@ -51,13 +59,20 @@ const STATE_STYLE: Record<State, string> = {
   on_hold: 'bg-amber-900/70 text-amber-200',
   queued: 'bg-slate-800 text-slate-500',
   declined: 'bg-amber-900/70 text-amber-200',
+  optional: 'bg-slate-800 text-slate-400',
 }
 
 const STATE_LABEL: Record<State, string> = {
   waiting: 'bucket.waiting', in_work: 'bucket.inWork', submitted: 'bucket.submitted',
   waived: 'bucket.waived', on_hold: 'concern.onHold', queued: 'bucket.queued',
   declined: 'bucket.declinedPending',
+  optional: '',
 }
+
+/** Copy kept local (cmLabels is owned elsewhere): a C/S row owes no answer. */
+const OPTIONAL_LABEL = 'Optional'
+const OPTIONAL_HINT = 'Consulted or supporting: this department may add input, no answer is required'
+const stateLabel = (s: State) => (s === 'optional' ? OPTIONAL_LABEL : t(STATE_LABEL[s]))
 
 /**
  * A department can carry more than one assessment row — multi-stage routing
@@ -81,12 +96,17 @@ export function pickAssessment(list: Assessment[], stage?: number): Assessment |
     ?? byStage[0]
 }
 
-function stateOf(a: Assessment | undefined, onHold: boolean, declined = false, owed = false): State {
+function stateOf(
+  a: Assessment | undefined, onHold: boolean, declined = false, owed = false, assesses = true,
+): State {
   if (a?.status === 'waived') return 'waived'
   if (a?.submitted_at || (a?.verdict && a.verdict !== 'pending')) return 'submitted'
   // "Not our responsibility" waits on the lead: the letter stays, the row is
   // neither answered nor free of its duty until that is decided.
   if (declined) return 'declined'
+  // Only R and A owe an answer. A consulted or supporting department (and one
+  // whose decline was approved, relettered to C) is never "waiting".
+  if (!assesses) return 'optional'
   // A pending row belongs to a stage that has not started — the department is
   // not on the hook yet, so no hold, no owner, no "waiting" urgency.
   // ... unless the round says it owes its answer now: a department the scoping
@@ -120,12 +140,14 @@ function ObjectList({ objects, partName }: {
             {objects.filter((o) => o.type === type).map((o) => (
               <li key={`${o.type}-${o.id}`}
                 className="flex items-baseline gap-2 text-sm min-w-0">
-                <span aria-hidden className="flex-shrink-0">{OBJECT_ICON[o.type] ?? '•'}</span>
+                <span aria-hidden="true" className="flex-shrink-0 self-center text-slate-500">
+                  {OBJECT_ICON[o.type] ?? <FileText size={14} />}
+                </span>
                 <span className="font-mono text-slate-200 flex-shrink-0">{o.number}</span>
                 <span className="text-slate-400 truncate">{o.name}</span>
                 {/* A part is not "via" itself. */}
                 {o.via_part_id != null && !(o.type === 'part' && o.via_part_id === o.id) && (
-                  <span className="text-[11px] text-slate-600 flex-shrink-0">
+                  <span className="text-[11px] text-slate-500 flex-shrink-0">
                     {t('bucket.via')} {partName(o.via_part_id)}
                   </span>
                 )}
@@ -306,7 +328,8 @@ export default function AssessmentBuckets({
       {visible.map((row) => {
         const a = row.assessment
         const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
-        const state = stateOf(a, row.onHold, row.declined, owed)
+        const assesses = row.rasic == null || row.rasic === 'R' || row.rasic === 'A'
+        const state = stateOf(a, row.onHold, row.declined, owed, assesses)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
         // status board only. The overview belongs to PM/Sales/lead/admin.
@@ -326,44 +349,48 @@ export default function AssessmentBuckets({
                 : t('bucket.othersHidden')}
               onClick={() => { if (mayOpen) setOpenDept(expanded ? null : row.id) }}
               className="w-full flex items-center gap-3 px-3 py-2 text-left disabled:cursor-default">
-              <span aria-hidden className="text-slate-500 text-xs w-3 flex-shrink-0">
-                {mayOpen ? (expanded ? '▾' : '▸') : ''}
+              <span aria-hidden="true" className="text-slate-500 w-3.5 flex-shrink-0">
+                {mayOpen ? (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
               </span>
               {row.rasic && (
-                <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] leading-tight text-slate-300 flex-shrink-0">
+                <span title={t(`rasic.${row.rasic}`)}
+                  className="rounded border border-slate-600 px-1.5 py-0 text-[11px] leading-tight font-semibold text-slate-300 flex-shrink-0">
                   {row.rasic}
                 </span>
               )}
               <span className="text-slate-100 font-medium truncate">{deptName(row.id)}</span>
               <span data-testid={`bucket-state-${row.id}`}
-                className={`rounded px-1.5 py-0 text-[10px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
-                {t(STATE_LABEL[state])}
+                title={state === 'optional' ? OPTIONAL_HINT : undefined}
+                className={`rounded px-1.5 py-0 text-[11px] leading-tight font-medium flex-shrink-0 ${STATE_STYLE[state]}`}>
+                {stateLabel(state)}
               </span>
               {a?.verdict && a.verdict !== 'pending' && (
                 <span data-testid={`bucket-verdict-${row.id}`}
-                  className={`text-sm flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
-                  title={assessmentVerdictLabel(a)} aria-label={assessmentVerdictLabel(a)}>
-                  {VERDICT_ICON[a.verdict] ?? ''}
+                  className={`inline-flex flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
+                  title={assessmentVerdictLabel(a)}>
+                  <span aria-hidden="true" className="inline-flex">{VERDICT_ICON[a.verdict] ?? null}</span>
+                  <span className="sr-only">{assessmentVerdictLabel(a)}</span>
                 </span>
               )}
               {evidenceOf(a?.id).length > 0 && (
                 <span data-testid={`bucket-evidence-count-${row.id}`}
                   title={t('bucket.evidence')}
-                  className="text-[10px] text-slate-400 flex-shrink-0">
-                  📎 {evidenceOf(a?.id).length}
+                  className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 tabular-nums flex-shrink-0">
+                  <Paperclip aria-hidden="true" size={12} />
+                  <span className="sr-only">{t('bucket.evidence')}:</span>
+                  {evidenceOf(a?.id).length}
                 </span>
               )}
               {row.stale > 0 && (
                 <span data-testid={`bucket-stale-${row.id}`}
                   title={t('bucket.staleRowsHint')}
-                  aria-label={t('bucket.staleRowsHint')}
-                  className="rounded bg-slate-700/70 text-slate-400 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
+                  className="rounded bg-slate-700/70 text-slate-400 px-1.5 py-0 text-[11px] leading-tight flex-shrink-0">
                   {t('bucket.staleRows').replace('{n}', String(row.stale))}
                 </span>
               )}
               {(areas > 0 || risks > 0) && (
                 <span data-testid={`bucket-areas-${row.id}`}
-                  className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[10px] leading-tight flex-shrink-0">
+                  className="rounded bg-slate-700 text-slate-300 px-1.5 py-0 text-[11px] leading-tight flex-shrink-0">
                   {[
                     ...(areas > 0 ? [`${plural(areas, 'area')} impacted`] : []),
                     ...(risks > 0 ? [`${plural(risks, 'risk')} flagged`] : []),
@@ -377,9 +404,11 @@ export default function AssessmentBuckets({
                   <span className="text-slate-400">{a.owner_name}</span>
                 )}
                 {a?.due_date && (
-                  <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                    {formatDate(a.due_date)}
-                    {a.overdue && ` ⚠ ${t('tasks.overdue')}`}
+                  <span className={`inline-flex items-center gap-1 tabular-nums ${
+                    a.overdue ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>
+                    {a.overdue && <TriangleAlert aria-hidden="true" size={12} />}
+                    {formatCalendarDate(a.due_date)}
+                    {a.overdue && ` ${t('tasks.overdue')}`}
                   </span>
                 )}
               </span>
@@ -494,7 +523,7 @@ export default function AssessmentBuckets({
                         </ul>
                       )}
                       {isMine && editable ? drop : atts.length === 0 && (
-                        <p className="text-xs text-slate-600">{hint}</p>
+                        <p className="text-xs text-slate-500">{hint}</p>
                       )}
                     </div>
                   )
@@ -568,8 +597,8 @@ export default function AssessmentBuckets({
   )
 }
 
-/** A submitted department's Yes rows, named from its own checklist, with ⚑
- *  where a row still carries an open risk. */
+/** A submitted department's Yes rows, named from its own checklist, with a
+ *  flag where a row still carries an open risk. */
 function ImpactAnswers({ departmentId, details, riskKeys, lang = 'en' }: {
   departmentId: number
   lang?: 'de' | 'en'
@@ -588,15 +617,23 @@ function ImpactAnswers({ departmentId, details, riskKeys, lang = 'en' }: {
       {impactsOf(details).filter((i) => i.impacted).map((i) => {
         const id = i.key ?? `free:${i.label ?? ''}`
         return (
-          <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}>
-            ✓ {labelOf(i)}
+          <li key={`${i.key ?? i.activity_id ?? 'free'}-${i.label ?? ''}`}
+            className="flex items-baseline gap-1.5">
+            <Check aria-hidden="true" size={12} className="self-center flex-shrink-0 text-emerald-400" />
+            <span>
+            {labelOf(i)}
             {i.choice ? ` (${choiceLabel(
               defs.find((d) => d.key === i.key)?.choices?.find((c) =>
                 (typeof c === 'string' ? c : c.value) === i.choice) ?? i.choice, lang)})` : ''}
             {i.remark ? `: ${i.remark}` : ''}
             {riskKeys.has(id) && (
-              <span data-testid={`bucket-impact-risk-${id}`} className="ml-1 text-amber-300">⚑</span>
+              <span data-testid={`bucket-impact-risk-${id}`} title="Open risk"
+                className="ml-1 inline-flex align-middle text-amber-300">
+                <Flag aria-hidden="true" size={12} />
+                <span className="sr-only">Open risk</span>
+              </span>
             )}
+            </span>
           </li>
         )
       })}

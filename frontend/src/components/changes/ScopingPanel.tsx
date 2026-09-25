@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Check, UserRound, X } from 'lucide-react'
+import Button from '../common/Button'
+import { btnSm } from '../common/buttonStyles'
+import { apiErrorMessage, toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
-import { contactsApi } from '../../api/contacts'
+import { contactsApi, type Contact } from '../../api/contacts'
 import { useDepartments } from '../../hooks/queries/useWorkflows'
 import ReasonDialog from './ReasonDialog'
 import AttachmentDropzone from './AttachmentDropzone'
@@ -16,12 +20,18 @@ import { getActsAsDepartmentId } from '../../lib/actsAs'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
 import type {
-  Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, RasicLetter,
+  Attachment, ChangeConcern, ChangeMeeting, ChangeRequest, CostCarrier, MeetingParticipant, RasicLetter,
 } from '../../types/change'
 import { carrierOf, isPersonContact } from '../../lib/scopingRules'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+/** The room's letters, in the order the picker shows them. I (informed) is an
+ *  FYI: no assessment, nothing blocks on it. */
+const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
+
+/** An attendee as picked: a directory person carries their user id, so the
+ *  record names the user; a typed name is an external guest. */
+type Attendee = MeetingParticipant & { email?: string | null }
+const attendeeKey = (a: Attendee) => (a.user_id != null ? `u${a.user_id}` : `n${a.name.toLowerCase()}`)
 
 const DECISION_LABEL: Record<string, string> = {
   proceed: t('meeting.proceed'), reject: t('meeting.reject'),
@@ -62,8 +72,11 @@ export default function ScopingPanel(
 
   const [date, setDate] = useState('')
   const [channel, setChannel] = useState<'meeting' | 'chat' | 'email'>('meeting')
-  const [participants, setParticipants] = useState('')
+  const [participants, setParticipants] = useState<Attendee[]>([])
   const [addName, setAddName] = useState('')
+  const channelId = useId()
+  const attendeeId = useId()
+  const attendeeHintId = useId()
   // The room's RASIC call per department. A department in the map is on the
   // hook with that letter; one outside it is not involved. Seeded from the
   // standard routing's letters, overruled by the people in the room.
@@ -117,30 +130,35 @@ export default function ScopingPanel(
     enabled: status === 'captured' || status === 'scoping',
     staleTime: 60 * 60 * 1000,
   })
-  const appendParticipant = (name: string) => {
-    const n = name.trim()
-    if (!n) return
-    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
-    if (!cur.includes(n)) setParticipants([...cur, n].join(', '))
+  const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
+  const fromContact = (c: Contact): Attendee =>
+    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null })
+  const appendParticipant = (a: Attendee | null) => {
+    if (!a || !a.name.trim()) return
+    const next = { ...a, name: a.name.trim() }
+    if (!participants.some((p) => attendeeKey(p) === attendeeKey(next)
+      || p.name.toLowerCase() === next.name.toLowerCase())) {
+      setParticipants([...participants, next])
+    }
     setAddName('')
   }
-  const removeParticipant = (name: string) => {
-    const cur = participants.split(',').map((s) => s.trim()).filter(Boolean)
-    setParticipants(cur.filter((n) => n !== name).join(', '))
-  }
-  const participantList = participants.split(',').map((s) => s.trim()).filter(Boolean)
-  const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
+  const removeParticipant = (a: Attendee) =>
+    setParticipants(participants.filter((p) => attendeeKey(p) !== attendeeKey(a)))
+  const participantList = participants
 
   // Resolve the typed text to the best contact match so Enter/Tab confirms the
-  // suggestion (exact > prefix > contains); falls back to the raw text for
-  // external attendees not in the directory.
-  const bestMatch = (q: string): string => {
+  // suggestion (exact > prefix > contains, on name, username or mail); falls
+  // back to the raw text for external attendees not in the directory.
+  const bestMatch = (q: string): Attendee | null => {
     const s = q.trim().toLowerCase()
-    if (!s) return ''
-    const exact = people.find((c) => c.name.toLowerCase() === s)
-    const prefix = people.find((c) => c.name.toLowerCase().startsWith(s))
+    if (!s) return null
+    const keys = (c: Contact) => [c.name, c.username ?? '', (c.email ?? '').split('@')[0]]
+      .map((k) => k.toLowerCase()).filter(Boolean)
+    const exact = people.find((c) => keys(c).some((k) => k === s))
+    const prefix = people.find((c) => keys(c).some((k) => k.startsWith(s)))
     const contains = people.find((c) => c.name.toLowerCase().includes(s))
-    return (exact ?? prefix ?? contains)?.name ?? q.trim()
+    const hit = exact ?? prefix ?? contains
+    return hit ? fromContact(hit) : { name: q.trim(), user_id: null }
   }
   const confirmTyped = () => appendParticipant(bestMatch(addName))
 
@@ -148,13 +166,14 @@ export default function ScopingPanel(
     qc.invalidateQueries({ queryKey: ['change-meetings', changeId] })
     qc.invalidateQueries({ queryKey: ['change', changeId, 'concerns'] })
     qc.invalidateQueries({ queryKey: ['change', changeId] })
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
   }
   const create = useMutation({
     mutationFn: () => changesApi.createMeeting(changeId, {
       meeting_date: date ? `${date}T12:00:00Z` : undefined,
       channel,
-      participants: participants.split(',').map((n) => n.trim())
-        .filter(Boolean).map((name) => ({ name })),
+      participants: participants.map(({ name, user_id }) =>
+        (user_id != null ? { name, user_id } : { name })),
       selected_department_ids: deptIds,
       department_rasic: deptRasic,
       ...(carrier ? { cost_carrier: carrier } : {}),
@@ -162,12 +181,12 @@ export default function ScopingPanel(
     onSuccess: () => {
       // A fresh form for the next record, folded away; the letters of this
       // meeting are what the next one starts from (seeded on reopen).
-      setParticipants(''); setAddName(''); setDate(''); setChannel('meeting'); setCarrier('')
+      setParticipants([]); setAddName(''); setDate(''); setChannel('meeting'); setCarrier('')
       setDeptTouched(false); setCarried(false); setFormOpen(false)
       toast.success(t('meeting.saved'))
       invalidate()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the meeting'),
+    onError: (e: unknown) => toastError(e, 'Could not record the meeting'),
   })
   // A refused decision names the open concerns that blocked it — that detail is
   // the whole answer, so it is shown in place and not only as a toast.
@@ -180,13 +199,13 @@ export default function ScopingPanel(
       toast.success(t('reject.sent'))
       invalidate()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the change'),
+    onError: (e: unknown) => toastError(e, 'Could not close the change'),
   })
   const setMeetingCarrier = useMutation({
     mutationFn: (vars: { meetingId: number; carrier: CostCarrier }) =>
       changesApi.updateMeeting(changeId, vars.meetingId, { cost_carrier: vars.carrier }),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not set the cost carrier'),
+    onError: (e: unknown) => toastError(e, 'Could not set the cost carrier'),
   })
   const decide = useMutation({
     mutationFn: (vars: {
@@ -194,9 +213,8 @@ export default function ScopingPanel(
     }) => changesApi.decideMeeting(changeId, vars.meetingId, vars.decision, vars.reason),
     onSuccess: () => { setDecideError(null); invalidate() },
     onError: (e: unknown) => {
-      const detail = errDetail(e) ?? 'Decision failed'
-      setDecideError(detail)
-      toast.error(detail)
+      setDecideError(apiErrorMessage(e, 'Could not record the decision'))
+      toastError(e, 'Could not record the decision')
     },
   })
   // Reject and needs-info both owe the originator an answer, so both collect
@@ -330,25 +348,26 @@ export default function ScopingPanel(
               <select aria-label={t('meeting.costCarrier')} data-testid={`meeting-carrier-${m.id}`}
                 value="" onChange={(e) => e.target.value
                   && setMeetingCarrier.mutate({ meetingId: m.id, carrier: e.target.value as CostCarrier })}
-                className="bg-slate-800 border border-amber-600 rounded px-2 py-0.5 text-xs text-slate-100">
+                className="h-7 bg-slate-800 border border-amber-600 rounded-lg px-2 text-xs text-slate-100">
                 <option value="">{t('meeting.costCarrierPick')}</option>
                 <option value="customer">{t('meeting.costCarrier.customer')}</option>
                 <option value="internal">{t('meeting.costCarrier.internal')}</option>
               </select>
             )}
-            <button className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            <button type="button" className={btnSm.primary}
               data-testid={`meeting-proceed-${m.id}`}
               disabled={decide.isPending || carrierOfMeeting(m) === ''}
               title={carrierOfMeeting(m) === '' ? t('meeting.costCarrierMissing') : undefined}
               onClick={() => setConfirmProceed(m)}>
               {t('meeting.proceed')}
             </button>
-            <button className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs"
+            <button type="button" className={btnSm.secondary}
               disabled={decide.isPending}
               onClick={() => setPending({ meetingId: m.id, decision: 'needs_info' })}>
               {t('meeting.needsInfo')}
             </button>
-            <button className="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-xs"
+            <button type="button"
+              className={`${btnSm.secondary} text-red-300 hover:text-red-200 hover:border-red-700`}
               disabled={decide.isPending}
               onClick={() => setPending({ meetingId: m.id, decision: 'reject' })}>
               {t('meeting.reject')}
@@ -479,21 +498,24 @@ export default function ScopingPanel(
                 <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('reject.step2')}</p>
               )}
               {change.rejection_sent_at ? (
-                <p className="text-xs text-emerald-300">
-                  ✓ {t('reject.sent')} · {formatDate(change.rejection_sent_at)}
+                <p className="inline-flex items-center gap-1.5 text-xs text-emerald-300">
+                  <Check aria-hidden="true" size={14} />
+                  {t('reject.sent')} · {formatDate(change.rejection_sent_at)}
                 </p>
               ) : (
-                <button type="button" data-testid="rejection-sent"
-                  disabled={rejectionLetters.length === 0 || !canSendRejection || markSent.isPending}
+                <Button variant="primary" data-testid="rejection-sent"
+                  disabled={rejectionLetters.length === 0 || !canSendRejection}
+                  loading={markSent.isPending}
                   title={!canSendRejection ? t('reject.salesOnly')
                     : rejectionLetters.length === 0 ? t('reject.needLetter') : undefined}
-                  onClick={() => setConfirmSent(true)}
-                  className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                  aria-describedby={!canSendRejection || rejectionLetters.length === 0
+                    ? 'rejection-sent-why' : undefined}
+                  onClick={() => setConfirmSent(true)}>
                   {t('reject.markSent')}
-                </button>
+                </Button>
               )}
               {!change.rejection_sent_at && (!canSendRejection || rejectionLetters.length === 0) && (
-                <p className="text-[11px] text-slate-400" data-testid="rejection-sent-why">
+                <p id="rejection-sent-why" className="text-[11px] text-slate-400" data-testid="rejection-sent-why">
                   {!canSendRejection ? t('reject.salesOnly') : t('reject.needLetter')}
                 </p>
               )}
@@ -561,7 +583,7 @@ export default function ScopingPanel(
                 <li key={m.id}>
                   <button type="button" data-testid={`meeting-summary-${m.id}`}
                     onClick={() => setShowMeeting(m.id)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-800">
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-400">
                     <span className="px-1.5 py-0 rounded bg-slate-700 text-slate-300">
                       {t(`channel.${m.channel ?? 'meeting'}`)}
                     </span>
@@ -573,7 +595,7 @@ export default function ScopingPanel(
                         {DECISION_LABEL[m.decision] ?? m.decision}
                       </span>
                     )}
-                    <span className="ml-auto text-slate-600">{t('scoping.showDetails')}</span>
+                    <span className="ml-auto text-slate-500">{t('scoping.showDetails')}</span>
                   </button>
                 </li>
               )
@@ -619,8 +641,9 @@ export default function ScopingPanel(
           <p className="text-xs text-slate-500">{t('scoping.discussionByEmail')}</p>
           <div className="flex flex-wrap gap-3">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">{t('channel.label')}</label>
-              <select value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)}
+              <label htmlFor={channelId} className="block text-xs text-slate-400 mb-1">{t('channel.label')}</label>
+              <select id={channelId} data-testid="meeting-channel"
+                value={channel} onChange={(e) => setChannel(e.target.value as typeof channel)}
                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100">
                 <option value="meeting">{t('channel.meeting')}</option>
                 <option value="chat">{t('channel.chat')}</option>
@@ -628,35 +651,45 @@ export default function ScopingPanel(
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">{t('meeting.dateLabel')}</label>
+              <span className="block text-xs text-slate-400 mb-1" aria-hidden="true">{t('meeting.dateLabel')}</span>
               <DateInput value={date} onChange={setDate} aria-label={t('meeting.dateLabel')}
                 className="w-36 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-100" />
             </div>
             <div className="flex-1 min-w-[14rem]">
-              <label className="block text-xs text-slate-500 mb-1">
+              <label htmlFor={attendeeId} className="block text-xs text-slate-400 mb-1">
                 {t('meeting.participants')}
-                <span className="ml-2 opacity-70">{t('meeting.attendanceHint')}</span>
+                <span id={attendeeHintId} className="ml-2 text-slate-500">{t('meeting.attendanceHint')}</span>
               </label>
-              {/* Picked names live as removable chips — grouped, contained, not
-                  free-editable text that can be accidentally mangled. */}
-              <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem]">
-                {participantList.map((name) => (
-                  <span key={name}
-                    className="inline-flex items-center gap-1 rounded-md bg-slate-700 text-slate-100 text-xs px-2 py-0.5">
-                    {name}
-                    <button type="button" aria-label={`Remove ${name}`}
-                      className="text-slate-400 hover:text-red-300"
-                      onClick={() => removeParticipant(name)}>×</button>
+              {/* Picked people live as removable chips: grouped, contained, not
+                  free-editable text that can be accidentally mangled. A person
+                  from the directory is the user (person icon); a typed name
+                  is an external guest. */}
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem] focus-within:border-sky-500">
+                {participantList.map((a) => (
+                  <span key={attendeeKey(a)} data-testid="meeting-attendee"
+                    data-user-id={a.user_id ?? undefined}
+                    title={a.user_id != null ? (a.email ?? undefined) : 'Guest, not a PLM user'}
+                    className={`inline-flex items-center gap-1 rounded-md text-xs pl-2 pr-0.5 py-0.5 ${
+                      a.user_id != null ? 'bg-slate-700 text-slate-100' : 'bg-slate-800 text-slate-300 ring-1 ring-inset ring-slate-600'}`}>
+                    {a.user_id != null && <UserRound aria-hidden="true" size={12} className="text-sky-300" />}
+                    {a.name}
+                    <button type="button" aria-label={`Remove ${a.name}`}
+                      className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                      onClick={() => removeParticipant(a)}>
+                      <X aria-hidden="true" size={12} />
+                    </button>
                   </span>
                 ))}
                 <input
-                  type="text" list="sc-contacts" value={addName}
+                  id={attendeeId} aria-describedby={attendeeHintId}
+                  type="text" list="sc-contacts" value={addName} autoComplete="off"
                   placeholder={participantList.length ? '' : t('meeting.addAttendee')}
                   onChange={(e) => {
                     const v = e.target.value
                     setAddName(v)
                     // Picking a suggestion sets the full name in one change event.
-                    if (people.some((c) => c.name === v)) appendParticipant(v)
+                    const picked = people.find((c) => c.name === v)
+                    if (picked) appendParticipant(fromContact(picked))
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') { e.preventDefault(); confirmTyped() }
@@ -667,7 +700,7 @@ export default function ScopingPanel(
                       removeParticipant(participantList[participantList.length - 1])
                     }
                   }}
-                  className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-100 outline-none" />
+                  className="flex-1 min-w-[8rem] bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none" />
               </div>
               <datalist id="sc-contacts">
                 {people.map((c) => (
@@ -680,12 +713,12 @@ export default function ScopingPanel(
           </div>
           <div>
             <div className="flex items-baseline justify-between gap-4 mb-1">
-              <label className="text-xs text-slate-500">
+              <span className="text-xs text-slate-400">
                 {t('meeting.departments')}
                 {recommendedIds.length > 0 && (
-                  <span className="ml-2 opacity-70">{t('meeting.recommendedHint')}</span>
+                  <span className="ml-2 text-slate-500">{t('meeting.recommendedHint')}</span>
                 )}
-              </label>
+              </span>
               <span className="text-[11px] text-slate-500 tabular-nums" data-testid="rasic-summary">
                 {t('meeting.rasicSummary')
                   .replace('{a}', String(Object.values(deptRasic).filter((l) => l === 'R' || l === 'A').length))
@@ -714,21 +747,22 @@ export default function ScopingPanel(
                     </button>
                     <span className="inline-flex flex-shrink-0 rounded-md border border-slate-600 overflow-hidden divide-x divide-slate-600"
                       role="group" aria-label={`${d.name} RASIC`}>
-                      {(['R', 'A', 'S', 'C'] as RasicLetter[]).map((l) => (
+                      {RASIC_PICK.map((l) => (
                         <button key={l} type="button" data-testid={`rasic-${d.id}-${l}`}
                           aria-pressed={letter === l} title={t(`rasic.${l}`)}
+                          aria-label={`${l}, ${t(`rasic.${l}`)}`}
                           onClick={() => setLetter(d.id, l)}
                           className={`w-7 h-6 text-[11px] font-semibold transition-colors active:scale-[0.97] ${
                             letter === l
                               ? (l === 'R' || l === 'A'
-                                ? 'bg-sky-600 text-white'
+                                ? 'bg-sky-700 text-white'
                                 : 'bg-slate-600 text-slate-100')
                               : 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}>
                           {l}
                         </button>
                       ))}
                       <button type="button" data-testid={`rasic-${d.id}-none`}
-                        aria-pressed={!letter} title={t('rasic.none')}
+                        aria-pressed={!letter} title={t('rasic.none')} aria-label={t('rasic.none')}
                         onClick={() => { if (letter) toggleDept(d.id) }}
                         className={`w-7 h-6 text-[11px] transition-colors ${
                           letter ? 'bg-slate-900 text-slate-500 hover:text-slate-200 hover:bg-slate-800'
@@ -746,9 +780,9 @@ export default function ScopingPanel(
           </div>
           {/* Who pays, confirmed by the room next to who works. */}
           <fieldset data-testid="meeting-carrier">
-            <legend className="text-xs text-slate-500 mb-1">
+            <legend className="text-xs text-slate-400 mb-1">
               {t('meeting.costCarrier')}
-              <span className="ml-2 opacity-70">{t('meeting.costCarrierHint')}</span>
+              <span className="ml-2 text-slate-500">{t('meeting.costCarrierHint')}</span>
             </legend>
             {carrierOf(change.customer_relevant) && (
               <p className="text-[11px] text-slate-400 mb-1" data-testid="meeting-carrier-captured">
@@ -774,15 +808,14 @@ export default function ScopingPanel(
             )}
           </fieldset>
           <div className="flex flex-wrap items-center gap-3">
-            <button data-testid="meeting-save"
-              className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={create.isPending || saveMissing.length > 0}
-              title={saveMissing.length ? t('meeting.saveMissing').replace('{x}', saveMissing.join(', ')) : undefined}
+            <Button variant="primary" data-testid="meeting-save"
+              disabled={saveMissing.length > 0} loading={create.isPending}
+              aria-describedby={saveMissing.length > 0 ? 'meeting-save-missing' : undefined}
               onClick={() => create.mutate()}>
               {t('meeting.save')}
-            </button>
+            </Button>
             {saveMissing.length > 0 && (
-              <span className="text-xs text-slate-400" data-testid="meeting-save-missing">
+              <span id="meeting-save-missing" className="text-xs text-slate-400" data-testid="meeting-save-missing">
                 {t('meeting.saveMissing').replace('{x}', saveMissing.join(', '))}
               </span>
             )}

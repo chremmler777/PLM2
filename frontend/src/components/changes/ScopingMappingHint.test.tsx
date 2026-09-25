@@ -44,19 +44,30 @@ describe('ScopingMappingHint', () => {
       assessments={[assessment(1), assessment(2)]}
       departments={departments} />))
     expect(await screen.findByText(/From scoping:/)).toBeDefined()
-    expect(screen.getByText(/Development ✓/)).toBeDefined()
-    expect(screen.getByText(/Sales ✓/)).toBeDefined()
+    expect(screen.getByTestId('scoping-mapped-1').textContent).toBe('Development R(assesses)')
+    expect(screen.getByTestId('scoping-mapped-2').textContent).toBe('Sales R(assesses)')
     expect(screen.getByText(/Tool Engineer has no blocking role in the routing template, so no assessment task/)).toBeDefined()
   })
 
-  it('reads the room\'s letter next to the name when the meeting recorded one', async () => {
+  it('reads the routed row\'s letter next to the name, over the room\'s call', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting({
       selected_department_ids: [1, 3], department_rasic: { '1': 'R', '3': 'C' },
     })])
     render(wrap(<ScopingMappingHint changeId={7}
       assessments={[assessment(1), assessment(3)]} departments={departments} />))
-    expect(await screen.findByText(/Development R ✓/)).toBeDefined()
-    expect(screen.getByText(/Tool Engineer C ✓/)).toBeDefined()
+    expect((await screen.findByTestId('scoping-mapped-1')).textContent).toBe('Development R(assesses)')
+    expect(screen.getByTestId('scoping-mapped-3').textContent).toBe('Tool Engineer R(assesses)')
+  })
+
+  it('reads the letter an approved decline moved, not the room\'s original R', async () => {
+    // Manufacturing declined: the routing change reletters its row to C.
+    vi.mocked(changesApi.listMeetings).mockResolvedValue([meeting({
+      selected_department_ids: [1, 3], department_rasic: { '1': 'R', '3': 'R' },
+    })])
+    render(wrap(<ScopingMappingHint changeId={7}
+      assessments={[assessment(1), { ...assessment(3), rasic_letter: 'C' }]} departments={departments} />))
+    expect((await screen.findByTestId('scoping-mapped-3')).textContent).toBe('Tool Engineer C(no answer needed)')
+    expect(screen.getByTestId('scoping-mapped-1').textContent).toBe('Development R(assesses)')
   })
 
   it('renders nothing when there is no proceed meeting', () => {

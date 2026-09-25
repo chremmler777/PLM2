@@ -12,6 +12,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Check, Flag, Minus } from 'lucide-react'
 import { changesApi } from '../../../api/changes'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
@@ -203,8 +204,12 @@ export default function ActivityChecklist({
                 <button type="button" data-testid={`check-risk-${r.id}`}
                   onClick={() => document.getElementById(`concern-card-${r.id}`)
                     ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                  className="text-left text-[11px] text-amber-300 hover:underline decoration-dotted underline-offset-2">
-                  ⚑ {r.severity ?? '?'} · {riskTypeName(r.risk_type)} · {r.note}
+                  className="inline-flex items-baseline gap-1 text-left text-[11px] text-amber-300 hover:underline decoration-dotted underline-offset-2">
+                  <Flag aria-hidden="true" size={11} className="self-center flex-shrink-0" />
+                  <span>
+                    <span className="sr-only">Risk, </span>
+                    {r.severity != null ? `Severity ${r.severity}` : 'Severity not set'} · {riskTypeName(r.risk_type)} · {r.note}
+                  </span>
                 </button>
               </li>
             ))}
@@ -306,7 +311,10 @@ export default function ActivityChecklist({
           {legacy.map((i) => (
             <li key={`legacy-${i.activity_id}-${i.label}`} className="py-1 text-xs text-slate-500">
               <span data-testid={`check-legacy-${i.activity_id ?? 'free'}`}>
-                {i.impacted ? '✓' : '·'} {i.label}
+                {i.impacted
+                  ? <Check role="img" aria-label="Impacted" size={12} className="mr-1 inline align-[-2px]" />
+                  : <Minus role="img" aria-label="Not impacted" size={12} className="mr-1 inline align-[-2px]" />}
+                {i.label}
                 {i.remark ? `: ${i.remark}` : ''}
               </span>
               <span className="ml-2 opacity-70">({t('check.legacy', lang)})</span>

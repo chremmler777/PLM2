@@ -49,6 +49,17 @@ describe('ChecklistRiskForm', () => {
     expect((screen.getByTestId('check-risk-note') as HTMLTextAreaElement).value).toBe('x')
   })
 
+  it('names each rating button by its weight, not a bare digit', async () => {
+    render(wrap(<ChecklistRiskForm changeId={5} departmentId={4}
+      checklistKey="threed_change" defaultNote="" onDone={() => {}} />))
+    const group = screen.getByRole('group', { name: t('risk.severity') })
+    expect(group).toBeTruthy()
+    const high = screen.getByRole('button', { name: 'Severity 3, highest' })
+    expect(high.textContent).toBe('3')
+    expect(screen.getByRole('button', { name: 'Severity 2, medium' }).getAttribute('aria-pressed')).toBe('true')
+    await screen.findByRole('option', { name: 'Cooling' })
+  })
+
   it('says what the disabled Flag button still needs', async () => {
     render(wrap(<ChecklistRiskForm changeId={5} departmentId={4}
       checklistKey="threed_change" defaultNote="" onDone={() => {}} />))

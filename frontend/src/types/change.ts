@@ -953,7 +953,9 @@ export interface ChangeMeeting {
   decided_at: string | null;
 }
 
-export type RasicLetter = 'R' | 'A' | 'S' | 'C';
+/** R and A assess (blocking); S supports; C is consulted; I is informed
+ *  (an FYI task, no assessment). */
+export type RasicLetter = 'R' | 'A' | 'S' | 'C' | 'I';
 
 /** Who pays: the customer (customer relevant) or the plant itself. */
 export type CostCarrier = 'customer' | 'internal';

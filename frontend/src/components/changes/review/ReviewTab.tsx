@@ -10,12 +10,11 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { btnPrimary, btnSecondary } from '../../common/buttonStyles'
+import { toastError } from '../../../lib/apiError'
 import { intakeKeys, intakesApi, type ReviewAnswer, type ReviewState } from '../../../api/intakes'
 import { formatDate } from '../../../lib/format'
 import type { ChangeRequest } from '../../../types/change'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const card = 'rounded-lg border border-slate-700 bg-slate-800 p-4'
 
@@ -42,7 +41,7 @@ export default function ReviewTab({ change, onGoImpact }: { change: ChangeReques
       qc.invalidateQueries({ queryKey: ['change-my-tasks'] })
       toast.success('Escalated to a full ECR')
     },
-    onError: (e) => toast.error(errDetail(e) ?? 'Could not escalate'),
+    onError: (e) => { toastError(e, 'Could not escalate') },
   })
 
   if (isError) return <p className="text-sm text-red-300">Could not load the review.</p>
@@ -67,15 +66,13 @@ export default function ReviewTab({ change, onGoImpact }: { change: ChangeReques
           </div>
           {!state.impact_locked && !state.escalated && onGoImpact && (
             <button onClick={onGoImpact} data-testid="review-go-impact"
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500">
+              className={btnPrimary}>
               Lock the impact
             </button>
           )}
           {state.can_escalate && !state.escalated && (
             <button onClick={() => setEscalating(true)} data-testid="review-escalate"
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${state.impact_count > 0
-                ? 'bg-amber-600 text-white hover:bg-amber-500'
-                : 'border border-slate-600 text-slate-200 hover:bg-slate-700'}`}>
+              className={state.impact_count > 0 ? btnPrimary : btnSecondary}>
               Escalate to a full ECR
             </button>
           )}
@@ -104,11 +101,11 @@ export default function ReviewTab({ change, onGoImpact }: { change: ChangeReques
               className="mt-2 w-full rounded-md border border-slate-600 bg-slate-800 px-2 py-1.5 text-sm text-slate-100" />
             <div className="mt-2 flex justify-end gap-2">
               <button onClick={() => setEscalating(false)}
-                className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800">Cancel</button>
+                className={btnSecondary}>Cancel</button>
               <button data-testid="escalate-confirm"
                 disabled={escalate.isPending || (state.impact_count === 0 && !escalateNote.trim())}
                 onClick={() => escalate.mutate()}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+                className={btnPrimary}>
                 Escalate
               </button>
             </div>
@@ -139,7 +136,7 @@ function AnswerRow({ changeId, answer, onDone }: {
     mutationFn: (value: 'no_impact' | 'impact') =>
       intakesApi.answer(changeId, { department_id: answer.department_id, answer: value, note: note.trim() || undefined }),
     onSuccess: (next) => { onDone(next); setEditing(false) },
-    onError: (e) => toast.error(errDetail(e) ?? 'Could not save the answer'),
+    onError: (e) => { toastError(e, 'Could not save the answer') },
   })
   const tone = answer.answer === 'impact' ? 'bg-amber-900/60 text-amber-200'
     : answer.answer === 'no_impact' ? 'bg-emerald-900/60 text-emerald-200' : 'bg-slate-700 text-slate-300'
@@ -173,12 +170,12 @@ function AnswerRow({ changeId, answer, onDone }: {
           <div className="flex gap-2">
             <button disabled={send.isPending} onClick={() => send.mutate('no_impact')}
               data-testid={`answer-no-impact-${answer.department_id}`}
-              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-40">
+              className={btnSecondary}>
               No impact
             </button>
             <button disabled={send.isPending || !note.trim()} onClick={() => send.mutate('impact')}
               data-testid={`answer-impact-${answer.department_id}`}
-              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+              className={btnSecondary}>
               Impact
             </button>
           </div>

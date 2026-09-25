@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ScopingPanel from './ScopingPanel'
 import { t } from '../../i18n/cmLabels'
 import { changesApi } from '../../api/changes'
+import { contactsApi } from '../../api/contacts'
+import { btnVariants } from '../common/buttonStyles'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -166,6 +168,41 @@ describe('ScopingPanel keeps the discussion out of the record', () => {
   })
 })
 
+describe('ScopingPanel attendees', () => {
+  afterEach(cleanup)
+
+  it('stores a picked directory person as the user and a typed guest by name', async () => {
+    vi.mocked(contactsApi.list).mockResolvedValue([
+      { name: 'Cody Brown', email: 'cody@ktx.io', user_id: 42, username: 'cody' },
+    ])
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    const input = await screen.findByLabelText(new RegExp(t('meeting.participants'))) as HTMLInputElement
+    // Typing the username and Enter picks the directory entry, not free text.
+    await waitFor(() => expect(document.querySelector('#sc-contacts option')).toBeTruthy())
+    fireEvent.change(input, { target: { value: 'cody' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(input, { target: { value: 'Supplier guest' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    const chips = screen.getAllByTestId('meeting-attendee')
+    expect(chips.map((c) => c.textContent)).toEqual(['Cody Brown', 'Supplier guest'])
+    expect(chips[0].getAttribute('data-user-id')).toBe('42')
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
+    fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
+      { name: 'Cody Brown', user_id: 42 }, { name: 'Supplier guest' },
+    ])
+    vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
+  })
+
+  it('names the meeting type select and the attendee field', async () => {
+    render(wrap(<ScopingPanel change={change()} />))
+    expect((await screen.findByLabelText(t('channel.label'))).tagName).toBe('SELECT')
+    expect(screen.getByLabelText(new RegExp(t('meeting.participants'))).tagName).toBe('INPUT')
+  })
+})
+
 describe('ScopingPanel department picker', () => {
   afterEach(cleanup)
 
@@ -197,6 +234,22 @@ describe('ScopingPanel department picker', () => {
     const body = vi.mocked(changesApi.createMeeting).mock.calls[0][1]
     expect(body.department_rasic).toEqual({ 2: 'A', 4: 'R' })
     expect(body.selected_department_ids.sort()).toEqual([2, 4])
+  })
+
+  it('offers I (informed) next to R, A, S and C', async () => {
+    deptState.current = [{ id: 2, name: 'Quality', is_active: true }]
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    const i = await screen.findByTestId('rasic-2-I')
+    expect(i.getAttribute('aria-label')).toBe(`I, ${t('rasic.I')}`)
+    fireEvent.click(i)
+    expect(i.getAttribute('aria-pressed')).toBe('true')
+    // Informed owes nothing: the assess count stays at zero.
+    expect(screen.getByTestId('rasic-summary').textContent).toBe('0 assess · 1 involved')
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
+    fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].department_rasic).toEqual({ 2: 'I' })
     deptState.current = [
       { id: 2, name: 'Quality', is_active: true },
       { id: 8, name: 'Logistics', is_active: false },
@@ -716,7 +769,7 @@ describe('ScopingPanel §16 meeting record', () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([] as never)
     render(wrap(<ScopingPanel change={change({ status: 'rejected', attachments: [] })} />))
     expect((await screen.findByTestId('rejection-title')).textContent).toBe(t('reject.sendTitle'))
-    expect(screen.getByTestId('rejection-sent').className).toContain('bg-sky-600')
+    expect(screen.getByTestId('rejection-sent').className).toContain(btnVariants.primary.split(' ')[0])
     expect(screen.getByTestId('rejection-sent-why').textContent).toBe(t('reject.needLetter'))
   })
 })

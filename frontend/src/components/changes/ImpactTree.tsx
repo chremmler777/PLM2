@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Check } from 'lucide-react'
 import { changesApi } from '../../api/changes'
+import Button from '../common/Button'
+import ConfirmDialog from '../common/ConfirmDialog'
+import EmptyState from '../common/EmptyState'
+import { btnSm } from '../common/buttonStyles'
+import { toastError } from '../../lib/apiError'
 import type { AssessmentObject, ChangeStatus, ImpactTreeNode } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
 import { formatDateTime } from '../../lib/format'
@@ -21,9 +27,6 @@ const LEAD_EDITABLE: ChangeStatus[] = ['captured', 'scoping']
 
 /** Tools, gauges and equipment serve parts; documents and parts do not. */
 const SERVING_TYPES = new Set(['tool', 'gauge', 'equipment'])
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 interface Props {
   changeId: number
@@ -69,10 +72,13 @@ export default function ImpactTree({
   const confirmImpact = useMutation({
     mutationFn: () => changesApi.confirmImpact(changeId),
     onSuccess: () => {
-      toast.success(t('impact.confirm'))
+      toast.success('Impact confirmed')
       qc.invalidateQueries({ queryKey: ['change', changeId] })
+      // The cockpit's "Your actions" reads its own query: without this the
+      // "Confirm impacted items" line stays until a reload.
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Confirm failed'),
+    onError: (e: unknown) => { toastError(e, 'Could not confirm the impact') },
   })
 
   const { data, isLoading } = useQuery({
@@ -159,6 +165,8 @@ export default function ImpactTree({
     qc.invalidateQueries({ queryKey: ['change', changeId] })
     qc.invalidateQueries({ queryKey: ['change', changeId, 'impact-tree'] })
     qc.invalidateQueries({ queryKey: ['change-assessment-objects', changeId] })
+    // Applying clears Development's confirmation: their action comes back.
+    qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
     onChanged?.()
   }
 
@@ -167,7 +175,7 @@ export default function ImpactTree({
       ? changesApi.applyImpactSelection(changeId, selectedKey, reason)
       : changesApi.applyImpactSelection(changeId, selectedKey)),
     onSuccess: invalidate,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Apply failed'),
+    onError: (e: unknown) => { toastError(e, 'Could not apply the selection') },
   })
 
   const makeLead = useMutation({
@@ -176,7 +184,7 @@ export default function ImpactTree({
       toast.success(t('impact.leadChanged'))
       invalidate()
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? t('impact.makeLeadFailed')),
+    onError: (e: unknown) => { toastError(e, t('impact.makeLeadFailed')) },
   })
 
   const toggle = (partId: number) => {
@@ -188,9 +196,19 @@ export default function ImpactTree({
     })
   }
 
-  if (isLoading) return <div className="text-slate-400 text-sm">…</div>
-  if (!data || data.tree.length === 0)
-    return <div className="text-slate-400 text-sm">{t('impact.empty')}</div>
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-slate-700 bg-slate-800 p-4" aria-busy="true">
+        <p className="sr-only">Loading the impacted items…</p>
+        <div className="space-y-2" aria-hidden="true">
+          {[0, 1, 2].map((i) => <div key={i} className="h-5 rounded bg-slate-700/70 motion-safe:animate-pulse" />)}
+        </div>
+      </div>
+    )
+  }
+  if (!data || data.tree.length === 0) {
+    return <EmptyState size="sm" title="No parts to pick from" hint={t('impact.empty')} />
+  }
 
   const server = new Set(data.impacted_part_ids)
   const added = selectedKey.filter((id) => !server.has(id))
@@ -353,30 +371,28 @@ export default function ImpactTree({
         </div>
         <div className="flex items-center gap-2">
           {impactConfirmedAt ? (
-            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
-              ✓ {t('impact.confirmed')} {impactConfirmedByName ?? '-'} · {formatDateTime(impactConfirmedAt)}
+            <span data-testid="impact-confirmed"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/60 text-emerald-200 ring-1 ring-inset ring-emerald-800/70">
+              <Check aria-hidden="true" size={14} />
+              {t('impact.confirmed')} {impactConfirmedByName ?? '-'} · {formatDateTime(impactConfirmedAt)}
             </span>
           ) : (
             // Shown to everyone, actionable only by Development: a greyed button
             // that names the rule beats a control that vanishes or 403s.
-            <button
+            <Button variant="primary"
               data-testid="impact-confirm"
               onClick={() => setConfirmingImpact(true)}
-              disabled={!canConfirm || confirmImpact.isPending || dirty}
+              disabled={!canConfirm || dirty}
+              loading={confirmImpact.isPending}
               title={!canConfirm ? t('impact.developmentOnly') : dirty ? t('impact.applyFirst') : undefined}
-              className="px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t('impact.confirm')}
-            </button>
+            </Button>
           )}
           {editable ? (
-            <button
-              onClick={startApply}
-              disabled={!dirty || apply.isPending}
-              className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm disabled:opacity-50"
-            >
+            <Button onClick={startApply} disabled={!dirty} loading={apply.isPending}>
               {t('impact.apply')}
-            </button>
+            </Button>
           ) : !phaseOpen ? (
             <span className="text-amber-300 text-xs">{t('impact.locked')}</span>
           ) : (
@@ -401,12 +417,11 @@ export default function ImpactTree({
           <span className="font-mono text-sky-200/80 truncate min-w-0">{pendingSummary}</span>
           <span className="ml-auto flex gap-2">
             <button type="button" onClick={discard} data-testid="impact-discard"
-              className="rounded border border-slate-600 px-2 py-0.5 text-slate-200 hover:bg-slate-700">
+              className={btnSm.ghost}>
               {t('impact.discard')}
             </button>
             <button type="button" onClick={startApply} disabled={apply.isPending}
-              data-testid="impact-apply-bar"
-              className="rounded bg-blue-600 px-2 py-0.5 text-white hover:bg-blue-500 disabled:opacity-50">
+              data-testid="impact-apply-bar" className={btnSm.primary}>
               {t('impact.apply')}
             </button>
           </span>
@@ -435,29 +450,12 @@ export default function ImpactTree({
         onSubmit={(reason) => { setAsking(null); apply.mutate(reason) }}
         onClose={() => setAsking(null)}
       />
-      {asking === 'lock' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          role="dialog" aria-label={t('impact.lockTitle')} data-testid="impact-lock-confirm">
-          <div className="w-full max-w-md rounded-xl bg-slate-800 p-5 shadow-xl">
-            <h3 className="mb-2 text-base font-semibold text-slate-100">{t('impact.lockTitle')}</h3>
-            <p role="alert"
-              className="mb-3 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-              {lockWarning}
-            </p>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setAsking(null)}
-                className="rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                {t('impact.keepSet')}
-              </button>
-              <button type="button" data-testid="impact-lock-go"
-                onClick={() => { setAsking(null); apply.mutate(undefined) }}
-                className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500">
-                {t('impact.applyAnyway')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog open={asking === 'lock'} data-testid="impact-lock-confirm"
+        title={t('impact.lockTitle')} body={lockWarning}
+        cancelLabel={t('impact.keepSet')} confirmLabel={t('impact.applyAnyway')}
+        errorFallback="Could not apply the selection"
+        onClose={() => setAsking(null)}
+        onConfirm={() => apply.mutateAsync(undefined)} />
     </div>
   )
 }

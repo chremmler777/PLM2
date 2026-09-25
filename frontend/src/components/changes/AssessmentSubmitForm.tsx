@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { toastError } from '../../lib/apiError'
+import { btnPrimary } from '../common/buttonStyles'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment } from '../../types/change'
@@ -56,9 +58,6 @@ export function loadDraft(changeId: number, departmentId: number,
 export const clearDraft = (changeId: number, departmentId: number) => {
   try { window.localStorage.removeItem(draftKey(changeId, departmentId)) } catch { /* storage off */ }
 }
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 const VERDICTS = ['feasible', 'feasible_with_conditions', 'not_feasible'] as const
 
@@ -168,9 +167,7 @@ export default function AssessmentSubmitForm({
     },
     onError: (e: unknown) => {
       // The backend enforces the same rule; say what it said, in place.
-      const detail = errDetail(e) ?? 'Submit failed'
-      setFailure(detail)
-      toast.error(detail)
+      setFailure(toastError(e, 'Could not submit the assessment'))
     },
   })
   const ready = !needsChangePpt && checklistDone && (notImpacted || (verdict !== ''
@@ -268,7 +265,7 @@ export default function AssessmentSubmitForm({
       )}
       <button data-testid="assessment-submit"
         disabled={!ready || submit.isPending} onClick={() => setConfirming(true)}
-        className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50">
+        className={btnPrimary}>
         {notImpacted ? t('pkg.submitNotImpacted') : t('assessment.submit')}
       </button>
       {/* Only what is on screen counts: while the first question is open the

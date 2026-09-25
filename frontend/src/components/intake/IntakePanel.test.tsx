@@ -76,6 +76,16 @@ describe('IntakePanel', () => {
     await waitFor(() => expect(api.decide).toHaveBeenCalledWith(7, { route: 'attach_ecr', reason: 'title block only', change_id: 5 }))
   })
 
+  it('names the reason field and closes the triage on Escape', async () => {
+    api.list.mockResolvedValue({ can_triage: true, intakes: [intake()] })
+    wrap()
+    fireEvent.click(await screen.findByTestId('triage-7'))
+    expect(screen.getByLabelText(/^Reason/).tagName).toBe('TEXTAREA')
+    fireEvent.keyDown(screen.getByTestId('route-dialog'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByTestId('route-dialog')).toBeNull())
+    expect(api.decide).not.toHaveBeenCalled()
+  })
+
   it('is read-only for others and says who decides', async () => {
     api.list.mockResolvedValue({ can_triage: false, intakes: [intake({ can_decide: false })] })
     wrap()

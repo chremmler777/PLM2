@@ -7,11 +7,18 @@
  * change lead through the same 4-eyes panel as an added department. Naming
  * who should own it instead files the add in the same step.
  */
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { TriangleAlert } from 'lucide-react'
 import { changesApi } from '../../api/changes'
+import Dialog from '../common/Dialog'
+import Button from '../common/Button'
+import { toastError } from '../../lib/apiError'
 import { t } from '../../i18n/cmLabels'
+
+const fieldCls =
+  'mt-1 w-full rounded-lg border border-slate-600 bg-slate-900 p-2 text-sm text-slate-100 focus:border-sky-500 focus:outline-none'
 
 interface Props {
   changeId: number
@@ -28,6 +35,9 @@ export default function NotResponsibleDialog({
   const qc = useQueryClient()
   const [reason, setReason] = useState('')
   const [instead, setInstead] = useState<number | ''>('')
+  const reasonId = useId()
+  const insteadId = useId()
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
   const decline = useMutation({
     mutationFn: async () => {
       const why = reason.trim()
@@ -44,46 +54,45 @@ export default function NotResponsibleDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['change-routing', changeId] })
       qc.invalidateQueries({ queryKey: ['change', changeId] })
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       toast.success(t('notResp.sent'))
       onClose()
     },
-    onError: (e: Error & { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? t('routingDev.failed')),
+    onError: (e: unknown) => { toastError(e, t('routingDev.failed')) },
   })
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog"
-      data-testid="not-responsible-dialog">
-      <div className="bg-slate-800 rounded-xl shadow-xl w-full max-w-md p-5 space-y-3">
-        <h3 className="text-base font-semibold text-slate-100">{t('notResp.title')}</h3>
-        <p className="text-xs text-amber-200/90 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2">
-          {t('notResp.effect')}
+    <Dialog open onClose={onClose} title={t('notResp.title')} busy={decline.isPending}
+      closeOnBackdrop={false} data-testid="not-responsible-dialog"
+      initialFocus={reasonRef as React.RefObject<HTMLElement>}
+      footer={(
+        <>
+          <Button onClick={onClose} disabled={decline.isPending}>{t('common.cancel')}</Button>
+          <Button variant="danger" data-testid="not-responsible-submit"
+            disabled={!reason.trim()} loading={decline.isPending}
+            onClick={() => decline.mutate()}>{t('notResp.submit')}</Button>
+        </>
+      )}>
+      <div className="space-y-3">
+        <p className="flex items-start gap-2 rounded-lg border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
+          <TriangleAlert aria-hidden="true" size={14} className="mt-0.5 shrink-0 text-amber-300" />
+          <span>{t('notResp.effect')}</span>
         </p>
-        <label className="block text-sm text-slate-400">
-          {t('notResp.reason')}
-          <textarea data-testid="not-responsible-reason" autoFocus
-            className="mt-1 w-full border border-slate-600 bg-slate-900 text-slate-100 rounded-lg p-2 text-sm min-h-[70px]"
+        <div>
+          <label htmlFor={reasonId} className="block text-sm text-slate-300">{t('notResp.reason')}</label>
+          <textarea id={reasonId} ref={reasonRef} data-testid="not-responsible-reason"
+            className={`${fieldCls} min-h-[70px]`}
             value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
-        <label className="block text-sm text-slate-400">
-          {t('notResp.whoInstead')}
-          <select data-testid="not-responsible-instead"
-            className="mt-1 w-full border border-slate-600 bg-slate-900 text-slate-100 rounded-lg p-2 text-sm"
+        </div>
+        <div>
+          <label htmlFor={insteadId} className="block text-sm text-slate-300">{t('notResp.whoInstead')}</label>
+          <select id={insteadId} data-testid="not-responsible-instead" className={fieldCls}
             value={instead}
             onChange={(e) => setInstead(e.target.value === '' ? '' : Number(e.target.value))}>
             <option value="">{t('notResp.nobody')}</option>
             {candidates.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-        </label>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button"
-            className="px-3 py-1.5 text-sm border border-slate-600 text-slate-300 hover:bg-slate-700 rounded-lg"
-            onClick={onClose}>{t('common.cancel')}</button>
-          <button type="button" data-testid="not-responsible-submit"
-            className="px-3 py-1.5 text-sm rounded-lg text-white bg-red-700 hover:bg-red-600 disabled:opacity-50"
-            disabled={!reason.trim() || decline.isPending}
-            onClick={() => decline.mutate()}>{t('notResp.submit')}</button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

@@ -13,16 +13,14 @@
  */
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { btnSm } from '../common/buttonStyles'
+import { toastError } from '../../lib/apiError'
 import { changesApi } from '../../api/changes'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
 import type { Attachment, ChangeConcern } from '../../types/change'
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 export default function NeedsInfoCard({
   changeId, concern: c, attachments, canAnswer, canSettle, editable, onChanged, origin,
@@ -59,12 +57,12 @@ export default function NeedsInfoCard({
   const postAnswer = useMutation({
     mutationFn: (note: string) => changesApi.answerConcern(changeId, c.id, note.trim()),
     onSuccess: onChanged,
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not record the answer'),
+    onError: (e: unknown) => { toastError(e, 'Could not record the answer') },
   })
   const settle = useMutation({
     mutationFn: (note: string) => changesApi.withdrawConcern(changeId, c.id, note.trim()),
     onSuccess: () => { setSettling(false); setSettleNote(''); onChanged() },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not close the question'),
+    onError: (e: unknown) => { toastError(e, 'Could not close the question') },
   })
 
 
@@ -75,7 +73,7 @@ export default function NeedsInfoCard({
 
   const state = !c.is_open ? 'solved' : c.answered_at != null || !!c.answer_note ? 'answered' : 'open'
   const SUMMARY_DOT: Record<string, string> = {
-    open: 'text-amber-400', answered: 'text-sky-400', solved: 'text-slate-600',
+    open: 'text-amber-400', answered: 'text-sky-400', solved: 'text-slate-500',
   }
 
   if (!expanded) {
@@ -88,7 +86,7 @@ export default function NeedsInfoCard({
       <button type="button" data-testid={`needs-info-summary-${c.id}`}
         onClick={() => setExpanded(true)}
         className="w-full flex items-baseline gap-2 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-1.5 text-left hover:bg-slate-800">
-        <span aria-hidden className={`flex-shrink-0 ${SUMMARY_DOT[state]}`}>●</span>
+        <span aria-hidden="true" className={`h-2 w-2 flex-shrink-0 rounded-full bg-current ${SUMMARY_DOT[state]}`} />
         <span className="text-sm text-slate-400 truncate">{c.note}</span>
         {trailing && (
           <span className="text-xs text-slate-500 truncate flex-shrink-0">
@@ -123,7 +121,7 @@ export default function NeedsInfoCard({
             : 'border-amber-700/60 bg-amber-950/20'}`}>
       <header className="flex items-center gap-2 flex-wrap">
         <span data-testid={`needs-info-state-${c.id}`}
-          className={`inline-flex items-center rounded px-1.5 py-0 text-[10px] leading-tight font-medium ${STATE_STYLE[state]}`}>
+          className={`inline-flex items-center rounded px-1.5 py-0 text-[11px] leading-tight font-medium ${STATE_STYLE[state]}`}>
           {t(STATE_LABEL[state])}
         </span>
         <span className="text-xs text-slate-500" data-testid={`needs-info-asker-${c.id}`}>
@@ -211,7 +209,7 @@ export default function NeedsInfoCard({
               className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 disabled:opacity-50" />
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" data-testid={`needs-info-answer-submit-${c.id}`}
-                className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                className={btnSm.primary}
                 disabled={!answer.trim() || postAnswer.isPending}
                 onClick={() => postAnswer.mutate(answer)}>
                 {answered ? t('concern.updateAnswer') : t('concern.submitAnswer')}
@@ -246,7 +244,7 @@ export default function NeedsInfoCard({
                 placeholder={t('concern.settleNote')} aria-label={t('concern.settleNote')}
                 className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
               <button type="button" data-testid={`needs-info-settle-confirm-${c.id}`}
-                className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+                className={btnSm.secondary}
                 disabled={!settleNote.trim() || settle.isPending}
                 onClick={() => settle.mutate(settleNote)}>
                 {t('concern.markSolved')}
@@ -258,7 +256,7 @@ export default function NeedsInfoCard({
             </div>
           ) : (
             <button type="button" data-testid={`needs-info-settle-${c.id}`}
-              className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
+              className={btnSm.secondary}
               onClick={() => { setSettling(true); setSettleNote(c.answer_note ?? '') }}>
               {t('concern.markSolved')}
             </button>

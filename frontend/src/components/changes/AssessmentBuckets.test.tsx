@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AssessmentBuckets, { pickAssessment } from './AssessmentBuckets'
 import type { Assessment } from '../../types/change'
@@ -173,6 +173,17 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('bucket-state-2').textContent).toBe(t('bucket.waiting'))
   })
 
+  it('never shows a consulted row as waiting: a C row after an approved decline reads Optional', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [
+      assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'active', verdict: 'pending' }),
+    ] }) })
+    const chip = await screen.findByTestId('bucket-state-2')
+    expect(chip.textContent).toBe('Optional')
+    expect(chip.getAttribute('title')).toMatch(/no answer is required/)
+    // The routed S department with no row of its own owes nothing either.
+    expect((await screen.findByTestId('bucket-state-4')).textContent).toBe('Optional')
+  })
+
   it('says a department is on hold when a concern blocks it', async () => {
     buckets({ canSeeAll: true, change: change({ blocked_department_ids: [2] }) })
     expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('concern.onHold'))
@@ -192,7 +203,7 @@ describe('AssessmentBuckets', () => {
     buckets({ canSeeAll: true, change: change({ assessments: [assessment({
       verdict: 'feasible', status: 'submitted', submitted_at: '2026-08-01T00:00:00',
       details: { impacted: false } })] }) })
-    expect((await screen.findByTestId('bucket-verdict-2')).getAttribute('aria-label')).toBe(t('pkg.notImpacted'))
+    expect((await screen.findByTestId('bucket-verdict-2')).textContent).toBe(t('pkg.notImpacted'))
     fireEvent.click(screen.getByTestId('bucket-toggle-2'))
     expect(screen.getByTestId('bucket-answer-2').textContent).toContain(t('pkg.notImpacted'))
     expect(screen.getByTestId('bucket-answer-2').textContent).not.toContain('Feasible')
@@ -893,7 +904,8 @@ describe('AssessmentBuckets — adding a forgotten department', () => {
     expect((screen.getByTestId('add-department-button') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByTestId('routing-deviation-reject'))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'not impacted' } })
-    fireEvent.click(screen.getByText(t('routingDev.reject'), { selector: 'button.bg-red-700' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: t('routingDev.rejectTitle') }))
+      .getByRole('button', { name: t('routingDev.reject') }))
     await waitFor(() => expect(changesApi.rejectDeviation).toHaveBeenCalledWith(7, 'not impacted'))
     fireEvent.click(screen.getByTestId('routing-deviation-approve'))
     await waitFor(() => expect(changesApi.approveDeviation).toHaveBeenCalledWith(7))

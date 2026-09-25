@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ImpactTree from './ImpactTree'
 import { changesApi } from '../../api/changes'
@@ -162,6 +162,15 @@ describe('ImpactTree', () => {
     await waitFor(() => expect(changesApi.confirmImpact).toHaveBeenCalledWith(7))
   })
 
+  it('refreshes Your actions once the impact is confirmed', async () => {
+    const { qc } = wrap(<ImpactTree changeId={7} status="captured" />)
+    const spy = vi.spyOn(qc, 'invalidateQueries')
+    await screen.findByText('Child')
+    fireEvent.click(screen.getByRole('button', { name: /Confirm impact \(Development\)/ }))
+    fireEvent.click(screen.getByTestId('confirm-go'))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-actions', 7] }))
+  })
+
   it('greys the confirm button for a non-Development viewer and says why', async () => {
     vi.mocked(changesApi.confirmImpact).mockClear()
     wrap(<ImpactTree changeId={7} status="captured" canConfirm={false} />)
@@ -306,7 +315,7 @@ describe('ImpactTree, spec §16', () => {
     const dlg = screen.getByTestId('impact-lock-confirm')
     expect(dlg.textContent).toContain('RD Member')
     expect(changesApi.applyImpactSelection).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId('impact-lock-go'))
+    fireEvent.click(within(dlg).getByTestId('confirm-ok'))
     await waitFor(() => expect(changesApi.applyImpactSelection).toHaveBeenCalledWith(7, [2, 3]))
   })
 

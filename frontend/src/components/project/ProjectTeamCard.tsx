@@ -10,7 +10,8 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
-import { apiErrorMessage } from '../../lib/apiError';
+import { toastError } from '../../lib/apiError';
+import { btnSm } from '../common/buttonStyles';
 import { t } from '../../i18n/cmLabels';
 
 interface TeamMember {
@@ -41,14 +42,14 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
       setEditing(null);
       qc.invalidateQueries({ queryKey: ['project-team', projectId] });
     },
-    onError: (e: unknown) => toast.error(apiErrorMessage(e, t('team.saveFailed'))),
+    onError: (e: unknown) => { toastError(e, t('team.saveFailed')); },
   });
 
   if (isLoading) return null;
 
   return (
     <div data-testid="project-team-card">
-      <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('team.title')}</p>
+      <h3 className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">{t('team.title')}</h3>
       <ul className="space-y-1">
         {team.map((row) => (
           <li key={row.department_id} className="flex items-center gap-2 text-sm" data-testid={`team-row-${row.department_id}`}>
@@ -65,7 +66,7 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
                   const v = e.target.value;
                   set.mutate({ department_id: row.department_id, user_id: v ? Number(v) : null });
                 }}
-                className="flex-1 rounded border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-100"
+                className="h-7 flex-1 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs text-slate-100 focus:border-sky-500 focus:outline-none"
               >
                 <option value="">{t('team.unassigned')}</option>
                 {row.members.map((m) => (
@@ -81,7 +82,8 @@ export function ProjectTeamCard({ projectId }: { projectId: number }) {
                 </span>
                 <button type="button" data-testid={`team-edit-${row.department_id}`}
                   onClick={() => setEditing(row.department_id)}
-                  className="flex-shrink-0 text-xs text-sky-300 hover:text-sky-200 underline decoration-dotted underline-offset-2">
+                  aria-label={`${t('team.change')}: ${row.department_name}`}
+                  className={`${btnSm.ghost} flex-shrink-0 text-sky-300 hover:text-sky-200`}>
                   {t('team.change')}
                 </button>
               </>
