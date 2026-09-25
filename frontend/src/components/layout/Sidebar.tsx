@@ -6,8 +6,13 @@
  * Everywhere else it starts expanded, as before, and is not remembered.
  */
 
-import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useState, type ComponentType } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  BookOpen, ChartColumn, CircleDollarSign, Factory, FolderKanban, GitPullRequestArrow, GraduationCap,
+  LayoutDashboard, ListChecks, LogOut, Palette, PanelLeftClose, PanelLeftOpen, Receipt, Settings2,
+  ShoppingCart, Workflow, type LucideProps,
+} from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import SearchBox from '../SearchBox';
 import NotificationBell from '../NotificationBell';
@@ -17,12 +22,17 @@ import ActsAsSwitch from './ActsAsSwitch';
 
 const RAIL_KEY = 'plm2.sidebar.projectRail';
 
+interface NavItem {
+  path: string;
+  label: string;
+  icon: ComponentType<LucideProps>;
+}
+
 function isProjectPage(path: string): boolean {
   return /^\/projects\/\d+(\/|$)/.test(path);
 }
 
 export default function Sidebar() {
-  const navigate = useNavigate();
   const location = useLocation();
   const { logout, username, role } = useAuth();
   const onProjectPage = isProjectPage(location.pathname);
@@ -44,60 +54,66 @@ export default function Sidebar() {
   // Workflow tasks + change tasks: whatever My Tasks would show.
   const openTasks = useOpenTaskCount();
 
-  const dailyItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: '🏠' },
-    { path: '/projects', label: 'Projects', icon: '📁' },
-    { path: '/catalog', label: 'Purchased Parts', icon: '🛒' },
-    { path: '/paints', label: 'Paints', icon: '🎨' },
-    { path: '/suppliers', label: 'Suppliers', icon: '🏭' },
-    { path: '/lessons', label: 'Lessons Learned', icon: '📘' },
-    { path: '/changes', label: 'Changes', icon: '🔄' },
-    { path: '/process-map', label: 'Process Flow', icon: '🗺️' },
-    { path: '/pnl', label: 'P&L', icon: '💰' },
-    { path: '/reports', label: 'Reports', icon: '📊' },
-    { path: '/my-tasks', label: 'My Tasks', icon: '✅' },
-    { path: '/training', label: 'Training', icon: '🎓' },
+  const dailyItems: NavItem[] = [
+    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/projects', label: 'Projects', icon: FolderKanban },
+    { path: '/catalog', label: 'Purchased Parts', icon: ShoppingCart },
+    { path: '/paints', label: 'Paints', icon: Palette },
+    { path: '/suppliers', label: 'Suppliers', icon: Factory },
+    { path: '/lessons', label: 'Lessons Learned', icon: BookOpen },
+    { path: '/changes', label: 'Changes', icon: GitPullRequestArrow },
+    { path: '/process-map', label: 'Process Flow', icon: Workflow },
+    { path: '/pnl', label: 'P&L', icon: CircleDollarSign },
+    { path: '/reports', label: 'Reports', icon: ChartColumn },
+    { path: '/my-tasks', label: 'My Tasks', icon: ListChecks },
+    { path: '/training', label: 'Training', icon: GraduationCap },
   ];
 
-  const setupItems = [
-    { path: '/workflows', label: 'Workflows', icon: '⚙️' },
-    { path: '/cost-sheet', label: 'Cost sheet', icon: '🧾' },
+  const setupItems: NavItem[] = [
+    { path: '/workflows', label: 'Workflows', icon: Settings2 },
+    { path: '/cost-sheet', label: 'Cost sheet', icon: Receipt },
   ];
 
   const showSetup = role === 'admin' || role === 'engineer';
 
-  const isActive = (path: string) => location.pathname === path;
+  // A detail page (/changes/21) keeps its section lit.
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
 
-  const renderNavItem = (item: { path: string; label: string; icon: string }) => {
+  const renderNavItem = (item: NavItem) => {
     const active = isActive(item.path);
+    const Icon = item.icon;
+    const count = item.path === '/my-tasks' ? openTasks : 0;
     return (
-      <button
+      <Link
         key={item.path}
-        onClick={() => navigate(item.path)}
+        to={item.path}
         aria-current={active ? 'page' : undefined}
-        aria-label={isCollapsed ? item.label : undefined}
-        className={`relative w-full text-left py-2.5 rounded-md text-sm font-medium ${
+        aria-label={isCollapsed ? (count > 0 ? `${item.label}, ${count} open` : item.label) : undefined}
+        className={`group relative w-full py-2 rounded-md text-sm font-medium flex items-center gap-3 transition-colors ${
           isCollapsed ? 'justify-center px-0' : 'px-3'
-        } flex items-center gap-3 ${
+        } ${
           active
             ? 'bg-sky-500/10 text-sky-300'
-            : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200 hover:translate-x-0.5'
+            : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
         }`}
-        title={isCollapsed ? item.label : ''}
+        title={isCollapsed ? item.label : undefined}
       >
         {active && (
-          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-sky-400" />
+          <span aria-hidden="true" className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-sky-400" />
         )}
-        <span className={`text-base flex-shrink-0 ${active ? '' : 'opacity-80'}`}>{item.icon}</span>
-        {!isCollapsed && <span className="flex-1">{item.label}</span>}
-        {item.path === '/my-tasks' && openTasks > 0 && (
+        <Icon aria-hidden="true" size={18} strokeWidth={1.75}
+          className={`flex-shrink-0 ${active ? 'text-sky-300' : 'text-slate-500 group-hover:text-slate-300'}`} />
+        {!isCollapsed && <span className="flex-1 truncate">{item.label}</span>}
+        {count > 0 && (
           <span className={isCollapsed
-            ? 'absolute top-0.5 right-0.5 min-w-[1rem] px-1 rounded bg-amber-500 text-slate-900 text-[10px] leading-4 font-bold text-center'
-            : 'px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0'}>
-            {openTasks}
+            ? 'absolute top-0 right-0 min-w-[1rem] px-1 rounded bg-amber-500 text-slate-900 text-[11px] leading-4 font-bold text-center tabular-nums'
+            : 'px-1.5 py-0.5 rounded-md bg-amber-500 text-slate-900 text-xs font-bold flex-shrink-0 tabular-nums'}>
+            {count}
+            {!isCollapsed && <span className="sr-only"> open</span>}
           </span>
         )}
-      </button>
+      </Link>
     );
   };
 
@@ -123,11 +139,16 @@ export default function Sidebar() {
           </div>
         )}
         <button
+          type="button"
           onClick={toggleCollapsed}
           className="p-1.5 hover:bg-slate-700 rounded-md text-slate-400 hover:text-slate-100"
           title={isCollapsed ? 'Expand' : 'Collapse'}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!isCollapsed}
         >
-          {isCollapsed ? '▶' : '◀'}
+          {isCollapsed
+            ? <PanelLeftOpen aria-hidden="true" size={18} strokeWidth={1.75} />
+            : <PanelLeftClose aria-hidden="true" size={18} strokeWidth={1.75} />}
         </button>
       </div>
 
@@ -139,12 +160,12 @@ export default function Sidebar() {
       )}
 
       {/* Navigation Items */}
-      <nav className={`flex-1 space-y-0.5 ${isCollapsed ? 'p-1' : 'p-2'}`}>
+      <nav aria-label="Main" className={`flex-1 space-y-0.5 ${isCollapsed ? 'p-1' : 'p-2'}`}>
         {dailyItems.map(renderNavItem)}
         {showSetup && (
           <>
             {!isCollapsed ? (
-              <p className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">SETUP</p>
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500 px-3 pt-4 pb-1">SETUP</p>
             ) : (
               <div className="border-t border-slate-700/70 mt-2 pt-2" />
             )}
@@ -174,11 +195,14 @@ export default function Sidebar() {
         {role === 'admin' && <ActsAsSwitch collapsed={isCollapsed} />}
         <NotificationBell collapsed={isCollapsed} />
         <button
+          type="button"
           onClick={logout}
-          className={`w-full py-2 rounded-md border border-slate-700 text-slate-400 hover:border-red-500/50 hover:text-red-300 hover:bg-red-500/10 font-medium text-sm ${isCollapsed ? 'px-0' : 'px-3'}`}
-          title={isCollapsed ? 'Logout' : ''}
+          className={`w-full py-2 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-700/60 font-medium text-sm flex items-center gap-3 ${isCollapsed ? 'justify-center px-0' : 'px-3'}`}
+          title={isCollapsed ? 'Log out' : undefined}
+          aria-label={isCollapsed ? 'Log out' : undefined}
         >
-          {isCollapsed ? '↪' : 'Logout'}
+          <LogOut aria-hidden="true" size={18} strokeWidth={1.75} className="flex-shrink-0" />
+          {!isCollapsed && <span>Log out</span>}
         </button>
       </div>
     </aside>

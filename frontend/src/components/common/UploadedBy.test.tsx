@@ -22,9 +22,9 @@ describe('UploadedBy', () => {
     expect(line.textContent).not.toContain('·')
   })
 
-  it('writes the day as dd.mm.yyyy', () => {
+  it('writes the day as "1 Jul 2026"', () => {
     render(<UploadedBy name="Eva Eng" at="2026-07-01T12:00:00" />)
-    expect(screen.getByTestId('uploaded-by').textContent).toMatch(/^Eva Eng · \d{2}\.\d{2}\.2026$/)
+    expect(screen.getByTestId('uploaded-by').textContent).toBe('Eva Eng · 1 Jul 2026')
   })
 
   it('renders nothing when there is no provenance at all', () => {

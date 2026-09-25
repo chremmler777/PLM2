@@ -101,7 +101,7 @@ describe('Sidebar My Tasks counter', () => {
     ] as never)
     wrap(<Sidebar />)
     const badge = await screen.findByText('5')
-    expect(badge.closest('button')?.textContent).toContain('My Tasks')
+    expect(badge.closest('a')?.textContent).toContain('My Tasks')
   })
 
   it('shows no badge when nothing is waiting', async () => {
@@ -111,7 +111,7 @@ describe('Sidebar My Tasks counter', () => {
     })
     vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
     wrap(<Sidebar />)
-    const myTasks = await screen.findByRole('button', { name: /My Tasks/ })
+    const myTasks = await screen.findByRole('link', { name: /My Tasks/ })
     expect(myTasks.textContent?.replace(/[^0-9]/g, '')).toBe('')
   })
 
@@ -127,7 +127,7 @@ describe('Sidebar My Tasks counter', () => {
     ] as never)
     wrap(<Sidebar />)
     const badge = await screen.findByText('2')
-    expect(badge.closest('button')?.textContent).toContain('My Tasks')
+    expect(badge.closest('a')?.textContent).toContain('My Tasks')
   })
 })
 
@@ -197,5 +197,24 @@ describe('Sidebar rail on project pages', () => {
     localStorage.setItem(RAIL_KEY, '{oops')
     wrapAt('/projects/2')
     expect((await screen.findByTestId('sidebar')).getAttribute('data-collapsed')).toBe('true')
+  })
+})
+
+describe('Sidebar links', () => {
+  afterEach(cleanup)
+
+  it('navigates with real links and keeps the section lit on a detail page', async () => {
+    authMock.current = { role: 'viewer', username: 'tester', logout: vi.fn() }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/changes/21']}><Sidebar /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const changes = await screen.findByRole('link', { name: 'Changes' })
+    expect(changes.getAttribute('href')).toBe('/changes')
+    expect(changes.getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy()
   })
 })

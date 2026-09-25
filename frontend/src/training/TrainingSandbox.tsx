@@ -84,7 +84,7 @@ export default function TrainingSandbox({ resetKey, children }: Props) {
           className="rounded-lg border-2 border-dashed border-amber-500/60 bg-amber-500/[0.03]"
         >
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/30">
-            <span className="inline-flex items-center rounded-full bg-amber-500 px-2 py-px font-mono text-[10px] font-semibold uppercase tracking-wider text-slate-900">
+            <span className="inline-flex items-center rounded-full bg-amber-500 px-2 py-px font-mono text-[11px] font-semibold uppercase tracking-wider text-slate-900">
               Training
             </span>
             <span className="text-[12px] text-amber-200/90">

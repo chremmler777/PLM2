@@ -30,7 +30,7 @@ export const financeChapter: ContentChapter = {
         },
         {
           callout:
-            'Rates are public by design: everybody in the organisation can read the cost sheet. ' +
+            'Rates are public by design: everybody in the organization can read the cost sheet. ' +
             'Only Finance, or an admin, can change it.',
         },
       ],

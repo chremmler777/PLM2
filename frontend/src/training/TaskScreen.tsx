@@ -66,7 +66,7 @@ function StartChangeScreen() {
         </div>
         <StartChangeButton label="+ New change request" onClick={() => setOpen(true)} />
       </div>
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-slate-400">
         The training copy holds one project (T100 Training Atlas) and its parts.
       </p>
       <StartChangeModal open={open} onClose={() => setOpen(false)} />
@@ -111,7 +111,7 @@ function useChange(changeId: number) {
 function ChangeHeader({ change }: { change: ChangeDetail }) {
   return (
     <div>
-      <div className="font-mono text-xs text-slate-500">{change.change_number}</div>
+      <div className="font-mono text-xs text-slate-400">{change.change_number}</div>
       <h3 className="text-base font-semibold text-slate-100">{change.title}</h3>
       {change.reason && <p className="mt-1 text-sm text-slate-400">{change.reason}</p>}
     </div>
@@ -125,7 +125,7 @@ function ChangeStatusScreen({ changeId }: { changeId: number }) {
     <div className="space-y-4">
       <ChangeHeader change={change} />
       <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4 space-y-3 text-sm">
-        <div className="text-xs uppercase tracking-wide text-slate-500">Status</div>
+        <div className="text-xs uppercase tracking-wide text-slate-400">Status</div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-slate-400 w-28">Priority</span>
           <PriorityEditor change={change} canEdit />
@@ -151,7 +151,7 @@ function AssessmentScreen({ department }: { department: string }) {
     <div className="space-y-4">
       <ChangeHeader change={change} />
       <div className="space-y-2">
-        <div className="text-xs uppercase tracking-wide text-slate-500">
+        <div className="text-xs uppercase tracking-wide text-slate-400">
           Assessment: {department}
         </div>
         {submitted || row?.submitted_at ? (

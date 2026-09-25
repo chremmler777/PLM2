@@ -20,9 +20,10 @@
  * side track has its own swimlane at the bottom, so a reader can trace any
  * single concern without crossing another.
  */
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { t } from '../i18n/cmLabels'
+import { useAuth } from '../contexts/AuthContext'
+import { readStored, writeStored } from '../lib/safeStorage'
 import ProcessOverview from '../components/processMap/ProcessOverview'
 import {
   OVERVIEW_PRINT_CSS, PROCESS_MAP_CSS, readStoredView, storeView, type ProcessView,
@@ -30,7 +31,7 @@ import {
 
 type BuildState = 'built' | 'in_build' | 'partial' | 'to_build'
 
-/** Border colour is the build status: the one thing the chart shows at a glance. */
+/** Border color is the build status: the one thing the chart shows at a glance. */
 const STROKE: Record<BuildState, string> = {
   built: '#34d399', in_build: '#38bdf8', partial: '#fbbf24', to_build: '#64748b',
 }
@@ -178,7 +179,7 @@ const RAIL = 16            // deadline rail
 const LANE_L = 62          // long left-hand returns
 const LANE_INT = 80        // the internal-approval path down to Approved
 const LX = 100, LW = 210   // left column
-const CX0 = 380, CW = 300  // centre column (the main path)
+const CX0 = 380, CW = 300  // center column (the main path)
 const RX = 750, RW = 230   // right column
 const LANE_R = 1000        // long right-hand returns
 const LANE_R2 = 1022       // second carry lane, so two carries never share a line
@@ -232,29 +233,44 @@ const CHART_H = RLANE_Y + RLANE_H + 20
 
 // --- primitives -----------------------------------------------------------
 
+/** Whether the chart shows the raw task keys ("task: costing_input"). Admins turn it on. */
+const TaskKeysContext = createContext(false)
+
+/**
+ * A line of raw task keys ("task: costing_input", "tasks: a_b · c_d") versus
+ * a line a reader understands ("task: read and understood", "valid 30 days").
+ */
+const isTaskKey = (s: string) => /^tasks?:/.test(s) && /\b[a-z]+_[a-z_]+\b/.test(s)
+
 function Box({ x, y, w, h, name, sub, task, badge, stroke, dashed, testId }: {
   x: number; y: number; w: number; h: number
   name: string; sub?: string; task?: string; badge?: string
   stroke: string; dashed?: boolean; testId: string
 }) {
-  const badgeW = badge ? badge.length * 6.2 + 14 : 0
+  const showKeys = useContext(TaskKeysContext)
+  const badgeW = badge ? badge.length * 6.8 + 14 : 0
+  // Task keys are for admins; everybody else gets the box without that line,
+  // and the two remaining lines sit centered.
+  const third = task && (!isTaskKey(task) || showKeys) ? task : undefined
+  const nameY = third ? y + 23 : sub ? y + h / 2 - 3 : y + h / 2 + 5
+  const subY = third ? y + 40 : y + h / 2 + 15
   return (
     <g data-testid={testId}>
       <rect x={x} y={y} width={w} height={h} rx={9} fill="#1e293b"
         stroke={stroke} strokeWidth={1.75}
         strokeDasharray={dashed ? '5 4' : undefined} />
-      <text x={x + 12} y={y + (sub ? 23 : h / 2 + 5)} fill="#e2e8f0"
+      <text x={x + 12} y={nameY} fill="#e2e8f0"
         fontSize={13.5} fontWeight={600}>{name}</text>
-      {sub && <text x={x + 12} y={y + 40} fill="#94a3b8" fontSize={10}>{sub}</text>}
-      {task && (
-        <text x={x + 12} y={y + 55} fill="#64748b" fontSize={9}
-          fontFamily="ui-monospace, monospace">{task}</text>
+      {sub && <text x={x + 12} y={subY} fill="#94a3b8" fontSize={11}>{sub}</text>}
+      {third && (
+        <text x={x + 12} y={y + 56} fill={isTaskKey(third) ? '#7c8ca3' : '#94a3b8'} fontSize={11}
+          fontFamily={isTaskKey(third) ? 'Geist Mono, ui-monospace, monospace' : undefined}>{third}</text>
       )}
       {badge && (
         <>
-          <rect x={x + w - badgeW - 10} y={y + 8} width={badgeW} height={17} rx={8}
+          <rect x={x + w - badgeW - 10} y={y + 8} width={badgeW} height={18} rx={9}
             fill="#0f172a" stroke="#475569" strokeWidth={1} />
-          <text x={x + w - badgeW / 2 - 10} y={y + 20} fill="#cbd5e1" fontSize={10}
+          <text x={x + w - badgeW / 2 - 10} y={y + 21} fill="#cbd5e1" fontSize={11}
             textAnchor="middle">{badge}</text>
         </>
       )}
@@ -275,7 +291,7 @@ function Decision({ y, name, lines, testId, x = CX0, w = CW }: {
       <text x={c} y={m - (lines?.length ? 6 : -4)} fill="#e9d5ff" fontSize={12.5}
         fontWeight={600} textAnchor="middle">{name}</text>
       {(lines ?? []).map((l, i) => (
-        <text key={l} x={c} y={m + 9 + i * 12} fill="#c4b5fd" fontSize={10}
+        <text key={l} x={c} y={m + 10 + i * 13} fill="#c4b5fd" fontSize={11}
           textAnchor="middle">{l}</text>
       ))}
     </g>
@@ -298,29 +314,37 @@ function Gate({ y, name, hard, testId, x = CX0 - 14, w = CW + 28 }: {
         fill="#131c2e" stroke={hard ? HARD : '#94a3b8'} strokeWidth={1.75} />
       <text x={x + w / 2} y={y + (detail ? 19 : GH / 2 + 4)}
         fill={hard ? '#fecaca' : '#cbd5e1'}
-        fontSize={10.5} fontWeight={600} textAnchor="middle">{title}</text>
+        fontSize={11} fontWeight={600} textAnchor="middle">{title}</text>
       {detail && (
         <text x={x + w / 2} y={y + 34} fill={hard ? '#fca5a5' : '#94a3b8'}
-          fontSize={9.5} textAnchor="middle">{detail}</text>
+          fontSize={11} textAnchor="middle">{detail}</text>
       )}
     </g>
   )
 }
 
 /** A terminal state: stadium shape, the flow stops here. */
-function Terminal({ x, y, w, name, sub, stroke, testId, dashed }: {
+function Terminal({ x, y, w, name, sub, task, stroke, testId, dashed }: {
   x: number; y: number; w: number; name: string; sub?: string
+  /** A task key, shown only when task keys are on. */
+  task?: string
   stroke: string; testId: string; dashed?: boolean
 }) {
+  const showKeys = useContext(TaskKeysContext)
+  const key = task && showKeys ? task : undefined
   return (
     <g data-testid={testId}>
       <rect x={x} y={y} width={w} height={TH} rx={TH / 2} fill="#1e293b"
         stroke={stroke} strokeWidth={1.75} strokeDasharray={dashed ? '5 4' : undefined} />
-      <text x={x + w / 2} y={y + (sub ? 19 : 27)} fill="#e2e8f0" fontSize={12.5}
+      <text x={x + w / 2} y={y + (key ? 15 : sub ? 19 : 27)} fill="#e2e8f0" fontSize={12.5}
         fontWeight={600} textAnchor="middle">{name}</text>
       {sub && (
-        <text x={x + w / 2} y={y + 33} fill="#94a3b8" fontSize={9.5}
+        <text x={x + w / 2} y={y + (key ? 28 : 33)} fill="#94a3b8" fontSize={11}
           textAnchor="middle">{sub}</text>
+      )}
+      {key && (
+        <text x={x + w / 2} y={y + 39} fill="#7c8ca3" fontSize={11}
+          fontFamily="Geist Mono, ui-monospace, monospace" textAnchor="middle">{key}</text>
       )}
     </g>
   )
@@ -337,7 +361,7 @@ const LABEL_FILL: Record<string, string> = {
 function Edge({ d, testId, color = LINE, dashed, both, label, lx, ly, rot, anchor }: {
   d: string; testId: string; color?: string; dashed?: boolean; both?: boolean
   label?: string; lx?: number; ly?: number
-  /** Vertical label, reading bottom to top, centred on (lx, ly). */
+  /** Vertical label, reading bottom to top, centered on (lx, ly). */
   rot?: boolean
   anchor?: 'start' | 'middle' | 'end'
 }) {
@@ -351,7 +375,7 @@ function Edge({ d, testId, color = LINE, dashed, both, label, lx, ly, rot, ancho
       {/* A dark halo keeps the label readable where it crosses lanes and
           outlines: in a chart this dense every label crosses something. */}
       {label && (
-        <text x={lx} y={ly} fill={textFill} fontSize={10}
+        <text x={lx} y={ly} fill={textFill} fontSize={11}
           textAnchor={rot ? 'middle' : anchor}
           transform={rot ? `rotate(-90 ${lx} ${ly})` : undefined}
           stroke="#0b1220" strokeWidth={4} style={{ paintOrder: 'stroke' }}>
@@ -362,9 +386,9 @@ function Edge({ d, testId, color = LINE, dashed, both, label, lx, ly, rot, ancho
   )
 }
 
-const artH = (lines: string[], pnl?: string) => 16 + (lines.length + (pnl ? 1 : 0)) * 13
+const artH = (lines: string[], pnl?: string) => 16 + (lines.length + (pnl ? 1 : 0)) * 14
 /** The y of an artifact box's P&L row, where the P&L line picks it up. */
-const pnlY = (y: number, lines: string[]) => y + 13 + lines.length * 13
+const pnlY = (y: number, lines: string[]) => y + 13 + lines.length * 14
 
 /** What a stage produces, in its own gutter so the path stays readable. The
  *  P&L row, when a stage touches the P&L, is cyan and ticks onto the P&L line. */
@@ -383,13 +407,13 @@ function Artifacts({ y, lines, pnl, testId }: {
       <path d={`M ${ART_X + 9} ${y + 8} h 5 l 3 3 v 8 h -8 z`} fill="none"
         stroke="#64748b" strokeWidth={1} />
       {lines.map((l, i) => (
-        <text key={l} x={ART_X + (i === 0 ? 22 : 10)} y={y + 17 + i * 13} fill="#94a3b8"
-          fontSize={9.5}>{l}</text>
+        <text key={l} x={ART_X + (i === 0 ? 22 : 10)} y={y + 17 + i * 14} fill="#94a3b8"
+          fontSize={11}>{l}</text>
       ))}
       {pnl && (
         <g data-testid={`${testId}-pnl`}>
-          <text x={ART_X + 10} y={y + 17 + lines.length * 13} fill="#67e8f9"
-            fontSize={9.5} fontWeight={600}>{pnl}</text>
+          <text x={ART_X + 10} y={y + 17 + lines.length * 14} fill="#67e8f9"
+            fontSize={11} fontWeight={600}>{pnl}</text>
           <path d={`M ${ART_X + ART_W} ${pnlY(y, lines)} L ${PNL_X} ${pnlY(y, lines)}`}
             stroke={CROSS} strokeWidth={1} fill="none" />
           <circle cx={PNL_X} cy={pnlY(y, lines)} r={2.5} fill={CROSS} />
@@ -407,7 +431,7 @@ function Phase({ y, h, label, x = CX0 - 30, w = CW + 60, color = '#475569' }: {
     <g>
       <rect x={x} y={y} width={w} height={h} rx={12}
         fill="#0b1220" stroke="#334155" strokeWidth={1} strokeDasharray="3 5" />
-      <text x={x + 8} y={y + 14} fill={color} fontSize={10}
+      <text x={x + 8} y={y + 14} fill={color} fontSize={11}
         letterSpacing={1.2}>{label.toUpperCase()}</text>
     </g>
   )
@@ -444,35 +468,41 @@ function Rung({ y, level, title, lines, stroke, testId }: {
   const h = RUNG_H(lines.length)
   return (
     <g data-testid={testId}>
-      <rect x={LX} y={y} width={LW} height={h} rx={8} fill="#1e293b" stroke={stroke}
+      <rect x={LX} y={y} width={RUNG_W} height={h} rx={8} fill="#1e293b" stroke={stroke}
         strokeWidth={1.75} />
       <rect x={LX + 10} y={y + 8} width={26} height={17} rx={8} fill={stroke} />
-      <text x={LX + 23} y={y + 20} fill="#0f172a" fontSize={10} fontWeight={700}
+      <text x={LX + 23} y={y + 20} fill="#0f172a" fontSize={11} fontWeight={700}
         textAnchor="middle">{level}</text>
       <text x={LX + 44} y={y + 21} fill="#e2e8f0" fontSize={12} fontWeight={600}>{title}</text>
       {lines.map((l, i) => (
-        <text key={l} x={LX + 10} y={y + 40 + i * 12} fill="#94a3b8" fontSize={9.5}>{l}</text>
+        <text key={l} x={LX + 10} y={y + 40 + i * 13} fill="#94a3b8" fontSize={11}>{l}</text>
       ))}
     </g>
   )
 }
 
-const RUNG_H = (n: number) => 36 + n * 12
-const L1_LINES = ['on raise: owner department + PM informed']
+const RUNG_H = (n: number) => 36 + n * 13
+/** Wider than the left column: the trigger lines are the content here. */
+const RUNG_W = 244
+const rungX = LX + RUNG_W / 2
+// One trigger per line, short enough for 11 px text in RUNG_W.
+const L1_LINES = ['on raise: owner department and', 'PM informed']
 const L2_LINES = [
-  'auto: severity 3 · a fix action overdue',
-  'recovery slips past the baseline finish',
+  'auto: severity 3, a fix action overdue',
+  'recovery slips past baseline finish',
   'no route decided after 2 working days',
-  'PM + change lead + Sales; Sales decides',
+  'PM, change lead, Sales; Sales decides',
   'whether the customer is told',
 ]
 const L3_LINES = [
-  'auto: recovery ends after the release date',
-  'L2 not acknowledged in 2 working days',
-  'customer requires a fix on a concession',
-  'Sales informs the customer (mail filed)',
-  'management notified · from KTX Weissenburg / Solingen:',
-  'the PM informs its contact instead',
+  'auto: the recovery ends after the',
+  'release date, or L2 is not',
+  'acknowledged in 2 working days',
+  'customer wants a fix on a concession',
+  'Sales tells the customer (mail filed)',
+  'management notified; for KTX',
+  'Weissenburg / Solingen the PM',
+  'informs its contact instead',
 ]
 const RUNG = { l1: IY.raise, l2: 0, l3: 0 }
 RUNG.l2 = RUNG.l1 + RUNG_H(L1_LINES.length) + 24
@@ -481,22 +511,22 @@ RUNG.l3 = RUNG.l2 + RUNG_H(L2_LINES.length) + 24
 function EscalationLadder() {
   return (
     <g data-testid="procmap-escalation-ladder">
-      <text x={LX} y={RUNG.l1 - 8} fill="#fca5a5" fontSize={10} letterSpacing={1.2}>
+      <text x={LX} y={RUNG.l1 - 8} fill="#fca5a5" fontSize={11} letterSpacing={1.2}>
         ESCALATION LADDER · PER OPEN ISSUE
       </text>
       <Rung y={RUNG.l1} level="L1" title="Department" lines={L1_LINES} stroke="#94a3b8"
         testId="procmap-escalation-l1" />
       <Edge testId="procmap-edge-l1-l2" color={LOOP}
-        d={`M ${lcx} ${RUNG.l1 + RUNG_H(L1_LINES.length)} L ${lcx} ${RUNG.l2}`} />
+        d={`M ${rungX} ${RUNG.l1 + RUNG_H(L1_LINES.length)} L ${rungX} ${RUNG.l2}`} />
       <Rung y={RUNG.l2} level="L2" title="Project" lines={L2_LINES} stroke={LOOP}
         testId="procmap-escalation-l2" />
       <Edge testId="procmap-edge-l2-l3" color={HARD}
-        d={`M ${lcx} ${RUNG.l2 + RUNG_H(L2_LINES.length)} L ${lcx} ${RUNG.l3}`} />
+        d={`M ${rungX} ${RUNG.l2 + RUNG_H(L2_LINES.length)} L ${rungX} ${RUNG.l3}`} />
       <Rung y={RUNG.l3} level="L3" title="Management + customer" lines={L3_LINES}
         stroke={HARD} testId="procmap-escalation-l3" />
       {['each level: audit row, notification and an', 'acknowledge task; manual escalation with a', 'reason; de-escalate only by closing or PM'].map((l, i) => (
-        <text key={l} x={LX} y={RUNG.l3 + RUNG_H(L3_LINES.length) + 16 + i * 12}
-          fill="#64748b" fontSize={9.5}>{l}</text>
+        <text key={l} x={LX} y={RUNG.l3 + RUNG_H(L3_LINES.length) + 16 + i * 13}
+          fill="#64748b" fontSize={11}>{l}</text>
       ))}
     </g>
   )
@@ -505,7 +535,7 @@ function EscalationLadder() {
 /** The mother-plant side track: no assessment, no costing, no offer. */
 function MotherPlantLane() {
   const y = LANE_Y + 34
-  const bw = 180, gw = 214, gap = 28
+  const bw = 190, gw = 214, gap = 22
   const xs = [58, 58 + bw + gap, 58 + 2 * (bw + gap)]
   const gx = xs[2] + bw + gap
   const ax = gx + gw + gap
@@ -519,11 +549,11 @@ function MotherPlantLane() {
     <g data-testid="procmap-mother-plant-lane">
       <rect x={40} y={LANE_Y} width={PNL_X - 40} height={LANE_H} rx={12}
         fill="#130f1f" stroke={MP} strokeWidth={1} strokeDasharray="6 5" />
-      <text x={52} y={LANE_Y + 20} fill="#d8b4fe" fontSize={10.5} letterSpacing={1.2}
+      <text x={52} y={LANE_Y + 20} fill="#d8b4fe" fontSize={11} letterSpacing={1.2}
         fontWeight={600}>
         LANE M · SIDE TRACK: Change from KTX Weissenburg / Solingen
       </text>
-      <text x={PNL_X - 14} y={LANE_Y + 20} fill={STROKE.built} fontSize={10}
+      <text x={PNL_X - 14} y={LANE_Y + 20} fill={STROKE.built} fontSize={11}
         textAnchor="end" data-testid="procmap-mp-state">built</text>
       <Box x={xs[0]} y={y} w={bw} h={NH} stroke={MP} badge="PM"
         name="Capture" sub="KTX Weissenburg (WUG) default"
@@ -551,7 +581,7 @@ function MotherPlantLane() {
         'Never: assessment, costing, offer, quote deadline. Open receipts show in Blocked by as information, not a gate.',
         'Timing as usual (team confirmation, baseline) with an "Inform KTX Weissenburg" (or Solingen) stamp instead of the customer publish. L3 escalation: the PM informs the contact there. P&L: actual local costs only.',
       ].map((l, i) => (
-        <text key={l} x={58} y={y + NH + 26 + i * 14} fill="#c4b5fd" fontSize={10}>{l}</text>
+        <text key={l} x={58} y={y + NH + 26 + i * 14} fill="#c4b5fd" fontSize={11}>{l}</text>
       ))}
     </g>
   )
@@ -573,11 +603,11 @@ function ReviewLane() {
     <g data-testid="procmap-review-lane">
       <rect x={40} y={RLANE_Y} width={PNL_X - 40} height={RLANE_H} rx={12}
         fill="#0b1a1a" stroke={RV} strokeWidth={1} strokeDasharray="6 5" />
-      <text x={52} y={RLANE_Y + 20} fill="#5eead4" fontSize={10.5} letterSpacing={1.2}
+      <text x={52} y={RLANE_Y + 20} fill="#5eead4" fontSize={11} letterSpacing={1.2}
         fontWeight={600}>
         LANE R · ENGINEERING REVIEW OF A NEW INDEX (origin engineering_review)
       </text>
-      <text x={PNL_X - 14} y={RLANE_Y + 20} fill={STROKE.built} fontSize={10}
+      <text x={PNL_X - 14} y={RLANE_Y + 20} fill={STROKE.built} fontSize={11}
         textAnchor="end" data-testid="procmap-rv-state">built</text>
       <Box x={xs[0]} y={y} w={bw} h={NH} stroke={RV} badge="Team"
         name="Triage" sub="Development picks the review"
@@ -604,7 +634,7 @@ function ReviewLane() {
         'Asked: Development, Packaging Engineer for articles, and the owners of what serves the part (tools: Tool Engineer, stations and EOAT: Manufacturing Engineer, gauges: APQP).',
         'A full ECR or an attached change activates exactly its linked pending index at release; the checklist hints "index updated" and "drawing and 3D data released" from it.',
       ].map((l, i) => (
-        <text key={l} x={58} y={y + NH + 46 + i * 14} fill="#99f6e4" fontSize={10}>{l}</text>
+        <text key={l} x={58} y={y + NH + 46 + i * 14} fill="#99f6e4" fontSize={11}>{l}</text>
       ))}
     </g>
   )
@@ -678,9 +708,9 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           name="Engineering review" sub="continues in lane R, below"
           task="E levels before series" testId="procmap-node-intake-review" />
         <Edge testId="procmap-edge-intake-admin" color={RV}
-          d={`M ${CX0 + CW} ${mid(INTAKE_Y, NH)} L ${RX} ${mid(INTAKE_Y, NH)}`}
+          d={`M ${CX0 + CW} ${mid(INTAKE_Y, NH)} L ${RX + 20} ${mid(INTAKE_Y, NH)}`}
           label="administrative" lx={CX0 + CW + 8} ly={mid(INTAKE_Y, NH) - 7} />
-        <Terminal x={RX} y={mid(INTAKE_Y, NH) - TH / 2} w={RW} name="Active now"
+        <Terminal x={RX + 20} y={mid(INTAKE_Y, NH) - TH / 2} w={RW - 20} name="Active now"
           sub="reason required, audited" stroke={RV} testId="procmap-node-intake-admin" />
 
         {/* --- the main path, each step carrying the condition it must meet --- */}
@@ -726,7 +756,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           d={`M ${CX0 + CW} ${mid(Y.meeting, DH)} L ${RX} ${mid(Y.meeting, DH)}`}
           label="reject" lx={CX0 + CW + 8} ly={mid(Y.meeting, DH) - 7} />
         <Terminal x={RX} y={Y.meeting + 20} w={RW} name="Rejected"
-          sub="reason + rejection letter · task: send_rejection" stroke={LOOP}
+          sub="reason + rejection letter" task="task: send_rejection" stroke={LOOP}
           testId="procmap-node-rejected" />
 
         {/* The needs-info loop: one tracked question, one owner, one answer. */}
@@ -978,8 +1008,8 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         <Edge testId="procmap-edge-cancelled" color={LOOP} dashed
           d={`M ${CX0 + CW} ${mid(Y.released, NH)} L ${RX} ${mid(Y.released, NH)}`}
           label="cancel" lx={CX0 + CW + 8} ly={mid(Y.released, NH) - 7} />
-        <Terminal x={RX} y={mid(Y.released, NH) - TH / 2} w={RW} name="Cancelled"
-          sub="terminal, irreversible, from any active stage" stroke="#f87171"
+        <Terminal x={RX} y={mid(Y.released, NH) - TH / 2} w={RW} name="Canceled"
+          sub="irreversible, from any active stage" stroke="#f87171"
           testId="procmap-node-cancelled" />
 
         {/* --- what each stage owes, in its own gutter ------------------ */}
@@ -991,7 +1021,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
             implementation on, compared at release. */}
         <Edge testId="procmap-edge-pnl-compare" color={CROSS} dashed
           d={`M ${PNL_X} ${pnlTop} L ${PNL_X} ${pnlBottom}`} />
-        <text x={PNL_X + 14} y={(pnlTop + pnlBottom) / 2} fill="#67e8f9" fontSize={10.5}
+        <text x={PNL_X + 14} y={(pnlTop + pnlBottom) / 2} fill="#67e8f9" fontSize={11}
           textAnchor="middle" transform={`rotate(-90 ${PNL_X + 14} ${(pnlTop + pnlBottom) / 2})`}>
           P&amp;L offer vs doing · planned at costing, frozen at acceptance · actual from implementation · compared at release
         </text>
@@ -1042,7 +1072,26 @@ const ARTIFACTS: { key: string; y: number; lines: string[]; pnl?: string }[] = [
   { key: 'released', y: Y.released, lines: ART.released, pnl: 'P&L offer vs doing: margin, slip' },
 ]
 
+const KEYS_KEY = 'plm2.procmap.taskKeys'
+
+/** The signed-in role, or null outside an AuthProvider (tests, previews). */
+function useRole(): string | null {
+  try {
+    return useAuth().role ?? null
+  } catch {
+    return null
+  }
+}
+
 export default function ProcessMapPage() {
+  const isAdmin = useRole() === 'admin'
+  const [keysOn, setKeysOn] = useState(() => readStored(KEYS_KEY) === 'on')
+  const showKeys = isAdmin && keysOn
+  const toggleKeys = () => {
+    const next = !keysOn
+    setKeysOn(next)
+    writeStored(KEYS_KEY, next ? 'on' : 'off')
+  }
   const [expanded, setExpanded] = useState(false)
   // Detailed is the default; the overview is remembered once chosen.
   const [view, setView] = useState<ProcessView>(readStoredView)
@@ -1069,13 +1118,8 @@ export default function ProcessMapPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [expanded])
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-slate-100">{t('procmap.title')}</h1>
-        <Link to="/changes" className="text-sm text-sky-400 hover:underline">
-          {t('procmap.backToChanges')}
-        </Link>
-      </div>
+    <div className={`${view === 'detailed' ? 'max-w-[88rem]' : 'max-w-6xl'} mx-auto p-6 space-y-4`}>
+      <h1 className="text-2xl font-semibold text-slate-100">{t('procmap.title')}</h1>
 
       <style>{PROCESS_MAP_CSS}</style>
       <div className="procmap-noprint flex flex-wrap items-center justify-between gap-3">
@@ -1093,9 +1137,16 @@ export default function ProcessMapPage() {
         </div>
         {view === 'overview' && (
           <button type="button" data-testid="procmap-print" onClick={() => window.print()}
-            className="rounded border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700">
+            className="rounded-md border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700">
             Print overview
           </button>
+        )}
+        {view === 'detailed' && isAdmin && (
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" data-testid="procmap-task-keys" checked={keysOn} onChange={toggleKeys}
+              className="h-3.5 w-3.5 rounded border-slate-600 accent-sky-500" />
+            Show task keys
+          </label>
         )}
       </div>
 
@@ -1106,7 +1157,9 @@ export default function ProcessMapPage() {
         </>
       ) : (
       <>
-      <Flowchart expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+      <TaskKeysContext.Provider value={showKeys}>
+        <Flowchart expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+      </TaskKeysContext.Provider>
 
       <p data-testid="procmap-legend"
         className="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1">
@@ -1117,12 +1170,12 @@ export default function ProcessMapPage() {
             <span className={STATE_TEXT[s]}>{STATE_LABEL[s]}</span>
           </span>
         ))}
-        <span className="text-slate-500">Box = stage · diamond = decision · hexagon = gate (red = unbypassable) · stadium = terminal state.</span>
+        <span className="text-slate-400">Box = stage · diamond = decision · hexagon = gate (red = unbypassable) · stadium = terminal state.</span>
         <span className="text-amber-300/80">Amber = the flow leaving or re-entering the main path, incl. the validation-issue branch.</span>
         <span className="text-cyan-300/80">Cyan = information carried into a later stage, and the P&amp;L line.</span>
         <span className="text-purple-300/80">Purple dashed = the side track for a change from KTX Weissenburg / Solingen (lane M).</span>
         <span className="text-teal-300/80">Teal = the intake of a new customer index and its engineering review (lane R).</span>
-        <span className="text-slate-500">Badge = who owns it · mono line = the task raised · right gutter = what the stage produces · left rail = which deadline is active.</span>
+        <span className="text-slate-400">Badge = who owns it{showKeys ? ' · mono line = the task raised' : ''} · right gutter = what the stage produces · left rail = which deadline is active.</span>
       </p>
 
       <section data-testid="procmap-detail" className="space-y-2">
@@ -1133,16 +1186,16 @@ export default function ProcessMapPage() {
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="text-slate-500 text-xs tabular-nums">{i + 1}</span>
               <span className="text-slate-100 text-sm font-medium">{s.name}</span>
-              <span className="rounded border border-slate-600 px-1.5 py-0 text-[10px] leading-tight text-slate-300">
+              <span className="rounded border border-slate-600 px-1.5 py-0 text-[11px] leading-tight text-slate-300">
                 {s.badge}
               </span>
-              <span className="text-xs text-slate-500">{s.responsible}</span>
+              <span className="text-xs text-slate-400">{s.responsible}</span>
               <span className={`ml-auto text-[11px] font-semibold ${STATE_TEXT[s.state]}`}>
                 {STATE_LABEL[s.state]}
               </span>
             </div>
             <p className="text-xs text-slate-300 mt-1">{s.what}</p>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            <p className="text-[11px] text-slate-400 mt-0.5">
               <span className="uppercase tracking-wide">Artifacts / gates</span>: {s.artifacts}
             </p>
           </div>
@@ -1198,7 +1251,7 @@ export default function ProcessMapPage() {
           <ol className="space-y-1 text-xs text-slate-400">
             {BUILD_ORDER.map((step, i) => (
               <li key={step} className="flex gap-2">
-                <span className="text-slate-600 tabular-nums flex-shrink-0">{i + 1}.</span>
+                <span className="text-slate-500 tabular-nums flex-shrink-0">{i + 1}.</span>
                 <span>{step}</span>
               </li>
             ))}
@@ -1206,11 +1259,13 @@ export default function ProcessMapPage() {
         </section>
       </div>
 
-      <p className="text-[11px] text-slate-600">
-        Source of truth: <span className="font-mono">docs/ECR_PROCESS_MAP.md</span> (stages, status),
-        {' '}<span className="font-mono">docs/CHANGE_MANAGEMENT_FLOW.md</span> (enforced mechanics)
-        and <span className="font-mono">docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md</span>.
-      </p>
+      {showKeys && (
+        <p data-testid="procmap-sources" className="text-[11px] text-slate-400">
+          Source of truth: <span className="font-mono">docs/ECR_PROCESS_MAP.md</span> (stages, status),
+          {' '}<span className="font-mono">docs/CHANGE_MANAGEMENT_FLOW.md</span> (enforced mechanics)
+          and the ECR costing-to-close spec (<span className="font-mono">docs/superpowers/specs</span>).
+        </p>
+      )}
       </>
       )}
     </div>

@@ -1,7 +1,8 @@
 /**
  * SearchBox - Global part/project search with debounced dropdown results.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import client from '../api/client';
@@ -25,6 +26,8 @@ export default function SearchBox() {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [open, setOpen] = useState(false);
+  const inputId = useId();
+  const listId = useId();
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 250);
@@ -58,42 +61,59 @@ export default function SearchBox() {
 
   return (
     <div ref={containerRef} className="relative">
+      <label htmlFor={inputId} className="sr-only">Search parts and projects</label>
+      <Search aria-hidden="true" size={15} strokeWidth={2}
+        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
       <input
-        type="text"
+        id={inputId}
+        type="search"
+        autoComplete="off"
+        spellCheck={false}
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        placeholder="🔍 Search parts..."
-        className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-slate-100 text-sm placeholder-slate-400"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            if (open) { e.preventDefault(); setOpen(false); }
+            else if (query) { e.preventDefault(); setQuery(''); }
+          }
+        }}
+        aria-expanded={open && debounced.length >= 2}
+        aria-controls={listId}
+        placeholder="Search parts and projects…"
+        className="w-full bg-slate-900/60 border border-slate-700 rounded-md pl-8 pr-3 py-1.5 text-slate-100 text-sm placeholder-slate-400 hover:border-slate-600"
       />
 
       {open && debounced.length >= 2 && (
-        <div className="absolute z-50 mt-1 w-72 bg-slate-700 border border-slate-600 rounded-lg shadow-xl max-h-80 overflow-y-auto">
+        <div id={listId} aria-live="polite"
+          className="absolute z-50 mt-1 w-72 bg-slate-800 border border-slate-600 rounded-lg shadow-lift max-h-80 overflow-y-auto overscroll-contain">
           {isFetching && !data ? (
-            <p className="px-3 py-2 text-slate-400 text-xs">Searching...</p>
+            <p className="px-3 py-2 text-slate-400 text-xs">Searching…</p>
           ) : !hasResults ? (
-            <p className="px-3 py-2 text-slate-400 text-xs">No results for “{debounced}”</p>
+            <p className="px-3 py-2 text-slate-400 text-xs">No parts or projects match “{debounced}”</p>
           ) : (
             <>
               {data!.projects.map((p) => (
                 <button
+                  type="button"
                   key={`proj-${p.id}`}
                   onClick={() => go(`/projects/${p.id}`)}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-600 border-b border-slate-600/50"
+                  className="w-full text-left px-3 py-2 hover:bg-slate-700 focus-visible:bg-slate-700 border-b border-slate-700"
                 >
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-blue-900/50 text-blue-300 mr-2">project</span>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-sky-900/50 text-sky-300 mr-2">Project</span>
                   <span className="text-slate-100 text-sm">{p.name}</span>
                   <span className="text-slate-400 text-xs ml-2 font-mono">{p.code}</span>
                 </button>
               ))}
               {data!.parts.map((part) => (
                 <button
+                  type="button"
                   key={`part-${part.id}`}
                   onClick={() => go(`/projects/${part.project_id}?part=${part.id}`)}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-600 border-b border-slate-600/50 last:border-b-0"
+                  className="w-full text-left px-3 py-2 hover:bg-slate-700 focus-visible:bg-slate-700 border-b border-slate-700 last:border-b-0"
                 >
                   <p className="text-slate-100 text-sm">
                     {part.name}

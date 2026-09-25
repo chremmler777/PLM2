@@ -162,7 +162,7 @@ export const engineeringChapter: ContentChapter = {
         {
           points: [
             ['A lead time on every line.', 'The quote plan is built from them. A line without a lead time is a plan without a date.'],
-            ['The star is your recommendation.', 'One favourite per position. Sales decides and is accountable; a different choice is recorded with a reason.'],
+            ['The star is your recommendation.', 'One favorite per position. Sales decides and is accountable; a different choice is recorded with a reason.'],
             ['Full or partial quote.', 'Full quotes are alternatives; one is bought. A partial quote is part of the line and always counted.'],
             ['"No rate in the cost sheet"', 'on a line means it is not counted. Tell Finance; they add the rate.'],
           ],
@@ -389,7 +389,7 @@ export const engineeringTasks: PracticeTaskSpec[] = [
       { assert: 'a Tool Engineer position with pricing quote exists', hint: 'There is no "External · vendor quote" line yet.' },
       { assert: 'it has two full (not partial) offers with price and lead time', hint: 'Both toolmakers belong on the line as alternatives, each with its price and lead time.' },
       { assert: 'offer B has shipping 400 separate, offer A shipping included', hint: 'Check the shipping of each offer.' },
-      { assert: 'the favourite is offer A', hint: 'Star toolmaker A: it is your recommendation because of the tight timing.' },
+      { assert: 'the favorite is offer A', hint: 'Star toolmaker A: it is your recommendation because of the tight timing.' },
       { assert: 'each offer carries a quote document', hint: 'A quote without its document cannot be checked. Attach both.' },
     ],
   },

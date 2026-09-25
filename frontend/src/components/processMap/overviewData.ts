@@ -127,9 +127,9 @@ export const OVERVIEW_LANES: Lane[] = [
 ]
 
 export const LANE_TONE: Record<string, { border: string; text: string }> = {
-  amber: { border: 'border-l-amber-400', text: 'text-amber-300' },
-  purple: { border: 'border-l-purple-400', text: 'text-purple-300' },
-  teal: { border: 'border-l-teal-400', text: 'text-teal-300' },
+  amber: { border: 'border-amber-400/50', text: 'text-amber-300' },
+  purple: { border: 'border-purple-400/50', text: 'text-purple-300' },
+  teal: { border: 'border-teal-400/50', text: 'text-teal-300' },
 }
 
 /** 11 columns: the deadline bars span the stages they are active in. */

@@ -1,4 +1,5 @@
 import type { RoleState } from '../api/training'
+import { btnPrimary, btnSecondary } from '../components/common/buttonStyles'
 
 //: Non-component helpers shared by the training pages (kept out of ui.tsx so
 //: fast refresh keeps working there).
@@ -12,13 +13,11 @@ export function stageOf(r: RoleState): RoleStage {
   return 'not_started'
 }
 
-export const BUTTON_PRIMARY =
-  'rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 ' +
-  'disabled:opacity-40 disabled:cursor-not-allowed active:translate-y-[1px] transition'
+// The shared button looks (components/common/buttonStyles), under the names
+// the training pages already use.
+export const BUTTON_PRIMARY = btnPrimary
 
-export const BUTTON_SECONDARY =
-  'rounded-lg border border-slate-600 px-3 py-1.5 text-sm font-medium text-slate-200 ' +
-  'hover:bg-slate-700/60 active:translate-y-[1px] transition'
+export const BUTTON_SECONDARY = btnSecondary
 
 export const INPUT =
   'w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm text-slate-100 ' +

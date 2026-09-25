@@ -4,6 +4,8 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { trainingApi, type CatalogRole, type RoleState } from '../api/training'
 import { useAuth } from '../contexts/AuthContext'
 import { todayIso } from '../lib/format'
+import { apiErrorMessage } from '../lib/apiError'
+import DateInput from '../components/gantt/DateInput'
 import TrainingSandbox from '../training/TrainingSandbox'
 import TaskScreen from '../training/TaskScreen'
 import { assertCurriculumCovered, TASKS, type TrainingTask } from '../training/tasks'
@@ -85,7 +87,7 @@ function Shell({
             </div>
             <div>
               <div className="text-sm font-semibold leading-none">ECR training</div>
-              <div className="mt-1 text-[11px] text-slate-500">
+              <div className="mt-1 text-[11px] text-slate-400">
                 {roleLabel ?? 'PLM v2'}
                 {practice && ' · practice, nothing is recorded'}
               </div>
@@ -107,7 +109,7 @@ function Shell({
 function StepHeading({ n, of, title }: { n: number; of: number; title: string }) {
   return (
     <div>
-      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
         Step {n} of {of}
       </div>
       <h2 className="mt-0.5 text-xl font-semibold tracking-tight text-slate-100">{title}</h2>
@@ -159,8 +161,7 @@ function AttestStep({
         confirmed: true,
       }),
     onSuccess: onDone,
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      setError(e.response?.data?.detail ?? 'That could not be recorded.'),
+    onError: (e) => setError(apiErrorMessage(e, 'Your training could not be recorded. Try again.')),
   })
   const ready = confirmed && trainerName.trim().length > 1 && trainingDate !== ''
   const [first, ...rest] = notice.split('\n\n')
@@ -199,14 +200,15 @@ function AttestStep({
             <span className="mb-1 block text-[12px] font-medium text-slate-300">
               When was the session held?
             </span>
-            <input
-              type="date"
+            <DateInput
+              aria-label="When was the session held?"
               max={todayIso()}
               value={trainingDate}
-              onChange={(e) => setTrainingDate(e.target.value)}
+              onChange={setTrainingDate}
+              commitOnChange
               className={INPUT}
             />
-            <span className="mt-1 block text-[11px] text-slate-500">
+            <span className="mt-1 block text-[11px] text-slate-400">
               The day it actually happened, not today by default.
             </span>
           </label>
@@ -223,7 +225,7 @@ function AttestStep({
             named held it.
           </span>
         </label>
-        {error && <p className="text-sm text-red-300">{error}</p>}
+        {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
@@ -234,9 +236,9 @@ function AttestStep({
             }}
             className={BUTTON_PRIMARY}
           >
-            {submit.isPending ? 'Recording...' : 'Confirm and continue'}
+            {submit.isPending ? 'Recording…' : 'Confirm and continue'}
           </button>
-          <span className="text-[12px] text-slate-500">
+          <span className="text-[12px] text-slate-400">
             Not trained yet? Leave this page and ask for your session.
           </span>
         </div>
@@ -278,7 +280,7 @@ function RecordedTasks({ role, onChanged }: { role: RoleState; onChanged: () => 
     )
   }
   if (!next) {
-    return <Notice tone="ok" title="All tasks passed">Recording the result...</Notice>
+    return <Notice tone="ok" title="All tasks passed">Recording the result…</Notice>
   }
   return (
     <TaskRunner
@@ -338,7 +340,7 @@ function PracticeFlow({ catalog }: { catalog: CatalogRole }) {
     return (
       <section className="space-y-5">
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
             Practice
           </div>
           <h2 className="mt-0.5 text-xl font-semibold tracking-tight text-slate-100">
@@ -347,7 +349,7 @@ function PracticeFlow({ catalog }: { catalog: CatalogRole }) {
         </div>
         <Notice tone="info" title="Practice mode">
           The same tasks as the recorded check, checked in your browser. Nothing is recorded,
-          so this does not count towards anybody's training.
+          so this does not count toward anybody's training.
         </Notice>
         <AssessmentIntro count={catalog.tasks.length} onStart={() => setIndex(0)} />
       </section>
@@ -360,7 +362,7 @@ function PracticeFlow({ catalog }: { catalog: CatalogRole }) {
           Every task passed. Nothing was recorded.
         </Notice>
         <button type="button" className={BUTTON_SECONDARY} onClick={() => setIndex(0)}>
-          Practise again
+          Practice again
         </button>
       </div>
     )
@@ -448,7 +450,7 @@ function TaskRunner({
     <section className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
             {roleLabel} · task {index + 1} of {total}
           </div>
           <h2 className="mt-0.5 text-xl font-semibold tracking-tight text-slate-100">
@@ -456,7 +458,7 @@ function TaskRunner({
           </h2>
         </div>
         {attemptsSoFar > 0 && (
-          <span className="text-[12px] text-slate-500">
+          <span className="text-[12px] text-slate-400">
             {attemptsSoFar} previous {attemptsSoFar === 1 ? 'attempt' : 'attempts'}
           </span>
         )}
@@ -532,7 +534,7 @@ function TaskRunner({
                 onClick={() => check.mutate()}
                 className={BUTTON_PRIMARY}
               >
-                {check.isPending ? 'Checking...' : 'Check my work'}
+                {check.isPending ? 'Checking…' : 'Check my work'}
               </button>
             </div>
           </div>

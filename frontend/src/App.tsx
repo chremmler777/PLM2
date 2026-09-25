@@ -33,7 +33,22 @@ import TrainingRunPage from './pages/TrainingRunPage';
 import TrainingHandoutPage from './pages/TrainingHandoutPage';
 import AppLayout from './components/layout/AppLayout';
 
-const queryClient = new QueryClient();
+// Defaults against refetch storms (a change page made 32 to 72 calls on load):
+// data counts as fresh for 30 s, a tab switch does not refetch everything,
+// one retry. Mutations still invalidate what they touch; pages that need a
+// live view keep their own refetchInterval / refetchOnWindowFocus.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+// Reference data that only changes with an admin edit: fetch once per session.
+queryClient.setQueryDefaults(['workflow', 'departments'], { staleTime: Infinity });
+queryClient.setQueryDefaults(['plants'], { staleTime: Infinity });
 
 function ProtectedRoute({ children, bare = false }: { children: React.ReactNode; bare?: boolean }) {
   const { isAuthenticated, loading } = useAuth();

@@ -48,7 +48,7 @@ export default function TrainingHandoutPage() {
 
       <article className="mx-auto max-w-3xl space-y-10 px-6 py-8 print:max-w-none print:px-0 print:py-0">
         <header className="space-y-2">
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500 print:text-slate-600">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400 print:text-slate-500">
             ECR training handout · {status.data?.software_version}
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-slate-100 print:text-black">
@@ -104,7 +104,7 @@ export default function TrainingHandoutPage() {
               )}
             </div>
           )}
-          <p className="text-[12px] text-slate-500 print:text-slate-600">
+          <p className="text-[12px] text-slate-400 print:text-slate-500">
             The record that counts is the one on the Training page. This sheet is for the
             session.
           </p>

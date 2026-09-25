@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { ArrowRight, Check } from 'lucide-react'
 import {
   rosterCsvUrl,
   trainingApi,
@@ -11,6 +12,9 @@ import {
 } from '../api/training'
 import { useAuth } from '../contexts/AuthContext'
 import { formatDate, formatDateTime, todayIso } from '../lib/format'
+import { toastError } from '../lib/apiError'
+import ConfirmDialog from '../components/common/ConfirmDialog'
+import DateInput from '../components/gantt/DateInput'
 import { CHAPTERS, type ManualChapter } from '../training/manual/chapters'
 import { TASKS } from '../training/tasks'
 import { Notice, StagePill } from '../training/ui'
@@ -40,7 +44,7 @@ export default function TrainingPage() {
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500">
+          <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
             ECR process
           </div>
           <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-slate-100">Training</h1>
@@ -80,7 +84,7 @@ export default function TrainingPage() {
         ))}
       </nav>
 
-      {status.isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+      {status.isLoading && <p className="text-sm text-slate-400">Loading…</p>}
       {status.isError && (
         <Notice tone="warn" title="Training could not be loaded">
           The system could not be reached. Refresh the page.
@@ -103,7 +107,7 @@ function GateLine({ data }: { data: TrainingStatus }) {
       Change actions are held until the training for your roles is signed off.
     </Notice>
   ) : (
-    <p className="text-[13px] text-slate-500">
+    <p className="text-[13px] text-slate-400">
       Training is recorded for the audit. It does not block any change action.
     </p>
   )
@@ -131,14 +135,14 @@ function MyTraining({ data }: { data: TrainingStatus }) {
       ) : (
         <Notice tone="info" title="No training is owed by your departments">
           Training follows your department (Sales, Project Manager, the engineering
-          departments, Scheduling, Quality, Finance). You can still practise any role below;
+          departments, Scheduling, Quality, Finance). You can still practice any role below;
           nothing is recorded.
         </Notice>
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-200">Practise a role</h2>
-        <p className="text-[13px] text-slate-500">
+        <h2 className="text-sm font-semibold text-slate-200">Practice a role</h2>
+        <p className="text-[13px] text-slate-400">
           The same tasks, checked in your browser, nothing recorded. For trainers, and for
           anybody who wants another go.
         </p>
@@ -157,7 +161,7 @@ function MyTraining({ data }: { data: TrainingStatus }) {
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-wide text-slate-500">{label}</dt>
+      <dt className="text-[11px] uppercase tracking-wide text-slate-400">{label}</dt>
       <dd className="mt-0.5 text-sm text-slate-200">{children}</dd>
     </div>
   )
@@ -167,7 +171,7 @@ function RoleCard({ role, practiceOnly }: { role: RoleState; practiceOnly: boole
   const stage = stageOf(role)
   const passed = role.tasks.filter((t) => t.passed).length
   const action = practiceOnly
-    ? 'Practise'
+    ? 'Practice'
     : stage === 'signed_off'
       ? null
       : stage === 'not_started'
@@ -183,7 +187,7 @@ function RoleCard({ role, practiceOnly }: { role: RoleState; practiceOnly: boole
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-slate-100">{role.label}</h3>
-          <p className="mt-0.5 text-[12px] text-slate-500">{role.departments.join(', ')}</p>
+          <p className="mt-0.5 text-[12px] text-slate-400">{role.departments.join(', ')}</p>
         </div>
         <StagePill stage={stage} />
       </div>
@@ -202,25 +206,26 @@ function RoleCard({ role, practiceOnly }: { role: RoleState; practiceOnly: boole
         <Fact label="Software version">{role.software_version ?? '-'}</Fact>
       </dl>
       <div>
-        <div className="mb-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+        <div className="mb-1.5 text-[11px] uppercase tracking-wide text-slate-400">
           Practical tasks ({passed} of {role.tasks.length}) · version {role.required_version}
         </div>
         <ul className="space-y-1">
           {role.tasks.map((t) => (
             <li key={t.key} className="flex items-center gap-2 text-sm">
               <span
-                className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
-                  t.passed ? 'bg-emerald-600 text-white' : 'border border-slate-600 text-transparent'
+                className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                  t.passed ? 'bg-emerald-600 text-white' : 'border border-slate-600'
                 }`}
                 aria-hidden
               >
-                ✓
+                {t.passed && <Check size={11} strokeWidth={3} />}
               </span>
+              <span className="sr-only">{t.passed ? 'Passed:' : 'Open:'}</span>
               <span className={t.passed ? 'text-slate-300' : 'text-slate-400'}>
                 {TASKS[t.key]?.title ?? t.key}
               </span>
               {t.attempts > 0 && (
-                <span className="text-[11px] text-slate-600">
+                <span className="text-[11px] text-slate-400">
                   {t.attempts} {t.attempts === 1 ? 'attempt' : 'attempts'}
                 </span>
               )}
@@ -253,13 +258,11 @@ function PracticeRow({ role }: { role: CatalogRole }) {
     >
       <span>
         <span className="font-medium text-slate-100">{role.label}</span>
-        <span className="ml-2 text-[12px] text-slate-500">
+        <span className="ml-2 text-[12px] text-slate-400">
           {role.tasks.length} {role.tasks.length === 1 ? 'task' : 'tasks'}
         </span>
       </span>
-      <span className="text-slate-500" aria-hidden>
-        →
-      </span>
+      <ArrowRight aria-hidden="true" size={16} className="shrink-0 text-slate-400" />
     </Link>
   )
 }
@@ -290,7 +293,7 @@ function ManualView({ data }: { data: TrainingStatus }) {
                 href={`#${c.id}`}
                 className="flex items-baseline gap-2 font-medium text-slate-200 hover:text-white"
               >
-                <span className="font-mono text-[11px] text-slate-500">{c.number}</span>
+                <span className="font-mono text-[11px] text-slate-400">{c.number}</span>
                 <span className="min-w-0">{c.title}</span>
                 {mine.has(c.id) && <YoursTag />}
               </a>
@@ -298,7 +301,7 @@ function ManualView({ data }: { data: TrainingStatus }) {
           ))}
         </ul>
         <div className="mt-6 space-y-1 border-t border-slate-700/70 pt-4 text-[13px]">
-          <div className="text-[11px] uppercase tracking-wide text-slate-500">Handouts</div>
+          <div className="text-[11px] uppercase tracking-wide text-slate-400">Handouts</div>
           {data.catalog.map((c) => (
             <Link
               key={c.role}
@@ -321,7 +324,7 @@ function ManualView({ data }: { data: TrainingStatus }) {
 
 function YoursTag() {
   return (
-    <span className="shrink-0 rounded-full bg-sky-500/20 px-1.5 py-px font-mono text-[9px] uppercase tracking-wider text-sky-300">
+    <span className="shrink-0 rounded-full bg-sky-500/20 px-1.5 py-px font-mono text-[11px] uppercase tracking-wider text-sky-300">
       yours
     </span>
   )
@@ -332,7 +335,7 @@ export function Chapter({ chapter, mine = false }: { chapter: ManualChapter; min
     <section id={chapter.id} className="scroll-mt-6 space-y-6 break-inside-avoid-page">
       <header className="border-t-2 border-slate-200 pt-4 print:border-black">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] text-slate-500">{chapter.number}</span>
+          <span className="font-mono text-[11px] text-slate-400">{chapter.number}</span>
           {mine && <YoursTag />}
         </div>
         <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-100 print:text-black">
@@ -385,7 +388,7 @@ function Records({ data }: { data: TrainingStatus }) {
 
   return (
     <div className="space-y-8">
-      <p className="text-[13px] text-slate-500" data-testid="records-scoring-note">
+      <p className="text-[13px] text-slate-400" data-testid="records-scoring-note">
         As in TWOS, the practical tasks are checked in the trainee's browser against a training
         copy that never reaches the server; the record keeps the result the browser reports,
         with who trained the person and when.
@@ -428,7 +431,7 @@ function Records({ data }: { data: TrainingStatus }) {
         </div>
         <div className="overflow-x-auto rounded-lg border border-slate-700">
           <table className="w-full text-sm">
-            <thead className="bg-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
+            <thead className="bg-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-3 py-2">Person</th>
                 <th className="px-3 py-2">Role</th>
@@ -446,7 +449,7 @@ function Records({ data }: { data: TrainingStatus }) {
                 <tr key={i.signoff_id} className={i.status === 'superseded' ? 'opacity-50' : ''}>
                   <td className="px-3 py-2">
                     <div className="text-slate-200">{i.display_name ?? i.email}</div>
-                    <div className="text-[11px] text-slate-500">{i.email}</div>
+                    <div className="text-[11px] text-slate-400">{i.email}</div>
                   </td>
                   <td className="px-3 py-2 text-slate-300">{i.label}</td>
                   <td className="px-3 py-2 text-slate-400">
@@ -468,7 +471,7 @@ function Records({ data }: { data: TrainingStatus }) {
                   <td className="px-3 py-2 text-slate-400">
                     {i.trainer_name ?? '-'}
                     {i.trainer_source === 'roster' && (
-                      <span className="ml-1 text-[11px] text-slate-600">(roster)</span>
+                      <span className="ml-1 text-[11px] text-slate-400">(roster)</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-slate-400">{formatDateTime(i.tasks_passed_at)}</td>
@@ -485,7 +488,7 @@ function Records({ data }: { data: TrainingStatus }) {
               ))}
               {roster.data && roster.data.items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                     No training recorded yet.
                   </td>
                 </tr>
@@ -501,7 +504,7 @@ function Records({ data }: { data: TrainingStatus }) {
             <ul className="mt-2 grid gap-1 sm:grid-cols-2">
               {notStarted.map((p) => (
                 <li key={`${p.user_id}:${p.role}`} className="text-slate-400">
-                  {p.name} <span className="text-slate-600">· {labelOf(p.role)}</span>
+                  {p.name} <span className="text-slate-400">· {labelOf(p.role)}</span>
                 </li>
               ))}
             </ul>
@@ -526,9 +529,6 @@ function Tile({ label, value }: { label: string; value: number | string }) {
     </div>
   )
 }
-
-const errText = (e: unknown, fallback: string) =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
 
 function RecordAttendance({
   data,
@@ -557,13 +557,13 @@ function RecordAttendance({
       setRole('')
       qc.invalidateQueries({ queryKey: ['training-roster'] })
     },
-    onError: (e) => toast.error(errText(e, 'Could not record the attendance')),
+    onError: (e) => toastError(e, 'Could not record the attendance'),
   })
   const ready = userId && role && date && trainer.trim().length > 1
   return (
     <section className="space-y-3 rounded-lg border border-slate-700 bg-slate-800/60 p-5">
       <h2 className="text-sm font-semibold text-slate-200">Record attendance</h2>
-      <p className="text-[13px] text-slate-500">
+      <p className="text-[13px] text-slate-400">
         For a session you witnessed. The person still takes the practical check themselves.
       </p>
       <select
@@ -595,12 +595,12 @@ function RecordAttendance({
           ))}
       </select>
       <div className="grid gap-3 sm:grid-cols-2">
-        <input
-          type="date"
+        <DateInput
           aria-label="Training date"
           max={todayIso()}
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={setDate}
+          commitOnChange
           className={INPUT}
         />
         <input
@@ -638,12 +638,12 @@ function PublishVersion({ data }: { data: TrainingStatus }) {
       qc.invalidateQueries({ queryKey: ['training-roster'] })
       qc.invalidateQueries({ queryKey: ['training-status'] })
     },
-    onError: (e) => toast.error(errText(e, 'Could not publish')),
+    onError: (e) => toastError(e, 'Could not publish the version'),
   })
   return (
     <section className="space-y-3 rounded-lg border border-slate-700 bg-slate-800/60 p-5">
       <h2 className="text-sm font-semibold text-slate-200">Publish a new version</h2>
-      <p className="text-[13px] text-slate-500">
+      <p className="text-[13px] text-slate-400">
         Asks everybody signed off in this role to take the practical check again. Their
         confirmation carries over. Nothing is blocked.
       </p>
@@ -680,7 +680,7 @@ function PublishVersion({ data }: { data: TrainingStatus }) {
               </span>{' '}
               · {formatDate(v.published_at)} · {v.published_by}
               {v.software_version && ` · ${v.software_version}`}
-              <div className="text-slate-500">{v.summary}</div>
+              <div className="text-slate-400">{v.summary}</div>
             </li>
           ))}
         </ul>
@@ -692,17 +692,20 @@ function PublishVersion({ data }: { data: TrainingStatus }) {
 function GateSwitch({ data }: { data: TrainingStatus }) {
   const { isAdmin } = useAuth()
   const qc = useQueryClient()
+  const [confirmOn, setConfirmOn] = useState(false)
   const flip = useMutation({
     mutationFn: (on: boolean) => trainingApi.setGate(on),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['training-status'] }),
-    onError: (e) => toast.error(errText(e, 'Could not switch the gate')),
+    onSuccess: (_d, on) => {
+      toast.success(on ? 'Training gate switched on' : 'Training gate switched off')
+      return qc.invalidateQueries({ queryKey: ['training-status'] })
+    },
   })
   return (
     <section className="space-y-2 rounded-lg border border-slate-700 bg-slate-800/40 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-slate-200">Training gate</h2>
-          <p className="mt-0.5 text-[13px] text-slate-500">
+          <p className="mt-0.5 text-[13px] text-slate-400">
             {data.gate_enabled
               ? 'On: change actions are held for anybody whose owed training is not signed off.'
               : 'Off: training is recorded, nothing is blocked.'}
@@ -714,16 +717,11 @@ function GateSwitch({ data }: { data: TrainingStatus }) {
             type="button"
             disabled={flip.isPending}
             onClick={() => {
-              const on = !data.gate_enabled
-              if (
-                on &&
-                !window.confirm(
-                  'Switch the training gate on? Change actions will be refused to everybody ' +
-                    'whose owed training is not signed off.',
-                )
-              )
-                return
-              flip.mutate(on)
+              if (data.gate_enabled) {
+                flip.mutate(false, { onError: (e) => toastError(e, 'Could not switch the gate off') })
+              } else {
+                setConfirmOn(true)
+              }
             }}
             className={BUTTON_SECONDARY}
           >
@@ -731,6 +729,15 @@ function GateSwitch({ data }: { data: TrainingStatus }) {
           </button>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmOn}
+        title="Switch the training gate on?"
+        body="Change actions will be refused to everybody whose owed training is not signed off."
+        confirmLabel="Switch the gate on"
+        errorFallback="Could not switch the gate on"
+        onConfirm={() => flip.mutateAsync(true)}
+        onClose={() => setConfirmOn(false)}
+      />
     </section>
   )
 }

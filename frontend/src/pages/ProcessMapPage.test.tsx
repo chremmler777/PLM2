@@ -178,7 +178,8 @@ describe('ProcessMapPage', () => {
     expect(l2).toContain('no route decided after 2 working days')
     const l3 = screen.getByTestId('procmap-escalation-l3').textContent ?? ''
     expect(l3).toContain('Management + customer')
-    expect(l3).toContain('recovery ends after the release date')
+    expect(l3).toContain('recovery ends after the')
+    expect(l3).toContain('release date, or L2 is not')
   })
 
   it('runs the mother-plant side track in its own lane, skipping assessment to offer', () => {

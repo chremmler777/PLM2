@@ -52,7 +52,7 @@ export function Steps({ items }: { items: { title: string; body: ReactNode }[] }
           key={i}
           className="flex gap-3 rounded-lg border border-slate-700/70 px-3.5 py-3 print:border-slate-300"
         >
-          <span className="mt-px w-4 shrink-0 font-mono text-[11px] font-semibold text-slate-500">
+          <span className="mt-px w-4 shrink-0 font-mono text-[11px] font-semibold text-slate-400">
             {i + 1}
           </span>
           <div className="min-w-0 space-y-1">
@@ -107,7 +107,7 @@ export function Figure({ src, alt, caption }: { src: string; alt: string; captio
         loading="lazy"
         className="w-full rounded-lg border border-slate-700 print:border-slate-300"
       />
-      {caption && <figcaption className="text-[11px] text-slate-500">{caption}</figcaption>}
+      {caption && <figcaption className="text-[11px] text-slate-400">{caption}</figcaption>}
     </figure>
   )
 }
@@ -120,7 +120,7 @@ export function Pending() {
   return (
     <p
       data-testid="manual-pending"
-      className="rounded-lg border border-dashed border-slate-700 px-3.5 py-2.5 text-[13px] text-slate-500 print:border-slate-300"
+      className="rounded-lg border border-dashed border-slate-700 px-3.5 py-2.5 text-[13px] text-slate-400 print:border-slate-300"
     >
       Content follows with the final screens.
     </p>
