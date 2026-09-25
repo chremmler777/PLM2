@@ -82,6 +82,69 @@ describe('Dialog', () => {
     fireEvent.mouseDown(screen.getByRole('dialog'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('reports a native close (close watcher, form method=dialog) to the parent', () => {
+    const onClose = vi.fn()
+    render(<Dialog open onClose={onClose} title="T" />)
+    const d = screen.getByRole('dialog') as HTMLDialogElement
+    d.removeAttribute('open')
+    fireEvent(d, new Event('close'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('reopens after a native close while busy', () => {
+    const onClose = vi.fn()
+    const showModal = vi.fn(function (this: HTMLDialogElement) { this.setAttribute('open', '') })
+    const proto = HTMLDialogElement.prototype as unknown as { showModal?: () => void }
+    const original = proto.showModal
+    proto.showModal = showModal
+    try {
+      render(<Dialog open busy onClose={onClose} title="T" />)
+      const d = screen.getByRole('dialog') as HTMLDialogElement
+      showModal.mockClear()
+      d.removeAttribute('open')
+      fireEvent(d, new Event('close'))
+      expect(onClose).not.toHaveBeenCalled()
+      expect(showModal).toHaveBeenCalledTimes(1)
+      expect(d.open).toBe(true)
+    } finally {
+      proto.showModal = original
+    }
+  })
+
+  it('ignores a stale close event while still open', () => {
+    const onClose = vi.fn()
+    render(<Dialog open onClose={onClose} title="T" />)
+    fireEvent(screen.getByRole('dialog'), new Event('close'))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('focuses [data-autofocus] before the first field', () => {
+    render(
+      <Dialog open onClose={() => {}} title="T">
+        <input aria-label="First" />
+        <input aria-label="Second" data-autofocus />
+      </Dialog>,
+    )
+    expect(document.activeElement).toBe(screen.getByLabelText('Second'))
+  })
+
+  it('moves focus to the panel when busy disables the focused control', () => {
+    function Busy({ busy }: { busy: boolean }) {
+      return (
+        <Dialog open busy={busy} onClose={() => {}} title="T" showClose={false}>
+          <button disabled={busy}>Go</button>
+        </Dialog>
+      )
+    }
+    const { rerender } = render(<Busy busy={false} />)
+    expect(document.activeElement).toBe(screen.getByText('Go'))
+    rerender(<Busy busy />)
+    const active = document.activeElement as HTMLElement
+    expect(screen.getByRole('dialog').contains(active)).toBe(true)
+    expect(active.tagName).toBe('DIV')
+    expect(active.getAttribute('tabindex')).toBe('-1')
+  })
 })
 
 describe('ConfirmDialog', () => {
@@ -147,7 +210,8 @@ describe('ConfirmModal (legacy props)', () => {
   it('disables both buttons while isLoading', () => {
     render(<ConfirmModal isOpen isLoading title="T" message="M" onConfirm={() => {}} onCancel={() => {}} />)
     expect((screen.getByText('Cancel') as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByTestId('confirm-ok') as HTMLButtonElement).disabled).toBe(true)
+    // Focusable but inert while loading, so focus never falls out of the dialog.
+    expect(screen.getByTestId('confirm-ok').getAttribute('aria-disabled')).toBe('true')
   })
 })
 

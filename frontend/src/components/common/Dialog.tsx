@@ -5,9 +5,15 @@
  * - Escape (and a click on the backdrop, unless turned off) asks to close
  *   through `onClose`; the parent owns `open`.
  * - Tab and Shift+Tab stay inside the dialog.
- * - Focus goes to `initialFocus`, else the first `[autofocus]` element, else
- *   the first focusable one; on close it returns to what had it before.
+ * - Focus goes to `initialFocus`, else the first `[data-autofocus]` element,
+ *   else the first focusable one; on close it returns to what had it before.
+ *   (React's `autoFocus` sets no attribute and fires before the dialog is
+ *   shown, so it does not count here.)
  * - `busy` blocks Escape and backdrop close while a request is in flight.
+ *   If the browser closes the dialog anyway (a close watcher skipping the
+ *   cancel event, `form method="dialog"`), it is reopened while busy and
+ *   reported through `onClose` otherwise. When busy disables the focused
+ *   control, focus moves to the panel so it never leaves the dialog.
  *
  * Renders nothing while closed, so state inside resets on every open.
  */
@@ -77,6 +83,9 @@ function OpenDialog({
   closeOnBackdrop = true, showClose = true, role = 'dialog', className = '', 'data-testid': testId,
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // False once our own cleanup closes the element, so that close is not reported.
+  const alive = useRef(true)
   const titleId = useId()
   const descId = useId()
   // Latest values for the native listeners without re-running the open effect.
@@ -97,11 +106,13 @@ function OpenDialog({
       && !document.activeElement.hasAttribute('data-dialog-close')
     const target = alreadyInside ? null :
       initialFocus?.current ??
-      el.querySelector<HTMLElement>('[autofocus],[data-autofocus]') ??
+      el.querySelector<HTMLElement>('[data-autofocus]') ??
       focusables(el).find((f) => !f.hasAttribute('data-dialog-close')) ??
       null
     target?.focus()
+    alive.current = true
     return () => {
+      alive.current = false
       if (typeof el.close === 'function' && el.open) el.close()
       if (previous && previous.isConnected) previous.focus({ preventScroll: true })
     }
@@ -117,9 +128,35 @@ function OpenDialog({
       e.preventDefault()
       if (!latest.current.busy) latest.current.onClose()
     }
+    // The element closed without going through us. Reopen it while busy,
+    // otherwise tell the parent so `open` matches what is on screen.
+    const onNativeClose = () => {
+      // `open` again: a close we queued ourselves (StrictMode re-run) that is stale now.
+      if (!alive.current || !el.isConnected || el.open) return
+      if (latest.current.busy) {
+        if (!el.open && typeof el.showModal === 'function') el.showModal()
+        return
+      }
+      latest.current.onClose()
+    }
     el.addEventListener('cancel', onCancel)
-    return () => el.removeEventListener('cancel', onCancel)
+    el.addEventListener('close', onNativeClose)
+    return () => {
+      el.removeEventListener('cancel', onCancel)
+      el.removeEventListener('close', onNativeClose)
+    }
   }, [])
+
+  // Busy can disable the control that had focus, which drops focus to <body>
+  // (or leaves it on a dead button). Park it on the panel instead.
+  useEffect(() => {
+    const el = ref.current
+    if (!busy || !el) return
+    const active = document.activeElement
+    const lost = !(active instanceof HTMLElement) || !el.contains(active)
+      || (active as HTMLButtonElement).disabled === true
+    if (lost) panelRef.current?.focus({ preventScroll: true })
+  }, [busy])
 
   const requestClose = () => { if (!busy) onClose() }
 
@@ -164,7 +201,7 @@ function OpenDialog({
       onMouseDown={onMouseDown}
       className={`m-auto w-[calc(100vw-2rem)] ${WIDTH[size]} max-h-[calc(100dvh-2rem)] overflow-visible border-0 bg-transparent p-0 text-slate-100 backdrop:bg-slate-950/70 open:flex motion-safe:animate-dialog-in ${className}`}
     >
-      <div className="flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-lift">
+      <div ref={panelRef} tabIndex={-1} className="flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-lift outline-none">
         <header className="flex items-start gap-3 px-5 pb-2 pt-4">
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="text-base font-semibold leading-snug text-slate-100">{title}</h2>

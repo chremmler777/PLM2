@@ -7,9 +7,13 @@
  * can retry or cancel. When it resolves (or returns nothing) the dialog
  * closes through `onClose`, unless `closeOnConfirm` is false (the parent
  * then closes it, for example from a mutation's onSuccess).
+ *
+ * The confirm button stays focusable while running (aria-disabled, clicks
+ * ignored) so focus never drops out of the dialog. A confirm that settles
+ * after the dialog was closed from outside, or reopened, is ignored.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { CircleAlert } from 'lucide-react'
+import { CircleAlert, LoaderCircle } from 'lucide-react'
 import Dialog from './Dialog'
 import Button from './Button'
 import { apiErrorMessage } from '../../lib/apiError'
@@ -44,11 +48,18 @@ export default function ConfirmDialog({
   const cancelRef = useRef<HTMLButtonElement>(null)
   const okRef = useRef<HTMLButtonElement>(null)
   const busy = pending || running
-  // The confirm button was disabled while running, which drops focus; put it
-  // back so Enter retries and Tab stays in the dialog.
+  // Bumped on every open/close and every confirm; a result whose token is
+  // stale belongs to an earlier open and is dropped.
+  const runToken = useRef(0)
+  const openRef = useRef(open)
+  openRef.current = open
+  // After a failure put focus on the safe choice (Cancel when danger).
   useEffect(() => { if (error) (danger ? cancelRef : okRef).current?.focus() }, [error, danger])
   // A dialog closed from outside starts clean next time.
-  useEffect(() => { if (!open) { setError(null); setRunning(false) } }, [open])
+  useEffect(() => {
+    runToken.current += 1
+    if (!open) { setError(null); setRunning(false) }
+  }, [open])
   // A string body is the dialog's accessible description; other nodes go in the body.
   const textBody = typeof body === 'string' && body.trim() ? body : undefined
   const hasBody = !textBody && body != null && body !== ''
@@ -56,6 +67,9 @@ export default function ConfirmDialog({
   const close = () => { setError(null); onClose() }
 
   const confirm = async () => {
+    if (busy) return
+    const token = ++runToken.current
+    const current = () => token === runToken.current && openRef.current
     setError(null)
     let result: unknown
     try {
@@ -65,10 +79,12 @@ export default function ConfirmDialog({
         await result
       }
     } catch (e) {
+      if (!current()) return
       setRunning(false)
       setError(apiErrorMessage(e, errorFallback))
       return
     }
+    if (!current()) return
     setRunning(false)
     if (closeOnConfirm) close()
   }
@@ -80,7 +96,9 @@ export default function ConfirmDialog({
       footer={(
         <>
           <Button ref={cancelRef} onClick={close} disabled={busy}>{cancelLabel}</Button>
-          <Button ref={okRef} variant={danger ? 'danger' : 'primary'} loading={busy}
+          <Button ref={okRef} variant={danger ? 'danger' : 'primary'}
+            icon={busy ? <LoaderCircle size={16} className="motion-safe:animate-spin" /> : undefined}
+            aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={() => { void confirm() }} data-testid="confirm-ok">
             {confirmLabel}
           </Button>
