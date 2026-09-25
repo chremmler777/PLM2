@@ -1640,3 +1640,63 @@ async def test_ideas_never_drive_and_quote_deadline_goes(client, world,
     assert "quote" not in keys(await _plan(client, sales, cid))
     await _set(session_factory, cid, quoted_at=None, customer_relevant=False)
     assert "quote" not in keys(await _plan(client, sales, cid))
+
+
+async def test_a_summary_is_never_an_idea(client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    url = f"/api/v1/changes/{cid}/plan"
+    s = await _task(client, sales, cid, "Phase", "2026-11-02", 1)
+    await _task(client, sales, cid, "A", "2026-11-02", 2, parent_id=s["id"])
+    res = await client.patch(f"{url}/tasks/{s['id']}", json={"is_idea": True},
+                             headers=sales)
+    assert res.status_code == 400
+    assert res.json()["detail"]["code"] == "summary_idea"
+    idea = await _task(client, sales, cid, "Maybe", "2026-11-02", 3, is_idea=True)
+    res = await client.post(f"{url}/tasks", json={
+        "plan": "quote", "name": "under", "start_date": "2026-11-02",
+        "parent_id": idea["id"]}, headers=sales)
+    assert res.status_code == 400 and res.json()["detail"]["code"] == "summary_idea"
+    res = await client.post(f"{url}/changes", json={"plan": "quote", "changes": {
+        "tasks_upsert": [{"id": s["id"], "parent_id": idea["id"]}]}}, headers=sales)
+    assert res.status_code == 400 and res.json()["detail"]["code"] == "summary_idea"
+    # old data with a flagged summary: its real work still drives
+    r = await _task(client, sales, cid, "R", "2026-11-02", 1)
+    await client.post(f"{url}/links", json={"plan": "quote", "from_task_id": s["id"],
+                                            "to_task_id": r["id"]}, headers=sales)
+    async with session_factory() as db:
+        (await db.get(ChangePlanTask, s["id"])).is_idea = True
+        await db.commit()
+    res = await client.post(f"{url}/schedule", json={"plan": "quote"}, headers=sales)
+    assert _by_name(res.json())["R"]["start_date"] == "2026-11-04"
+    # one bank_build_late per idea and successor, however many links
+    bank = await _task(client, sales, cid, "Bank", "2026-11-02", 10, is_idea=True)
+    tool = await _task(client, sales, cid, "Tool", "2026-11-05", 1)
+    for typ in ("FS", "SS"):
+        await client.post(f"{url}/links", json={
+            "plan": "quote", "from_task_id": bank["id"], "to_task_id": tool["id"],
+            "type": typ}, headers=sales)
+    out = await _plan(client, sales, cid)
+    late = [w for w in out["validation"]["warnings"]
+            if w["code"] == "bank_build_late" and w["task_id"] == bank["id"]]
+    assert len(late) == 1
+
+
+async def test_import_clears_the_idea_flag_on_summaries(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    x = lambda uid, name, lvl, idea: (
+        f'<Task><UID>{uid}</UID><Name>{name}</Name><Start>2026-10-05T08:00:00</Start>'
+        f'<Duration>PT16H0M0S</Duration><OutlineLevel>{lvl}</OutlineLevel>'
+        '<ExtendedAttribute><FieldID>188743752</FieldID>'
+        f'<Value>{1 if idea else 0}</Value></ExtendedAttribute></Task>')
+    xml = ('<?xml version="1.0"?><Project xmlns="http://schemas.microsoft.com/project">'
+           '<Tasks>' + x(1, "Phase", 1, True) + x(2, "A", 2, False)
+           + '</Tasks></Project>').encode()
+    res = await client.post(f"/api/v1/changes/{cid}/plan/import",
+                            data={"plan": "quote"},
+                            files={"file": ("p.xml", xml, "application/xml")},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    assert _by_name(res.json())["Phase"]["is_idea"] is False
+    assert any("idea flag was cleared" in w for w in res.json()["import_warnings"])

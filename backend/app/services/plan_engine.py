@@ -408,14 +408,18 @@ class Graph:
         return ("PS", tid) if point == "S" else ("PF", tid)
 
 
-def usable_link(lk: ELink, by_id: dict, anc: dict, summaries: set) -> bool:
+def usable_link(lk: ELink, by_id: dict, anc: dict, summaries: set,
+                has_real: Optional[dict] = None) -> bool:
     """A link the math uses: both ends known, not a self link, not out of an
-    idea block, not between a block and its own summary, not FF/SF into a
-    summary."""
+    idea (a leaf flagged idea, or a summary with no committed work below it,
+    whatever its own flag), not between a block and its own summary, not
+    FF/SF into a summary."""
     f, t = lk.from_id, lk.to_id
     if f not in by_id or t not in by_id or f == t:
         return False
-    if by_id[f].idea:
+    idea = (not has_real[f]) if has_real is not None and f in has_real \
+        else by_id[f].idea
+    if idea:
         return False           # an idea never drives committed work (it follows)
     if f in anc[t] or t in anc[f]:
         return False
@@ -437,13 +441,20 @@ def graph(tasks: list[ETask], links: list[ELink]) -> Graph:
             p = parent.get(p)
         anc[t.id] = chain
     leaves = [t.id for t in tasks if t.id not in summaries]
+    # committed work at or below each block: a leaf that is not an idea; a
+    # summary with such a leaf below it (its own is_idea flag is ignored)
+    has_real: dict = {}
+    for tid, _w in reversed(dfs_order(tasks)):
+        kids = children.get(tid, [])
+        has_real[tid] = (any(has_real[c] for c in kids) if kids
+                         else not by_id[tid].idea)
     # One link per (from, to, type); a duplicate keeps the larger lag.
     use: dict = {}
     for lk in links:
         typ = lk.type if lk.type in LINK_TYPES else "FS"
         e = ELink(from_id=lk.from_id, to_id=lk.to_id, type=typ,
                   lag=int(lk.lag or 0), id=lk.id)
-        if not usable_link(e, by_id, anc, summaries):
+        if not usable_link(e, by_id, anc, summaries, has_real):
             continue
         k = (e.from_id, e.to_id, typ)
         if k not in use or e.lag > use[k].lag:
@@ -483,15 +494,9 @@ def graph(tasks: list[ETask], links: list[ELink]) -> Graph:
     # Summary dates roll up the children with committed work (an idea is a
     # proposal: it does not stretch a summary). Start points, deepest
     # summary first, also leave out a child the start point itself drives.
-    has_real: dict = {}
-    for tid, _w in reversed(dfs_order(tasks)):
-        if tid not in summaries:
-            has_real[tid] = not by_id[tid].idea
-            continue
+    for tid in summaries:
         kids = children[tid]
-        real = [c for c in kids if has_real[c]]
-        has_real[tid] = bool(real)
-        g.real_kids[tid] = real or kids
+        g.real_kids[tid] = [c for c in kids if has_real[c]] or kids
     for sid, _w in reversed(dfs_order(tasks)):
         if sid not in summaries:
             continue

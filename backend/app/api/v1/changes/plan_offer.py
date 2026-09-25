@@ -20,7 +20,7 @@ from app.dependencies import get_current_user
 from app.models import User, get_db
 from app.services import plan_engine as eng
 from app.services.change_plan_service import (
-    ChangePlanService, PlanConflict, PlanForbidden,
+    ChangePlanService, PlanConflict, PlanForbidden, PlanRuleError,
 )
 from app.services.change_service import ChangeError, ChangeService
 from app.services.offer_service import OfferService
@@ -231,6 +231,9 @@ def _http(e: Exception) -> HTTPException:
             return HTTPException(status_code=404, detail=str(e))
         return HTTPException(status_code=409,
                              detail={"message": str(e), **e.extra})
+    if isinstance(e, PlanRuleError):          # a plan rule with a code
+        return HTTPException(status_code=400,
+                             detail={"message": str(e), "code": e.code})
     return HTTPException(status_code=400, detail=str(e))
 
 

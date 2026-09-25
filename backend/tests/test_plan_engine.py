@@ -82,7 +82,10 @@ def test_vector_file_shape():
                  "push: moving a real block moves the idea after it",
                  "push: a moved block driven by a block given a constraint "
                  "is pushed",
-                 "push: a moved block under a summary given a link is pushed"):
+                 "push: a moved block under a summary given a link is pushed",
+                 "idea: a link out of a summary of ideas only does not drive",
+                 "idea: a link out of a summary flagged idea with real work "
+                 "below drives"):
         assert must in names
 
 

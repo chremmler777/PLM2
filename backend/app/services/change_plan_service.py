@@ -44,6 +44,15 @@ class PlanForbidden(Exception):
     """The caller may not do this; mapped to HTTP 403 in the router."""
 
 
+class PlanRuleError(ChangeError):
+    """A plan rule refusal with a machine-readable code (HTTP 400, detail
+    {"message", "code"})."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
 class PlanConflict(Exception):
     """The request collides with existing state; mapped to HTTP 409."""
 
@@ -233,10 +242,13 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
     # A link out of an idea does not drive its successor (the idea follows,
     # it never pushes committed work): say so when the idea overlaps it.
     by_id = {t.id: t for t in tasks}
+    late_pairs = set()
     for lk in lks:
         p, q = by_id.get(lk.from_id), by_id.get(lk.to_id)
         if p is not None and q is not None and p.is_idea and not q.is_idea \
-                and p.id not in summaries and p.end_date > q.start_date:
+                and p.id not in summaries and p.end_date > q.start_date \
+                and (p.id, q.id) not in late_pairs:
+            late_pairs.add((p.id, q.id))
             warnings.append(_issue(
                 "bank_build_late",
                 f"'{p.name}' (idea) ends after '{q.name}' starts "
@@ -965,6 +977,8 @@ class ChangePlanService:
         for sid in summaries:
             if by_id[sid].constraint_type in eng.PIN_CONSTRAINTS:
                 out.add(("summary_pin", sid))
+            if getattr(by_id[sid], "is_idea", False):
+                out.add(("summary_idea", sid))
         for lk in links:
             if lk.to_task_id in summaries and lk.type in eng.FINISH_TARGET_LINKS:
                 out.add(("summary_finish_link", lk.to_task_id))
@@ -993,6 +1007,11 @@ class ChangePlanService:
                 f"'{name}' is a summary block: it cannot have a must-start-on or "
                 "must-finish-on constraint (its dates follow the blocks under "
                 "it); remove the constraint or put it on a block under it")
+        if code == "summary_idea":
+            raise PlanRuleError(
+                f"'{name}' has blocks under it: a summary cannot be an idea "
+                "(mark the blocks under it as ideas instead), and an idea "
+                "cannot hold blocks", "summary_idea")
         if code == "summary_finish_link":
             raise ChangeError(
                 f"'{name}' is a summary block: a finish-to-finish or "
@@ -1978,6 +1997,12 @@ class ChangePlanService:
             warnings.append(
                 "The file's baseline was not imported: the baseline is set by "
                 "validating the timing")
+        parents = {r.get("parent_uid") for r in rows if r.get("parent_uid")}
+        for r in rows:
+            if r["uid"] in parents and r.get("idea"):
+                r["idea"] = False
+                warnings.append(f"'{r['name']}' has tasks under it: its idea "
+                                "flag was cleared (a summary cannot be an idea)")
         cal = ChangePlanService.calendar(change, plan)
         old_links = await ChangePlanService.links(session, change, plan)
         before_issues = ChangePlanService._structure_issues(existing, old_links)

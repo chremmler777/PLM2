@@ -621,14 +621,20 @@ from summary, SF from summary, FF into summary (refused), mso on summary
 (refused), snet on summary.
 
 Idea blocks (decided 2026-09-25, both engines MUST match):
-- A link whose predecessor is an idea block (is_idea) never drives its
-  successor: it is ignored by the forward and backward pass, automatic
-  scheduling (push), the post-baseline cascade and the critical path. It
-  stays stored and shown.
+- A link whose predecessor is an idea never drives its successor: it is
+  ignored by the forward and backward pass, automatic scheduling (push),
+  the post-baseline cascade and the critical path. It stays stored and
+  shown. A leaf is an idea when is_idea is set; a summary is an idea when it
+  has no committed (non-idea) work below it, whatever its own flag (a
+  summary with real work below it always drives).
+- is_idea is refused on a block that has blocks under it (400, code
+  `summary_idea`), and an idea cannot gain blocks under it (create, move,
+  batch). The import clears the flag on summaries with a warning.
 - A link INTO an idea drives the idea: ideas follow committed work.
 - Validation warns `bank_build_late` when an idea ends after the start of a
-  block it links to.
+  block it links to (once per idea and successor).
 - Summary dates roll up only children with committed work (a summary of
   ideas only rolls up its ideas).
 Vectors: idea -> real FS (the idea, even lengthened, moves nothing real);
-real -> idea (the idea moves).
+real -> idea (the idea moves); a summary of ideas only does not drive; a
+summary flagged idea with real work below it drives.
