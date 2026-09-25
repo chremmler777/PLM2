@@ -595,3 +595,19 @@ Only the keys present in `expected` are compared. Rules (engine
   working day with LagFormat 7); ConstraintType 0 ASAP, 2 MSO, 3 MFO, 4 SNET,
   7 FNLT; kind in ExtendedAttribute Text1 (FieldID 188743731), idea in Flag1
   (188743752); lanes as resources with assignments.
+
+### Summary task rule (decided 2026-09-25, both engines MUST match)
+MS Project semantics:
+- Link INTO a summary (summary is the successor): FS and SS apply to every
+  descendant leaf (no child may start before the predecessor allows). FF and
+  SF into a summary are refused (write, batch, import).
+- Link FROM a summary (summary is the predecessor): uses the summary's
+  rolled-up dates: start = earliest descendant start (SS, SF), finish =
+  latest descendant end (FS, FF). Never "every child" for SS/SF.
+- Constraints on a summary: snet applies to every descendant start; fnlt is
+  checked against the rolled-up finish (warning); mso and mfo are refused.
+- A link between a summary and its own descendant is ignored for scheduling
+  (warning `summary_link`).
+Vectors must cover: FS into summary, SS into summary, FS from summary, SS
+from summary, SF from summary, FF into summary (refused), mso on summary
+(refused), snet on summary.
