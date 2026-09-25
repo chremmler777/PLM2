@@ -1076,3 +1076,30 @@ updates regularly. Separate module, feeds costing and the P&L.
   table department x position x plant, inline edit in drafts, "Publish
   version" with valid-from and note, diff to previous version, CSV/XLSX
   export.
+
+### 15a. Machine cost, sampling per tonnage, personnel overhead
+Same versioned sheet (one publish covers all parts):
+- `cost_sheet_machine_rates` (version_id, plant_id null, machine_class
+  String(40) e.g. tonnage class "<=200 t", "200-450 t", "450-800 t",
+  ">800 t" (classes defined per org, editable), optional machine_ref
+  String(80) for a specific press, tonnage_min/max int null,
+  hourly_rate Numeric(10,2), currency, note).
+- `cost_sheet_sampling_rates` (version_id, plant_id null, machine_class,
+  mode `flat` | `components`; flat_price per trial; or setup_hours,
+  run_hours_default, handling_cost, and the machine rate of that class ×
+  hours + labour hours × effective labour rate; computed price shown).
+- Personnel overhead: `cost_sheet_overheads` (version_id, plant_id null,
+  department_id null (null = all), kind `percent` | `per_hour`, value).
+  Effective labour rate = base position rate x (1 + percent) or + per_hour;
+  most specific overhead wins (dept+plant > dept > plant > org).
+- Use: costing lines of kind own_time use the effective labour rate;
+  new costing line kinds `machine_time` (hours x machine class rate) and
+  `sampling` (trials x sampling price of the class); implementation
+  bookings may carry machine class hours; P&L actuals use the rates valid
+  on the booking date; the Gantt's sampling / re-validation blocks show the
+  sampling cost estimate when a machine class is set on the change
+  (change-level `machine_class`, default from the impacted tool's
+  tonnage if known).
+- UI: cost sheet page tabs "Positions", "Machines", "Sampling",
+  "Overheads", each with the version's validity; effective rate column
+  on Positions.
