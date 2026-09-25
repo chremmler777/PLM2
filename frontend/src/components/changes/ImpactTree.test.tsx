@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ImpactTree from './ImpactTree'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -317,6 +320,30 @@ describe('ImpactTree, spec §16', () => {
     expect(changesApi.applyImpactSelection).not.toHaveBeenCalled()
     fireEvent.click(within(dlg).getByTestId('confirm-ok'))
     await waitFor(() => expect(changesApi.applyImpactSelection).toHaveBeenCalledWith(7, [2, 3]))
+  })
+
+  it('shows a failed "apply anyway" once, in the dialog, not also as a toast', async () => {
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(changesApi.applyImpactSelection).mockRejectedValueOnce(new Error('Selection is locked'))
+    wrap(<ImpactTree changeId={7} status="scoping"
+      impactConfirmedByName="RD Member" impactConfirmedAt="2026-09-20T08:00:00" />)
+    await screen.findByText('Child')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    fireEvent.click(screen.getByTestId('impact-apply-bar'))
+    const dlg = screen.getByTestId('impact-lock-confirm')
+    fireEvent.click(within(dlg).getByTestId('confirm-ok'))
+    expect(await within(dlg).findByRole('alert')).toBeTruthy()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('toasts a failed apply that has no dialog to show it', async () => {
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(changesApi.applyImpactSelection).mockRejectedValueOnce(new Error('Selection is locked'))
+    wrap(<ImpactTree changeId={7} status="scoping" />)
+    await screen.findByText('Child')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Sibling/ }))
+    fireEvent.click(screen.getByTestId('impact-apply-bar'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
   })
 
   it('asks a reason once the offer went out and sends it', async () => {

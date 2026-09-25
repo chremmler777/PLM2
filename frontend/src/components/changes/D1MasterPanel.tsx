@@ -8,11 +8,15 @@ import { t } from '../../i18n/cmLabels';
 import { COST_CARRIER_LABELS } from '../../lib/humanLabels';
 import { formatDate } from '../../lib/format';
 import { toastError } from '../../lib/apiError';
+import { useAuth } from '../../contexts/AuthContext';
 import Button from '../common/Button';
 import EmptyState from '../common/EmptyState';
 
 /** A finished change keeps its D1 as a record: nothing on it is edited. */
 const FINISHED = new Set(['closed', 'cancelled', 'rejected']);
+
+/** Who pays may only move while the change is captured or being scoped. */
+const CARRIER_OPEN = new Set(['captured', 'scoping']);
 
 /** The gate answers as people say them. */
 const DECISION_LABEL: Record<'yes' | 'no' | 'na', string> = { yes: 'Yes', no: 'No', na: 'N/A' };
@@ -61,6 +65,7 @@ export default function D1MasterPanel({
   canEditCustomerRelevant?: boolean;
 }) {
   const qc = useQueryClient();
+  const { userId, isAdmin } = useAuth();
 
   const { data: change } = useQuery({
     queryKey: ['change', changeId],
@@ -147,7 +152,13 @@ export default function D1MasterPanel({
   // A finished change is a record: every control reads, none edits.
   const finished = !!change && FINISHED.has(change.status);
   const mayEditD1 = canEditD1 && !finished;
-  const mayEditCarrier = canEditCustomerRelevant && !finished;
+  // Mirrors the backend: the cost carrier moves only during capture or
+  // scoping, and never on a mother-plant change (the mother plant handles
+  // the customer there).
+  const mayEditCarrier = canEditCustomerRelevant && !finished && !!change
+    && CARRIER_OPEN.has(change.status) && change.origin !== 'mother_plant';
+  // Gates are the change lead's decision (or an admin's); everyone else reads.
+  const mayDecide = !!change && (isAdmin || (userId != null && change.lead_id === userId));
 
   const togglePlant = (plantId: number) => {
     setFields((f) => {
@@ -337,6 +348,12 @@ export default function D1MasterPanel({
               <div key={key} className="text-sm" data-testid={`d1-gate-${key}`}>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-slate-200" id={`d1-gate-label-${key}`}>{t(key)}</span>
+                  {!mayDecide ? (
+                    <span className="text-xs font-medium text-slate-200" data-testid={`d1-gate-value-${key}`}
+                      aria-labelledby={`d1-gate-label-${key}`}>
+                      {g?.decision ? DECISION_LABEL[g.decision] : 'Not decided'}
+                    </span>
+                  ) : (
                   <span className="inline-flex overflow-hidden rounded-md border border-slate-600 divide-x divide-slate-600"
                     role="group" aria-labelledby={`d1-gate-label-${key}`}>
                     {(['yes', 'no', 'na'] as const).map((d) => (
@@ -354,6 +371,7 @@ export default function D1MasterPanel({
                       </button>
                     ))}
                   </span>
+                  )}
                 </div>
                 {g?.decision && (decidedBy || decidedAt) && (
                   <div className="text-xs text-slate-400 mt-0.5 pl-1" data-testid={`d1-gate-decided-${key}`}>

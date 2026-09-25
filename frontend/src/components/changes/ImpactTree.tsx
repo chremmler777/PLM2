@@ -175,6 +175,10 @@ export default function ImpactTree({
       ? changesApi.applyImpactSelection(changeId, selectedKey, reason)
       : changesApi.applyImpactSelection(changeId, selectedKey)),
     onSuccess: invalidate,
+  })
+  // A failure toasts only where nothing else shows it: the "apply anyway"
+  // ConfirmDialog prints its own inline error, so it applies without this.
+  const applyWithToast = (reason?: string) => apply.mutate(reason, {
     onError: (e: unknown) => { toastError(e, 'Could not apply the selection') },
   })
 
@@ -223,7 +227,7 @@ export default function ImpactTree({
   const startApply = () => {
     if (quoted) setAsking('reason')
     else if (impactConfirmedAt) setAsking('lock')
-    else apply.mutate(undefined)
+    else applyWithToast(undefined)
   }
   const discard = () => setSelected(new Set(data.impacted_part_ids))
 
@@ -447,7 +451,7 @@ export default function ImpactTree({
         warning={[t('impact.afterQuoteWarning'), lockWarning].filter(Boolean).join(' ')}
         label={t('impact.afterQuoteLabel')}
         submitLabel={t('impact.apply')}
-        onSubmit={(reason) => { setAsking(null); apply.mutate(reason) }}
+        onSubmit={(reason) => { setAsking(null); applyWithToast(reason) }}
         onClose={() => setAsking(null)}
       />
       <ConfirmDialog open={asking === 'lock'} data-testid="impact-lock-confirm"

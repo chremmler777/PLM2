@@ -5,6 +5,7 @@ import AssessmentBuckets, { pickAssessment } from './AssessmentBuckets'
 import type { Assessment } from '../../types/change'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { formatDate } from '../../lib/format'
 
 vi.mock('../../api/changes', () => ({
   changesApi: {
@@ -182,6 +183,35 @@ describe('AssessmentBuckets', () => {
     expect(chip.getAttribute('title')).toMatch(/no answer is required/)
     // The routed S department with no row of its own owes nothing either.
     expect((await screen.findByTestId('bucket-state-4')).textContent).toBe('Optional')
+  })
+
+  it('never calls a department the gate waits on Optional, whatever its letter', async () => {
+    buckets({ canSeeAll: true,
+      round: { first_stage: 1, total: 1, submitted: 0, all_submitted: false,
+        waiting_on: [{ department_id: 2, department_name: 'Development', assessment_id: 1, rasic_letter: 'C' }],
+        not_feasible: [], declined_pending: [], verdicts: [], open_risks: [] },
+      change: change({ assessments: [
+        assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'active', verdict: 'pending' }),
+      ] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.waiting'))
+  })
+
+  it('a consulted row still reads on hold or queued before Optional', async () => {
+    buckets({ canSeeAll: true, change: change({ blocked_department_ids: [2], assessments: [
+      assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'active', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('concern.onHold'))
+    cleanup()
+    buckets({ canSeeAll: true, change: change({ assessments: [
+      assessment({ id: 1, department_id: 2, rasic_letter: 'C', status: 'pending', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-state-2')).textContent).toBe(t('bucket.queued'))
+  })
+
+  it('shows the due date as the timestamp it is (utcnow() + N days)', async () => {
+    const due = '2026-10-05T14:30:00'
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({ due_date: due })] }) })
+    expect((await screen.findByTestId('bucket-toggle-2')).textContent).toContain(formatDate(due))
   })
 
   it('says a department is on hold when a concern blocks it', async () => {

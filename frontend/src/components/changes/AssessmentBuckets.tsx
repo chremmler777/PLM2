@@ -25,7 +25,7 @@ import BucketErrorBoundary from './BucketErrorBoundary'
 import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
-import { formatCalendarDate } from '../../lib/format'
+import { formatDate } from '../../lib/format'
 import type {
   ChangeConcern,
   Assessment, AssessmentObject, ChangeDetail, DepartmentObjects, StageAssessment,
@@ -104,9 +104,6 @@ function stateOf(
   // "Not our responsibility" waits on the lead: the letter stays, the row is
   // neither answered nor free of its duty until that is decided.
   if (declined) return 'declined'
-  // Only R and A owe an answer. A consulted or supporting department (and one
-  // whose decline was approved, relettered to C) is never "waiting".
-  if (!assesses) return 'optional'
   // A pending row belongs to a stage that has not started — the department is
   // not on the hook yet, so no hold, no owner, no "waiting" urgency.
   // ... unless the round says it owes its answer now: a department the scoping
@@ -114,6 +111,9 @@ function stateOf(
   // owed work, not a later stage.
   if (a?.status === 'pending' && !owed) return 'queued'
   if (onHold) return 'on_hold'
+  // Only R and A owe an answer. A consulted or supporting department (and one
+  // whose decline was approved, relettered to C) is never "waiting".
+  if (!assesses) return 'optional'
   if (a?.owner_id != null || a?.accepted_at) return 'in_work'
   return 'waiting'
 }
@@ -328,7 +328,8 @@ export default function AssessmentBuckets({
       {visible.map((row) => {
         const a = row.assessment
         const owed = owedIds.has(row.id) && (row.rasic === 'R' || row.rasic === 'A')
-        const assesses = row.rasic == null || row.rasic === 'R' || row.rasic === 'A'
+        // A department the gate waits on is never "Optional", whatever its letter.
+        const assesses = owedIds.has(row.id) || row.rasic == null || row.rasic === 'R' || row.rasic === 'A'
         const state = stateOf(a, row.onHold, row.declined, owed, assesses)
         const isMine = myDepartmentIds.includes(row.id)
         // Another department's answers are theirs; ordinary members see the
@@ -407,7 +408,8 @@ export default function AssessmentBuckets({
                   <span className={`inline-flex items-center gap-1 tabular-nums ${
                     a.overdue ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>
                     {a.overdue && <TriangleAlert aria-hidden="true" size={12} />}
-                    {formatCalendarDate(a.due_date)}
+                    {/* due_date is a timestamp (utcnow() + N days), not a calendar date. */}
+                    {formatDate(a.due_date)}
                     {a.overdue && ` ${t('tasks.overdue')}`}
                   </span>
                 )}

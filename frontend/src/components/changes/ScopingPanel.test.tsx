@@ -187,6 +187,8 @@ describe('ScopingPanel attendees', () => {
     const chips = screen.getAllByTestId('meeting-attendee')
     expect(chips.map((c) => c.textContent)).toEqual(['Cody Brown', 'Supplier guest'])
     expect(chips[0].getAttribute('data-user-id')).toBe('42')
+    expect(chips[0].getAttribute('data-guest')).toBeNull()
+    expect(chips[1].getAttribute('data-guest')).toBe('true')
     fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
     fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
     await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
@@ -194,6 +196,32 @@ describe('ScopingPanel attendees', () => {
       { name: 'Cody Brown', user_id: 42 }, { name: 'Supplier guest' },
     ])
     vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
+  })
+
+  // Today GET /v1/contacts sends no user_id: a directory pick is still a
+  // colleague, never styled as a guest. Only typed free text is a guest.
+  it('treats a directory pick without a user id as a colleague, not a guest', async () => {
+    vi.mocked(contactsApi.list).mockResolvedValue([{ name: 'Dana Lee', email: 'dana@ktx.io' }])
+    vi.mocked(changesApi.createMeeting).mockClear()
+    render(wrap(<ScopingPanel change={change()} />))
+    const input = await screen.findByLabelText(new RegExp(t('meeting.participants'))) as HTMLInputElement
+    await waitFor(() => expect(document.querySelector('#sc-contacts option')).toBeTruthy())
+    // Picking the suggestion sets the full name in one change event.
+    fireEvent.change(input, { target: { value: 'Dana Lee' } })
+    fireEvent.change(input, { target: { value: 'Supplier guest' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    const chips = screen.getAllByTestId('meeting-attendee')
+    expect(chips.map((c) => c.textContent)).toEqual(['Dana Lee', 'Supplier guest'])
+    expect(chips[0].getAttribute('data-guest')).toBeNull()
+    expect(chips[0].getAttribute('title')).toBe('dana@ktx.io')
+    expect(chips[1].getAttribute('data-guest')).toBe('true')
+    expect(chips[1].getAttribute('title')).toBe('Guest, not a PLM user')
+    fireEvent.click(screen.getByTestId('meeting-carrier-customer'))
+    fireEvent.click(screen.getByRole('button', { name: /save meeting/i }))
+    await waitFor(() => expect(changesApi.createMeeting).toHaveBeenCalled())
+    expect(vi.mocked(changesApi.createMeeting).mock.calls[0][1].participants).toEqual([
+      { name: 'Dana Lee' }, { name: 'Supplier guest' },
+    ])
   })
 
   it('names the meeting type select and the attendee field', async () => {

@@ -28,9 +28,10 @@ import { carrierOf, isPersonContact } from '../../lib/scopingRules'
  *  FYI: no assessment, nothing blocks on it. */
 const RASIC_PICK: RasicLetter[] = ['R', 'A', 'S', 'C', 'I']
 
-/** An attendee as picked: a directory person carries their user id, so the
- *  record names the user; a typed name is an external guest. */
-type Attendee = MeetingParticipant & { email?: string | null }
+/** An attendee as picked. A directory person is a colleague (and carries
+ *  their user id once the contacts API sends it); a typed name that matched
+ *  nobody is an external guest. `guest` is UI-only and never sent. */
+type Attendee = MeetingParticipant & { email?: string | null; guest?: boolean }
 const attendeeKey = (a: Attendee) => (a.user_id != null ? `u${a.user_id}` : `n${a.name.toLowerCase()}`)
 
 const DECISION_LABEL: Record<string, string> = {
@@ -132,7 +133,7 @@ export default function ScopingPanel(
   })
   const people = contacts.filter((c) => isPersonContact(c, departments.map((d) => d.name)))
   const fromContact = (c: Contact): Attendee =>
-    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null })
+    ({ name: c.name, user_id: c.user_id ?? null, email: c.email ?? null, guest: false })
   const appendParticipant = (a: Attendee | null) => {
     if (!a || !a.name.trim()) return
     const next = { ...a, name: a.name.trim() }
@@ -158,7 +159,7 @@ export default function ScopingPanel(
     const prefix = people.find((c) => keys(c).some((k) => k.startsWith(s)))
     const contains = people.find((c) => c.name.toLowerCase().includes(s))
     const hit = exact ?? prefix ?? contains
-    return hit ? fromContact(hit) : { name: q.trim(), user_id: null }
+    return hit ? fromContact(hit) : { name: q.trim(), user_id: null, guest: true }
   }
   const confirmTyped = () => appendParticipant(bestMatch(addName))
 
@@ -667,11 +668,11 @@ export default function ScopingPanel(
               <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-800 border border-slate-600 px-2 py-1.5 min-h-[2.25rem] focus-within:border-sky-500">
                 {participantList.map((a) => (
                   <span key={attendeeKey(a)} data-testid="meeting-attendee"
-                    data-user-id={a.user_id ?? undefined}
-                    title={a.user_id != null ? (a.email ?? undefined) : 'Guest, not a PLM user'}
+                    data-user-id={a.user_id ?? undefined} data-guest={a.guest || undefined}
+                    title={a.guest ? 'Guest, not a PLM user' : (a.email ?? undefined)}
                     className={`inline-flex items-center gap-1 rounded-md text-xs pl-2 pr-0.5 py-0.5 ${
-                      a.user_id != null ? 'bg-slate-700 text-slate-100' : 'bg-slate-800 text-slate-300 ring-1 ring-inset ring-slate-600'}`}>
-                    {a.user_id != null && <UserRound aria-hidden="true" size={12} className="text-sky-300" />}
+                      a.guest ? 'bg-slate-800 text-slate-300 ring-1 ring-inset ring-slate-600' : 'bg-slate-700 text-slate-100'}`}>
+                    {!a.guest && <UserRound aria-hidden="true" size={12} className="text-sky-300" />}
                     {a.name}
                     <button type="button" aria-label={`Remove ${a.name}`}
                       className="inline-flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-600 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"

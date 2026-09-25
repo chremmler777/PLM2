@@ -25,7 +25,7 @@ const SUMMATION = {
 
 const CHANGE = {
   id: 1, change_number: 'CHG-001', project_id: 1, title: 'Test', change_type: 'physical_part',
-  priority: 'medium', status: 'in_assessment', lead_id: null, raised_by: 1,
+  priority: 'medium', status: 'scoping', lead_id: 7, raised_by: 1,
   customer_response: 'pending', created_at: '2026-01-01', updated_at: '2026-01-01',
   issuer: 'Alice', car_line: 'VW426', is_series: true, cm_internal: false, cm_external: true,
   implementation_mode: 'integrated', customer_relevant: false,
@@ -52,6 +52,10 @@ vi.mock('../../api/changes', () => ({
   },
 }));
 
+// The viewer: user 7 leads CHANGE, so by default the gates are theirs to decide.
+const auth = { current: { userId: 7 as number | null, isAdmin: false } };
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => auth.current }));
+
 vi.mock('../../api/plants', () => ({
   plantsApi: {
     list: vi.fn(),
@@ -72,6 +76,7 @@ function makeWrapper(preloadGates?: boolean, preloadSummation?: boolean, preload
 describe('D1MasterPanel', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    auth.current = { userId: 7, isAdmin: false };
     const { changesApi } = await import('../../api/changes');
     const { plantsApi } = await import('../../api/plants');
     (changesApi.get as ReturnType<typeof vi.fn>).mockResolvedValue(CHANGE);
@@ -244,6 +249,46 @@ describe('D1MasterPanel', () => {
     expect(screen.queryByRole('button', { name: /save/i })).toBeNull();
     screen.getAllByRole('button', { name: 'Yes' }).forEach((b) =>
       expect((b as HTMLButtonElement).disabled).toBe(true));
+  });
+
+  function renderWith(change: Record<string, unknown>) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['change-gates', 1], GATES);
+    qc.setQueryData(['change', 1], change);
+    qc.setQueryData(['plants'], PLANTS);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    return render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper });
+  }
+
+  it('locks the cost carrier once the change is past scoping', async () => {
+    renderWith({ ...CHANGE, status: 'in_assessment' });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByTestId('d1-cost-carrier') as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('locks the cost carrier on a mother-plant change', async () => {
+    renderWith({ ...CHANGE, status: 'scoping', origin: 'mother_plant' });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect((screen.getByTestId('d1-cost-carrier') as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it('shows gate decisions read-only to someone who is neither lead nor admin', async () => {
+    auth.current = { userId: 99, isAdmin: false };
+    renderWith(CHANGE);
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect(screen.queryByRole('button', { name: 'Yes' })).toBeNull();
+    expect(screen.getByTestId('d1-gate-value-feasibility').textContent).toBe('Yes');
+    expect(screen.getByTestId('d1-gate-value-release').textContent).toBe('N/A');
+  });
+
+  it('lets an admin decide gates on a change they do not lead', async () => {
+    auth.current = { userId: 99, isAdmin: true };
+    renderWith(CHANGE);
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    expect(screen.getAllByRole('button', { name: 'Yes' }).length).toBe(3);
   });
 
   it('renders lead part indicator', async () => {
