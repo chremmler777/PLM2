@@ -7,9 +7,11 @@ own every rule; this module maps their three refusal kinds onto HTTP
 the thing asked for is not on this change) and builds nothing itself.
 """
 from datetime import date
-from typing import List, Optional
+from typing import List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status,
+)
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +42,7 @@ class PlanSeedIn(BaseModel):
 
 class TaskCreateIn(BaseModel):
     plan: str = "quote"
-    name: str
+    name: str = Field(max_length=200)
     kind: str = "work"
     lane: Optional[str] = Field(default=None, max_length=80)
     department_id: Optional[int] = None
@@ -49,10 +51,13 @@ class TaskCreateIn(BaseModel):
     predecessors: List[int] = []
     is_idea: bool = False
     notes: Optional[str] = None
+    parent_id: Optional[int] = None
+    constraint_type: Optional[str] = None
+    constraint_date: Optional[date] = None
 
 
 class TaskPatchIn(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=200)
     kind: Optional[str] = None
     lane: Optional[str] = Field(default=None, max_length=80)
     department_id: Optional[int] = None
@@ -65,6 +70,9 @@ class TaskPatchIn(BaseModel):
     actual_start: Optional[date] = None
     actual_finish: Optional[date] = None
     notes: Optional[str] = None
+    parent_id: Optional[int] = None
+    constraint_type: Optional[str] = None
+    constraint_date: Optional[date] = None
     reason: Optional[str] = None
 
 
@@ -77,6 +85,71 @@ class BulkItem(BaseModel):
 class BulkIn(BaseModel):
     plan: str = "quote"
     updates: List[BulkItem]
+    reason: Optional[str] = None
+
+
+class LinkIn(BaseModel):
+    plan: str = "quote"
+    from_task_id: int
+    to_task_id: int
+    type: str = "FS"
+    lag_days: int = 0
+
+
+class LinkPatchIn(BaseModel):
+    type: Optional[str] = None
+    lag_days: Optional[int] = None
+
+
+class CalendarIn(BaseModel):
+    mode: str = "calendar"
+    workdays: List[int] = [1, 2, 3, 4, 5]
+    holidays: List[date] = []
+
+
+# Batch ChangeSet. Ids of new blocks / links may be client temp ids
+# (strings such as "tmp-3") referenced elsewhere in the same set.
+TempId = Union[int, str]
+
+
+class TaskUpsert(BaseModel):
+    id: Optional[TempId] = None
+    name: Optional[str] = Field(default=None, max_length=200)
+    kind: Optional[str] = None
+    lane: Optional[str] = Field(default=None, max_length=80)
+    department_id: Optional[int] = None
+    start_date: Optional[date] = None
+    duration_days: Optional[int] = None
+    predecessors: Optional[List[TempId]] = None
+    is_idea: Optional[bool] = None
+    sort_order: Optional[int] = None
+    progress_pct: Optional[int] = None
+    actual_start: Optional[date] = None
+    actual_finish: Optional[date] = None
+    notes: Optional[str] = None
+    parent_id: Optional[TempId] = None
+    constraint_type: Optional[str] = None
+    constraint_date: Optional[date] = None
+
+
+class LinkUpsert(BaseModel):
+    id: Optional[TempId] = None
+    from_task_id: Optional[TempId] = None
+    to_task_id: Optional[TempId] = None
+    type: Optional[str] = None
+    lag_days: Optional[int] = None
+
+
+class ChangeSetIn(BaseModel):
+    tasks_upsert: List[TaskUpsert] = []
+    tasks_delete: List[int] = []
+    links_upsert: List[LinkUpsert] = []
+    links_delete: List[int] = []
+
+
+class PlanChangesIn(BaseModel):
+    plan: str = "quote"
+    changes: ChangeSetIn
     reason: Optional[str] = None
 
 
@@ -277,6 +350,121 @@ async def schedule_plan(
     return out
 
 
+@router.post("/{change_id}/plan/links")
+async def add_plan_link(
+    change_id: int, body: LinkIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await _change(db, change_id, current_user)
+    try:
+        await ChangePlanService.add_link(
+            db, change, body.plan, body.model_dump(exclude={"plan"}), current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _plan_out(db, change, body.plan, current_user)
+    await db.commit()
+    return out
+
+
+@router.patch("/{change_id}/plan/links/{link_id}")
+async def update_plan_link(
+    change_id: int, link_id: int, body: LinkPatchIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await _change(db, change_id, current_user)
+    try:
+        link = await ChangePlanService.update_link(
+            db, change, link_id, body.model_dump(exclude_unset=True), current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _plan_out(db, change, link.plan, current_user)
+    await db.commit()
+    return out
+
+
+@router.delete("/{change_id}/plan/links/{link_id}")
+async def delete_plan_link(
+    change_id: int, link_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    change = await _change(db, change_id, current_user)
+    try:
+        plan = await ChangePlanService.delete_link(db, change, link_id, current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _plan_out(db, change, plan, current_user)
+    await db.commit()
+    return out
+
+
+@router.put("/{change_id}/plan/calendar")
+async def set_plan_calendar(
+    change_id: int, body: CalendarIn, plan: str = Query("quote"),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """One calendar for both plans; answers the PlanOut of `?plan=`."""
+    change = await _change(db, change_id, current_user)
+    try:
+        await ChangePlanService.set_calendar(db, change, body.model_dump(),
+                                             current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _plan_out(db, change, plan, current_user)
+    await db.commit()
+    return out
+
+
+@router.post("/{change_id}/plan/changes")
+async def apply_plan_changes(
+    change_id: int, body: PlanChangesIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """One ChangeSet, applied atomically: PlanOut plus `id_map` (temp task
+    id -> real id) and `link_id_map` (temp link id -> real id)."""
+    change = await _change(db, change_id, current_user)
+    ch = body.changes
+    changes = {
+        "tasks_upsert": [u.model_dump(exclude_unset=True) for u in ch.tasks_upsert],
+        "tasks_delete": list(ch.tasks_delete),
+        "links_upsert": [u.model_dump(exclude_unset=True) for u in ch.links_upsert],
+        "links_delete": list(ch.links_delete),
+    }
+    try:
+        maps = await ChangePlanService.apply_changes(
+            db, change, body.plan, changes, current_user, reason=body.reason)
+    except _ERRORS as e:
+        await db.rollback()
+        raise _http(e)
+    out = await _plan_out(db, change, body.plan, current_user)
+    await db.commit()
+    return {**out, **maps}
+
+
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/{change_id}/plan/import")
+async def import_plan(
+    change_id: int, file: UploadFile = File(...), plan: str = Form("quote"),
+    replace: bool = Form(False),
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """MS Project XML (MSPDI) into a plan; refused after the baseline."""
+    change = await _change(db, change_id, current_user)
+    content = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(content) > MAX_IMPORT_BYTES:
+        raise HTTPException(status_code=400, detail="The file is larger than 10 MB")
+    try:
+        await ChangePlanService.import_mspdi(db, change, plan, content,
+                                             current_user, replace=replace)
+    except _ERRORS as e:
+        await db.rollback()
+        raise _http(e)
+    out = await _plan_out(db, change, plan, current_user)
+    await db.commit()
+    return out
+
+
 @router.get("/{change_id}/plan/export.xml")
 async def export_plan_xml(
     change_id: int, plan: str = Query("quote"),
@@ -286,7 +474,8 @@ async def export_plan_xml(
     if plan not in ("quote", "detailed"):
         raise HTTPException(status_code=400, detail=f"Unknown plan '{plan}'")
     tasks = await ChangePlanService.tasks(db, change, plan)
-    body = ChangePlanService.mspdi_xml(change, plan, tasks)
+    links = await ChangePlanService.links(db, change, plan)
+    body = ChangePlanService.mspdi_xml(change, plan, tasks, links)
     return Response(content=body, media_type="application/xml", headers={
         "Content-Disposition":
             f'attachment; filename="{change.change_number}-{plan}.xml"'})
@@ -301,7 +490,8 @@ async def export_plan_csv(
     if plan not in ("quote", "detailed"):
         raise HTTPException(status_code=400, detail=f"Unknown plan '{plan}'")
     tasks = await ChangePlanService.tasks(db, change, plan)
-    return Response(content=ChangePlanService.csv_export(tasks),
+    links = await ChangePlanService.links(db, change, plan)
+    return Response(content=ChangePlanService.csv_export(tasks, links),
                     media_type="text/csv", headers={
                         "Content-Disposition":
                             f'attachment; filename="{change.change_number}-{plan}.csv"'})
@@ -521,9 +711,7 @@ async def get_release(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
-    out = await ReleaseService.state(db, change)
-    await db.commit()          # lazily seeded rows
-    return out
+    return await ReleaseService.state(db, change)   # read-only
 
 
 @router.post("/{change_id}/release/checks/{check_key}")

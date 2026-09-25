@@ -472,8 +472,11 @@ clarification.
   status, project_id, change_id, created_by, created_by_name, created_at}`.
 
 ### Guards, cockpit, my-tasks
-- The timing guard applies to `approved -> in_implementation` only (not to
-  resuming from on_hold or looping back from validation). The release guard
+- The timing guard applies to the first start of implementation:
+  `approved -> in_implementation`, and `on_hold -> in_implementation` when
+  the change was approved and never implemented (no bypass through a hold).
+  Resuming a hold taken during implementation and looping back from
+  validation stay exempt. The release guard
   runs after the validation blocker and the ready-to-go check.
 - `ChangeResponse` also carries `plan_revision, timing_validated_at,
   timing_validated_by, accepted_offer_id, lessons_done_at,
@@ -544,3 +547,51 @@ engine (shared test vectors in `backend/tests/data/gantt_vectors.json`, the
 frontend engine tests read the same file). MSPDI export includes link type +
 lag (LinkLag in tenths of minutes) and summary tasks (OutlineLevel);
 `POST /plan/import` accepts an MSPDI file.
+
+### Vectors
+Shared scheduling vectors, `backend/tests/data/gantt_vectors.json`, read by
+the backend tests and by `frontend/src/components/gantt/engine/vectors.test.ts`
+(which also runs its own sample `engine/__fixtures__/gantt_vectors.sample.json`
+in the same format):
+```
+{"cases": [{
+  "name": "fs chain",
+  "calendar": {"mode": "calendar"|"working", "workdays": [1..7, Mon=1], "holidays": ["YYYY-MM-DD"]},
+  "options": {"pull": false},                     // optional; default push (never earlier than own start)
+  "tasks": [{"id": 1|"A", "start": "YYYY-MM-DD", "duration": 5,
+             "constraint": {"type": "asap|snet|fnlt|mso|mfo", "date": "YYYY-MM-DD"} | null,   // optional
+             "parentId": null, "isIdea": false}],                                        // optional
+  "links": [{"from": 1, "to": 2, "type": "FS|SS|FF|SF", "lag": 2}],
+  "expected": {"<id>": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD",   // early dates, end exclusive
+                         "total_slack": 0 | null, "critical": true,
+                         "free_slack": 0}}                           // optional key
+}]}
+```
+Only the keys present in `expected` are compared. Rules (engine
+`schedule.ts` header has the full text):
+- Units: days in calendar mode, working days in working mode; ends exclusive;
+  a working-mode start (milestones too) moves to the next working day.
+- Link bounds with `shift(date, lag)`: FS `S.start >= P.end+lag`, SS
+  `S.start >= P.start+lag`, FF `S.end >= P.end+lag`, SF `S.end >= P.start+lag`.
+- Push mode: ES = max(own start, link bounds, snet); `mso`/`mfo` pin the
+  date and win over links (warning `constraint_conflict`); `fnlt` only caps
+  the late finish (warning when missed). Pull mode: tasks without
+  predecessors start at the project start.
+- Finish constraint dates (`fnlt`, `mfo`) are exclusive ends, like `end`.
+- Backward pass over non-idea tasks from the project finish (max early end of
+  non-idea leaves). Total slack = diff(ES, LS), may be negative; critical =
+  not an idea and total slack <= 0. Free slack = min gap to the successors'
+  bounds, else diff(EF, project finish), capped at total slack.
+- Summary tasks roll up (min start, max end, slack = min of their leaves,
+  critical when a leaf is). **A link or constraint on a summary applies to
+  every leaf below it** (MS Project behaviour). The backend engine does the
+  same (vectors `summary: a link on a summary applies to every leaf below
+  it`, `... a link into a summary ...`, `... a constraint on a summary ...`);
+  a link between a summary and a block under it is ignored (warning
+  `summary_link`).
+- A cycle stops the pass: tasks keep their own dates, slack null, error `cycle`.
+- MSPDI round trip: link Type 0 FF, 1 FS, 2 SF, 3 SS; LinkLag tenths of
+  minutes (14400 per elapsed day with LagFormat 8 in calendar mode, 4800 per
+  working day with LagFormat 7); ConstraintType 0 ASAP, 2 MSO, 3 MFO, 4 SNET,
+  7 FNLT; kind in ExtendedAttribute Text1 (FieldID 188743731), idea in Flag1
+  (188743752); lanes as resources with assignments.

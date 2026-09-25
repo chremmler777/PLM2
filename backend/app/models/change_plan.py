@@ -8,9 +8,12 @@ each block. From then on a date only moves as a deviation with a reason,
 because the baseline is what the customer was told.
 
 Dates are calendar dates, not timestamps: a block starts on a day, and a
-timezone shifting it to the day before would move a promise. Durations are
-calendar days and end_date is exclusive (start + duration), so a successor may
-start on its predecessor's end_date.
+timezone shifting it to the day before would move a promise. Durations count
+days of the plan calendar (change_requests.plan_calendar: calendar days by
+default, working days in "working" mode) and end_date is exclusive, so a
+successor may start on its predecessor's end_date. Links (FS/SS/FF/SF with a
+lag) live in change_plan_links; the old `predecessors` JSON is legacy, only
+read for rows written before migration 088.
 """
 from datetime import date, datetime, timedelta
 
@@ -23,6 +26,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.database import Base
 
 PLAN_KINDS = ("quote", "detailed")
+LINK_TYPES = ("FS", "SS", "FF", "SF")
+CONSTRAINT_TYPES = ("asap", "snet", "fnlt", "mso", "mfo")
 TASK_KINDS = ("work", "supplier", "downtime", "bank_build", "sampling",
               "validation", "customer", "buffer", "milestone")
 FEEDBACK_VERDICTS = ("confirmed", "concern")
@@ -54,8 +59,17 @@ class ChangePlanTask(Base):
 
     start_date: Mapped[date] = mapped_column(Date)
     duration_days: Mapped[int] = mapped_column(Integer, default=0)
-    # Finish-to-start links to other tasks of the SAME plan, by id.
+    # LEGACY (before 088): finish-to-start predecessor ids. Links now live in
+    # change_plan_links; this column is no longer written (stays []).
     predecessors: Mapped[list] = mapped_column(JSON, default=list)
+    # The summary block this block sits under (same plan). A block with
+    # children is a summary: its dates are the rollup of the children.
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_plan_tasks.id"), nullable=True)
+    # asap (None) | snet | fnlt | mso | mfo. Start constraints carry a start
+    # date, finish constraints an EXCLUSIVE end date (like end_date).
+    constraint_type: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    constraint_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
     progress_pct: Mapped[int] = mapped_column(
@@ -81,8 +95,31 @@ class ChangePlanTask(Base):
 
     @property
     def end_date(self) -> date:
-        """Exclusive end: the first day a successor may start."""
+        """Exclusive end: the day after the last counted day. Uses the plan
+        calendar the service attaches on load (`_plan_cal`); without one,
+        durations are calendar days."""
+        cal = getattr(self, "_plan_cal", None)
+        if cal is not None and cal.working:
+            return cal.end_date(self.start_date, int(self.duration_days or 0))
         return self.start_date + timedelta(days=int(self.duration_days or 0))
+
+
+class ChangePlanLink(Base):
+    """A dependency between two blocks of the same plan: FS, SS, FF or SF,
+    with a lag in plan-calendar days (negative = lead)."""
+    __tablename__ = "change_plan_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(
+        ForeignKey("change_requests.id"), index=True)
+    plan: Mapped[str] = mapped_column(String(10))
+    from_task_id: Mapped[int] = mapped_column(ForeignKey("change_plan_tasks.id"))
+    to_task_id: Mapped[int] = mapped_column(ForeignKey("change_plan_tasks.id"))
+    type: Mapped[str] = mapped_column(String(2), default="FS", server_default="FS")
+    lag_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ChangePlanFeedback(Base):

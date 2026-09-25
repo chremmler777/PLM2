@@ -30,7 +30,7 @@ from app.models.change_impl import (
 )
 from app.models.change_validation import ValidationCheck, ChangeReleaseCheck
 from app.models.change_plan import (
-    ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation,
+    ChangePlanTask, ChangePlanFeedback, ChangePlanDeviation, ChangePlanLink,
 )
 from app.models.change_offer import ChangeOffer
 from app.models.workflow import (
@@ -100,7 +100,7 @@ __all__ = [
     "ImplementationEscalation",
     "ValidationCheck",
     "ChangeReleaseCheck",
-    "ChangePlanTask",
+    "ChangePlanTask", "ChangePlanLink",
     "ChangePlanFeedback",
     "ChangePlanDeviation",
     "ChangeOffer",

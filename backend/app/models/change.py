@@ -219,6 +219,9 @@ class ChangeRequest(Base):
     # the revision it confirmed. timing_validated_* is the baseline moment —
     # the soft guard on approved -> in_implementation reads it.
     plan_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Plan calendar for both plans (migration 088): {mode: calendar|working,
+    # workdays: [1..7, Mon=1], holidays: ["YYYY-MM-DD"]}. None = calendar days.
+    plan_calendar: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     timing_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     timing_validated_by: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"), nullable=True)
