@@ -103,6 +103,11 @@ class NegotiationService:
             offer = await session.get(ChangeOffer, offer_id)
             if offer is None or offer.change_id != change.id:
                 raise ChangeError("That offer is not on this change")
+            # A round is about what the customer held: never a draft.
+            if offer.status not in ("sent", "superseded", "accepted", "declined"):
+                raise ChangeError(
+                    f"Offer v{offer.version} is a draft: a negotiation round "
+                    "refers to an offer the customer received")
         else:
             latest = await OfferService.latest_sent(session, change)
             offer_id = latest.id if latest is not None else None

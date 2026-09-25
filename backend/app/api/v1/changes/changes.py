@@ -264,6 +264,53 @@ async def my_change_tasks(
     in_scheduling = await ChangeService._user_in_department(
         db, current_user, ChangeService.SCHEDULING_DEPARTMENT)
 
+    # Batch the per-stage lookups once for the whole list, instead of a few
+    # queries per change: departments by name, draft / latest sent offers,
+    # detailed-plan presence and feedback, release-check rows.
+    from app.models.change_offer import ChangeOffer
+    from app.models.change_plan import ChangePlanFeedback, ChangePlanTask
+    from app.models.change_validation import ChangeReleaseCheck
+    from app.services import release_checklist
+    from app.services.offer_service import EXPIRY_WARNING_DAYS, OfferService
+    dept_by_name = {n: i for i, n in (await db.execute(
+        select(Department.id, Department.name))).all()}
+
+    def _ids(*statuses):
+        return [c.id for c in open_changes if c.status in statuses]
+
+    drafts: dict = {}
+    latest_sent: dict = {}
+    offer_ids = _ids("quoting", "quoted") if in_sales else []
+    if offer_ids:
+        for o in (await db.execute(
+                select(ChangeOffer).where(
+                    ChangeOffer.change_id.in_(offer_ids),
+                    ChangeOffer.status.in_(("draft", "sent")))
+                .order_by(ChangeOffer.version))).scalars().all():
+            # ordered by version: the last one per change wins
+            (drafts if o.status == "draft" else latest_sent)[o.change_id] = o
+    planned: set = set()
+    feedback: dict = {}
+    approved_ids = [c.id for c in open_changes
+                    if c.status == "approved" and c.timing_validated_at is None]
+    if dep_ids and approved_ids:
+        planned = {cid for (cid,) in (await db.execute(
+            select(ChangePlanTask.change_id).where(
+                ChangePlanTask.change_id.in_(approved_ids),
+                ChangePlanTask.plan == "detailed").distinct())).all()}
+        if planned:
+            for r in (await db.execute(
+                    select(ChangePlanFeedback).where(
+                        ChangePlanFeedback.change_id.in_(planned))
+                    .order_by(ChangePlanFeedback.id))).scalars().all():
+                feedback.setdefault(r.change_id, {})[r.department_id] = r
+    release_rows: dict = {}
+    validation_ids = _ids("in_validation") if dep_ids else []
+    if validation_ids:
+        for r in (await db.execute(select(ChangeReleaseCheck).where(
+                ChangeReleaseCheck.change_id.in_(validation_ids)))).scalars().all():
+            release_rows.setdefault(r.change_id, {})[r.check_key] = r
+
     for c in open_changes:
         if c.status == "captured" and can_capture:
             tasks.append({**await _base(c), "kind": "kickoff",
@@ -291,9 +338,7 @@ async def my_change_tasks(
         # offer has to be written from it. has_price says which half is left —
         # put a number on it, then send it (-> quoted).
         elif c.status == "quoting" and in_sales and c.customer_relevant:
-            from app.services.offer_service import OfferService
-            offers = await OfferService.list_offers(db, c)
-            draft = next((o for o in offers if o.status == "draft"), None)
+            draft = drafts.get(c.id)
             tasks.append({
                 **await _base(c), "kind": "create_quote",
                 "has_price": c.quoted_price is not None,
@@ -332,9 +377,9 @@ async def my_change_tasks(
         # out (or once it has) the customer has to be chased or a new
         # version sent.
         if c.status == "quoted" and in_sales and c.customer_relevant:
-            from app.services.offer_service import OfferService
-            offer = await OfferService.expiring_offer(db, c)
-            if offer is not None:
+            offer = latest_sent.get(c.id)
+            if (offer is not None and offer.valid_until is not None
+                    and OfferService.days_left(offer) <= EXPIRY_WARNING_DAYS):
                 tasks.append({
                     **await _base(c), "kind": "offer_expiring",
                     "offer_id": offer.id, "version": offer.version,
@@ -345,30 +390,31 @@ async def my_change_tasks(
 
         # The detailed plan waits on every responsible team's confirmation;
         # each unconfirmed one is that department's errand.
+        # Same rule as ChangePlanService.feedback_state, on preloaded rows.
         if (c.status == "approved" and dep_ids
-                and c.timing_validated_at is None):
-            from app.services.change_plan_service import ChangePlanService
-            if await ChangePlanService.tasks(db, c, "detailed"):
-                fb = await ChangePlanService.feedback_state(db, c)
-                for row in fb["required"]:
-                    if row["department_id"] not in dep_ids:
-                        continue
-                    if row["verdict"] == "confirmed" and not row["stale"]:
-                        continue
-                    tasks.append({
-                        **await _base(c), "kind": "plan_feedback",
-                        "department_id": row["department_id"],
-                        "stale": row["stale"], "target_tab": "timing",
-                        "hint": "Confirm the detailed plan or raise a concern",
-                    })
+                and c.timing_validated_at is None and c.id in planned):
+            required = {a.department_id for a in c.assessments
+                        if a.rasic_letter in BLOCKING_LETTERS}
+            required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
+                         if n in dept_by_name}
+            latest = feedback.get(c.id, {})
+            revision = int(c.plan_revision or 0)
+            for did in sorted(required & dep_ids):
+                r = latest.get(did)
+                stale = bool(r is not None and r.plan_revision < revision)
+                if r is not None and r.verdict == "confirmed" and not stale:
+                    continue
+                tasks.append({
+                    **await _base(c), "kind": "plan_feedback",
+                    "department_id": did,
+                    "stale": stale, "target_tab": "timing",
+                    "hint": "Confirm the detailed plan or raise a concern",
+                })
 
         # Stage 10: open release-checklist items, per owner department.
         if c.status == "in_validation" and dep_ids:
-            from app.services import release_checklist
-            from app.services.release_service import ReleaseService
-            rows = {r.check_key: r for r in await ReleaseService.rows(db, c)}
-            by_name = {n: i for i, n in (await db.execute(
-                select(Department.id, Department.name))).all()}
+            rows = release_rows.get(c.id, {})
+            by_name = dept_by_name
             open_by_dept: dict = {}
             for key in release_checklist.CHECK_KEYS:
                 r = rows.get(key)
@@ -911,11 +957,40 @@ async def get_changelog(
     change_id: int,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
+    if not change:
+        raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.negotiation_service import NegotiationService
+    rows = (await db.execute(
         select(ChangeChangelog).where(ChangeChangelog.change_id == change_id)
         .order_by(ChangeChangelog.performed_at, ChangeChangelog.id)
-    )
-    return result.scalars().all()
+    )).scalars().all()
+    if await NegotiationService.may_read(db, change, current_user):
+        return rows
+    # Everyone on the change reads its history; only the cost roles (admin,
+    # lead, PM, Sales) read its prices. Older rows carry amounts in their
+    # description, so they are redacted on the way out, never rewritten.
+    return [_redact_changelog(r) for r in rows]
+
+
+def _redact_changelog(row) -> dict:
+    import re
+    desc = row.action_description or ""
+    notes = row.notes
+    if row.action == "offer_sent":
+        # legacy "Offer v2 sent: 1234.00 EUR, valid until ..."
+        desc = re.sub(r"\s*sent:\s*-?[\d.,]+\s*[A-Z]{3},", " sent,", desc)
+    elif row.action == "internal_costs_approved":
+        desc = "Internal costs approved"
+    elif row.action == "costing_offer_added":
+        desc = re.sub(r":\s*-?[\d.,]+\s*$", "", desc)
+    elif row.action == "negotiation_final":
+        m = re.match(r"(Negotiation closed \([^)]*\))", desc)
+        desc = m.group(1) if m else "Negotiation closed"
+        notes = None
+    return {"id": row.id, "action": row.action, "action_description": desc,
+            "performed_by": row.performed_by, "performed_at": row.performed_at,
+            "notes": notes}
 
 
 @router.get("/{change_id}/implementation")
@@ -1371,9 +1446,17 @@ async def customer_response(
     change_id: int, body: CustomerResponseRequest,
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    change = await ChangeService.get_change(db, change_id)
+    change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.negotiation_service import NegotiationService
+    # The customer's answer to a price is Sales' to record: the same people
+    # who may write the price (Sales, the change lead, admin).
+    if not await NegotiationService.may_write(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may record the "
+                   "customer response")
     try:
         await ChangeService.record_customer_response(
             db, change, body.response, current_user.id,

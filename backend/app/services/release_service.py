@@ -7,10 +7,10 @@ Both are soft-guarded on in_validation -> released (ChangeService._guard),
 after the validation blocker, so an approved transition deviation can still
 release a change whose paperwork is knowingly late.
 
-Rows are seeded lazily from the catalog (release_checklist.py) the first time
-anyone reads or writes them. The guard does NOT depend on that: it counts the
-catalog items without a done/na row, so a change nobody looked at has 13 open
-items rather than none.
+Rows are written only when an item is first answered; reads show the catalog
+(release_checklist.py) with unsaved 'open' rows for the rest. The guard does
+NOT depend on rows existing: it counts the catalog items without a done/na
+row, so a change nobody looked at has 13 open items rather than none.
 """
 from datetime import datetime
 from typing import Optional
@@ -69,21 +69,49 @@ class ReleaseService:
                 ChangeReleaseCheck.change_id == change.id))).scalars().all())
 
     @staticmethod
-    async def ensure_rows(session: AsyncSession,
-                          change: ChangeRequest) -> list[ChangeReleaseCheck]:
+    async def _owner_ids(session: AsyncSession) -> dict[str, int]:
+        return {n: i for i, n in (await session.execute(
+            select(Department.id, Department.name))).all()}
+
+    @staticmethod
+    async def view_rows(session: AsyncSession,
+                        change: ChangeRequest) -> list[ChangeReleaseCheck]:
+        """Every catalog item, in catalog order, WITHOUT writing: an item
+        nobody answered yet is an unsaved in-memory 'open' row. A GET must
+        never write (two readers racing on the unique key would fail)."""
         existing = {r.check_key: r for r in await ReleaseService.rows(session, change)}
         missing = [k for k in catalog.CHECK_KEYS if k not in existing]
         if missing:
-            ids = {n: i for i, n in (await session.execute(
-                select(Department.id, Department.name))).all()}
+            ids = await ReleaseService._owner_ids(session)
             for key in missing:
-                row = ChangeReleaseCheck(
+                existing[key] = ChangeReleaseCheck(
                     change_id=change.id, check_key=key, status="open",
                     department_id=ids.get(catalog.owner_for(key)))
-                session.add(row)
-                existing[key] = row
-            await session.flush()
         return [existing[k] for k in catalog.CHECK_KEYS]
+
+    @staticmethod
+    async def _row_for_write(session: AsyncSession, change: ChangeRequest,
+                             key: str) -> ChangeReleaseCheck:
+        """The persisted row for one item, inserted on first answer. A
+        concurrent first answer loses the insert race on the unique key: the
+        savepoint rolls back and the winner's row is read instead."""
+        from sqlalchemy.exc import IntegrityError
+        q = select(ChangeReleaseCheck).where(
+            ChangeReleaseCheck.change_id == change.id,
+            ChangeReleaseCheck.check_key == key)
+        row = (await session.execute(q)).scalar_one_or_none()
+        if row is not None:
+            return row
+        ids = await ReleaseService._owner_ids(session)
+        row = ChangeReleaseCheck(change_id=change.id, check_key=key, status="open",
+                                 department_id=ids.get(catalog.owner_for(key)))
+        try:
+            async with session.begin_nested():
+                session.add(row)
+                await session.flush()
+        except IntegrityError:
+            row = (await session.execute(q)).scalar_one()
+        return row
 
     @staticmethod
     async def open_count(session: AsyncSession, change: ChangeRequest) -> int:
@@ -106,12 +134,14 @@ class ReleaseService:
             raise ChangeError(
                 "The release checklist is answered during implementation and "
                 "validation")
-        rows = {r.check_key: r for r in await ReleaseService.ensure_rows(session, change)}
-        row = rows[key]
-        if not await ReleaseService.may_answer(session, change, row, user):
+        # Rights are checked on the unsaved view row: a refused caller writes
+        # nothing, not even the seed row.
+        view = {r.check_key: r for r in await ReleaseService.view_rows(session, change)}
+        if not await ReleaseService.may_answer(session, change, view[key], user):
             raise PlanForbidden(
                 "Only the owner department, Project Management, the change "
                 "lead or an admin may answer this item")
+        row = await ReleaseService._row_for_write(session, change, key)
         old = row.status
         row.status = status
         row.note = note
@@ -225,7 +255,7 @@ class ReleaseService:
 
     @staticmethod
     async def state(session: AsyncSession, change: ChangeRequest) -> dict:
-        rows = await ReleaseService.ensure_rows(session, change)
+        rows = await ReleaseService.view_rows(session, change)
         names = {i: n for i, n in (await session.execute(
             select(Department.id, Department.name))).all()}
         lessons = await ReleaseService.lessons(session, change)

@@ -54,10 +54,8 @@ SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:")
 
 
 def _num(v, default: float = 0.0) -> float:
-    try:
-        return float(v) if v is not None and v != "" else default
-    except (TypeError, ValueError):
-        return default
+    """Lenient number for reads: never raises, understands "12,5"."""
+    return parse_number(v, strict=False, default=default)
 
 
 def _issue(code: str, message: str) -> dict:
@@ -81,13 +79,67 @@ def default_data() -> dict:
     }
 
 
-def normalise(data: Optional[dict]) -> dict:
-    """Fill every missing key with its default (the server owns the shape)
-    and check the few enumerations the totals depend on."""
+def parse_number(v, field: str = "value", *, strict: bool = True,
+                 default=0.0, allow_none: bool = False):
+    """One number from what a browser or a spreadsheet paste sends: a JSON
+    number, or a string in either notation ("12.5", "12,5", "1.234,50",
+    "1,234.50", "1 234,5"). Anything else is refused (strict) or replaced by
+    the default (lenient, for rows stored before this check existed)."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None if allow_none else default
+    if isinstance(v, bool):
+        out = None
+    elif isinstance(v, (int, float)):
+        out = float(v)
+    elif isinstance(v, str):
+        t = v.strip().replace(" ", "").replace("\u00a0", "").replace("'", "")
+        if "," in t and "." in t:
+            # the later separator is the decimal one
+            if t.rfind(",") > t.rfind("."):
+                t = t.replace(".", "").replace(",", ".")
+            else:
+                t = t.replace(",", "")
+        elif "," in t:
+            t = t.replace(",", ".")
+        try:
+            out = float(t)
+        except ValueError:
+            out = None
+    else:
+        out = None
+    if out is None or math.isnan(out) or math.isinf(out):
+        if strict:
+            raise ChangeError(f"'{field}' must be a number (got {str(v)[:40]!r})")
+        return None if allow_none else default
+    return out
+
+
+def _dict_items(items, key: str, strict: bool) -> list:
+    """List items must be objects: a stray string or number in a list is
+    refused (strict) or dropped (lenient)."""
+    out = []
+    for i in items:
+        if isinstance(i, dict):
+            out.append(dict(i))
+        elif strict:
+            raise ChangeError(f"Every entry of '{key}' must be an object")
+    return out
+
+
+def normalise(data: Optional[dict], *, strict: bool = False) -> dict:
+    """Fill every missing key with its default (the server owns the shape),
+    check the enumerations the totals depend on and coerce every number the
+    totals read. `strict` (a PATCH) refuses bad input with a 400; the lenient
+    mode repairs stored data so a legacy row still renders."""
     out = default_data()
+    if data is not None and not isinstance(data, dict):
+        raise ChangeError("Offer data must be an object")
     for k, v in (data or {}).items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = {**out[k], **v}
+        if k in out and isinstance(out[k], dict):
+            if isinstance(v, dict):
+                out[k] = {**out[k], **v}
+            elif v is not None and strict:
+                raise ChangeError(f"'{k}' must be an object")
         else:
             out[k] = v
     if out["cbd_mode"] not in ("detailed", "rough"):
@@ -96,17 +148,56 @@ def normalise(data: Optional[dict]) -> dict:
         raise ChangeError(
             "changeover.mode must be 'running_change' or 'customer_pays_scrap'")
     for key in ("cost_lines", "factors", "risks", "free_fields"):
+        if out[key] is None:
+            out[key] = []
         if not isinstance(out[key], list):
             raise ChangeError(f"'{key}' must be a list")
+        out[key] = _dict_items(out[key], key, strict)
+
+    def num(obj, fld, label, **kw):
+        if fld in obj or not kw.get("allow_none"):
+            obj[fld] = parse_number(obj.get(fld), label, strict=strict, **kw)
+
     for line in out["cost_lines"]:
         if line.get("category", "other") not in ("internal", "external", "other"):
             raise ChangeError("cost line category must be internal, external or other")
+        num(line, "amount", "cost line amount")
+        if "source_amount" in line:
+            num(line, "source_amount", "cost line source amount")
     for f in out["factors"] + out["risks"]:
         if f.get("type", "pct") not in ("pct", "amount"):
             raise ChangeError("factor and risk type must be 'pct' or 'amount'")
+        num(f, "value", "factor or risk value")
     for f in out["factors"]:
         if f.get("sign", 1) not in (1, -1):
             raise ChangeError("factor sign must be 1 or -1")
+    for f in out["free_fields"]:
+        # A free field without an amount is a text line in the terms.
+        num(f, "amount", "free field amount", allow_none=True, default=None)
+    co = out["changeover"]
+    num(co, "scrap_qty", "scrap quantity")
+    num(co, "scrap_unit_price", "scrap unit price")
+    pp = out["piece_price"]
+    num(pp, "annual_volume", "annual volume")
+    rows = pp.get("rows")
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        raise ChangeError("'piece_price.rows' must be a list")
+    pp["rows"] = _dict_items(rows, "piece_price.rows", strict)
+    for r in pp["rows"]:
+        num(r, "delta_per_piece", "delta per piece")
+    tm = out["timing"]
+    ms = tm.get("milestones")
+    if ms is None:
+        ms = []
+    if not isinstance(ms, list):
+        raise ChangeError("'timing.milestones' must be a list")
+    tm["milestones"] = _dict_items(ms, "timing.milestones", strict)
+    if tm.get("weeks_from_order") not in (None, ""):
+        w = parse_number(tm["weeks_from_order"], "weeks from order",
+                         strict=strict, allow_none=True, default=None)
+        tm["weeks_from_order"] = int(w) if w is not None and w == int(w) else w
     return out
 
 
@@ -226,9 +317,23 @@ class OfferService:
         if not await OfferService.may_write(session, change, user):
             raise PlanForbidden(
                 "Only Sales, the change lead or an admin may write the offer")
+        await OfferService._require_open(session, change)
         if change.status not in OFFER_WINDOW:
             raise ChangeError(
                 "The offer is written while the change is quoting or quoted")
+
+    @staticmethod
+    async def _require_open(session, change) -> None:
+        """Once the customer said yes the offer is history: no new draft, no
+        edit, no second send that would move the price after the fact."""
+        if change.accepted_offer_id is None and change.customer_response != "accepted":
+            return
+        accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
+                    if change.accepted_offer_id else None)
+        if accepted is not None:
+            raise ChangeError(
+                f"The customer accepted v{accepted.version}; the offer is closed")
+        raise ChangeError("The customer accepted the quote; the offer is closed")
 
     # ------------------------------------------------------------------
     # Reads
@@ -415,8 +520,22 @@ class OfferService:
             change_id=change.id, version=version, status="draft",
             currency=(base.currency if base else "EUR"), data=data,
             created_by=user.id)
-        session.add(offer)
-        await session.flush()
+        from sqlalchemy.exc import IntegrityError
+        try:
+            async with session.begin_nested():
+                session.add(offer)
+                await session.flush()
+        except IntegrityError:
+            # A second POST raced us to the same version number: the winner's
+            # row is the draft; answer like the sequential case.
+            winner = (await session.execute(
+                select(ChangeOffer).where(ChangeOffer.change_id == change.id,
+                                          ChangeOffer.status == "draft")
+                .order_by(ChangeOffer.version.desc()).limit(1)
+            )).scalar_one_or_none()
+            raise PlanConflict(
+                "A draft offer was just created - edit or send it",
+                draft_id=winner.id if winner is not None else None)
         await OfferService._store_totals(session, change, offer)
         await session.flush()
         await ChangeService.append_changelog(
@@ -448,7 +567,7 @@ class OfferService:
                 merged[k] = {**merged[k], **v}
             else:
                 merged[k] = v
-        offer.data = normalise(merged)
+        offer.data = normalise(merged, strict=True)
         if currency is not None:
             cur = currency.strip().upper()
             if len(cur) != 3:
@@ -515,10 +634,11 @@ class OfferService:
             raise ChangeError(
                 "The offer includes timing but the quote plan is empty - plan "
                 "it first or leave timing out")
+        received = received_at or date.today()
+        OfferService._check_received(received, datetime.utcnow())
         for prev in await OfferService.list_offers(session, change):
             if prev.id != offer.id and prev.status == "sent":
                 prev.status = "superseded"
-        received = received_at or date.today()
         offer.status = "sent"
         offer.change_note = note
         offer.sent_at = datetime.utcnow()
@@ -529,18 +649,35 @@ class OfferService:
         await session.flush()
         if change.status == "quoting":
             await ChangeService.transition(session, change, "quoted", user.id)
+        # No amounts here: the changelog is read by everyone on the change,
+        # prices only by the cost roles (they read them on the offer itself).
         await ChangeService.append_changelog(
             session, change, "offer_sent",
-            f"Offer v{offer.version} sent: {totals['total_one_time']:.2f} "
-            f"{offer.currency}, valid until {offer.valid_until.isoformat()}"
+            f"Offer v{offer.version} sent, valid until "
+            f"{offer.valid_until.isoformat()}"
             + (f" ({note})" if note else ""), user.id, notes=note,
             new_value={"offer_id": offer.id, "version": offer.version,
-                       "total": totals["total_one_time"],
-                       "piece_price_delta": totals["piece_price_delta"],
+                       "status": offer.status,
                        "received_at": received.isoformat(),
                        "valid_until": offer.valid_until.isoformat(),
                        "note": note})
         return offer
+
+    @staticmethod
+    def _check_received(received: date, sent_at: Optional[datetime]) -> None:
+        """The customer cannot receive an offer before it was sent, nor on a
+        day that has not come yet. sent_at is UTC; the bounds allow for the
+        server's local day differing from the UTC day by one."""
+        today = max(date.today(), datetime.utcnow().date())
+        if received > today:
+            raise ChangeError(
+                f"The receipt date {received.isoformat()} is in the future")
+        if sent_at is not None:
+            sent_day = min(sent_at.date(), date.today())
+            if received < sent_day:
+                raise ChangeError(
+                    f"The receipt date {received.isoformat()} is before the "
+                    f"offer was sent ({sent_at.date().isoformat()})")
 
     @staticmethod
     async def mark_received(session: AsyncSession, change: ChangeRequest,
@@ -551,6 +688,7 @@ class OfferService:
                 "Only Sales, the change lead or an admin may write the offer")
         if offer.status != "sent":
             raise ChangeError("Only a sent offer has a receipt date")
+        OfferService._check_received(received_at, offer.sent_at)
         old = offer.received_at
         offer.received_at = received_at
         offer.valid_until = received_at + timedelta(days=OFFER_VALIDITY_DAYS)

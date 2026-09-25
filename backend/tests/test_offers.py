@@ -207,12 +207,22 @@ async def test_send_moves_to_quoted_and_versions(client, offer_world, session_fa
     res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
     assert res.status_code == 400 and "quote plan" in res.json()["detail"]
     await _seed_quote_plan(client, sales, cid)
+    today = date.today()
+    tomorrow = (today + timedelta(days=2)).isoformat()   # beyond any UTC offset
+    # the customer cannot receive it tomorrow, nor before it was sent
     res = await client.post(_url(cid, f"/{o['id']}/send"),
-                            json={"received_at": "2026-10-01"}, headers=sales)
+                            json={"received_at": tomorrow}, headers=sales)
+    assert res.status_code == 400 and "future" in res.json()["detail"]
+    res = await client.post(_url(cid, f"/{o['id']}/send"),
+                            json={"received_at": (today - timedelta(days=3)).isoformat()},
+                            headers=sales)
+    assert res.status_code == 400 and "before the offer was sent" in res.json()["detail"]
+    res = await client.post(_url(cid, f"/{o['id']}/send"),
+                            json={"received_at": today.isoformat()}, headers=sales)
     assert res.status_code == 200, res.text
     v1 = res.json()
-    assert v1["status"] == "sent" and v1["received_at"] == "2026-10-01"
-    assert v1["valid_until"] == "2026-10-31"
+    assert v1["status"] == "sent" and v1["received_at"] == today.isoformat()
+    assert v1["valid_until"] == (today + timedelta(days=30)).isoformat()
     assert v1["sent_by_name"] == "Offer sales"
     change = (await client.get(f"/api/v1/changes/{cid}", headers=sales)).json()
     assert change["status"] == "quoted"
@@ -221,15 +231,19 @@ async def test_send_moves_to_quoted_and_versions(client, offer_world, session_fa
     res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {}}, headers=sales)
     assert res.status_code == 400
 
-    # receipt date corrected: validity recomputed
+    # receipt date corrected: validity recomputed; not into the future
     res = await client.post(_url(cid, f"/{o['id']}/received"),
-                            json={"received_at": "2026-10-05"}, headers=sales)
-    assert res.status_code == 200 and res.json()["valid_until"] == "2026-11-04"
+                            json={"received_at": tomorrow}, headers=sales)
+    assert res.status_code == 400
+    res = await client.post(_url(cid, f"/{o['id']}/received"),
+                            json={"received_at": today.isoformat()}, headers=sales)
+    assert res.status_code == 200
+    assert res.json()["valid_until"] == (today + timedelta(days=30)).isoformat()
 
     v2 = await _create(client, sales, cid)
     assert v2["version"] == 2 and v2["data"]["subject"] == v1["data"]["subject"]
     res = await client.post(_url(cid, f"/{v2['id']}/received"),
-                            json={"received_at": "2026-10-05"}, headers=sales)
+                            json={"received_at": today.isoformat()}, headers=sales)
     assert res.status_code == 400                        # draft has no receipt
     await client.patch(_url(cid, f"/{v2['id']}"), json={"data": {
         "factors": [{"key": "discount", "label": "Discount", "type": "pct",
@@ -375,3 +389,201 @@ async def test_offer_build_action_at_quoting(client, offer_world):
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=sales)).json()
     row = next(t for t in tasks if t["kind"] == "create_quote")
     assert row["has_offer_draft"] is False and row["target_tab"] == "offer"
+
+
+# ----------------------------------------------------------------------
+# Review hardening
+# ----------------------------------------------------------------------
+async def _sent_v1(client, sales, cid):
+    o = await _create(client, sales, cid)
+    await client.patch(_url(cid, f"/{o['id']}"),
+                       json={"data": {"timing": {"include": False}}}, headers=sales)
+    res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 200, res.text
+    return res.json()
+
+
+async def test_customer_response_needs_sales_rights_and_quoted(client, offer_world):
+    cid = offer_world["change_id"]
+    sales, pm, tool = (await _auth(client, "sales"), await _auth(client, "pm"),
+                       await _auth(client, "tool"))
+    # still quoting: nothing is out with the customer yet
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response",
+                            json={"response": "declined"}, headers=sales)
+    assert res.status_code == 400 and "quoted" in res.json()["detail"]
+    await _sent_v1(client, sales, cid)
+    for who in (pm, tool):
+        res = await client.post(f"/api/v1/changes/{cid}/customer-response",
+                                json={"response": "declined"}, headers=who)
+        assert res.status_code == 403
+
+
+async def test_changelog_hides_prices_from_non_cost_roles(client, offer_world,
+                                                          session_factory):
+    from app.services.change_service import ChangeService
+    cid = offer_world["change_id"]
+    sales, tool = await _auth(client, "sales"), await _auth(client, "tool")
+    await _sent_v1(client, sales, cid)
+    # a row written by the old code, amount in the text
+    async with session_factory() as s:
+        change = await s.get(ChangeRequest, cid)
+        await ChangeService.append_changelog(
+            s, change, "offer_sent",
+            "Offer v1 sent: 1234.50 EUR, valid until 2026-10-30", 1)
+        await ChangeService.append_changelog(
+            s, change, "internal_costs_approved", "Internal costs approved (777.00)", 1)
+        await s.commit()
+    mine = [e for e in (await client.get(f"/api/v1/changes/{cid}/changelog",
+                                         headers=sales)).json()]
+    new = next(e for e in mine if e["action"] == "offer_sent")
+    assert "1000" not in new["action_description"]          # new rows carry no amount
+    assert any("1234.50" in e["action_description"] for e in mine)   # Sales sees legacy
+    theirs = (await client.get(f"/api/v1/changes/{cid}/changelog", headers=tool)).json()
+    text = " ".join(e["action_description"] for e in theirs)
+    assert "1234.50" not in text and "777" not in text
+    assert "Offer v1 sent, valid until 2026-10-30" in text
+
+
+async def test_offer_is_closed_after_acceptance(client, offer_world):
+    cid = offer_world["change_id"]
+    sales = await _auth(client, "sales")
+    v1 = await _sent_v1(client, sales, cid)
+    due = (datetime.utcnow() + timedelta(days=90)).isoformat()
+    res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
+        "response": "accepted", "release_due_date": due}, headers=sales)
+    assert res.status_code == 200, res.text
+    res = await client.post(_url(cid), headers=sales)
+    assert res.status_code == 400
+    assert res.json()["detail"] == "The customer accepted v1; the offer is closed"
+    res = await client.post(_url(cid, f"/{v1['id']}/send"), json={}, headers=sales)
+    assert res.status_code == 400 and "offer is closed" in res.json()["detail"]
+
+
+async def test_numbers_are_coerced_and_validated(client, offer_world):
+    cid = offer_world["change_id"]
+    sales = await _auth(client, "sales")
+    o = await _create(client, sales, cid)
+    res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": {
+        "cost_lines": [{"key": "a", "label": "A", "category": "internal",
+                        "amount": "1.000,50", "include": True}],
+        "factors": [{"key": "margin", "label": "Margin", "type": "pct",
+                     "value": "12,5", "sign": 1, "enabled": True}],
+        "changeover": {"mode": "customer_pays_scrap", "scrap_qty": "10",
+                       "scrap_unit_price": "2,5"},
+        "free_fields": [{"label": "Text only", "value": "x"},
+                        {"label": "Transport", "amount": "30"}],
+        "piece_price": {"enabled": True, "annual_volume": "1000",
+                        "rows": [{"label": "m", "delta_per_piece": "0,01"}]},
+    }}, headers=sales)
+    assert res.status_code == 200, res.text
+    d, t = res.json()["data"], res.json()["totals"]
+    assert d["cost_lines"][0]["amount"] == 1000.5
+    assert d["factors"][0]["value"] == 12.5
+    assert d["free_fields"][0].get("amount") is None and d["free_fields"][1]["amount"] == 30
+    assert t["base"] == 1000.5 and t["scrap"] == 25 and t["free"] == 30
+    assert t["annual_effect"] == 10
+    for bad in ({"cost_lines": [{"key": "a", "amount": "lots"}]},
+                {"factors": [{"key": "m", "value": {"x": 1}, "enabled": True}]},
+                {"changeover": {"scrap_qty": "ten"}},
+                {"cost_lines": ["not an object"]},
+                {"piece_price": {"rows": [3]}},
+                {"terms": "net 30"}):
+        res = await client.patch(_url(cid, f"/{o['id']}"), json={"data": bad},
+                                 headers=sales)
+        assert res.status_code == 400, (bad, res.text)
+
+
+async def test_negotiation_round_refers_to_a_sent_offer(client, offer_world):
+    cid = offer_world["change_id"]
+    sales = await _auth(client, "sales")
+    v1 = await _sent_v1(client, sales, cid)
+    v2 = await _create(client, sales, cid)
+    res = await client.post(f"/api/v1/changes/{cid}/negotiations", json={
+        "channel": "call", "note": "on the draft", "offer_id": v2["id"]}, headers=sales)
+    assert res.status_code == 400 and "draft" in res.json()["detail"]
+    res = await client.post(f"/api/v1/changes/{cid}/negotiations", json={
+        "channel": "call", "note": "on v1", "offer_id": v1["id"]}, headers=sales)
+    assert res.status_code == 201 and res.json()["offer_id"] == v1["id"]
+
+
+async def test_concurrent_create_answers_409_with_the_winner(
+        client, offer_world, session_factory, monkeypatch):
+    """Two POSTs that both passed the 'no draft yet' read: the loser hits the
+    unique (change, version) key and gets the same 409 as the sequential case."""
+    from app.services.offer_service import OfferService
+    cid = offer_world["change_id"]
+    sales = await _auth(client, "sales")
+    first = await _create(client, sales, cid)
+
+    async def blind(session, change):          # the loser read before the winner wrote
+        return []
+    monkeypatch.setattr(OfferService, "list_offers", staticmethod(blind))
+    res = await client.post(_url(cid), headers=sales)
+    assert res.status_code == 409, res.text
+    assert res.json()["detail"]["draft_id"] == first["id"]
+
+
+# ----------------------------------------------------------------------
+# PDF robustness (rendered directly, no HTTP)
+# ----------------------------------------------------------------------
+def _pdf_ctx(*, data=None, tasks=None, status="sent", totals=None):
+    from app.services.offer_service import compute_totals, normalise
+    d = normalise(data or {})
+    return {
+        "org_name": "Org & <Co>", "plant_name": "Plant", "plant_location": "Town",
+        "project_name": "P", "change_number": "C-PDF-1", "title": "T <b>",
+        "reason": "r & r", "description": "d" * 3000,
+        "items": [{"number": "1<2", "name": "a & b", "index": "C"}],
+        "offer": {"version": 2, "status": status, "currency": "EUR", "data": d,
+                  "totals": totals or compute_totals(d, 100.0),
+                  "change_note": "x < y & z", "sent_at": date.today(),
+                  "valid_until": date.today() + timedelta(days=30)},
+        "tasks": tasks or [],
+    }
+
+
+def _pages(pdf: bytes) -> int:
+    return pdf.count(b"/Type /Page") - pdf.count(b"/Type /Pages")
+
+
+async def test_pdf_survives_string_and_garbage_numbers():
+    from app.services.offer_pdf import render_offer_pdf
+    ctx = _pdf_ctx(totals={"base": "1.000,50", "factors": [{"label": "F", "amount": "abc"}],
+                           "risks_total": "12,5", "scrap": None, "free": "x",
+                           "total_one_time": "1234,5", "piece_price_delta": "0,01",
+                           "annual_effect": "n/a"})
+    ctx["offer"]["data"].update({
+        "cost_lines": [{"label": "A", "amount": "12,5", "include": True},
+                       {"label": "B", "amount": "garbage", "include": True}],
+        "changeover": {"mode": "customer_pays_scrap", "scrap_qty": "1.200",
+                       "scrap_unit_price": "oops"},
+        "piece_price": {"enabled": True, "annual_volume": "many",
+                        "rows": [{"label": "m", "delta_per_piece": "0,01"}, "junk"]},
+        "timing": {"include": True, "weeks_from_order": "twelve",
+                   "milestones": [{"label": "M", "date": "not a date"}, 5]},
+        "risks": [{"label": "R", "severity": "3", "show": True, "note": "n"}],
+    })
+    pdf = render_offer_pdf(ctx)
+    assert pdf[:4] == b"%PDF"
+
+
+async def test_pdf_splits_a_120_task_plan_over_pages():
+    from app.services.offer_pdf import render_offer_pdf
+    start = date(2026, 10, 5)
+    tasks = [{"name": f"Task {i} & <x>", "lane": f"Lane {i % 5}", "kind": "work",
+              "start": start + timedelta(days=i), "end": start + timedelta(days=i + 4),
+              "duration": 0 if i % 10 == 0 else 4} for i in range(120)]
+    pdf = render_offer_pdf(_pdf_ctx(data={"timing": {"include": True}}, tasks=tasks))
+    assert pdf[:4] == b"%PDF" and _pages(pdf) >= 4
+
+
+async def test_pdf_flows_a_20k_note_and_escapes_markup():
+    from app.services.offer_pdf import render_offer_pdf
+    note = ("Terms & conditions <apply> > never. " * 600)[:20000]
+    pdf = render_offer_pdf(_pdf_ctx(data={
+        "terms": {"notes": note, "payment": "<b>30</b> & net"},
+        "intro": "Dear <customer> & team",
+        "free_fields": [{"label": "L<1>", "value": "v & w" * 500}],
+        "risks": [{"label": "R", "severity": 3, "show": True, "note": "n & <m>" * 400}],
+    }, status="draft"))
+    assert pdf[:4] == b"%PDF" and _pages(pdf) >= 4

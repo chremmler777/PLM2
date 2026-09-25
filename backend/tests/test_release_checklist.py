@@ -1,6 +1,6 @@
 """Stage 10: the release checklist and the lessons-learned step.
 
-Pinned here: the 13 catalog items are seeded lazily with their owner
+Pinned here: the 13 catalog items show with their owner
 departments; 'na' needs a note; only the owner department, PM, the lead or
 an admin answer an item; lessons are added by anyone on the change and the
 step is completed by PM/lead/admin with at least one lesson or a reason; and
@@ -200,3 +200,54 @@ async def test_release_check_task_for_owner(client, rel_world):
     tasks = (await client.get("/api/v1/changes/my-tasks", headers=dev)).json()
     t = next(t for t in tasks if t["kind"] == "release_check")
     assert t["open_count"] == 3 and t["department_id"] == rel_world["depts"]["Development"]
+
+
+async def test_get_release_writes_nothing(client, rel_world, session_factory):
+    from sqlalchemy import func, select
+    from app.models.change_validation import ChangeReleaseCheck
+    cid = rel_world["change_id"]
+    pm = await _auth(client, "pm")
+    await _state(client, pm, cid)
+    await _state(client, pm, cid)
+    async with session_factory() as s:
+        n = (await s.execute(select(func.count()).select_from(ChangeReleaseCheck)
+                             .where(ChangeReleaseCheck.change_id == cid))).scalar()
+    assert n == 0
+    # a refused answer writes nothing either; an accepted one writes its row only
+    tool = await _auth(client, "tool")
+    assert (await _check(client, tool, cid, "index_updated", "done")).status_code == 403
+    assert (await _check(client, pm, cid, "index_updated", "done")).status_code == 200
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeReleaseCheck)
+                                .where(ChangeReleaseCheck.change_id == cid))).scalars().all()
+    assert [(r.check_key, r.status) for r in rows] == [("index_updated", "done")]
+    assert rows[0].department_id == rel_world["depts"]["Development"]
+    st = await _state(client, pm, cid)
+    assert st["open_count"] == 12
+
+
+async def test_timing_guard_cannot_be_bypassed_through_on_hold(session_factory, rel_world):
+    """approved -> on_hold -> in_implementation used to skip 'timing
+    validated'. A hold taken during implementation still resumes freely."""
+    from datetime import datetime
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, rel_world["change_id"])
+        c.status = "on_hold"
+        c.impact_confirmed_at = datetime.utcnow()
+        c.customer_response = "accepted"
+        c.timing_validated_at = None
+        await s.flush()
+        await s.refresh(c, ["impacted_items", "gates"])
+        assert "Timing not validated" in (
+            await ChangeService._guard(s, c, "in_implementation") or "")
+        # the change had been in implementation before the hold: exempt
+        await ChangeService.append_changelog(
+            s, c, "status_changed", "approved -> in_implementation", 1,
+            field_name="status", old_value="approved", new_value="in_implementation")
+        await s.flush()
+        assert "Timing not validated" not in (
+            await ChangeService._guard(s, c, "in_implementation") or "")
+        # loop-back from validation stays exempt
+        c.status = "in_validation"
+        assert "Timing not validated" not in (
+            await ChangeService._guard(s, c, "in_implementation") or "")

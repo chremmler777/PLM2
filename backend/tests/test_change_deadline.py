@@ -26,6 +26,16 @@ async def _mk_change(session, seed, **over):
     return chg
 
 
+async def _quote_out(session_factory, cid):
+    """Put a fresh change where a customer response belongs: quoted, with the
+    creator (the engineer) as lead, who may record the answer."""
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = "quoted"
+        c.lead_id = c.raised_by
+        await s.commit()
+
+
 async def _mk_template_with_stages(session, n_stages):
     t = WfTemplate(name="Deadline Test Template", created_by=1)
     session.add(t)
@@ -413,12 +423,13 @@ async def test_in_assessment_gate_skips_deadline_for_internal(session_factory, s
 
 
 @pytest.mark.asyncio
-async def test_acceptance_requires_release_deadline(client, eng_auth, seed):
+async def test_acceptance_requires_release_deadline(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "Accept needs date", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
+    await _quote_out(session_factory, cid)
 
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
                             json={"response": "accepted"}, headers=eng_auth)
@@ -439,12 +450,13 @@ async def test_acceptance_requires_release_deadline(client, eng_auth, seed):
 
 
 @pytest.mark.asyncio
-async def test_decline_does_not_require_release_deadline(client, eng_auth, seed):
+async def test_decline_does_not_require_release_deadline(client, eng_auth, seed, session_factory):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": "Decline no date", "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
+    await _quote_out(session_factory, cid)
     res = await client.post(f"/api/v1/changes/{cid}/customer-response",
                             json={"response": "declined"}, headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -457,6 +469,7 @@ async def test_acceptance_release_deadline_audited(client, eng_auth, seed, sessi
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
+    await _quote_out(session_factory, cid)
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     await client.post(f"/api/v1/changes/{cid}/customer-response", json={
         "response": "accepted", "release_due_date": due,
@@ -473,12 +486,13 @@ async def test_acceptance_release_deadline_audited(client, eng_auth, seed, sessi
         assert rows[0].new_value is not None
 
 
-async def _accepted_change(client, eng_auth, seed, title):
+async def _accepted_change(client, eng_auth, seed, title, session_factory):
     res = await client.post("/api/v1/changes", json={
         "project_id": seed["project_id"], "title": title, "reason": "r",
         "customer_relevant": True,
     }, headers=eng_auth)
     cid = res.json()["id"]
+    await _quote_out(session_factory, cid)
     due = (datetime.utcnow() + timedelta(days=45)).isoformat()
     res = await client.post(f"/api/v1/changes/{cid}/customer-response", json={
         "response": "accepted", "release_due_date": due,
@@ -488,8 +502,8 @@ async def _accepted_change(client, eng_auth, seed, title):
 
 
 @pytest.mark.asyncio
-async def test_release_deadline_editable_after_acceptance(client, eng_auth, seed):
-    cid = await _accepted_change(client, eng_auth, seed, "Edit release DL")
+async def test_release_deadline_editable_after_acceptance(client, eng_auth, seed, session_factory):
+    cid = await _accepted_change(client, eng_auth, seed, "Edit release DL", session_factory)
     new_due = (datetime.utcnow() + timedelta(days=60)).isoformat()
     res = await client.patch(f"/api/v1/changes/{cid}", json={
         "release_due_date": new_due, "release_due_reason": "customer moved SOP",
@@ -513,8 +527,8 @@ async def test_release_deadline_not_settable_before_acceptance(client, eng_auth,
 
 
 @pytest.mark.asyncio
-async def test_release_deadline_cannot_be_cleared(client, eng_auth, seed):
-    cid = await _accepted_change(client, eng_auth, seed, "No clearing")
+async def test_release_deadline_cannot_be_cleared(client, eng_auth, seed, session_factory):
+    cid = await _accepted_change(client, eng_auth, seed, "No clearing", session_factory)
     res = await client.patch(f"/api/v1/changes/{cid}", json={
         "release_due_date": None,
     }, headers=eng_auth)

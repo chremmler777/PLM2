@@ -72,7 +72,7 @@ RELEASE_CHECK_STATUSES = ("open", "done", "na")
 
 
 class ChangeReleaseCheck(Base):
-    """One item of the release checklist on one change (seeded lazily)."""
+    """One item of the release checklist on one change (written on its first answer)."""
     __tablename__ = "change_release_checks"
     __table_args__ = (
         UniqueConstraint("change_id", "check_key", name="uq_change_release_check"),

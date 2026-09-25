@@ -623,10 +623,18 @@ class ChangeService:
                             f"category: {', '.join(missing)}")
             # The detailed plan is what the customer is told and what every
             # team works to. Implementation starting on a plan nobody
-            # confirmed is how "we never agreed to that date" happens. Only
-            # on the hop out of 'approved': resuming from on_hold or looping
-            # back from validation re-enters a plan that was already live.
-            if change.status == "approved" and change.timing_validated_at is None:
+            # confirmed is how "we never agreed to that date" happens. Guarded
+            # on the FIRST start of implementation: out of 'approved', or out
+            # of 'on_hold' when the hold was taken before implementation ever
+            # began (otherwise approved -> on_hold -> in_implementation would
+            # walk around the guard). Resuming a hold taken during
+            # implementation, and looping back from validation, re-enter a
+            # plan that was already live and stay exempt.
+            if change.timing_validated_at is None and (
+                    change.status == "approved"
+                    or (change.status == "on_hold"
+                        and await ChangeService._approved_not_yet_implemented(
+                            session, change))):
                 return ("Timing not validated - every responsible team must "
                         "confirm the detailed plan")
         if to_status == "released":
@@ -657,6 +665,23 @@ class ChangeService:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
                 return f"Gate '{gate.gate_key}' is not approved ('{gate.decision}')"
         return None
+
+    @staticmethod
+    async def _approved_not_yet_implemented(session: AsyncSession,
+                                            change: ChangeRequest) -> bool:
+        """The change was commercially approved (customer acceptance or the
+        internal approval, or a recorded hop to 'approved') and has never
+        been in implementation. Read from the status changelog."""
+        statuses = {v for (v,) in (await session.execute(
+            select(ChangeChangelog.new_value).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.field_name == "status"))).all()}
+        if json.dumps("in_implementation") in statuses:
+            return False
+        return (json.dumps("approved") in statuses
+                or change.accepted_offer_id is not None
+                or change.internal_approved_at is not None
+                or change.customer_response == "accepted")
 
     @staticmethod
     async def _cancel_engine_work(session: AsyncSession, change: ChangeRequest,
@@ -2722,6 +2747,10 @@ class ChangeService:
     ) -> ChangeRequest:
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
+        if change.status != "quoted":
+            raise ChangeError(
+                "The customer response is recorded while the quote is out "
+                "(status 'quoted')")
         # Acceptance is the moment deadline #2 is born: the customer said yes,
         # so a released-by commitment must exist from here on.
         if (response == "accepted" and release_due_date is None
