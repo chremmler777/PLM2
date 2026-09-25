@@ -75,7 +75,14 @@ def test_vector_file_shape():
                  "block holds its start",
                  "summary: SS from a summary to a block feeding a later child "
                  "is not a cycle",
-                 "summary: idea blocks do not stretch a summary"):
+                 "summary: idea blocks do not stretch a summary",
+                 "idea: a link out of an idea does not drive its successor",
+                 "idea: a link into an idea drives the idea",
+                 "push: lengthening an idea moves nothing real",
+                 "push: moving a real block moves the idea after it",
+                 "push: a moved block driven by a block given a constraint "
+                 "is pushed",
+                 "push: a moved block under a summary given a link is pushed"):
         assert must in names
 
 

@@ -52,7 +52,10 @@ of leaves (so nested summaries never multiply links):
 In the backward pass a finish-type link out of a summary bounds every leaf
 below it, a start-type link only the leaves that start the summary.
 Idea blocks are scheduled forward but left out of the backward pass (slack
-null, never critical). The project end is the max ef of non-idea leaves. A
+null, never critical). A link out of an idea never drives its successor
+(forward, backward, push, cascade, critical path; it stays stored and shown,
+and validation warns `bank_build_late` when the idea overlaps it); a link
+into an idea drives the idea. The project end is the max ef of non-idea leaves. A
 cycle stops the pass: blocks keep their dates, slack null.
 """
 from __future__ import annotations
@@ -406,11 +409,14 @@ class Graph:
 
 
 def usable_link(lk: ELink, by_id: dict, anc: dict, summaries: set) -> bool:
-    """A link the math uses: both ends known, not a self link, not between a
-    block and its own summary, not FF/SF into a summary."""
+    """A link the math uses: both ends known, not a self link, not out of an
+    idea block, not between a block and its own summary, not FF/SF into a
+    summary."""
     f, t = lk.from_id, lk.to_id
     if f not in by_id or t not in by_id or f == t:
         return False
+    if by_id[f].idea:
+        return False           # an idea never drives committed work (it follows)
     if f in anc[t] or t in anc[f]:
         return False
     if t in summaries and lk.type in FINISH_TARGET_LINKS:
@@ -778,6 +784,10 @@ def downstream(tasks: list[ETask], links: list[ELink], sources: list,
     for src in sources:
         if src not in g.by_id:
             continue
+        # A summary source walks from its start gate too. The service never
+        # makes a summary a date source (its dates follow its blocks); a
+        # summary gets here through push(also=...). Kept for parity: the TS
+        # engine mirrors it.
         starts = ([("G", src), ("PS", src), ("PF", src)] if src in g.summaries
                   else [("L", src)])
         seen, stack = set(starts), list(starts)
@@ -833,7 +843,8 @@ def push(tasks: list[ETask], links: list[ELink], cal: Calendar, sources: list,
     cause = downstream(tasks, links, everyone)
     for a in also:
         cause.setdefault(a, a)
-    for s_id, by in downstream(tasks, links, sources, stop=False).items():
+    # a moved block that another edited block (moved or `also`) drives
+    for s_id, by in downstream(tasks, links, everyone, stop=False).items():
         if s_id in sources and s_id not in cause:
             cause[s_id] = by
     cons = _constraints(tasks)

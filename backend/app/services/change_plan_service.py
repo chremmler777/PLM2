@@ -230,6 +230,17 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
                     "bank_build_late",
                     f"'{t.name}' ends after the first downtime starts "
                     f"({first_down.isoformat()})", t.id))
+    # A link out of an idea does not drive its successor (the idea follows,
+    # it never pushes committed work): say so when the idea overlaps it.
+    by_id = {t.id: t for t in tasks}
+    for lk in lks:
+        p, q = by_id.get(lk.from_id), by_id.get(lk.to_id)
+        if p is not None and q is not None and p.is_idea and not q.is_idea \
+                and p.id not in summaries and p.end_date > q.start_date:
+            warnings.append(_issue(
+                "bank_build_late",
+                f"'{p.name}' (idea) ends after '{q.name}' starts "
+                f"({q.start_date.isoformat()})", p.id))
     if plan == "detailed" and any(t.is_idea for t in tasks):
         warnings.append(_issue(
             "idea_blocks", "The detailed plan still contains idea blocks"))
@@ -506,7 +517,10 @@ class ChangePlanService:
     async def deadlines(session: AsyncSession, change: ChangeRequest) -> list[dict]:
         from app.models.change_offer import ChangeOffer
         out = []
-        if change.required_by_date is not None:
+        # the quote deadline matters until the quote is out, and only when
+        # a customer is quoted at all (same rule as the change's deadline)
+        if change.required_by_date is not None and change.customer_relevant \
+                and change.quoted_at is None:
             out.append({"key": "quote", "label": "Quote deadline",
                         "date": _as_date(change.required_by_date)})
         if change.release_due_date is not None:
@@ -1573,11 +1587,13 @@ class ChangePlanService:
                 "Timing was validated: the plan calendar is frozen with the baseline")
         before = ChangePlanService._calendars(change).get(plan)
         old = ChangePlanService.calendar(change, plan)
-        if set(spec) <= {"auto"}:
+        if set(spec) <= {"auto", "convert"}:
             # the automatic scheduling switch alone: nothing moves, the
-            # plan is the same plan (no revision bump)
-            if "auto" not in spec or spec["auto"] is None:
-                raise ChangeError("Nothing to change")
+            # plan is the same plan (no revision bump); nothing at all (or
+            # only `convert`) is a no-op
+            if spec.get("auto") is None or \
+                    bool(spec["auto"]) == ChangePlanService.auto(change, plan):
+                return
             ChangePlanService._store_calendar(change, plan, old, auto=spec["auto"])
             await session.flush()
             await ChangeService.append_changelog(
@@ -1614,6 +1630,12 @@ class ChangePlanService:
             raise ChangeError(f"At most {eng.MAX_HOLIDAYS} holidays")
         cal = eng.Calendar(mode, workdays, holidays)
         auto = spec.get("auto")
+        if cal.to_json() == old.to_json():
+            # the same calendar again: only the switch (if sent) can change
+            if auto is None or bool(auto) == ChangePlanService.auto(change, plan):
+                return
+            return await ChangePlanService.set_calendar(
+                session, change, {"auto": auto}, user, plan=plan)
         ChangePlanService._store_calendar(change, plan, cal, auto=auto)
         tasks = await ChangePlanService.tasks(session, change, plan)
         links = await ChangePlanService.links(session, change, plan)

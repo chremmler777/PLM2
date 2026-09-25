@@ -619,3 +619,16 @@ MS Project semantics:
 Vectors must cover: FS into summary, SS into summary, FS from summary, SS
 from summary, SF from summary, FF into summary (refused), mso on summary
 (refused), snet on summary.
+
+Idea blocks (decided 2026-09-25, both engines MUST match):
+- A link whose predecessor is an idea block (is_idea) never drives its
+  successor: it is ignored by the forward and backward pass, automatic
+  scheduling (push), the post-baseline cascade and the critical path. It
+  stays stored and shown.
+- A link INTO an idea drives the idea: ideas follow committed work.
+- Validation warns `bank_build_late` when an idea ends after the start of a
+  block it links to.
+- Summary dates roll up only children with committed work (a summary of
+  ideas only rolls up its ideas).
+Vectors: idea -> real FS (the idea, even lengthened, moves nothing real);
+real -> idea (the idea moves).

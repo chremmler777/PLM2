@@ -1565,3 +1565,78 @@ async def test_buffer_behind_an_idea_does_not_count(client, world):
         "type": "SS"}, headers=sales)
     assert res.status_code == 200, res.text
     assert res.json()["summary"]["buffer_days"] == 0
+
+
+async def test_calendar_put_that_changes_nothing_is_a_no_op(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    await _task(client, sales, cid, "A", "2026-11-02", 5)
+    url = f"/api/v1/changes/{cid}/plan/calendar?plan=quote"
+    rev = (await _plan(client, sales, cid))["revision"]
+
+    async def log_n():
+        return sum(1 for e in (await client.get(
+            f"/api/v1/changes/{cid}/changelog", headers=sales)).json()
+            if e["action"] == "plan_calendar")
+    n = await log_n()
+    for body in ({"convert": True}, {}, {"auto": True},
+                 {"mode": "calendar", "workdays": [1, 2, 3, 4, 5], "holidays": []},
+                 {"mode": "calendar", "convert": True, "auto": True}):
+        res = await client.put(url, json=body, headers=sales)
+        assert res.status_code == 200, (body, res.text)
+        assert res.json()["revision"] == rev, body
+    assert await log_n() == n
+    # the same calendar with the switch flipped: the switch only
+    res = await client.put(url, json={"mode": "calendar", "auto": False},
+                           headers=sales)
+    assert res.json()["calendar"]["auto"] is False and res.json()["revision"] == rev
+    assert await log_n() == n + 1
+
+
+async def test_batch_push_from_a_constrained_block_moves_a_moved_successor(client,
+                                                                          world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 3)
+    x = await _task(client, sales, cid, "X", "2026-11-05", 2, predecessors=[a["id"]])
+    res = await client.post(f"/api/v1/changes/{cid}/plan/changes", json={
+        "plan": "quote", "changes": {"tasks_upsert": [
+            {"id": a["id"], "constraint_type": "snet",
+             "constraint_date": "2026-11-20"},
+            {"id": x["id"], "start_date": "2026-11-09"}]}}, headers=sales)
+    assert res.status_code == 200, res.text
+    t = _by_name(res.json())
+    assert (t["A"]["start_date"], t["X"]["start_date"]) == ("2026-11-20", "2026-11-23")
+
+
+async def test_ideas_never_drive_and_quote_deadline_goes(client, world,
+                                                         session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    idea = await _task(client, sales, cid, "Bank", "2026-11-02", 10, is_idea=True)
+    real = await _task(client, sales, cid, "Tool", "2026-11-05", 2,
+                       predecessors=[idea["id"]])
+    out = await _plan(client, sales, cid)
+    t = _by_name(out)
+    assert t["Tool"]["start_date"] == "2026-11-05"          # not pushed
+    assert out["links"][0]["from_task_id"] == idea["id"]    # still stored
+    assert out["validation"]["errors"] == []
+    warn = [w for w in out["validation"]["warnings"] if w["code"] == "bank_build_late"]
+    assert warn and warn[0]["task_id"] == idea["id"]
+    # lengthening the idea moves nothing real; a real block drives an idea
+    res = await client.patch(f"/api/v1/changes/{cid}/plan/tasks/{idea['id']}",
+                             json={"duration_days": 20}, headers=sales)
+    assert _by_name(res.json())["Tool"]["start_date"] == "2026-11-05"
+    later = await _task(client, sales, cid, "Later idea", "2026-11-01", 1,
+                        is_idea=True, predecessors=[real["id"]])
+    assert _by_name(await _plan(client, sales, cid))["Later idea"]["start_date"] \
+        == "2026-11-07"
+    assert later["id"]
+    # the quote deadline goes once the quote is out, and for internal changes
+    await _set(session_factory, cid, required_by_date=date(2026, 12, 1))
+    keys = lambda o: {d["key"] for d in o["deadlines"]}
+    assert "quote" in keys(await _plan(client, sales, cid))
+    await _set(session_factory, cid, quoted_at=datetime.utcnow())
+    assert "quote" not in keys(await _plan(client, sales, cid))
+    await _set(session_factory, cid, quoted_at=None, customer_relevant=False)
+    assert "quote" not in keys(await _plan(client, sales, cid))
