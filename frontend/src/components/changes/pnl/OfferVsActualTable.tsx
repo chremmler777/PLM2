@@ -1,4 +1,4 @@
-import { formatDate, formatMoney } from '../../../lib/format'
+import { formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice } from '../../../lib/format'
 import type { OfferVsActual, OvaLine } from '../../../types/pnl'
 import { TONE_CLASS, varianceTone } from './variance'
 import { plantText } from '../../../lib/plantName'
@@ -7,7 +7,7 @@ const money = (v: number | null | undefined, cur?: string) =>
   v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, cur)
 
 const pct = (v: number | null | undefined) =>
-  v === null || v === undefined ? '' : ` (${v.toFixed(1)} %)`
+  v === null || v === undefined ? '' : ` (${formatPercent(v)})`
 
 const BASIS_LABEL: Record<string, string> = {
   accepted_offer: 'accepted offer',
@@ -160,9 +160,8 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
         {data.piece_price && (
           <div data-testid="ova-piece-price">
             <span className="text-slate-500">Piece price: </span>
-            {data.piece_price.delta_per_piece > 0 ? '+' : ''}
-            {data.piece_price.delta_per_piece.toLocaleString('de-DE', { maximumFractionDigits: 4 })} {cur} per piece
-            {data.piece_price.annual_volume ? ` x ${data.piece_price.annual_volume.toLocaleString('de-DE')} per year` : ''}
+            {formatPiecePrice(data.piece_price.delta_per_piece, cur, { sign: true })} per piece
+            {data.piece_price.annual_volume ? ` x ${formatNumber(data.piece_price.annual_volume, { max: 0 })} per year` : ''}
             {data.piece_price.annual_effect !== null ? ` = ${money(data.piece_price.annual_effect, cur)} per year` : ''}
           </div>
         )}

@@ -54,7 +54,7 @@ describe('CustomerDecision', () => {
     wrap(<CustomerDecision change={change()} latestSent={sent()} canRespond
       canSignPm={false} canSignQuality={false} userId={5} />)
     fireEvent.click(screen.getByText('Customer accepted'))
-    expect(screen.getByTestId('accept-expired').textContent).toContain('01.09.2026')
+    expect(screen.getByTestId('accept-expired').textContent).toContain('1 Sep 2026')
     fireEvent.change(screen.getByTestId('accept-release-due'), { target: { value: '2026-11-30' } })
     const confirm = screen.getByTestId('accept-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)

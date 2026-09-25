@@ -3,6 +3,7 @@
  * internal proposals (E1.1, 1.1 …) nested underneath.
  */
 import { groupByMajor, type Revision } from './revisionGrouping';
+import { formatDate } from '../../lib/format';
 import { revisionLabel } from './RevisionBadge';
 
 export type { Revision } from './revisionGrouping';
@@ -61,7 +62,7 @@ export default function RevisionTimeline({ revisions, activeRevisionId, onNewPro
               </div>
               {major.summary && <p className="text-sm text-slate-300">{major.summary}</p>}
               <p className="text-xs text-slate-500">
-                {major.customer_received_at ? `Received ${major.customer_received_at}` : `Created ${new Date(major.created_at).toLocaleDateString()}`}
+                {major.customer_received_at ? `Received ${formatDate(major.customer_received_at)}` : `Created ${formatDate(major.created_at)}`}
               </p>
             </div>
             <button data-testid={`new-proposal-${major.id}`} onClick={() => onNewProposal(major.id)}

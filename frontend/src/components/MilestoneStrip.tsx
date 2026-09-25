@@ -2,6 +2,7 @@
  * MilestoneStrip - project timing gates as a horizontal chip row.
  */
 import { useState } from 'react';
+import { formatDate } from '../lib/format';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
 import { toast } from 'sonner';
@@ -83,7 +84,7 @@ export default function MilestoneStrip({ projectId }: { projectId: number }) {
             {m.status === 'done' ? '✓' : m.overdue ? '⚠' : '◇'}
           </button>
           <span className="font-medium">{m.name}</span>
-          <span className="opacity-70">{new Date(m.due_date).toLocaleDateString()}</span>
+          <span className="opacity-70">{formatDate(m.due_date)}</span>
           <button
             onClick={() => deleteMutation.mutate(m.id)}
             className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition"

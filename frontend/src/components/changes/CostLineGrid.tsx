@@ -13,6 +13,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { changesApi } from '../../api/changes';
 import type { CostLine, CostLineIn, DepartmentRateRef } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
+import { formatNumber } from '../../lib/format';
 
 // ── pure helper (exported for unit tests) ────────────────────────────────────
 
@@ -249,7 +250,7 @@ export default function CostLineGrid({
                     <td
                       data-testid={`internal-${rowKey(r)}-${p.id}`}
                       className="py-1 px-1 text-right text-slate-400 text-xs tabular-nums">
-                      {internalCost(rates, departmentId, p.id, c.hours).toFixed(2)}
+                      {formatNumber(internalCost(rates, departmentId, p.id, c.hours), { min: 2, max: 2 })}
                     </td>
                     <td className="py-1 px-1 text-right">
                       {numberCell(`external-${rowKey(r)}-${p.id}`, c.external,
@@ -310,7 +311,7 @@ export default function CostLineGrid({
             {columns.map((p) => (
               <td key={p.id} colSpan={3} data-testid={`plant-sum-${p.id}`}
                 className="pt-1 px-1 text-right tabular-nums border-l border-slate-700">
-                {plantSum(p.id).toFixed(2)}
+                {formatNumber(plantSum(p.id), { min: 2, max: 2 })}
                 {plantMinutes(p.id) !== 0 && (
                   <span className="block text-[10px] text-slate-500">
                     {plantMinutes(p.id) > 0 ? '+' : ''}{plantMinutes(p.id)} {t('costing.minutesShort')}
@@ -343,7 +344,7 @@ export default function CostLineGrid({
           {activities.map((a) => <option key={a.id} value={a.label} />)}
         </datalist>
         <span className="text-sm text-slate-300 tabular-nums" data-testid="cost-grand-total">
-          {t('total')}: {grandTotal.toFixed(2)}
+          {t('total')}: {formatNumber(grandTotal, { min: 2, max: 2 })}
         </span>
         <button onClick={() => save.mutate()} disabled={save.isPending}
           className="px-2.5 py-1 text-xs rounded bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50">

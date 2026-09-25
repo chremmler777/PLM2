@@ -14,7 +14,9 @@ vi.mock('../CADUploader', () => ({
   default: () => <div data-testid="cad-uploader" />,
 }))
 vi.mock('../workflows/RevisionWorkflowSection', () => ({
-  default: () => <div data-testid="wf-section" />,
+  default: (p: { onChanged?: () => void }) => (
+    <button type="button" data-testid="wf-section" onClick={() => p.onChanged?.()}>wf</button>
+  ),
 }))
 
 const progress = {
@@ -31,8 +33,10 @@ const progress = {
   ],
 }
 
+let lastQc: QueryClient
 function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  lastQc = qc
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
 }
 
@@ -57,6 +61,16 @@ describe('ImplementationPanel', () => {
     })
     wrap(<ImplementationPanel changeId={7} />)
     expect((await screen.findByTestId('impl-needs-1')).textContent).toBe('Needs: Development, Quality')
+  })
+
+  it('a completed or canceled workflow task refreshes the progress and the cockpit actions (review M4)', async () => {
+    wrap(<ImplementationPanel changeId={7} />)
+    await screen.findByText(/ECR1\.1/)
+    const spy = vi.spyOn(lastQc, 'invalidateQueries')
+    fireEvent.click(screen.getByRole('button', { name: /Workflow/ }))
+    fireEvent.click(screen.getByTestId('wf-section'))
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 7, 'implementation'] })
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-actions', 7] })
   })
 
   it('signs no-geometry-change with a reason', async () => {

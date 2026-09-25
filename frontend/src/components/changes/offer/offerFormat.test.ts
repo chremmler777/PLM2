@@ -39,8 +39,10 @@ describe('offer diff wording', () => {
     expect(diffLabel('total_one_time')).toBe('Total one-time')
     expect(diffLabel('Terms payment')).toBe('Payment terms')
     expect(diffLabel('Cost line Development')).toBe('Cost line Development')
-    expect(diffValue('Total one-time', 12345.5, 'EUR')).toBe('12.345,50 EUR')
-    expect(diffValue('Cost line Development', 900)).toBe('900,00 EUR')
+    expect(diffValue('Total one-time', 12345.5, 'EUR')).toBe('12,345.50 EUR')
+    expect(diffValue('Cost line Development', 900)).toBe('900.00 EUR')
+    expect(diffValue('Piece price delta', 0.4125, 'EUR')).toBe('+0.4125 EUR')
+    expect(diffValue('Scrap quantity', 12000)).toBe('12,000 pcs')
     expect(diffValue('Changeover', 'customer_pays_scrap')).toBe('Customer pays scrap')
     expect(diffValue('Timing weeks from order', 9)).toBe('9 weeks')
     expect(diffValue('Terms payment', null)).toBe('-')
@@ -49,14 +51,14 @@ describe('offer diff wording', () => {
 })
 
 describe('lib/format', () => {
-  it('formats dates as dd.mm.yyyy and money with the currency code', () => {
-    expect(formatDate('2026-10-05')).toBe('05.10.2026')
-    expect(formatDate('2026-10-05T12:00:00')).toBe('05.10.2026')
+  it('formats dates as d MMM yyyy and money with the currency code', () => {
+    expect(formatDate('2026-10-05')).toBe('5 Oct 2026')
+    expect(formatDate('2026-10-05T12:00:00')).toBe('5 Oct 2026')
     expect(formatDate(null)).toBe('-')
     // Naive backend datetimes are UTC; tests run in Europe/Berlin (CEST, +2).
-    expect(formatDateTime('2026-10-05T08:07:00')).toBe('05.10.2026 10:07')
-    expect(formatMoney(1234.5)).toBe('1.234,50 EUR')
-    expect(formatMoney(10, 'USD')).toBe('10,00 USD')
+    expect(formatDateTime('2026-10-05T08:07:00')).toBe('5 Oct 2026, 10:07')
+    expect(formatMoney(1234.5)).toBe('1,234.50 EUR')
+    expect(formatMoney(10, 'USD')).toBe('10.00 USD')
     expect(formatMoney(undefined)).toBe('-')
   })
 })

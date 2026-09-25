@@ -61,7 +61,7 @@ export default function MotherPlantFields({ value, onChange, plants }: {
         <div>
           <label htmlFor="sc-mp-sop" className="block text-sm text-slate-300 mb-1">SOP date</label>
           <DateInput id="sc-mp-sop" aria-label="SOP date" value={value.sop}
-            className={field} onChange={(iso) => set({ sop: iso })} placeholder="dd.mm.yyyy" commitOnChange />
+            className={field} onChange={(iso) => set({ sop: iso })} commitOnChange />
           <p className="mt-1 text-xs text-slate-500">Becomes the release deadline when the change is approved.</p>
         </div>
         <div>

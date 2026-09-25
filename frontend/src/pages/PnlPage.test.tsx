@@ -131,7 +131,7 @@ describe('PnlPage', () => {
     changesMock.mockClear()
     summaryMock.mockClear()
 
-    // dd.mm.yyyy, applied as soon as the date is complete (no blur needed).
+    // A typed date (dd.mm.yyyy here), applied as soon as the date is complete (no blur needed).
     fireEvent.change(screen.getByLabelText(/from/i), { target: { value: '01.01.2026' } })
     await waitFor(() => {
       expect(changesMock).toHaveBeenCalledWith(expect.objectContaining({ date_from: '2026-01-01' }))
@@ -187,7 +187,7 @@ describe('PnlPage', () => {
     const { container } = renderPage()
     await screen.findByRole('link', { name: 'GB-CM-0001' })
     expect(container.querySelector('input[type="date"]')).toBeNull()
-    expect((screen.getByLabelText(/from/i) as HTMLInputElement).placeholder).toBe('dd.mm.yyyy')
+    expect((screen.getByLabelText(/from/i) as HTMLInputElement).placeholder).toBe('e.g. 25 Sep 2026')
   })
 
   it('reads the Pipeline and Realized cards from the offer-vs-doing fields, like the tiles', async () => {
@@ -231,12 +231,12 @@ describe('PnlPage', () => {
     ] })
     renderPage()
     const row15 = (await screen.findByText('CR-15')).closest('tr')!
-    expect(row15.textContent).toContain('3.175,00 USD')
+    expect(row15.textContent).toContain('3,175.00 USD')
     expect(row15.textContent).not.toContain('EUR')
     expect(screen.getByTestId('pnl-no-rate-15')).toBeDefined()
     const row16 = screen.getByText('CR-16').closest('tr')!
-    expect(row16.textContent).toContain('1.000,00 EUR')
-    expect(row16.textContent).toContain('400,00 USD')
+    expect(row16.textContent).toContain('1,000.00 EUR')
+    expect(row16.textContent).toContain('400.00 USD')
     expect(screen.getByTestId('pnl-currency-mismatch-16').textContent).toBe('EUR vs USD: no margin')
   })
 
@@ -251,9 +251,9 @@ describe('PnlPage', () => {
     })
     renderPage()
     const usd = await screen.findByTestId('pnl-summary-USD')
-    expect(usd.textContent).toContain('3.175,00 USD')
+    expect(usd.textContent).toContain('3,175.00 USD')
     expect(usd.textContent).not.toContain('EUR')
-    expect(screen.getByTestId('pnl-summary-EUR').textContent).toContain('100.000,00 EUR')
+    expect(screen.getByTestId('pnl-summary-EUR').textContent).toContain('100,000.00 EUR')
     expect(screen.getByTestId('pnl-summary-notes-USD').textContent)
       .toContain('without a rate in the cost sheet')
   })

@@ -118,7 +118,8 @@ export default function OfferPriceSection({
                       </td>
                       {customerView && (
                         <td data-testid={`cost-line-customer-${l.key}`} className="px-2 py-1.5 text-slate-300">
-                          {l.customer_category ?? 'Other'}
+                          {/* As the PDF prints it: a line without a category keeps its own label. */}
+                          {l.customer_category?.trim() || l.label}
                         </td>
                       )}
                       <td className="whitespace-nowrap px-2 py-1.5 text-right tabular-nums text-slate-500">

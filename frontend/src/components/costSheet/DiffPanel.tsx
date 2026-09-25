@@ -2,7 +2,7 @@
  * What changed against the previous version, per tab: added, removed and
  * changed rows, with the old and new value side by side.
  */
-import { formatMoney } from '../../lib/format'
+import { formatMoney, formatPercent } from '../../lib/format'
 import type { CostSheetDiff, CostSheetSection, DiffSection } from '../../types/costSheet'
 import { SECTION_LABELS, deptName, plantName, type SheetContext } from './columns'
 
@@ -82,7 +82,7 @@ function Section({ section, data, ctx }: { section: CostSheetSection; data: Diff
                   {' '}<span className="text-sky-300">{fmt(f, ch.new, ctx, rowCurrency(c, ctx, 'new'))}</span>
                   {f === 'hourly_rate' && c.pct !== undefined && (
                     <span className={`ml-1 text-xs ${c.pct >= 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                      {c.pct >= 0 ? '+' : ''}{c.pct.toLocaleString('de-DE')} %
+                      {formatPercent(c.pct, 1, { sign: true })}
                     </span>
                   )}
                 </span>

@@ -13,7 +13,7 @@ import type {
 } from '../types/change'
 import type { IssueOut } from '../types/validationIssue'
 import { isIssueOpen, issueCode } from '../types/validationIssue'
-import { formatDate } from './format'
+import { formatDayMonth } from './format'
 import { issueTabFor } from './issueTabs'
 import { plantText } from './plantName'
 
@@ -48,11 +48,11 @@ const STATUS_WORDS: Record<IssueOut['status'], string> = {
   revalidation: 're-validation', closed: 'closed', accepted: 'accepted', transferred: 'transferred',
 }
 
-const dayMonth = (iso?: string | null) => (iso ? formatDate(iso).slice(0, 5) : '')
+const dayMonth = (iso?: string | null) => (iso ? formatDayMonth(iso) : '')
 
 /**
  * Open validation issues as waits: the highest escalation level first
- * ("Escalation L3: VI-2 Tool cannot run, customer informed 25.09"), then one
+ * ("Escalation L3: VI-2 Tool cannot run, customer informed 25 Sep"), then one
  * line per open issue (more than three fold into one line).
  */
 export function issueWaits(issues: IssueLite[], status = 'in_validation'): WaitState[] {
@@ -421,24 +421,32 @@ export function resolveWaitStates(
   return waits
 }
 
-/** Impacted revisions still in their check workflow, and who owes a task. */
-export interface RevisionsInCheck { count: number; needs: string[] }
+/** Impacted revisions not through their check workflow (canceled ones
+ *  among them), and who owes a task. */
+export interface RevisionsInCheck { count: number; canceled: number; needs: string[] }
 
-/** From GET /implementation: items whose workflow runs (or never started). */
+/** From GET /implementation. Counts every item that is not ready, as the
+ *  release guard does (ReleaseService.not_ready_message): a workflow that
+ *  runs, one that never started, one that was canceled, an item with no
+ *  revision yet. */
 export function revisionsInCheckOf(items: {
   revision_id: number | null; instance_id: number | null; instance_status: string | null; ready: boolean
   waiting_on?: string[] | null
 }[] | null | undefined): RevisionsInCheck {
-  const open = (items ?? []).filter((i) => i.revision_id != null && !i.ready
-    // The engine spells it "canceled"; accept the other spelling too.
-    && i.instance_status !== 'canceled' && i.instance_status !== 'cancelled')
+  const open = (items ?? []).filter((i) => !i.ready)
+  // The engine spells it "canceled"; accept the other spelling too.
+  const canceled = open.filter((i) => i.instance_status === 'canceled' || i.instance_status === 'cancelled').length
   const needs = [...new Set(open.flatMap((i) => i.waiting_on ?? []))]
-  return { count: open.length, needs }
+  return { count: open.length, canceled, needs }
 }
 
-/** "2 revisions still in their check workflow; needs Development, Quality". */
+/** "2 impacted revisions have not completed their check workflow (1 workflow
+ *  canceled: restart it); needs Development, Quality". */
 export function revisionsInCheckText(rc: RevisionsInCheck): string {
-  return `${rc.count} revision${rc.count === 1 ? '' : 's'} still in ${rc.count === 1 ? 'its' : 'their'} check workflow`
+  const one = rc.count === 1
+  const c = rc.canceled ?? 0
+  return `${rc.count} impacted revision${one ? ' has' : 's have'} not completed ${one ? 'its' : 'their'} check workflow`
+    + (c ? ` (${c} workflow${c === 1 ? '' : 's'} canceled: restart ${c === 1 ? 'it' : 'them'})` : '')
     + (rc.needs.length ? `; needs ${rc.needs.join(', ')}` : '')
 }
 

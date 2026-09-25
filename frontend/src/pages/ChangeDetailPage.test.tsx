@@ -133,13 +133,17 @@ vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>m
 // probing it for the keys these tests care about.
 const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
-  default: ({ waits = [], needs, onAdvance, onDecideDeviation }: {
+  default: ({ waits = [], needs, onAdvance, onDecideDeviation, deviationTargets, onAskDeviation }: {
     waits?: { key: string; text: string }[]
     needs?: (step: string) => string | null
     onAdvance?: (to: string) => void
     onDecideDeviation?: (id?: number) => void
+    deviationTargets?: { approved: string[]; pending: string[] }
+    onAskDeviation?: (to: string, gateKey: string) => void
   }) => (
     <div>mock-cockpit-summary
+      <p data-testid="mock-deviation-targets">{JSON.stringify(deviationTargets ?? null)}</p>
+      <button type="button" onClick={() => onAskDeviation?.('in_implementation', 'release')}>mock-ask-deviation</button>
       {waits.map((w) => <p key={w.key} data-testid={`wait-${w.key}`}>{w.text}</p>)}
       {needs && NEEDS_PROBE_KEYS.map((k) => (
         <p key={k} data-testid={`needs-${k}`}>{needs(k) ?? 'allowed'}</p>
@@ -1280,6 +1284,20 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     expect(screen.queryByTestId('confirm-clear')).toBeNull()
   })
 
+  it('the cockpit knows which steps a deviation covers, and asking one opens the deviation banner (review M1)', async () => {
+    change.status = 'approved' as ChangeDetail['status']
+    vi.mocked(changesApi.listDeviations).mockResolvedValue([
+      { id: 8, to_status: 'in_implementation', reason: 'x', status: 'approved', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+      { id: 9, to_status: 'released', reason: 'y', status: 'pending', proposed_by: 16, proposed_at: '2026-09-25T10:00:00' },
+    ] as never)
+    wrap('/changes/1?tab=overview')
+    await waitFor(() => expect(screen.getByTestId('mock-deviation-targets').textContent)
+      .toBe(JSON.stringify({ approved: ['in_implementation'], pending: ['released'] })))
+    expect(screen.queryByText('mock-deviation-banner')).toBeNull()
+    fireEvent.click(screen.getByText('mock-ask-deviation'))
+    expect(await screen.findByText('mock-deviation-banner')).toBeDefined()
+  })
+
   it('names the revisions still in their check workflow while implementing', async () => {
     change.status = 'in_implementation' as ChangeDetail['status']
     vi.mocked(changesApi.getImplementation).mockResolvedValue({ ready_to_go: false, items: [
@@ -1288,6 +1306,6 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     ] } as never)
     wrap('/changes/1?tab=timing')
     expect((await screen.findByTestId('wait-revisions-in-check')).textContent)
-      .toBe('1 revision still in its check workflow; needs Development')
+      .toBe('1 impacted revision has not completed its check workflow; needs Development')
   })
 })

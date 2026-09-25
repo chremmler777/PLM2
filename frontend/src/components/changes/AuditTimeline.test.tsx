@@ -187,7 +187,7 @@ describe('AuditTimeline', () => {
     ])
     wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
     expect(await screen.findByText(/verdict: Not answered yet → verdict: Feasible with conditions/)).toBeDefined()
-    expect(screen.getByText('01.07.2026')).toBeDefined()
+    expect(screen.getByText('1 Jul 2026')).toBeDefined()
     expect(screen.getAllByText(/Change assessment/).length).toBeGreaterThan(0)
   })
 

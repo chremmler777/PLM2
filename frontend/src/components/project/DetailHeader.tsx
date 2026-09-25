@@ -4,6 +4,7 @@
  * scrolls; the tab content below it does.
  */
 import { useNavigate } from 'react-router-dom';
+import { formatDate } from '../../lib/format';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -108,7 +109,7 @@ export default function DetailHeader({ projectId, part, article, sel, onPopOut }
         <div className="mt-2 flex items-center gap-3 text-sm">
           {part.next_calibration_due ? (
             <span className={overdue ? 'text-red-400 font-medium' : 'text-slate-300'}>
-              📏 Calibration due {new Date(part.next_calibration_due).toLocaleDateString()}
+              📏 Calibration due {formatDate(part.next_calibration_due)}
               {overdue && ' (overdue)'}
             </span>
           ) : (

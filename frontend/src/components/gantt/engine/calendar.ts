@@ -10,6 +10,7 @@
  * shown as "last day Friday").
  */
 import type { GanttCalendar } from './types'
+import { formatDateShort } from '../../../lib/format'
 
 const MS_DAY = 86_400_000
 const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})$/
@@ -63,22 +64,18 @@ export function ymd(day: number): { y: number; m: number; d: number } {
 
 export const dayOf = (y: number, m: number, d: number) => Math.round(Date.UTC(y, m, d) / MS_DAY)
 
-export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export { MONTHS } from '../../../lib/format'
 
-/** "5 Oct 26". */
+/** "5 Oct 26": the app's compact date (lib/format formatDateShort). */
 export function fmtDay(day: number | null | undefined): string {
-  if (day == null || Number.isNaN(day)) return '-'
-  const { y, m, d } = ymd(day)
-  return `${d} ${MONTHS[m]} ${String(y).slice(2)}`
+  return formatDateShort(day)
 }
 
 export const fmtIso = (iso: string | null | undefined) => (iso ? fmtDay(toDay(iso)) : '-')
 
-/** "05.10.26": the app's dd.mm.yy style for axis, grid and tooltips. */
+/** "5 Oct 26" for axis, grid and tooltips; same as fmtDay. */
 export function fmtShort(day: number | null | undefined): string {
-  if (day == null || Number.isNaN(day)) return '-'
-  const { y, m, d } = ymd(day)
-  return `${String(d).padStart(2, '0')}.${String(m + 1).padStart(2, '0')}.${String(y).slice(2)}`
+  return formatDateShort(day)
 }
 
 // ------------------------------------------------------------------ calendar

@@ -770,6 +770,19 @@ export default function ChangeDetailPage() {
           if (key === 'override-costing') setOverrideOpen(true);
         }}
         onDecideDeviation={(id) => { setTab('overview'); setFocusDeviation(id ?? null); }}
+        deviationTargets={{
+          approved: deviations.filter((d) => d.status === 'approved').map((d) => d.to_status),
+          pending: deviations.filter((d) => d.status === 'pending').map((d) => d.to_status),
+        }}
+        // A gate held step: the deviation banner asks for the deviation (the
+        // gate is a soft guard; an approved one lets the step through).
+        onAskDeviation={(to, gateKey) => {
+          const g = gates.find((x) => x.gate_key === gateKey);
+          setBlocked({ to, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
+            t(g?.decision === 'no' ? 'cockpit.gateStateNo' : 'cockpit.gateStateOpen')}. `
+            + 'An approved deviation is required to proceed.' });
+          setBlockedSeq((n) => n + 1);
+        }}
         leadSlot={<LeadPicker change={change}
           canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
             && (isAdmin || isChangeLead || isPmMember)}

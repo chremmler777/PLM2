@@ -41,7 +41,7 @@ describe('QuoteBasis', () => {
       total_minutes_per_part: -1.5, max_lead_time_days: 15,
     } as never)
     wrap()
-    await waitFor(() => expect(screen.getByTestId('quote-basis-total').textContent).toBe('1000.00'))
+    await waitFor(() => expect(screen.getByTestId('quote-basis-total').textContent).toBe('1,000.00'))
     const minutes = screen.getByTestId('quote-basis-minutes')
     // A time saving reads as a saving, with its plant named.
     expect(minutes.textContent).toContain('Plant A')

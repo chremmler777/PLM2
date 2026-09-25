@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { addDaysIso, todayIso } from '../../../lib/format'
+import { addDaysIso, formatDate, todayIso } from '../../../lib/format'
 import OfferTab, { type OfferTabProps } from './OfferTab'
 import { changeOfferApi } from '../../../api/changeOffer'
 import type { ChangeDetail } from '../../../types/change'
@@ -109,9 +109,9 @@ describe('OfferTab', () => {
   it('renders the server totals, not a local sum', async () => {
     vi.mocked(changeOfferApi.list).mockResolvedValue([offer()])
     renderTab(props())
-    expect((await screen.findByTestId('offer-total')).textContent).toBe('12.345,50 EUR')
-    expect(screen.getByTestId('sum-total').textContent).toBe('12.345,50 EUR')
-    expect(screen.getByTestId('sum-factor-overhead').textContent).toBe('150,00 EUR')
+    expect((await screen.findByTestId('offer-total')).textContent).toBe('12,345.50 EUR')
+    expect(screen.getByTestId('sum-total').textContent).toBe('12,345.50 EUR')
+    expect(screen.getByTestId('sum-factor-overhead').textContent).toBe('150.00 EUR')
     expect(screen.getByTestId('offer-status').textContent).toBe('Draft v1')
   })
 
@@ -124,7 +124,7 @@ describe('OfferTab', () => {
     await waitFor(() => expect(changeOfferApi.patch).toHaveBeenCalledTimes(1), { timeout: 2000 })
     const body = vi.mocked(changeOfferApi.patch).mock.calls[0][2]
     expect(body.data?.risks?.find((r) => r.concern_id === 32)?.show).toBe(true)
-    await waitFor(() => expect(screen.getByTestId('sum-total').textContent).toBe('999,00 EUR'))
+    await waitFor(() => expect(screen.getByTestId('sum-total').textContent).toBe('999.00 EUR'))
     expect(screen.getByTestId('offer-save-state').textContent).toContain('Saved')
   })
 
@@ -144,7 +144,7 @@ describe('OfferTab', () => {
     const day = addDaysIso(todayIso(), -1)
     fireEvent.change(await screen.findByTestId('send-received'), { target: { value: day } })
     expect(screen.getByTestId('send-valid-until').textContent)
-      .toBe(`The offer is valid 30 days from receipt, until ${addDaysIso(day, 30).split('-').reverse().join('.')}.`)
+      .toBe(`The offer is valid 30 days from receipt, until ${formatDate(addDaysIso(day, 30))}.`)
     expect(screen.queryByTestId('send-note')).toBeNull()
     fireEvent.click(screen.getByTestId('send-confirm'))
     await waitFor(() => expect(changeOfferApi.send).toHaveBeenCalledWith(7, 11, { received_at: day }))
@@ -206,8 +206,8 @@ describe('OfferTab', () => {
     fireEvent.click(await screen.findByTestId('offer-send'))
     const diff = (await screen.findByTestId('send-diff')).textContent ?? ''
     expect(diff).toContain('Total one-time')
-    expect(diff).toContain('1.000,00 EUR')
-    expect(diff).toContain('900,00 EUR')
+    expect(diff).toContain('1,000.00 EUR')
+    expect(diff).toContain('900.00 EUR')
     expect(diff).not.toContain('total_one_time')
     const confirm = screen.getByTestId('send-confirm') as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
@@ -225,7 +225,7 @@ describe('OfferTab', () => {
     vi.mocked(changeOfferApi.create).mockResolvedValue(offer({ id: 12, version: 2 }))
     renderTab(props({ change: change({ status: 'quoted' }) }))
     const chip = await screen.findByTestId('offer-valid-chip')
-    expect(chip.textContent).toContain(until.split('-').reverse().join('.'))
+    expect(chip.textContent).toContain(formatDate(until))
     expect(chip.textContent).toContain('7 d left')
     expect(chip.className).toContain('amber')
     fireEvent.click(screen.getByTestId('offer-new-version'))
@@ -280,7 +280,7 @@ describe('OfferTab', () => {
     expect(screen.getByTestId('offer-sum-figures').dataset.stale).toBeUndefined()
     fireEvent.click(send)
     const dialog = await screen.findByRole('dialog')
-    expect(dialog.textContent).toContain('777,00 EUR')
+    expect(dialog.textContent).toContain('777.00 EUR')
   })
 
   it('does not open the send dialog when the save fails', async () => {

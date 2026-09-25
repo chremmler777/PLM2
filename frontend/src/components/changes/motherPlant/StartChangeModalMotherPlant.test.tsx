@@ -107,7 +107,7 @@ describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
     fireEvent.blur(sop, { relatedTarget: calBtn })
     fireEvent.blur(calBtn, { relatedTarget: screen.getByLabelText(/Their timing/) })
     await waitFor(() => expect(create.disabled).toBe(false))
-    expect((sop as HTMLInputElement).value).toBe('01.12.2026')
+    expect((sop as HTMLInputElement).value).toBe('1 Dec 2026')
   })
 
   it('the customer option still sends a customer change', async () => {

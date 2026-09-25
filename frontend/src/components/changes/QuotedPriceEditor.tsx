@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { formatNumber } from '../../lib/format'
 import type { ChangeRequest } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -42,7 +43,7 @@ export function QuotedPriceEditor({ change, canEdit = true }: { change: ChangeRe
     <p data-testid="quoted-price-negotiated">
       <span className="text-slate-400">{t('negotiation.finalPrice')}:</span>{' '}
       <span className="tabular-nums text-emerald-200">
-        {change.negotiated_final_price.toFixed(2)}
+        {formatNumber(change.negotiated_final_price, { min: 2, max: 2 })}
       </span>
     </p>
   )

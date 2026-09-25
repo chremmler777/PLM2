@@ -4,6 +4,7 @@
  * department, in one sentence, and never priced with an invented rate.
  */
 import type { Summation } from '../types/change'
+import { formatNumber } from './format'
 
 type UnpricedLine = NonNullable<Summation['unpriced_lines']>[number]
 
@@ -15,7 +16,7 @@ export interface UnpricedDepartment {
   message: string
 }
 
-const qty = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
+const qty = (n: number) => formatNumber(n)
 
 /** "No cost sheet rate for Project Manager: 13 h unpriced". */
 export function unpricedMessage(name: string, hours: number, trials = 0, booked = false): string {

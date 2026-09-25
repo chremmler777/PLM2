@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
+import { formatDate } from '../lib/format';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '../lib/apiError';
 import FormPanel from '../forms/FormPanel';
@@ -34,7 +35,7 @@ const ITEM_STATES: Array<{ value: SepItem['status']; label: string; active: stri
 ];
 
 function fmtDate(iso: string | null): string {
-  return iso ? iso.slice(0, 10) : '—';
+  return formatDate(iso);
 }
 
 function GateStepper({ gates, selected, onSelect, controls }: {

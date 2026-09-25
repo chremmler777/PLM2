@@ -5,11 +5,11 @@
  */
 import { Link } from 'react-router-dom'
 import type { IssueRecoveryOut } from '../../../types/validationIssue'
-import { formatDate } from '../../../lib/format'
+import { formatDate, formatDayMonth } from '../../../lib/format'
 import { sectionLabel } from '../offer/offerFormat'
 import { workingDaysBetween } from './issueModel'
 
-const short = (iso?: string | null) => (iso ? formatDate(iso).slice(0, 5) : '-')
+const short = (iso?: string | null) => formatDayMonth(iso)
 
 /** The figures the card shows, server counts first, Mon to Fri as a fallback. */
 export function recoveryFigures(r: IssueRecoveryOut) {
@@ -20,7 +20,7 @@ export function recoveryFigures(r: IssueRecoveryOut) {
   return { slipBaseline, slipDeadline }
 }
 
-/** "Recovery ends 14.11, the plan finish moves +9 wd, 4 wd after the release deadline". */
+/** "Recovery ends 14 Nov, the plan finish moves +9 wd, 4 wd after the release deadline". */
 export function recoverySentence(r: IssueRecoveryOut): string {
   const { slipBaseline, slipDeadline } = recoveryFigures(r)
   const parts = [`Recovery ends ${short(r.finish)}`]

@@ -79,8 +79,8 @@ describe('PnlCard', () => {
     render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
     expect(await screen.findByText('Revenue')).toBeDefined()
     expect(screen.getByText('Margin')).toBeDefined()
-    expect(screen.getByText('5.000,00 EUR')).toBeDefined()
-    expect(await screen.findByText('3.000,00 EUR')).toBeDefined()
+    expect(screen.getByText('5,000.00 EUR')).toBeDefined()
+    expect(await screen.findByText('3,000.00 EUR')).toBeDefined()
   })
 
   it('prices the cost in the costing currency and shows the costing warnings', async () => {
@@ -89,7 +89,7 @@ describe('PnlCard', () => {
       warnings: [{ code: 'no_rate', message: '1 costing line has no rate in the cost sheet and is not counted: the total is too low' }],
     })
     render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
-    expect(await screen.findByText('2.000,00 USD')).toBeDefined()
+    expect(await screen.findByText('2,000.00 USD')).toBeDefined()
     expect((await screen.findByTestId('pnl-costing-warnings')).textContent)
       .toContain('no rate in the cost sheet')
   })
@@ -99,8 +99,8 @@ describe('PnlCard', () => {
       ...summation({ grand_total: 2000 }), currency: 'USD', revenue_currency: 'EUR',
     })
     render(wrap(<PnlCard change={change({ customer_relevant: true, quoted_price: 5000 })} />))
-    expect(await screen.findByText('2.000,00 USD')).toBeDefined()
-    expect(screen.getByText('5.000,00 EUR')).toBeDefined()
+    expect(await screen.findByText('2,000.00 USD')).toBeDefined()
+    expect(screen.getByText('5,000.00 EUR')).toBeDefined()
     expect(screen.getByTestId('pnl-margin').textContent).toBe('-')
     expect(screen.getByTestId('pnl-currency-mismatch').textContent)
       .toBe('No margin: EUR revenue vs USD costs')
@@ -121,10 +121,10 @@ describe('PnlCard', () => {
     })
     render(wrap(<PnlCard change={change({ status: 'released', customer_relevant: true, quoted_price: 3000 })} />))
     const rev = await screen.findByTestId('ova-line-revenue')
-    expect(rev.textContent).toContain('3.000,00 EUR')
-    expect(screen.getByTestId('ova-line-internal').textContent).toContain('1.000,00 USD')
+    expect(rev.textContent).toContain('3,000.00 EUR')
+    expect(screen.getByTestId('ova-line-internal').textContent).toContain('1,000.00 USD')
     expect(screen.getByTestId('ova-line-internal').textContent).not.toContain('EUR')
-    expect(screen.getByTestId('ova-line-external').textContent).toContain('700,00 USD')
+    expect(screen.getByTestId('ova-line-external').textContent).toContain('700.00 USD')
     expect(screen.getByTestId('ova-planned-margin').textContent).toBe('-')
     expect(screen.getByTestId('ova-actual-margin').textContent).toBe('-')
     expect(screen.queryByTestId('ova-margin-variance')).toBeNull()
@@ -137,8 +137,8 @@ describe('PnlCard', () => {
     render(wrap(<PnlCard change={change({ customer_relevant: false, internal_approved_amount: 3000 })} />))
     expect(await screen.findByText('Approved budget')).toBeDefined()
     expect(screen.getByText('vs. approved budget')).toBeDefined()
-    expect(screen.getByText('3.000,00 EUR')).toBeDefined()
-    expect(await screen.findByText('1.000,00 EUR')).toBeDefined()
+    expect(screen.getByText('3,000.00 EUR')).toBeDefined()
+    expect(await screen.findByText('1,000.00 EUR')).toBeDefined()
   })
 
   it('is hidden before costing (in_assessment)', () => {
@@ -179,13 +179,13 @@ describe('PnlCard', () => {
     await screen.findByTestId('pnl-offer-vs-actual')
     expect(screen.getByText('Actual to date')).toBeDefined()
     expect(screen.getByTestId('ova-forecast-head').textContent).toBe('Forecast')
-    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19.592,00 EUR')
-    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1.800,00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19,592.00 EUR')
+    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1,800.00 EUR')
     expect(screen.queryByText('Margin (forecast)')).toBeNull()
-    // the internal line: 1.050 booked, 1.000 forecast
+    // the internal line: 1,050 booked, 1,000 forecast
     const internal = screen.getByTestId('ova-line-internal').textContent ?? ''
-    expect(internal).toContain('1.050,00 EUR')
-    expect(internal).toContain('1.000,00 EUR')
+    expect(internal).toContain('1,050.00 EUR')
+    expect(internal).toContain('1,000.00 EUR')
   })
 
   it('the margin row reads from margin_row when the server sends it', async () => {
@@ -197,11 +197,11 @@ describe('PnlCard', () => {
     costListMock.mockResolvedValue({ items: [], total: 0, can_write: false, writable_department_ids: null, cost_role: true })
     render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true, quoted_price: 3000 })} />))
     await screen.findByTestId('pnl-offer-vs-actual')
-    expect(screen.getByTestId('ova-planned-margin').textContent).toContain('0,00 EUR')
-    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19.592,00 EUR')
-    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('72.8')
-    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1.800,00 EUR')
-    expect(screen.getByTestId('ova-margin-variance').textContent).toContain('-1.800,00 EUR')
+    expect(screen.getByTestId('ova-planned-margin').textContent).toContain('0.00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('19,592.00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('72.9%')
+    expect(screen.getByTestId('ova-forecast-margin').textContent).toContain('-1,800.00 EUR')
+    expect(screen.getByTestId('ova-margin-variance').textContent).toContain('-1,800.00 EUR')
     expect(screen.getByTestId('ova-margin-variance').getAttribute('data-tone')).toBe('rose')
   })
 
@@ -213,7 +213,7 @@ describe('PnlCard', () => {
     await screen.findByTestId('pnl-offer-vs-actual')
     expect(screen.queryByTestId('ova-forecast-head')).toBeNull()
     expect(screen.queryByTestId('ova-forecast-margin')).toBeNull()
-    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1.250,00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1,250.00 EUR')
   })
 
   it('a department member (no cost role) gets only their own actual costs, and no P&L request', async () => {
@@ -257,14 +257,14 @@ describe('PnlCard', () => {
       writable_department_ids: null, cost_role: true })
     render(wrap(<PnlCard change={change({ status: 'in_implementation', customer_relevant: true, quoted_price: 3000 })} />))
     await screen.findByTestId('pnl-offer-vs-actual')
-    expect(screen.getByTestId('ova-chip-internal').getAttribute('data-tone')).toBe('amber')   // +5 %
-    expect(screen.getByTestId('ova-chip-external').getAttribute('data-tone')).toBe('rose')    // +40 %
+    expect(screen.getByTestId('ova-chip-internal').getAttribute('data-tone')).toBe('amber')   // +5%
+    expect(screen.getByTestId('ova-chip-external').getAttribute('data-tone')).toBe('rose')    // +40%
     expect(screen.getByTestId('ova-chip-revenue').getAttribute('data-tone')).toBe('green')
     expect(screen.queryByTestId('ova-chip-issues_supplier')).toBeNull()
-    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1.250,00 EUR')
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1,250.00 EUR')
     expect(screen.getByTestId('ova-margin-variance').getAttribute('data-tone')).toBe('rose')
     expect(screen.getByTestId('ova-timing').textContent).toContain('3 working days late')
-    expect(screen.getByTestId('ova-piece-price').textContent).toContain('1.200,00 EUR per year')
+    expect(screen.getByTestId('ova-piece-price').textContent).toContain('1,200.00 EUR per year')
     expect(screen.getByTestId('ova-warnings').textContent).toContain('No supplier invoice')
     expect(document.body.textContent).not.toContain('\u2014')
   })

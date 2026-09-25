@@ -7,7 +7,7 @@ import {
   alternativesOf, chosenOf, decisionDivergesOf, favoriteOf, partsOf, tagLabel,
 } from './CostPositions';
 import { t } from '../../i18n/cmLabels';
-import { addDaysIso, daysUntil, formatDate, formatMoney, todayIso } from '../../lib/format';
+import { addDaysIso, daysUntil, formatDate, formatMoney, formatNumber, todayIso } from '../../lib/format';
 import type { CostPosition, SummationPositionLine } from '../../types/change';
 
 const errDetail = (e: unknown): string | undefined =>
@@ -91,7 +91,7 @@ function VendorDecision({ changeId, position }: { changeId: number; position: Co
       {/* Re-choosing stays open while the change is being quoted. */}
       {partsOf(p).length > 0 && (
         <div data-testid={`vendor-parts-${p.id}`} className="text-xs text-slate-400">
-          {t('costpos.partsSum')}: {partsOf(p).map((o) => `${o.vendor_name} ${(o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0)).toFixed(2)}`).join(' + ')}
+          {t('costpos.partsSum')}: {partsOf(p).map((o) => { const v = o.cost + (o.shipping_included ? 0 : o.shipping_cost ?? 0); return `${o.vendor_name} ${p.currency ? formatMoney(v, p.currency) : formatNumber(v, { min: 2, max: 2 })}`; }).join(' + ')}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">

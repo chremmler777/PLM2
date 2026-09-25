@@ -203,8 +203,8 @@ describe('TimingTab', () => {
       canDecideDeviation: true, canSetBankBuild: true })
 
     const row = await screen.findByTestId('deviation-5')
-    expect(row.textContent).toContain('09.10.2026')
-    expect(row.textContent).toContain('12.10.2026')
+    expect(row.textContent).toContain('9 Oct 2026')
+    expect(row.textContent).toContain('12 Oct 2026')
     expect(screen.getByTestId('deviation-slip-5').className).toContain('text-red-300')
     expect(screen.getByTestId('gantt-stub').dataset.mode).toBe('track')
     expect(screen.getByTestId('impl-stub').dataset.escalate).toBe('true')
@@ -303,7 +303,7 @@ describe('TimingTab', () => {
     renderTab()
     await waitFor(() => expect(screen.getByTestId('timing-step-3').dataset.state).toBe('done'))
     expect(screen.getByTestId('timing-step-3').textContent).toContain('Timing validated')
-    expect(screen.getByTestId('timing-step-3').textContent).toContain('22.09.2026')
+    expect(screen.getByTestId('timing-step-3').textContent).toContain('22 Sep 2026')
   })
 
   it('hides deviation decisions from plan editors who may not decide (Scheduling)', async () => {

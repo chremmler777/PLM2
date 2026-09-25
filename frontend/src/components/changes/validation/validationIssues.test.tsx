@@ -268,7 +268,7 @@ describe('customer decision', () => {
     fireEvent.click(screen.getByTestId('customer-decision-new_timing'))
     fireEvent.change(screen.getByTestId('customer-note'), { target: { value: 'New SOP agreed' } })
     expect(screen.getByTestId('customer-blocked').textContent).toBe('Enter the new release date')
-    expect(screen.getByTestId('issue-customer-form-11').textContent).toContain('Now 03.11.2026')
+    expect(screen.getByTestId('issue-customer-form-11').textContent).toContain('Now 3 Nov 2026')
     fireEvent.change(screen.getByTestId('customer-new-date'), { target: { value: '2026-11-20' } })
     fireEvent.click(screen.getByTestId('customer-submit'))
     await waitFor(() => expect(validationIssuesApi.customer).toHaveBeenCalledWith(7, 11, {
@@ -281,7 +281,7 @@ describe('cost visibility', () => {
   it('cost roles see the amount, others only that a cost is set', () => {
     const i = issue({ extra_cost: 1250.5, cost_bearer: 'supplier', cost_set: true })
     wrap(<IssueCard changeId={7} changeStatus="in_validation" issue={i} viewer={{ canSeeCosts: true }} departments={departments} />)
-    expect(screen.getByTestId('issue-cost-11').textContent).toBe('1.250,50 EUR, Supplier pays')
+    expect(screen.getByTestId('issue-cost-11').textContent).toBe('1,250.50 EUR, Supplier pays')
     cleanup()
     wrap(<IssueCard changeId={7} changeStatus="in_validation" viewer={{}} departments={departments}
       issue={issue({ extra_cost: null, cost_bearer: 'supplier', cost_set: true })} />)
@@ -327,16 +327,16 @@ describe('recovery summary', () => {
     expect(workingDaysBetween('2026-11-14', '2026-11-16')).toBe(1)
     const r = { summary_task_id: 501, finish: '2026-11-14', plan_finish: '2026-11-25',
       baseline_finish: '2026-11-13', release_due_date: '2026-11-19' }
-    expect(recoverySentence(r)).toBe('Recovery ends 14.11, the plan finish moves +8 wd, 4 wd after the release deadline')
+    expect(recoverySentence(r)).toBe('Recovery ends 14 Nov, the plan finish moves +8 wd, 4 wd after the release deadline')
   })
 
   it('shows the server figures and links the recovery in the plan', () => {
     wrap(<RecoverySummary changeId={7} recovery={{ summary_task_id: 501, finish: '2026-11-14', plan_finish: '2026-11-25',
       baseline_finish: '2026-11-12', release_due_date: '2026-11-30', slip_baseline_wd: 9, slip_deadline_wd: -3 }} />)
-    expect(screen.getByTestId('recovery-plan-finish-sub').textContent).toBe('+9 wd vs baseline 12.11')
+    expect(screen.getByTestId('recovery-plan-finish-sub').textContent).toBe('+9 wd vs baseline 12 Nov')
     expect(screen.getByTestId('recovery-deadline-sub').textContent).toBe('3 wd to spare')
     expect(screen.getByTestId('recovery-sentence').textContent).toBe(
-      'Recovery ends 14.11, the plan finish moves +9 wd, 3 wd before the release deadline.')
+      'Recovery ends 14 Nov, the plan finish moves +9 wd, 3 wd before the release deadline.')
     expect(screen.getByTestId('recovery-open-plan').getAttribute('href')).toBe('/changes/7?tab=timing&task=501')
   })
 })
@@ -359,7 +359,7 @@ describe('release blockers and waits', () => {
     })
     const waits = issueWaits([open2, l3, closed])
     expect(waits[0]).toMatchObject({ key: 'issue-escalation', level: 3, tab: 'release',
-      text: 'Escalation L3: VI-4 Tool cannot run, customer informed 25.09' })
+      text: 'Escalation L3: VI-4 Tool cannot run, customer informed 25 Sep' })
     expect(waits.slice(1).map((w) => w.text)).toEqual(['VI-2 open: Tool cannot run (fixing)', 'VI-4 open: Tool cannot run (fixing)'])
   })
 
@@ -373,6 +373,6 @@ describe('release blockers and waits', () => {
     const waits = resolveWaitStates({ status: 'in_implementation', customer_relevant: true } as never, [], String, [], {}, null, null,
       { validationIssues: [issue({ status: 'fixing', escalation_level: 2,
         escalations: [{ id: 1, level: 2, reason: 'overdue', created_at: '2026-09-23T08:00:00' }] })] })
-    expect(waits[0].text).toBe('Escalation L2: VI-2 Tool cannot run, since 23.09, not acknowledged')
+    expect(waits[0].text).toBe('Escalation L2: VI-2 Tool cannot run, since 23 Sep, not acknowledged')
   })
 })

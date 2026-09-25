@@ -117,7 +117,7 @@ describe('CostingBuckets', () => {
 
   it('lets PM see the figures and which buckets are still empty', async () => {
     buckets({ canSeeAll: true })
-    await waitFor(() => expect(screen.getByTestId('costing-total-2').textContent).toBe('1000.00'))
+    await waitFor(() => expect(screen.getByTestId('costing-total-2').textContent).toBe('1,000.00'))
     expect(screen.getByTestId('costing-state-2').textContent).toBe(t('costing.filled'))
     expect(screen.getByTestId('costing-state-4').textContent).toBe(t('costing.empty'))
     expect(screen.getByTestId('costing-lead-2').textContent).toContain('15')

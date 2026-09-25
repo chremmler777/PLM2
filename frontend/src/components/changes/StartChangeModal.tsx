@@ -664,7 +664,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                   {t('deadline.quote')} <span className="text-slate-500">{t('start.optional')}</span>
                 </label>
                 <DateInput id="sc-quote-deadline" aria-label={t('deadline.quote')}
-                  value={quoteDeadline} onChange={setQuoteDeadline} placeholder="dd.mm.yyyy" commitOnChange
+                  value={quoteDeadline} onChange={setQuoteDeadline} commitOnChange
                   className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm" />
                 <p className="mt-1 text-xs text-slate-500">{t('start.quoteDeadlineHint')}</p>
               </div>

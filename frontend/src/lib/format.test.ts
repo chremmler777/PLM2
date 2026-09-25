@@ -1,23 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { addDaysIso, daysUntil, formatDate, formatDateTime, parseApiDateTime, todayIso } from './format'
+import {
+  addDaysIso, daysUntil, formatDate, formatDateShort, formatDateTime, formatDayMonth, formatDays, formatHours, formatMoney,
+  formatMoneyDelta, formatNumber, formatPercent, formatPiecePrice, formatTime, parseApiDateTime, todayIso,
+} from './format'
 
 // vitest pins TZ=Europe/Berlin (see vitest.config).
 describe('formatDate / formatDateTime', () => {
   it('formats a date-only value from its text, never shifted by the time zone', () => {
-    expect(formatDate('2026-01-01')).toBe('01.01.2026')
-    expect(formatDateTime('2026-01-01')).toBe('01.01.2026')
+    expect(formatDate('2026-01-01')).toBe('1 Jan 2026')
+    expect(formatDateTime('2026-01-01')).toBe('1 Jan 2026')
   })
 
   it('reads a naive backend datetime as UTC and shows local time', () => {
-    // 23:30 UTC on 31.12. is already 01.01. 00:30 in Berlin (CET, +1).
-    expect(formatDate('2025-12-31T23:30:00')).toBe('01.01.2026')
-    expect(formatDateTime('2025-12-31T23:30:00')).toBe('01.01.2026 00:30')
-    expect(formatDateTime('2026-07-01T10:00:00.123456')).toBe('01.07.2026 12:00')
+    // 23:30 UTC on 31 Dec is already 1 Jan 00:30 in Berlin (CET, +1).
+    expect(formatDate('2025-12-31T23:30:00')).toBe('1 Jan 2026')
+    expect(formatDateTime('2025-12-31T23:30:00')).toBe('1 Jan 2026, 00:30')
+    expect(formatDateTime('2026-07-01T10:00:00.123456')).toBe('1 Jul 2026, 12:00')
   })
 
   it('keeps an explicit offset or Z as given', () => {
-    expect(formatDateTime('2026-07-01T10:00:00Z')).toBe('01.07.2026 12:00')
-    expect(formatDateTime('2026-07-01T10:00:00+02:00')).toBe('01.07.2026 10:00')
+    expect(formatDateTime('2026-07-01T10:00:00Z')).toBe('1 Jul 2026, 12:00')
+    expect(formatDateTime('2026-07-01T10:00:00+02:00')).toBe('1 Jul 2026, 10:00')
     expect(parseApiDateTime('2026-07-01T10:00:00').toISOString()).toBe('2026-07-01T10:00:00.000Z')
   })
 
@@ -25,6 +28,59 @@ describe('formatDate / formatDateTime', () => {
     expect(formatDate(undefined)).toBe('-')
     expect(formatDateTime(null)).toBe('-')
     expect(formatDateTime('soon')).toBe('soon')
+  })
+})
+
+describe('formatDateShort / formatTime', () => {
+  it('writes d MMM yy from an ISO date, a datetime or a Gantt day number', () => {
+    expect(formatDateShort('2026-09-25')).toBe('25 Sep 26')
+    expect(formatDateShort('2025-12-31T23:30:00')).toBe('1 Jan 26')
+    expect(formatDateShort(Date.UTC(2026, 9, 5) / 86_400_000)).toBe('5 Oct 26')
+    expect(formatDateShort(null)).toBe('-')
+    expect(formatDateShort(NaN)).toBe('-')
+    expect(formatDayMonth('2026-11-14')).toBe('14 Nov')
+  })
+
+  it('writes 24 h local time', () => {
+    expect(formatTime('2026-07-01T12:05:00')).toBe('14:05')
+    expect(formatTime('2026-07-01')).toBe('-')
+  })
+})
+
+describe('numbers, money, percent, units (en-US)', () => {
+  it('groups with commas and uses a decimal point', () => {
+    expect(formatNumber(12345.5)).toBe('12,345.5')
+    expect(formatNumber(2, { min: 2 })).toBe('2.00')
+    expect(formatNumber(7, { sign: true })).toBe('+7')
+    expect(formatNumber(undefined)).toBe('-')
+  })
+
+  it('writes money with 2 decimals and the ISO code', () => {
+    expect(formatMoney(12345.5, 'USD')).toBe('12,345.50 USD')
+    expect(formatMoney(-0.001, 'EUR')).toBe('0.00 EUR')
+    expect(formatMoney(null)).toBe('-')
+    expect(formatMoneyDelta(4626.5, 'USD')).toBe('+4,626.50 USD')
+    expect(formatMoneyDelta(-2826.5, 'USD')).toBe('-2,826.50 USD')
+    expect(formatMoneyDelta(0, 'USD')).toBe('0.00 USD')
+  })
+
+  it('writes piece prices with 2 to 4 decimals', () => {
+    expect(formatPiecePrice(0.4125, 'EUR')).toBe('0.4125 EUR')
+    expect(formatPiecePrice(1.5, 'EUR')).toBe('1.50 EUR')
+    expect(formatPiecePrice(0.02, 'USD', { sign: true })).toBe('+0.02 USD')
+  })
+
+  it('writes percent with one decimal and no space', () => {
+    expect(formatPercent(27.24)).toBe('27.2%')
+    expect(formatPercent(0)).toBe('0.0%')
+    expect(formatPercent(3, 0, { sign: true })).toBe('+3%')
+  })
+
+  it('writes hours and days with a narrow space', () => {
+    expect(formatHours(13.5)).toBe('13.5\u202Fh')
+    expect(formatDays(7)).toBe('7\u202Fd')
+    expect(formatDays(7, { sign: true })).toBe('+7\u202Fd')
+    expect(formatDays(-3, { sign: true })).toBe('-3\u202Fd')
   })
 })
 

@@ -6,6 +6,7 @@
  */
 import type { OfferData, OfferOut } from '../../../types/changeOffer'
 import { fmtDate, fmtMoney, inputCls, sectionLabel } from './offerFormat'
+import { customerCbd } from './customerCbd'
 import { AutoGrowTextarea, Field, Segmented, SubLabel } from './ui'
 
 export default function OfferDocumentSection({
@@ -25,11 +26,10 @@ export default function OfferDocumentSection({
   const cur = offer.currency || 'EUR'
   const included = (data.cost_lines ?? []).filter((l) => l.include).length
   const shownRisks = (data.risks ?? []).filter((r) => r.show).length
-  // The CBD as the customer reads it: included lines grouped by the
-  // customer-facing category, when the backend names it.
-  const cbd = [...(data.cost_lines ?? []).filter((l) => l.include && l.customer_category)
-    .reduce((m, l) => m.set(l.customer_category!, (m.get(l.customer_category!) ?? 0) + (l.amount ?? 0)),
-      new Map<string, number>())]
+  // The CBD as the PDF prints it: included lines summed per customer
+  // category, a line without one under its own label, hidden factors and
+  // folded risk surcharges spread in, so the rows add up to the total.
+  const cbd = customerCbd(data, offer.totals)
   const changeover = data.changeover?.mode === 'customer_pays_scrap' ? 'Customer pays scrap' : 'Running change'
 
   const outline: [string, string][] = [
@@ -39,7 +39,7 @@ export default function OfferDocumentSection({
     ['Subject', data.subject || 'Not set'],
     ['1 Scope of change', data.scope_text?.trim() ? data.scope_text.trim() : 'Not written yet'],
     ['2 Price', mode === 'detailed'
-      ? `Detailed CBD, ${cbd.length > 0 ? cbd.map(([k, v]) => `${k} ${fmtMoney(v, cur)}`).join('; ')
+      ? `Detailed CBD, ${cbd.length > 0 ? cbd.map((r) => `${r.label} ${fmtMoney(r.amount, cur)}`).join('; ')
         : `${included} line${included === 1 ? '' : 's'}`}, total ${fmtMoney(offer.totals.total_one_time, cur)}`
       : `Rough description, total ${fmtMoney(offer.totals.total_one_time, cur)}`],
     ['3 Changeover', changeover],

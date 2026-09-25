@@ -21,7 +21,8 @@ export interface PnlRow {
   currency_mismatch?: boolean;
   /** Costing lines without a rate in the cost sheet: the cost is too low. */
   no_rate?: boolean;
-  warnings?: { code: string; message: string }[];
+  /** no_rate_department names its department_id. */
+  warnings?: { code: string; message: string; department_id?: number | null }[];
   revenue: number | null;
   /** The costing's cost as the summation counts it: assessment cost lines plus costing positions, in `currency`. */
   internal_cost: number;

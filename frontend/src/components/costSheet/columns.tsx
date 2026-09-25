@@ -3,7 +3,7 @@
  * them; a column says what it holds and the cell knows how to show and edit it.
  */
 import type { ReactNode } from 'react'
-import { formatMoney } from '../../lib/format'
+import { formatMoney, formatNumber } from '../../lib/format'
 import type {
   CostSheetOverview, CostSheetRow, CostSheetSection, PositionRate, SamplingRate,
 } from '../../types/costSheet'
@@ -67,7 +67,7 @@ const MISSING_LABEL: Record<string, string> = {
 
 function overheadLabel(kind: string, value: number, currency = 'EUR'): string {
   return kind === 'percent'
-    ? `+${value.toLocaleString('de-DE', { maximumFractionDigits: 2 })} %`
+    ? `+${formatNumber(value)}%`
     : `+${formatMoney(value, currency)}/h`
 }
 

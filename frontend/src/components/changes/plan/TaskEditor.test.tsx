@@ -27,7 +27,7 @@ describe('TaskEditor', () => {
     rerender(<TaskEditor {...base} task={task({ start_date: '2026-10-08' })} onSave={onSave} />)
     expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Tool rework, second loop')
     // The untouched start follows the server.
-    expect((screen.getByLabelText('Start') as HTMLInputElement).value).toBe('08.10.2026')
+    expect((screen.getByLabelText('Start') as HTMLInputElement).value).toBe('8 Oct 2026')
     fireEvent.click(screen.getByTestId('task-editor-save'))
     expect(onSave).toHaveBeenCalledWith({ name: 'Tool rework, second loop' })
   })
@@ -78,7 +78,7 @@ describe('TaskEditor', () => {
     fireEvent.change(start, { target: { value: '' } })
     fireEvent.blur(start)
     expect(screen.getByTestId('date-input-error').textContent).toBe('Start is required')
-    expect(start.value).toBe('05.10.2026')
+    expect(start.value).toBe('5 Oct 2026')
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'x' } })
     const reset = screen.getByText('Reset') as HTMLButtonElement
     expect(reset.disabled).toBe(false)

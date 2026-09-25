@@ -44,7 +44,7 @@ describe('MotherPlantTab', () => {
     await screen.findByTestId('mother-plant-tab')
     expect(screen.getByText('KTX Weissenburg (WUG)')).toBeDefined()
     expect(screen.getByText('WUG-4711')).toBeDefined()
-    expect(screen.getByTestId('mother-plant-sop-date').textContent).toContain('01.12.2026')
+    expect(screen.getByTestId('mother-plant-sop-date').textContent).toContain('1 Dec 2026')
     expect(screen.getByTestId('mother-plant-timing-file').textContent).toBe('wug.xml')
     const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement
     await waitFor(() => expect(box('Development').checked).toBe(true))

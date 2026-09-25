@@ -98,7 +98,7 @@ export default function TransitionDeviationsPanel({
                 </div>
               ) : (
                 <p data-testid={`deviation-waiting-${d.id}`} className="mt-1 text-xs text-slate-500">
-                  Waiting for the approver: the change lead, or an admin when the lead asked. Never the requester.
+                  Waiting for the approver: the change lead or an admin; when the lead asked, any engineer or admin. Never the requester.
                 </p>
               )}
             </li>

@@ -231,15 +231,15 @@ describe('SummationView', () => {
 
   it('renders grand total from summation data', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByTestId('summation-total').textContent).toBe('425,00 EUR');
+    expect(screen.getByTestId('summation-total').textContent).toBe('425.00 EUR');
   });
 
   it('renders all four cost breakdown rows', () => {
     render(<SummationView changeId={1} />, { wrapper: makeWrapper(false, true) });
-    expect(screen.getByText('100,00 EUR')).toBeDefined();
-    expect(screen.getByText('50,00 EUR')).toBeDefined();
-    expect(screen.getByText('200,00 EUR')).toBeDefined();
-    expect(screen.getByText('75,00 EUR')).toBeDefined();
+    expect(screen.getByText('100.00 EUR')).toBeDefined();
+    expect(screen.getByText('50.00 EUR')).toBeDefined();
+    expect(screen.getByText('200.00 EUR')).toBeDefined();
+    expect(screen.getByText('75.00 EUR')).toBeDefined();
   });
 
   it('renders by_department row', async () => {
@@ -301,11 +301,11 @@ describe('SummationView', () => {
     );
     render(<SummationView changeId={1} />, { wrapper });
     await waitFor(() => expect(
-      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6.000,00 EUR'));
-    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6.043,00 EUR');
-    expect(screen.getByTestId('summation-total').textContent).toBe('43,00 EUR');
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6.000,00 EUR');
-    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6.043,00 EUR');
+      screen.getByTestId('summation-dept-positions-5').textContent).toBe('6,000.00 EUR'));
+    expect(screen.getByTestId('summation-dept-total-5').textContent).toBe('6,043.00 EUR');
+    expect(screen.getByTestId('summation-total').textContent).toBe('43.00 EUR');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('6,000.00 EUR');
+    expect(screen.getByTestId('summation-grand-with-positions').textContent).toBe('6,043.00 EUR');
     // The chosen vendor is named — it is the price the total is built on.
     expect((await screen.findByTestId('summation-position-vendor-3')).textContent).toContain('Vendor A');
   });

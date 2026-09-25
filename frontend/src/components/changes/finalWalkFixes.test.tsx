@@ -18,6 +18,7 @@ import OfferPriceSection from './offer/OfferPriceSection'
 import OfferDocumentSection from './offer/OfferDocumentSection'
 import { unpricedByDepartment, unpricedMessage } from '../../lib/unpriced'
 import { revisionsInCheckOf, revisionsInCheckText } from '../../lib/waitStates'
+import { customerCbdLines, spreadCbd } from './offer/customerCbd'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeDetail } from '../../types/change'
 import type { OfferData, OfferOut } from '../../types/changeOffer'
@@ -73,6 +74,8 @@ describe('TransitionDeviationsPanel (P2-3)', () => {
   it('tells anyone else whose decision it is, with no buttons', () => {
     wrap(<TransitionDeviationsPanel changeId={21} deviations={[dev]} decidableIds={[]} />)
     expect(screen.getByTestId('deviation-waiting-5').textContent).toContain('Never the requester')
+    // transition_deviation_refusal: a deviation the lead asked for is any engineer's (or an admin's) to decide.
+    expect(screen.getByTestId('deviation-waiting-5').textContent).toContain('when the lead asked, any engineer or admin')
     expect(screen.queryByTestId('deviation-approve-5')).toBeNull()
   })
 
@@ -95,7 +98,7 @@ describe('Actual costs in the change currency (P2-2)', () => {
     vi.mocked(changesApi.costingContext).mockResolvedValue({ currency: 'USD' } as never)
     wrap(<ActualCostsPanel changeId={21} />)
     await waitFor(() => expect(screen.getByTestId('actual-cost-total').textContent).toContain('USD'))
-    expect(screen.getByTestId('actual-cost-3').textContent).toContain('8.750,00 USD')
+    expect(screen.getByTestId('actual-cost-3').textContent).toContain('8,750.00 USD')
     fireEvent.click(screen.getByTestId('actual-cost-open'))
     expect(screen.getByTestId('actual-cost-form').textContent).toContain('Amount (USD)')
     expect(screen.getByTestId('actual-cost-form').textContent).not.toContain('EUR')
@@ -109,7 +112,7 @@ describe('Actual costs in the change currency (P2-2)', () => {
     vi.mocked(changesApi.costingContext).mockRejectedValue(new Error('403'))
     wrap(<ActualCostsPanel changeId={21} />)
     await waitFor(() => expect(screen.getByTestId('actual-cost-total').textContent)
-      .toBe('8.750,00 USD · 100,00 EUR'))
+      .toBe('8,750.00 USD · 100.00 EUR'))
   })
 })
 
@@ -128,8 +131,8 @@ describe('Cost sheet diff currency (P2-2)', () => {
         changes: { hourly_rate: { old: 19.5, new: 21 } }, pct: 7.7 }] },
       machines: empty, sampling: empty, overheads: empty,
     }} />)
-    expect(screen.getByText('19,50 USD')).toBeDefined()
-    expect(screen.getByText('21,00 USD')).toBeDefined()
+    expect(screen.getByText('19.50 USD')).toBeDefined()
+    expect(screen.getByText('21.00 USD')).toBeDefined()
     expect(screen.queryByText(/EUR/)).toBeNull()
   })
 
@@ -141,9 +144,9 @@ describe('Cost sheet diff currency (P2-2)', () => {
           changes: { hourly_rate: { old: 10, new: 20 }, currency: { old: 'EUR', new: 'USD' } } }] },
       machines: empty, sampling: empty, overheads: empty,
     }} />)
-    expect(screen.getByText('10,00 EUR')).toBeDefined()
-    expect(screen.getByText('20,00 USD')).toBeDefined()
-    expect(screen.getByText('30,00 MXN')).toBeDefined()
+    expect(screen.getByText('10.00 EUR')).toBeDefined()
+    expect(screen.getByText('20.00 USD')).toBeDefined()
+    expect(screen.getByText('30.00 MXN')).toBeDefined()
   })
 })
 
@@ -180,6 +183,25 @@ describe('Unpriced hours said per department (P2-6)', () => {
     expect(text).toContain('2 costing lines have no rate')
   })
 
+  it('matches a department warning on its department, and lists two of them (review L1)', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      by_department: [], totals: { one_time_internal: 0, one_time_external: 0 },
+      unpriced_lines: lines.slice(0, 2),
+      warnings: [
+        { code: 'no_rate_department', department_id: 6, message: 'No cost sheet rate for PM: hours unpriced' },
+        { code: 'no_rate_department', department_id: 8, message: 'No cost sheet rate for Tooling: hours unpriced' },
+        { code: 'no_rate_department', department_id: 9, message: 'No cost sheet rate for Quality: hours unpriced' },
+      ],
+    } as never)
+    wrap(<PnlCard change={{ id: 21, status: 'costing', customer_relevant: true, quoted_price: null } as ChangeDetail}
+      departments={[{ id: 6, name: 'Project Manager' }]} />)
+    await waitFor(() => expect(screen.getAllByTestId('pnl-unpriced')).toHaveLength(1))
+    const text = screen.getByTestId('pnl-costing-warnings').textContent ?? ''
+    expect(text).not.toContain('No cost sheet rate for PM:')
+    expect(text).toContain('No cost sheet rate for Tooling: hours unpriced')
+    expect(text).toContain('No cost sheet rate for Quality: hours unpriced')
+  })
+
   it('a costing bucket with hours but no rate reads "No rate", not "Empty"', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue({
       by_department: [{ department_id: 6, one_time_internal: 0, one_time_external: 0,
@@ -202,6 +224,14 @@ describe('Revision check workflows (P2-4)', () => {
     expect(toast.error).toHaveBeenCalledWith('Only Development may complete this task')
   })
 
+  it('tells the caller when a task was completed (review M4)', () => {
+    wf.complete.mockImplementation((_v: unknown, o: { onSuccess: () => void }) => o.onSuccess())
+    const onChanged = vi.fn()
+    render(<RevisionWorkflowSection revisionId={3} onChanged={onChanged} />)
+    fireEvent.click(screen.getByText('approve-task'))
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  })
+
   it('counts the revisions still in their check workflow and who they need', () => {
     const rc = revisionsInCheckOf([
       { revision_id: 1, instance_id: 2, instance_status: 'active', ready: false, waiting_on: ['Development'] },
@@ -210,9 +240,15 @@ describe('Revision check workflows (P2-4)', () => {
       { revision_id: null, instance_id: null, instance_status: null, ready: false },
       { revision_id: 7, instance_id: 8, instance_status: 'canceled', ready: false },
     ])
-    expect(rc).toEqual({ count: 2, needs: ['Development', 'Quality'] })
-    expect(revisionsInCheckText(rc)).toBe('2 revisions still in their check workflow; needs Development, Quality')
-    expect(revisionsInCheckText({ count: 1, needs: [] })).toBe('1 revision still in its check workflow')
+    // Same count as the release guard (not_ready_message): every item not
+    // ready, a canceled workflow and a missing revision included (review M3).
+    expect(rc).toEqual({ count: 4, canceled: 1, needs: ['Development', 'Quality'] })
+    expect(revisionsInCheckText(rc)).toBe('4 impacted revisions have not completed their check workflow'
+      + ' (1 workflow canceled: restart it); needs Development, Quality')
+    expect(revisionsInCheckText({ count: 1, canceled: 0, needs: [] }))
+      .toBe('1 impacted revision has not completed its check workflow')
+    expect(revisionsInCheckText({ count: 2, canceled: 2, needs: [] }))
+      .toBe('2 impacted revisions have not completed their check workflow (2 workflows canceled: restart them)')
   })
 })
 
@@ -249,7 +285,40 @@ describe('Offer as the customer reads it (P2-7)', () => {
     const outline = screen.getByTestId('doc-outline').textContent ?? ''
     expect(outline).toContain('Issued by')
     expect(outline).toContain('KTX Group US Corp.')
-    expect(outline).toContain('Engineering 3.622,00 USD; Tooling 8.750,00 USD; Sampling and trials 500,00 USD')
+    expect(outline).toContain('Engineering 3,622.00 USD; Tooling 8,750.00 USD; Sampling and trials 500.00 USD')
     expect(outline).not.toContain('Tool Engineer internal effort')
+  })
+
+  // Review L4: the preview says what the PDF prints (offer_pdf customer_cbd_lines, spread_cbd).
+  const handAdded = { key: 'free:1', label: 'Customer visit', category: 'other' as const,
+    amount: 128, include: true, customer_category: null }
+  const withHand = { ...data, cost_lines: [...data.cost_lines!, handAdded] } as OfferData
+
+  it('the outline lists a hand-added line under its own label and folds hidden factors in, as the PDF', () => {
+    const offer = { version: 1, currency: 'USD', warnings: [],
+      totals: { total_one_time: 14300, risks_total: 0, scrap: 0,
+        factors: [{ key: 'margin', label: 'Margin', amount: 1300, show: false }] } } as unknown as OfferOut
+    render(<OfferDocumentSection offer={offer} data={withHand} update={vi.fn()} editable={false}
+      changeNumber="CR-2026-0021" onPreview={vi.fn()} />)
+    const outline = screen.getByTestId('doc-outline').textContent ?? ''
+    expect(outline).toContain('Engineering 3,984.20 USD; Tooling 9,625.00 USD; Sampling and trials 550.00 USD;'
+      + ' Customer visit 140.80 USD, total 14,300.00 USD')
+  })
+
+  it('the price table says the hand-added line reads as its own label, not "Other"', () => {
+    render(<OfferPriceSection data={withHand} update={vi.fn()} editable={false} currency="USD" />)
+    expect(screen.getByTestId('cost-line-customer-free:1').textContent).toBe('Customer visit')
+  })
+
+  it('spreads a hidden amount like the PDF, a credit keeps its own amount', () => {
+    expect(customerCbdLines([
+      { label: 'x', amount: 10, customer_category: 'Tooling' },
+      { label: 'Own', amount: 5, customer_category: null },
+      { label: 'y', amount: 20, customer_category: 'Engineering' },
+    ])).toEqual([{ label: 'Engineering', amount: 20 }, { label: 'Tooling', amount: 10 }, { label: 'Own', amount: 5 }])
+    expect(spreadCbd([{ label: 'A', amount: 100 }, { label: 'Credit', amount: -20 }], 10))
+      .toEqual([{ label: 'A', amount: 110 }, { label: 'Credit', amount: -20 }])
+    expect(spreadCbd([{ label: 'Credit', amount: -20 }], 30))
+      .toEqual([{ label: 'Credit', amount: -20 }, { label: 'Engineering and handling', amount: 30 }])
   })
 })

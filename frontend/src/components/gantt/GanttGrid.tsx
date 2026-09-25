@@ -8,7 +8,7 @@ import { key } from './engine/tree'
 import type { GanttTask } from './engine/types'
 import { HEADER_H } from './GanttChart'
 import { gridTiming, gridWidth, type CellContext, type EditKind, type GanttColumn } from './columns'
-import { formatDateInput, parseDateInput } from './dateText'
+import { DATE_PLACEHOLDER, formatDateInput, parseDateInput } from './dateText'
 import { textWidth, type Row } from './layout'
 import { v } from './theme'
 
@@ -107,7 +107,7 @@ export function ColumnPicker({ all, shown, dropped, open, onOpen, onToggle }: {
 function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
   initial: string; type: EditKind; onCommit: (v: string) => void; onCancel: () => void; label: string; placeholder?: string
 }) {
-  // Dates are typed as dd.mm.yyyy (never the locale's native picker) and go out as ISO.
+  // Dates show as 25 Sep 2026, are typed in any form dateText reads (never the locale's native picker) and go out as ISO.
   const [val, setVal] = useState(type === 'date' ? formatDateInput(initial) : initial)
   const ref = useRef<HTMLInputElement>(null)
   const done = useRef(false)
@@ -122,7 +122,7 @@ function CellEditor({ initial, type, onCommit, onCancel, label, placeholder }: {
       type={type === 'number' ? 'number' : 'text'}
       className="h-full w-full rounded-sm border px-1 text-xs outline-none [color-scheme:dark]"
       style={{ background: v('bg'), color: v('text'), borderColor: v('accent') }}
-      value={val} placeholder={placeholder ?? (type === 'date' ? 'dd.mm.yyyy' : undefined)} onChange={(e) => setVal(e.target.value)}
+      value={val} placeholder={placeholder ?? (type === 'date' ? DATE_PLACEHOLDER : undefined)} onChange={(e) => setVal(e.target.value)}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {

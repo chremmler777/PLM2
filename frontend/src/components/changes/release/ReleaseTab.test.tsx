@@ -219,9 +219,9 @@ describe('ReleaseTab', () => {
     const onAdvance = vi.fn()
     wrap(<ReleaseTab change={change({ status: 'released' })} departments={[]} myDepartmentIds={[]} canSeeAll
       canAcknowledge canManage onAdvance={onAdvance} advancing={false} />)
-    // Baseline finish is exclusive 2026-10-11 -> last day 10.10.2026; actual 14.10.2026.
-    expect((await screen.findByTestId('summary-baseline-finish')).textContent).toBe('10.10.2026')
-    await waitFor(() => expect(screen.getByTestId('summary-actual-finish').textContent).toBe('14.10.2026'))
+    // Baseline finish is exclusive 2026-10-11 -> last day 10 Oct 2026; actual 14 Oct 2026.
+    expect((await screen.findByTestId('summary-baseline-finish')).textContent).toBe('10 Oct 2026')
+    await waitFor(() => expect(screen.getByTestId('summary-actual-finish').textContent).toBe('14 Oct 2026'))
     expect(screen.getByTestId('summary-against-baseline').textContent).toBe('4 d late')
     expect(screen.getByTestId('summary-against-baseline-detail').textContent).toBe('1 task slipped')
     fireEvent.click(screen.getByTestId('close-change'))

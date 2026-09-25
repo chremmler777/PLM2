@@ -10,7 +10,7 @@ const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment']
 /** Stages where there is doing: offer vs actual and actual costs. */
 const ACTUALS_STATUSES: ChangeStatus[] = ['in_implementation', 'in_validation', 'released', 'closed'];
 
-/** "13.629,50 EUR" via the shared formatter — same money format everywhere. */
+/** "13,629.50 EUR" via the shared formatter — same money format everywhere. */
 const fmtMoney = (v: number | null | undefined, currency?: string | null) =>
   v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, currency);
 
@@ -84,7 +84,12 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
   const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? `#${id}`;
   const unpriced = unpricedByDepartment(data?.unpriced_lines, deptName);
   const unpricedLines = unpriced.map((u) => u.message);
-  const covered = (msg: string) => unpriced.some((u) => msg.startsWith(`No cost sheet rate for ${u.name}:`));
+  // A department's no-rate warning the unpriced lines already say (with the
+  // hours): matched on its department, by name only when the id is missing.
+  const covered = (w: { code: string; message: string; department_id?: number | null }) =>
+    w.code === 'no_rate_department' && w.department_id != null
+      ? unpriced.some((u) => u.department_id === w.department_id)
+      : unpriced.some((u) => w.message.startsWith(`No cost sheet rate for ${u.name}:`));
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-4 mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -105,8 +110,8 @@ export default function PnlCard({ change, departments = [], canSeeCosts = true }
             not add, lines without a rate. Shown here only, once. */}
         {((data?.warnings ?? []).length > 0 || unpricedLines.length > 0) && (
           <ul data-testid="pnl-costing-warnings" className="mt-1 space-y-0.5">
-            {(data?.warnings ?? []).filter((w) => !covered(w.message)).map((w) => (
-              <li key={w.code} className="text-[11px] text-amber-300">{w.message}</li>
+            {(data?.warnings ?? []).filter((w) => !covered(w)).map((w, i) => (
+              <li key={`${w.code}-${i}`} className="text-[11px] text-amber-300">{w.message}</li>
             ))}
             {unpricedLines.map((m) => (
               <li key={m} data-testid="pnl-unpriced" className="text-[11px] text-amber-300">{m}</li>

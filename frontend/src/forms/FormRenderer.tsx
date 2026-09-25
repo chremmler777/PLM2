@@ -1,4 +1,5 @@
 import { recompute } from './compute';
+import { formatNumber } from '../lib/format';
 import type { FormDefinitionBody, FormData, FieldDef, Row, TableSection } from './types';
 
 interface UserOption { id: number; name: string }
@@ -16,7 +17,7 @@ function display(f: FieldDef, v: unknown, users: UserOption[]): string {
   if (f.type === 'checkbox') return v ? 'yes' : 'no';
   if (f.type === 'user') return users.find((u) => u.id === Number(v))?.name ?? String(v);
   if (f.type === 'multichoice' && Array.isArray(v)) return v.join(', ');
-  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/\.?0+$/, '');
+  if (typeof v === 'number') return formatNumber(v);
   return String(v);
 }
 

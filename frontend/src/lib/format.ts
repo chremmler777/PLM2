@@ -1,8 +1,24 @@
 /**
- * One date and money format for the change screens: dd.mm.yyyy, dd.mm.yyyy
- * hh:mm and "12.345,50 EUR" (de-DE grouping, 2 decimals, currency code).
- * Missing values render as "-".
+ * The one number, money and date format of the app (en-US, see the UI polish
+ * plan 2.1). Every screen formats through these helpers; nothing else calls
+ * Intl, toLocale* or toFixed for display.
+ *
+ *   number     12,345.5            money        12,345.50 USD (ISO code, never summed across currencies)
+ *   delta      +4,626.50 USD        piece price  0.4125 EUR (2 to 4 decimals)
+ *   percent    27.2%                hours, days  13.5 h, 7 d, +7 d
+ *   date       25 Sep 2026          compact      25 Sep 26 (tables, Gantt grid, chips)
+ *   date+time  25 Sep 2026, 14:05   missing      -
+ *
+ * The customer offer PDF keeps its own per-currency locale (backend).
  */
+
+export const LOCALE = 'en-US'
+
+/** English month abbreviations, fixed (Intl en-GB would say "Sept"). */
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** Narrow no-break space between a number and its unit ("13.5 h"). */
+const UNIT_SP = '\u202F'
 
 const pad = (x: number) => String(x).padStart(2, '0')
 
@@ -18,29 +34,68 @@ export function parseApiDateTime(iso: string): Date {
   return new Date(naive ? `${iso.replace(' ', 'T')}Z` : iso)
 }
 
+const MS_DAY = 86_400_000
+
+/** Year, month (0-11) and day of an ISO date or datetime; null when unreadable. */
+function partsOf(iso: string): { y: number; m: number; d: number; dt: Date | null } | null {
+  if (DATE_ONLY.test(iso)) {
+    const [y, m, d] = iso.split('-').map(Number)
+    return { y, m: m - 1, d, dt: null }
+  }
+  const dt = parseApiDateTime(iso)
+  if (Number.isNaN(dt.getTime())) return null
+  return { y: dt.getFullYear(), m: dt.getMonth(), d: dt.getDate(), dt }
+}
+
 /**
- * dd.mm.yyyy from an ISO date or datetime. A plain date ("2026-10-05") is
+ * "25 Sep 2026" from an ISO date or datetime. A plain date ("2026-10-05") is
  * formatted from its text and never shifted by the time zone; a datetime is
- * read as UTC when naive and shown as the local calendar day.
+ * read as UTC when naive and shown as the local calendar day. Unreadable
+ * text passes through.
  */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '-'
-  if (DATE_ONLY.test(iso)) {
-    const [y, m, d] = iso.split('-')
-    return `${d}.${m}.${y}`
-  }
-  const dt = parseApiDateTime(iso)
-  if (Number.isNaN(dt.getTime())) return iso
-  return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()}`
+  const p = partsOf(iso)
+  return p ? `${p.d} ${MONTHS[p.m]} ${p.y}` : iso
 }
 
-/** dd.mm.yyyy hh:mm in local time; a naive backend datetime is read as UTC. */
+/**
+ * "25 Sep 26" for tables, the Gantt grid and chips. Takes an ISO date or
+ * datetime, or a Gantt day number (days since 1970-01-01, UTC).
+ */
+export function formatDateShort(v: string | number | null | undefined): string {
+  if (v === null || v === undefined || v === '') return '-'
+  if (typeof v === 'number') {
+    if (Number.isNaN(v)) return '-'
+    const dt = new Date(v * MS_DAY)
+    return `${dt.getUTCDate()} ${MONTHS[dt.getUTCMonth()]} ${String(dt.getUTCFullYear()).slice(-2)}`
+  }
+  const p = partsOf(v)
+  return p ? `${p.d} ${MONTHS[p.m]} ${String(p.y).slice(-2)}` : v
+}
+
+/** "14 Nov": day and month only, for a sentence where the year is plain. */
+export function formatDayMonth(iso: string | null | undefined): string {
+  if (!iso) return '-'
+  const p = partsOf(iso)
+  return p ? `${p.d} ${MONTHS[p.m]}` : iso
+}
+
+/** "25 Sep 2026, 14:05" in local time (24 h); a naive backend datetime is read as UTC. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-'
-  if (DATE_ONLY.test(iso)) return formatDate(iso)
+  const p = partsOf(iso)
+  if (!p) return iso
+  if (!p.dt) return formatDate(iso)
+  return `${p.d} ${MONTHS[p.m]} ${p.y}, ${pad(p.dt.getHours())}:${pad(p.dt.getMinutes())}`
+}
+
+/** "14:05" in local time; a naive backend datetime is read as UTC. */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso || DATE_ONLY.test(iso)) return '-'
   const dt = parseApiDateTime(iso)
-  if (Number.isNaN(dt.getTime())) return iso
-  return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+  if (Number.isNaN(dt.getTime())) return '-'
+  return `${pad(dt.getHours())}:${pad(dt.getMinutes())}`
 }
 
 /** Today as YYYY-MM-DD in local time. */
@@ -71,10 +126,78 @@ export function daysUntil(iso: string, now: number = Date.now()): number {
   return Math.ceil((ms - now) / 864e5) || 0 // no -0
 }
 
-const moneyFmt = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// ------------------------------------------------------------------ numbers
 
-/** "12.345,50 EUR". */
+const fmtCache = new Map<string, Intl.NumberFormat>()
+function nf(min: number, max: number): { format: (v: number) => string } {
+  const key = `${min}-${max}`
+  let f = fmtCache.get(key)
+  if (!f) {
+    f = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: min, maximumFractionDigits: max })
+    fmtCache.set(key, f)
+  }
+  const intl = f
+  // A value that rounds to zero never shows as "-0.00".
+  return { format: (v: number) => intl.format(Math.round(v * 10 ** max) === 0 ? 0 : v) }
+}
+
+const missing = (v: number | null | undefined): v is null | undefined =>
+  v === null || v === undefined || Number.isNaN(v)
+
+/** Sign prefix for an explicitly signed value: "+" only when it does not round to zero. */
+function plus(v: number, max: number): string {
+  return v > 0 && Math.round(v * 10 ** max) !== 0 ? '+' : ''
+}
+
+/** "12,345.5": en-US grouping, 0 to 2 decimals unless told otherwise. */
+export function formatNumber(
+  v: number | null | undefined,
+  { min = 0, max = 2, sign = false }: { min?: number; max?: number; sign?: boolean } = {},
+): string {
+  if (missing(v)) return '-'
+  return `${sign ? plus(v, max) : ''}${nf(min, Math.max(min, max)).format(v)}`
+}
+
+/** "12,345.50 USD": 2 decimals and the ISO code. Never add amounts of different currencies. */
 export function formatMoney(amount: number | null | undefined, currency: string | null | undefined = 'EUR'): string {
-  if (amount === null || amount === undefined || Number.isNaN(amount)) return '-'
-  return `${moneyFmt.format(amount)} ${currency || 'EUR'}`
+  if (missing(amount)) return '-'
+  return `${nf(2, 2).format(amount)} ${currency || 'EUR'}`
+}
+
+/** "+4,626.50 USD", "-2,826.50 USD", "0.00 USD". */
+export function formatMoneyDelta(amount: number | null | undefined, currency: string | null | undefined = 'EUR'): string {
+  if (missing(amount)) return '-'
+  return `${plus(amount, 2)}${formatMoney(amount, currency)}`
+}
+
+/** "0.4125 EUR": piece prices carry 2 to 4 decimals; `sign` adds "+" to a rise. */
+export function formatPiecePrice(
+  v: number | null | undefined,
+  currency: string | null | undefined = 'EUR',
+  { sign = false }: { sign?: boolean } = {},
+): string {
+  if (missing(v)) return '-'
+  return `${sign ? plus(v, 4) : ''}${nf(2, 4).format(v)} ${currency || 'EUR'}`
+}
+
+/** "27.2%" from a percent value (27.2, not 0.272); `sign` adds "+" to a rise. */
+export function formatPercent(
+  v: number | null | undefined,
+  decimals = 1,
+  { sign = false }: { sign?: boolean } = {},
+): string {
+  if (missing(v)) return '-'
+  return `${sign ? plus(v, decimals) : ''}${nf(decimals, decimals).format(v)}%`
+}
+
+/** "13.5 h" (up to 2 decimals). */
+export function formatHours(v: number | null | undefined): string {
+  if (missing(v)) return '-'
+  return `${nf(0, 2).format(v)}${UNIT_SP}h`
+}
+
+/** "7 d", or "+7 d" with `sign`. */
+export function formatDays(v: number | null | undefined, { sign = false }: { sign?: boolean } = {}): string {
+  if (missing(v)) return '-'
+  return `${sign ? plus(v, 1) : ''}${nf(0, 1).format(v)}${UNIT_SP}d`
 }

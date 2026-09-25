@@ -16,6 +16,7 @@ import CostLineGrid from './CostLineGrid'
 import CostPositions from './CostPositions'
 import CostingSheetBar from './CostingSheetBar'
 import { t } from '../../i18n/cmLabels'
+import { formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeDetail, Summation } from '../../types/change'
 
 const errDetail = (e: unknown): string | undefined =>
@@ -165,7 +166,7 @@ export default function CostingBuckets({
                 {/* Figures ride along only for those allowed to see them. */}
                 {canSeeAll && total != null && (
                   <span data-testid={`costing-total-${id}`} className="tabular-nums text-slate-300">
-                    {total.toFixed(2)}{summation?.currency ? ` ${summation.currency}` : ''}
+                    {summation?.currency ? formatMoney(total, summation.currency) : formatNumber(total, { min: 2, max: 2 })}
                   </span>
                 )}
               </span>
@@ -206,7 +207,7 @@ export default function CostingBuckets({
                     <p className="text-slate-300">
                       {t('costing.deptTotal')}: <span className="tabular-nums">
                         {total != null
-                          ? `${total.toFixed(2)}${summation?.currency ? ` ${summation.currency}` : ''}`
+                          ? (summation?.currency ? formatMoney(total, summation.currency) : formatNumber(total, { min: 2, max: 2 }))
                           : '-'}
                       </span>
                     </p>

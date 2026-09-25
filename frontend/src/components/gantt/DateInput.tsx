@@ -1,15 +1,16 @@
 /**
- * A date field that always shows dd.mm.yyyy (no locale mm/dd from the native
- * picker). It parses dd.mm.yyyy, dd.mm.yy (00-69 = 20xx, 70-99 = 19xx),
- * dd-mm-yyyy and ISO yyyy-mm-dd, refuses slashes (ambiguous) and years
- * outside 1900-2200 with a message, and offers a small month calendar in a
- * popover (portal, kept inside the viewport, arrow keys move the day).
- * Value in and out: ISO `YYYY-MM-DD` or ''.
+ * A date field that always shows "25 Sep 2026" (no locale mm/dd from the
+ * native picker). It reads "25 Sep 2026", "25 sep 26", ISO yyyy-mm-dd,
+ * dd.mm.yyyy, dd.mm.yy (00-69 = 20xx, 70-99 = 19xx) and dd-mm-yyyy, echoes
+ * the date it read under the field while typing ("= 25 Sep 2026"), refuses
+ * slashes (ambiguous) and years outside 1900-2200 with a message, and offers
+ * a small month calendar in a popover (portal, kept inside the viewport,
+ * arrow keys move the day). Value in and out: ISO `YYYY-MM-DD` or ''.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MONTHS, dayOf, isIsoDay, isoWeekday, toDay, toIso, todayDay, ymd } from './engine/calendar'
-import { formatDateInput, readDateInput } from './dateText'
+import { DATE_PLACEHOLDER, formatDateInput, readDateInput } from './dateText'
 
 interface Props {
   value: string
@@ -134,6 +135,8 @@ export default function DateInput(p: Props) {
   const typed = readDateInput(text)
   const invalid = text.trim() !== '' && !typed.iso
   const shownMessage = message ?? (invalid ? typed.error : null)
+  // What the typed text reads as, while it is not yet in the shown form.
+  const echo = !shownMessage && typed.iso && text.trim() !== formatDateInput(typed.iso) ? formatDateInput(typed.iso) : null
   const shiftMonth = (dm: number) => setFocusDay((d) => {
     const c = ymd(d)
     const last = dayOf(c.y, c.m + dm + 1, 1) - dayOf(c.y, c.m + dm, 1)
@@ -161,9 +164,9 @@ export default function DateInput(p: Props) {
         setOpen(false)
         commitText(); p.onBlur?.()
       }}>
-      <input ref={input} id={p.id} type="text" inputMode="numeric" disabled={p.disabled} aria-label={p['aria-label']}
-        aria-invalid={invalid || !!message || undefined} aria-describedby={shownMessage ? msgId : undefined}
-        placeholder={p.placeholder ?? 'dd.mm.yyyy'}
+      <input ref={input} id={p.id} type="text" autoComplete="off" spellCheck={false} data-date-input="" disabled={p.disabled} aria-label={p['aria-label']}
+        aria-invalid={invalid || !!message || undefined} aria-describedby={shownMessage || echo ? msgId : undefined}
+        placeholder={p.placeholder ?? DATE_PLACEHOLDER}
         className={`${p.className ?? ''} pr-7`} style={p.style} value={text}
         onChange={(e) => {
           const v = e.target.value
@@ -202,6 +205,9 @@ export default function DateInput(p: Props) {
       )}
       {shownMessage && (
         <p id={msgId} role="alert" className="mt-0.5 text-[11px] text-red-300" data-testid="date-input-error">{shownMessage}</p>
+      )}
+      {echo && (
+        <p id={msgId} aria-live="polite" className="mt-0.5 text-[11px] tabular-nums text-slate-400" data-testid="date-input-echo">= {echo}</p>
       )}
       {open && createPortal(
         <div ref={pop} id={popId} role="dialog" aria-label="Pick a date" data-testid="date-popover"

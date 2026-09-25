@@ -5,6 +5,7 @@
  * Every number links through to the filtered list behind it.
  */
 import { useQuery } from '@tanstack/react-query';
+import { formatNumber, formatPercent } from '../lib/format';
 import { Link } from 'react-router-dom';
 import { reportsApi } from '../api/reports';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
@@ -12,8 +13,9 @@ import { DeadlineChip } from '../components/changes/DeadlineChip';
 import { t } from '../i18n/cmLabels';
 import type { ChangeStatus } from '../types/change';
 
-const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
-const fmtMoney = (v: number) => v.toLocaleString('de-DE');
+const pct = (v: number | null) => (v === null ? '-' : formatPercent(v * 100, 0));
+// The report API sends no currency with budgets and actuals: numbers only.
+const fmtMoney = (v: number) => formatNumber(v);
 
 function Tile({ title, value, sub, accent = 'text-slate-100' }: {
   title: string;

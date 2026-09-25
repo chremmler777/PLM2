@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
+import { formatMoney, formatNumber } from '../../lib/format'
 import type { ChangeConcern, Summation } from '../../types/change'
 
 export default function QuoteBasis({
@@ -42,7 +43,9 @@ export default function QuoteBasis({
       <p className="flex items-baseline gap-2">
         <span className="text-slate-400">{t('total')}:</span>
         <span className="tabular-nums text-slate-100" data-testid="quote-basis-total">
-          {data.totals.grand_total.toFixed(2)}
+          {data.currency
+            ? formatMoney(data.totals.grand_total, data.currency)
+            : formatNumber(data.totals.grand_total, { min: 2, max: 2 })}
         </span>
       </p>
       {(minutes.length > 0 || data.total_minutes_per_part != null) && (

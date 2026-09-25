@@ -700,7 +700,7 @@ describe('ScopingPanel §16 meeting record', () => {
   it('names a meeting without attendees in words, not with a dash', async () => {
     vi.mocked(changesApi.listMeetings).mockResolvedValue([undecided({ participants: [] })] as never)
     render(wrap(<ScopingPanel change={change()} />))
-    expect(await screen.findByText('04.07.2026 · no attendees recorded')).toBeTruthy()
+    expect(await screen.findByText('4 Jul 2026 · no attendees recorded')).toBeTruthy()
   })
 
   it('offers people only in the attendee list', async () => {

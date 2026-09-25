@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
 import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
-import { formatDate, formatDateTime, parseApiDateTime } from '../../lib/format'
+import { formatDate, formatTime, parseApiDateTime } from '../../lib/format'
 import { auditValueLabel, humanize } from '../../lib/humanLabels'
 
 // Short codes the backend stores for a handful of fields, in words.
@@ -196,7 +196,7 @@ export default function AuditTimeline({ correlationId, changeId }: {
               return (
                 <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono text-xs text-slate-500">
-                    {formatDateTime(e.timestamp).slice(11)}
+                    {formatTime(e.timestamp)}
                   </span>
                   <span className="font-medium text-slate-200">
                     {e.real_user_name ?? e.user_name ?? t('audit.system')}

@@ -5,6 +5,7 @@
  * in_review → rejected (categorized reason). Capture lands directly in review.
  */
 import { useEffect, useRef, useState } from 'react';
+import { formatDate, formatDateShort, formatDateTime, formatNumber } from '../lib/format';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from '../api/client';
@@ -514,7 +515,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
               {lesson.owner_name && <> · responsible: <span className="text-slate-200">{lesson.owner_name}</span></>}
               {lesson.target_date && (
                 <> · target <span className={lesson.target_overdue ? 'text-red-400' : 'text-slate-200'}>
-                  {lesson.target_date.slice(0, 10)}
+                  {formatDate(lesson.target_date)}
                 </span></>
               )}
             </div>
@@ -816,7 +817,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
                 {a.assignee_name && <span className="text-xs text-blue-300">@{a.assignee_name}</span>}
                 {a.due_date && (
                   <span className={`text-xs ${a.overdue ? 'text-red-400 font-semibold' : 'text-slate-500'}`}>
-                    due {a.due_date.slice(0, 10)}{a.overdue && ' ⚠'}
+                    due {formatDate(a.due_date)}{a.overdue && ' ⚠'}
                   </span>
                 )}
               </div>
@@ -902,7 +903,7 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
                 >
                   {f.filename}
                 </button>
-                <span className="text-xs text-slate-500">{(f.size_bytes / 1024).toFixed(0)} KB</span>
+                <span className="text-xs text-slate-500">{formatNumber(f.size_bytes / 1024, { max: 0 })} KB</span>
                 {/* Who attached the evidence, and when. */}
                 <UploadedBy name={f.uploaded_by_name} at={f.created_at} />
                 {workable && (
@@ -926,12 +927,12 @@ export function LessonDetailModal({ lessonId, onClose }: { lessonId: number; onC
             {lesson.comments.map((c) =>
               c.is_system ? (
                 <div key={c.id} className="text-xs text-slate-500 italic">
-                  {c.body} · {c.created_at?.slice(0, 16).replace('T', ' ')}
+                  {c.body} · {formatDateTime(c.created_at)}
                 </div>
               ) : (
                 <div key={c.id} className="text-sm">
                   <span className="text-blue-300 text-xs">{c.user_name}</span>{' '}
-                  <span className="text-slate-500 text-xs">{c.created_at?.slice(0, 16).replace('T', ' ')}</span>
+                  <span className="text-slate-500 text-xs">{formatDateTime(c.created_at)}</span>
                   <p className="text-slate-200">{c.body}</p>
                 </div>
               )
@@ -1173,10 +1174,10 @@ export default function LessonsLearnedPage() {
                 <td className="px-4 py-2 text-xs">
                   {l.target_date ? (
                     <span className={l.target_overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                      {l.target_date.slice(0, 10)}{l.target_overdue && ' ⚠'}
+                      {formatDateShort(l.target_date)}{l.target_overdue && ' ⚠'}
                     </span>
                   ) : (
-                    <span className="text-slate-600">—</span>
+                    <span className="text-slate-600">-</span>
                   )}
                 </td>
                 <td className="px-4 py-2">

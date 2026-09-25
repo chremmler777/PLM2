@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import { formatDate } from '../lib/format';
 import { useTemplates, useDepartments, useCreateTemplate, useUpdateTemplate, useDeactivateTemplate } from '../hooks/queries/useWorkflows';
 import { WfTemplate, WfTemplateSave, WfStep, WfStage, Department } from '../types/workflow';
 import * as workflowApi from '../api/workflows';
@@ -328,7 +329,7 @@ export default function WorkflowDesignerPage() {
                   />
                   {selectedTemplate && (
                     <div className="text-xs text-slate-400 mt-3">
-                      v{selectedTemplate.version} • Updated {selectedTemplate.updated_at ? new Date(selectedTemplate.updated_at).toLocaleDateString() : 'never'}
+                      v{selectedTemplate.version} • Updated {selectedTemplate.updated_at ? formatDate(selectedTemplate.updated_at) : 'never'}
                     </div>
                   )}
                 </div>

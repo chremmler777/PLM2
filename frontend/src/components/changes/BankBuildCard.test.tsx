@@ -155,7 +155,7 @@ describe('BankBuildCard', () => {
     expect(screen.queryByTestId('bank-build-save')).toBeNull()
     const view = screen.getByTestId('bank-build-readonly')
     expect(view.textContent).toContain(t('bankbuild.mode.planned_scrap'))
-    expect(view.textContent).toContain('4.200,00 EUR')
+    expect(view.textContent).toContain('4,200.00 EUR')
     expect(view.textContent).toContain('scrap 380 pcs at Ostrava')
     expect(view.textContent).toContain('sched.max')
     expect(view.textContent).toContain(t('bankbuild.readOnly'))

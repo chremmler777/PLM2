@@ -151,6 +151,12 @@ export default function ImplementationPanel({ changeId }: Props) {
                     <RevisionWorkflowSection
                       revisionId={item.revision_id}
                       revisionName={item.revision_name ?? undefined}
+                      // A task done or the workflow canceled changes the
+                      // progress here and the viewer's open actions.
+                      onChanged={() => {
+                        invalidate();
+                        qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
+                      }}
                     />
                   </div>
                 )}

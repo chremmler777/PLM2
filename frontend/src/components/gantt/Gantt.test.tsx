@@ -62,8 +62,8 @@ describe('Gantt: rendering', () => {
   it('shows row numbers, dd.mm.yy dates, inclusive finish and predecessors', () => {
     setup()
     expect(cell(2, 'row').textContent).toBe('2')
-    expect(cell(1, 'start').textContent).toBe('05.10.26')
-    expect(cell(1, 'end').textContent).toBe('09.10.26')
+    expect(cell(1, 'start').textContent).toBe('5 Oct 26')
+    expect(cell(1, 'end').textContent).toBe('9 Oct 26')
     expect(cell(1, 'duration').textContent).toBe('5d')
     expect(cell(2, 'predecessors').textContent).toBe('1')
   })
@@ -81,7 +81,7 @@ describe('Gantt: rendering', () => {
   it('shows markers in the chart and the header', () => {
     setup({ markers: [{ id: 'rel', date: '2026-10-20', label: 'Release' }] })
     expect(screen.getByTestId('gantt-marker-rel')).toBeTruthy()
-    expect(screen.getByTestId('gantt-marker-label-rel').textContent).toContain('Release 20.10.26')
+    expect(screen.getByTestId('gantt-marker-label-rel').textContent).toContain('Release 20 Oct 26')
   })
 
   it('shows baselines and slip tails', () => {
@@ -212,7 +212,7 @@ describe('Gantt: dragging bars', () => {
     expect(cs().updateTasks).toEqual([{ id: 1, patch: { start: '2026-10-07' } }])
     expect(cs().label).toBe('Move task')
     // Optimistic: the grid shows the new date at once.
-    expect(cell(1, 'start').textContent).toBe('07.10.26')
+    expect(cell(1, 'start').textContent).toBe('7 Oct 26')
   })
 
   it('moves a multi-selection as one block', async () => {
@@ -779,7 +779,7 @@ describe('Gantt: host hooks', () => {
     drag(screen.getByTestId('gantt-bar-shape-1'), 56)
     await new Promise((r) => setTimeout(r, 20))
     expect(onChange).not.toHaveBeenCalled()
-    expect(cell(1, 'start').textContent).toBe('05.10.26')
+    expect(cell(1, 'start').textContent).toBe('5 Oct 26')
   })
 
   it('beforeChange can add meta (a reason)', async () => {
@@ -804,7 +804,7 @@ describe('Gantt: host hooks', () => {
       columns={['row', 'name', 'start']} />)
     drag(screen.getByTestId('gantt-bar-shape-1'), 56)
     await waitFor(() => expect(onError).toHaveBeenCalledWith('Plan is read-only', expect.anything()))
-    await waitFor(() => expect(cell(1, 'start').textContent).toBe('05.10.26'))
+    await waitFor(() => expect(cell(1, 'start').textContent).toBe('5 Oct 26'))
     expect((screen.getByTestId('gantt-undo') as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -850,7 +850,7 @@ describe('Gantt: task dialog', () => {
     const date = within(dlg).getByLabelText('Constraint date')
     fireEvent.change(date, { target: { value: '20.10.2026' } })
     fireEvent.blur(date)
-    expect((date as HTMLInputElement).value).toBe('20.10.2026')
+    expect((date as HTMLInputElement).value).toBe('20 Oct 2026')
     fireEvent.click(within(dlg).getByTestId('gantt-task-dialog-save'))
     await waitFor(() => expect(onChange).toHaveBeenCalled())
     expect(cs().updateTasks).toEqual([{ id: 3, patch: { constraint: { type: 'snet', date: '2026-10-20' } } }])
@@ -1019,8 +1019,8 @@ describe('Gantt: review fixes', () => {
     drag(screen.getByTestId('gantt-bar-shape-3'), 28)
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(onError).toHaveBeenCalledWith('refused', expect.any(Error)))
-    expect(cell(1, 'start').textContent).toBe('05.10.26')
-    expect(cell(3, 'start').textContent).toBe('16.10.26')
+    expect(cell(1, 'start').textContent).toBe('5 Oct 26')
+    expect(cell(3, 'start').textContent).toBe('16 Oct 26')
     // Undo skips the refused move: it undoes the one that went through.
     fireEvent.click(screen.getByTestId('gantt-undo'))
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(3))
@@ -1251,9 +1251,9 @@ describe('Gantt: read-only (legacy) links', () => {
       tasks: [{ ...base()[0], baselineStart: '2026-10-05', baselineEnd: '2026-10-08', actualStart: '2026-10-05', actualEnd: '2026-10-09' }, base()[1], base()[2]],
     })
     expect(screen.getByTestId('gantt-actual-1')).toBeTruthy()
-    expect(cell(1, 'baselineEnd').textContent).toBe('07.10.26')
+    expect(cell(1, 'baselineEnd').textContent).toBe('7 Oct 26')
     expect(cell(1, 'variance').textContent).toBe('+2d')
-    expect(cell(1, 'actualEnd').textContent).toBe('09.10.26')
+    expect(cell(1, 'actualEnd').textContent).toBe('9 Oct 26')
   })
 })
 

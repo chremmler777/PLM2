@@ -33,7 +33,7 @@ describe('InformMotherPlant', () => {
     wrap(<InformMotherPlant change={change({ plan_published_at: '2026-09-12T10:00:00', plan_published_by_name: 'Paula PM' })}
       canInform timingValidated />)
     expect(screen.getByTestId('timing-mother-informed').textContent)
-      .toContain('KTX Weissenburg informed of the timing 12.09.2026 by Paula PM')
+      .toContain('KTX Weissenburg informed of the timing 12 Sep 2026 by Paula PM')
     expect(screen.getByTestId('timing-inform-mother-button').textContent).toBe('Inform KTX Weissenburg again')
   })
 

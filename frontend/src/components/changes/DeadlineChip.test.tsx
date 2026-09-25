@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { DeadlineChip } from './DeadlineChip'
-import { addDaysIso, todayIso } from '../../lib/format'
+import { addDaysIso, formatDate, todayIso } from '../../lib/format'
 
 describe('DeadlineChip', () => {
   afterEach(cleanup)
@@ -32,13 +32,12 @@ describe('DeadlineChip', () => {
     const chip = screen.getByTestId('deadline-chip')
     expect(chip.textContent).not.toMatch(/over/)
   })
-  it('counts a plain date in calendar days and titles it dd.mm.yyyy', () => {
+  it('counts a plain date in calendar days and titles it d MMM yyyy', () => {
     const tomorrow = addDaysIso(todayIso(), 1)
     render(<DeadlineChip date={tomorrow} state="on_track" />)
     const chip = screen.getByTestId('deadline-chip')
     expect(chip.textContent).toContain('1d')
-    const [y, m, d] = tomorrow.split('-')
-    expect(chip.getAttribute('title')).toBe(`${d}.${m}.${y}`)
+    expect(chip.getAttribute('title')).toBe(formatDate(tomorrow))
   })
   it('reads as a sentence for a named deadline', () => {
     render(<DeadlineChip date={addDaysIso(todayIso(), 5)} state="on_track" kind="release" />)

@@ -48,7 +48,7 @@ describe('CostingSheetBar', () => {
     wrap(<CostingSheetBar changeId={7} editable />)
     const banner = await screen.findByTestId('costing-stale-banner')
     expect(banner.textContent).toContain('Cost sheet v2 is older than 12 months')
-    expect(banner.textContent).toContain('01.07.2026')
+    expect(banner.textContent).toContain('1 Jul 2026')
     expect(screen.getByTestId('costing-sheet-source').textContent)
       .toBe('Priced from cost sheet v2 (Toccoa, USD)')
     const pick = screen.getByTestId('costing-machine-class') as HTMLSelectElement
@@ -74,11 +74,11 @@ describe('CostingSheetBar', () => {
     } as unknown as Summation
     wrap(<CostingSheetBar changeId={7} editable summation={summation} />)
     expect((await screen.findByTestId('costing-totals-by-currency')).textContent)
-      .toContain('120,00 EUR · 100,00 USD')
+      .toContain('120.00 EUR · 100.00 USD')
     expect(screen.queryByTestId('costing-summation-warnings')).toBeNull()
     expect(screen.queryByTestId('costing-stale-banner')).toBeNull()
     expect(screen.getByTestId('costing-totals-by-currency').textContent)
-      .toContain('120,00 EUR · 100,00 USD')
+      .toContain('120.00 EUR · 100.00 USD')
   })
 
   it('says so when no version is valid today', async () => {

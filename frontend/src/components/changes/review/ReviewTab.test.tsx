@@ -82,6 +82,8 @@ describe('ReviewTab', () => {
     fireEvent.click(screen.getByTestId('escalate-confirm'))
     await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['changes'] }))
     expect(spy).toHaveBeenCalledWith({ queryKey: ['change', 9] })
+    // The My Tasks list's own key (MyTasksPage, useOpenTaskCount).
+    expect(spy).toHaveBeenCalledWith({ queryKey: ['change-my-tasks'] })
   })
 
   it('needs a note to escalate without a reported impact', async () => {

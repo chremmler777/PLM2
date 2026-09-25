@@ -20,9 +20,13 @@ import { WfDecision } from '../../types/workflow';
 interface Props {
   revisionId: number;
   revisionName?: string;
+  /** Called after a task was completed, the workflow canceled or started:
+   *  the owner refreshes what depends on it (a change's implementation
+   *  progress and the viewer's open actions). */
+  onChanged?: () => void;
 }
 
-export default function RevisionWorkflowSection({ revisionId, revisionName }: Props) {
+export default function RevisionWorkflowSection({ revisionId, revisionName, onChanged }: Props) {
   const { data: instance, isLoading } = useRevisionWorkflow(revisionId);
   const completeMutation = useCompleteTask(instance?.id ?? 0, revisionId);
   const cancelMutation = useCancelWorkflow(instance?.id ?? 0, revisionId);
@@ -34,14 +38,16 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
     completeMutation.mutate(
       { taskId, data: { decision, notes } },
       {
-        onSuccess: () =>
+        onSuccess: () => {
           toast.success(
             decision === 'approved'
               ? 'Task approved'
               : decision === 'waived'
                 ? 'Task waived'
                 : 'Task rejected',
-          ),
+          );
+          onChanged?.();
+        },
         // The backend says why (not your department, a later stage, ...).
         onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to complete task')),
       },
@@ -55,6 +61,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
         onSuccess: () => {
           setConfirmCancel(false);
           toast.success('Workflow canceled');
+          onChanged?.();
         },
         onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to cancel workflow')),
       },
@@ -95,6 +102,7 @@ export default function RevisionWorkflowSection({ revisionId, revisionName }: Pr
           onStarted={() => {
             setShowStartModal(false);
             toast.success('Workflow started');
+            onChanged?.();
           }}
           onCancel={() => setShowStartModal(false)}
         />

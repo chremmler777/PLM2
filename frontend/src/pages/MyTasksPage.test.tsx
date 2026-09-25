@@ -339,7 +339,7 @@ describe('MyTasksPage one list (spec §16)', () => {
     await screen.findByText('GB-CM-0007')
     expect(screen.getAllByText('GB-CM-0007')).toHaveLength(1)
     // The earlier, overdue date wins.
-    expect(screen.getByText('01.09.2026')).toBeDefined()
+    expect(screen.getByText('1 Sep 2026')).toBeDefined()
   })
 
   it('reads the stage from stage_label, then stage, then status', async () => {
@@ -368,8 +368,8 @@ describe('MyTasksPage one list (spec §16)', () => {
     const stages = screen.getAllByTestId('task-stage').map((e) => e.textContent)
     expect(stages[0]).toBe('Captured')
     expect(stages).toContain('Costing')
-    expect(screen.getByText('20.11.2026')).toBeDefined()
-    expect(screen.getByText('02.10.2026')).toBeDefined()
+    expect(screen.getByText('20 Nov 2026')).toBeDefined()
+    expect(screen.getByText('2 Oct 2026')).toBeDefined()
     const rows = screen.getAllByTestId('task-row')
     expect(rows[0].textContent).toContain('GB-CM-0008')
   })

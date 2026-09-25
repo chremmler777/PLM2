@@ -87,7 +87,7 @@ describe('mother-plant flow helpers', () => {
     </QueryClientProvider>)
     fireEvent.click(screen.getByTestId('next-info-send'))
     expect(onGo).toHaveBeenCalledWith('mother')
-    expect(screen.getByTestId('mother-plant-sop').textContent).toBe('SOP from KTX Weissenburg 01.12.2026')
+    expect(screen.getByTestId('mother-plant-sop').textContent).toBe('SOP from KTX Weissenburg 1 Dec 2026')
     expect(screen.getByTestId('mother-plant-origin').textContent).toBe('From KTX Weissenburg · WUG-4711')
   })
 

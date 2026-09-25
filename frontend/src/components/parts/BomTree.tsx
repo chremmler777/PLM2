@@ -4,6 +4,7 @@
  */
 import { useState } from 'react';
 import RevisionBadge, { revisionLabel } from './RevisionBadge';
+import { formatNumber } from '../../lib/format';
 
 export interface BomNode {
   part_id: number;
@@ -31,9 +32,7 @@ export interface BomLine {
   child: BomNode | null;
 }
 
-function fmt(n: number) {
-  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
-}
+const fmt = (n: number) => formatNumber(n);
 
 function Line({ line, depth, onOpenPart }: { line: BomLine; depth: number; onOpenPart?(id: number): void }) {
   const [open, setOpen] = useState(depth < 1);

@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react';
+import { formatDate } from '../../lib/format';
 import { WfTemplate } from '../../types/workflow';
 import { rasicColors } from '../../lib/constants';
 
@@ -102,7 +103,7 @@ export default function WorkflowFlowChart({ template, versions = [] }: WorkflowF
                   <span className="mr-2">• {currentVersionInfo.change_note}</span>
                 )}
                 {currentVersionInfo.changed_at && (
-                  <span>{new Date(currentVersionInfo.changed_at).toLocaleDateString()}</span>
+                  <span>{formatDate(currentVersionInfo.changed_at)}</span>
                 )}
               </div>
             )}

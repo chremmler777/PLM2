@@ -89,7 +89,7 @@ describe('NeedsInfoCard states', () => {
       .toContain(`${t('concern.solvedByName')} Pia PM: price agreed`)
     fireEvent.click(screen.getByTestId('needs-info-summary-1'))
     expect(screen.getByTestId('needs-info-solved-by-1').textContent)
-      .toBe(`${t('concern.solvedByName')} Pia PM · 03.08.2026`)
+      .toBe(`${t('concern.solvedByName')} Pia PM · 3 Aug 2026`)
   })
 
   it('names the asker as solver when the asker closed it', () => {

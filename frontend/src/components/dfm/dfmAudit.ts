@@ -5,6 +5,7 @@
  * formatters (local date/time, file size, a short sha256 prefix).
  * Mirrors docs/superpowers/specs/2026-09-24-dfm-audit-api.md.
  */
+import { formatDateTime } from '../../lib/format';
 import { KIND_LABELS, PARTY_LABELS, type DfmAuditAction, type DfmAuditEvent, type DfmParty } from '../../api/dfm';
 
 export type DfmAuditGroup = 'all' | 'messages' | 'files' | 'topic' | 'views';
@@ -45,11 +46,7 @@ export const AUDIT_ACTION_STYLE: Record<DfmAuditAction, { label: string; badge: 
 
 /** "24 Sep 2026, 11:15" from a UTC-without-offset backend timestamp, in the viewer's local time. */
 export function auditLocalTime(iso: string): string {
-  const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  const date = d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  return `${date}, ${time}`;
+  return formatDateTime(iso);
 }
 
 export function auditFileSize(bytes: number | undefined): string {

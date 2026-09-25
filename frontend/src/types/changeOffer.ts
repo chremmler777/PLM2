@@ -125,7 +125,8 @@ export interface OfferData {
 
 export interface OfferTotals {
   base: number
-  factors: { key: string; label: string; amount: number }[]
+  /** show: printed as its own row; hidden ones are folded into the CBD rows. */
+  factors: { key: string; label: string; amount: number; show?: boolean }[]
   risks_total: number
   scrap: number
   free: number

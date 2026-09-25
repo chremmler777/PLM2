@@ -39,7 +39,7 @@ import {
 } from './layout'
 import { THEMES, resolveTheme, themeVars, v, type GanttKindStyle, type GanttThemeName } from './theme'
 import { useSaveQueue, type SaveQueueOptions } from './useSaveQueue'
-import { readDateInput } from './dateText'
+import { DATE_EXAMPLE, readDateInput } from './dateText'
 
 export interface GanttRights {
   /** Add, delete, indent, reorder, duplicate, rename. Default true. */
@@ -464,7 +464,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     const width = () => cols.reduce((n, c) => n + c.width, 0)
     // The task name keeps at least 180 px (it is what people read).
     if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(Math.min(180, c.width), c.width - (width() - max)) } : c))
-    // Then every column narrows towards its minimum width (dd.mm.yy dates stay readable).
+    // Then every column narrows towards its minimum width (compact dates stay readable).
     if (width() > max) {
       const room = cols.reduce((n, c) => n + (c.minWidth != null ? c.width - c.minWidth : 0), 0)
       const need = Math.min(room, width() - max)
@@ -1101,12 +1101,12 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
       case 'lane': patch({ lane: val || null }, 'Change lane'); return
       case 'start':
         if (val === '') { notifyError('Start is required'); return }
-        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
+        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? `Type the date as ${DATE_EXAMPLE}`); return }
         if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         patch({ start: val }, 'Change start'); return
       case 'end': {
         if (val === '') return
-        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
+        if (!isIsoDay(val)) { notifyError(readDateInput(val).error ?? `Type the date as ${DATE_EXAMPLE}`); return }
         if (!inYearRange(val)) { notifyError(`Dates must lie between ${LIMITS.minYear} and ${LIMITS.maxYear}`); return }
         if (t.duration === 0) { patch({ start: val }, 'Move milestone'); return }
         const s = normStart(cal, toDay(t.start))
@@ -1122,7 +1122,7 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
         patch({ duration: n }, 'Change duration'); return
       }
       case 'actualStart': case 'actualEnd': {
-        if (val !== '' && !isIsoDay(val)) { notifyError(readDateInput(val).error ?? 'Type the date as dd.mm.yyyy'); return }
+        if (val !== '' && !isIsoDay(val)) { notifyError(readDateInput(val).error ?? `Type the date as ${DATE_EXAMPLE}`); return }
         if (val && val > toIso(todayDay() + 1)) { notifyError('Actual dates cannot lie in the future'); return }
         patch(col.key === 'actualStart' ? { actualStart: val || null } : { actualEnd: val || null }, 'Actual dates'); return
       }

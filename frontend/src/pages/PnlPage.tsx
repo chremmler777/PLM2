@@ -14,7 +14,7 @@ import client from '../api/client';
 import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
-import { formatMoney } from '../lib/format';
+import { formatMoney, formatPercent } from '../lib/format';
 import DateInput from '../components/gantt/DateInput';
 import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
 import type {
@@ -26,7 +26,7 @@ const fmtMoney = (v: number | null | undefined, currency?: string | null) =>
   v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, currency);
 
 const fmtPct = (v: number | null | undefined) =>
-  v === null || v === undefined ? '-' : `${v.toFixed(1)}%`;
+  formatPercent(v);
 
 type SortKey = 'change_number' | 'title' | 'status' | 'offer_revenue' | 'planned_cost'
   | 'actual_cost' | 'planned_margin' | 'actual_margin' | 'variance' | 'slip_days';

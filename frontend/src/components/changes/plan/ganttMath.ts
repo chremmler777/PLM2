@@ -6,9 +6,10 @@
  * out at the edges only, so no timezone ever touches the arithmetic.
  */
 import type { BulkDateUpdate, TaskKind, TaskOut } from '../../../types/changePlan'
+import { MONTHS } from '../../../lib/format'
+import { fmtDay } from '../../gantt/engine/calendar'
 
 const MS_DAY = 86_400_000
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export function toDay(iso: string): number {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
@@ -56,14 +57,8 @@ export function ymd(day: number): { y: number; m: number; d: number } {
   return { y: dt.getUTCFullYear(), m: dt.getUTCMonth(), d: dt.getUTCDate() }
 }
 
-/** "5 Oct 26". */
-export function fmtDay(day: number | null | undefined): string {
-  if (day == null) return '-'
-  const { y, m, d } = ymd(day)
-  return `${d} ${MONTHS[m]} ${String(y).slice(2)}`
-}
-
-export const fmtIso = (iso: string | null | undefined) => (iso ? fmtDay(toDay(iso)) : '-')
+/** "5 Oct 26" (lib/format formatDateShort, via the Gantt engine). */
+export { fmtDay, fmtIso } from '../../gantt/engine/calendar'
 
 // ---------------------------------------------------------------- tasks
 

@@ -65,6 +65,13 @@ interface Props {
   /** A "Decide deviation #n" action or the pending-deviations line was
       clicked: the page opens the decision panel on that deviation. */
   onDecideDeviation?: (deviationId?: number) => void
+  /** Target statuses of the change's transition deviations by state. A gate
+      is a soft guard on the backend: an approved deviation to its target
+      lets the held step through, so the step stays live. */
+  deviationTargets?: { approved: string[]; pending: string[] }
+  /** "Ask for a deviation" on a gate held step: the page asks for one to
+      that status (the gate's key names what holds it). */
+  onAskDeviation?: (to: ChangeStatus, gateKey: GateKey) => void
 }
 
 /** One next step: a place to go and do the work, or a status to move to. */
@@ -211,7 +218,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
 export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
@@ -272,7 +279,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const tabName = (tb: string) => changeTabLabel(tb, change.customer_relevant, change.status, change.mother_plant_name)
 
   const gateRow = (g: Gate, blocking: boolean) => {
-    // In words: "Release gate not decided yet", "Release gate answered No".
+    // In words: "Release gate not answered Yes (it is n/a)", "Release gate answered No".
     const label = (
       <>
         {blocking && '⚠ '}{t('gate.' + g.gate_key)} {t('cockpit.gateWord')}:{' '}
@@ -313,9 +320,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // the gate's reason, and the way to D1 is right under it.
   const gateHolding = (to: ChangeStatus): Gate | undefined =>
     gates.find((g) => GATE_TARGET_STATUS[g.gate_key] === to && g.decision !== 'yes')
+  // The gate is a soft guard (ChangeService._guard): an approved transition
+  // deviation to its target lets the step through.
+  const deviationCovers = (to: string) => deviationTargets?.approved.includes(to) ?? false
+  const deviationAsked = (to: string) => deviationTargets?.pending.includes(to) ?? false
+  const gateState = (g: Gate) => t(g.decision === 'no' ? 'cockpit.gateStateNo' : 'cockpit.gateStateOpen')
   const gateWhy = (g: Gate, mine = true) => t(mine ? 'cockpit.gateHolds' : 'cockpit.gateHoldsNotYours')
     .replace('{gate}', t('gate.' + g.gate_key))
-    .replace('{state}', t(g.decision === 'no' ? 'cockpit.gateStateNo' : 'cockpit.gateStateOpen'))
+    .replace('{state}', gateState(g))
   const backupGroup = (
     <div data-testid="backup-actions">
       <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('actions.asBackup')}</h3>
@@ -501,7 +513,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ))}
             {buttons.map((st) => {
               const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
-              const gate = st.kind === 'advance' ? gateHolding(st.to) : undefined
+              const gate = st.kind === 'advance' && !deviationCovers(st.to) ? gateHolding(st.to) : undefined
               const denied = st.kind === 'action' ? null : needs(key) ?? (gate ? gateWhy(gate) : null)
               // While the step waits there is no primary button at all.
               const primary = steps[0] === st
@@ -522,18 +534,36 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             {/* The gate that holds a step, with the way to where it is decided. */}
             {[...new Map(buttons.flatMap((st) => {
               const g = st.kind === 'advance' ? gateHolding(st.to) : undefined
-              return g ? [[g.gate_key, g] as const] : []
-            })).values()].map((g) => {
+              return g && st.kind === 'advance' ? [[g.gate_key, { g, to: st.to }] as const] : []
+            })).values()].map(({ g, to }) => {
+              if (deviationCovers(to)) {
+                return (
+                  <p key={g.gate_key} data-testid={`next-gate-${g.gate_key}`} className="text-xs text-emerald-300">
+                    ✓ {t('cockpit.gateDeviationApproved').replace('{gate}', t('gate.' + g.gate_key))
+                      .replace('{state}', gateState(g))}
+                  </p>
+                )
+              }
               const canJump = !!onResolveGate && canSeeGovernance
               return (
-                <p key={g.gate_key} data-testid={`next-gate-${g.gate_key}`} className="text-xs text-amber-300">
+                <div key={g.gate_key} data-testid={`next-gate-${g.gate_key}`} className="text-xs text-amber-300">
                   {canJump ? (
                     <button type="button" className="text-left hover:underline decoration-dotted underline-offset-2"
                       onClick={() => onResolveGate!(g.gate_key)} title={t('cockpit.resolveGate')}>
                       ⛔ {gateWhy(g)} <span className="opacity-70">→ D1</span>
                     </button>
-                  ) : <>⛔ {gateWhy(g, false)}</>}
-                </p>
+                  ) : <p>⛔ {gateWhy(g, false)}</p>}
+                  {deviationAsked(to) ? (
+                    <p className="mt-1 text-slate-400">⏳ {t('cockpit.gateDeviationPending')}</p>
+                  ) : onAskDeviation ? (
+                    <button type="button" data-testid={`next-ask-deviation-${to}`}
+                      className="mt-1 block text-left text-amber-200 hover:underline decoration-dotted underline-offset-2"
+                      title={t('cockpit.askDeviationHint')}
+                      onClick={() => onAskDeviation(to, g.gate_key)}>
+                      {t('cockpit.askDeviation')}
+                    </button>
+                  ) : null}
+                </div>
               )
             })}
             {(() => {

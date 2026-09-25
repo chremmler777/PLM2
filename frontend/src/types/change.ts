@@ -512,7 +512,8 @@ export interface Summation {
   mixed_currency?: boolean;
   unpriced_lines?: { position_id: number; department_id: number; label: string; kind: string;
     quantity: number; unit: string; reason?: string | null; message: string }[];
-  warnings?: { code: string; message: string }[];
+  /** no_rate_department names its department_id. */
+  warnings?: { code: string; message: string; department_id?: number | null }[];
   cost_sheet_versions_used?: number[];
   cost_sheet_current_version?: number | null;
   by_plant: PlantRollup[];

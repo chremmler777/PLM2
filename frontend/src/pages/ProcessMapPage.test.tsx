@@ -3,6 +3,9 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import ProcessMapPage from './ProcessMapPage'
 
+const authMock = vi.hoisted(() => ({ current: { role: 'viewer' as string | null } }))
+vi.mock('../contexts/AuthContext', () => ({ useAuth: () => authMock.current }))
+
 // The ten stages of docs/ECR_PROCESS_MAP.md, in order, as the chart names them.
 const STAGES: [string, string][] = [
   ['captured', 'Capture'],
@@ -20,7 +23,11 @@ const STAGES: [string, string][] = [
 const wrap = () => render(<MemoryRouter><ProcessMapPage /></MemoryRouter>)
 
 describe('ProcessMapPage', () => {
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    authMock.current = { role: 'viewer' }
+    window.localStorage.removeItem('plm2.procmap.taskKeys')
+  })
 
   it('draws a box per stage in the chart, named and badged', () => {
     wrap()
@@ -92,6 +99,8 @@ describe('ProcessMapPage', () => {
   })
 
   it('draws the customer-question loop back into scoping', () => {
+    authMock.current = { role: 'admin' }
+    window.localStorage.setItem('plm2.procmap.taskKeys', 'on')
     wrap()
     expect(screen.getByTestId('procmap-node-obtain-info').textContent).toContain('obtain_info')
     expect(screen.getByTestId('procmap-node-customer-answer').textContent)
@@ -199,8 +208,23 @@ describe('ProcessMapPage', () => {
     expect(screen.getByTestId('procmap-rail-release')).toBeTruthy()
   })
 
-  it('names the task each stage raises and the artifacts it owes', () => {
+  it('keeps task keys off the chart unless an admin turns them on', () => {
+    authMock.current = { role: 'viewer' }
     wrap()
+    expect(screen.queryByTestId('procmap-task-keys')).toBeNull()
+    expect(screen.getByTestId('procmap-node-costing').textContent).not.toContain('costing_input')
+    // Detail that is not a task key stays for everybody.
+    expect(screen.getByTestId('procmap-mp-inform').textContent).toContain('task: read and understood')
+    expect(screen.getByTestId('procmap-node-negotiation').textContent).toContain('valid 30 days from receipt')
+    expect(screen.queryByTestId('procmap-sources')).toBeNull()
+  })
+
+  it('names the task each stage raises and the artifacts it owes', () => {
+    authMock.current = { role: 'admin' }
+    window.localStorage.clear()
+    wrap()
+    fireEvent.click(screen.getByTestId('procmap-task-keys'))
+    expect(screen.getByTestId('procmap-sources')).toBeTruthy()
     expect(screen.getByTestId('procmap-node-captured').textContent).toContain('task: kickoff')
     expect(screen.getByTestId('procmap-node-scoping').textContent)
       .toContain('scoping_wrapup · impact_confirm')

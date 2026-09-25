@@ -4,7 +4,7 @@
  * when the value really changed. Escape restores the saved value.
  */
 import { useEffect, useState } from 'react'
-import { formatMoney } from '../../lib/format'
+import { formatMoney, formatNumber } from '../../lib/format'
 import type { CostSheetRow } from '../../types/costSheet'
 import { type Column, type SheetContext, deptName, plantName } from './columns'
 
@@ -13,6 +13,7 @@ const INPUT =
   'placeholder:text-slate-600 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/40 ' +
   'disabled:opacity-40 disabled:cursor-not-allowed'
 
+/** The raw edit value: no grouping, so it reads back through parse() unchanged. */
 function toInput(v: unknown, money = false): string {
   if (v === null || v === undefined) return ''
   return money && typeof v === 'number' ? v.toFixed(2) : String(v)
@@ -35,7 +36,7 @@ export function displayValue(col: Column, row: CostSheetRow, ctx: SheetContext):
     case 'money':
       return v === null || v === undefined ? '-' : formatMoney(v as number, (row.currency as string) || 'EUR')
     case 'number':
-      return v === null || v === undefined ? '-' : (v as number).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+      return v === null || v === undefined ? '-' : formatNumber(v as number)
     case 'department':
     case 'department_optional':
       return deptName(ctx, v) || col.empty || '-'

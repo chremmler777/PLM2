@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import { formatDate } from '../../lib/format';
 import { WfInstance, WfInstanceTask, WfDecision } from '../../types/workflow';
 import { rasicColors, instanceStatusColors } from '../../lib/constants';
 import { t } from '../../i18n/cmLabels';
@@ -43,7 +44,7 @@ export default function WorkflowProgress({
   const statusLabel = instance.status.charAt(0).toUpperCase() + instance.status.slice(1);
   const statusClass = instanceStatusColors[instance.status] ?? 'bg-slate-600 text-white';
 
-  const startedDate = new Date(instance.started_at).toLocaleDateString();
+  const startedDate = formatDate(instance.started_at);
 
   return (
     <div className="space-y-4">
@@ -298,7 +299,7 @@ function TaskRow({
           <span
             className={`ml-2 ${task.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}`}
           >
-            {new Date(task.due_date).toLocaleDateString()}
+            {formatDate(task.due_date)}
             {task.overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
           </span>
         )}

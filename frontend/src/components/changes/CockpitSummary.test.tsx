@@ -72,7 +72,7 @@ describe('CockpitSummary', () => {
       pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
     // In words, no "NA" jargon.
-    expect(screen.getByText(/Feasibility gate: not decided yet/)).toBeDefined()
+    expect(screen.getByText(/Feasibility gate: not answered Yes \(it is n\/a\)/)).toBeDefined()
     expect(screen.queryByText(/\bNA\b/)).toBeNull()
     const feasibilityRow = screen.getByText(/Feasibility/).closest('li')
     expect(feasibilityRow?.textContent).toContain('⚠')
@@ -589,7 +589,7 @@ describe('CockpitSummary early stages (spec §16)', () => {
       required_by_date: '2026-10-01', deadline_state: 'on_track' })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByTestId('deadline-chip')).toBeNull()
-    expect(screen.getByTestId('status-dates').textContent).toBe('Created 01.07.2026 · last change 01.07.2026')
+    expect(screen.getByTestId('status-dates').textContent).toBe('Created 1 Jul 2026 · last change 1 Jul 2026')
   })
 
   it('lists a missing lead among the kickoff needs', () => {
@@ -621,7 +621,7 @@ describe('CockpitSummary gate holds the next step (final walk P2-5)', () => {
       onAdvance={onAdvance} advancing={false} onResolveGate={onResolveGate} />))
     const step = screen.getByTestId('next-to-in_implementation') as HTMLButtonElement
     expect(step.disabled).toBe(true)
-    expect(step.title).toBe('Release gate not decided yet: decide it on D1 first')
+    expect(step.title).toBe('Release gate not answered Yes (it is n/a): decide it on D1 first')
     fireEvent.click(step)
     expect(onAdvance).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('next-gate-release').querySelector('button')!)
@@ -662,5 +662,45 @@ describe('CockpitSummary deviation decisions (final walk P2-3)', () => {
     expect(onAction).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId('blocked-pending-deviations').querySelector('button')!)
     expect(onDecideDeviation).toHaveBeenLastCalledWith()
+  })
+})
+
+describe('CockpitSummary gate held step and deviations (review M1)', () => {
+  afterEach(cleanup)
+  const approved = () => change({ status: 'approved', timing_validated_at: '2026-09-20T00:00:00', customer_relevant: true })
+
+  it('an approved deviation covering the step keeps it live (the gate is a soft guard)', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary change={approved()}
+      gates={[{ gate_key: 'release', decision: 'no' }]} pendingDeviations={0}
+      deviationTargets={{ approved: ['in_implementation'], pending: [] }}
+      onAdvance={onAdvance} advancing={false} onResolveGate={() => {}} />))
+    const step = screen.getByTestId('next-to-in_implementation') as HTMLButtonElement
+    expect(step.disabled).toBe(false)
+    fireEvent.click(step)
+    expect(onAdvance).toHaveBeenCalledWith('in_implementation')
+    expect(screen.getByTestId('next-gate-release').textContent).toContain('approved deviation')
+    expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()
+  })
+
+  it('offers "Ask for a deviation" next to the D1 link on a gate held step', () => {
+    const onAskDeviation = vi.fn()
+    render(wrap(<CockpitSummary change={approved()}
+      gates={[{ gate_key: 'release', decision: 'na' }]} pendingDeviations={0}
+      deviationTargets={{ approved: [], pending: [] }} onAskDeviation={onAskDeviation}
+      onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
+    expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('next-ask-deviation-in_implementation'))
+    expect(onAskDeviation).toHaveBeenCalledWith('in_implementation', 'release')
+  })
+
+  it('a pending deviation is named instead of a second ask', () => {
+    render(wrap(<CockpitSummary change={approved()}
+      gates={[{ gate_key: 'release', decision: 'na' }]} pendingDeviations={1}
+      deviationTargets={{ approved: [], pending: ['in_implementation'] }} onAskDeviation={() => {}}
+      onAdvance={() => {}} advancing={false} onResolveGate={() => {}} />))
+    expect((screen.getByTestId('next-to-in_implementation') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('next-ask-deviation-in_implementation')).toBeNull()
+    expect(screen.getByTestId('next-gate-release').textContent).toContain('waits for its decision')
   })
 })

@@ -211,28 +211,28 @@ describe('SummationView totals come from the backend, counted once', () => {
   });
   afterEach(cleanup);
 
-  it('shows 13.629,50 USD including the positions, and the positions as a part of it', async () => {
+  it('shows 13,629.50 USD including the positions, and the positions as a part of it', async () => {
     wrap(<SummationView changeId={3} status="closed" />);
     expect((await screen.findByTestId('summation-grand-with-positions')).textContent)
-      .toBe('13.629,50 USD');
+      .toBe('13,629.50 USD');
     // the cost lines alone: nothing beyond the positions
-    expect(screen.getByTestId('summation-total').textContent).toBe('0,00 USD');
-    expect(screen.getByTestId('summation-positions-total').textContent).toBe('13.629,50 USD');
+    expect(screen.getByTestId('summation-total').textContent).toBe('0.00 USD');
+    expect(screen.getByTestId('summation-positions-total').textContent).toBe('13,629.50 USD');
   });
 
   it('keeps the department total the backend row total; positions are a part of it', async () => {
     wrap(<SummationView changeId={3} status="closed" />);
-    expect((await screen.findByTestId('summation-dept-total-5')).textContent).toBe('1.129,50 USD');
-    expect(screen.getByTestId('summation-dept-positions-5').textContent).toBe('1.129,50 USD');
-    expect(screen.getByTestId('summation-dept-total-6').textContent).toBe('12.500,00 USD');
-    expect(screen.getByTestId('summation-positions-dept-total-6').textContent).toBe('12.500,00 USD');
+    expect((await screen.findByTestId('summation-dept-total-5')).textContent).toBe('1,129.50 USD');
+    expect(screen.getByTestId('summation-dept-positions-5').textContent).toBe('1,129.50 USD');
+    expect(screen.getByTestId('summation-dept-total-6').textContent).toBe('12,500.00 USD');
+    expect(screen.getByTestId('summation-positions-dept-total-6').textContent).toBe('12,500.00 USD');
   });
 
   it('shows each position at its backend amount: money plus priced hours', async () => {
     wrap(<SummationView changeId={3} status="closed" />);
     // an effort line shows its value, not the frontend's effective cost
     expect((await screen.findByTestId('summation-position-amount-11')).textContent)
-      .toBe('172,00 USD');
-    expect(screen.getByTestId('summation-position-amount-12').textContent).toBe('957,50 USD');
+      .toBe('172.00 USD');
+    expect(screen.getByTestId('summation-position-amount-12').textContent).toBe('957.50 USD');
   });
 });

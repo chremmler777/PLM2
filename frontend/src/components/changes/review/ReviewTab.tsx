@@ -39,7 +39,7 @@ export default function ReviewTab({ change, onGoImpact }: { change: ChangeReques
       // Escalation gives the change the ordinary ECR title and the project's
       // PM as lead: every list naming it must re-read, not only this page.
       qc.invalidateQueries({ queryKey: ['changes'] })
-      qc.invalidateQueries({ queryKey: ['my-tasks'] })
+      qc.invalidateQueries({ queryKey: ['change-my-tasks'] })
       toast.success('Escalated to a full ECR')
     },
     onError: (e) => toast.error(errDetail(e) ?? 'Could not escalate'),

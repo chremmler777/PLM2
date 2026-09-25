@@ -4,8 +4,8 @@ import { formatDateInput, parseDateInput, readDateInput } from './dateText'
 import DateInput from './DateInput'
 
 describe('date text (G19: no locale mm/dd)', () => {
-  it('formats ISO as dd.mm.yyyy', () => {
-    expect(formatDateInput('2026-10-05')).toBe('05.10.2026')
+  it('formats ISO as d MMM yyyy', () => {
+    expect(formatDateInput('2026-10-05')).toBe('5 Oct 2026')
     expect(formatDateInput('')).toBe('')
     expect(formatDateInput('nonsense')).toBe('')
   })
@@ -17,6 +17,16 @@ describe('date text (G19: no locale mm/dd)', () => {
     expect(parseDateInput('10/05')).toBeNull()
     expect(parseDateInput('')).toBeNull()
   })
+  it('reads month names: 25 Sep 2026, 25 sep 26, 25-Sep-2026, 5 September 2026 (WP1)', () => {
+    expect(parseDateInput('25 Sep 2026')).toBe('2026-09-25')
+    expect(parseDateInput('25 sep 26')).toBe('2026-09-25')
+    expect(parseDateInput('25-Sep-2026')).toBe('2026-09-25')
+    expect(parseDateInput('5 September 2026')).toBe('2026-09-05')
+    expect(parseDateInput('5 Sept. 2026')).toBe('2026-09-05')
+    expect(parseDateInput('31 Feb 2026')).toBeNull()
+    expect(parseDateInput('5 Se 2026')).toBeNull()
+    expect(parseDateInput('5 Foo 2026')).toBeNull()
+  })
   it('two-digit years pivot at 70: 00-69 are 20xx, 70-99 are 19xx (review #8)', () => {
     expect(parseDateInput('01.01.00')).toBe('2000-01-01')
     expect(parseDateInput('01.01.69')).toBe('2069-01-01')
@@ -25,7 +35,7 @@ describe('date text (G19: no locale mm/dd)', () => {
     expect(parseDateInput('05-10-2026')).toBe('2026-10-05')
   })
   it('refuses slashes and out-of-range years with a reason', () => {
-    expect(readDateInput('01/02/2026')).toEqual({ iso: null, error: expect.stringContaining('dd.mm.yyyy') })
+    expect(readDateInput('01/02/2026')).toEqual({ iso: null, error: expect.stringContaining('25 Sep 2026') })
     expect(readDateInput('01.01.1899')).toEqual({ iso: null, error: 'The year must be between 1900 and 2200' })
     expect(readDateInput('01.01.2201').iso).toBeNull()
     expect(readDateInput('1899-12-31').error).toContain('1900')
@@ -40,21 +50,21 @@ describe('DateInput', () => {
     const onChange = vi.fn()
     render(<DateInput aria-label="Start" value="2026-10-05" onChange={onChange} />)
     const input = screen.getByLabelText('Start') as HTMLInputElement
-    expect(input.value).toBe('05.10.2026')
+    expect(input.value).toBe('5 Oct 2026')
     fireEvent.change(input, { target: { value: '07.10.2026' } })
     fireEvent.blur(input)
     expect(onChange).toHaveBeenCalledWith('2026-10-07')
     fireEvent.change(input, { target: { value: 'soon' } })
     fireEvent.blur(input)
-    expect(input.value).toBe('05.10.2026')
+    expect(input.value).toBe('5 Oct 2026')
   })
   it('picks a day from the calendar popover and respects max', () => {
     const onChange = vi.fn()
     render(<DateInput aria-label="Actual" value="2026-10-05" max="2026-10-10" onChange={onChange} />)
     fireEvent.click(screen.getByLabelText('Open calendar'))
     expect(screen.getByTestId('date-popover')).toBeTruthy()
-    expect((screen.getByLabelText('20.10.2026') as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByLabelText('08.10.2026'))
+    expect((screen.getByLabelText('20 Oct 2026') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByLabelText('8 Oct 2026'))
     expect(onChange).toHaveBeenCalledWith('2026-10-08')
   })
 })
@@ -89,7 +99,7 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     expect(outer).toHaveBeenCalledTimes(1) // only the Alt+Down; Escape stayed inside
     // from inside the popover too
     fireEvent.keyDown(input, { key: 'ArrowDown', altKey: true })
-    fireEvent.keyDown(screen.getByLabelText('05.10.2026'), { key: 'Escape' })
+    fireEvent.keyDown(screen.getByLabelText('5 Oct 2026'), { key: 'Escape' })
     expect(screen.queryByTestId('date-popover')).toBeNull()
     expect(outer).toHaveBeenCalledTimes(2)
   })
@@ -99,14 +109,14 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     fireEvent.keyDown(screen.getByLabelText('Start'), { key: 'ArrowDown', altKey: true })
     const day = (t: string) => screen.getByLabelText(t)
     await new Promise((r) => requestAnimationFrame(r))
-    expect(document.activeElement).toBe(day('05.10.2026'))
+    expect(document.activeElement).toBe(day('5 Oct 2026'))
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' })
-    expect(day('06.10.2026').getAttribute('tabindex')).toBe('0')
-    fireEvent.keyDown(day('06.10.2026'), { key: 'ArrowDown' })
-    expect(day('13.10.2026').getAttribute('tabindex')).toBe('0')
-    fireEvent.keyDown(day('13.10.2026'), { key: 'PageDown' })
+    expect(day('6 Oct 2026').getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(day('6 Oct 2026'), { key: 'ArrowDown' })
+    expect(day('13 Oct 2026').getAttribute('tabindex')).toBe('0')
+    fireEvent.keyDown(day('13 Oct 2026'), { key: 'PageDown' })
     expect(screen.getByTestId('date-popover').textContent).toContain('Nov 2026')
-    fireEvent.click(day('13.11.2026'))
+    fireEvent.click(day('13 Nov 2026'))
     expect(onChange).toHaveBeenCalledWith('2026-11-13')
   })
 
@@ -116,7 +126,7 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     fireEvent.click(screen.getByLabelText('Open calendar'), { detail: 1 })
     expect(document.activeElement).toBe(input)
     fireEvent.keyDown(input, { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(screen.getByLabelText('05.10.2026'))
+    expect(document.activeElement).toBe(screen.getByLabelText('5 Oct 2026'))
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
     expect(screen.queryByTestId('date-popover')).toBeNull()
     expect(document.activeElement).toBe(input)
@@ -125,7 +135,7 @@ describe('DateInput popover and messages (review #5, #8)', () => {
   it('Tab away from the calendar closes it', () => {
     render(<><DateInput aria-label="Start" value="2026-10-05" onChange={vi.fn()} /><button type="button">next</button></>)
     fireEvent.click(screen.getByLabelText('Open calendar'))
-    fireEvent.blur(screen.getByLabelText('05.10.2026'), { relatedTarget: screen.getByText('next') })
+    fireEvent.blur(screen.getByLabelText('5 Oct 2026'), { relatedTarget: screen.getByText('next') })
     expect(screen.queryByTestId('date-popover')).toBeNull()
   })
 
@@ -144,7 +154,7 @@ describe('DateInput popover and messages (review #5, #8)', () => {
     fireEvent.blur(btn, { relatedTarget: null })
     expect(onChange).toHaveBeenCalledWith('2026-10-09')
     expect(onBlur).toHaveBeenCalledTimes(1)
-    expect(input.value).toBe('09.10.2026')
+    expect(input.value).toBe('9 Oct 2026')
   })
 
   it('Tab from the calendar button to the next field commits too', () => {
@@ -160,14 +170,26 @@ describe('DateInput popover and messages (review #5, #8)', () => {
   it('a slash date or a year out of range keeps the value and says why', () => {
     const { input, onChange } = mount()
     fireEvent.change(input, { target: { value: '01/02/2026' } })
-    expect(screen.getByTestId('date-input-error').textContent).toContain('dd.mm.yyyy')
+    expect(screen.getByTestId('date-input-error').textContent).toContain('25 Sep 2026')
     fireEvent.blur(input)
-    expect(input.value).toBe('05.10.2026')
-    expect(screen.getByTestId('date-input-error').textContent).toContain('kept 05.10.2026')
+    expect(input.value).toBe('5 Oct 2026')
+    expect(screen.getByTestId('date-input-error').textContent).toContain('kept 5 Oct 2026')
     fireEvent.change(input, { target: { value: '01.01.2300' } })
     fireEvent.blur(input)
     expect(screen.getByTestId('date-input-error').textContent).toContain('between 1900 and 2200')
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('echoes the date it read while the text is in another form, and not once it is shown as such', () => {
+    const { input } = mount()
+    expect(screen.queryByTestId('date-input-echo')).toBeNull()
+    fireEvent.change(input, { target: { value: '2026-09-25' } })
+    expect(screen.getByTestId('date-input-echo').textContent).toBe('= 25 Sep 2026')
+    fireEvent.change(input, { target: { value: '25 Sep 2026' } })
+    expect(screen.queryByTestId('date-input-echo')).toBeNull()
+    fireEvent.change(input, { target: { value: '25/09/2026' } })
+    expect(screen.queryByTestId('date-input-echo')).toBeNull()
+    expect(screen.getByTestId('date-input-error')).toBeTruthy()
   })
 
   it('a required field refuses to be cleared', () => {

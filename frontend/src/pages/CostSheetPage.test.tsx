@@ -9,7 +9,7 @@ import SheetCell from '../components/costSheet/SheetCell'
 import { COLUMNS, sortRows, type SheetContext } from '../components/costSheet/columns'
 import { diffCount } from '../components/costSheet/DiffPanel'
 import { costSheetApi } from '../api/costSheet'
-import { addDaysIso, todayIso } from '../lib/format'
+import { addDaysIso, formatDate, todayIso } from '../lib/format'
 
 vi.mock('../api/costSheet', () => ({
   costSheetApi: {
@@ -71,14 +71,13 @@ describe('PublishDialog', () => {
     expect(onPublish).toHaveBeenCalledWith(past, '', true)
   })
 
-  it('shows the date as dd.mm.yyyy and needs no confirmation for a future date', () => {
+  it('shows the date as d MMM yyyy and needs no confirmation for a future date', () => {
     const onPublish = vi.fn()
     const future = addDaysIso(todayIso(), 10)
     render(<PublishDialog open version={2} defaultValidFrom={future} defaultNote={null}
                           latestValidFrom={null} latestVersion={null} changeCount={1} busy={false}
                           onCancel={() => {}} onPublish={onPublish} />)
-    const [y, m, d] = future.split('-')
-    expect((screen.getByLabelText('Valid from') as HTMLInputElement).value).toBe(`${d}.${m}.${y}`)
+    expect((screen.getByLabelText('Valid from') as HTMLInputElement).value).toBe(formatDate(future))
     fireEvent.click(screen.getByRole('button', { name: 'Publish' }))
     expect(onPublish).toHaveBeenCalledWith(future, '', false)
   })

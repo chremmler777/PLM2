@@ -1,22 +1,20 @@
 /** Number, date and chip helpers shared by the offer workspace. */
-import { daysUntil, formatDate, formatMoney } from '../../../lib/format'
+import { daysUntil, formatDate, formatMoney, formatNumber, formatPercent, formatPiecePrice } from '../../../lib/format'
 
-/** 2 decimals + currency code, de-DE grouping: "12.345,50 EUR". */
+/** 2 decimals + currency code: "12,345.50 EUR". */
 export const fmtMoney = formatMoney
 
-/** Piece-price deltas carry 4 decimals. */
+/** Piece-price deltas carry 2 to 4 decimals and a sign on a rise: "+0.4125 EUR". */
 export function fmtPiece(v: number | null | undefined, currency = 'EUR'): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return '-'
-  const f = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
-  return `${v > 0 ? '+' : ''}${f.format(v)} ${currency}`
+  return formatPiecePrice(v, currency, { sign: true })
 }
 
+/** "27.2%". */
 export function fmtPct(v: number | null | undefined): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return '-'
-  return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(v)} %`
+  return formatPercent(v)
 }
 
-/** dd.mm.yyyy from an ISO date or datetime. */
+/** "25 Sep 2026" from an ISO date or datetime. */
 export const fmtDate = formatDate
 
 export { todayIso, addDaysIso } from '../../../lib/format'
@@ -150,7 +148,7 @@ export function diffLabel(field: string): string {
   return field
 }
 
-const numFmt = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 })
+const numFmt = { format: (v: number) => formatNumber(v, { max: 4 }) }
 
 /** A diff value in the words and units of its row. */
 export function diffValue(rawField: string, v: unknown, currency = 'EUR'): string {

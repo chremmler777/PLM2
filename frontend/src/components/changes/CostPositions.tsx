@@ -243,9 +243,11 @@ function ScopeToggle({ testId, partial, onChange }: {
 }
 
 function OfferRow({
-  changeId, positionId, offer, editable, onChanged,
+  changeId, positionId, offer, currency, editable, onChanged,
 }: {
   changeId: number; positionId: number; offer: CostingOffer
+  /** The position's currency; offers carry none of their own. */
+  currency: string | null
   editable: boolean; onChanged: () => void
 }) {
   const qc = useQueryClient()
@@ -370,12 +372,12 @@ function OfferRow({
             {offer.vendor_name}
           </span>
           <span data-testid={`offer-cost-${offer.id}`} className="text-slate-300 text-sm tabular-nums">
-            {offer.cost.toFixed(2)}
+            {formatMoney(offer.cost, currency)}
           </span>
           <span data-testid={`offer-shipping-${offer.id}`} className="text-xs text-slate-400">
             {t('costpos.shipping')}: {offer.shipping_included
               ? t('costpos.shippingIncluded')
-              : `${(offer.shipping_cost ?? 0).toFixed(2)} ${t('costpos.shippingSeparate')}`}
+              : `${formatMoney(offer.shipping_cost ?? 0, currency)} ${t('costpos.shippingSeparate')}`}
           </span>
           {offer.lead_time_days != null && (
             <span data-testid={`offer-lead-${offer.id}`} className="text-xs text-slate-400">
@@ -781,7 +783,7 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
               <ul>
                 {(p.offers ?? []).map((o) => (
                   <OfferRow key={o.id} changeId={changeId} positionId={p.id} offer={o}
-                    editable={editable} onChanged={onChanged} />
+                    currency={cur} editable={editable} onChanged={onChanged} />
                 ))}
               </ul>
             )}
@@ -818,39 +820,78 @@ function EffortRow({
   const [hours, setHours] = useState(position?.hours != null ? String(position.hours) : '')
   const [labourPos, setLabourPos] = useState(position?.labour_position ?? '')
   const positions = ctx?.positions_by_department?.[String(departmentId)] ?? []
-  // Single flight: blur and the Save click (or Enter, then blur) arrive in the
-  // same moment, and isPending is only true after a render. The first save
-  // holds the row; a create keeps holding it until the new position arrives
-  // (the row remounts on it), so a second create can never follow.
+  // Blur and the Save click (or Enter, then blur) arrive in the same moment,
+  // and isPending is only true after a render. One save at a time: a change
+  // made while one is out (a second hours commit, a labour position pick) is
+  // queued, the latest of each wins, and it goes out when the save settles.
+  // A create keeps holding the row until the new position arrives (the row
+  // remounts on it), so a second create can never follow; what was queued
+  // meanwhile is sent as an edit of the created position.
+  type Patch = { hours?: true; labour_position?: string | null }
   const inFlight = useRef(false)
+  const queued = useRef<Patch | null>(null)
+  const hoursRef = useRef(hours)
+  hoursRef.current = hours
+  // The hours the save in flight sent: a queued hours commit of the same
+  // number has nothing left to say.
+  const sentHours = useRef<string | null>(null)
+  const body = (p: Patch) => ({
+    ...(p.hours ? { hours: num(hoursRef.current) } : {}),
+    ...('labour_position' in p ? { labour_position: p.labour_position ?? null } : {}),
+  })
   const save = useMutation({
-    mutationFn: (override?: { labour_position: string | null }) => position
-      ? changesApi.updateCostPosition(changeId, position.id, override ?? { hours: num(hours) })
+    mutationFn: (p: Patch) => position
+      ? changesApi.updateCostPosition(changeId, position.id, body(p))
       : changesApi.createCostPosition(changeId, {
-        department_id: departmentId, label: t(labelKey), kind, hours: num(hours),
-        labour_position: (override ? override.labour_position : labourPos) || null,
+        department_id: departmentId, label: t(labelKey), kind, hours: num(hoursRef.current),
+        labour_position: ('labour_position' in p ? p.labour_position : labourPos) || null,
       }),
-    onSuccess: () => {
-      if (position) inFlight.current = false
-      toast.success(t('costpos.saved')); onChanged()
+    onSuccess: (created: unknown) => {
+      toast.success(t('costpos.saved'))
+      let q = queued.current
+      queued.current = null
+      if (q?.hours && hoursRef.current === sentHours.current) {
+        q = 'labour_position' in q ? { labour_position: q.labour_position } : null
+      }
+      if (position) {
+        inFlight.current = false
+        if (q) run(q)
+        else onChanged()
+        return
+      }
+      const id = (created as { id?: number } | undefined)?.id
+      if (q && id != null) {
+        changesApi.updateCostPosition(changeId, id, body(q))
+          .catch((e: unknown) => toast.error(errDetail(e) ?? 'Could not save the effort'))
+          .finally(onChanged)
+        return
+      }
+      onChanged()
     },
     onError: (e: unknown) => {
       inFlight.current = false
       toast.error(errDetail(e) ?? 'Could not save the effort')
+      const q = queued.current
+      queued.current = null
+      if (q && position) run(q)
     },
   })
   const dirty = num(hours) !== (position?.hours ?? null)
-  const run = (override?: { labour_position: string | null }) => {
-    if (inFlight.current) return
+  const run = (p: Patch) => {
+    if (inFlight.current) {
+      queued.current = { ...queued.current, ...p }
+      return
+    }
     inFlight.current = true
-    save.mutate(override)
+    sentHours.current = p.hours || !position ? hoursRef.current : null
+    save.mutate(p)
   }
-  const commit = () => { if (dirty) run(undefined) }
+  const commit = () => { if (dirty) run({ hours: true }) }
   // The position re-prices a saved row at once; before the first save it
-  // rides along with the hours.
+  // rides along with the hours (or, while the create is out, follows it).
   const pickPosition = (v: string) => {
     setLabourPos(v)
-    if (position) run({ labour_position: v || null })
+    if (position || inFlight.current) run({ labour_position: v || null })
   }
   return (
     <tr className="border-t border-slate-700/70">
