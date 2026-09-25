@@ -17,6 +17,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from app.utils.clock import business_today
 from app.models.change import ChangeAssessment, ChangeRequest
 from app.models.change_cost import CostingOffer, CostingPosition
 from app.models.change_plan import ChangePlanTask
@@ -123,7 +124,7 @@ async def _seed(client, auth, cid, plan="quote", replace=False):
 
 
 def _today(n=0):
-    return (date.today() + timedelta(days=n)).isoformat()
+    return (business_today() + timedelta(days=n)).isoformat()
 
 
 def _by_name(out):
@@ -144,7 +145,7 @@ async def test_seed_without_costing_positions(client, world):
                      "Customer approval (PPAP / ISIR)", "Safety buffer",
                      "Start of production (change)"]
     t = _by_name(out)
-    anchor = (date.today() + timedelta(days=7)).isoformat()
+    anchor = (business_today() + timedelta(days=7)).isoformat()
     assert t["Customer order / go-ahead"]["start_date"] == anchor
     assert t["Customer order / go-ahead"]["kind"] == "milestone"
     assert t["Implementation"]["duration_days"] == 20
@@ -162,13 +163,13 @@ async def test_seed_without_costing_positions(client, world):
 async def test_seed_from_costing_positions(client, world, session_factory):
     tool_pos, gauge_pos = await _add_positions(session_factory, world)
     await _set(session_factory, world["change_id"],
-               required_by_date=datetime.combine(date.today() + timedelta(days=30),
+               required_by_date=datetime.combine(business_today() + timedelta(days=30),
                                                  datetime.min.time()))
     sales = await _auth(client, "sales")
     out = (await _seed(client, sales, world["change_id"])).json()
     t = _by_name(out)
     order = t["Customer order / go-ahead"]
-    assert order["start_date"] == (date.today() + timedelta(days=37)).isoformat()
+    assert order["start_date"] == (business_today() + timedelta(days=37)).isoformat()
     eng = t["Tool Engineer engineering"]
     # 16 h = 2 working days = ceil(2*7/5) = 3 calendar days, after the order
     assert eng["duration_days"] == 3

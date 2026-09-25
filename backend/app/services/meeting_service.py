@@ -16,6 +16,10 @@ from app.services.change_service import ChangeService, ChangeError
 from app.services.workflow_service import WorkflowService
 
 
+class MeetingForbidden(ChangeError):
+    """A meeting act the caller has no right to: 403, not 400 (spec §16)."""
+
+
 class MeetingService:
 
     @staticmethod
@@ -55,8 +59,8 @@ class MeetingService:
         if user.id == change.lead_id:
             return
         if not await MeetingService.user_is_pm(session, user):
-            raise ChangeError(
-                "Only Project Management, the change lead, or an admin "
+            raise MeetingForbidden(
+                "Only Project Management, the change lead or an admin "
                 "may manage scoping meetings")
 
     @staticmethod
@@ -86,7 +90,7 @@ class MeetingService:
                 letter = "C"
             if letter not in TASK_LETTERS:
                 raise ChangeError(
-                    f"Invalid RASIC letter '{v}' for department {k} — one of R, A, S, C")
+                    f"Invalid RASIC letter '{v}' for department {k}: one of R, A, S, C")
             out[str(int(k))] = letter
         ids = await MeetingService._validate_departments(session, [int(k) for k in out])
         return out, ids
@@ -99,6 +103,7 @@ class MeetingService:
         selected_department_ids: Optional[list[int]] = None,
         channel: str = "meeting",
         department_rasic: Optional[dict] = None,
+        cost_carrier: Optional[str] = None,
     ) -> ChangeMeeting:
         await MeetingService._authz(session, change, user)
         # Meetings belong to scoping: capture is Sales writing the request
@@ -118,6 +123,7 @@ class MeetingService:
             change_id=change.id, meeting_date=meeting_date or datetime.utcnow(),
             channel=channel, participants=participants or [], notes=notes,
             selected_department_ids=dept_ids, department_rasic=rasic,
+            cost_carrier=MeetingService._validate_cost_carrier(cost_carrier),
             created_by=user.id)
         session.add(meeting)
         await session.flush()
@@ -126,6 +132,52 @@ class MeetingService:
             f"Scoping decision #{meeting.id} recorded ({channel})", user.id,
             new_value={"meeting_id": meeting.id, "channel": channel})
         return meeting
+
+    @staticmethod
+    def _validate_cost_carrier(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if value not in ("customer", "internal"):
+            raise ChangeError(
+                f"Invalid cost carrier '{value}': customer or internal")
+        return value
+
+    @staticmethod
+    async def _apply_cost_carrier(session: AsyncSession, change: ChangeRequest,
+                                  meeting: ChangeMeeting, user: User) -> None:
+        """Spec §16: the room re-confirms the cost carrier Sales picked at
+        capture. A flip is a decision with consequences (it selects the
+        whole commercial branch), so it is audited and Sales is told."""
+        wanted = meeting.cost_carrier == "customer"
+        if bool(change.customer_relevant) == wanted:
+            return
+        before = "customer" if change.customer_relevant else "internal"
+        change.customer_relevant = wanted
+        from app.services import mother_plants as mp
+        if not mp.is_mother_plant(change):
+            change.origin = meeting.cost_carrier
+        await session.flush()
+        from app.services.cm_labels import label
+        await ChangeService.append_changelog(
+            session, change, "cost_carrier_changed",
+            f"Cost carrier changed at the scoping meeting: "
+            f"{label('cost_carrier', before)} to "
+            f"{label('cost_carrier', meeting.cost_carrier)}", user.id,
+            field_name="customer_relevant",
+            old_value={"cost_carrier": before, "customer_relevant": not wanted},
+            new_value={"cost_carrier": meeting.cost_carrier,
+                       "customer_relevant": wanted,
+                       "meeting_id": meeting.id})
+        sales = (await session.execute(
+            select(Department.id).where(Department.name == "Sales"))).scalar_one_or_none()
+        if sales is not None:
+            from app.services.notification_service import NotificationService
+            await NotificationService.notify_departments(
+                session, [sales],
+                title=f"Cost carrier changed: {change.change_number}",
+                body=(f"The scoping meeting set '{change.title}' to "
+                      f"{label('cost_carrier', meeting.cost_carrier).lower()}."),
+                link=f"/changes/{change.id}?tab=scoping")
 
     @staticmethod
     async def _get_meeting(session: AsyncSession, change: ChangeRequest,
@@ -156,8 +208,11 @@ class MeetingService:
                 keep = {str(i) for i in fields["selected_department_ids"]}
                 fields["department_rasic"] = {k: v for k, v in meeting.department_rasic.items()
                                               if k in keep}
+        if "cost_carrier" in fields:
+            fields["cost_carrier"] = MeetingService._validate_cost_carrier(
+                fields["cost_carrier"])
         for k in ("meeting_date", "participants", "notes", "selected_department_ids",
-                  "department_rasic"):
+                  "department_rasic", "cost_carrier"):
             if k in fields and fields[k] is not None:
                 setattr(meeting, k, fields[k])
         await session.flush()
@@ -207,11 +262,11 @@ class MeetingService:
         # work happens, not in the scoping room.
         if in_assessment and kind != "risk":
             raise ChangeError(
-                f"'{kind}' concerns belong to scoping — during assessment "
+                f"'{kind}' concerns belong to scoping. During assessment "
                 "the register takes risks")
         if not in_assessment and kind == "risk":
             raise ChangeError(
-                "Risks belong to the assessment phase — during scoping, flag "
+                "Risks belong to the assessment phase. During scoping, flag "
                 "a concern (needs_info or reject_proposal) instead")
         if kind == "risk":
             # The vocabulary is per department (app/services/risk_types.py):
@@ -223,7 +278,7 @@ class MeetingService:
             allowed = await allowed_keys(session, dept_for_vocab)
             if risk_type not in allowed:
                 raise ChangeError(
-                    f"Invalid risk type '{risk_type}' for this department — one of: "
+                    f"Invalid risk type '{risk_type}' for this department. One of: "
                     + ", ".join(sorted(allowed)))
             if severity not in RISK_SEVERITIES:
                 raise ChangeError(
@@ -273,7 +328,7 @@ class MeetingService:
                 and c.department_id == department_id
                 for c in change.concerns):
             raise ChangeError(
-                "You already have an open concern of this kind — withdraw it first")
+                "You already have an open concern of this kind. Withdraw it first")
         concern = ChangeConcern(
             change_id=change.id, kind=kind, note=note.strip(), raised_by=user.id,
             department_id=department_id,
@@ -285,12 +340,13 @@ class MeetingService:
         await ChangeService.append_changelog(
             session, change, "concern_raised",
             f"Concern ({kind}"
-            + (f"/{concern.risk_type}, severity {concern.severity}"
+            + (f"/{concern.risk_type_label or concern.risk_type}, severity {concern.severity}"
                if kind == "risk" else "")
             + f"): {concern.note}", user.id,
             new_value={"concern_id": concern.id, "kind": kind,
                        "department_id": department_id,
                        "risk_type": concern.risk_type,
+                       "risk_type_label": concern.risk_type_label,
                        "severity": concern.severity,
                        "checklist_key": checklist_key},
             notes=concern.note)
@@ -364,11 +420,19 @@ class MeetingService:
         # real memberships, so driving the Sales view never keeps the
         # requester right on a question they asked as themselves.
         acting_as = getattr(user, "acts_as_department_id", None) is not None
-        allowed = ((concern.raised_by == user.id and not acting_as)
-                   or await MeetingService.user_is_pm_member(session, user)
-                   or (department_owns_it
-                       and await WorkflowService.actor_in_department(
-                           session, user, concern.department_id)))
+        # Who settles it is recorded as a role (spec §16): the author
+        # withdrawing their own point reads differently from Project
+        # Management settling somebody else's.
+        settled_as = None
+        if concern.raised_by == user.id and not acting_as:
+            settled_as = "author"
+        elif await MeetingService.user_is_pm_member(session, user):
+            settled_as = "pm"
+        elif (department_owns_it
+              and await WorkflowService.actor_in_department(
+                  session, user, concern.department_id)):
+            settled_as = "department"
+        allowed = settled_as is not None
         if not allowed:
             raise ChangeError(
                 "Only a member of the department that raised this concern, "
@@ -384,17 +448,20 @@ class MeetingService:
                 "saying how it was addressed")
         concern.withdrawn_at = datetime.utcnow()
         concern.withdrawn_by = user.id
+        concern.settled_as = settled_as
         concern.resolution_note = note or None
         await session.flush()
         # The changelog row IS the thread: question (concern_raised) then
         # answer (concern_withdrawn), each with its note and its actor.
+        from app.services.cm_labels import label
         await ChangeService.append_changelog(
             session, change,
             "concern_withdrawn",
-            f"Concern #{concern.id} withdrawn"
-            + (f" — {concern.resolution_note}" if concern.resolution_note else ""),
+            f"Concern #{concern.id}: {label('settled_as', settled_as).lower()}"
+            + (f": {concern.resolution_note}" if concern.resolution_note else ""),
             user.id,
             old_value={"concern_id": concern.id},
+            new_value={"settled_as": settled_as},
             notes=concern.resolution_note)
         return concern
 
@@ -481,7 +548,7 @@ class MeetingService:
             if not note and not await ChangeService.has_info_response(
                     session, change, concern_id=concern.id):
                 raise ChangeError(
-                    "An answer needs content — write it or attach the response "
+                    "An answer needs content: write it or attach the response "
                     "document")
         concern.answer_note = note or None
         concern.answered_at = datetime.utcnow()
@@ -490,7 +557,7 @@ class MeetingService:
         await ChangeService.append_changelog(
             session, change, "concern_answered",
             f"Concern #{concern.id} answered"
-            + (f" — {note}" if note else " (see attached document)"),
+            + (f": {note}" if note else " (see attached document)"),
             user.id,
             new_value={"concern_id": concern.id}, notes=note or None)
         return concern
@@ -543,9 +610,15 @@ class MeetingService:
             who = ", ".join(sorted({c.raised_by_name or f"user #{c.raised_by}"
                                     for c in open_concerns}))
             raise ChangeError(
-                f"{len(open_concerns)} open concern(s) from {who} — they must be "
+                f"{len(open_concerns)} open concern(s) from {who}. They must be "
                 "withdrawn by their author, or answered by rejecting / asking "
                 "for more information")
+        # The room re-confirms the cost carrier (spec §16): it selects the
+        # whole commercial branch, so nobody proceeds without saying it.
+        if decision == "proceed" and meeting.cost_carrier is None:
+            raise ChangeError(
+                "Confirm the cost carrier (customer or internal change) before "
+                "proceeding")
         # Both of the negative outcomes owe the originator an answer: reject
         # says why the change cannot go ahead, needs_info says what is missing
         # before it can start. Only 'proceed' needs no justification.
@@ -569,9 +642,11 @@ class MeetingService:
         await ChangeService.append_changelog(
             session, change, "scoping_meeting_decided",
             f"Scoping meeting #{meeting.id}: {decision}"
-            + (f" — {reason}" if reason else ""), user.id,
+            + (f": {reason}" if reason else ""), user.id,
             field_name="decision", new_value=decision,
             notes=reason or meeting.notes)
+        if decision == "proceed":
+            await MeetingService._apply_cost_carrier(session, change, meeting, user)
         if decision in ("proceed", "reject"):
             # Meetings only exist in scoping now, so proceed always goes
             # straight to assessment; reject goes straight out.

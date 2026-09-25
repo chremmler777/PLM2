@@ -22,6 +22,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from app.utils.clock import business_today
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -657,7 +659,7 @@ class ChangePlanService:
         cal = ChangePlanService.calendar(change, plan)
         names = await ChangePlanService._dept_names(session)
         ids_by_name = {n: i for i, n in names.items()}
-        today = date.today()
+        today = business_today()
         anchor = cal.snap(max(today, _as_date(change.required_by_date) or today)
                           + timedelta(days=ORDER_OFFSET_DAYS))
 
@@ -907,7 +909,7 @@ class ChangePlanService:
                     f"Dates lie between {eng.MIN_YEAR} and {eng.MAX_YEAR}")
         # Actual dates report what happened: not later than today (server
         # date, one day of slack for a browser a timezone ahead).
-        latest = date.today() + timedelta(days=1)
+        latest = business_today() + timedelta(days=1)
         for k, label in (("actual_start", "actual start"),
                          ("actual_finish", "actual finish")):
             d = _as_date(spec.get(k))
@@ -2259,10 +2261,19 @@ class ChangePlanService:
     async def required_department_ids(session: AsyncSession,
                                        change: ChangeRequest) -> list[int]:
         """Every department with an R or A assessment on the change, plus
-        Scheduling (it builds the bank) and Sales (it tells the customer)."""
+        Scheduling (it builds the bank) and Sales (it tells the customer).
+        A mother-plant change (spec §14) has no assessments and no customer
+        here: the informed departments and Scheduling confirm."""
+        from app.services import mother_plants as mp
         ids = {a.department_id for a in change.assessments
                if a.rasic_letter in BLOCKING_LETTERS}
-        for name in ("Scheduling", "Sales"):
+        names = ("Scheduling", "Sales")
+        if mp.is_mother_plant(change):
+            from app.services.mother_plant_service import MotherPlantService
+            ids |= set(await MotherPlantService.informed_department_ids(
+                session, change))
+            names = ("Scheduling",)
+        for name in names:
             did = await ChangePlanService._dept_id(session, name)
             if did is not None:
                 ids.add(did)

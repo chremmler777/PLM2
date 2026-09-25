@@ -68,6 +68,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
+
+from app.utils.clock import business_today
 from xml.etree import ElementTree as ET
 
 LINK_TYPES = ("FS", "SS", "FF", "SF")
@@ -1089,7 +1091,7 @@ def build_mspdi(*, name: str, title: str, cal: Calendar, tasks: list[dict],
     el(root, "Name", name)
     el(root, "Title", title)
     el(root, "ScheduleFromStart", 1)
-    start = min((t["start"] for t in tasks), default=date.today())
+    start = min((t["start"] for t in tasks), default=business_today())
     finish = max((t["end"] for t in tasks), default=start)
     el(root, "StartDate", ts(start))
     el(root, "FinishDate", fin(finish) if finish > start else ts(start))
@@ -1579,7 +1581,7 @@ def _parse_mspdi(content: bytes) -> dict:
         if name and txt(a, "TaskUID") not in lane_by_uid:
             lane_by_uid[txt(a, "TaskUID")] = name
 
-    latest_actual = date.today() + timedelta(days=1)
+    latest_actual = business_today() + timedelta(days=1)
     tasks, links = [], []
     stack: list[tuple[int, str]] = []            # (level, uid)
     for te in raw:

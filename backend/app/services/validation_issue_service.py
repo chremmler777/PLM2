@@ -24,6 +24,8 @@ import math
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from app.utils.clock import business_today
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -202,8 +204,16 @@ class ValidationIssueService:
 
     @staticmethod
     async def get_issue(session: AsyncSession, change: ChangeRequest,
-                        iid: int) -> ValidationIssue:
-        row = await session.get(ValidationIssue, iid)
+                        iid: int, *, lock: bool = False) -> ValidationIssue:
+        if lock:
+            # SELECT ... FOR UPDATE, re-read: two route decisions at once
+            # serialise here and the second sees the first's route
+            row = (await session.execute(
+                select(ValidationIssue).where(ValidationIssue.id == iid)
+                .with_for_update()
+                .execution_options(populate_existing=True))).scalar_one_or_none()
+        else:
+            row = await session.get(ValidationIssue, iid)
         if row is None or row.change_id != change.id:
             raise IssueNotFound("Validation issue not found on this change")
         return row
@@ -344,6 +354,14 @@ class ValidationIssueService:
             return v.pm or v.lead or v.sales
         return v.pm or v.lead or v.sales or v.management
 
+    @staticmethod
+    def may_acknowledge(v: Viewer, issue: ValidationIssue,
+                        esc: ValidationIssueEscalation) -> bool:
+        """The audience of the level, but never whoever raised that
+        escalation (an admin excepted, as for the route)."""
+        return (ValidationIssueService.ack_audience_ok(v, issue, esc.level)
+                and (v.admin or esc.created_by != v.id))
+
     # ------------------------------------------------------------------
     # Changelog / notifications
     # ------------------------------------------------------------------
@@ -351,51 +369,80 @@ class ValidationIssueService:
     async def _log(session, change, issue: ValidationIssue, action: str,
                    text: str, user_id: Optional[int], *, notes=None, **extra):
         # a sweep-made entry has no actor: the change lead (or the raiser)
-        # stands in, the entry says it was automatic
+        # stands in (performed_by is required), the entry says it was
+        # automatic in its text and with the system marker
         actor = user_id or change.lead_id or issue.created_by
+        if user_id is None:
+            text += " (automatic)"
+            extra = {**extra, "system": True}
         await ChangeService.append_changelog(
             session, change, f"validation_issue_{action}",
             f"{issue.ref} {text}", actor, notes=notes,
             new_value={"issue_id": issue.id, "number": issue.number, **extra})
 
     @staticmethod
-    async def _dept_members(session, dept_ids) -> set[int]:
+    async def change_org_id(session: AsyncSession,
+                            change: ChangeRequest) -> Optional[int]:
+        """The change's organization (project -> plant -> org), None for a
+        change without a project (visible to every organization)."""
+        from app.models.entities import Plant, Project
+        if change.project_id is None:
+            return None
+        return (await session.execute(
+            select(Plant.organization_id).join(Project, Project.plant_id == Plant.id)
+            .where(Project.id == change.project_id))).scalar_one_or_none()
+
+    @staticmethod
+    async def _dept_members(session, dept_ids, org_id: Optional[int] = None) -> set[int]:
         ids = [i for i in dept_ids if i is not None]
         if not ids:
             return set()
-        return set((await session.execute(
-            select(UserDepartment.user_id).where(
-                UserDepartment.department_id.in_(ids)))).scalars().all())
+        q = select(UserDepartment.user_id).where(UserDepartment.department_id.in_(ids))
+        if org_id is not None:
+            # departments are global: only the change's organization is told
+            q = q.join(User, User.id == UserDepartment.user_id).where(
+                User.organization_id == org_id)
+        return set((await session.execute(q)).scalars().all())
 
     @staticmethod
     async def audience(session: AsyncSession, change: ChangeRequest,
                        issue: ValidationIssue, level: int) -> tuple[set, str]:
-        """(user ids, who in words) a level change notifies."""
+        """(user ids, who in words) a level change notifies: members of the
+        change's organization only."""
         svc = ValidationIssueService
+        org = await svc.change_org_id(session, change)
         pm = await svc._dept_id(session, PM_DEPARTMENT)
         sales = await svc._dept_id(session, SALES_DEPARTMENT)
-        users = await svc._dept_members(session, [pm])
+        users = await svc._dept_members(session, [pm], org)
         words = ["Project Manager"]
         if level <= 1:
-            users |= await svc._dept_members(session, [issue.department_id])
+            users |= await svc._dept_members(session, [issue.department_id], org)
             words.insert(0, "owner department")
             return users, ", ".join(words)
         if change.lead_id:
             users.add(change.lead_id)
         words.append("change lead")
-        users |= await svc._dept_members(session, [sales])
+        users |= await svc._dept_members(session, [sales], org)
         words.append("Sales")
         if level >= 3:
             mgmt = await svc._dept_id(session, MANAGEMENT_DEPARTMENT)
-            members = await svc._dept_members(session, [mgmt]) if mgmt else set()
+            members = await svc._dept_members(session, [mgmt], org) if mgmt else set()
             if members:
                 users |= members
                 words.append("Management")
             else:
-                users |= set((await session.execute(
-                    select(User.id).where(User.role == "admin",
-                                          User.is_active.is_(True)))).scalars().all())
+                q = select(User.id).where(User.role == "admin",
+                                          User.is_active.is_(True))
+                if org is not None:
+                    q = q.where(User.organization_id == org)
+                users |= set((await session.execute(q)).scalars().all())
                 words.append("admins")
+            # Mother plant (spec §14): there is no customer of ours; the PM
+            # informs the mother plant contact instead.
+            from app.services import mother_plants as mp
+            if mp.is_mother_plant(change):
+                words.append(f"mother plant contact "
+                              f"({change.mother_plant_name or 'mother plant'}) via PM")
         return users, ", ".join(words)
 
     @staticmethod
@@ -417,9 +464,17 @@ class ValidationIssueService:
         session.add(esc)
         old = issue.escalation_level
         issue.escalation_level = level
-        # Level 3 is management and customer: Sales informs the customer.
-        if level >= 3 and trigger != "deescalate":
+        # Level 3 is management and customer: Sales informs the customer. A
+        # mother-plant change has no customer here: the PM informs the mother
+        # plant contact (spec §14), so the customer errand is not raised.
+        from app.services import mother_plants as mp
+        mother_plant = mp.is_mother_plant(change)
+        if level >= 3 and trigger != "deescalate" and not mother_plant:
             issue.customer_inform = True
+        body = reason
+        if level >= 3 and trigger != "deescalate" and mother_plant:
+            body = (f"PM: inform the mother plant contact "
+                    f"({change.mother_plant_name or 'mother plant'}). {reason}")
         await session.flush()
         from app.services.notification_service import NotificationService
         await NotificationService.notify_once(
@@ -428,7 +483,7 @@ class ValidationIssueService:
             subject_key=f"vi:{issue.id}:esc:{esc.id}",
             title=(f"{change.change_number} {issue.ref} escalation level {level} "
                    f"({LEVEL_NAMES.get(level, '')}): {issue.title}")[:255],
-            body=reason, link=svc._link(change, issue))
+            body=body, link=svc._link(change, issue))
         await svc._log(session, change, issue, "escalated",
                        f"escalation level {old} -> {level}: {reason}", user_id,
                        notes=reason, level=level, old_level=old, trigger=trigger,
@@ -461,7 +516,16 @@ class ValidationIssueService:
 
         def incl(d):
             return d - timedelta(days=1) if d is not None else None
-        finish = incl(t.end_date) if int(t.duration_days or 0) > 0 else t.start_date
+        # The group's dates are its blocks' dates, counted like the plan
+        # finish (exclusive end -> inclusive last day); the summary's own
+        # stored duration may lag behind a child that moved.
+        kids = [c for c in ctx["by_id"].values() if c.parent_id == t.id]
+        if kids:
+            start = min(c.start_date for c in kids)
+            finish = incl(max(c.end_date for c in kids))
+        else:
+            start = t.start_date
+            finish = incl(t.end_date) if int(t.duration_days or 0) > 0 else t.start_date
         plan_finish = incl(ctx["finish_excl"])
         base = incl(ctx["baseline_excl"])
         deadline = _d(change.release_due_date)
@@ -477,7 +541,7 @@ class ValidationIssueService:
                                  if plan_finish and base else None),
             "slip_deadline_wd": (workdays_between(deadline, plan_finish)
                                  if plan_finish and deadline else None),
-            "start": t.start_date, "finish": finish,
+            "start": start, "finish": finish,
             "plan_finish": plan_finish, "baseline_finish": base,
             "slip_days": slip,
             "slip_workdays": (workdays_between(base, plan_finish)
@@ -501,7 +565,7 @@ class ValidationIssueService:
                        today: Optional[date] = None) -> list[tuple]:
         """Every automatic escalation trigger standing now, as
         (level, trigger, reason)."""
-        today = today or date.today()
+        today = today or business_today()
         out = []
         if issue.severity == 3:
             out.append((2, "severity", "Severity 3: blocks production"))
@@ -586,8 +650,17 @@ class ValidationIssueService:
             .distinct())).scalars().all()
         n = 0
         for cid in ids:
-            change = await session.get(ChangeRequest, cid)
-            n += await ValidationIssueService.reevaluate(session, change, today=today)
+            # one broken change must not stop the sweep for every other one:
+            # its own writes roll back to the savepoint, the rest stand
+            try:
+                async with session.begin_nested():
+                    change = await session.get(ChangeRequest, cid)
+                    n += await ValidationIssueService.reevaluate(
+                        session, change, today=today)
+            except Exception:                              # noqa: BLE001
+                import logging
+                logging.getLogger(__name__).exception(
+                    "validation issue sweep failed for change %s", cid)
         return n
 
     @staticmethod
@@ -642,6 +715,9 @@ class ValidationIssueService:
         v = await svc.viewer(session, change, user)
         svc._require(svc.ack_audience_ok(v, issue, esc.level),
                      "Only the people this escalation notified may acknowledge it")
+        svc._require(svc.may_acknowledge(v, issue, esc),
+                     "Four eyes: an escalation is acknowledged by someone other "
+                     "than the person who raised it")
         if esc.acknowledged_at is not None:
             raise ChangeError("This escalation is already acknowledged")
         esc.acknowledged_by = user.id
@@ -688,6 +764,35 @@ class ValidationIssueService:
             "can_raise": bool(check.status == "failed" and existing is None
                               and await svc.may_raise(session, change, v)),
         }
+
+    @staticmethod
+    async def _check_part(session, change: ChangeRequest, part_id) -> None:
+        """An affected part exists and belongs to the change's organization."""
+        if part_id is None:
+            return
+        from app.models.entities import Plant, Project
+        from app.models.part import Part
+        org = (await session.execute(
+            select(Plant.organization_id)
+            .join(Project, Project.plant_id == Plant.id)
+            .join(Part, Part.project_id == Project.id)
+            .where(Part.id == part_id))).first()
+        if org is None:
+            raise ChangeError(f"Part {part_id} does not exist")
+        mine = await ValidationIssueService.change_org_id(session, change)
+        if mine is not None and org[0] != mine:
+            raise ChangeError(f"Part {part_id} is not a part of this change's "
+                              "organization")
+
+    @staticmethod
+    async def _check_user(session, change: ChangeRequest, user_id) -> None:
+        """An action owner exists and belongs to the change's organization."""
+        u = await session.get(User, user_id)
+        if u is None:
+            raise ChangeError(f"User {user_id} does not exist")
+        mine = await ValidationIssueService.change_org_id(session, change)
+        if mine is not None and u.organization_id != mine:
+            raise ChangeError(f"User {user_id} is not in this change's organization")
 
     @staticmethod
     async def _check_fields(session, spec: dict) -> None:
@@ -758,6 +863,7 @@ class ValidationIssueService:
         for k in ("title", "description"):
             spec.setdefault(k, "")
         await svc._check_fields(session, spec)
+        await svc._check_part(session, change, spec.get("affected_part_id"))
         number = ((await session.execute(
             select(func.max(ValidationIssue.number)).where(
                 ValidationIssue.change_id == change.id))).scalar() or 0) + 1
@@ -812,6 +918,8 @@ class ValidationIssueService:
         clean = {k: val for k, val in fields.items()
                  if val is not None or k in ("affected_part_id", "affected_tool_ref")}
         await svc._check_fields(session, clean)
+        if clean.get("affected_part_id") is not None:
+            await svc._check_part(session, change, clean["affected_part_id"])
         before = {k: getattr(issue, k) for k in clean}
         for k, val in clean.items():
             setattr(issue, k, val)
@@ -886,8 +994,8 @@ class ValidationIssueService:
             if dept is not None and await session.get(Department, dept) is None:
                 raise ChangeError(f"Department {dept} does not exist")
             owner = item.get("owner_id")
-            if owner is not None and await session.get(User, owner) is None:
-                raise ChangeError(f"User {owner} does not exist")
+            if owner is not None:
+                await ValidationIssueService._check_user(session, change, owner)
             a = ValidationIssueAction(
                 issue_id=issue.id, description=desc, owner_id=owner,
                 department_id=dept if dept is not None else issue.department_id,
@@ -904,7 +1012,7 @@ class ValidationIssueService:
                            spec: dict, user: User) -> ValidationIssue:
         svc = ValidationIssueService
         v = await svc.viewer(session, change, user)
-        issue = await svc.get_issue(session, change, iid)
+        issue = await svc.get_issue(session, change, iid, lock=True)
         svc._require(v.admin or v.pm or v.lead,
                      "Only Project Management, the change lead or an admin decide "
                      "the route")
@@ -977,6 +1085,15 @@ class ValidationIssueService:
             await svc.build_recovery(session, change, issue, open_actions, user)
         elif route == "customer_concession":
             issue.status = "route_decided"
+            if issue.customer_decision == "accept_deviation" and \
+                    await svc.has_customer_mail(session, issue):
+                # Sales recorded the customer's yes (with the mail) before
+                # the route: the concession is settled the moment it is
+                # decided. Without the mail Sales still owes it and records
+                # the decision again (next act "customer").
+                await svc._close(session, change, issue, "accepted",
+                                 issue.customer_decision_note or reason, user.id,
+                                 "closed: accepted by the customer as a concession")
         else:                                         # follow_up_change
             await svc._transfer(session, change, issue, user)
         await session.flush()
@@ -1003,6 +1120,7 @@ class ValidationIssueService:
         issue.closed_by = user.id
         issue.closure_note = f"Transferred to {follow.change_number}"
         await session.flush()
+        await ValidationIssueService._finish_recovery(session, change, issue, user.id)
         await ValidationIssueService._log(
             session, change, issue, "transferred",
             f"transferred to follow-up change {follow.change_number}", user.id,
@@ -1023,6 +1141,27 @@ class ValidationIssueService:
         if cal.working:
             return DEFAULT_FIX_WORKDAYS
         return math.ceil(DEFAULT_FIX_WORKDAYS * 7 / 5)
+
+    @staticmethod
+    async def _recovery_task_ids(session, change: ChangeRequest, tasks) -> set[int]:
+        """Every block of every recovery group on the change: the summaries,
+        their children (fix blocks, re-validation)."""
+        rows = (await session.execute(
+            select(ValidationIssue.recovery_task_id,
+                   ValidationIssue.revalidation_task_id).where(
+                ValidationIssue.change_id == change.id))).all()
+        ids = {x for r in rows for x in r if x is not None}
+        ids |= {a for a in (await session.execute(
+            select(ValidationIssueAction.plan_task_id)
+            .join(ValidationIssue, ValidationIssue.id == ValidationIssueAction.issue_id)
+            .where(ValidationIssue.change_id == change.id,
+                   ValidationIssueAction.plan_task_id.is_not(None)))).scalars().all()}
+        grew = True
+        while grew:                      # descendants of the summaries
+            more = {t.id for t in tasks if t.parent_id in ids and t.id not in ids}
+            ids |= more
+            grew = bool(more)
+        return ids
 
     @staticmethod
     async def build_recovery(session: AsyncSession, change: ChangeRequest,
@@ -1052,10 +1191,15 @@ class ValidationIssueService:
         if issue.check_id:
             chk = await session.get(ValidationCheck, issue.check_id)
             check_dept = chk.department_id if chk else None
-        vals = [t for t in leaves if t.kind == "validation"]
+        # Other issues' recovery groups are not the failed validation: a
+        # second recovery runs in parallel off the same validation block and
+        # feeds the same dependents, never chained after another recovery.
+        recovery = await ValidationIssueService._recovery_task_ids(
+            session, change, tasks)
+        vals = [t for t in leaves if t.kind == "validation" and t.id not in recovery]
         if vals:
             anchor = max(vals, key=lambda t: (t.end_date, t.sort_order))
-        today = cal.snap(date.today())
+        today = cal.snap(business_today())
         start = max(anchor.end_date, today) if anchor else today
         start = cal.snap(start)
         names = await ValidationIssueService._dept_names(session)
@@ -1065,7 +1209,8 @@ class ValidationIssueService:
         succ_ids = []
         if anchor is not None:
             succ_ids = [lk.to_task_id for lk in links
-                        if lk.from_task_id == anchor.id]
+                        if lk.from_task_id == anchor.id
+                        and lk.to_task_id not in recovery]
         rv_dept = check_dept or owner_dept
 
         blocks = []                       # (key, spec)
@@ -1144,6 +1289,25 @@ class ValidationIssueService:
     ATTACH_KINDS = ("general", "customer_email")
 
     @staticmethod
+    def frozen_attachment_reason(issue: ValidationIssue,
+                                 att: ChangeAttachment) -> Optional[str]:
+        """Why a document filed into an issue can no longer be removed (409
+        for everyone but an admin), or None."""
+        if att.kind == "customer_email" and issue.status == "accepted":
+            return (f"{issue.ref} was accepted as a concession on this customer "
+                    "mail: it is the record and cannot be removed")
+        return None
+
+    @staticmethod
+    async def frozen_attachment(session: AsyncSession,
+                                att: ChangeAttachment) -> Optional[str]:
+        if att.validation_issue_id is None:
+            return None
+        issue = await session.get(ValidationIssue, att.validation_issue_id)
+        return (ValidationIssueService.frozen_attachment_reason(issue, att)
+                if issue is not None else None)
+
+    @staticmethod
     async def check_attach(session: AsyncSession, change: ChangeRequest,
                            iid: int, kind: str, actor: Optional[User]) -> ValidationIssue:
         """Filing a document into an issue (ChangeService.add_attachment):
@@ -1189,6 +1353,10 @@ class ValidationIssueService:
         new_date = _d(spec.get("new_release_due_date") or spec.get("new_date"))
         if decision == "new_timing" and new_date is None:
             raise ChangeError("New timing: give the new date the customer agreed")
+        if decision == "new_timing" and new_date < business_today():
+            raise ChangeError(
+                f"New timing: {new_date.isoformat()} is in the past; give the "
+                "date the customer agreed from today on")
         issue.customer_decision = decision
         issue.customer_decision_note = note
         issue.customer_decided_at = datetime.utcnow()
@@ -1206,14 +1374,8 @@ class ValidationIssueService:
                        new_date=new_date.isoformat() if new_date else None)
 
         if decision == "accept_deviation" and issue.route == "customer_concession":
-            issue.status = "accepted"
-            issue.closed_at = datetime.utcnow()
-            issue.closed_by = user.id
-            issue.closure_note = note
-            await session.flush()
-            await svc._log(session, change, issue, "closed",
-                           "closed: accepted by the customer as a concession",
-                           user.id, notes=note, status="accepted")
+            await svc._close(session, change, issue, "accepted", note, user.id,
+                             "closed: accepted by the customer as a concession")
         elif decision == "require_fix" and issue.route == "customer_concession":
             # the concession is off: the route is decided again
             await svc._log(session, change, issue, "reopened",
@@ -1227,9 +1389,14 @@ class ValidationIssueService:
             await session.flush()
         elif decision == "new_timing":
             issue.new_timing_date = new_date
+            # end of the agreed day, like every other deadline writer; the
+            # reason keeps what it said and adds this issue's note
+            prior = (change.release_due_reason or "").strip()
+            entry = f"{issue.ref}: {note}"
             await ChangeService._apply_release_deadline(
-                session, change, datetime.combine(new_date, datetime.min.time()),
-                issue.ref, user.id)
+                session, change,
+                datetime.combine(new_date, datetime.max.time().replace(microsecond=0)),
+                f"{prior}; {entry}" if prior else entry, user.id)
             await svc._escalate_recovery_deviations(session, change, issue, note, user)
         await session.flush()
         await svc.reevaluate(session, change, issue, user.id)
@@ -1285,7 +1452,9 @@ class ValidationIssueService:
                      "Only Project Management, Sales, the change lead or an admin "
                      "record the extra cost")
         issue = await svc.get_issue(session, change, iid)
-        svc._require_open(issue)
+        # Open or not: a late invoice lands after the issue closed, like the
+        # quote of the fix (mark_fix_quoted). Audited either way.
+        late = not issue.is_open
         cost = spec.get("extra_cost")
         bearer = spec.get("cost_bearer")
         if cost is not None:
@@ -1307,10 +1476,12 @@ class ValidationIssueService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "validation_issue_cost",
-            f"{issue.ref} extra cost recorded ({bearer or 'none'})", user.id,
+            f"{issue.ref} extra cost recorded ({bearer or 'none'})"
+            + (f" after the issue was {issue.status}" if late else ""), user.id,
             old_value={"issue_id": issue.id, **old},
             new_value={"issue_id": issue.id, "number": issue.number,
-                       "extra_cost": cost, "cost_bearer": bearer})
+                       "extra_cost": cost, "cost_bearer": bearer,
+                       "after_close": late})
         return issue
 
     @staticmethod
@@ -1386,6 +1557,18 @@ class ValidationIssueService:
                        f"fix action done: {a.description}", user.id, action_id=a.id)
         acts = (await svc.actions_of(session, [issue.id]))[issue.id]
         if issue.status == "fixing" and all(x.status == "done" for x in acts):
+            chk = (await session.get(ValidationCheck, issue.check_id)
+                   if issue.check_id else None)
+            if chk is not None and chk.status == "passed":
+                # the linked check passed again while actions were still
+                # open ("revalidated early"): the last action closes it
+                await svc._log(session, change, issue, "revalidated",
+                               "re-validated: the linked check had passed, the "
+                               "last fix action is done", user.id,
+                               check_id=chk.id)
+                await svc._close(session, change, issue, "closed",
+                                 "Re-validated: the linked check passed", user.id)
+                return issue
             issue.status = "revalidation"
             await session.flush()
             await svc._log(session, change, issue, "revalidation",
@@ -1399,6 +1582,68 @@ class ValidationIssueService:
     # Re-validation / close
     # ------------------------------------------------------------------
     @staticmethod
+    async def _finish_recovery(session: AsyncSession, change: ChangeRequest,
+                               issue: ValidationIssue,
+                               user_id: Optional[int]) -> list[int]:
+        """The issue is done: its recovery blocks (fix blocks and the
+        re-validation) are done too. A block not at 100% goes to 100% with
+        its actual dates filled where missing (start: the planned start,
+        never after today; finish: today, the last worked day). An issue
+        accepted or transferred never fixed anything: its blocks are marked
+        done the same way with a note saying so. Returns the block ids."""
+        from app.models.change_plan import ChangePlanTask
+        ids = {a.plan_task_id for a in (await ValidationIssueService.actions_of(
+            session, [issue.id]))[issue.id] if a.plan_task_id}
+        if issue.revalidation_task_id:
+            ids.add(issue.revalidation_task_id)
+        if not ids:
+            return []
+        today = business_today()
+        note = None
+        if issue.status == "accepted":
+            note = f"{issue.ref} accepted by the customer as a concession: not fixed"
+        elif issue.status == "transferred":
+            note = f"{issue.ref} transferred to a follow-up change: not fixed here"
+        done = []
+        for t in (await session.execute(
+                select(ChangePlanTask).where(ChangePlanTask.id.in_(ids),
+                                             ChangePlanTask.change_id == change.id)
+        )).scalars().all():
+            if int(t.progress_pct or 0) >= 100 and t.actual_finish is not None:
+                continue
+            t.progress_pct = 100
+            if t.actual_start is None:
+                t.actual_start = min(t.start_date, today)
+            if t.actual_finish is None:
+                t.actual_finish = max(today, t.actual_start)
+            if note and note not in (t.notes or ""):
+                t.notes = f"{t.notes}\n{note}" if t.notes else note
+            if user_id is not None:
+                t.updated_by = user_id
+            done.append(t.id)
+        if done:
+            await session.flush()
+        return done
+
+    @staticmethod
+    async def _close(session: AsyncSession, change: ChangeRequest,
+                     issue: ValidationIssue, status: str, note: Optional[str],
+                     user_id: int, text: str = "closed") -> None:
+        """Every way an issue ends in 'closed' or 'accepted': the record,
+        the changelog and the recovery blocks marked done."""
+        issue.status = status
+        issue.closed_at = datetime.utcnow()
+        issue.closed_by = user_id
+        issue.closure_note = note
+        issue.updated_at = datetime.utcnow()
+        await session.flush()
+        blocks = await ValidationIssueService._finish_recovery(
+            session, change, issue, user_id)
+        await ValidationIssueService._log(
+            session, change, issue, "closed", text, user_id, notes=note,
+            status=status, **({"plan_task_ids_done": blocks} if blocks else {}))
+
+    @staticmethod
     async def on_check_answered(session: AsyncSession, change: ChangeRequest,
                                 check: ValidationCheck, user: User) -> dict:
         """Hook for ValidationService.record_check (or the router): a PASSED
@@ -1411,19 +1656,24 @@ class ValidationIssueService:
             select(ValidationIssue).where(
                 ValidationIssue.check_id == check.id,
                 ValidationIssue.status.not_in(ISSUE_DONE_STATUSES)))).scalars().all())
-        closed, reopened = [], []
+        closed, reopened, early = [], [], []
         if check.status == "passed":
+            acts = await svc.actions_of(session, [i.id for i in linked])
             for i in linked:
-                i.status = "closed"
-                i.closed_at = datetime.utcnow()
-                i.closed_by = user.id
-                i.closure_note = "Re-validated: the linked check passed"
-                await session.flush()
+                if i.status == "fixing" and any(a.status == "open" for a in acts[i.id]):
+                    # passed before the fix actions are done: stays open
+                    # ("revalidated early") and closes with the last action
+                    await svc._log(session, change, i, "revalidated_early",
+                                   "the linked check passed while fix actions are "
+                                   "still open: closes when they are done", user.id,
+                                   check_id=check.id)
+                    early.append(i.id)
+                    continue
                 await svc._log(session, change, i, "revalidated",
                                "re-validated: the linked check passed", user.id,
                                check_id=check.id)
-                await svc._log(session, change, i, "closed", "closed", user.id,
-                               status="closed")
+                await svc._close(session, change, i, "closed",
+                                 "Re-validated: the linked check passed", user.id)
                 closed.append(i.id)
         elif check.status == "failed":
             for i in linked:
@@ -1434,7 +1684,7 @@ class ValidationIssueService:
                                    "re-validation failed again: back to fixing",
                                    user.id, check_id=check.id)
                     reopened.append(i.id)
-        return {"closed": closed, "reopened": reopened,
+        return {"closed": closed, "reopened": reopened, "revalidated_early": early,
                 "offer_raise": check.status == "failed" and not linked}
 
     @staticmethod
@@ -1457,13 +1707,7 @@ class ValidationIssueService:
                 f"{issue.ref} is {issue.status}: finish the fix actions first "
                 "(an issue closes from re-validation, or before a route when "
                 "it was raised in error)")
-        issue.status = "closed"
-        issue.closed_at = datetime.utcnow()
-        issue.closed_by = user.id
-        issue.closure_note = note
-        await session.flush()
-        await svc._log(session, change, issue, "closed", "closed", user.id,
-                       notes=note, status="closed")
+        await svc._close(session, change, issue, "closed", note, user.id)
         return issue
 
     # ------------------------------------------------------------------
@@ -1484,8 +1728,15 @@ class ValidationIssueService:
         return "raised"
 
     # Acts that are not a step of the issue: never the primary button (the
-    # frontend's QUIET list).
+    # frontend's QUIET list), add_action excepted when it is the only way on.
     QUIET_ACTS = ("edit", "attach", "escalate", "add_action")
+
+    @staticmethod
+    def _needs_new_action(issue: ValidationIssue, actions: list) -> bool:
+        """Fixing with no open action (the re-validation failed after every
+        action was done): only a new fix action moves the issue on."""
+        return issue.status == "fixing" and not any(
+            a.status == "open" for a in actions)
 
     @staticmethod
     async def next_acts(session: AsyncSession, change: ChangeRequest,
@@ -1494,17 +1745,31 @@ class ValidationIssueService:
         """(next_acts, primary, extra_acts) for the viewer. next_acts is
         ORDERED: the first entry outside QUIET_ACTS is the one primary
         button. Names: acknowledge contain root_cause route customer
-        action_done close cost add_action escalate edit attach. extra_acts
-        carries the two acts the card does not know yet: quote_fix,
-        deescalate."""
+        action_done recheck close cost add_action escalate edit attach.
+        extra_acts carries the acts the card does not know yet: quote_fix,
+        deescalate (and cost on a done issue: a late invoice).
+
+        Every open state has an act for someone: raised/contained -> contain,
+        root_cause, route; route_decided (concession) -> customer (Sales,
+        until the customer's yes is on file with the mail); fixing ->
+        action_done, or add_action as the primary when the re-validation
+        failed with every action done; revalidation -> recheck (the check's
+        department answers the linked check again) or close (no check)."""
         svc = ValidationIssueService
         if not issue.is_open:
-            return [], None, []
+            # a late invoice or the quote of the fix still land after close
+            extra = []
+            if v.cost_role:
+                extra.append("cost")
+            if (v.admin or v.sales) and issue.cost_bearer == "customer" and \
+                    issue.fix_quoted_at is None:
+                extra.append("quote_fix")
+            return [], None, extra
         acts: list[str] = []
         owner = svc._owner_ok(v, issue)
         decided = issue.route is not None
         if any(e.acknowledged_at is None and e.trigger != "deescalate"
-               and e.level >= 2 and svc.ack_audience_ok(v, issue, e.level)
+               and e.level >= 2 and svc.may_acknowledge(v, issue, e)
                for e in escalations):
             acts.append("acknowledge")
         if not decided and not issue.containment and owner:
@@ -1516,11 +1781,19 @@ class ValidationIssueService:
         if not decided and can_route and change.status in WORK_STATUSES and not (
                 issue.severity == 3 and not issue.containment):
             acts.append("route")
-        if (v.admin or v.sales) and issue.customer_inform and \
-                issue.customer_decision in (None, "pending"):
+        if (v.admin or v.sales) and issue.customer_inform and (
+                issue.customer_decision in (None, "pending")
+                or issue.route == "customer_concession"):
+            # an open concession always waits on the customer (a yes recorded
+            # before the route without the mail is recorded again with it)
             acts.append("customer")
         if any(a.status == "open" and svc._may_do_action(v, issue, a) for a in actions):
             acts.append("action_done")
+        if issue.status == "revalidation" and issue.check_id is not None:
+            chk = await session.get(ValidationCheck, issue.check_id)
+            if v.admin or v.pm or v.in_dept(chk.department_id if chk else
+                                            issue.department_id):
+                acts.append("recheck")
         if (v.admin or v.pm or v.lead) and issue.check_id is None and \
                 issue.status == "revalidation":
             acts.append("close")
@@ -1541,6 +1814,11 @@ class ValidationIssueService:
         if (v.admin or v.pm) and issue.escalation_level > 1:
             extra.append("deescalate")
         primary = next((a for a in acts if a not in svc.QUIET_ACTS), None)
+        if svc._needs_new_action(issue, actions) and "add_action" in acts and \
+                primary in (None, "cost", "customer"):
+            # re-validation failed with every action done: the next step is
+            # a new fix action
+            primary = "add_action"
         return acts, primary, extra
 
     @staticmethod
@@ -1581,7 +1859,7 @@ class ValidationIssueService:
                 select(ChangeRequest.id, ChangeRequest.change_number)
                 .where(ChangeRequest.id.in_(fids)))).all())
         ctx = await svc.plan_context(session, change)
-        today = date.today()
+        today = business_today()
         out = []
         for i in issues:
             c = checks.get(i.check_id)
@@ -1600,7 +1878,7 @@ class ValidationIssueService:
                 "can_acknowledge": bool(
                     i.is_open and e.acknowledged_at is None and e.level >= 2
                     and e.trigger != "deescalate"
-                    and svc.ack_audience_ok(v, i, e.level)),
+                    and svc.may_acknowledge(v, i, e)),
             } for e in escs[i.id]]
             latest = hist[-1] if hist else None
             out.append({
@@ -1681,6 +1959,12 @@ class ValidationIssueService:
                     "uploaded_by": a.uploaded_by,
                     "uploaded_by_name": users.get(a.uploaded_by),
                     "created_at": a.created_at,
+                    # the attachment DELETE rule: uploader, lead, PM, admin;
+                    # the customer's mail of an accepted concession is the
+                    # record (admin only)
+                    "can_delete": bool(
+                        (v.admin or a.uploaded_by == v.id or v.lead or v.pm)
+                        and (v.admin or svc.frozen_attachment_reason(i, a) is None)),
                 } for a in atts[i.id]],
                 "has_customer_mail": any(a.kind == "customer_email" for a in atts[i.id]),
                 "escalation_level": i.escalation_level,
@@ -1736,6 +2020,10 @@ class ValidationIssueService:
         "customer": ("validation_issue_customer", "Record the customer decision on {ref}"),
         "quote_fix": ("validation_issue_quote", "Quote the fix of {ref}"),
         "close": ("validation_issue_close", "Close {ref} after re-validation"),
+        "recheck": ("validation_issue_recheck",
+                    "Answer the linked validation check of {ref} again"),
+        "add_action": ("validation_issue_add_action",
+                       "Re-validation of {ref} failed: add a new fix action"),
     }
 
     @staticmethod
@@ -1770,13 +2058,20 @@ class ValidationIssueService:
                     a.status == "open" and (a.owner_id == v.id or v.in_dept(a.department_id))
                     for a in acts[i.id]):
                 owed.append("action_done")
-            if "customer" in possible and not v.admin and i.customer_inform and \
-                    i.customer_decision in (None, "pending"):
+            if "customer" in possible and not v.admin and i.customer_inform and (
+                    i.customer_decision in (None, "pending")
+                    or i.route == "customer_concession"):
                 owed.append("customer")
             if "quote_fix" in possible and not v.admin:
                 owed.append("quote_fix")
             if "close" in possible and i.status == "revalidation" and not v.admin:
                 owed.append("close")
+            if "recheck" in possible and not v.admin:
+                owed.append("recheck")
+            if "add_action" in possible and not v.admin and \
+                    svc._needs_new_action(i, acts[i.id]) and \
+                    (v.pm or v.in_dept(i.department_id)):
+                owed.append("add_action")
             for key in owed:
                 kind, label = svc.ACT_KINDS[key]
                 out.append({"kind": kind, "label": label.format(ref=i.ref),
@@ -1784,7 +2079,7 @@ class ValidationIssueService:
             for e in escs[i.id]:
                 if e.acknowledged_at is None and e.level >= 2 and \
                         e.trigger != "deescalate" and \
-                        svc.ack_audience_ok(v, i, e.level) and not v.admin:
+                        svc.may_acknowledge(v, i, e) and not v.admin:
                     out.append({
                         "kind": "validation_issue_escalation",
                         "label": f"Acknowledge escalation {i.ref} (level {e.level})",

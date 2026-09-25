@@ -43,9 +43,10 @@ async def test_engineer_with_owned_active_task_gets_assessment_action(
         dept = Department(name="QA-MA", flow_type="action", is_active=True)
         s.add(dept)
         await s.flush()
+        # Assessment actions exist only while the change is in assessment (§16).
         chg = ChangeRequest(change_number="C-MA-001", title="x", reason="y",
                             change_type="physical_part", project_id=seed["project_id"],
-                            raised_by=seed["admin_id"])
+                            raised_by=seed["admin_id"], status="in_assessment")
         s.add(chg)
         await s.flush()
         a = ChangeAssessment(change_id=chg.id, department_id=dept.id, stage_order=1,

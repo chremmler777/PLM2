@@ -82,9 +82,39 @@ async def client(session_factory, seed):
 
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with _LeadKeepingClient(transport=transport, base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+KEEP_LEAD_RULE = "X-Test-Keep-Lead-Rule"
+
+
+class _LeadKeepingClient(AsyncClient):
+    """Spec §16: POST /changes ignores lead_id unless the caller is Project
+    Management or an admin (the capturer never names the lead). Most tests
+    create a change as the engineer with a lead in the body because they
+    are about something else; for those the lead is assigned right after,
+    as the admin, the way Project Management would. A test about the rule
+    itself sends KEEP_LEAD_RULE and sees the real answer."""
+
+    async def post(self, url, *args, **kwargs):
+        headers = kwargs.get("headers") or {}
+        keep_rule = KEEP_LEAD_RULE in headers
+        if keep_rule:
+            kwargs["headers"] = {k: v for k, v in headers.items() if k != KEEP_LEAD_RULE}
+        res = await super().post(url, *args, **kwargs)
+        body = kwargs.get("json")
+        if (not keep_rule and str(url).rstrip("/") == "/api/v1/changes"
+                and isinstance(body, dict) and body.get("lead_id") is not None
+                and res.status_code in (200, 201)
+                and res.json().get("lead_id") is None):
+            fix = await super().patch(f"/api/v1/changes/{res.json()['id']}",
+                                      json={"lead_id": body["lead_id"]},
+                                      headers=_mint_cookie("admin@test.io"))
+            if fix.status_code == 200:
+                return fix
+        return res
 
 
 def _mint_cookie(email: str, admin: bool = True) -> dict:
@@ -240,8 +270,17 @@ async def make_internal(client, auth, change_id: int):
 async def satisfy_capture_gate(client, auth, change_id: int):
     """Kickoff (captured -> scoping) is soft-gated on a complete capture:
     a description, at least one attachment, and — for customer-relevant
-    changes — the quote deadline. See ChangeService._guard. The date is set
-    unconditionally here; it is harmless on internal changes."""
+    changes — the quote deadline, plus a change lead (spec §16). See
+    ChangeService._guard. The date is set unconditionally here; it is
+    harmless on internal changes. A change with no lead gets its raiser."""
+    cur = await client.get(f"/api/v1/changes/{change_id}", headers=auth)
+    if cur.status_code == 200 and cur.json().get("lead_id") is None:
+        # Assigning the lead is PM's (or the admin's) act, not the
+        # capturer's: done as the admin.
+        res = await client.patch(f"/api/v1/changes/{change_id}",
+                                 json={"lead_id": cur.json()["raised_by"]},
+                                 headers=_mint_cookie("admin@test.io"))
+        assert res.status_code == 200, res.text
     res = await client.patch(
         f"/api/v1/changes/{change_id}",
         json={"description": "Captured by Sales",

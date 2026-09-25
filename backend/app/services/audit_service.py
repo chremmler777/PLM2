@@ -111,3 +111,36 @@ class AuditService:
             "correlation_entries": len(rows),
             "correlation_ok": chain_valid and entries_ok and len(rows) > 0,
         }
+
+    @staticmethod
+    async def verify_change(session: AsyncSession, condition, chain: dict) -> dict:
+        """Spec §16 P1-9: tell a global break apart from a break inside the
+        change's own entries. `condition` selects the change's rows by entity
+        (EarlyStageService.audit_condition); each is re-hashed in place from
+        its own stored fields, and the global break point is checked for
+        membership."""
+        rows = (await session.execute(
+            select(AuditLog).where(condition).order_by(AuditLog.id))).scalars().all()
+        own_broken = None
+        for r in rows:
+            expected = hashlib.sha256(AuditService._payload(
+                r.entity_type, r.entity_id, r.action, r.old_values, r.new_values,
+                r.user_id, r.timestamp, r.previous_hash, r.correlation_id, r.log_level
+            ).encode()).hexdigest()
+            if expected != r.entry_hash:
+                own_broken = r.id
+                break
+        ids = {r.id for r in rows}
+        global_break = chain.get("first_broken_id")
+        if own_broken is not None:
+            scope, first = "change", own_broken
+        elif global_break is not None and global_break in ids:
+            scope, first = "change", global_break
+        elif global_break is not None:
+            scope, first = "global", None
+        else:
+            scope, first = "none", None
+        return {"change_entries": len(rows),
+                "change_ok": scope != "change" and len(rows) > 0,
+                "change_first_broken_id": first,
+                "break_scope": scope}

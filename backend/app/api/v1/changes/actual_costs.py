@@ -5,7 +5,7 @@ from datetime import date
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
@@ -18,14 +18,32 @@ from app.services.pnl_service import (
 router = APIRouter(prefix="/changes", tags=["changes"])
 
 
+# change_actual_costs.amount is Numeric(12, 2)
+MAX_AMOUNT = 9_999_999_999.99
+
+
 class ActualCostIn(BaseModel):
     category: Literal["external", "scrap", "other"] = "external"
-    amount: float = Field(gt=0, le=1e10)
+    amount: float = Field(gt=0, le=MAX_AMOUNT)
     cost_date: date
     department_id: Optional[int] = None
     vendor_name: Optional[str] = Field(default=None, max_length=120)
     note: Optional[str] = Field(default=None, max_length=4000)
     attachment_id: Optional[int] = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount(cls, v):
+        """A number, or a string as typed: "1.234,56" (German), "1,234.56",
+        "1234.5", with an optional currency sign."""
+        if isinstance(v, str):
+            from app.services.offer_service import read_number
+            text = v.replace("\u20ac", "").replace("EUR", "").strip()
+            out = read_number(text)
+            if out is None:
+                raise ValueError(f"'{v[:40]}' is not an amount")
+            return round(out, 2)
+        return v
 
 
 async def _change(db, change_id, user):

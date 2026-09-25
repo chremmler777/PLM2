@@ -16,18 +16,20 @@ from __future__ import annotations
 import calendar
 import csv
 import io
+import math
 from dataclasses import dataclass, asdict, field
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineRate, CostSheetMachineClass,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
     OVERHEAD_KINDS, SAMPLING_MODES, FINANCE_DEPARTMENT, DEFAULT_REVIEW_MONTHS,
-    SETTING_REVIEW_MONTHS,
+    SETTING_REVIEW_MONTHS, SETTING_PLANT_CURRENCY_CONFIRMED, CURRENCIES,
 )
 from app.models.entities import Plant
 from app.models.workflow import Department
@@ -181,14 +183,17 @@ def _require_draft(v: CostSheetVersion) -> None:
 _ROW_COPY = {
     "rates": (CostSheetRate, ("department_id", "position", "plant_id", "hourly_rate",
                               "currency", "min_factor", "note")),
-    "machines": (CostSheetMachineRate, ("plant_id", "machine_class", "machine_ref",
+    "machines": (CostSheetMachineRate, ("plant_id", "machine_class_id", "machine_class",
+                                        "machine_ref",
                                         "tonnage_min", "tonnage_max", "hourly_rate",
                                         "currency", "note")),
-    "sampling": (CostSheetSamplingRate, ("plant_id", "machine_class", "mode", "flat_price",
+    "sampling": (CostSheetSamplingRate, ("plant_id", "machine_class_id", "machine_class",
+                                         "mode", "flat_price",
                                          "setup_hours", "run_hours_default", "labour_hours",
                                          "labour_department_id", "labour_position",
                                          "handling_cost", "currency", "note")),
-    "overheads": (CostSheetOverhead, ("plant_id", "department_id", "kind", "value", "note")),
+    "overheads": (CostSheetOverhead, ("plant_id", "department_id", "kind", "value", "currency",
+                                      "note")),
 }
 _REL = {"rates": "rates", "machines": "machine_rates", "sampling": "sampling_rates",
         "overheads": "overheads"}
@@ -205,11 +210,17 @@ async def create_draft(db: AsyncSession, org_id: int, user_id: Optional[int],
             if based_on_version_id else await latest_published(db, org_id))
     nxt = (await db.execute(select(func.coalesce(func.max(CostSheetVersion.version), 0))
                             .where(CostSheetVersion.organization_id == org_id))).scalar() + 1
-    draft = CostSheetVersion(organization_id=org_id, version=nxt, status="draft",
+    draft = CostSheetVersion(organization_id=org_id, version=nxt, status="draft", draft_lock=1,
                              based_on_version_id=base.id if base else None,
                              created_by=user_id, created_at=datetime.utcnow())
     db.add(draft)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # A concurrent request opened a draft (or took the version number)
+        # between our check and this insert; the index is the real guard.
+        await db.rollback()
+        raise CostSheetError("There is already an open draft", 409)
     if base is not None:
         for section, (model, cols) in _ROW_COPY.items():
             for row in getattr(base, _REL[section]):
@@ -238,9 +249,13 @@ async def delete_draft(db: AsyncSession, v: CostSheetVersion) -> None:
 
 
 async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
-                  valid_from: date, note: Optional[str] = None) -> CostSheetVersion:
+                  valid_from: date, note: Optional[str] = None, *,
+                  confirm_backdated: bool = False,
+                  today: Optional[date] = None) -> CostSheetVersion:
     """Freeze a draft. valid_from must lie after the latest published
-    version's, which then ends the day before."""
+    version's, which then ends the day before. A valid_from in the past
+    re-prices everything booked since then, so it needs confirm_backdated.
+    A draft identical to the version it was copied from is refused."""
     _require_draft(v)
     latest = await latest_published(db, v.organization_id)
     if latest is not None and valid_from <= latest.valid_from:
@@ -249,9 +264,17 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
             f"(version {latest.version})", 422)
     if not v.rates:
         raise CostSheetError("A version needs at least one position rate", 422)
+    if valid_from < (today or date.today()) and not confirm_backdated:
+        raise CostSheetError(
+            "Valid from lies in the past: costs booked since then would be re-priced. "
+            "Confirm the backdated publish to go ahead", 422)
+    prev = await previous_version(db, v)
+    if prev is not None and diff_is_empty(diff_versions(prev, v)):
+        raise CostSheetError(f"Nothing changed since version {prev.version}", 409)
     v.valid_from = valid_from
     if note is not None:
         v.note = note
+    v.draft_lock = None
     v.status = "published"
     v.published_at = datetime.utcnow()
     v.published_by = user_id
@@ -261,14 +284,73 @@ async def publish(db: AsyncSession, v: CostSheetVersion, user_id: Optional[int],
 
 # ---------------------------------------------------------------- row edits
 
-_ROW_NUMERIC_NONNEG = {"hourly_rate", "flat_price", "setup_hours", "run_hours_default",
-                       "labour_hours", "handling_cost", "min_factor"}
+# Bounds per numeric column: (min inclusive, max exclusive). They sit well
+# inside the Numeric precision of each column, so a value that passes can
+# always be stored; NaN and infinities never pass (math.isfinite).
+BOUNDS = {
+    "hourly_rate": (0, 1e8), "flat_price": (0, 1e10), "handling_cost": (0, 1e10),
+    "setup_hours": (0, 1e6), "run_hours_default": (0, 1e6), "labour_hours": (0, 1e6),
+    "min_factor": (0, 100), "tonnage_min": (0, 1e6), "tonnage_max": (0, 1e6),
+}
+PERCENT_OVERHEAD_MAX = 300
+PER_HOUR_OVERHEAD_MAX = 1e6
 
 
-async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict) -> None:
-    for k in _ROW_NUMERIC_NONNEG:
-        if data.get(k) is not None and float(data[k]) < 0:
-            raise CostSheetError(f"{k} must not be negative", 422)
+def _check_number(key: str, value, lo: float, hi: float) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        raise CostSheetError(f"{key} must be a number", 422)
+    if not math.isfinite(f):
+        raise CostSheetError(f"{key} must be a finite number", 422)
+    if f < lo or f >= hi:
+        raise CostSheetError(f"{key} must be between {lo:g} and {hi:g}", 422)
+    return f
+
+
+def normalize_currency(value) -> str:
+    cur = str(value or "").strip().upper()
+    if cur not in CURRENCIES:
+        raise CostSheetError(
+            f"Unknown currency {cur or '(empty)'}; use one of {', '.join(CURRENCIES)}", 422)
+    return cur
+
+
+async def plant_currency(db: AsyncSession, plant_id: Optional[int]) -> str:
+    if plant_id is None:
+        return "EUR"
+    plant = await db.get(Plant, plant_id)
+    return (plant.currency if plant is not None and plant.currency else "EUR")
+
+
+async def resolve_machine_class(db: AsyncSession, org_id: int, class_id=None,
+                                name=None) -> CostSheetMachineClass:
+    """The org's class by id, or by name (case-blind). Rows must name a class
+    that exists, so a rename can follow them."""
+    if class_id is not None:
+        c = await db.get(CostSheetMachineClass, class_id)
+        if c is not None and c.organization_id == org_id:
+            return c
+    elif name:
+        c = (await db.execute(select(CostSheetMachineClass).where(
+            CostSheetMachineClass.organization_id == org_id,
+            func.lower(CostSheetMachineClass.name) == name.strip().lower()))).scalars().first()
+        if c is not None:
+            return c
+    raise CostSheetError("Unknown machine class; add it to the machine classes first", 422)
+
+
+async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict,
+                        class_changed: bool = True) -> None:
+    for k, (lo, hi) in BOUNDS.items():
+        if data.get(k) is not None:
+            data[k] = _check_number(k, data[k], lo, hi)
+    for k in ("tonnage_min", "tonnage_max"):
+        if data.get(k) is not None:
+            data[k] = int(data[k])
+    if (data.get("tonnage_min") is not None and data.get("tonnage_max") is not None
+            and data["tonnage_min"] > data["tonnage_max"]):
+        raise CostSheetError("Tonnage from must not be above tonnage to", 422)
     if data.get("plant_id") is not None:
         plant = await db.get(Plant, data["plant_id"])
         if plant is None or plant.organization_id != org_id:
@@ -276,11 +358,8 @@ async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict)
     for key in ("department_id", "labour_department_id"):
         if data.get(key) is not None and await db.get(Department, data[key]) is None:
             raise CostSheetError("Unknown department", 422)
-    if "currency" in data and data["currency"] is not None:
-        cur = str(data["currency"]).strip().upper()
-        if len(cur) != 3 or not cur.isalpha():
-            raise CostSheetError("Currency is a 3-letter code", 422)
-        data["currency"] = cur
+    if data.get("currency") is not None:
+        data["currency"] = normalize_currency(data["currency"])
     for key in ("position", "labour_position", "machine_ref", "machine_class"):
         if key in data:
             data[key] = _norm_position(data[key])
@@ -289,8 +368,12 @@ async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict)
             raise CostSheetError("A rate needs a department", 422)
         if data.get("hourly_rate") is None:
             raise CostSheetError("A rate needs an hourly rate", 422)
-    if section in ("machines", "sampling") and not data.get("machine_class"):
-        raise CostSheetError("A machine class is required", 422)
+    if section in ("machines", "sampling") and class_changed:
+        if not data.get("machine_class") and data.get("machine_class_id") is None:
+            raise CostSheetError("A machine class is required", 422)
+        cls = await resolve_machine_class(
+            db, org_id, class_id=data.get("machine_class_id"), name=data.get("machine_class"))
+        data["machine_class_id"], data["machine_class"] = cls.id, cls.name
     if section == "machines" and data.get("hourly_rate") is None:
         raise CostSheetError("A machine rate needs an hourly rate", 422)
     if section == "sampling":
@@ -306,6 +389,12 @@ async def _validate_row(db: AsyncSession, org_id: int, section: str, data: dict)
             raise CostSheetError("Kind is percent or per_hour", 422)
         if data.get("value") is None:
             raise CostSheetError("An overhead needs a value", 422)
+        hi = PERCENT_OVERHEAD_MAX + 1e-9 if data["kind"] == "percent" else PER_HOUR_OVERHEAD_MAX
+        data["value"] = _check_number("value", data["value"], 0, hi)
+        if data["kind"] == "percent":
+            data["currency"] = None      # a percentage has no currency
+        elif not data.get("currency"):
+            data["currency"] = await plant_currency(db, data.get("plant_id"))
 
 
 def _duplicate_key(section: str, data: dict) -> tuple:
@@ -318,10 +407,11 @@ def _duplicate_key(section: str, data: dict) -> tuple:
 def _raw_key(section: str, data: dict) -> tuple:
     if section == "rates":
         return (data.get("department_id"), data.get("position"), data.get("plant_id"))
+    cls = data.get("machine_class_id") or data.get("machine_class")
     if section == "machines":
-        return (data.get("plant_id"), data.get("machine_class"), data.get("machine_ref"))
+        return (data.get("plant_id"), cls, data.get("machine_ref"))
     if section == "sampling":
-        return (data.get("plant_id"), data.get("machine_class"))
+        return (data.get("plant_id"), cls)
     return (data.get("plant_id"), data.get("department_id"))
 
 
@@ -344,6 +434,8 @@ async def add_row(db: AsyncSession, v: CostSheetVersion, section: str, data: dic
         data.setdefault("mode", "flat")
     if section == "overheads":
         data.setdefault("kind", "percent")
+    if section != "overheads" and not data.get("currency"):
+        data["currency"] = await plant_currency(db, data.get("plant_id"))
     await _validate_row(db, v.organization_id, section, data)
     _check_unique(v, section, data)
     # None values are left out so column defaults (currency EUR) apply.
@@ -367,10 +459,17 @@ async def update_row(db: AsyncSession, v: CostSheetVersion, section: str, row_id
     row = _find_row(v, section, row_id)
     _, cols = _ROW_COPY[section]
     merged = {c: getattr(row, c) for c in cols}
-    merged.update({k: val for k, val in changes.items() if k in cols})
-    if "currency" in merged and not merged["currency"]:
-        merged["currency"] = "EUR"
-    await _validate_row(db, v.organization_id, section, merged)
+    changes = {k: val for k, val in changes.items() if k in cols}
+    # A new class name without an id picks the class by name.
+    if "machine_class" in changes and "machine_class_id" not in changes:
+        changes["machine_class_id"] = None
+    merged.update(changes)
+    if section != "overheads" and not merged.get("currency"):
+        merged["currency"] = await plant_currency(db, merged.get("plant_id"))
+    await _validate_row(db, v.organization_id, section, merged,
+                        class_changed=("machine_class" in changes
+                                       or changes.get("machine_class_id") is not None
+                                       or merged.get("machine_class_id") is None))
     _check_unique(v, section, merged, exclude_id=row.id)
     for c in cols:
         setattr(row, c, merged[c])
@@ -397,6 +496,65 @@ async def list_machine_classes(db: AsyncSession, org_id: int,
                                              CostSheetMachineClass.id))).scalars().all())
 
 
+async def add_machine_class(db: AsyncSession, org_id: int, data: dict) -> CostSheetMachineClass:
+    name = _norm_position(data.get("name"))
+    if not name:
+        raise CostSheetError("A machine class needs a name", 422)
+    await _check_class_name(db, org_id, name)
+    c = CostSheetMachineClass(organization_id=org_id, name=name,
+                              sort_order=int(data.get("sort_order") or 0),
+                              is_active=True if data.get("is_active") is None else data["is_active"])
+    _apply_class_band(c, data)
+    db.add(c)
+    await db.flush()
+    return c
+
+
+async def _check_class_name(db: AsyncSession, org_id: int, name: str,
+                            exclude_id: Optional[int] = None) -> None:
+    q = select(CostSheetMachineClass.id).where(
+        CostSheetMachineClass.organization_id == org_id,
+        func.lower(CostSheetMachineClass.name) == name.lower())
+    if exclude_id is not None:
+        q = q.where(CostSheetMachineClass.id != exclude_id)
+    if (await db.execute(q)).first() is not None:
+        raise CostSheetError("A machine class with this name exists already", 409)
+
+
+def _apply_class_band(c: CostSheetMachineClass, data: dict) -> None:
+    for k in ("tonnage_min", "tonnage_max"):
+        if k in data:
+            setattr(c, k, None if data[k] is None else int(_check_number(k, data[k], *BOUNDS[k])))
+    if c.tonnage_min is not None and c.tonnage_max is not None and c.tonnage_min > c.tonnage_max:
+        raise CostSheetError("Tonnage from must not be above tonnage to", 422)
+
+
+async def update_machine_class(db: AsyncSession, org_id: int, class_id: int,
+                               data: dict) -> CostSheetMachineClass:
+    """Edit a class. A rename carries over to every row that references the
+    class (drafts and published versions alike: the class is the same, only
+    its label changes), so lookups and exports keep matching."""
+    c = await db.get(CostSheetMachineClass, class_id)
+    if c is None or c.organization_id != org_id:
+        raise CostSheetError("Machine class not found", 404)
+    if "name" in data:
+        name = _norm_position(data["name"])
+        if not name:
+            raise CostSheetError("A machine class needs a name", 422)
+        await _check_class_name(db, org_id, name, exclude_id=c.id)
+        if name != c.name:
+            for model in (CostSheetMachineRate, CostSheetSamplingRate):
+                await db.execute(update(model).where(model.machine_class_id == c.id)
+                                 .values(machine_class=name))
+            c.name = name
+    _apply_class_band(c, data)
+    for k in ("sort_order", "is_active"):
+        if data.get(k) is not None:
+            setattr(c, k, data[k])
+    await db.flush()
+    return c
+
+
 def class_for_tonnage(classes: Iterable[CostSheetMachineClass], tonnage: float) -> Optional[str]:
     """The class whose band contains tonnage (min exclusive, max inclusive,
     open bounds allowed). Used to default a change's machine class from the
@@ -415,7 +573,9 @@ def class_for_tonnage(classes: Iterable[CostSheetMachineClass], tonnage: float) 
 class RateHit:
     """One looked-up rate and where it came from. Costing lines store rate,
     version_id and version as the snapshot."""
-    rate: float
+    # None = incomplete: a part of the price is missing or in another
+    # currency; breakdown["missing"] says which. Never guess a number.
+    rate: Optional[float]
     currency: str
     version_id: int
     version: int
@@ -462,18 +622,23 @@ def _pick_overhead(rows: Iterable[CostSheetOverhead], department_id: Optional[in
     return None
 
 
-def apply_overhead(base: float, oh: Optional[CostSheetOverhead]) -> float:
+def apply_overhead(base: float, oh: Optional[CostSheetOverhead],
+                   currency: Optional[str] = None) -> Optional[float]:
+    """Base rate plus overhead. None when a per-hour overhead is in another
+    currency than the rate: adding USD to EUR would be a wrong number."""
     if oh is None:
         return round(base, 2)
     if oh.kind == "percent":
         return round(base * (1 + float(oh.value) / 100.0), 2)
+    if currency and oh.currency and oh.currency != currency:
+        return None
     return round(base + float(oh.value), 2)
 
 
 def _overhead_dict(oh: Optional[CostSheetOverhead]) -> Optional[dict]:
     if oh is None:
         return None
-    return {"id": oh.id, "kind": oh.kind, "value": float(oh.value),
+    return {"id": oh.id, "kind": oh.kind, "value": float(oh.value), "currency": oh.currency,
             "department_id": oh.department_id, "plant_id": oh.plant_id}
 
 
@@ -487,8 +652,10 @@ def rate_in_version(v: CostSheetVersion, department_id: int, position: Optional[
                   version=v.version, row_id=row.id, match=match, base_rate=round(base, 2))
     if with_overhead:
         oh = _pick_overhead(v.overheads, department_id, plant_id)
-        hit.rate = apply_overhead(base, oh)
+        hit.rate = apply_overhead(base, oh, row.currency)
         hit.overhead = _overhead_dict(oh)
+        if hit.rate is None:
+            hit.breakdown = {"missing": ["overhead_currency"]}
     return hit
 
 
@@ -509,12 +676,18 @@ async def effective_labour_rate(db: AsyncSession, org_id: int, department_id: in
     return rate_in_version(v, department_id, position, plant_id, with_overhead=True) if v else None
 
 
-def _pick_machine(rows: Iterable[CostSheetMachineRate], machine_class: str,
+def _class_match(row, machine_class) -> bool:
+    """machine_class is a class id (int) or a name (case-blind)."""
+    if isinstance(machine_class, int):
+        return row.machine_class_id == machine_class
+    return (row.machine_class or "").casefold() == str(machine_class).strip().casefold()
+
+
+def _pick_machine(rows: Iterable[CostSheetMachineRate], machine_class,
                   plant_id: Optional[int], machine_ref: Optional[str]):
     """ref+plant > ref > class+plant > class (class rows have no ref)."""
-    mc = machine_class.casefold()
     ref = _norm_position(machine_ref)
-    rows = [r for r in rows if r.machine_class.casefold() == mc]
+    rows = [r for r in rows if _class_match(r, machine_class)]
     order = []
     if ref:
         order += [(ref.casefold(), plant_id, "ref+plant"), (ref.casefold(), None, "ref")]
@@ -551,8 +724,7 @@ def sampling_in_version(v: CostSheetVersion, machine_class: str, plant_id: Optio
     """Price of ONE trial. Components: (setup + run hours) x machine rate +
     labour hours x effective labour rate + handling. hit.breakdown says which
     parts went in; a missing machine or labour rate is reported, not guessed."""
-    mc = machine_class.casefold()
-    rows = [r for r in v.sampling_rates if r.machine_class.casefold() == mc]
+    rows = [r for r in v.sampling_rates if _class_match(r, machine_class)]
     row = next((r for r in rows if r.plant_id == plant_id and plant_id is not None), None)
     match = "class+plant"
     if row is None:
@@ -566,28 +738,36 @@ def sampling_in_version(v: CostSheetVersion, machine_class: str, plant_id: Optio
                        row_id=row.id, match=match, breakdown={"mode": "flat", "flat_price": price})
     setup = float(row.setup_hours or 0)
     run = float(run_hours if run_hours is not None else (row.run_hours_default or 0))
-    mhit = machine_rate_in_version(v, row.machine_class, plant_id)
-    machine_cost = round((setup + run) * mhit.rate, 2) if mhit else 0.0
+    key = row.machine_class_id if row.machine_class_id is not None else row.machine_class
+    mhit = machine_rate_in_version(v, key, plant_id)
     labour_hours = float(row.labour_hours or 0)
     lhit = None
     if labour_hours and row.labour_department_id:
         lhit = rate_in_version(v, row.labour_department_id, row.labour_position, plant_id,
                                with_overhead=True)
-    labour_cost = round(labour_hours * lhit.rate, 2) if lhit else 0.0
-    handling = float(row.handling_cost or 0)
     missing = []
     if (setup + run) and mhit is None:
         missing.append("machine_rate")
-    if labour_hours and lhit is None:
+    elif (setup + run) and mhit.currency != row.currency:
+        missing.append("machine_rate_currency")
+    if labour_hours and (lhit is None or lhit.rate is None):
         missing.append("labour_rate")
-    price = round(machine_cost + labour_cost + handling, 2)
+    elif labour_hours and lhit.currency != row.currency:
+        missing.append("labour_rate_currency")
+    machine_cost = round((setup + run) * mhit.rate, 2) if mhit and (setup + run) else 0.0
+    labour_cost = (round(labour_hours * lhit.rate, 2)
+                   if lhit and lhit.rate is not None and labour_hours else 0.0)
+    handling = float(row.handling_cost or 0)
+    # An incomplete price is no price: a sum without its labour part would be
+    # taken for the real cost of a trial.
+    price = None if missing else round(machine_cost + labour_cost + handling, 2)
     return RateHit(rate=price, currency=row.currency, version_id=v.id, version=v.version,
                    row_id=row.id, match=match, breakdown={
                        "mode": "components", "setup_hours": setup, "run_hours": run,
                        "machine_rate": mhit.rate if mhit else None, "machine_cost": machine_cost,
                        "labour_hours": labour_hours, "labour_rate": lhit.rate if lhit else None,
                        "labour_cost": labour_cost, "handling_cost": handling,
-                       "missing": missing})
+                       "missing": missing, "complete": not missing})
 
 
 async def sampling_price_for(db: AsyncSession, org_id: int, machine_class: str,
@@ -647,11 +827,13 @@ def version_detail(v: CostSheetVersion, valid: dict) -> dict:
     rates = _rows(v, "rates")
     for r, row in zip(rates, v.rates):
         oh = _pick_overhead(v.overheads, row.department_id, row.plant_id)
-        r["effective_rate"] = apply_overhead(float(row.hourly_rate), oh)
+        r["effective_rate"] = apply_overhead(float(row.hourly_rate), oh, row.currency)
         r["overhead"] = _overhead_dict(oh)
     sampling = _rows(v, "sampling")
     for s, row in zip(sampling, v.sampling_rates):
-        hit = sampling_in_version(v, row.machine_class, row.plant_id)
+        hit = sampling_in_version(
+            v, row.machine_class_id if row.machine_class_id is not None else row.machine_class,
+            row.plant_id)
         s["computed_price"] = hit.rate if hit and hit.row_id == row.id else None
         s["breakdown"] = hit.breakdown if hit and hit.row_id == row.id else None
     return {**version_summary(v, valid), "rates": rates,
@@ -666,7 +848,7 @@ _DIFF_VALUES = {
     "machines": ("hourly_rate", "currency", "tonnage_min", "tonnage_max", "note"),
     "sampling": ("mode", "flat_price", "setup_hours", "run_hours_default", "labour_hours",
                  "labour_department_id", "labour_position", "handling_cost", "currency", "note"),
-    "overheads": ("kind", "value", "note"),
+    "overheads": ("kind", "value", "currency", "note"),
 }
 _DIFF_KEYS = {
     "rates": ("department_id", "position", "plant_id"),
@@ -724,6 +906,10 @@ def diff_versions(old: Optional[CostSheetVersion], new: CostSheetVersion) -> dic
     return out
 
 
+def diff_is_empty(d: dict) -> bool:
+    return all(not (d[s]["added"] or d[s]["removed"] or d[s]["changed"]) for s in SECTIONS)
+
+
 async def previous_version(db: AsyncSession, v: CostSheetVersion) -> Optional[CostSheetVersion]:
     """The version a draft or published version is compared to: the one it
     was based on for a draft, the previous published one for a published."""
@@ -745,11 +931,24 @@ async def _names(db: AsyncSession, org_id: int) -> tuple[dict, dict]:
     return deps, plants
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe(value):
+    """Neutralise spreadsheet formulas: a text cell starting with = + - @ tab
+    or CR is prefixed with ' so Excel and LibreOffice show it as text instead
+    of running it (CSV/formula injection). Numbers pass unchanged."""
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        return "'" + value
+    return value
+
+
 def _export_tables(v: CostSheetVersion, deps: dict, plants: dict) -> dict[str, tuple[list, list]]:
+    """Header and rows per sheet. Text goes through _safe; numbers stay numbers."""
     detail = version_detail(v, {})
     pl = lambda i: plants.get(i, "") if i else "All plants"  # noqa: E731
     dp = lambda i: deps.get(i, "") if i else "All departments"  # noqa: E731
-    return {
+    tables = {
         "Positions": (["Department", "Position", "Plant", "Hourly rate", "Effective rate",
                        "Currency", "Note"],
                       [[dp(r["department_id"]), r["position"] or "Default", pl(r["plant_id"]),
@@ -761,30 +960,42 @@ def _export_tables(v: CostSheetVersion, deps: dict, plants: dict) -> dict[str, t
                        r["tonnage_min"], r["tonnage_max"], r["hourly_rate"], r["currency"],
                        r["note"] or ""] for r in detail["machine_rates"]]),
         "Sampling": (["Machine class", "Plant", "Mode", "Flat price", "Setup h", "Run h",
-                      "Labour h", "Labour department", "Handling", "Price per trial",
-                      "Currency", "Note"],
+                      "Labour h", "Labour department", "Labour position", "Handling",
+                      "Price per trial", "Currency", "Note"],
                      [[r["machine_class"], pl(r["plant_id"]), r["mode"], r["flat_price"],
                        r["setup_hours"], r["run_hours_default"], r["labour_hours"],
                        deps.get(r["labour_department_id"], "") if r["labour_department_id"] else "",
-                       r["handling_cost"], r["computed_price"], r["currency"], r["note"] or ""]
+                       r["labour_position"] or "", r["handling_cost"], r["computed_price"],
+                       r["currency"], r["note"] or ""]
                       for r in detail["sampling_rates"]]),
-        "Overheads": (["Department", "Plant", "Kind", "Value", "Note"],
+        "Overheads": (["Department", "Plant", "Kind", "Value", "Currency", "Note"],
                       [[dp(r["department_id"]), pl(r["plant_id"]),
                         "Percent" if r["kind"] == "percent" else "Per hour", r["value"],
-                        r["note"] or ""] for r in detail["overheads"]]),
+                        r["currency"] or "", r["note"] or ""] for r in detail["overheads"]]),
     }
+    return {k: (head, [[_safe(c) for c in row] for row in rows])
+            for k, (head, rows) in tables.items()}
+
+
+def _csv_number(value: float, full: bool) -> str:
+    """German Excel reads ';'-separated CSV with a decimal comma."""
+    text = (f"{value:.4f}".rstrip("0").rstrip(".") if full else f"{value:.2f}")
+    return text.replace(".", ",")
 
 
 async def export_csv(db: AsyncSession, v: CostSheetVersion, section: str = "Positions") -> str:
     deps, plants = await _names(db, v.organization_id)
     tables = _export_tables(v, deps, plants)
     head, rows = tables.get(section, tables["Positions"])
+    # overhead values keep their full precision (12.5 %, 0.25 per hour)
+    full = {i for i, h in enumerate(head) if section == "Overheads" and h == "Value"}
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(head)
     for r in rows:
-        w.writerow(["" if c is None else f"{c:.2f}" if isinstance(c, float) else c
-                    for c in r])
+        w.writerow(["" if c is None
+                    else _csv_number(float(c), i in full) if isinstance(c, float)
+                    else c for i, c in enumerate(r)])
     return buf.getvalue()
 
 
@@ -845,3 +1056,32 @@ async def reference_rates(db: AsyncSession, org_id: int,
                     "hourly_rate": float(r.hourly_rate),
                     "min_factor": r.min_factor if r.min_factor is not None else 1.0})
     return list(out.values())
+
+
+# ---------------------------------------------------------------- plant currencies
+
+async def plant_currencies(db: AsyncSession, org_id: int) -> list[dict]:
+    """Every plant with its currency and whether Finance confirmed it
+    (migration 094 set it from the location only)."""
+    plants = (await db.execute(select(Plant).where(Plant.organization_id == org_id)
+                               .order_by(Plant.name))).scalars().all()
+    confirmed = {k for (k,) in (await db.execute(select(OrgSetting.key).where(
+        OrgSetting.organization_id == org_id,
+        OrgSetting.key.like(SETTING_PLANT_CURRENCY_CONFIRMED + "%"),
+        OrgSetting.value == "1"))).all()}
+    return [{"id": p.id, "name": p.name, "code": p.code, "is_active": p.is_active,
+             "currency": p.currency or "EUR",
+             "currency_confirmed": f"{SETTING_PLANT_CURRENCY_CONFIRMED}{p.id}" in confirmed}
+            for p in plants]
+
+
+async def set_plant_currency(db: AsyncSession, org_id: int, plant_id: int, currency: str,
+                             user_id: Optional[int]) -> None:
+    """Finance sets (or confirms) a plant's currency. Existing rows keep
+    theirs: a published price does not change its code after the fact."""
+    plant = await db.get(Plant, plant_id)
+    if plant is None or plant.organization_id != org_id:
+        raise CostSheetError("Unknown plant", 404)
+    plant.currency = normalize_currency(currency)
+    await set_setting(db, org_id, f"{SETTING_PLANT_CURRENCY_CONFIRMED}{plant_id}", "1", user_id)
+    await db.flush()

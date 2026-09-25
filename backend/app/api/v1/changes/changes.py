@@ -26,7 +26,7 @@ from app.services.change_service import (
     ALLOWED_TRANSITIONS, ChangeService, ChangeError, _org_scope,
 )
 from app.services.workflow_service import WorkflowService
-from app.services.meeting_service import MeetingService
+from app.services.meeting_service import MeetingForbidden, MeetingService
 from app.services.validation_issue_service import IssueForbidden, IssueNotFound
 from app.schemas.change import (
     ChangeCreate, ChangeUpdate, ChangeResponse, ChangeDetailResponse,
@@ -98,17 +98,27 @@ async def create_change(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not await ChangeService.user_can_start_change(db, current_user):
+    from app.services import mother_plants as mp
+    from app.services.mother_plant_service import MotherPlantService
+    mother_plant = body.origin == mp.MOTHER_PLANT
+    allowed = (await MotherPlantService.may_start(db, current_user) if mother_plant
+               else await ChangeService.user_can_start_change(db, current_user))
+    if not allowed:
         raise HTTPException(
             status_code=403,
-            detail="Only an admin or a member of a department allowed to start "
-                   "changes (e.g. Sales) may raise a change")
+            detail=("Only an admin, Project Management or a member of a "
+                    "department allowed to start changes may raise a change "
+                    "from the mother plant" if mother_plant else
+                    "Only an admin or a member of a department allowed to start "
+                    "changes (e.g. Sales) may raise a change"))
     # The system currently runs the customer (external) change flow only, so
     # the entry point refuses to create internal ones — half-built internal
     # changes stuck mid-flow are worse than not offering them. The SERVICE
     # stays capable: the internal costing/approval path is real, tested
     # functionality waiting on the decision to switch it on.
-    if body.customer_relevant is False:
+    # A change from the mother plant is not customer relevant here either,
+    # but it is its own side track (spec §14), not the internal branch.
+    if body.customer_relevant is False and not mother_plant:
         raise HTTPException(
             status_code=400,
             detail="Internal changes are not enabled yet — this system "
@@ -119,16 +129,40 @@ async def create_change(
     if project_org is None or (current_user.effective_role != "admin"
                                and project_org != current_user.organization_id):
         raise HTTPException(status_code=404, detail="Project not found")
-    if body.lead_id is not None:
-        await _require_org_user(db, body.lead_id, project_org)
+    # Spec §16: the capturer does not make themselves (or anybody) the lead.
+    # Naming the lead is Project Management's call (or an admin's); for
+    # everybody else lead_id is ignored and the change starts without one
+    # (no project-PM concept exists to default to).
+    lead_id = body.lead_id
+    if lead_id is not None and not await MeetingService.user_is_pm(db, current_user):
+        lead_id = None
+    if lead_id is not None:
+        await _require_org_user(db, lead_id, project_org)
     try:
         change = await ChangeService.create_change(
             session=db, project_id=body.project_id, title=body.title,
             change_type=body.change_type, raised_by=current_user.id,
             reason=body.reason, description=body.description, priority=body.priority,
-            lead_id=body.lead_id, data_classification=body.data_classification,
+            lead_id=lead_id, data_classification=body.data_classification,
             customer_relevant=body.customer_relevant,
+            origin=body.origin, mother_plant_name=body.mother_plant_name,
+            mother_plant_ref=body.mother_plant_ref,
+            mother_plant_sop=body.mother_plant_sop,
         )
+        # Spec §16: the impacted items travel with the capture, in the same
+        # transaction, so a change never exists half-captured.
+        if body.title_auto is not None:
+            change.title_auto = body.title_auto
+        if body.impacted_part_ids:
+            from app.services.early_stage_service import EarlyStageService
+            ids = list(dict.fromkeys(body.impacted_part_ids))
+            lead = body.lead_part_id if body.lead_part_id in ids else ids[0]
+            await db.refresh(change, ["impacted_items"])
+            for pid in ids:
+                await ChangeService.add_impacted_item(
+                    db, change, pid, current_user.id, is_lead=(pid == lead))
+                await db.refresh(change, ["impacted_items"])
+            await EarlyStageService.recompose_title(db, change, current_user.id)
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -152,9 +186,12 @@ async def list_changes(
     from app.services.price_redaction import PriceViewer, redact_change_out
     viewer = PriceViewer(db, current_user)
     out = []
+    acting = getattr(current_user, "acts_as_department_id", None) is not None
     for change in changes:
         change.deadline_state = await ChangeService.deadline_state(db, change)
         row = ChangeResponse.model_validate(change)
+        # "Mine" filter (spec §16): the caller leads or raised it.
+        row.is_mine = not acting and current_user.id in (change.lead_id, change.raised_by)
         if not await viewer.may_read(change):
             redact_change_out(row)
         out.append(row)
@@ -172,8 +209,15 @@ async def change_permissions(
     will give. Declared before /{change_id} so "permissions" is not eaten as
     a change id (same trap as my-tasks).
     """
+    from app.services import mother_plants as mp
+    from app.services.mother_plant_service import MotherPlantService
     return {
         "can_start_change": await ChangeService.user_can_start_change(db, current_user),
+        # Mother-plant side track (spec §14): starters plus Project
+        # Management, and the configured plants (default first).
+        "can_start_mother_plant": await MotherPlantService.may_start(db, current_user),
+        "mother_plants": list(mp.MOTHER_PLANTS),
+        "default_mother_plant": mp.DEFAULT_MOTHER_PLANT,
     }
 
 
@@ -221,6 +265,12 @@ async def my_change_tasks(
                        within 7 days (or already has), for Sales
       plan_feedback    approved with a detailed plan this caller's required
                        department has not confirmed at the current revision
+      info_ack         mother-plant change: this caller's department was
+                       informed and has not confirmed "Read and understood"
+      info_send        mother-plant change at scoping, nobody informed yet,
+                       for PM / lead / admin
+      inform_mother_plant  mother-plant change with validated timing not yet
+                       stamped "Inform mother plant", for PM / lead / admin
       release_check    in_validation with open release-checklist items owned
                        by this caller's department
       validation_issue_* an open validation issue waits on this caller:
@@ -243,7 +293,20 @@ async def my_change_tasks(
                 & (ChangeRequest.status == "in_assessment")
             )
         )
-        for a, c in rows.all():
+        from app.services.early_stage_service import EarlyStageService
+        pairs = rows.all()
+        # The assessment is the FIRST routing stage (plus deviation-added
+        # departments); later-stage PM/Sales rows are no assessment (§16).
+        firsts: dict[int, int] = {}
+        if pairs:
+            from sqlalchemy import func as _f
+            firsts = dict((await db.execute(
+                select(ChangeAssessment.change_id, _f.min(ChangeAssessment.stage_order))
+                .where(ChangeAssessment.change_id.in_({c.id for _, c in pairs}))
+                .group_by(ChangeAssessment.change_id))).all())
+        for a, c in pairs:
+            if not EarlyStageService.is_assessment_row(a, firsts.get(c.id)):
+                continue
             # Execution state lives on the linked engine task; surface a row only
             # when it is *effectively* active (task active, or an unlinked row
             # carrying its own "active" status from a routing deviation).
@@ -359,6 +422,25 @@ async def my_change_tasks(
                         ChangePlanFeedback.change_id.in_(planned))
                     .order_by(ChangePlanFeedback.id))).scalars().all():
                 feedback.setdefault(r.change_id, {})[r.department_id] = r
+    # Mother-plant side track (spec §14): open "Read and understood"
+    # receipts of the caller's departments, and which changes have informed
+    # anybody yet (the PM's "Send information" errand).
+    from app.models.change_info import ChangeInfoReceipt
+    from app.services import mother_plants as mp
+    from app.services.mother_plant_service import MotherPlantService
+    mp_ids = [c.id for c in open_changes if mp.is_mother_plant(c)]
+    info_open = await MotherPlantService.open_receipts_for(db, mp_ids, dep_ids)
+    informed_ids = set((await db.execute(
+        select(ChangeInfoReceipt.change_id).where(
+            ChangeInfoReceipt.change_id.in_(mp_ids)).distinct()
+    )).scalars().all()) if mp_ids else set()
+    informed_depts: dict = {}
+    if mp_ids and approved_ids:
+        for cid, did in (await db.execute(
+                select(ChangeInfoReceipt.change_id, ChangeInfoReceipt.department_id)
+                .where(ChangeInfoReceipt.change_id.in_(
+                    [i for i in mp_ids if i in approved_ids])))).all():
+            informed_depts.setdefault(cid, set()).add(did)
     release_rows: dict = {}
     validation_ids = _ids("in_validation") if dep_ids else []
     if validation_ids:
@@ -443,6 +525,36 @@ async def my_change_tasks(
                     "target_tab": "offer",
                 })
 
+        # Mother plant: "Read and understood" for each informed department
+        # of the caller; "Send information" for the PM at scoping until
+        # somebody is informed; "Inform the mother plant" once the timing is
+        # validated (the customer publish does not exist here).
+        if mp.is_mother_plant(c):
+            for r in info_open.get(c.id, []):
+                tasks.append({
+                    **await _base(c), "kind": "info_ack",
+                    "department_id": r.department_id, "receipt_id": r.id,
+                    "target_tab": "mother",
+                    "hint": "Read the mother plant's change and confirm: "
+                            "read and understood",
+                })
+            if (c.status == "scoping" and c.id not in informed_ids
+                    and await MotherPlantService.may_send(db, c, current_user)):
+                tasks.append({
+                    **await _base(c), "kind": "info_send",
+                    "target_tab": "mother",
+                    "hint": "Send information to the team",
+                })
+            if (c.status in ("approved", "in_implementation")
+                    and c.timing_validated_at is not None
+                    and c.plan_published_at is None
+                    and await MotherPlantService.may_send(db, c, current_user)):
+                tasks.append({
+                    **await _base(c), "kind": "inform_mother_plant",
+                    "target_tab": "timing",
+                    "hint": "Inform the mother plant of the validated timing",
+                })
+
         # The detailed plan waits on every responsible team's confirmation;
         # each unconfirmed one is that department's errand.
         # Same rule as ChangePlanService.feedback_state, on preloaded rows.
@@ -450,8 +562,14 @@ async def my_change_tasks(
                 and c.timing_validated_at is None and c.id in planned):
             required = {a.department_id for a in c.assessments
                         if a.rasic_letter in BLOCKING_LETTERS}
-            required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
-                         if n in dept_by_name}
+            if mp.is_mother_plant(c):
+                # no assessments: the informed departments and Scheduling
+                required |= informed_depts.get(c.id, set())
+                required |= {dept_by_name[n] for n in ("Scheduling",)
+                             if n in dept_by_name}
+            else:
+                required |= {dept_by_name[n] for n in ("Scheduling", "Sales")
+                             if n in dept_by_name}
             latest = feedback.get(c.id, {})
             revision = int(c.plan_revision or 0)
             for did in sorted(required & dep_ids):
@@ -599,6 +717,63 @@ async def my_change_tasks(
                     "question_note": newest.note,
                 })
 
+    # Post-quote scope change (spec §16): costing reopens for the affected
+    # departments only, until a newer offer or an approved deviation covers it.
+    if dep_ids:
+        from app.services.early_stage_service import EarlyStageService as _ES
+        for c in open_changes:
+            mine_depts = set(c.scope_change_department_ids or []) & dep_ids
+            if not (c.scope_changed_after_quote and mine_depts):
+                continue
+            state = await _ES.scope_change_state(db, c)
+            if state and not state["covered"]:
+                for d in sorted(mine_depts):
+                    tasks.append({**await _base(c), "kind": "costing_update",
+                                  "department_id": d,
+                                  "reason": c.scope_change_reason})
+
+    # One list (spec §16): no duplicate rows, a human kind label and the
+    # stage each row belongs to.
+    from app.services import cm_labels
+    status_of = {c.id: c.status for c in open_changes}
+    lead_of = {c.id: c.lead_id for c in open_changes}
+    acting = getattr(current_user, "acts_as_department_id", None) is not None
+    # The caller's departments' RASIC letters per change (spec §16 follow-up).
+    letters: dict[int, set] = {}
+    task_change_ids = {t["change_id"] for t in tasks}
+    if dep_ids and task_change_ids:
+        for cid, letter in (await db.execute(
+                select(ChangeAssessment.change_id, ChangeAssessment.rasic_letter)
+                .where(ChangeAssessment.change_id.in_(task_change_ids),
+                       ChangeAssessment.department_id.in_(dep_ids)))).all():
+            letters.setdefault(cid, set()).add(letter)
+    seen: set = set()
+    unique = []
+    for t in tasks:
+        key = (t["kind"], t["change_id"], t.get("assessment_id"),
+               t.get("concern_id"), t.get("issue_id"), t.get("check_key"),
+               t.get("escalation_id"), t.get("action_id"),
+               t.get("department_id") if t["kind"] in ("costing_input", "costing_update",
+                                                        "plan_feedback", "info_ack",
+                                                        "release_check", "progress_report")
+               else None)
+        if key in seen:
+            continue
+        seen.add(key)
+        t.setdefault("kind_label", cm_labels.TASK_KIND[t["kind"]][0]
+                     if t["kind"] in cm_labels.TASK_KIND
+                     else t.get("label") or cm_labels.label("task_kind", t["kind"]))
+        stage = t.get("stage") or status_of.get(t["change_id"])
+        t.setdefault("stage", stage)
+        t.setdefault("stage_label", cm_labels.label("status", stage) if stage else None)
+        t.setdefault("status", status_of.get(t["change_id"]))
+        t["rasic_letters"] = sorted(letters.get(t["change_id"], set()),
+                                    key="RASCI".index)
+        t["is_mine"] = bool(t.get("mine")) or (
+            not acting and lead_of.get(t["change_id"]) == current_user.id)
+        unique.append(t)
+    tasks = unique
+
     # One order across every kind: overdue first, then soonest due (undated
     # last), then change number. Assessment rows keep "mine" as the top tie
     # break — an answer you already accepted outranks one you have not.
@@ -684,6 +859,12 @@ async def put_check_standard(
 @router.get("/reference/rates")
 async def reference_rates(db: AsyncSession = Depends(get_db),
                           current_user: User = Depends(get_current_user)):
+    # The cost sheet's currently valid version (spec §15); department_rate
+    # only until a first version is published.
+    from app.services.cost_sheet_service import reference_rates as sheet_rates
+    sheet = await sheet_rates(db, current_user.organization_id)
+    if sheet is not None:
+        return sheet
     from app.models.change_cost import DepartmentRate
     rows = (await db.execute(select(DepartmentRate))).scalars().all()
     return [{"department_id": r.department_id, "plant_id": r.plant_id,
@@ -708,6 +889,15 @@ async def reference_assessment_checklist(
         dept = await db.get(Department, department_id)
         name = dept.name if dept is not None else None
     return checklist.items_for(name)
+
+
+@router.get("/reference/labels")
+async def reference_labels(current_user: User = Depends(get_current_user)):
+    """Human labels for the module's codes (spec §16): status, verdict,
+    change type, priority, concern kind, RASIC letter, cost carrier, how a
+    concern was settled and My Tasks kinds. {group: {code: {en, de}}}."""
+    from app.services import cm_labels
+    return cm_labels.reference()
 
 
 @router.get("/reference/risk-types")
@@ -1154,7 +1344,8 @@ async def get_routing(change_id: int, db: AsyncSession = Depends(get_db),
                 # Execution state lives on the linked engine task; read it through.
                 status=(a.effective_status if a else None),
                 verdict=(a.verdict if a else None),
-                assessment_id=(a.id if a else None)))
+                assessment_id=(a.id if a else None),
+                pending_rasic_letter=(a.pending_rasic_letter if a else None)))
         stages.append(RoutingStage(stage_order=st["stage_order"], departments=deps))
     return RoutingResponse(
         change_id=change_id,
@@ -1227,6 +1418,14 @@ async def transition_change(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    # Spec §16 P1-4: reject, cancel, hold, recall and closing the assessment
+    # are the change lead's, Project Management's or an admin's; kickoff
+    # (and a rejection at capture) also Sales'.
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.transition_refusal(
+        db, change, current_user, body.to_status)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     # The quote stage is Sales' own: starting the offer and declaring it sent
     # are both statements about the customer relationship, and nobody else is
     # in a position to make them. Enforced here, like every other role gate in
@@ -1284,6 +1483,17 @@ async def transition_change(
                         if change.status == "rejected" else
                         "Only Project Management, the change lead or an admin "
                         f"may move a change to '{body.to_status}'"))
+    # Mother plant (spec §14): scoping -> approved is the PM's call, like
+    # sending the information that gates it.
+    if change.status == "scoping" and body.to_status == "approved":
+        from app.services import mother_plants as mp
+        from app.services.mother_plant_service import MotherPlantService
+        if (mp.is_mother_plant(change)
+                and not await MotherPlantService.may_send(db, change, current_user)):
+            raise HTTPException(
+                status_code=403,
+                detail="Only Project Management, the change lead or an admin "
+                       "may approve a change from the mother plant")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
@@ -1307,12 +1517,19 @@ async def add_impacted_item(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.impact_edit_refusal(db, change, current_user)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     try:
+        before = await EarlyStageService.begin_impact_edit(db, change, body.reason)
         item = await ChangeService.add_impacted_item(
             db, change, body.part_id, current_user.id,
             impact_note=body.impact_note, eng_level_before=body.eng_level_before,
             is_lead=body.is_lead,
         )
+        await EarlyStageService.finish_impact_edit(
+            db, change, current_user.id, body.reason, before, [body.part_id])
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -1323,13 +1540,23 @@ async def add_impacted_item(
 @router.delete("/{change_id}/impacted-items/{item_id}", status_code=204)
 async def remove_impacted_item(
     change_id: int, item_id: int,
+    reason: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.impact_edit_refusal(db, change, current_user)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     try:
+        item = next((i for i in change.impacted_items if i.id == item_id), None)
+        before = await EarlyStageService.begin_impact_edit(db, change, reason)
         await ChangeService.remove_impacted_item(db, change, item_id, current_user.id)
+        await EarlyStageService.finish_impact_edit(
+            db, change, current_user.id, reason, before,
+            [item.part_id] if item else [])
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -1367,13 +1594,19 @@ async def apply_impact_selection(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
-    if current_user.effective_role != "admin" and change.lead_id != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Only the change lead or an admin may edit the impact selection")
+    # Spec §16 P1-5: the change lead, Project Management or an admin.
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.impact_edit_refusal(db, change, current_user)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     try:
+        prior = {i.part_id for i in change.impacted_items}
+        before = await EarlyStageService.begin_impact_edit(db, change, body.reason)
         await ChangeService.apply_impact_selection(
             db, change, body.part_ids, current_user.id)
+        await EarlyStageService.finish_impact_edit(
+            db, change, current_user.id, body.reason, before,
+            sorted(prior ^ set(body.part_ids)))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -1393,6 +1626,10 @@ async def seed_impacted_items(
     change = await ChangeService.get_change(db, change_id, viewer=current_user)
     if not change:
         raise HTTPException(status_code=404, detail="Change not found")
+    from app.services.early_stage_service import EarlyStageService
+    refusal = await EarlyStageService.impact_edit_refusal(db, change, current_user)
+    if refusal:
+        raise HTTPException(status_code=403, detail=refusal)
     added = await ChangeService.seed_impacted_from_relations(db, change, current_user.id)
     await db.commit()
     return {"added": added}
@@ -1619,6 +1856,9 @@ async def update_change(
             db, change, "lead_changed",
             f"Change lead {change.lead_id} -> {new_lead.id}", current_user.id,
             field_name="lead_id", old_value=change.lead_id, new_value=new_lead.id)
+    # A hand-typed title stops following the lead item (spec §16).
+    if fields.get("title") is not None and fields["title"] != change.title:
+        change.title_auto = False
     try:
         await ChangeService.update_change(db, change, current_user.id, **fields)
     except ChangeError as e:
@@ -1865,6 +2105,20 @@ async def upload_attachment(
     contents = await file.read()
     if len(contents) > 50 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+    # The mother plant's timing seeds the detailed plan at approval: refuse
+    # a file that could not be imported now, not weeks later.
+    from app.services import mother_plants as mp
+    if kind == mp.TIMING_ATTACHMENT_KIND:
+        from app.services.mother_plant_service import check_timing_file
+        if not mp.is_mother_plant(change):
+            raise HTTPException(
+                status_code=400,
+                detail="A mother-plant timing file belongs to a change from "
+                       "the mother plant")
+        try:
+            check_timing_file(contents)
+        except ChangeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     uploads_dir = os.path.join(os.getcwd(), "uploads", "changes", str(change_id))
     os.makedirs(uploads_dir, exist_ok=True)
     safe_name = os.path.basename(file.filename or "attachment.bin")
@@ -1947,6 +2201,11 @@ async def _require_attachment_delete(db: AsyncSession, change, att,
         if concern is not None and not concern.is_open:
             frozen("That concern is settled: the documents it was settled on "
                    "cannot be removed")
+    if att.validation_issue_id is not None:
+        from app.services.validation_issue_service import ValidationIssueService
+        why = await ValidationIssueService.frozen_attachment(db, att)
+        if why:
+            frozen(why)
     a = (await db.get(ChangeAssessment, att.assessment_id)
          if att.assessment_id is not None else None)
     if a is not None and a.change_id == change.id:
@@ -2466,7 +2725,10 @@ async def create_meeting(
             db, change, current_user, meeting_date=body.meeting_date,
             participants=[p.model_dump() for p in body.participants],
             notes=body.notes, selected_department_ids=body.selected_department_ids,
-            channel=body.channel, department_rasic=body.department_rasic)
+            channel=body.channel, department_rasic=body.department_rasic,
+            cost_carrier=body.cost_carrier)
+    except MeetingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -2489,6 +2751,8 @@ async def update_meeting(
     try:
         meeting = await MeetingService.update_meeting(
             db, change, meeting_id, current_user, **fields)
+    except MeetingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ChangeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
@@ -2585,7 +2849,9 @@ async def list_concerns(
     # so the card never shows a bare username — or worse, a '#id'.
     user_ids = ({c.raised_by for c in change.concerns}
                 | {c.answered_by for c in change.concerns
-                   if c.answered_by is not None})
+                   if c.answered_by is not None}
+                | {c.withdrawn_by for c in change.concerns
+                   if c.withdrawn_by is not None})
     dept_names: dict[int, list[str]] = {}
     names: dict[int, str] = {}
     if user_ids:
@@ -2598,6 +2864,9 @@ async def list_concerns(
                 select(User.id, User.full_name).where(User.id.in_(user_ids))):
             names[uid] = full_name
     out = []
+    # Risk types read as words, a department's own types included (§16).
+    from app.services.risk_types import labels_for_keys
+    type_labels = await labels_for_keys(db, {c.risk_type for c in change.concerns})
     # A risk deleted by its raiser is gone from the register; the changelog
     # keeps the record.
     for c in (c for c in change.concerns if c.retracted_at is None):
@@ -2605,6 +2874,10 @@ async def list_concerns(
         row.raised_by_departments = sorted(dept_names.get(c.raised_by, []))
         if c.answered_by is not None:
             row.answered_by_name = names.get(c.answered_by)
+        if c.withdrawn_by is not None:
+            row.withdrawn_by_name = names.get(c.withdrawn_by)
+        if c.risk_type:
+            row.risk_type_label = type_labels.get(c.risk_type)
         out.append(row)
     return out
 
@@ -2723,6 +2996,8 @@ async def decide_meeting(
         meeting = await MeetingService.decide_meeting(
             db, change, meeting_id, body.decision, current_user,
             reason=body.reason)
+    except MeetingForbidden as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         # transition side effects raise ChangeError (a ValueError subclass);
         # WorkflowService kick-off gates raise plain ValueError.

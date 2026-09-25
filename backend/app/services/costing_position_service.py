@@ -59,7 +59,16 @@ class CostingPositionService:
                 or await MeetingService.user_is_pm_member(session, actor)):
             return True
         if change.status != "costing":
-            return False
+            # Spec §16: an impact edit after the quote reopens costing for
+            # the departments it touched, until a newer offer or an
+            # approved deviation covers it.
+            if not (change.scope_changed_after_quote
+                    and department_id in (change.scope_change_department_ids or [])):
+                return False
+            from app.services.early_stage_service import EarlyStageService
+            state = await EarlyStageService.scope_change_state(session, change)
+            if state is None or state["covered"]:
+                return False
         return await WorkflowService.actor_in_department(
             session, actor, department_id)
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -307,11 +307,24 @@ class ChangeRoutingService:
         # reason is the record of which, and the lead reads it to decide.
         if not (reason and reason.strip()):
             raise ValueError("A reason is required to change the routing")
-        existing = (await session.execute(
+        # A department can hold rows in several routing stages (R at stage 1,
+        # C at the summation stage...). The deviation acts on the row of the
+        # stage it targets: the given stage, else the assessment stage (the
+        # change's first); remove/reletter fall back to the lowest row.
+        dept_rows = (await session.execute(
             select(ChangeAssessment).where(
                 (ChangeAssessment.change_id == change.id)
                 & (ChangeAssessment.department_id == department_id))
-        )).scalar_one_or_none()
+            .order_by(ChangeAssessment.stage_order, ChangeAssessment.id)
+        )).scalars().all()
+        target_stage = stage_order
+        if target_stage is None:
+            target_stage = (await session.execute(
+                select(func.min(ChangeAssessment.stage_order)).where(
+                    ChangeAssessment.change_id == change.id))).scalar() or 1
+        existing = next((r for r in dept_rows if r.stage_order == target_stage), None)
+        if existing is None and op != "add" and dept_rows:
+            existing = dept_rows[0]
         # Change-scoped engine instance (Task 3). When present, deviation ops must
         # mutate its tasks alongside the assessment rows so engine state stays
         # consistent. Legacy pre-migration changes have none -> assessment-only.
@@ -324,7 +337,7 @@ class ChangeRoutingService:
         if op == "add":
             if rasic_letter not in TASK_LETTERS:
                 raise ValueError("add requires a task letter (R/A/S/C)")
-            order = stage_order or 1
+            order = stage_order or target_stage
             if existing is None:
                 new_status = "active" if order <= await ChangeRoutingService._max_active_order(session, change) else "pending"
                 new_row = ChangeAssessment(
@@ -393,16 +406,21 @@ class ChangeRoutingService:
                 raise ValueError("reletter requires a task letter (R/A/S/C)")
             if existing is None:
                 raise ValueError("no assessment to reletter")
-            existing.rasic_letter = rasic_letter
-            if existing.wf_instance_task_id is not None:
-                task = await session.get(WfInstanceTask, existing.wf_instance_task_id)
-                if task is not None:
-                    _retarget_task(task, rasic_letter)
-                    await session.flush()
-            # A reletter can add or remove a stage gate; re-check advancement.
-            if inst is not None:
-                await WorkflowService._maybe_advance_stage(session, inst)
-            desc = f"re-lettered dept {department_id} to {rasic_letter}"
+            # "Not our responsibility" (spec §16 P1-3): a department that has
+            # answered cannot decline any more, and the decline is only a
+            # request. The row keeps its letter (and owes its answer) until
+            # the lead approves; the workflow does not move on it.
+            if existing.submitted_at is not None or (
+                    existing.verdict and existing.verdict != "pending"):
+                raise ValueError(
+                    "The department has already submitted its assessment; it "
+                    "can no longer decline it")
+            if existing.rasic_letter == rasic_letter:
+                raise ValueError(f"The department is already {rasic_letter}")
+            existing.pending_rasic_letter = rasic_letter
+            await session.flush()
+            desc = (f"dept {department_id} declined: {existing.rasic_letter} to "
+                    f"{rasic_letter}, awaiting decision")
         else:
             raise ValueError(f"unknown op '{op}'")
 
@@ -422,7 +440,7 @@ class ChangeRoutingService:
                 session, [change.lead_id], kind="routing_deviation_pending",
                 subject_key=f"routing-dev:{change.id}:{routing.deviation_proposed_by}:{desc}",
                 title=f"Routing change pending: {change.change_number}",
-                body=f"{desc.capitalize()} — needs your approval.",
+                body=f"{desc.capitalize()}: needs your approval.",
                 link=f"/changes/{change.id}?tab=assessments",
             )
         return routing
@@ -483,6 +501,10 @@ class ChangeRoutingService:
         rows = (await session.execute(
             select(ChangeAssessment).where(ChangeAssessment.change_id == change.id)
         )).scalars().all()
+        # A pending decline simply lapses: the row never changed its letter.
+        declined = [a for a in rows if a.pending_rasic_letter]
+        for a in declined:
+            a.pending_rasic_letter = None
         added = [a for a in rows if (a.department_id, a.stage_order) not in standard]
         # A re-lettered standard row ("not our responsibility" -> C) goes back
         # to the letter the routing gave it.
@@ -527,7 +549,8 @@ class ChangeRoutingService:
             f"Routing deviation rejected: {reason.strip()}", user_id,
             notes=reason.strip(),
             new_value={"removed_department_ids": removed,
-                       "restored_department_ids": [a.department_id for a in relettered]})
+                       "restored_department_ids": [a.department_id for a in relettered],
+                       "declines_refused_department_ids": [a.department_id for a in declined]})
         if routing.deviation_proposed_by is not None and routing.deviation_proposed_by != user_id:
             await NotificationService.notify_once(
                 session, [routing.deviation_proposed_by], kind="routing_deviation_rejected",
@@ -543,12 +566,42 @@ class ChangeRoutingService:
         from app.services.change_service import ChangeService
         routing = await ChangeRoutingService._routing(session, change)
         ChangeRoutingService._check_decide(change, routing, user_id, "approve")
+        # A pending "not our responsibility" re-letters only now (§16 P1-3),
+        # and only if the department has not answered in the meantime (then
+        # its answer stands and the decline is moot).
+        rows = (await session.execute(
+            select(ChangeAssessment).where(
+                ChangeAssessment.change_id == change.id,
+                ChangeAssessment.pending_rasic_letter.isnot(None))
+        )).scalars().all()
+        relettered = []
+        for a in rows:
+            letter = a.pending_rasic_letter
+            a.pending_rasic_letter = None
+            if a.submitted_at is not None or (a.verdict and a.verdict != "pending"):
+                continue
+            a.rasic_letter = letter
+            if a.wf_instance_task_id is not None:
+                task = await session.get(WfInstanceTask, a.wf_instance_task_id)
+                if task is not None:
+                    _retarget_task(task, letter)
+            relettered.append(a.department_id)
+        await session.flush()
+        if relettered:
+            inst = (await session.execute(
+                select(WfInstance).where(
+                    WfInstance.change_id == change.id,
+                    WfInstance.status == "active")
+            )).scalar_one_or_none()
+            if inst is not None:
+                await WorkflowService._maybe_advance_stage(session, inst)
         routing.deviation_status = "approved"
         routing.deviation_approved_by = user_id
         routing.deviation_approved_at = datetime.utcnow()
         await session.flush()
         await ChangeService.append_changelog(
-            session, change, "routing_deviation_approved", "Routing deviation approved", user_id)
+            session, change, "routing_deviation_approved", "Routing deviation approved", user_id,
+            new_value={"relettered_department_ids": relettered} if relettered else None)
         return routing
 
     @staticmethod

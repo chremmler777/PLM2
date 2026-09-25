@@ -55,7 +55,11 @@ ALLOWED_TRANSITIONS = {
     # down outright without first being scoped, and forcing it through scoping
     # would demand an impacted set for a change that is dying anyway.
     "captured":          {"scoping", "rejected", "cancelled", "on_hold"},
-    "scoping":           {"in_assessment", "rejected", "cancelled", "on_hold"},
+    # 'approved' straight from scoping is the MOTHER-PLANT side track only
+    # (spec §14): no assessment, costing or quote. transition() refuses it
+    # for every other origin.
+    "scoping":           {"in_assessment", "approved", "rejected", "cancelled",
+                          "on_hold"},
     "in_assessment":     {"scoping", "costing", "rejected", "cancelled", "on_hold"},
     # 'approved' straight from costing is the INTERNAL branch (no quote at
     # all). Customer-relevant changes go costing -> quoting -> quoted.
@@ -262,9 +266,33 @@ class ChangeService:
         priority: str = "medium", lead_id: Optional[int] = None,
         data_classification: str = "confidential",
         customer_relevant: Optional[bool] = None,
+        origin: Optional[str] = None,
+        mother_plant_name: Optional[str] = None,
+        mother_plant_ref: Optional[str] = None,
+        mother_plant_sop=None,
     ) -> ChangeRequest:
+        from app.services import mother_plants as mp
         if change_type not in CHANGE_TYPES:
             raise ChangeError(f"Invalid change_type '{change_type}'")
+        if origin is not None and origin not in mp.ORIGINS:
+            raise ChangeError(
+                f"Invalid origin '{origin}' - one of {', '.join(mp.ORIGINS)}")
+        if origin == mp.MOTHER_PLANT:
+            # The mother plant sold it: never customer relevant here (no quote
+            # deadline, no offer).
+            if customer_relevant:
+                raise ChangeError(
+                    "A change from the mother plant is not customer relevant "
+                    "here: the mother plant handles the customer")
+            from app.services.mother_plant_service import MotherPlantService
+            mother_plant_name, mother_plant_ref, mother_plant_sop = \
+                MotherPlantService.check_capture(
+                    mother_plant_name, mother_plant_ref, mother_plant_sop)
+            customer_relevant = False
+        else:
+            # customer / internal mirror the flag (the flag stays the rule
+            # the flow reads; origin says where the change came from).
+            origin = "customer" if customer_relevant else "internal"
         number = await ChangeService.generate_change_number(session)
         change = ChangeRequest(
             change_number=number, project_id=project_id, title=title,
@@ -274,6 +302,11 @@ class ChangeService:
         )
         if customer_relevant is not None:
             change.customer_relevant = customer_relevant
+        change.origin = origin
+        if origin == mp.MOTHER_PLANT:
+            change.mother_plant_name = mother_plant_name
+            change.mother_plant_ref = mother_plant_ref
+            change.mother_plant_sop = mother_plant_sop
         session.add(change)
         await session.flush()
         # Only the release gate is seeded up front. Feasibility is answered by
@@ -539,7 +572,10 @@ class ChangeService:
             missing.append("at least one attachment")
         # Internal changes have no quote deadline in the two-phase model.
         if change.customer_relevant and change.required_by_date is None:
-            missing.append("required-by date")
+            missing.append("quote deadline")
+        # Somebody has to own what is handed over (spec §16 P1-5).
+        if change.lead_id is None:
+            missing.append("change lead")
         return missing
 
     @staticmethod
@@ -555,7 +591,7 @@ class ChangeService:
         if to_status == "scoping":
             missing = await ChangeService.kickoff_missing(session, change)
             if missing:
-                return ("Incomplete capture — missing " + ", ".join(missing)
+                return ("Incomplete capture: missing " + ", ".join(missing)
                         + " before scoping")
         if to_status == "in_assessment":
             count = len(change.impacted_items)
@@ -566,7 +602,7 @@ class ChangeService:
             # Internal changes have no quote deadline; only customer-relevant
             # changes must set the required-by date before assessment.
             if change.customer_relevant and change.required_by_date is None:
-                return "No deadline set — define the required-by date in scoping"
+                return "No quote deadline set: define it in scoping"
             # A change that already has routing has fanned out once — the proceed
             # meeting was consumed then. Resuming from on_hold back into
             # in_assessment must not re-demand a fresh meeting (build_routing is
@@ -595,7 +631,8 @@ class ChangeService:
                 return "Not all responsible/accountable assessments are submitted"
             submitted = [a for a in change.assessments if a.verdict != "pending"]
             if any(a.verdict == "not_feasible" for a in submitted):
-                return "An assessment is 'not_feasible' — explicit decision required"
+                return ("An assessment is 'not feasible': reject, go back to "
+                        "scoping, or override with an approved deviation")
             routing = change.routing
             if routing is not None and routing.deviation_status == "pending_approval":
                 return "Routing deviation is pending approval"
@@ -755,8 +792,27 @@ class ChangeService:
         if to_status not in allowed:
             raise ChangeError(f"Cannot move from '{change.status}' to '{to_status}'")
 
+        # Mother-plant side track (spec §14): no assessment, costing or
+        # quote, ever; scoping -> approved is its own hop, hard-gated on the
+        # impact lock and the team being informed (no deviation bypasses it).
+        from app.services import mother_plants as mp
+        mother_plant = mp.is_mother_plant(change)
+        if mother_plant and to_status in mp.MOTHER_PLANT_SKIPPED:
+            raise ChangeError(
+                "A change from the mother plant has no assessment, costing or "
+                "quote: it goes from scoping to approved")
+        if change.status == "scoping" and to_status == "approved":
+            if not mother_plant:
+                raise ChangeError(
+                    "Only a change from the mother plant goes from scoping "
+                    "straight to approved")
+            from app.services.mother_plant_service import MotherPlantService
+            blocker = await MotherPlantService.approval_blocker(session, change)
+            if blocker is not None:
+                raise ChangeError(blocker)
+
         # HARD gates: the approval decision cannot be forced.
-        if to_status == "approved":
+        if to_status == "approved" and not mother_plant:
             if change.customer_relevant:
                 if change.customer_response != "accepted":
                     raise ChangeError("Customer has not accepted the offer")
@@ -787,12 +843,22 @@ class ChangeService:
         # HARD precondition: recall (in_assessment -> scoping) is a correction for
         # a premature submit, not a silent undo of real work. Allowed only while no
         # assessment has been submitted or carries a non-pending verdict.
+        # Spec §16: after a "not feasible" the team may take the change back
+        # to scoping to reshape it. That throws submitted work away, so it
+        # needs a reason, and the answers are kept on the record.
+        supersede_reason = None
         if change.status == "in_assessment" and to_status == "scoping":
             started = [a for a in change.assessments
                        if a.verdict != "pending" or a.effective_status == "submitted"]
             if started:
-                raise ChangeError(
-                    "Cannot recall: assessment work has already started")
+                if not any(a.verdict == "not_feasible" for a in change.assessments):
+                    raise ChangeError(
+                        "Cannot recall: assessment work has already started")
+                supersede_reason = (reason or "").strip()
+                if not supersede_reason:
+                    raise ChangeError(
+                        "A reason is required to take the change back to "
+                        "scoping after a 'not feasible' verdict")
 
         # HARD precondition: validation sending the change BACK is the stage's
         # other outcome, and it is expensive — the timeline has to be replanned
@@ -870,16 +936,16 @@ class ChangeService:
                     ChangeAttachment.kind == "rejection_letter"))).scalar() or 0
             if letters == 0:
                 raise ChangeError(
-                    "No rejection letter on file — attach the explanation sent "
+                    "No rejection letter on file: attach the explanation sent "
                     "to the customer before closing")
             if change.rejection_sent_at is None:
                 raise ChangeError(
-                    "Rejection has not been confirmed as sent — record the send "
+                    "Rejection has not been confirmed as sent: record the send "
                     "(POST /rejection-sent) before closing")
 
         if to_status == "in_assessment" and change.impact_confirmed_at is None:
             raise ChangeError(
-                "Impacted set is not locked — confirm impacted items before "
+                "Impacted set is not locked: confirm impacted items before "
                 "starting assessment")
 
         if deviation is not None:
@@ -888,6 +954,10 @@ class ChangeService:
         # Side effects on entry
         if to_status == "scoping" and change.status == "in_assessment":
             from app.services.change_routing_service import ChangeRoutingService
+            if supersede_reason:
+                from app.services.early_stage_service import EarlyStageService
+                await EarlyStageService.supersede_assessments(
+                    session, change, user_id, supersede_reason)
             await ChangeRoutingService.teardown_routing(session, change, user_id)
         if to_status == "in_assessment":
             await ChangeService.ensure_assessments(session, change, user_id)
@@ -903,6 +973,15 @@ class ChangeService:
         old = change.status
         change.status = to_status
         await session.flush()
+        if to_status == "costing":
+            # Spec §16 P1-2: later routing stages wake only now.
+            from app.services.early_stage_service import EarlyStageService
+            await EarlyStageService.wake_later_stages(session, change)
+        if mother_plant and old == "scoping" and to_status == "approved":
+            # After the status flips: the detailed plan is only writable in
+            # approved.
+            from app.services.mother_plant_service import MotherPlantService
+            await MotherPlantService.on_approved(session, change, user_id)
         action = "deviated_transition" if deviation else "status_changed"
         desc = f"{old} -> {to_status}" + (
             f" (deviation #{deviation.id}: {deviation.reason})" if deviation else "")
@@ -1598,6 +1677,11 @@ class ChangeService:
         plan in front of the customer, and the previous stamp is in the
         changelog where the history belongs.
         """
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            raise ChangeError(
+                "A change from the mother plant has no customer publish: "
+                "inform the mother plant instead")
         if change.status != "approved" and user.effective_role != "admin":
             raise ChangeError(
                 "The bank build plan is published while the change is approved")
@@ -1644,7 +1728,16 @@ class ChangeService:
                 select(Department.id, Department.name)
                 .where(Department.id.in_(assess_dept_ids)))).all()
             dept_names = {i: n for i, n in rows}
+        # Spec §16 P1-2: assessment work exists only while the change is in
+        # assessment, and only on the first routing stage (plus departments
+        # added by deviation). PM/Sales rows of later stages are no
+        # assessment, whatever their engine task says.
+        from app.services.early_stage_service import EarlyStageService
+        first_stage = EarlyStageService.first_stage(change)
         for a in change.assessments:
+            if (change.status != "in_assessment"
+                    or not EarlyStageService.is_assessment_row(a, first_stage)):
+                continue
             if a.effective_status != "active":
                 continue
             # Only R/A letters owe a submit — a Consulted/Support row is
@@ -1758,12 +1851,18 @@ class ChangeService:
                 and await ChangeService._user_in_department(session, user, "Sales")):
             actions.append({
                 "kind": "needs_info",
-                "label": "Sales: obtain missing information — "
+                "label": "Sales: obtain missing information: "
                          + (latest.decision_reason or "see meeting note"),
                 "target_tab": "scoping",
             })
 
         actions += await ChangeService._costing_to_close_actions(
+            session, change, user, dept_ids)
+
+        # Mother-plant side track (spec §14): send the information, read and
+        # understood, inform the mother plant of the validated timing.
+        from app.services.mother_plant_service import MotherPlantService
+        actions += await MotherPlantService.my_actions(
             session, change, user, dept_ids)
 
         # Validation issues (spec §12): contain / root cause / fix actions
@@ -1972,7 +2071,7 @@ class ChangeService:
             raise ChangeError("Rejection was already confirmed as sent")
         if not await ChangeService.has_rejection_letter(session, change):
             raise ChangeError(
-                "No rejection letter on file — attach the explanation sent to "
+                "No rejection letter on file: attach the explanation sent to "
                 "the customer first")
         change.rejection_sent_at = datetime.utcnow()
         change.rejection_sent_by = user_id
@@ -2121,6 +2220,11 @@ class ChangeService:
         checklist existed land here and keep their task, which is the safe
         side of the line.
         """
+        # "Not impacted" is a complete answer (Packaging's questionnaire):
+        # costing does not wait on it (spec §16).
+        if assessment.details_dict.get("impacted") is False:
+            return bool(assessment.cost_impact or assessment.lifecycle_cost
+                        or assessment.lead_time_impact_days)
         impacts = assessment.details_dict.get("impacts")
         if not isinstance(impacts, list):
             return True
@@ -2448,7 +2552,7 @@ class ChangeService:
             if not decks:
                 raise ChangeError(
                     "Not feasible requires the explanation document (PPT) for "
-                    "the customer — attach it to this assessment as a "
+                    "the customer: attach it to this assessment as a "
                     "'change_ppt'")
 
         # Soft hold: a department that flagged an open concern on this change
@@ -2472,7 +2576,7 @@ class ChangeService:
         if held:
             points = "; ".join(f"#{c.id} ({c.kind}): {c.note}" for c in held)
             raise ChangeError(
-                "This department has open concerns on the change — resolve "
+                "This department has open concerns on the change: resolve "
                 f"them before submitting its assessment: {points}")
         result = await session.execute(
             select(ChangeAssessment).where(
@@ -2508,7 +2612,13 @@ class ChangeService:
             if not isinstance(details, dict):
                 raise ChangeError("Assessment details must be an object")
             await ChangeService._validate_impacts(session, department_id, details)
+            details.pop("draft", None)
             a.details = json.dumps(details)
+        elif "draft" in a.details_dict:
+            # The submit is the answer; an unfinished draft ends with it.
+            kept = a.details_dict
+            kept.pop("draft", None)
+            a.details = json.dumps(kept) if kept else None
         a.submitted_at = datetime.utcnow()
         a.submitted_by = user_id
         # Doing the work IS taking it. There is no claim step in front of an
@@ -2691,6 +2801,11 @@ class ChangeService:
         # driven downstream gates/pricing decisions. Idempotent PATCHes
         # (same value) are allowed at any status.
         cust_rel = fields.get("customer_relevant")
+        from app.services import mother_plants as mp
+        if cust_rel and mp.is_mother_plant(change):
+            raise ChangeError(
+                "A change from the mother plant is not customer relevant here: "
+                "the mother plant handles the customer")
         if (
             cust_rel is not None
             and cust_rel != change.customer_relevant
@@ -2699,6 +2814,8 @@ class ChangeService:
             raise ChangeError(
                 "Customer-relevant can only be changed during capture or scoping"
             )
+        if cust_rel is not None and not mp.is_mother_plant(change):
+            change.origin = "customer" if cust_rel else "internal"
 
         # Sales-settable deadline: handled before the generic loop (not part
         # of the plain-attribute `allowed` whitelist) so an explicit null
@@ -2737,7 +2854,7 @@ class ChangeService:
             await ChangeService.append_changelog(
                 session, change,
                 "quote_deadline_pushback" if pushback else "deadline_set",
-                f"Required-by {old} -> {new_date}", user_id,
+                f"Quote deadline {old} -> {new_date}", user_id,
                 field_name="required_by_date",
                 old_value=str(old) if old else None,
                 new_value=str(new_date) if new_date else None, notes=reason)
@@ -2947,6 +3064,16 @@ class ChangeService:
             f"Internal costs approved ({summ['totals']['grand_total']:.2f})",
             actor.id, field_name="internal_approved_amount",
             new_value=summ["totals"]["grand_total"], notes=note)
+        # The internal branch has no offer to freeze the plan into: the
+        # planned P&L is frozen here, append-only, as its own changelog row
+        # (price-redacted via the "pnl" key); PnlService reads it as the
+        # planned basis (spec §16 follow-up).
+        from app.services.pnl_service import PnlService
+        pnl = await PnlService.planned_figures(session, change, None)
+        await ChangeService.append_changelog(
+            session, change, "pnl_frozen",
+            "Planned P&L frozen at internal approval", actor.id,
+            new_value={"pnl": pnl})
         return change
 
     @staticmethod

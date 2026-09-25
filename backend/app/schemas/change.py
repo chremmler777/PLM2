@@ -1,6 +1,6 @@
 """Pydantic schemas for Change Management."""
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -23,6 +23,19 @@ class ChangeCreate(BaseModel):
     lead_id: Optional[int] = None
     data_classification: str = "confidential"
     customer_relevant: Optional[bool] = None
+    # Mother-plant side track (spec §14): origin 'mother_plant' carries the
+    # plant (one of app/services/mother_plants.MOTHER_PLANTS, default
+    # Weissenburg), their reference and the SOP date (required).
+    origin: Optional[str] = None
+    mother_plant_name: Optional[str] = Field(None, max_length=120)
+    mother_plant_ref: Optional[str] = Field(None, max_length=120)
+    mother_plant_sop: Optional[date] = None
+    # Atomic capture (spec §16): the impacted items in the same request.
+    # The first id is the lead unless lead_part_id says otherwise; with
+    # title_auto (default) the server composes the title from the lead.
+    impacted_part_ids: Optional[List[int]] = None
+    lead_part_id: Optional[int] = None
+    title_auto: Optional[bool] = None
 
 
 class ChangeUpdate(BaseModel):
@@ -82,6 +95,8 @@ class ImpactedItemCreate(BaseModel):
     impact_note: Optional[str] = None
     eng_level_before: Optional[str] = None
     is_lead: bool = False
+    # Required from 'quoted' on: the offer no longer covers the scope.
+    reason: Optional[str] = None
 
 
 class AssessmentSubmit(BaseModel):
@@ -132,6 +147,9 @@ class AssessmentResponse(BaseModel):
     rfq_expected: bool = False
     stage_order: int = 1
     rasic_letter: str = "R"
+    # "Not our responsibility" pending the lead's decision (spec §16): the
+    # letter asked for; the row keeps rasic_letter until approval.
+    pending_rasic_letter: Optional[str] = None
     status: str = "active"
     owner_id: Optional[int] = None
     owner_name: Optional[str] = None
@@ -154,6 +172,7 @@ class AssessmentResponse(BaseModel):
                     "lead_time_impact_days", "conditions", "notes",
                     "responsible_id", "effort_hours", "submitted_at",
                     "stage_order", "rasic_letter")},
+                "pending_rasic_letter": getattr(data, "pending_rasic_letter", None),
                 "status": data.effective_status,
                 "owner_id": data.effective_owner_id,
                 "owner_name": data.effective_owner_name,
@@ -270,6 +289,22 @@ class ChangeResponse(BaseModel):
     cm_external: bool = False
     implementation_mode: Optional[str] = None
     customer_relevant: bool = False
+    # Spec §16: the title follows the lead item; an impact edit after the
+    # quote leaves the offer short of the scope.
+    title_auto: bool = False
+    scope_changed_after_quote: bool = False
+    # Set by the list endpoint: the caller leads or raised the change.
+    is_mine: bool = False
+    # customer | internal | mother_plant (migration 093, spec §14).
+    origin: str = "customer"
+    mother_plant_name: Optional[str] = None
+    mother_plant_ref: Optional[str] = None
+    mother_plant_sop: Optional[date] = None
+    # The team informed (mother plant): first send, and the departments
+    # that have not confirmed "Read and understood" yet (Blocked by, info).
+    info_sent_at: Optional[datetime] = None
+    info_department_ids: List[int] = []
+    info_open_department_ids: List[int] = []
     car_line: Optional[str] = None
     affected_plant_ids: List[int] = []
     required_by_date: Optional[datetime] = None
@@ -371,6 +406,10 @@ class ChangeResponse(BaseModel):
             row["blocked_department_ids"] = data.blocked_department_ids
             row["negotiated_final_price"] = data.negotiated_final_price
             row["scrap_price_set"] = data.scrap_quote_price is not None
+            row["info_sent_at"] = getattr(data, "info_sent_at", None)
+            row["info_department_ids"] = getattr(data, "info_department_ids", [])
+            row["info_open_department_ids"] = getattr(
+                data, "info_open_department_ids", [])
             row["project_number"] = data.project_number
             row["project_name"] = data.project_name
             return row
@@ -397,6 +436,7 @@ class RoutingDepartment(BaseModel):
     status: Optional[str] = None     # None for info-only
     verdict: Optional[str] = None
     assessment_id: Optional[int] = None
+    pending_rasic_letter: Optional[str] = None
 
 
 class RoutingStage(BaseModel):
@@ -871,6 +911,9 @@ class MeetingCreate(BaseModel):
     # {department_id: "R"|"A"|"S"|"C"} — the room's call. When given, it is
     # authoritative and selected_department_ids follows its keys.
     department_rasic: Optional[Dict[int, str]] = None
+    # The room re-confirms the cost carrier: customer | internal (§16).
+    # Proceed is refused until it is set.
+    cost_carrier: Optional[str] = None
 
 
 class MeetingUpdate(BaseModel):
@@ -879,6 +922,7 @@ class MeetingUpdate(BaseModel):
     notes: Optional[str] = None
     selected_department_ids: Optional[List[int]] = None
     department_rasic: Optional[Dict[int, str]] = None
+    cost_carrier: Optional[str] = None
 
 
 class NegotiationCreate(BaseModel):
@@ -992,6 +1036,8 @@ class ConcernResponse(BaseModel):
     department_id: Optional[int] = None
     # Set on kind "risk" only; null on legacy kinds.
     risk_type: Optional[str] = None
+    # Human label of risk_type ("Tolerance stack"), spec §16.
+    risk_type_label: Optional[str] = None
     severity: Optional[int] = None
     checklist_key: Optional[str] = None
     raised_by_meeting_id: Optional[int] = None
@@ -1002,6 +1048,12 @@ class ConcernResponse(BaseModel):
     # it and fell back to '#id' while nothing served it.
     answered_by_name: Optional[str] = None
     withdrawn_at: Optional[datetime] = None
+    withdrawn_by: Optional[int] = None
+    # author | pm | department, and its words ("Withdrawn by author",
+    # "Settled by Project Management"), spec §16.
+    settled_as: Optional[str] = None
+    settled_label: Optional[str] = None
+    withdrawn_by_name: Optional[str] = None
     resolution_note: Optional[str] = None
     resolved_by_meeting_id: Optional[int] = None
     is_open: bool = True
@@ -1027,6 +1079,7 @@ class MeetingResponse(BaseModel):
     decision: Optional[str] = None
     selected_department_ids: List[int] = []
     department_rasic: Optional[Dict[int, str]] = None
+    cost_carrier: Optional[str] = None
     created_by: int
     created_at: datetime
     decided_by: Optional[int] = None
@@ -1042,6 +1095,8 @@ class ImpactSuggestIn(BaseModel):
 
 class ImpactSelectionIn(BaseModel):
     part_ids: List[int]
+    # Required from 'quoted' on (spec §16).
+    reason: Optional[str] = None
 
 
 class DeviationProposeIn(BaseModel):

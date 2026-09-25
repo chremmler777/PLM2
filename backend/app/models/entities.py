@@ -31,6 +31,8 @@ class Plant(Base):
     name: Mapped[str] = mapped_column(String(255))
     code: Mapped[str] = mapped_column(String(50))
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ISO 4217; the cost sheet prices this plant's rows in it (migration 094).
+    currency: Mapped[str] = mapped_column(String(3), default="EUR", server_default="EUR")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

@@ -10,7 +10,7 @@ from app.models.change import ChangeMeeting
 async def post_meeting(client, auth, change_id, **overrides):
     body = {"participants": [{"name": "PM Jane"}, {"name": "Customer Rep"}],
             "notes": "Initial scope clarification",
-            "selected_department_ids": [], **overrides}
+            "selected_department_ids": [], "cost_carrier": "customer", **overrides}
     return await client.post(f"/api/v1/changes/{change_id}/meetings",
                              json=body, headers=auth)
 
@@ -132,7 +132,7 @@ async def test_meeting_authz_pm_or_lead_or_admin(client, admin_auth, seed):
     change = await create_change(client, admin_auth, seed["project_id"])
     eng_auth = await login(client, "eng@test.io", ENGINEER_PASSWORD)
     res = await post_meeting(client, eng_auth, change["id"])
-    assert res.status_code == 400
+    assert res.status_code == 403   # a missing right, not a bad request (§16)
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from app.utils.clock import business_today
 from app.models.change import ChangeConcern, ChangeRequest
 from app.models.change_cost import CostingPosition
 from app.models.change_offer import ChangeOffer
@@ -210,7 +211,7 @@ async def test_send_moves_to_quoted_and_versions(client, offer_world, session_fa
     res = await client.post(_url(cid, f"/{o['id']}/send"), json={}, headers=sales)
     assert res.status_code == 400 and "quote plan" in res.json()["detail"]
     await _seed_quote_plan(client, sales, cid)
-    today = date.today()
+    today = business_today()
     tomorrow = (today + timedelta(days=3)).isoformat()   # beyond any UTC offset + 1 day
     # the customer cannot receive it tomorrow, nor before it was sent
     res = await client.post(_url(cid, f"/{o['id']}/send"),
@@ -322,7 +323,7 @@ async def test_expired_offer_acceptance_needs_a_reason(client, offer_world,
     assert res.status_code == 200, res.text
     async with session_factory() as s:
         row = await s.get(ChangeOffer, o["id"])
-        row.valid_until = date.today() - timedelta(days=1)
+        row.valid_until = business_today() - timedelta(days=1)
         await s.commit()
     got = (await client.get(_url(cid), headers=sales)).json()[0]
     assert got["expired"] is True and got["days_left"] == -1
@@ -540,8 +541,8 @@ def _pdf_ctx(*, data=None, tasks=None, status="sent", totals=None):
         "items": [{"number": "1<2", "name": "a & b", "index": "C"}],
         "offer": {"version": 2, "status": status, "currency": "EUR", "data": d,
                   "totals": totals or compute_totals(d, 100.0),
-                  "change_note": "x < y & z", "sent_at": date.today(),
-                  "valid_until": date.today() + timedelta(days=30)},
+                  "change_note": "x < y & z", "sent_at": business_today(),
+                  "valid_until": business_today() + timedelta(days=30)},
         "tasks": tasks or [],
     }
 

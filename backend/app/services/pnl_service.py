@@ -239,13 +239,22 @@ class PnlService:
         for t in tasks:
             plan_tasks.setdefault((t.change_id, t.plan), []).append(t)
 
+        internal_frozen = await PnlService.internal_frozen(
+            session, [c.id for c in changes if not c.customer_relevant])
         out = {}
         for c in changes:
             o = by_change.get(c.id)
             snap = (((o.data or {}).get(SNAPSHOT_KEY) or {}).get("pnl")
                     if o is not None and o.status == "accepted" else None)
+            if snap is None and o is None and not c.customer_relevant:
+                snap = internal_frozen.get(c.id)
             internal_cost, external_cost = costs.get(c.id, (0.0, 0.0))
-            if snap:
+            mother_plant = getattr(c, "origin", None) == "mother_plant"
+            if mother_plant:
+                # spec §14: no offer basis, actual local costs only
+                planned = {"revenue": None, "internal": 0.0, "external": 0.0,
+                           "scrap": 0.0}
+            elif snap:
                 planned = {k: snap.get(k) for k in
                            ("revenue", "internal", "external", "scrap")}
             else:
@@ -270,8 +279,7 @@ class PnlService:
             # nothing booked, invoiced or raised yet: there is no actual to
             # compare, and a zero would read as a saving
             recorded = (c.id in internal_actual or bool(e) or bool(i))
-            phase = ("actual" if c.status in ACTUAL_STATUSES and recorded
-                     else "plan")
+            phase = pnl_phase(c, recorded)
 
             # slip against the detailed baseline, else the offered finish
             detailed = plan_tasks.get((c.id, "detailed"), [])
@@ -290,13 +298,15 @@ class PnlService:
                     if baseline is not None and forecast is not None else None)
             out[c.id] = {
                 "phase": phase,
-                "basis": ("accepted_offer" if o is not None and o.status == "accepted"
-                          else "sent_offer" if o is not None else "costing"),
+                # the card's basis rule (pnl_basis), so list and card agree
+                "basis": pnl_basis(c, o, bool(snap)),
                 "offer_revenue": fig["planned_revenue"],
                 "planned_cost": fig["planned_cost"],
                 "planned_margin": fig["planned_margin"],
+                "actual_revenue": fig["actual_revenue"] if phase == "actual" else None,
                 "actual_cost": fig["actual_cost"] if phase == "actual" else None,
                 "actual_margin": fig["actual_margin"] if phase == "actual" else None,
+                "forecast_cost": fig["forecast_cost"] if phase == "actual" else None,
                 "forecast_margin": fig["forecast_margin"] if phase == "actual" else None,
                 "variance": fig["variance"] if phase == "actual" else None,
                 "slip_days": slip,
@@ -323,14 +333,24 @@ class PnlService:
             total_cost = sum(r["total_cost"] for r in subset)
             margin = revenue - total_cost
             margin_pct = (margin / revenue * 100) if revenue else None
-            actual_rows = [r for r in subset if r.get("phase") == "actual"]
+            # Offer vs doing: revenue, cost and margin over the SAME rows,
+            # the priced ones (a change without a price has no margin, so its
+            # cost stays out of the cost too); the rest is counted.
+            priced = [r for r in subset if r.get("offer_revenue") is not None]
+            actual_rows = [r for r in priced if r.get("phase") == "actual"]
             slips = [r["slip_days"] for r in subset if r.get("slip_days") is not None]
             return {
-                "offer_revenue": _round(sum(r.get("offer_revenue") or 0.0 for r in subset)),
-                "planned_cost": _round(sum(r.get("planned_cost") or 0.0 for r in subset)),
-                "planned_margin": _round(sum(r.get("planned_margin") or 0.0 for r in subset)),
+                "offer_revenue": _round(sum(r["offer_revenue"] for r in priced)),
+                "planned_cost": _round(sum(r.get("planned_cost") or 0.0 for r in priced)),
+                "planned_margin": _round(sum(r.get("planned_margin") or 0.0 for r in priced)),
+                "priced_count": len(priced),
+                "unpriced_count": len(subset) - len(priced),
+                "actual_revenue": _round(sum(r.get("actual_revenue") or 0.0
+                                             for r in actual_rows)),
                 "actual_cost": _round(sum(r.get("actual_cost") or 0.0 for r in actual_rows)),
                 "actual_margin": _round(sum(r.get("actual_margin") or 0.0 for r in actual_rows)),
+                "forecast_cost": _round(sum(r.get("forecast_cost") or 0.0
+                                            for r in actual_rows)),
                 "forecast_margin": _round(sum(r.get("forecast_margin") or 0.0 for r in actual_rows)),
                 "actual_count": len(actual_rows),
                 "variance": _round(sum(r.get("variance") or 0.0 for r in actual_rows)),
@@ -570,6 +590,29 @@ class PnlService:
         }
 
     @staticmethod
+    async def internal_frozen(session, change_ids) -> dict[int, dict]:
+        """{change_id: pnl} frozen at internal approval (the latest
+        'pnl_frozen' changelog row per change)."""
+        import json as _json
+        from app.models.change import ChangeChangelog
+        ids = list(change_ids)
+        if not ids:
+            return {}
+        out: dict[int, dict] = {}
+        for cid, raw in (await session.execute(
+                select(ChangeChangelog.change_id, ChangeChangelog.new_value)
+                .where(ChangeChangelog.change_id.in_(ids),
+                       ChangeChangelog.action == "pnl_frozen")
+                .order_by(ChangeChangelog.id))).all():
+            try:
+                pnl = (_json.loads(raw) or {}).get("pnl")
+            except (TypeError, ValueError):
+                pnl = None
+            if pnl:
+                out[cid] = pnl
+        return out
+
+    @staticmethod
     async def _plan_finish(session, change, plan: str) -> Optional[date]:
         from app.services.change_plan_service import ChangePlanService
         tasks = [t for t in await ChangePlanService.tasks(session, change, plan)
@@ -578,8 +621,12 @@ class PnlService:
 
     @staticmethod
     async def _basis_offer(session, change):
-        """(basis, offer): the accepted offer, else the latest sent one."""
+        """(basis, offer): the accepted offer, else the latest sent one. A
+        mother-plant change (spec §14) has no offer basis at all: "none"."""
         from app.models.change_offer import ChangeOffer
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            return "none", None
         if change.accepted_offer_id is not None:
             offer = await session.get(ChangeOffer, change.accepted_offer_id)
             if offer is not None:
@@ -688,7 +735,16 @@ class PnlService:
         frozen = None
         if offer is not None and offer.status == "accepted":
             frozen = ((offer.data or {}).get(SNAPSHOT_KEY) or {}).get("pnl")
-        if frozen:
+        elif basis == "internal_approval":
+            frozen = (await PnlService.internal_frozen(session, [change.id])).get(change.id)
+        if basis == "none":
+            # Mother plant: nothing was offered or costed here, so there is
+            # no plan side; the card shows the actual local costs only.
+            planned = {"revenue": None, "internal": 0.0, "external": 0.0,
+                       "scrap": 0.0, "currency": "EUR"}
+            warnings.append("Change from the mother plant: no offer, actual "
+                            "local costs only")
+        elif frozen:
             planned = frozen
         else:
             planned = await PnlService.planned_figures(session, change, offer)
@@ -701,7 +757,6 @@ class PnlService:
         elif basis == "sent_offer":
             warnings.append(f"Offer v{offer.version} is not accepted yet")
 
-        phase = "actual" if change.status in ACTUAL_STATUSES else "plan"
         actuals = await PnlService.change_actuals(session, change)
         if actuals["unrated_hours"]:
             warnings.append("Hours booked without a department rate are "
@@ -716,7 +771,10 @@ class PnlService:
             warnings.append("Customer-borne issue costs are not quoted yet")
         recorded = bool(actuals["total_booked_hours"] or any(costs.values())
                         or issues["count"])
-        if phase == "actual" and not recorded:
+        # the list's phase rule (pnl_phase): no actual before anything is
+        # recorded, a zero would read as a saving
+        phase = pnl_phase(change, recorded)
+        if change.status in ACTUAL_STATUSES and not recorded:
             warnings.append("No actuals recorded yet: no hours booked, no "
                             "invoice or issue cost entered")
         elif phase == "actual" and not costs["external"] and (planned.get("external") or 0) > 0:
@@ -734,7 +792,7 @@ class PnlService:
              "issues_supplier": issues["supplier"],
              "issues_customer": issues["customer"]},
             in_progress=change.status in IN_PROGRESS_STATUSES)
-        if planned_revenue is None:
+        if planned_revenue is None and basis != "none":
             warnings.append("No price yet: margins cannot be computed")
 
         timing = await PnlService.timing(session, change, planned.get("quote_finish"))
@@ -758,6 +816,30 @@ class PnlService:
 ACTUAL_STATUSES = ("in_implementation", "in_validation", "released", "closed")
 # until release, open cost lines are forecast at plan
 IN_PROGRESS_STATUSES = ("in_implementation", "in_validation")
+
+
+def pnl_phase(change, recorded: bool) -> str:
+    """'actual' once the change is being implemented AND something was
+    recorded (hours, an invoice, an issue cost), else 'plan'. One rule for
+    the list and the card."""
+    return "actual" if change.status in ACTUAL_STATUSES and recorded else "plan"
+
+
+def pnl_basis(change, offer, frozen: bool) -> str:
+    """What the plan side stands on. One rule for the list and the card:
+    none (mother plant, spec §14), accepted_offer (frozen at acceptance),
+    costing (accepted but never frozen: planned costs are the current
+    costing; or nothing offered yet), sent_offer, internal_approval."""
+    from app.services import mother_plants as mp
+    if mp.is_mother_plant(change):
+        return "none"
+    if offer is not None:
+        if offer.status == "accepted":
+            return "accepted_offer" if frozen else "costing"
+        return "sent_offer"
+    if not change.customer_relevant and change.internal_approved_amount is not None:
+        return "internal_approval"
+    return "costing"
 
 LINE_LABELS = (
     ("revenue", "Revenue (offer)", "revenue"),
@@ -816,7 +898,18 @@ def compose(planned: dict, actual: dict, *, in_progress: bool = False) -> dict:
     pm = None if rev_p is None else rev_p - cost_p
     am = None if rev_a is None else rev_a - cost_a
     fm = None if rev_a is None else rev_a - cost_f
+    pm_pct = _round(pm / rev_p * 100) if pm is not None and rev_p else None
+    am_pct = _round(am / rev_a * 100) if am is not None and rev_a else None
+    fm_pct = _round(fm / rev_a * 100) if fm is not None and rev_a else None
     return {
+        # the margin row, each column its own field: actual = to date,
+        # forecast = at completion (open lines at plan while in progress)
+        "margin_row": {"planned": _round(pm), "actual": _round(am),
+                       "forecast": _round(fm),
+                       "planned_pct": pm_pct, "actual_pct": am_pct,
+                       "forecast_pct": fm_pct,
+                       "variance": (_round(fm - pm)
+                                    if fm is not None and pm is not None else None)},
         "lines": lines, "in_progress": in_progress,
         "planned_revenue": _round(rev_p), "actual_revenue": _round(rev_a),
         "planned_cost": _round(cost_p), "actual_cost": _round(cost_a),
@@ -834,6 +927,8 @@ def compose(planned: dict, actual: dict, *, in_progress: bool = False) -> dict:
 # Actual costs that are not hours (supplier invoice lines, scrap, other)
 # ----------------------------------------------------------------------
 ACTUAL_COST_WINDOW = ("approved", "in_implementation", "in_validation", "released")
+# change_actual_costs.amount is Numeric(12, 2)
+MAX_ACTUAL_COST = 9_999_999_999.99
 
 
 class ActualCostError(ValueError):
@@ -858,8 +953,9 @@ class ActualCostService:
 
     @staticmethod
     async def list_costs(session, change, user) -> dict:
-        """Cost roles read every line; a department member reads the lines
-        booked to their own departments (what they entered themselves)."""
+        """Cost roles read every line; anyone else (a member of a department
+        that may enter costs) reads only the lines they entered themselves,
+        never a colleague's or another department's amounts."""
         from app.models.change_actual_cost import ChangeActualCost
         from app.models.workflow import Department
         cost_role = await ActualCostService.is_cost_role(session, change, user)
@@ -870,7 +966,7 @@ class ActualCostService:
             .order_by(ChangeActualCost.cost_date.desc(), ChangeActualCost.id.desc())
         )).scalars().all())
         if not cost_role:
-            rows = [r for r in rows if r.department_id in own]
+            rows = [r for r in rows if r.created_by == user.id]
         names = dict((await session.execute(select(Department.id, Department.name))).all())
         users = dict((await session.execute(
             select(User.id, User.full_name).where(
@@ -914,8 +1010,16 @@ class ActualCostService:
                 f"Unknown category '{category}' - one of external, scrap, other")
         if amount is None or amount <= 0:
             raise ActualCostError("The amount must be greater than zero")
+        if amount > MAX_ACTUAL_COST:
+            raise ActualCostError(
+                f"The amount is at most {MAX_ACTUAL_COST:,.2f}")
         if department_id is not None and await session.get(Department, department_id) is None:
             raise ActualCostError("Unknown department")
+        if attachment_id is not None:
+            from app.models.change import ChangeAttachment
+            att = await session.get(ChangeAttachment, attachment_id)
+            if att is None or att.change_id != change.id:
+                raise ActualCostError("That attachment is not on this change")
         if not await ActualCostService.is_cost_role(session, change, user):
             own = await ActualCostService.own_department_ids(session, user)
             if department_id is None or department_id not in own:

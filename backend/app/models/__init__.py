@@ -37,6 +37,7 @@ from app.models.change_validation_issue import (
     ValidationIssue, ValidationIssueAction, ValidationIssueEscalation,
 )
 from app.models.change_actual_cost import ChangeActualCost
+from app.models.change_info import ChangeInfoReceipt
 from app.models.cost_sheet import (
     CostSheetVersion, CostSheetRate, CostSheetMachineClass, CostSheetMachineRate,
     CostSheetSamplingRate, CostSheetOverhead, OrgSetting,
@@ -113,6 +114,7 @@ __all__ = [
     "ChangePlanDeviation",
     "ChangeOffer",
     "ChangeActualCost",
+    "ChangeInfoReceipt",
     "CostSheetVersion", "CostSheetRate", "CostSheetMachineClass", "CostSheetMachineRate",
     "CostSheetSamplingRate", "CostSheetOverhead", "OrgSetting",
     "FormDefinition",

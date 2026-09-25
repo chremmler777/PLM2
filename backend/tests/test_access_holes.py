@@ -751,7 +751,16 @@ async def test_create_change_is_org_bound(client, offer_world, session_factory, 
     assert res.status_code == 404, res.text
     org2 = (await _org2_id(session_factory))
     stranger = await _user(session_factory, seed, "stranger", org_id=org2)
-    res = await client.post("/api/v1/changes", headers=sales, json={
+    # Sales does not name the lead (spec §16): lead_id is ignored, so no
+    # foreign user can slip in that way either.
+    from tests.conftest import KEEP_LEAD_RULE, login
+    res = await client.post("/api/v1/changes", headers={**sales, KEEP_LEAD_RULE: "1"}, json={
+        "project_id": seed["project_id"], "title": "x-lead", "reason": "r",
+        "change_type": "physical_part", "lead_id": stranger})
+    assert res.status_code == 200 and res.json()["lead_id"] is None, res.text
+    # Whoever may name it (an admin) is held to the organization.
+    admin = await login(client, "admin@test.io")
+    res = await client.post("/api/v1/changes", headers=admin, json={
         "project_id": seed["project_id"], "title": "x-lead", "reason": "r",
         "change_type": "physical_part", "lead_id": stranger})
     assert res.status_code == 400, res.text

@@ -339,6 +339,16 @@ async def test_deviation_reletter_updates_task(
             s, change, seed["engineer_id"], op="reletter",
             department_id=dev_departments["Tool Engineer"], rasic_letter="S", reason="test op")
         await s.commit()
+    # Spec §16 P1-3: a re-letter is a request until it is approved.
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Tool Engineer"])
+        ))).scalar_one()
+        assert row.pending_rasic_letter == "S" and row.rasic_letter != "S"
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
+        await s.commit()
 
     async with session_factory() as s:
         row = (await s.execute(select(ChangeAssessment).where(
@@ -579,6 +589,16 @@ async def test_deviation_reletter_noted_to_blocking(
         await ChangeRoutingService.apply_deviation(
             s, change, seed["engineer_id"], op="reletter",
             department_id=dev_departments["Quality"], rasic_letter="R", reason="test op")
+        await s.commit()
+    # Spec §16 P1-3: a re-letter is a request until it is approved.
+    async with session_factory() as s:
+        row = (await s.execute(select(ChangeAssessment).where(
+            (ChangeAssessment.change_id == cid)
+            & (ChangeAssessment.department_id == dev_departments["Quality"])
+        ))).scalar_one()
+        assert row.pending_rasic_letter == "R" and row.rasic_letter != "R"
+        change = await s.get(ChangeRequest, cid)
+        await ChangeRoutingService.approve_deviation(s, change, seed["admin_id"])
         await s.commit()
 
     async with session_factory() as s:

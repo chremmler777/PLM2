@@ -127,6 +127,13 @@ class ImplementationService:
             .where(ChangeAssessment.change_id == change.id)
             .distinct())).scalars()
         dept_ids.update(rows.all())
+        # A mother-plant change (spec §14) prices nothing here: the informed
+        # departments are the ones doing the local work.
+        from app.services import mother_plants as mp
+        if mp.is_mother_plant(change):
+            from app.services.mother_plant_service import MotherPlantService
+            dept_ids.update(await MotherPlantService.informed_department_ids(
+                session, change))
         return sorted(dept_ids)
 
     # ------------------------------------------------------------------

@@ -340,7 +340,8 @@ async def test_informational_only_scoping_is_rejected(
     await lock_impact(session_factory, change["id"])
     await to_scoping(client, admin_auth, change["id"])
     res = await client.post(f"/api/v1/changes/{change['id']}/meetings",
-                            json={"selected_department_ids": picked}, headers=admin_auth)
+                            json={"selected_department_ids": picked,
+                                  "cost_carrier": "customer"}, headers=admin_auth)
     assert res.status_code == 200, res.text
     meeting_id = res.json()["id"]
     res = await client.post(

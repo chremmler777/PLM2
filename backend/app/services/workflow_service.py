@@ -464,6 +464,20 @@ class WorkflowService:
         )
         all_actionable = stage_tasks_result.scalars().all()
 
+        # Spec §16 P1-2: a change's later routing stages (PM's summation,
+        # Sales' customer activities) stay dormant while the change is in
+        # assessment. Stage 1 completing there only earns the hop to costing;
+        # the hop itself wakes the next stage (ChangeService.transition).
+        # Otherwise PM and Sales get assessment tasks nobody owes, and a
+        # department's bucket rebinds from its submitted row to a later one.
+        if instance.change_id is not None:
+            from app.models.change import ChangeRequest
+            change_status = (await db.execute(
+                select(ChangeRequest.status).where(
+                    ChangeRequest.id == instance.change_id))).scalar_one_or_none()
+            if change_status == "in_assessment":
+                return instance
+
         if all(t.status in ("approved", "waived") for t in all_actionable):
             # Advance: load template stages to find next
             tmpl_result = await db.execute(

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from app.utils.clock import business_today
 from app.auth.security import get_password_hash
 from app.models.change import (
     ChangeAssessment, ChangeAttachment, ChangeChangelog, ChangeRequest,
@@ -32,7 +33,7 @@ from tests.conftest import ENGINEER_PASSWORD, login
 
 pytestmark = pytest.mark.asyncio
 
-TODAY = date.today()
+TODAY = business_today()
 D0 = TODAY - timedelta(days=20)          # plan start: validation ended 3 days ago
 
 
@@ -384,7 +385,7 @@ async def test_fix_route_loops_back_and_builds_recovery_before_baseline(
     rv = tasks[rec["revalidation_task_id"]]
     assert rv.name == "Re-validation VI-1" and rv.duration_days == 3
     fixes = sorted([t for t in kids if t.kind == "work"], key=lambda t: t.id)
-    assert fixes[0].start_date == TODAY                 # never in the past
+    assert fixes[0].start_date == business_today()      # never in the past
     assert fixes[0].end_date == due + timedelta(days=1)  # until the due date
     assert fixes[1].duration_days == 7                  # 5 wd in calendar days
     assert rv.start_date == max(f.end_date for f in fixes)
@@ -583,7 +584,8 @@ async def test_new_timing_moves_release_deadline_and_escalates_recovery(
     async with session_factory() as s:
         change = await s.get(ChangeRequest, vi["change_id"])
         assert change.release_due_date.date() == new
-        assert change.release_due_reason == "VI-1"
+        assert change.release_due_date.time().isoformat() == "23:59:59"
+        assert change.release_due_reason == "VI-1: New SOP agreed"
         devs = list((await s.execute(select(ChangePlanDeviation))).scalars().all())
         escs = list((await s.execute(select(ImplementationEscalation))).scalars().all())
     assert len(escs) == 1 and escs[0].direction == "customer"
@@ -667,7 +669,8 @@ async def test_actions_revalidation_and_check_closes(client, vi, session_factory
         u = await s.get(User, vi["user"]["tool"]["id"])
         res = await ValidationIssueService.on_check_answered(s, change, chk, u)
         await s.commit()
-    assert res == {"closed": [], "reopened": [iid], "offer_raise": False}
+    assert res == {"closed": [], "reopened": [iid], "revalidated_early": [],
+                   "offer_raise": False}
     assert (await client.get(_url(vi, f"/{iid}"), headers=pm)).json()["status"] == "fixing"
     async with session_factory() as s:
         chk = await s.get(ValidationCheck, vi["check_id"])

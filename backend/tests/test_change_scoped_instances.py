@@ -291,7 +291,18 @@ async def test_ra_submission_completes_task_and_engine_advances(
         d1 = by_dep[dep["E-D1"]]
         d1_task = await s.get(WfInstanceTask, d1.wf_instance_task_id)
         assert d1_task.status == "approved"
-        # Engine advanced to stage 2.
+        # Spec §16 P1-2: while the change is in assessment the later stage
+        # stays dormant; entering costing wakes it.
+        inst = (await s.execute(select(WfInstance).where(
+            WfInstance.change_id == cid))).scalar_one()
+        assert inst.current_stage_order == 1
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
+    async with session_factory() as s:
+        rows = (await s.execute(select(ChangeAssessment).where(
+            ChangeAssessment.change_id == cid))).scalars().all()
+        by_dep = {a.department_id: a for a in rows}
         inst = (await s.execute(select(WfInstance).where(
             WfInstance.change_id == cid))).scalar_one()
         assert inst.current_stage_order == 2

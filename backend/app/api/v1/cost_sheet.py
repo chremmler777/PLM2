@@ -7,21 +7,48 @@ over cost_sheet_service; every write commits here.
 from datetime import date
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import get_db, User
-from app.models.cost_sheet import CostSheetMachineClass, SETTING_REVIEW_MONTHS
-from app.models.entities import Plant
+from app.models.cost_sheet import CostSheetMachineClass, SETTING_REVIEW_MONTHS, CURRENCIES
 from app.models.workflow import Department
 from app.services import cost_sheet_service as svc
 from app.services.cost_sheet_service import CostSheetError
 
-router = APIRouter(prefix="/cost-sheet", tags=["cost-sheet"])
+class _FiniteJsonRoute(APIRoute):
+    """Refuse NaN / Infinity in a JSON body with a plain 422 before FastAPI
+    parses it. Python's json accepts those tokens, and FastAPI's own 422
+    would then echo the NaN back and fail to serialise it (a 500)."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def guarded(request: Request):
+            if request.method in ("POST", "PUT", "PATCH"):
+                raw = await request.body()
+                if raw:
+                    def _reject(token):
+                        raise ValueError(token)
+                    try:
+                        json.loads(raw, parse_constant=_reject)
+                    except ValueError as e:
+                        if str(e) in ("NaN", "Infinity", "-Infinity"):
+                            return JSONResponse(status_code=422, content={
+                                "detail": "Numbers must be finite (no NaN or Infinity)"})
+            return await handler(request)
+        return guarded
+
+
+router = APIRouter(prefix="/cost-sheet", tags=["cost-sheet"], route_class=_FiniteJsonRoute)
 
 Section = Literal["rates", "machines", "sampling", "overheads"]
 
@@ -44,44 +71,59 @@ class DraftUpdate(BaseModel):
 class PublishBody(BaseModel):
     valid_from: date
     note: Optional[str] = Field(None, max_length=2000)
+    # A valid_from in the past re-prices what was booked since; the caller
+    # has to say it means it.
+    confirm_backdated: bool = False
+
+
+def _num(hi: float, lo: float = 0):
+    """A finite number in [lo, hi). NaN/Infinity are refused here with a 422,
+    before they can reach a Numeric column (and lock the draft with 500s)."""
+    return Field(None, ge=lo, lt=hi, allow_inf_nan=False)
 
 
 class RowBody(BaseModel):
     """Union of the four row shapes; the service keeps the fields its section
-    knows and validates them."""
+    knows and validates them again (bounds, finiteness, per-kind limits)."""
     department_id: Optional[int] = None
     position: Optional[str] = Field(None, max_length=80)
     plant_id: Optional[int] = None
-    hourly_rate: Optional[float] = None
+    hourly_rate: Optional[float] = _num(1e8)
     currency: Optional[str] = Field(None, max_length=3)
-    min_factor: Optional[float] = None
+    min_factor: Optional[float] = _num(100)
     note: Optional[str] = Field(None, max_length=2000)
+    machine_class_id: Optional[int] = None
     machine_class: Optional[str] = Field(None, max_length=40)
     machine_ref: Optional[str] = Field(None, max_length=80)
-    tonnage_min: Optional[int] = None
-    tonnage_max: Optional[int] = None
+    tonnage_min: Optional[int] = Field(None, ge=0, lt=1_000_000)
+    tonnage_max: Optional[int] = Field(None, ge=0, lt=1_000_000)
     mode: Optional[Literal["flat", "components"]] = None
-    flat_price: Optional[float] = None
-    setup_hours: Optional[float] = None
-    run_hours_default: Optional[float] = None
-    labour_hours: Optional[float] = None
+    flat_price: Optional[float] = _num(1e10)
+    setup_hours: Optional[float] = _num(1e6)
+    run_hours_default: Optional[float] = _num(1e6)
+    labour_hours: Optional[float] = _num(1e6)
     labour_department_id: Optional[int] = None
     labour_position: Optional[str] = Field(None, max_length=80)
-    handling_cost: Optional[float] = None
+    handling_cost: Optional[float] = _num(1e10)
     kind: Optional[Literal["percent", "per_hour"]] = None
-    value: Optional[float] = None
+    # percent: 0 to 300; per_hour: 0 to 1e6 (the service checks per kind)
+    value: Optional[float] = _num(1e6)
 
 
 class MachineClassBody(BaseModel):
     name: Optional[str] = Field(None, max_length=40)
-    tonnage_min: Optional[int] = None
-    tonnage_max: Optional[int] = None
-    sort_order: Optional[int] = None
+    tonnage_min: Optional[int] = Field(None, ge=0, lt=1_000_000)
+    tonnage_max: Optional[int] = Field(None, ge=0, lt=1_000_000)
+    sort_order: Optional[int] = Field(None, ge=0, lt=10_000)
     is_active: Optional[bool] = None
 
 
 class SettingsBody(BaseModel):
     review_months: int = Field(..., ge=1, le=120)
+
+
+class PlantCurrencyBody(BaseModel):
+    currency: str = Field(..., min_length=3, max_length=3)
 
 
 def _class_dict(c: CostSheetMachineClass) -> dict:
@@ -104,9 +146,6 @@ async def overview(current_user: User = Depends(get_current_user),
     draft = next((v for v in versions if v.status == "draft"), None)
     deps = (await db.execute(select(Department.id, Department.name, Department.is_active)
                              .order_by(Department.sort_order, Department.name))).all()
-    # Inactive plants too: migrated rows may still name one.
-    plants = (await db.execute(select(Plant.id, Plant.name, Plant.code, Plant.is_active).where(
-        Plant.organization_id == org).order_by(Plant.name))).all()
     return {
         "versions": [svc.version_summary(v, valid) for v in reversed(versions)],
         "current_version_id": current.id if current else None,
@@ -114,8 +153,9 @@ async def overview(current_user: User = Depends(get_current_user),
         "can_edit": await svc.can_edit(db, current_user),
         "stale": await svc.stale_status(db, org),
         "departments": [{"id": d.id, "name": d.name, "is_active": d.is_active} for d in deps],
-        "plants": [{"id": p.id, "name": p.name, "code": p.code, "is_active": p.is_active}
-                   for p in plants],
+        # Inactive plants too: migrated rows may still name one.
+        "plants": await svc.plant_currencies(db, org),
+        "currencies": list(CURRENCIES),
         "machine_classes": [_class_dict(c) for c in await svc.list_machine_classes(db, org)],
     }
 
@@ -258,7 +298,8 @@ async def publish(version_id: int, body: PublishBody,
                   db: AsyncSession = Depends(get_db)):
     try:
         v = await _editable(db, current_user, version_id)
-        await svc.publish(db, v, current_user.id, body.valid_from, body.note)
+        await svc.publish(db, v, current_user.id, body.valid_from, body.note,
+                          confirm_backdated=body.confirm_backdated)
     except CostSheetError as e:
         _raise(e)
     return await _detail(db, v)
@@ -316,21 +357,14 @@ async def add_machine_class(body: MachineClassBody,
                             db: AsyncSession = Depends(get_db)):
     try:
         await svc.require_edit(db, current_user)
+        c = await svc.add_machine_class(db, current_user.organization_id,
+                                        body.model_dump(exclude_unset=True))
+        await db.commit()
     except CostSheetError as e:
         _raise(e)
-    name = (body.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="A machine class needs a name")
-    org = current_user.organization_id
-    if (await db.execute(select(CostSheetMachineClass).where(
-            CostSheetMachineClass.organization_id == org,
-            CostSheetMachineClass.name == name))).scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="This machine class exists already")
-    c = CostSheetMachineClass(organization_id=org, name=name, tonnage_min=body.tonnage_min,
-                              tonnage_max=body.tonnage_max, sort_order=body.sort_order or 0,
-                              is_active=True if body.is_active is None else body.is_active)
-    db.add(c)
-    await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A machine class with this name exists already")
     return _class_dict(c)
 
 
@@ -338,22 +372,17 @@ async def add_machine_class(body: MachineClassBody,
 async def update_machine_class(class_id: int, body: MachineClassBody,
                                current_user: User = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
+    """Rename or re-band a class; a rename follows into every row using it."""
     try:
         await svc.require_edit(db, current_user)
+        c = await svc.update_machine_class(db, current_user.organization_id, class_id,
+                                           body.model_dump(exclude_unset=True))
+        await db.commit()
     except CostSheetError as e:
         _raise(e)
-    c = await db.get(CostSheetMachineClass, class_id)
-    if c is None or c.organization_id != current_user.organization_id:
-        raise HTTPException(status_code=404, detail="Machine class not found")
-    data = body.model_dump(exclude_unset=True)
-    if "name" in data:
-        name = (data["name"] or "").strip()
-        if not name:
-            raise HTTPException(status_code=422, detail="A machine class needs a name")
-        data["name"] = name
-    for k, val in data.items():
-        setattr(c, k, val)
-    await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A machine class with this name exists already")
     return _class_dict(c)
 
 
@@ -392,3 +421,20 @@ async def put_settings(body: SettingsBody, current_user: User = Depends(get_curr
                           str(body.review_months), current_user.id)
     await db.commit()
     return {"review_months": body.review_months}
+
+
+# ---------------------------------------------------------------- plant currencies
+
+@router.put("/plants/{plant_id}/currency")
+async def put_plant_currency(plant_id: int, body: PlantCurrencyBody,
+                             current_user: User = Depends(get_current_user),
+                             db: AsyncSession = Depends(get_db)):
+    """Finance sets or confirms the currency a plant's rows are priced in."""
+    try:
+        await svc.require_edit(db, current_user)
+        await svc.set_plant_currency(db, current_user.organization_id, plant_id,
+                                     body.currency, current_user.id)
+    except CostSheetError as e:
+        _raise(e)
+    await db.commit()
+    return await svc.plant_currencies(db, current_user.organization_id)

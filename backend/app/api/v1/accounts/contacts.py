@@ -29,10 +29,26 @@ async def _local_contacts(db: AsyncSession) -> List[dict]:
         .where(User.is_active.is_(True))
         .order_by(User.full_name, User.username)
     )).all()
-    return [
+    return _people([
         {"name": full_name or username, "email": email, "source": "local"}
         for full_name, username, email in rows
-    ]
+    ])
+
+
+def _people(entries: List[dict]) -> List[dict]:
+    """Only people (spec §16): no service tokens, smoke-test or admin
+    accounts, no entry without a real mailbox; one row per name."""
+    from app.services.early_stage_service import EarlyStageService
+    seen, out = set(), []
+    for e in entries:
+        if not isinstance(e, dict) or not EarlyStageService.is_person_contact(e):
+            continue
+        key = (e.get("name") or "").strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
 
 
 @router.get("", response_model=List[dict])
@@ -56,7 +72,8 @@ async def list_contacts(
                 cookies={settings.jwt_cookie_name: cookie} if cookie else None,
             )
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            return _people(data) if isinstance(data, list) else data
     except httpx.HTTPError:
         pass
     # Hub unreachable or errored — degrade to local rather than 500 the picker.

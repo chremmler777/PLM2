@@ -20,6 +20,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+from app.utils.clock import business_today
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -552,12 +554,12 @@ class OfferService:
         an accepted, declined or superseded offer has no clock."""
         if offer.status != "sent" or offer.valid_until is None:
             return None
-        return (offer.valid_until - date.today()).days
+        return (offer.valid_until - business_today()).days
 
     @staticmethod
     def is_expired(offer: ChangeOffer) -> bool:
         return (offer.status == "sent" and offer.valid_until is not None
-                and offer.valid_until < date.today())
+                and offer.valid_until < business_today())
 
     # ------------------------------------------------------------------
     # Seeding from the costing
@@ -871,7 +873,7 @@ class OfferService:
                     raise ChangeError(
                         f"Nothing changed since v{prev.version}; change the "
                         f"offer or keep v{prev.version}")
-        received = received_at or date.today()
+        received = received_at or business_today()
         OfferService._check_received(received)
         data = copy.deepcopy(offer.data or {})
         data[SNAPSHOT_KEY] = snapshot
@@ -922,10 +924,11 @@ class OfferService:
     @staticmethod
     def _check_received(received: date, sent_at: Optional[datetime] = None) -> None:
         """Not in the future (one day of tolerance: the browser sends its
-        LOCAL day, the server thinks in UTC) and not absurdly far back. Sales
+        own local day, the server counts the business day, app.utils.clock)
+        and not absurdly far back. Sales
         records sends after the fact, so a receipt date before the day the
         offer was entered is fine."""
-        today = datetime.utcnow().date()
+        today = business_today()
         if received > today + timedelta(days=1):
             raise ChangeError(
                 f"The receipt date {received.isoformat()} is in the future")
@@ -1239,7 +1242,7 @@ class OfferService:
         offer = await OfferService.latest_sent(session, change)
         if offer is None or offer.valid_until is None:
             return None
-        if (offer.valid_until - date.today()).days <= EXPIRY_WARNING_DAYS:
+        if (offer.valid_until - business_today()).days <= EXPIRY_WARNING_DAYS:
             return offer
         return None
 

@@ -16,6 +16,8 @@ from typing import Any, Optional
 
 # Keys whose value is money, wherever they sit in a logged value.
 PRICE_KEYS = frozenset((
+    # the frozen planned P&L of an internal approval (spec §16), whole
+    "pnl",
     "quoted_price", "estimated_cost", "internal_approved_amount",
     "counter_price", "total_cost", "effective_cost", "cost_impact",
     "scrap_quote_price", "total_one_time", "piece_price_delta",

@@ -63,6 +63,13 @@ DEPARTMENT_ITEMS = {
         ("article_design_update", "Artikelkonstruktion anpassen",
          "Article design update", _DESIGN_CHOICES),
     ],
+    # Asked once "packaging impacted?" is Yes (spec §16); "not impacted" is a
+    # complete assessment and skips the whole checklist.
+    "Packaging Engineer": [
+        ("layout_change", "Verpackungslayout ändern", "Packaging layout change", None),
+        ("packaging_type_change", "Verpackungsart ändern", "Packaging type change", None),
+        ("packaging_modification", "Verpackung modifizieren", "Packaging modification", None),
+    ],
 }
 
 # The one item whose cost is per part for the life of the programme; every

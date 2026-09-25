@@ -16,7 +16,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text,
-    UniqueConstraint, Boolean,
+    UniqueConstraint, Boolean, Index,
 )
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -29,17 +29,29 @@ OVERHEAD_KINDS = ("percent", "per_hour")
 FINANCE_DEPARTMENT = "Finance"
 DEFAULT_REVIEW_MONTHS = 12
 SETTING_REVIEW_MONTHS = "cost_sheet_review_months"
+# org_settings key prefix: Finance confirmed plant <id>'s currency (094 set
+# it from the location only).
+SETTING_PLANT_CURRENCY_CONFIRMED = "plant_currency_confirmed:"
+# ISO 4217 codes the sheet accepts. Short on purpose: a typo'd code would
+# silently split a department's rates into two currencies.
+CURRENCIES = ("EUR", "USD", "MXN", "RSD", "GBP", "CHF", "CNY", "CZK", "PLN", "HUF",
+              "JPY", "INR", "BRL", "CAD", "SEK", "TRY", "ZAR", "KRW")
 
 
 class CostSheetVersion(Base):
     __tablename__ = "cost_sheet_versions"
-    __table_args__ = (UniqueConstraint("organization_id", "version",
-                                       name="uq_cost_sheet_version"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "version", name="uq_cost_sheet_version"),
+        # One open draft per org, enforced by the database: draft_lock is 1 on
+        # a draft and NULL once published, and NULLs never collide.
+        Index("uq_cost_sheet_one_draft", "organization_id", "draft_lock", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id"), index=True)
     version: Mapped[int] = mapped_column(Integer)
+    draft_lock: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(12), default="draft",
                                         server_default="draft")
     # A draft may carry the date Finance intends; it is only binding once
@@ -105,6 +117,10 @@ class CostSheetMachineRate(Base):
     version_id: Mapped[int] = mapped_column(
         ForeignKey("cost_sheet_versions.id", ondelete="CASCADE"), index=True)
     plant_id: Mapped[int | None] = mapped_column(ForeignKey("plants.id"), nullable=True)
+    # The class this row prices; machine_class keeps its name for display and
+    # export and is rewritten when the class is renamed.
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
     machine_class: Mapped[str] = mapped_column(String(40))
     machine_ref: Mapped[str | None] = mapped_column(String(80), nullable=True)
     tonnage_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -127,6 +143,10 @@ class CostSheetSamplingRate(Base):
     version_id: Mapped[int] = mapped_column(
         ForeignKey("cost_sheet_versions.id", ondelete="CASCADE"), index=True)
     plant_id: Mapped[int | None] = mapped_column(ForeignKey("plants.id"), nullable=True)
+    # The class this row prices; machine_class keeps its name for display and
+    # export and is rewritten when the class is renamed.
+    machine_class_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cost_sheet_machine_classes.id"), nullable=True)
     machine_class: Mapped[str] = mapped_column(String(40))
     mode: Mapped[str] = mapped_column(String(12), default="flat", server_default="flat")
     flat_price: Mapped[float | None] = mapped_column(
@@ -159,6 +179,8 @@ class CostSheetOverhead(Base):
         ForeignKey("wf_departments.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(12), default="percent", server_default="percent")
     value: Mapped[float] = mapped_column(Numeric(10, 4, asdecimal=False))
+    # per_hour only: the currency the amount is in; it must match the rate's.
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

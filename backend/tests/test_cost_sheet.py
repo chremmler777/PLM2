@@ -40,10 +40,10 @@ async def world(session_factory, seed):
 
 async def _published(session_factory, org_id, *, version=1, valid_from=date(2026, 1, 1),
                      rates=(), overheads=(), machines=(), sampling=(),
-                     published_at=None):
+                     published_at=None, note_override=None):
     async with session_factory() as s:
         v = CostSheetVersion(organization_id=org_id, version=version, status="published",
-                             valid_from=valid_from,
+                             valid_from=valid_from, note=note_override,
                              published_at=published_at or datetime(2026, 1, 1))
         s.add(v)
         await s.flush()
@@ -264,7 +264,8 @@ async def test_draft_edit_publish_freeze_and_chain(client, admin_auth, world):
     assert res.json()["rates"][0]["effective_rate"] == 57.75
 
     res = await client.post(f"{API}/versions/{d['id']}/publish", json={
-        "valid_from": "2026-01-01", "note": "Budget 2026"}, headers=admin_auth)
+        "valid_from": "2026-01-01", "note": "Budget 2026", "confirm_backdated": True},
+        headers=admin_auth)
     assert res.status_code == 200
     assert res.json()["status"] == "published" and res.json()["valid_to"] is None
     # frozen
@@ -296,7 +297,8 @@ async def test_draft_edit_publish_freeze_and_chain(client, admin_auth, world):
     assert diff["overheads"] == {"added": [], "removed": [], "changed": []}
 
     res = await client.post(f"{API}/versions/{d2['id']}/publish",
-                            json={"valid_from": "2026-07-01"}, headers=admin_auth)
+                            json={"valid_from": "2026-07-01", "confirm_backdated": True},
+                            headers=admin_auth)
     assert res.status_code == 200
     ov = (await client.get(API, headers=admin_auth)).json()
     v1 = next(v for v in ov["versions"] if v["version"] == 1)
@@ -337,6 +339,11 @@ async def test_row_validation(client, admin_auth, world):
     assert (await client.post(f"{base}/sampling", json={
         "machine_class": "x", "mode": "components", "labour_hours": 2},
         headers=admin_auth)).status_code == 422
+    # a row must name a class that exists
+    assert (await client.post(f"{base}/machines", json={"machine_class": "<=200 t",
+                                                        "hourly_rate": 60},
+                              headers=admin_auth)).status_code == 422
+    await client.post(f"{API}/machine-classes", json={"name": "<=200 t"}, headers=admin_auth)
     res = await client.post(f"{base}/machines", json={"machine_class": "<=200 t",
                                                       "hourly_rate": 60}, headers=admin_auth)
     assert res.status_code == 201
@@ -380,7 +387,7 @@ async def test_export_csv_and_xlsx(client, admin_auth, world, session_factory):
     assert res.status_code == 200
     text = res.content.decode("utf-8-sig")
     assert text.splitlines()[0].startswith("Department;Position;Plant")
-    assert "Tooling-CS;Engineer;All plants;70.00;70.00;EUR" in text
+    assert "Tooling-CS;Engineer;All plants;70,00;70,00;EUR" in text
     res = await client.get(f"{API}/versions/{vid}/export", headers=admin_auth)
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(res.content))
@@ -409,3 +416,241 @@ async def test_reference_rates_reads_the_current_version(client, eng_auth, world
                             "min_factor": 0.6}
     assert by_plant[p2]["hourly_rate"] == 50.0 and by_plant[p2]["min_factor"] == 1.0
     assert len(rows) == 2
+
+
+# ---------------------------------------------------------------- review fixes
+
+async def _draft(client, auth):
+    return (await client.post(f"{API}/drafts", json={}, headers=auth)).json()
+
+
+async def test_nan_infinity_and_bounds_are_422(client, admin_auth, world):
+    d = await _draft(client, admin_auth)
+    base = f"{API}/versions/{d['id']}"
+    hdr = {**admin_auth, "Content-Type": "application/json"}
+    for raw in ('NaN', 'Infinity', '-Infinity', '1e9', '-1'):
+        res = await client.post(f"{base}/rates", headers=hdr,
+                                content=f'{{"department_id": {world["tool"]}, "hourly_rate": {raw}}}')
+        assert res.status_code == 422, raw
+    ok = await client.post(f"{base}/rates", json={"department_id": world["tool"],
+                                                  "hourly_rate": 50}, headers=admin_auth)
+    rid = ok.json()["rates"][0]["id"]
+    res = await client.patch(f"{base}/rates/{rid}", headers=hdr, content='{"hourly_rate": NaN}')
+    assert res.status_code == 422
+    # the draft still loads: nothing broken was stored
+    assert (await client.get(f"{base}", headers=admin_auth)).status_code == 200
+    assert (await client.post(f"{base}/overheads", json={"kind": "percent", "value": 301},
+                              headers=admin_auth)).status_code == 422
+    assert (await client.post(f"{base}/overheads", json={"kind": "percent", "value": 300},
+                              headers=admin_auth)).status_code == 201
+    assert (await client.post(f"{base}/overheads", json={"kind": "per_hour", "value": -1,
+                                                         "plant_id": world["p1"]},
+                              headers=admin_auth)).status_code == 422
+    await client.post(f"{API}/machine-classes", json={"name": "A"}, headers=admin_auth)
+    res = await client.post(f"{base}/machines", json={"machine_class": "A", "hourly_rate": 1,
+                                                      "tonnage_min": 500, "tonnage_max": 100},
+                            headers=admin_auth)
+    assert res.status_code == 422
+    assert (await client.post(f"{base}/sampling", json={"machine_class": "A", "mode": "components",
+                                                        "setup_hours": 1e7},
+                              headers=admin_auth)).status_code == 422
+    assert (await client.post(f"{API}/machine-classes", json={"name": "B", "tonnage_min": -5},
+                              headers=admin_auth)).status_code == 422
+    assert (await client.post(f"{API}/machine-classes", json={
+        "name": "B", "tonnage_min": 9, "tonnage_max": 1}, headers=admin_auth)).status_code == 422
+
+
+async def test_service_refuses_non_finite_numbers(session_factory, world):
+    async with session_factory() as s:
+        v = await svc.create_draft(s, world["org_id"], None)
+        with pytest.raises(svc.CostSheetError) as e:
+            await svc.add_row(s, v, "rates", {"department_id": world["tool"],
+                                              "hourly_rate": float("nan")})
+        assert e.value.status == 422
+
+
+async def test_exports_neutralise_formulas(client, admin_auth, world, session_factory):
+    vid = await _published(session_factory, world["org_id"], rates=[
+        dict(department_id=world["tool"], position="=HYPERLINK(\"x\")", hourly_rate=70,
+             note="+1+cmd|' /C calc'!A0"),
+        dict(department_id=world["qa"], position="@SUM(A1)", hourly_rate=12.5,
+             note="-2"),
+    ], overheads=[dict(kind="percent", value=12.345)])
+    csv_text = (await client.get(f"{API}/versions/{vid}/export",
+                                 params={"format": "csv"}, headers=admin_auth)
+                ).content.decode("utf-8-sig")
+    assert "'=HYPERLINK" in csv_text and ";'+1+cmd" in csv_text and ";'@SUM" in csv_text
+    assert ";'-2" in csv_text
+    assert ";=" not in csv_text and ';"=' not in csv_text
+    assert "70,00" in csv_text and "12,50" in csv_text           # decimal comma
+    oh = (await client.get(f"{API}/versions/{vid}/export",
+                           params={"format": "csv", "section": "Overheads"},
+                           headers=admin_auth)).content.decode("utf-8-sig")
+    assert "12,345" in oh                                        # full precision
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO((await client.get(f"{API}/versions/{vid}/export",
+                                                    headers=admin_auth)).content))
+    cells = [c.value for row in wb["Positions"].iter_rows(min_row=4) for c in row]
+    assert "'=HYPERLINK(\"x\")" in cells and "'@SUM(A1)" in cells
+    assert not any(isinstance(c, str) and c.startswith("=") for c in cells)
+
+
+async def test_machine_class_rename_follows_rows(client, admin_auth, world):
+    cls = (await client.post(f"{API}/machine-classes", json={"name": "small"},
+                             headers=admin_auth)).json()
+    await client.post(f"{API}/machine-classes", json={"name": "big"}, headers=admin_auth)
+    d = await _draft(client, admin_auth)
+    base = f"{API}/versions/{d['id']}"
+    await client.post(f"{base}/rates", json={"department_id": world["tool"], "hourly_rate": 1},
+                      headers=admin_auth)
+    row = (await client.post(f"{base}/machines", json={"machine_class": "SMALL",
+                                                       "hourly_rate": 40},
+                             headers=admin_auth)).json()["machine_rates"][0]
+    assert row["machine_class"] == "small" and row["machine_class_id"] == cls["id"]
+    await client.post(f"{base}/publish", json={"valid_from": "2026-01-01",
+                                               "confirm_backdated": True}, headers=admin_auth)
+    assert (await client.patch(f"{API}/machine-classes/{cls['id']}", json={"name": "BIG"},
+                               headers=admin_auth)).status_code == 409
+    res = await client.patch(f"{API}/machine-classes/{cls['id']}", json={"name": "<=200 t"},
+                             headers=admin_auth)
+    assert res.status_code == 200 and res.json()["name"] == "<=200 t"
+    got = (await client.get(f"{base}", headers=admin_auth)).json()
+    assert got["machine_rates"][0]["machine_class"] == "<=200 t"
+    hit = (await client.get(f"{API}/lookup/machine", params={"machine_class": "<=200 t",
+                                                             "on_date": "2026-02-01"},
+                            headers=admin_auth)).json()
+    assert hit["rate"] == 40
+
+
+async def test_currency_per_plant_and_no_mixing(client, admin_auth, world, session_factory):
+    async with session_factory() as s:
+        p2 = await s.get(Plant, world["p2"])
+        p2.currency = "USD"
+        await s.commit()
+    ov = (await client.get(API, headers=admin_auth)).json()
+    p2row = next(p for p in ov["plants"] if p["id"] == world["p2"])
+    assert p2row["currency"] == "USD" and p2row["currency_confirmed"] is False
+    d = await _draft(client, admin_auth)
+    base = f"{API}/versions/{d['id']}"
+    res = await client.post(f"{base}/rates", json={"department_id": world["tool"],
+                                                   "plant_id": world["p2"], "hourly_rate": 30},
+                            headers=admin_auth)
+    assert res.json()["rates"][0]["currency"] == "USD"          # from the plant
+    assert (await client.post(f"{base}/rates", json={"department_id": world["qa"],
+                                                     "hourly_rate": 1, "currency": "XYZ"},
+                              headers=admin_auth)).status_code == 422
+    # a per-hour overhead in EUR on a USD rate: no effective rate
+    await client.post(f"{base}/overheads", json={"kind": "per_hour", "value": 5,
+                                                 "currency": "EUR"}, headers=admin_auth)
+    r = (await client.get(base, headers=admin_auth)).json()["rates"][0]
+    assert r["effective_rate"] is None
+    # Finance confirms the plant currency
+    res = await client.put(f"{API}/plants/{world['p2']}/currency", json={"currency": "usd"},
+                           headers=admin_auth)
+    assert next(p for p in res.json() if p["id"] == world["p2"])["currency_confirmed"] is True
+    assert (await client.put(f"{API}/plants/{world['p2']}/currency", json={"currency": "ABC"},
+                             headers=admin_auth)).status_code == 422
+
+
+async def test_components_sampling_incomplete_or_mixed_is_none(session_factory, world):
+    t = world["tool"]
+    await _published(session_factory, world["org_id"],
+                     rates=[dict(department_id=t, hourly_rate=40, currency="USD")],
+                     machines=[dict(machine_class="S", hourly_rate=60)],
+                     sampling=[
+                         dict(machine_class="S", mode="components", setup_hours=1,
+                              labour_hours=2, labour_department_id=t),
+                         dict(machine_class="M", mode="components", setup_hours=1),
+                     ])
+    async with session_factory() as s:
+        hit = await svc.sampling_price_for(s, world["org_id"], "S")
+        assert hit.rate is None and hit.breakdown["missing"] == ["labour_rate_currency"]
+        assert hit.breakdown["complete"] is False
+        hit = await svc.sampling_price_for(s, world["org_id"], "M")
+        assert hit.rate is None and hit.breakdown["missing"] == ["machine_rate"]
+
+
+async def test_backdated_publish_needs_confirmation(client, admin_auth, world):
+    d = await _draft(client, admin_auth)
+    await client.post(f"{API}/versions/{d['id']}/rates",
+                      json={"department_id": world["tool"], "hourly_rate": 1}, headers=admin_auth)
+    past = (date.today() - timedelta(days=3)).isoformat()
+    res = await client.post(f"{API}/versions/{d['id']}/publish", json={"valid_from": past},
+                            headers=admin_auth)
+    assert res.status_code == 422 and "past" in res.json()["detail"]
+    res = await client.post(f"{API}/versions/{d['id']}/publish",
+                            json={"valid_from": date.today().isoformat()}, headers=admin_auth)
+    assert res.status_code == 200
+
+
+async def test_publish_without_changes_is_409(client, admin_auth, world):
+    d = await _draft(client, admin_auth)
+    await client.post(f"{API}/versions/{d['id']}/rates",
+                      json={"department_id": world["tool"], "hourly_rate": 1}, headers=admin_auth)
+    await client.post(f"{API}/versions/{d['id']}/publish",
+                      json={"valid_from": date.today().isoformat()}, headers=admin_auth)
+    d2 = await _draft(client, admin_auth)
+    res = await client.post(f"{API}/versions/{d2['id']}/publish",
+                            json={"valid_from": (date.today() + timedelta(days=5)).isoformat()},
+                            headers=admin_auth)
+    assert res.status_code == 409 and res.json()["detail"] == "Nothing changed since version 1"
+
+
+async def test_second_draft_blocked_by_the_database(client, admin_auth, world, monkeypatch):
+    await _draft(client, admin_auth)
+
+    async def no_draft(db, org_id):
+        return None
+    monkeypatch.setattr(svc, "open_draft", no_draft)       # simulate the race
+    res = await client.post(f"{API}/drafts", json={}, headers=admin_auth)
+    assert res.status_code == 409
+
+
+async def test_migration_094_rebuilds_the_chain(db_engine, session_factory, world):
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).parents[1] / "alembic/versions/094_cost_sheet_fixes.py"
+    import sys
+    import types
+    spec = importlib.util.spec_from_file_location("m094", path)
+    m = importlib.util.module_from_spec(spec)
+    # backend/alembic (the scripts dir) shadows the package; the helpers
+    # under test never touch `op`.
+    saved = sys.modules.get("alembic")
+    sys.modules["alembic"] = types.SimpleNamespace(op=None)
+    try:
+        spec.loader.exec_module(m)
+    finally:
+        if saved is None:
+            sys.modules.pop("alembic", None)
+        else:
+            sys.modules["alembic"] = saved
+    assert m._is_usa("US", "Toccoa", "usa-toccoa") and m._is_usa(None, "USA", "x")
+    assert not m._is_usa("DE", "Weissenburg", "WUG") and not m._is_usa("MX", "Silao", "SIL")
+    t, p1, p2 = world["tool"], world["p1"], world["p2"]
+    async with session_factory() as s:
+        s.add_all([
+            DepartmentRate(department_id=t, plant_id=p1, hourly_rate=50, min_factor=0.6,
+                           effective_from=date(2026, 1, 1)),
+            DepartmentRate(department_id=t, plant_id=p2, hourly_rate=20, min_factor=0.3,
+                           effective_from=date(2026, 3, 1)),
+            # same numbers again: no new version
+            DepartmentRate(department_id=t, plant_id=p1, hourly_rate=50, min_factor=0.6,
+                           effective_from=date(2026, 5, 1)),
+            DepartmentRate(department_id=t, plant_id=p1, hourly_rate=55, min_factor=0.6,
+                           effective_from=date(2026, 7, 1)),
+        ])
+        await s.commit()
+    await _published(session_factory, world["org_id"], note_override=m.MIGRATED_NOTE,
+                     rates=[dict(department_id=t, plant_id=p1, hourly_rate=55)])
+    async with db_engine.begin() as conn:
+        await conn.run_sync(lambda c: m._rebuild_migrated_chain(c, m.VERSIONS, {p2: "USD"}))
+    async with session_factory() as s:
+        vs = await svc.list_versions(s, world["org_id"])
+        assert [(v.version, v.valid_from) for v in vs] == [
+            (1, date(2026, 1, 1)), (2, date(2026, 3, 1)), (3, date(2026, 7, 1))]
+        assert len(vs[0].rates) == 1 and len(vs[1].rates) == 2
+        usd = next(r for r in vs[1].rates if r.plant_id == p2)
+        assert usd.currency == "USD" and usd.hourly_rate == 20
+        assert (await svc.rate_for(s, world["org_id"], t, None, p1, date(2026, 6, 30))).rate == 50
+        assert (await svc.rate_for(s, world["org_id"], t, None, p1, date(2026, 7, 1))).rate == 55

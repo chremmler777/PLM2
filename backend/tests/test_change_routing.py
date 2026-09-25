@@ -204,13 +204,17 @@ async def test_stage_gating_blocks_costing_until_blocking_submitted(
     routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
     apqp = next(d for st in routing["stages"] for d in st["departments"]
                 if d["department_id"] == departments["APQP"])
-    assert apqp["status"] == "active"
+    # Spec §16 P1-2: the later stage stays dormant while in assessment.
+    assert apqp["status"] == "pending"
     # Only the ASSESSMENT stage gates costing (rule book: later template
-    # stages are lifecycle phases — summation, customer — not assessment
-    # work). The engine advanced and activated stage 2, and precisely that
-    # must not re-block the hop stage 1's completion just earned.
+    # stages are lifecycle phases, summation and customer, not assessment
+    # work). Entering costing wakes stage 2.
     res = await client.post(f"/api/v1/changes/{c['id']}/transition", json={"to_status": "costing"}, headers=auth)
     assert res.status_code == 200, res.text
+    routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
+    apqp = next(d for st in routing["stages"] for d in st["departments"]
+                if d["department_id"] == departments["APQP"])
+    assert apqp["status"] == "active"
 
 
 async def test_deviation_requires_approval_then_clears(
@@ -355,8 +359,11 @@ async def test_my_tasks_active_stage_filter_exercised(
     # Submitting Tool Engineer (R) clears stage 1's blocking → stage 2 activates.
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
-    dep_ids2 = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()}
-    assert departments["APQP"] in dep_ids2               # now active → visible
+    dep_ids2 = {t["department_id"] for t in (await client.get("/api/v1/changes/my-tasks", headers=auth)).json()
+                if t["kind"] == "assessment"}
+    # Spec §16 P1-2: stage 2 stays dormant during assessment and is no
+    # assessment work anyway.
+    assert departments["APQP"] not in dep_ids2
     assert departments["Tool Engineer"] not in dep_ids2  # submitted → verdict no longer pending
 
 
@@ -433,6 +440,10 @@ async def test_maybe_advance_cascades_through_optional_only_stage(
     # the routing view (effective_status), since raw assessment rows stay "pending".
     await client.post(f"/api/v1/changes/{c['id']}/assessments",
                       json={"department_id": departments["Tool Engineer"], "verdict": "feasible"}, headers=auth)
+    # Spec §16 P1-2: the cascade runs when costing wakes the later stages.
+    res = await client.post(f"/api/v1/changes/{c['id']}/transition",
+                            json={"to_status": "costing"}, headers=auth)
+    assert res.status_code == 200, res.text
     routing = (await client.get(f"/api/v1/changes/{c['id']}/routing", headers=auth)).json()
     by_dep = {d["department_id"]: d for st in routing["stages"] for d in st["departments"]}
     assert by_dep[departments["APQP"]]["status"] == "active"    # cascaded through stage 2 to stage 3
@@ -684,7 +695,8 @@ async def test_reject_restores_a_relettered_department(
         row = (await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
             ChangeAssessment.stage_order == 1))).scalar_one()
-        assert row.rasic_letter == "C"
+        # Spec §16 P1-3: the letter holds until the lead decides.
+        assert row.rasic_letter == "R" and row.pending_rasic_letter == "C"
     admin_auth = await _login_admin(client)
     res = await client.post(f"/api/v1/changes/{c['id']}/routing/deviation/reject",
                             json={"reason": "It is yours: the insert moves"}, headers=admin_auth)
@@ -693,5 +705,5 @@ async def test_reject_restores_a_relettered_department(
         row = (await s.execute(select(ChangeAssessment).where(
             ChangeAssessment.change_id == c["id"], ChangeAssessment.department_id == te,
             ChangeAssessment.stage_order == 1))).scalar_one()
-        assert row.rasic_letter == "R"
+        assert row.rasic_letter == "R" and row.pending_rasic_letter is None
         assert row.task is None or row.task.is_actionable

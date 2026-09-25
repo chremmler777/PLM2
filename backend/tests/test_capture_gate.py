@@ -56,7 +56,7 @@ async def test_kickoff_blocked_without_date_when_customer_relevant(
     await _attach(client, eng_auth, change["id"])
     res = await _kickoff(client, eng_auth, change["id"])
     assert res.status_code == 400
-    assert "required-by date" in res.json()["detail"].lower()
+    assert "quote deadline" in res.json()["detail"].lower()
 
 
 async def test_internal_change_needs_no_date(client, eng_auth, seed):

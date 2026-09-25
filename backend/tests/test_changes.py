@@ -96,7 +96,8 @@ async def test_illegal_transition_rejected(client, eng_auth, seed):
 
 
 async def test_cancel_requires_reason(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     res = await _transition(client, eng_auth, change["id"], "cancelled")
     assert res.status_code == 400, res.text
     res = await _transition(client, eng_auth, change["id"], "cancelled",
@@ -120,7 +121,8 @@ async def _make_part(client, auth, project_id, number, category="article"):
 
 
 async def test_add_and_remove_impacted_item(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     part_id = await _make_part(client, eng_auth, seed["project_id"], "ART-1")
     res = await client.post(f"/api/v1/changes/{change['id']}/impacted-items",
                             json={"part_id": part_id, "impact_note": "wall thickness"},
@@ -139,7 +141,8 @@ async def test_add_and_remove_impacted_item(client, eng_auth, seed):
 
 
 async def test_seed_impacted_from_relations(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     article = await _make_part(client, eng_auth, seed["project_id"], "ART-2", "article")
     tool = await _make_part(client, eng_auth, seed["project_id"], "TOOL-2", "tool")
     # tool produces article
@@ -322,7 +325,8 @@ async def test_release_activates_revisions_and_stamps_eng_level(
 
 
 async def test_changelog_is_hash_chained(client, eng_auth, seed):
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     await _transition(client, eng_auth, change["id"], "on_hold")
     res = await client.get(f"/api/v1/changes/{change['id']}/changelog", headers=eng_auth)
     assert res.status_code == 200, res.text
@@ -804,7 +808,8 @@ async def test_reject_requires_a_memo_and_can_be_reopened(client, eng_auth, seed
 
 async def test_cancelled_stays_terminal(client, eng_auth, seed):
     """Cancellation is the irreversible one — no reopen path out of it."""
-    change = await _create_change(client, eng_auth, seed["project_id"])
+    change = await _create_change(client, eng_auth, seed["project_id"],
+                                  lead_id=seed["engineer_id"])
     cid = change["id"]
     res = await _transition(client, eng_auth, cid, "cancelled",
                             cancellation_reason="Duplicate of CR-2026-0001")
