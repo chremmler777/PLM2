@@ -1,4 +1,6 @@
-import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction } from '../../types/change'
+import type { ReactNode } from 'react'
+import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, StageAssessment } from '../../types/change'
+import { hasEnded, endLabel } from '../../lib/transitionRights'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
@@ -45,12 +47,28 @@ interface Props {
    * Absent: everything is allowed (the backend still decides).
    */
   needs?: (step: string) => string | null
+  /** The assessment round (stage-state, or derived): decides the next step
+      while the change is in assessment. */
+  assessment?: StageAssessment | null
+  /** Whether the viewer may move the change to a status (transition rights).
+      A step the viewer may not take is not offered at all. */
+  may?: (to: string) => boolean
+  /** Why a hidden step is hidden, shown once under the next step. */
+  mayNotText?: string
+  /** A non-transition step (override, send letter) was clicked. */
+  onStepAction?: (key: string) => void
+  /** The lead line of the Status card (the lead picker when allowed). */
+  leadSlot?: ReactNode
 }
 
 /** One next step: a place to go and do the work, or a status to move to. */
 export type NextStep =
   | { kind: 'go'; key: string; label: string; tab: string }
   | { kind: 'advance'; to: ChangeStatus; label?: string; hint?: string }
+  /** Not a button: what the step is waiting for (no primary while waiting). */
+  | { kind: 'wait'; key: string; text: string }
+  /** A button that opens a dialog of its own (override with a reason). */
+  | { kind: 'action'; key: string; label: string; hint?: string }
 
 /**
  * What the cockpit offers as the next step. Transitions that a dedicated act
@@ -60,8 +78,48 @@ export type NextStep =
  */
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
-  & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at'>>): NextStep[] {
+  & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'>>,
+  assessment?: StageAssessment | null): NextStep[] {
   const s = change.status
+  // The assessment round (spec §16 P1 6/8): no primary while departments are
+  // still answering; a not-feasible answer offers the three ways out; a full
+  // round closes into costing.
+  if (s === 'in_assessment' && assessment) {
+    const n = assessment.waiting_on.length
+    if (assessment.not_feasible.length > 0 && assessment.override !== 'approved') {
+      // Three equal ways out, none of them pre-chosen: no primary button.
+      const who = assessment.not_feasible.map((d) => d.department_name ?? `#${d.department_id}`).join(', ')
+      return [
+        { kind: 'wait', key: 'not-feasible', text: t('next.notFeasible').replace('{x}', who) },
+        ...(n > 0 ? [{ kind: 'wait' as const, key: 'waiting', text: t('next.waitingOn').replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's') }] : []),
+        { kind: 'advance', to: 'rejected', label: t('next.reject') },
+        { kind: 'advance', to: 'scoping', label: t('next.backToScoping') },
+        assessment.override === 'pending'
+          ? { kind: 'wait', key: 'override-pending', text: t('next.overridePending') }
+          : { kind: 'action', key: 'override-costing', label: t('next.override'), hint: t('next.overrideHint') },
+      ]
+    }
+    if (n > 0 || !assessment.all_submitted) {
+      return [
+        { kind: 'wait', key: 'waiting', text: t('next.waitingOn').replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's') },
+        { kind: 'advance', to: 'rejected', label: t('next.reject') },
+      ]
+    }
+    if (assessment.routing_deviation_pending) {
+      return [
+        { kind: 'wait', key: 'routing', text: t('next.waitingRouting') },
+        { kind: 'advance', to: 'rejected', label: t('next.reject') },
+      ]
+    }
+    return [
+      { kind: 'advance', to: 'costing', label: t('next.closeAssessment') },
+      { kind: 'advance', to: 'rejected', label: t('next.reject') },
+    ]
+  }
+  // A rejected customer change still owes the customer its letter.
+  if (s === 'rejected' && change.customer_relevant && !change.rejection_sent_at) {
+    return [{ kind: 'go', key: 'send-rejection', label: t('next.sendRejection'), tab: 'scoping' }]
+  }
   // Mother plant (spec §14): scoping informs the team, then goes straight to
   // approved; the validated timing is told to the mother plant, not published.
   if (change.origin === 'mother_plant') {
@@ -115,7 +173,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
 export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, waits = [], onGo, needs = () => null }: Props) {
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
@@ -125,11 +183,15 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       : (change.customer_relevant
         ? s !== 'approved' && s !== 'quoted'
         : s !== 'quoted' && s !== 'quoting'))
+  const ended = hasEnded(change)
   const openGates = gates.filter((g) => g.decision !== 'yes')
   // A gate only blocks when it guards a transition that's currently available —
   // gates seeded 'na' but guarding a later transition are just "outstanding later".
   const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key]))
-  const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key]))
+  // A gate nobody has set ("NA") guarding a later step is noise, not news:
+  // only a later gate that was actually answered No is worth a line.
+  const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key])
+    && g.decision === 'no')
   const overdue = change.assessments.filter((a) => a.overdue).length
   // Blocks two transitions on the same signal: entering assessment (from scoping,
   // hard-gated) and kickoff (from approved, soft-guarded). Only meaningful once
@@ -144,11 +206,17 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     ...(change.description?.trim() ? [] : [t('kickoff.description')]),
     ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
     ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
+    // Kickoff wants a lead (soft): scoping is the lead's to run.
+    ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
   ]
   // Held departments, open assessments, customer questions, … arrive as waits.
   const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
     + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + waits.length
-  const steps = nextStepFor(change)
+  // Steps the viewer may not take are not offered (spec §16 P1 4).
+  const allSteps = nextStepFor(change, assessment)
+  const steps = allSteps.filter((st) => st.kind !== 'advance' || may(st.to))
+  const hiddenSteps = allSteps.length - steps.length
+  const buttons = steps.filter((st): st is Exclude<NextStep, { kind: 'wait' }> => st.kind !== 'wait')
   const offPath = OFF_PATH_STATUSES.includes(change.status)
 
   // Same names as the tab bar.
@@ -156,10 +224,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const tabName = (tb: string) => changeTabLabel(tb, change.customer_relevant, change.status)
 
   const gateRow = (g: Gate, blocking: boolean) => {
+    // In words: "Release gate not decided yet", "Release gate answered No".
     const label = (
       <>
-        {blocking && '⚠ '}{t('cockpit.gate')} {t('gate.' + g.gate_key)}:{' '}
-        <span className="uppercase">{g.decision}</span>
+        {blocking && '⚠ '}{t('gate.' + g.gate_key)} {t('cockpit.gateWord')}:{' '}
+        {g.decision === 'no' ? t('cockpit.gateNo') : t('cockpit.gateOpen')}
       </>
     )
     return (
@@ -202,15 +271,16 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       <div className="grid md:grid-cols-3 gap-3">
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.where')}</h3>
-        <span className={`px-2.5 py-1 rounded-full text-sm font-semibold ${STATUS_PILL[change.status]}`}>
-          {STATUS_LABELS[change.status]}
+        <span data-testid="status-pill" className={`px-2.5 py-1 rounded-full text-sm font-semibold ${
+          endLabel(change) ? 'bg-red-900 text-red-100' : STATUS_PILL[change.status]}`}>
+          {endLabel(change) ?? STATUS_LABELS[change.status]}
         </span>
         {' '}
         <StageResponsibleBadge status={change.status} />
         {' '}
         {/* Phase-aware: release deadline once active, otherwise the frozen
             quote verdict, otherwise the quote deadline for customer work. */}
-        {change.active_deadline === 'release' ? (
+        {ended ? null : change.active_deadline === 'release' ? (
           <DeadlineEditor change={change} kind="release" />
         ) : change.quoted_on_time !== null ? (
           <QuotedFactChip change={change} />
@@ -229,11 +299,13 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             {change.mother_plant_ref ? ` · ${change.mother_plant_ref}` : ''}
           </p>
         )}
-        <p className="mt-3 text-sm text-slate-300">
-          {t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? '-'}</span>
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          {formatDate(change.created_at)} → {formatDate(change.updated_at)}
+        <div className="mt-3 text-sm text-slate-300">
+          {leadSlot ?? (
+            <p>{t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? t('cockpit.noLead')}</span></p>
+          )}
+        </div>
+        <p data-testid="status-dates" className="mt-1 text-xs text-slate-500">
+          {t('cockpit.created')} {formatDate(change.created_at)} · {t('cockpit.updated')} {formatDate(change.updated_at)}
         </p>
       </div>
 
@@ -257,7 +329,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                   <button type="button"
                     className="text-left hover:underline decoration-dotted underline-offset-2"
                     onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
-                    {w.info ? 'ℹ' : '⏳'} {w.text} <span className="text-xs opacity-70">→ {tabName(w.tab)}</span>
+                    {w.info ? 'ℹ' : '⏳'} {w.text} <span className="text-xs opacity-70 whitespace-nowrap">→ {tabName(w.tab)}</span>
                   </button>
                 ) : <>{w.info ? 'ℹ' : '⏳'} {w.text}</>}
               </li>
@@ -314,28 +386,41 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             onClick={() => onAction?.('scoping')}>
             {t('cockpit.decideInMeeting')}
           </button>
-        ) : offPath || steps.length === 0 ? (
-          <p className="text-sm text-slate-400">{STATUS_LABELS[change.status]}</p>
+        ) : (offPath && steps.length === 0) || allSteps.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            {ended ? t('next.ended') : STATUS_LABELS[change.status]}
+          </p>
         ) : (
           <div className="flex flex-col gap-2">
-            {steps.map((st, i) => {
-              const key = st.kind === 'go' ? st.key : `to:${st.to}`
-              const denied = needs(key)
-              const cls = i === 0
+            {steps.filter((st) => st.kind === 'wait').map((st) => (
+              <p key={st.key} data-testid={`next-wait-${st.key}`}
+                className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
+                ⏳ {st.kind === 'wait' ? st.text : ''}
+              </p>
+            ))}
+            {buttons.map((st) => {
+              const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
+              const denied = st.kind === 'action' ? null : needs(key)
+              // While the step waits there is no primary button at all.
+              const primary = steps[0] === st
+              const cls = primary
                 ? 'bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-sky-600'
                 : 'border border-slate-600 text-slate-300 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed'
               return (
                 <button key={key} type="button" data-testid={`next-${key.replace(':', '-')}`}
                   className={cls}
                   disabled={!!denied || (st.kind === 'advance' && advancing)}
-                  title={denied ?? (st.kind === 'advance' ? st.hint : undefined) ?? undefined}
-                  onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab) : onAdvance(st.to))}>
-                  {st.kind === 'go' ? st.label : (st.label ?? `→ ${STATUS_LABELS[st.to]}`)}
+                  title={denied ?? (st.kind === 'advance' || st.kind === 'action' ? st.hint : undefined) ?? undefined}
+                  onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab)
+                    : st.kind === 'action' ? onStepAction?.(st.key) : onAdvance(st.to))}>
+                  {st.kind === 'go' || st.kind === 'action' ? st.label : (st.label ?? `→ ${STATUS_LABELS[st.to]}`)}
                 </button>
               )
             })}
             {(() => {
-              const why = steps.map((st) => needs(st.kind === 'go' ? st.key : `to:${st.to}`)).find(Boolean)
+              const why = buttons.map((st) => (st.kind === 'go' ? needs(st.key)
+                : st.kind === 'advance' ? needs(`to:${st.to}`) : null)).find(Boolean)
+                ?? (hiddenSteps > 0 && buttons.length === 0 ? mayNotText ?? t('next.notYours') : null)
               return why ? <p data-testid="next-needs" className="text-xs text-slate-500">{why}</p> : null
             })()}
           </div>

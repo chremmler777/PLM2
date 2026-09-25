@@ -155,6 +155,18 @@ describe('D1MasterPanel', () => {
     expect((screen.getByDisplayValue('Alice') as HTMLInputElement).disabled).toBe(false);
   });
 
+  it('names the cost carrier in words, like the scoping meeting (spec §16)', async () => {
+    const { changesApi } = await import('../../api/changes');
+    render(<D1MasterPanel changeId={1} canEditD1 canEditCustomerRelevant />, { wrapper: makeWrapper(true, false, true, true) });
+    await waitFor(() => screen.getByDisplayValue('Alice'));
+    const sel = screen.getByTestId('d1-cost-carrier') as HTMLSelectElement;
+    expect(sel.selectedOptions[0].text).toBe('Internal (plant pays)');
+    await act(async () => { fireEvent.change(sel, { target: { value: 'customer' } }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /save/i })); });
+    await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(1,
+      expect.objectContaining({ customer_relevant: true })));
+  });
+
   it('is read-only without any right: disabled fields, no save', async () => {
     render(<D1MasterPanel changeId={1} />, { wrapper: makeWrapper(true, false, true, true) });
     await waitFor(() => screen.getByDisplayValue('Alice'));

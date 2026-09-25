@@ -12,6 +12,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
 import ReasonDialog from './ReasonDialog'
+import { useAuth } from '../../contexts/AuthContext'
+import { deviationWaitKey } from '../../lib/scopingRules'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeRouting, DeviationRequest } from '../../types/change'
 
@@ -30,6 +32,9 @@ interface Props {
   canAdd: boolean
   /** Mirrors the backend 4-eyes rule; computed by the caller. */
   canDecide: boolean
+  /** The change lead, so the wait line names who decides: the lead, or the
+   *  Project Manager when the lead proposed it. Omitted: the old wording. */
+  leadId?: number | null
 }
 
 function AddDepartmentDialog({ open, candidates, onSubmit, onClose }: {
@@ -104,9 +109,10 @@ function AddDepartmentDialog({ open, candidates, onSubmit, onClose }: {
 }
 
 export default function RoutingDeviationPanel({
-  changeId, routing, departments, routedIds, stageOrder, canAdd, canDecide,
+  changeId, routing, departments, routedIds, stageOrder, canAdd, canDecide, leadId,
 }: Props) {
   const qc = useQueryClient()
+  const { userId } = useAuth()
   const [addOpen, setAddOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
   const invalidate = () => {
@@ -164,7 +170,7 @@ export default function RoutingDeviationPanel({
               </>
             ) : (
               <span className="text-xs text-amber-200/70" data-testid="routing-deviation-waiting">
-                {t('routingDev.waitingForLead')}
+                {t(deviationWaitKey(routing?.deviation_proposed_by, leadId, userId))}
               </span>
             )}
           </div>

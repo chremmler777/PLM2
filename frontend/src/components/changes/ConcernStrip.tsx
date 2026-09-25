@@ -5,7 +5,8 @@ import { changesApi } from '../../api/changes'
 import { useAuth } from '../../contexts/AuthContext'
 import { t } from '../../i18n/cmLabels'
 import { getActsAsDepartmentId } from '../../lib/actsAs'
-import { preferredDepartmentId } from '../../lib/departments'
+import { plural } from '../../lib/humanLabels'
+import { defaultFlagDepartment, settledLine } from '../../lib/scopingRules'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import type {
@@ -63,6 +64,7 @@ function SeverityBadge({ value, testId }: { value?: number | null; testId: strin
 export default function ConcernStrip({
   changeId, editable, scoped = false, departments = [], myDepartmentIds = [],
   hideConcernIds = [], onlyDepartmentId, isPm = false, attachments = [],
+  changeDepartmentIds = [],
 }: {
   changeId: number
   editable: boolean
@@ -79,6 +81,9 @@ export default function ConcernStrip({
   scoped?: boolean
   departments?: { id: number; name: string; is_active?: boolean }[]
   myDepartmentIds?: number[]
+  /** Departments on this change (routed / picked): a new flag defaults to the
+   *  viewer's membership among them. */
+  changeDepartmentIds?: number[]
 }) {
   const qc = useQueryClient()
   const { userId, isAdmin } = useAuth()
@@ -111,11 +116,11 @@ export default function ConcernStrip({
     : isAdmin ? selectable
     : selectable.filter((d) => myDepartmentIds.includes(d.id))
   const [deptId, setDeptId] = useState<number | undefined>(onlyDepartmentId)
-  // Scoping starts on "Team". Assessment starts on the master department when
-  // the user holds it, and otherwise on nothing at all — they pick.
-  const effectiveDept = onlyDepartmentId ?? deptId ?? (scoped
-    ? preferredDepartmentId(myDepartmentIds, options)
-    : undefined)
+  // A flag starts filed under the viewer's own department (spec §16); "Team"
+  // (scoping) or an explicit pick (assessment) when they have none.
+  const [deptPicked, setDeptPicked] = useState(false)
+  const effectiveDept = onlyDepartmentId
+    ?? (deptPicked ? deptId : defaultFlagDepartment(myDepartmentIds, options, changeDepartmentIds))
   const deptName = (id?: number | null) =>
     id == null ? null : departments.find((d) => d.id === id)?.name ?? `#${id}`
 
@@ -317,6 +322,13 @@ export default function ConcernStrip({
     },
   })
 
+  // A disabled Flag button says what it still needs.
+  const riskMissing = [
+    ...(riskType ? [] : [t('concern.missingType')]),
+    ...(effectiveDept === undefined ? [t('concern.missingDept')] : []),
+    ...(note.trim() ? [] : [t('concern.missingNote')]),
+  ]
+
   const listed = concerns
     .filter((c: ChangeConcern) => !hideConcernIds.includes(c.id))
     .filter((c: ChangeConcern) =>
@@ -341,7 +353,7 @@ export default function ConcernStrip({
         {openRisks.length > 0 && (
           <span data-testid="risk-open-count" title={t('risk.open')}
             className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-200">
-            {t('risk.openCount').replace('{n}', String(openRisks.length))}
+            {`${plural(openRisks.length, 'open risk')}`}
           </span>
         )}
         {editable && !adding && (
@@ -354,7 +366,10 @@ export default function ConcernStrip({
       {scoped && <p className="text-[11px] text-slate-500">{w.hint}</p>}
 
       {open.length === 0 && settled.length === 0 && (
-        <p className="text-xs text-slate-500">{t('concern.none')}</p>
+        // Assessment is past the meeting: its empty register says so plainly.
+        <p className="text-xs text-slate-500" data-testid="concern-empty">
+          {scoped ? t('risk.none') : t('concern.noneScoping')}
+        </p>
       )}
 
       <ul className="space-y-1">
@@ -395,8 +410,12 @@ export default function ConcernStrip({
                     with the hat they wear. */}
                 {(c.raised_by_departments?.length ?? 0) > 0
                   && ` (${c.raised_by_departments!.join(', ')})`}
-                {!c.is_open && `, ${c.withdrawn_at ? t('concern.withdrawn') : t('concern.answered')}`}
               </span>
+              {!c.is_open && (
+                <span className="block text-xs opacity-80" data-testid={`concern-settled-${c.id}`}>
+                  {settledLine(c, scoped)}
+                </span>
+              )}
               {!c.is_open && c.resolution_note && (
                 <span className="block text-xs opacity-70">
                   {t('concern.resolved')}: {c.resolution_note}
@@ -532,15 +551,22 @@ export default function ConcernStrip({
                 {t('risk.retract')}
               </button>
             ))}
-            {c.is_open && editable && withdrawing !== c.id && retracting !== c.id && (
+            {/* Only those who may close a flag get the control; everyone else
+                reads who does, never a dead button. */}
+            {c.is_open && editable && withdrawing !== c.id && retracting !== c.id && (mayClose(c) ? (
               <button data-testid={`concern-close-${c.id}`}
-                className="text-xs underline decoration-dotted flex-shrink-0 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed disabled:text-slate-500"
-                disabled={!mayClose(c) || withdraw.isPending}
-                title={mayClose(c) ? undefined : closerRule(c)}
+                className="text-xs underline decoration-dotted flex-shrink-0 disabled:opacity-50"
+                disabled={withdraw.isPending}
                 onClick={() => { setWithdrawing(c.id); setResolution('') }}>
-                {scoped ? w.settle : (isAuthor(c) ? t('concern.withdraw') : t('concern.markSolved'))}
+                {scoped ? w.settle
+                  : isAuthor(c) ? t('concern.withdraw') : t('concern.settleAsPm')}
               </button>
-            )}
+            ) : (
+              <span data-testid={`concern-closer-${c.id}`} title={closerRule(c)}
+                className="text-[11px] text-slate-500 flex-shrink-0">
+                {scoped && c.department_id != null ? t('concern.closerShortDept') : t('concern.closerShortPm')}
+              </span>
+            ))}
           </li>
         ))}
       </ul>
@@ -565,7 +591,7 @@ export default function ConcernStrip({
           </select>
           {onlyDepartmentId === undefined && options.length > 0 && (
             <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-              onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+              onChange={(e) => { setDeptPicked(true); setDeptId(e.target.value ? Number(e.target.value) : undefined) }}
               className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
               <option value="">{t('concern.team')}</option>
               {options.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -575,7 +601,9 @@ export default function ConcernStrip({
             placeholder={t('concern.notePlaceholder')} aria-label={t('concern.note')}
             className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100" />
           <button className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+            data-testid="concern-submit"
             disabled={!note.trim() || raise.isPending}
+            title={!note.trim() ? t('concern.missing').replace('{x}', t('concern.missingNote')) : undefined}
             onClick={() => raise.mutate()}>{w.raise}</button>
           <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
             onClick={() => { setAdding(false); setNote(''); setFailure(null) }}>
@@ -655,7 +683,7 @@ export default function ConcernStrip({
             )}
             {onlyDepartmentId === undefined && (
               <select value={effectiveDept ?? ''} aria-label={t('concern.department')}
-                onChange={(e) => setDeptId(e.target.value ? Number(e.target.value) : undefined)}
+                onChange={(e) => { setDeptPicked(true); setDeptId(e.target.value ? Number(e.target.value) : undefined) }}
                 className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
                 {effectiveDept === undefined
                   && <option value="">{t('concern.pickDepartment')}</option>}
@@ -685,9 +713,15 @@ export default function ConcernStrip({
           <div className="flex gap-2 items-center">
             <button data-testid="risk-submit"
               className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!note.trim() || !riskType || raise.isPending
-                || effectiveDept === undefined}
+              disabled={riskMissing.length > 0 || raise.isPending}
+              title={riskMissing.length > 0
+                ? t('concern.missing').replace('{x}', riskMissing.join(', ')) : undefined}
               onClick={() => raise.mutate()}>{w.raise}</button>
+            {riskMissing.length > 0 && (
+              <span data-testid="risk-submit-missing" className="text-[11px] text-slate-500">
+                {t('concern.missing').replace('{x}', riskMissing.join(', '))}
+              </span>
+            )}
             <button className="text-xs text-slate-400 hover:text-slate-200 px-1"
               onClick={() => { setAdding(false); setNote(''); setFailure(null); setSaveTemplate(false); setTemplateId('') }}>
               {t('common.cancel')}

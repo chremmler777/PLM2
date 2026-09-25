@@ -47,7 +47,9 @@ export default function PackagingAssessmentFields({ value, onChange }: Departmen
       </fieldset>
 
       {impacted === true && (
-        <div className="space-y-1" data-testid="pkg-detail">
+        <div className="space-y-1 rounded border border-slate-700/60 bg-slate-900/30 px-2 py-1.5" data-testid="pkg-detail">
+          <p className="text-[11px] uppercase tracking-wide text-slate-500">{t('pkg.questions')}</p>
+          <p className="text-[11px] text-slate-500">{t('pkg.questionsHint')}</p>
           {BOXES.map((b) => (
             <label key={b.key} className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" data-testid={`pkg-${b.key}`}

@@ -4,6 +4,7 @@ import { changesApi } from '../../api/changes';
 import { plantsApi } from '../../api/plants';
 import type { GateKey, ChangeDetail } from '../../types/change';
 import { t } from '../../i18n/cmLabels';
+import { COST_CARRIER_LABELS } from '../../lib/humanLabels';
 import { formatDate } from '../../lib/format';
 
 interface D1Fields {
@@ -167,19 +168,31 @@ export default function D1MasterPanel({
               ['is_series', 'is_series'],
               ['cm_internal', 'cm_internal'],
               ['cm_external', 'cm_external'],
-              ['customer_relevant', 'customer_relevant'],
             ] as const).map(([key, labelKey]) => (
               <label key={key} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
                   className="accent-sky-500"
                   checked={fields[key]}
-                  disabled={key === 'customer_relevant' ? !canEditCustomerRelevant : !canEditD1}
+                  disabled={!canEditD1}
                   onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.checked }))}
                 />
                 {t(labelKey)}
               </label>
             ))}
+            {/* Cost carrier reads the same here as at the scoping meeting:
+                who pays, in words, not a bare checkbox. */}
+            <label className="flex flex-col gap-0.5 pt-1">
+              <span className="text-slate-400 text-xs">{t('customer_relevant')}</span>
+              <select data-testid="d1-cost-carrier"
+                className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs"
+                value={fields.customer_relevant ? 'customer' : 'internal'}
+                disabled={!canEditCustomerRelevant}
+                onChange={(e) => setFields((f) => ({ ...f, customer_relevant: e.target.value === 'customer' }))}>
+                <option value="customer">{COST_CARRIER_LABELS.customer}</option>
+                <option value="internal">{COST_CARRIER_LABELS.internal}</option>
+              </select>
+            </label>
           </div>
         </div>
       </div>
@@ -211,7 +224,9 @@ export default function D1MasterPanel({
           <ul className="text-xs space-y-0.5">
             {change.impacted_items.map((item) => (
               <li key={item.id} className="flex items-center gap-1.5 text-slate-300">
-                <span>Part #{item.part_id}</span>
+                <span>{item.part_number
+                  ? [item.part_number, item.part_name].filter(Boolean).join(' ')
+                  : `Part ${item.part_id}`}</span>
                 {item.is_lead && (
                   <span className="px-1.5 py-0.5 rounded bg-amber-600/30 text-amber-300 text-xs font-medium">
                     {t('lead_part')}

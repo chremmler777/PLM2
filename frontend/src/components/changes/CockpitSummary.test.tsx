@@ -33,8 +33,8 @@ describe('CockpitSummary', () => {
       // costing, release guards in_implementation), so none should be amber.
       gates={[
         { gate_key: 'feasibility', decision: 'yes' },
-        { gate_key: 'budget', decision: 'na' },
-        { gate_key: 'release', decision: 'na' },
+        { gate_key: 'budget', decision: 'no' },
+        { gate_key: 'release', decision: 'no' },
       ]}
       pendingDeviations={1}
       onAdvance={onAdvance} advancing={false} />))
@@ -66,11 +66,14 @@ describe('CockpitSummary', () => {
     render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
       gates={[
         { gate_key: 'feasibility', decision: 'na' },
-        { gate_key: 'budget', decision: 'na' },
-        { gate_key: 'release', decision: 'na' },
+        { gate_key: 'budget', decision: 'no' },
+        { gate_key: 'release', decision: 'no' },
       ]}
       pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.queryByText(/Nothing blocking/)).toBeNull()
+    // In words, no "NA" jargon.
+    expect(screen.getByText(/Feasibility gate: not decided yet/)).toBeDefined()
+    expect(screen.queryByText(/\bNA\b/)).toBeNull()
     const feasibilityRow = screen.getByText(/Feasibility/).closest('li')
     expect(feasibilityRow?.textContent).toContain('⚠')
     expect(feasibilityRow?.className).toContain('text-amber-300')
@@ -86,8 +89,8 @@ describe('CockpitSummary', () => {
     const onResolveGate = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
       gates={[
-        { gate_key: 'feasibility', decision: 'na' },
-        { gate_key: 'budget', decision: 'na' },
+        { gate_key: 'feasibility', decision: 'no' },
+        { gate_key: 'budget', decision: 'no' },
       ]}
       pendingDeviations={0} onAdvance={() => {}} advancing={false}
       onResolveGate={onResolveGate} />))
@@ -101,8 +104,8 @@ describe('CockpitSummary', () => {
     const onResolveGate = vi.fn()
     render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
       gates={[
-        { gate_key: 'feasibility', decision: 'na' },
-        { gate_key: 'budget', decision: 'na' },
+        { gate_key: 'feasibility', decision: 'no' },
+        { gate_key: 'budget', decision: 'no' },
       ]}
       pendingDeviations={0} onAdvance={() => {}} advancing={false}
       onResolveGate={onResolveGate} canSeeGovernance={false} />))
@@ -110,9 +113,17 @@ describe('CockpitSummary', () => {
     expect(screen.getByText(/Feasibility/)).toBeDefined()
   })
 
+  it('hides a later gate nobody has set (no "Gate Release: NA" noise)', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
+      gates={[{ gate_key: 'release', decision: 'na' }]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByText(/Nothing blocking/)).toBeDefined()
+    expect(screen.queryByText(/Release gate/)).toBeNull()
+  })
+
   it('keeps the green nothing-blocking state while still listing later gates as muted', () => {
     render(wrap(<CockpitSummary change={change({ status: 'quoted', assessments: [] })}
-      gates={[{ gate_key: 'budget', decision: 'na' }]}
+      gates={[{ gate_key: 'budget', decision: 'no' }]}
       pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
     expect(screen.getByText(/Nothing blocking/)).toBeDefined()
     const budgetRow = screen.getByText(/Budget/).closest('li')
@@ -430,5 +441,91 @@ describe('CockpitSummary waits', () => {
   it('pluralizes the backend action labels', () => {
     expect(pluralizeLabel('Decide 1 plan deviation(s): lock or escalate')).toBe('Decide 1 plan deviation: lock or escalate')
     expect(pluralizeLabel('Decide 3 plan deviation(s): lock or escalate')).toBe('Decide 3 plan deviations: lock or escalate')
+  })
+})
+
+describe('CockpitSummary early stages (spec §16)', () => {
+  afterEach(cleanup)
+  const round = (over: Record<string, unknown> = {}) => ({
+    first_stage: 1, total: 2, submitted: 1, all_submitted: false,
+    waiting_on: [{ department_id: 4, department_name: 'Quality' }],
+    not_feasible: [], declined_pending: [], verdicts: [], open_risks: [],
+    routing_deviation_pending: false, can_close: false, ...over,
+  })
+  const inAssessment = change({ status: 'in_assessment' })
+
+  it('has no primary while departments are still answering', () => {
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} assessment={round()} />))
+    expect(screen.getByTestId('next-wait-waiting').textContent).toContain('Waiting on 1 department')
+    expect(screen.queryByTestId('next-to-costing')).toBeNull()
+    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-600')
+  })
+
+  it('offers "Close assessment -> Costing" once every first-stage R/A answered', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={onAdvance} advancing={false}
+      assessment={round({ waiting_on: [], all_submitted: true, submitted: 2 })} />))
+    const go = screen.getByTestId('next-to-costing')
+    expect(go.textContent).toBe('Close assessment → Costing')
+    expect(go.className).toContain('bg-sky-600')
+    fireEvent.click(go)
+    expect(onAdvance).toHaveBeenCalledWith('costing')
+  })
+
+  it('offers reject, back to scoping and an override when a department is not feasible', () => {
+    const onStepAction = vi.fn()
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} onStepAction={onStepAction}
+      assessment={round({ waiting_on: [], all_submitted: true,
+        not_feasible: [{ department_id: 27, department_name: 'Tool Engineer', has_change_ppt: true }] })} />))
+    expect(screen.getByTestId('next-wait-not-feasible').textContent).toContain('Tool Engineer: not feasible')
+    expect(screen.getByTestId('next-to-rejected').textContent).toBe('Reject change')
+    // None of the three ways out is pre-chosen.
+    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-600')
+    expect(screen.getByTestId('next-to-scoping').textContent).toBe('Back to scoping')
+    fireEvent.click(screen.getByTestId('next-override-costing'))
+    expect(onStepAction).toHaveBeenCalledWith('override-costing')
+    expect(screen.queryByTestId('next-to-costing')).toBeNull()
+  })
+
+  it('hides steps the viewer may not take and says who may', () => {
+    render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
+      onAdvance={() => {}} advancing={false} may={() => false}
+      assessment={round({ waiting_on: [], all_submitted: true })} />))
+    expect(screen.queryByTestId('next-to-costing')).toBeNull()
+    expect(screen.queryByTestId('next-to-rejected')).toBeNull()
+    expect(screen.getByTestId('next-needs').textContent).toContain('change lead, Project Management or an admin')
+  })
+
+  it('makes "Send rejection letter" the step of a rejected customer change', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'rejected', customer_relevant: true })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('next-send-rejection').textContent).toBe('Send rejection letter')
+  })
+
+  it('shows no deadline on an ended change and labels the Status dates', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'cancelled', customer_relevant: true,
+      required_by_date: '2026-10-01', deadline_state: 'on_track' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.queryByTestId('deadline-chip')).toBeNull()
+    expect(screen.getByTestId('status-dates').textContent).toBe('Created 01.07.2026 · last change 01.07.2026')
+  })
+
+  it('lists a missing lead among the kickoff needs', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'captured', lead_id: null, lead_name: null })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('kickoff-hint').textContent).toContain('No lead assigned')
+  })
+})
+
+describe('CockpitSummary end states (spec §16 P1 7)', () => {
+  afterEach(cleanup)
+  it('names a rejected-then-closed change as such on the Status card', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'closed', rejected_at: '2026-09-20T00:00:00' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('status-pill').textContent).toBe('Rejected, closed')
+    expect(screen.getByText('Ended: no further step')).toBeDefined()
   })
 })

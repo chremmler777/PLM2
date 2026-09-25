@@ -22,6 +22,9 @@ export interface ImpactedItem {
   eng_level_after?: string | null;
   resulting_revision_id?: number | null;
   is_lead?: boolean;
+  /** Human names, when the backend sends them (instead of "Part #id"). */
+  part_number?: string | null;
+  part_name?: string | null;
 }
 
 export interface Assessment {
@@ -266,6 +269,53 @@ export interface ChangeRequest {
   info_sent_at?: string | null;
   info_department_ids?: number[];
   info_open_department_ids?: number[];
+  // --- Early stages polish (spec §16). All optional: an older backend omits
+  // them and every reader falls back to what it can derive itself. ---
+  /** The statuses THIS viewer may move the change to (backend transition
+   *  rights). Absent: the client mirror in lib/transitionRights decides. */
+  allowed_transitions?: string[];
+  /** The assessment round's first stage, as the backend counts it. */
+  stage_state?: StageState | null;
+  /** End states: the stage the change was in when it was rejected/cancelled. */
+  stopped_at?: ChangeStatus | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  /** The title is composed from the lead item and follows it (default on). */
+  title_auto?: boolean;
+  /** Impact edited after the offer went out: the offer no longer covers it. */
+  scope_changed_after_quote?: boolean;
+  /** The offer version that no longer covers the scope (Blocked by text). */
+  scope_offer_version?: number | null;
+  /** Who picked the lead (and when), for the Status card. */
+  lead_set_at?: string | null;
+  /** Cost carrier as the scoping meeting confirmed it. */
+  cost_carrier_confirmed_at?: string | null;
+  /** Human labels the backend already resolved (lists): the stage owner. */
+  stage_owner?: string | null;
+  /** Changes list: the viewer leads it or is on its hook. */
+  is_mine?: boolean;
+}
+
+/** The first routing stage's standing (spec §16 P1 6). */
+export interface StageState {
+  /** R/A departments of the first stage that have not submitted. */
+  waiting_department_ids: number[];
+  submitted_department_ids?: number[];
+  /** Submitted not-feasible verdicts (Blocked by + next step options). */
+  not_feasible_department_ids?: number[];
+  /** "Not our responsibility" declines awaiting the lead's decision. */
+  declined_pending_department_ids?: number[];
+  /** Every first-stage R/A row has submitted. */
+  all_submitted: boolean;
+}
+
+/** Who may lead a change (lead picker on the Status card). */
+export interface LeadCandidate {
+  id: number;
+  name: string;
+  department?: string | null;
+  /** The project's PM: the picker's default. */
+  is_default?: boolean;
 }
 
 export type ChangeOrigin = 'customer' | 'internal' | 'mother_plant';
@@ -328,7 +378,7 @@ export type ChangeTaskKind =
  * backend still renders as a plain row instead of crashing the page.
  */
 export interface ChangeTask {
-  kind: ChangeTaskKind | (string & {});
+  kind: ChangeTaskKind | (string & NonNullable<unknown>);
   change_id: number;
   change_number: string;
   title: string;
@@ -354,6 +404,11 @@ export interface ChangeTask {
   concern_id?: number;
   // send_rejection rows: whether the letter is already attached
   has_letter?: boolean;
+  /** Human kind label and the change's stage, when the backend sends them. */
+  kind_label?: string | null;
+  status?: ChangeStatus | null;
+  /** R and A rows of one department folded into one task. */
+  rasic_letters?: string[];
 }
 
 // --- Cost & summation types (sub-project A) ---
@@ -465,8 +520,15 @@ export interface ChecklistItemDef {
   label_en: string;
   /** false for the common set, true for a department's own additions. */
   extra: boolean;
-  /** When present the ticked row must also pick one of these. */
-  choices?: string[];
+  /** When present the ticked row must also pick one of these. The backend
+   *  serves objects; plain strings are older payloads. */
+  choices?: (ChecklistChoice | string)[];
+}
+
+export interface ChecklistChoice {
+  value: string;
+  label_de?: string;
+  label_en?: string;
 }
 
 export interface DepartmentRateRef { department_id: number; plant_id: number; hourly_rate: number; min_factor: number; }
@@ -664,7 +726,7 @@ export interface CostingOfferIn {
     typing older rows. Any string the backend serves is valid. */
 export type RiskType =
   | 'fill_issue' | 'dimensional_issue' | 'visual_surface'
-  | 'process_capability' | 'other' | (string & {});
+  | 'process_capability' | 'other' | (string & NonNullable<unknown>);
 
 /** A risk a department wrote down once to raise again. */
 export interface RiskTemplate {
@@ -716,6 +778,11 @@ export interface ChangeConcern {
   severity?: RiskSeverity | null;
   /** Risk raised from a checklist row: that row's key (or free:<label>). */
   checklist_key?: string | null;
+  /** Who settled it ("solved by <name>"), and how it ended for a cancel vote:
+   *  settled by the PM, or withdrawn by its author. */
+  withdrawn_by?: number | null;
+  withdrawn_by_name?: string | null;
+  settled_as?: 'settled' | 'withdrawn' | null;
 }
 
 export interface ChangeMeeting {
@@ -730,6 +797,8 @@ export interface ChangeMeeting {
   selected_department_ids: number[];
   /** The room's RASIC call, {department_id: letter}; absent on older meetings. */
   department_rasic?: Record<string, RasicLetter> | null;
+  /** Cost carrier as the room confirmed it (spec §16): customer or internal. */
+  cost_carrier?: CostCarrier | null;
   created_by: number;
   created_at: string;
   decided_by: number | null;
@@ -737,6 +806,9 @@ export interface ChangeMeeting {
 }
 
 export type RasicLetter = 'R' | 'A' | 'S' | 'C';
+
+/** Who pays: the customer (customer relevant) or the plant itself. */
+export type CostCarrier = 'customer' | 'internal';
 
 export interface TransitionDeviation {
   id: number;
@@ -842,7 +914,7 @@ export type ValidationCheckKey =
 export type ValidationCheckStatus = 'open' | 'passed' | 'failed';
 
 export interface ValidationCheck {
-  check_key: ValidationCheckKey | (string & {});
+  check_key: ValidationCheckKey | (string & NonNullable<unknown>);
   /** The catalog's labels (backend validation_checklist). */
   label_en?: string | null;
   label_de?: string | null;
@@ -882,4 +954,74 @@ export interface ValidationState {
   weight_ack_at?: string | null;
   weight_ack_by_name?: string | null;
   weight_ack_note?: string | null;
+}
+
+// --- GET /changes/{id}/stage-state (spec §16) ---------------------------------
+
+export interface StageDept {
+  department_id: number;
+  department_name?: string | null;
+  assessment_id?: number;
+  rasic_letter?: string;
+}
+
+export interface StageWait {
+  kind: string;
+  text: string;
+  target_tab?: string;
+  department_id?: number;
+  assessment_id?: number;
+  has_change_ppt?: boolean;
+  concern_ids?: number[];
+  missing?: string[];
+}
+
+export interface StageAssessment {
+  first_stage: number | null;
+  total: number;
+  submitted: number;
+  all_submitted: boolean;
+  waiting_on: StageDept[];
+  not_feasible: (StageDept & { has_change_ppt?: boolean })[];
+  declined_pending: (StageDept & { to_letter?: string | null })[];
+  verdicts: (StageDept & { verdict: string; verdict_label?: string | null; open_risks?: number })[];
+  open_risks: {
+    id: number; department_id: number | null; department_name?: string | null;
+    risk_type?: string | null; risk_type_label?: string | null;
+    severity?: number | null; note: string; checklist_key?: string | null;
+  }[];
+  routing_deviation_pending: boolean;
+  can_close: boolean;
+  /** Client side: a transition deviation to costing past a not-feasible answer. */
+  override?: 'pending' | 'approved' | null;
+}
+
+export interface StageEndState {
+  kind: 'rejected' | 'cancelled';
+  status: ChangeStatus;
+  closed: boolean;
+  stopped_at: ChangeStatus | null;
+  stopped_at_label?: string | null;
+  at?: string | null;
+  by?: number | null;
+  by_name?: string | null;
+  reason?: string | null;
+  label?: string | null;
+}
+
+export interface StageStateResponse {
+  change_id: number;
+  status: ChangeStatus;
+  status_label?: string;
+  /** {to_status: may the viewer} for every hop out of the current status. */
+  can_transition: Record<string, boolean>;
+  can_edit_impact: boolean;
+  impact_edit_needs_reason: boolean;
+  lead_assigned: boolean;
+  title_auto: boolean;
+  assessment: StageAssessment | null;
+  routing_deviation: { text: string; can_decide?: boolean; decider?: string } | null;
+  end_state: StageEndState | null;
+  scope_change: { covered: boolean; offer_version?: number | null } | null;
+  waits: StageWait[];
 }

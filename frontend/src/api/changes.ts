@@ -10,7 +10,7 @@ import type {
   CostPosition, CostPositionIn, CostingOffer, CostingOfferIn,
   ChangeNegotiation, NegotiationChannel, BankBuildMode,
   ImplBooking, ImplReport, ImplEscalation, ImplEscalationDirection, ImplDepartmentState,
-  ValidationState, ValidationCheckKey, ChangelogEntry,
+  ValidationState, ValidationCheckKey, ChangelogEntry, LeadCandidate, CostCarrier, StageStateResponse,
 } from '../types/change';
 import type { Escalation } from '../types/workflow';
 
@@ -28,7 +28,31 @@ export const changesApi = {
     /** Mother-plant side track (spec §14). */
     origin?: 'customer' | 'internal' | 'mother_plant';
     mother_plant_name?: string; mother_plant_ref?: string; mother_plant_sop?: string;
+    /** The impacted parts in the same request, and which one leads (spec §16). */
+    impacted_part_ids?: number[]; lead_part_id?: number;
+    /** The title is composed from the lead item and follows it. */
+    title_auto?: boolean;
   }) => client.post<ChangeRequest>('/v1/changes', body).then((r) => r.data),
+
+  /** Who may lead the change: lead, PM members, admin (spec §16 P1 5). */
+  leadCandidates: (id: number) =>
+    client.get<LeadCandidate[]>(`/v1/changes/${id}/lead-candidates`).then((r) => r.data),
+  setLead: (id: number, leadId: number | null) =>
+    client.patch<ChangeRequest>(`/v1/changes/${id}`, { lead_id: leadId }).then((r) => r.data),
+
+  /** The department's unfinished checklist, kept server side (spec §16 P1 1). */
+  saveAssessmentDraft: (id: number, assessmentId: number, draft: Record<string, unknown>) =>
+    client.put(`/v1/changes/${id}/assessments/${assessmentId}/draft`, { draft })
+      .then((r) => r.data),
+
+  /** Everything the cockpit needs for the early stages (spec §16): waits,
+   *  the viewer's transition rights, the assessment round, the end state. */
+  stageState: (id: number) =>
+    client.get<StageStateResponse>(`/v1/changes/${id}/stage-state`).then((r) => r.data),
+
+  /** Make an impacted item the lead; the composed title follows it. */
+  makeLead: (id: number, itemId: number) =>
+    client.post(`/v1/changes/${id}/impacted-items/${itemId}/make-lead`).then((r) => r.data),
 
   update: (id: number, body: Record<string, unknown>) =>
     client.patch<ChangeRequest>(`/v1/changes/${id}`, body).then((r) => r.data),
@@ -239,8 +263,10 @@ export const changesApi = {
     client.get(`/v1/changes/${changeId}/impact-tree`).then((r) => r.data),
   suggestImpact: (changeId: number, partIds: number[]): Promise<{ suggested_part_ids: number[] }> =>
     client.post(`/v1/changes/${changeId}/impact-tree/suggest`, { part_ids: partIds }).then((r) => r.data),
-  applyImpactSelection: (changeId: number, partIds: number[]): Promise<{ impacted_part_ids: number[] }> =>
-    client.put(`/v1/changes/${changeId}/impacted-items`, { part_ids: partIds }).then((r) => r.data),
+  /** `reason` is required once the offer went out (scope_changed_after_quote). */
+  applyImpactSelection: (changeId: number, partIds: number[], reason?: string): Promise<{ impacted_part_ids: number[] }> =>
+    client.put(`/v1/changes/${changeId}/impacted-items`,
+      reason ? { part_ids: partIds, reason } : { part_ids: partIds }).then((r) => r.data),
   confirmImpact: (changeId: number): Promise<ChangeDetail> =>
     client.post(`/v1/changes/${changeId}/impact/confirm`).then((r) => r.data),
 
@@ -256,6 +282,7 @@ export const changesApi = {
     participants: MeetingParticipant[];
     notes?: string; selected_department_ids: number[];
     department_rasic?: Record<number, RasicLetter>;
+    cost_carrier?: CostCarrier;
   }) => client.post<ChangeMeeting>(`/v1/changes/${id}/meetings`, body).then((r) => r.data),
   updateMeeting: (id: number, meetingId: number, body: Record<string, unknown>) =>
     client.patch<ChangeMeeting>(`/v1/changes/${id}/meetings/${meetingId}`, body).then((r) => r.data),
@@ -391,7 +418,7 @@ export const changesApi = {
   // carries the note that says what went wrong.
   setValidationCheck: (id: number, body: {
     department_id: number;
-    check_key: ValidationCheckKey | (string & {});
+    check_key: ValidationCheckKey | (string & NonNullable<unknown>);
     status: 'passed' | 'failed';
     value?: number;
     note?: string;

@@ -68,6 +68,11 @@ export default function NeedsInfoCard({
   })
 
 
+  // "Solved by <name>": the person who settled it, never the note text.
+  const solverName = c.withdrawn_by_name
+    ?? (c.withdrawn_by != null && c.withdrawn_by === c.raised_by ? c.raised_by_name : null)
+  const solvedByLine = solverName ? `${t('concern.solvedByName')} ${solverName}` : t('concern.solvedPlain')
+
   const state = !c.is_open ? 'solved' : c.answered_at != null || !!c.answer_note ? 'answered' : 'open'
   const SUMMARY_DOT: Record<string, string> = {
     open: 'text-amber-400', answered: 'text-sky-400', solved: 'text-slate-600',
@@ -76,7 +81,9 @@ export default function NeedsInfoCard({
   if (!expanded) {
     // The same one-liner for every state: the dot carries where it stands, the
     // text carries what it is about.
-    const trailing = solved ? c.resolution_note : c.answer_note
+    const trailing = solved
+      ? `${solvedByLine}${c.resolution_note ? `: ${c.resolution_note}` : ''}`
+      : c.answer_note
     return (
       <button type="button" data-testid={`needs-info-summary-${c.id}`}
         onClick={() => setExpanded(true)}
@@ -85,7 +92,7 @@ export default function NeedsInfoCard({
         <span className="text-sm text-slate-400 truncate">{c.note}</span>
         {trailing && (
           <span className="text-xs text-slate-500 truncate flex-shrink-0">
-            {' · '}{solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
+            {' · '}{trailing}
           </span>
         )}
         <span className="ml-auto text-xs text-slate-600 flex-shrink-0">
@@ -190,19 +197,22 @@ export default function NeedsInfoCard({
           <p className="text-xs text-slate-600">{t('concern.noAnswerYet')}</p>
         )}
 
-        {!solved && editable && (
+        {!solved && editable && !canAnswer && (
+          <p className="text-[11px] text-slate-500" data-testid={`needs-info-answer-readonly-${c.id}`}>
+            {t('concern.salesAnswersHint')}
+          </p>
+        )}
+        {!solved && editable && canAnswer && (
           <>
             <textarea value={answer} rows={2}
               data-testid={`needs-info-answer-note-${c.id}`}
-              disabled={!canAnswer}
               onChange={(e) => setAnswer(e.target.value)}
               placeholder={t('concern.answerPlaceholder')} aria-label={t('concern.answer')}
               className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 disabled:opacity-50" />
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" data-testid={`needs-info-answer-submit-${c.id}`}
                 className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!canAnswer || !answer.trim() || postAnswer.isPending}
-                title={canAnswer ? undefined : t('concern.salesAnswers')}
+                disabled={!answer.trim() || postAnswer.isPending}
                 onClick={() => postAnswer.mutate(answer)}>
                 {answered ? t('concern.updateAnswer') : t('concern.submitAnswer')}
               </button>
@@ -215,12 +225,17 @@ export default function NeedsInfoCard({
       </div>
 
       {solved ? (
-        c.resolution_note && (
-          <p className="text-sm border-t border-slate-700 pt-2" data-testid={`needs-info-resolution-${c.id}`}>
-            <span className="text-slate-500">{t('concern.solvedBy')} </span>
-            {c.resolution_note}
-          </p>
-        )
+        <p className="text-sm border-t border-slate-700 pt-2" data-testid={`needs-info-resolution-${c.id}`}>
+          <span className="text-slate-500" data-testid={`needs-info-solved-by-${c.id}`}>
+            {solvedByLine}{c.withdrawn_at ? ` · ${formatDate(c.withdrawn_at)}` : ''}
+          </span>
+          {c.resolution_note && <span className="block">{c.resolution_note}</span>}
+        </p>
+      ) : editable && !canSettle ? (
+        <p className="border-t border-slate-700/60 pt-2 text-[11px] text-slate-500"
+          data-testid={`needs-info-settle-readonly-${c.id}`}>
+          {t('concern.closerHint')}
+        </p>
       ) : editable && (
         // Closing belongs to whoever needed the information — or to PM.
         <div className="border-t border-slate-700/60 pt-2 space-y-2">
@@ -243,9 +258,7 @@ export default function NeedsInfoCard({
             </div>
           ) : (
             <button type="button" data-testid={`needs-info-settle-${c.id}`}
-              className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={!canSettle}
-              title={canSettle ? undefined : t('concern.closerOnly')}
+              className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded text-xs"
               onClick={() => { setSettling(true); setSettleNote(c.answer_note ?? '') }}>
               {t('concern.markSolved')}
             </button>

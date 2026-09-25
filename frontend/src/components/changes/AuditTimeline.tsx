@@ -2,18 +2,22 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
 import { t } from '../../i18n/cmLabels'
-import { parseApiDateTime } from '../../lib/format'
+import { formatDate, formatDateTime } from '../../lib/format'
+import { auditValueLabel, humanize } from '../../lib/humanLabels'
 
-// Turn a stored JSON value into a plain phrase — no braces, quotes or keys-as-noise.
-const humanValue = (v: unknown): string => {
+// Turn a stored JSON value into a plain phrase: no braces, quotes or codes.
+// Keys name their field, so a value reads by its field ("status: Scoping").
+const humanValue = (v: unknown, field?: string): string => {
   if (v === null || v === undefined) return '-'
-  if (Array.isArray(v)) return v.length ? v.map(humanValue).join(', ') : '(none)'
+  if (Array.isArray(v)) return v.length ? v.map((x) => humanValue(x, field)).join(', ') : '(none)'
   if (typeof v === 'object') {
+    // Empty fields say nothing: "concern id: -" is noise in a trail.
     return Object.entries(v as Record<string, unknown>)
-      .map(([k, val]) => `${k.replace(/_/g, ' ')}: ${humanValue(val)}`)
+      .filter(([, val]) => val !== null && val !== undefined && val !== '')
+      .map(([k, val]) => `${humanize(k).toLowerCase()}: ${humanValue(val, k)}`)
       .join(', ')
   }
-  return String(v)
+  return auditValueLabel(field ?? null, String(v))
 }
 
 const parse = (s: string | null): unknown => {
@@ -35,21 +39,43 @@ const describeChange = (oldRaw: string | null, newRaw: string | null): string | 
 
 const LIST_LIMIT = 1000
 
-export default function AuditTimeline({ correlationId }: { correlationId: string }) {
+export default function AuditTimeline({ correlationId, changeId }: {
+  correlationId: string
+  /** The change's own trail by entity ids (spec §16 P1 9), not by number text. */
+  changeId?: number
+}) {
   const [entityFilter, setEntityFilter] = useState<string>('all')
+  const scope = changeId != null ? { change_id: changeId } : { correlation_id: correlationId }
   const { data: entries = [], isLoading } = useQuery({
-    queryKey: ['audit', correlationId],
+    queryKey: ['audit', correlationId, changeId ?? null],
     // Newest-first (see backend's list ordering): with LIST_LIMIT truncation
     // this drops the OLDEST entries, keeping the most recent history visible.
-    queryFn: () => auditApi.list({ correlation_id: correlationId, limit: LIST_LIMIT }),
+    queryFn: () => auditApi.list({ ...scope, limit: LIST_LIMIT }),
   })
-  // Always correlation-scoped: this component is always shown for one change,
-  // so the chain check is run WITH correlation_id and the badge reports what
-  // was actually verified for this change (not just "some global chain").
+  // Always scoped to this change, and the badge says which chain broke: a
+  // break inside this change's entries is this change's problem; a break
+  // elsewhere in the global chain is not.
   const { data: chain } = useQuery({
-    queryKey: ['audit-verify', correlationId],
-    queryFn: () => auditApi.verify({ correlation_id: correlationId }),
+    queryKey: ['audit-verify', correlationId, changeId ?? null],
+    queryFn: () => auditApi.verify({ correlation_id: correlationId, ...(changeId != null ? { change_id: changeId } : {}) }),
   })
+  const badge = !chain ? null
+    : chain.break_scope === 'change' ? {
+      ok: false,
+      text: t('audit.brokenInChange').replace('{n}', String(chain.change_first_broken_id ?? chain.first_broken_id ?? '?')),
+    }
+    : chain.break_scope === 'global' ? {
+      ok: true, warn: true,
+      text: t('audit.brokenGlobally').replace('{n}', String(chain.first_broken_id ?? '?')),
+    }
+    : chain.break_scope === 'none' ? { ok: true, text: t('audit.chainOkScoped') }
+    // An older backend: correlation verdict only, still told apart from a global break.
+    : chain.correlation_ok ? { ok: true, text: t('audit.chainOkScoped') }
+    : chain.valid === false && chain.first_broken_id != null ? {
+      ok: true, warn: true,
+      text: t('audit.brokenGlobally').replace('{n}', String(chain.first_broken_id)),
+    }
+    : { ok: false, text: t('audit.chainBrokenScoped') }
   const truncated = entries.length === LIST_LIMIT
 
   const entityTypes = useMemo(
@@ -66,7 +92,7 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
       // Day grouping matches the row times below (both local): a local
       // midnight boundary keeps entries under the heading their time reads
       // under, instead of splitting across a UTC day boundary.
-      const day = parseApiDateTime(e.timestamp).toLocaleDateString()
+      const day = formatDate(e.timestamp)
       if (!groups.has(day)) groups.set(day, [])
       groups.get(day)!.push(e)
     }
@@ -80,18 +106,18 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-200">{t('audit.title')}</h3>
-          {chain && (
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              chain.correlation_ok ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'}`}>
-              {chain.correlation_ok
-                ? `✓ ${t('audit.chainOkScoped')}`
-                : `✗ ${t('audit.chainBrokenScoped')}`}
+          {badge && (
+            <span data-testid="audit-chain" className={`text-xs px-2 py-0.5 rounded-full ${
+              !badge.ok ? 'bg-red-900 text-red-200'
+              : 'warn' in badge && badge.warn ? 'bg-amber-900/70 text-amber-200'
+              : 'bg-emerald-900 text-emerald-200'}`}>
+              {badge.ok ? '✓' : '✗'} {badge.text}
             </span>
           )}
         </div>
         <button
           className="text-xs border border-slate-600 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded-lg"
-          onClick={() => auditApi.downloadCsv({ correlation_id: correlationId })}>
+          onClick={() => auditApi.downloadCsv(scope)}>
           ⬇ {t('audit.export')}
         </button>
       </div>
@@ -102,7 +128,7 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
             className={`text-xs px-2.5 py-1 rounded-full ${
               entityFilter === et ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
             onClick={() => setEntityFilter(et)}>
-            {et === 'all' ? t('audit.all') : et}
+            {et === 'all' ? t('audit.all') : humanize(et)}
           </button>
         ))}
       </div>
@@ -121,12 +147,12 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
               return (
                 <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono text-xs text-slate-500">
-                    {parseApiDateTime(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {formatDateTime(e.timestamp).slice(11)}
                   </span>
                   <span className="font-medium text-slate-200">{e.user_name ?? t('audit.system')}</span>
-                  <span className="text-slate-300">{e.action.replace(/_/g, ' ')}</span>
+                  <span className="text-slate-300">{humanize(e.action).toLowerCase()}</span>
                   {detail && <span className="text-slate-400">: {detail}</span>}
-                  <span className="text-xs text-slate-600">{e.entity_type}#{e.entity_id}</span>
+                  <span className="text-xs text-slate-600">{humanize(e.entity_type)} {e.entity_id}</span>
                 </li>
               )
             })}

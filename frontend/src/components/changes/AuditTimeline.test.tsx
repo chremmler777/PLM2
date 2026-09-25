@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AuditTimeline from './AuditTimeline'
+import { formatDate } from '../../lib/format'
 import { auditApi } from '../../api/audit'
 
 vi.mock('../../api/audit', () => ({
@@ -54,7 +55,7 @@ describe('AuditTimeline', () => {
     expect(await screen.findByText('Dana Lee')).toBeDefined()
     expect(screen.getByText('Sam Ito')).toBeDefined()
     // Human-readable payload, no braces/quotes/keys-as-JSON
-    expect(screen.getByText(/captured → in_assessment/)).toBeDefined()
+    expect(screen.getByText(/Captured → In Assessment/)).toBeDefined()
     expect(screen.getByText(/deck\.pptx/)).toBeDefined()
     expect(screen.queryByText(/\{/)).toBeNull()
     expect(screen.queryByText(/"filename"/)).toBeNull()
@@ -80,7 +81,7 @@ describe('AuditTimeline', () => {
   it('filters by entity type and exports', async () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
-    fireEvent.click(screen.getByRole('button', { name: 'wf_instance' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wf instance' }))
     expect(screen.queryByText('gate decided')).toBeNull()
     expect(screen.getByText('wf started')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }))
@@ -94,7 +95,7 @@ describe('AuditTimeline', () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
     expect(screen.queryByText(/\(UTC\)/)).toBeNull()
-    const expectedDay = new Date('2026-07-01T10:00:00Z').toLocaleDateString()
+    const expectedDay = formatDate('2026-07-01T10:00:00Z')
     expect(screen.getByText(expectedDay)).toBeDefined()
   })
 
@@ -110,8 +111,8 @@ describe('AuditTimeline', () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
 
-    const expectedDay1 = new Date('2026-07-01T21:30:00Z').toLocaleDateString()
-    const expectedDay2 = new Date('2026-07-01T22:30:00Z').toLocaleDateString()
+    const expectedDay1 = formatDate('2026-07-01T21:30:00Z')
+    const expectedDay2 = formatDate('2026-07-01T22:30:00Z')
     expect(expectedDay1).not.toBe(expectedDay2)
     expect(screen.getByText(expectedDay1)).toBeDefined()
     expect(screen.getByText(expectedDay2)).toBeDefined()
@@ -130,5 +131,39 @@ describe('AuditTimeline', () => {
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
     expect(screen.queryByText(/newest 1000/)).toBeNull()
+  })
+
+  it('reads the change trail by change id and tells a global break from its own (spec §16)', async () => {
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: false, checked: 42, first_broken_id: 9, correlation_entries: 2, correlation_ok: false,
+      change_entries: 2, change_ok: true, change_first_broken_id: null, break_scope: 'global',
+    })
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    const badge = await screen.findByTestId('audit-chain')
+    expect(badge.textContent).toContain('global chain is broken at #9, outside this change')
+    expect(auditApi.list).toHaveBeenCalledWith(expect.objectContaining({ change_id: 7 }))
+    expect(auditApi.verify).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007', change_id: 7 })
+  })
+
+  it('flags a break inside the change\'s own entries in red', async () => {
+    vi.mocked(auditApi.verify).mockResolvedValue({
+      valid: false, checked: 42, first_broken_id: 2, change_entries: 2, change_ok: false,
+      change_first_broken_id: 2, break_scope: 'change',
+    })
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    const badge = await screen.findByTestId('audit-chain')
+    expect(badge.textContent).toContain("broken inside this change's entries (at #2)")
+    expect(badge.className).toContain('red')
+  })
+
+  it('shows audit values and entity types in words, days as dd.mm.yyyy', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 4, action: 'field_changed', old_values: '{"verdict": "pending"}',
+        new_values: '{"verdict": "feasible_with_conditions"}', entity_type: 'change_assessment' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    expect(await screen.findByText(/verdict: Not answered yet → verdict: Feasible with conditions/)).toBeDefined()
+    expect(screen.getByText('01.07.2026')).toBeDefined()
+    expect(screen.getAllByText(/Change assessment/).length).toBeGreaterThan(0)
   })
 })

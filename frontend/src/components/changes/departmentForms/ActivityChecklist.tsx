@@ -13,10 +13,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { changesApi } from '../../../api/changes'
-import AttachmentDropzone from '../AttachmentDropzone'
 import { AttachmentRow } from '../AttachmentRow'
 import { t } from '../../../i18n/cmLabels'
-import type { Attachment, ChangeConcern, ChecklistItemDef } from '../../../types/change'
+import type { Attachment, ChangeConcern, ChecklistChoice, ChecklistItemDef } from '../../../types/change'
 import ChecklistRiskForm from './ChecklistRiskForm'
 import type { DepartmentFieldsProps } from './types'
 
@@ -73,6 +72,21 @@ export function restToNo(
 /** Keys are capped where the backend caps them (change_concerns.checklist_key). */
 export const riskKeyOf = (id: string) => id.slice(0, 120)
 
+/** A choice as the backend serves it ({value, label_de, label_en}) or as an
+ *  older payload did (a bare string). */
+export const choiceValue = (c: ChecklistChoice | string): string =>
+  typeof c === 'string' ? c : String(c?.value ?? '')
+
+export function choiceLabel(c: ChecklistChoice | string, lang: 'de' | 'en' = 'en'): string {
+  if (typeof c !== 'string') {
+    const own = lang === 'de' ? c?.label_de : c?.label_en
+    if (own) return own
+  }
+  const v = choiceValue(c)
+  const key = `check.choice.${v}`
+  return t(key, lang) === key ? v : t(key, lang)
+}
+
 /** Rows written under the old activity-catalog shape — read-only history. */
 const isLegacy = (i: ImpactItem) => i.key === undefined && i.activity_id !== undefined
 
@@ -80,7 +94,7 @@ const idOf = (i: ImpactItem) => i.key ?? `free:${i.label ?? ''}`
 
 export default function ActivityChecklist({
   departmentId, value, onChange, lang = 'en',
-  changeId, assessmentId, attachments = [], onUploaded, highlightOpen = false,
+  changeId, assessmentId, attachments = [], highlightOpen = false,
 }: DepartmentFieldsProps & {
   departmentId: number
   lang?: 'de' | 'en'
@@ -169,9 +183,10 @@ export default function ActivityChecklist({
           </span>
           <span className={item.answer === 'yes' ? 'text-slate-100'
             : item.answer === 'no' ? 'text-slate-500' : 'text-slate-300'}>{label}</span>
-          {/* A No can still carry a risk ("no 3D change, but the stack is
-              tight"), so any answered row may flag one — and more than one. */}
-          {changeId != null && item.answer && (
+          {/* A risk hangs off work that happens: only a Yes row flags one
+              (more than one is fine). A worry about a No row is a free risk
+              in the department's risk panel. */}
+          {changeId != null && item.answer === 'yes' && (
             <button type="button" data-testid={`check-flag-${id}`}
               onClick={() => setFlagging(id)}
               className="ml-auto text-[11px] text-amber-300/80 hover:text-amber-200">
@@ -207,18 +222,18 @@ export default function ActivityChecklist({
             {def?.choices && def.choices.length > 0 && (
               <div className="flex items-center gap-3 text-xs" role="group"
                 aria-label={t('check.choice')}>
-                {def.choices.map((choice) => (
-                  <label key={choice} className="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" name={`choice-${id}`}
-                      data-testid={`check-choice-${id}-${choice}`}
-                      checked={item.choice === choice}
-                      onChange={() => put({ ...item, choice })} />
-                    <span className="text-slate-300">
-                      {t(`check.choice.${choice}`) === `check.choice.${choice}`
-                        ? choice : t(`check.choice.${choice}`, lang)}
-                    </span>
-                  </label>
-                ))}
+                {def.choices.map((c) => {
+                  const choice = choiceValue(c)
+                  return (
+                    <label key={choice} className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name={`choice-${id}`}
+                        data-testid={`check-choice-${id}-${choice}`}
+                        checked={item.choice === choice}
+                        onChange={() => put({ ...item, choice })} />
+                      <span className="text-slate-300">{choiceLabel(c, lang)}</span>
+                    </label>
+                  )
+                })}
               </div>
             )}
             <input type="text" data-testid={`check-remark-${id}`}
@@ -241,9 +256,14 @@ export default function ActivityChecklist({
                     {t('attach.rfqMissing', lang)}
                   </p>
                 )}
-                <AttachmentDropzone changeId={changeId} assessmentId={assessmentId}
-                  kind="rfq" compact label={t('attach.rfqSlot', lang)}
-                  onUploaded={() => onUploaded?.()} />
+                {/* One RFQ drop zone per assessment: the RFQ box under the
+                    form. The row only says whether it is filed and points there. */}
+                <button type="button" data-testid="check-rfq-goto"
+                  onClick={() => document.querySelector(`[data-testid^="bucket-rfq-"]`)
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  className="text-[11px] text-sky-300 hover:text-sky-200 underline decoration-dotted underline-offset-2">
+                  {t('attach.rfqGoto', lang)}
+                </button>
               </div>
             )}
           </div>

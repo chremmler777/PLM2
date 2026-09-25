@@ -69,3 +69,29 @@ describe('LifecycleStepper scoping handoff note', () => {
     expect(screen.queryByTitle(t('tab.scopingHandoff'))).toBeNull()
   })
 })
+
+describe('LifecycleStepper end states (spec §16)', () => {
+  afterEach(cleanup)
+
+  it('ends a rejected change in a red pill, stopped at its stage, later stages greyed', () => {
+    render(<LifecycleStepper status="rejected" customerRelevant
+      end={{ kind: 'rejected', stoppedAt: 'in_assessment' }} />)
+    expect(screen.getByTestId('stepper-end').textContent).toContain('Rejected')
+    expect(screen.getByTestId('stepper-end').textContent).toContain('stopped at In Assessment')
+    expect(screen.getByTestId('step-captured').className).toContain('emerald')
+    expect(screen.getByTestId('step-in_assessment').className).toContain('red')
+    expect(screen.getByTestId('step-costing').className).toContain('slate-600')
+    // Never "Closed" as the end of a stopped path, and no "Rejected" off-path badge twice.
+    expect(screen.queryByTestId('step-closed')).toBeNull()
+    expect(screen.getAllByText(/Rejected/)).toHaveLength(1)
+  })
+
+  it('names a rejected-then-closed change and a cancelled one distinctly', () => {
+    render(<LifecycleStepper status="closed" end={{ kind: 'rejected', stoppedAt: 'scoping', closed: true }} />)
+    expect(screen.getByTestId('stepper-end').textContent).toContain('Rejected, closed')
+    cleanup()
+    render(<LifecycleStepper status="cancelled" end={{ kind: 'cancelled', stoppedAt: 'costing' }} />)
+    expect(screen.getByTestId('stepper-end').textContent).toContain('Cancelled')
+    expect(screen.getByTestId('stepper-stopped-at')).toBeTruthy()
+  })
+})

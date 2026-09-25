@@ -59,7 +59,7 @@ describe('NeedsInfoCard states', () => {
   })
 
   it('shows the stored answer and still asks to be closed', () => {
-    card({ concern: concern({
+    card({ canSettle: true, concern: concern({
       answer_note: 'customer confirmed 12.50', answered_at: '2026-08-02T00:00:00',
       answered_by: 5, answered_by_name: 'Sam Sales' }) })
     expect(screen.getByTestId('needs-info-state-1').textContent).toBe(t('concern.awaitingClosure'))
@@ -80,6 +80,22 @@ describe('NeedsInfoCard states', () => {
     expect(screen.getByTestId('needs-info-state-1').textContent).toBe(t('concern.solved'))
     expect(screen.getByTestId('needs-info-resolution-1').textContent).toContain('price agreed')
     expect(screen.queryByTestId('needs-info-settle-1')).toBeNull()
+  })
+
+  it('says who solved it, by name, never the note as the name', () => {
+    card({ concern: concern({ is_open: false, withdrawn_at: '2026-08-03T00:00:00',
+      withdrawn_by: 4, withdrawn_by_name: 'Pia PM', resolution_note: 'price agreed' }) })
+    expect(screen.getByTestId('needs-info-summary-1').textContent)
+      .toContain(`${t('concern.solvedByName')} Pia PM: price agreed`)
+    fireEvent.click(screen.getByTestId('needs-info-summary-1'))
+    expect(screen.getByTestId('needs-info-solved-by-1').textContent)
+      .toBe(`${t('concern.solvedByName')} Pia PM · 03.08.2026`)
+  })
+
+  it('names the asker as solver when the asker closed it', () => {
+    card({ concern: concern({ is_open: false, withdrawn_at: '2026-08-03T00:00:00',
+      withdrawn_by: 9, resolution_note: 'got it' }) })
+    expect(screen.getByTestId('needs-info-summary-1').textContent).toContain('Solved by PM Jane')
   })
 })
 
@@ -108,12 +124,12 @@ describe('NeedsInfoCard roles', () => {
       .toBe(t('concern.updateAnswer'))
   })
 
-  it('greys the answer zone for anyone but Sales', () => {
+  it('offers no answer controls to anyone but Sales, only who answers', () => {
     card({ canSettle: true })
-    const submit = screen.getByTestId('needs-info-answer-submit-1') as HTMLButtonElement
-    expect(submit.disabled).toBe(true)
-    expect(submit.getAttribute('title')).toBe(t('concern.salesAnswers'))
-    expect((screen.getByTestId('needs-info-answer-note-1') as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.queryByTestId('needs-info-answer-submit-1')).toBeNull()
+    expect(screen.queryByTestId('needs-info-answer-note-1')).toBeNull()
+    expect(screen.getByTestId('needs-info-answer-readonly-1').textContent)
+      .toBe(t('concern.salesAnswersHint'))
   })
 
   it('closes only for the asking side or PM, with a note', async () => {
@@ -128,11 +144,10 @@ describe('NeedsInfoCard roles', () => {
       .toHaveBeenCalledWith(7, 1, 'price agreed, good to proceed'))
   })
 
-  it('greys closing for Sales and says who may do it', () => {
+  it('offers Sales no close button, only who closes it', () => {
     card({ canAnswer: true })
-    const settle = screen.getByTestId('needs-info-settle-1') as HTMLButtonElement
-    expect(settle.disabled).toBe(true)
-    expect(settle.getAttribute('title')).toBe(t('concern.closerOnly'))
+    expect(screen.queryByTestId('needs-info-settle-1')).toBeNull()
+    expect(screen.getByTestId('needs-info-settle-readonly-1').textContent).toBe(t('concern.closerHint'))
   })
 })
 

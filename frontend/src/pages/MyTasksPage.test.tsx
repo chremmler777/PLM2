@@ -265,9 +265,10 @@ describe('MyTasksPage change tasks by kind', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/7')
   })
 
-  it('renders an unknown kind as a plain row instead of crashing', async () => {
+  it('renders an unknown kind as a plain, readable row instead of crashing', async () => {
     await renderWith(changeTask({ kind: 'something_new' }))
-    expect(screen.getByText('something_new')).toBeDefined()
+    expect(screen.getByText('Something new')).toBeDefined()
+    expect(screen.queryByText('something_new')).toBeNull()
     expect(screen.getByText('Clip rattles')).toBeDefined()
   })
 
@@ -290,5 +291,78 @@ describe('MyTasksPage change tasks by kind', () => {
       owner_id: 9, owner_name: 'Toola Engineer', mine: false,
     }))
     expect(screen.getByText('Toola Engineer')).toBeTruthy()
+  })
+})
+
+describe('MyTasksPage one list (spec §16)', () => {
+  beforeEach(() => {
+    navigate.mockClear()
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/workflow-instances/my-tasks'))
+        return Promise.resolve({ data: [
+          myTask({ task_id: 1, rasic_letter: 'R', step_name: 'Update 3D data', overdue: false,
+                   due_date: '2026-10-02T00:00:00' }),
+          myTask({ task_id: 2, rasic_letter: 'A', step_name: 'Update 3D data', overdue: false,
+                   due_date: '2026-10-02T00:00:00' }),
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+  })
+  afterEach(cleanup)
+
+  it('lists change and workflow tasks in one table, counted in the title', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'kickoff', status: 'captured' })] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    await screen.findByText('Update 3D data')
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+    expect(screen.getAllByTestId('task-row')).toHaveLength(2)
+    expect(screen.getByTestId('task-list-title').textContent).toContain('(2)')
+  })
+
+  it('folds the R and A row of the same step into one row carrying both letters', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('Update 3D data')
+    expect(screen.getAllByText('Update 3D data')).toHaveLength(1)
+    expect(screen.getAllByTestId('task-rasic').map((e) => e.textContent)).toEqual(['R', 'A'])
+  })
+
+  it('folds a department\'s duplicate change-task rows into one', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'assessment', department_id: 2, assessment_id: 3, rasic_letters: ['R'] }),
+      changeTask({ kind: 'assessment', department_id: 2, assessment_id: 4, rasic_letters: ['A'],
+                   due_date: '2026-09-01', overdue: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0007')
+    expect(screen.getAllByText('GB-CM-0007')).toHaveLength(1)
+    // The earlier, overdue date wins.
+    expect(screen.getByText('01.09.2026')).toBeDefined()
+  })
+
+  it('shows the change stage and dates as dd.mm.yyyy, overdue first', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'costing_input', status: 'costing', due_date: '2026-11-20' }),
+      changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', status: 'captured',
+                   due_date: '2026-09-23', overdue: true }),
+    ] as never)
+    wrap(<MyTasksPage />)
+    await screen.findByText('GB-CM-0008')
+    const stages = screen.getAllByTestId('task-stage').map((e) => e.textContent)
+    expect(stages[0]).toBe('Captured')
+    expect(stages).toContain('Costing')
+    expect(screen.getByText('20.11.2026')).toBeDefined()
+    expect(screen.getByText('02.10.2026')).toBeDefined()
+    const rows = screen.getAllByTestId('task-row')
+    expect(rows[0].textContent).toContain('GB-CM-0008')
+  })
+
+  it('uses the server kind label when one is sent', async () => {
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      changeTask({ kind: 'release_check', kind_label: 'Release checklist' })] as never)
+    wrap(<MyTasksPage />)
+    expect(await screen.findByText('Release checklist')).toBeDefined()
   })
 })

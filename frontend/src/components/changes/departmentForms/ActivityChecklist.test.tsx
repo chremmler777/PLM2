@@ -7,10 +7,15 @@ const DEFS = [
   { key: 'cycle_time_change', label_de: 'Zykluszeit', label_en: 'Cycle time change', extra: false },
   { key: 'threed_change', label_de: '3D', label_en: '3D change necessary', extra: false },
 ]
+const ARTICLE = { key: 'article_design_update', label_de: 'A', label_en: 'Article design update',
+  extra: true, choices: [
+    { value: 'internal', label_de: 'Intern', label_en: 'Internal' },
+    { value: 'customer_given', label_de: 'Kundenvorgabe', label_en: 'Customer given' }] }
+const assessmentChecklist = vi.fn(() => Promise.resolve(DEFS as unknown[]))
 const listConcerns = vi.fn(() => Promise.resolve([] as unknown[]))
 vi.mock('../../../api/changes', () => ({
   changesApi: {
-    assessmentChecklist: vi.fn(() => Promise.resolve(DEFS)),
+    assessmentChecklist: () => assessmentChecklist(),
     listConcerns: () => listConcerns(),
     riskTypes: vi.fn(() => Promise.resolve({ items: [{ key: 'fill_issue', label_en: 'Fill issue' }] })),
     raiseConcern: vi.fn(),
@@ -95,14 +100,33 @@ describe('ActivityChecklist answers', () => {
   })
 })
 
+describe('ActivityChecklist choices', () => {
+  afterEach(cleanup)
+  it('renders object choices by their label and stores the value (crash fix)', async () => {
+    assessmentChecklist.mockResolvedValueOnce([ARTICLE])
+    const onChange = vi.fn()
+    render(wrap(<ActivityChecklist departmentId={4} onChange={onChange}
+      value={{ impacts: [{ key: 'article_design_update', answer: 'yes', impacted: true }] }} />))
+    expect(await screen.findByText('Customer given')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
+    expect(onChange).toHaveBeenLastCalledWith({ impacts: [expect.objectContaining({
+      key: 'article_design_update', choice: 'customer_given' })] })
+  })
+})
+
 describe('ActivityChecklist risk flag', () => {
   afterEach(cleanup)
-  const answeredNo = { impacts: [{ key: 'threed_change', answer: 'no', impacted: false }] }
+  const answeredNo = { impacts: [{ key: 'threed_change', answer: 'yes', impacted: true }] }
 
-  it('offers ⚑ on an answered row, not on an open one', async () => {
-    render(wrap(<ActivityChecklist departmentId={4} changeId={5} value={answeredNo} onChange={() => {}} />))
+  it('offers ⚑ on a Yes row only: never on an open row or a No row (spec §16)', async () => {
+    render(wrap(<ActivityChecklist departmentId={4} changeId={5} onChange={() => {}}
+      value={{ impacts: [
+        { key: 'threed_change', answer: 'yes', impacted: true },
+        { key: 'visual_risk', answer: 'no', impacted: false },
+      ] }} />))
     expect(await screen.findByTestId('check-flag-threed_change')).toBeTruthy()
     expect(screen.queryByTestId('check-flag-cycle_time_change')).toBeNull()
+    expect(screen.queryByTestId('check-flag-visual_risk')).toBeNull()
   })
 
   it('opens the pre-filled form from ⚑', async () => {

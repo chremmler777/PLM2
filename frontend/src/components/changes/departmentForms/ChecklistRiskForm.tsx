@@ -40,13 +40,17 @@ export default function ChecklistRiskForm({ changeId, departmentId, checklistKey
     },
     onError: (e: unknown) => setFailure(errDetail(e) ?? 'Could not raise the risk'),
   })
+  const missing = [
+    ...(riskType ? [] : [t('concern.missingType')]),
+    ...(note.trim() ? [] : [t('concern.missingNote')]),
+  ]
   return (
     <div className="mt-1 ml-6 space-y-1 rounded border border-amber-700/50 bg-amber-950/20 p-2">
       <div className="flex flex-wrap items-center gap-2">
         <select value={riskType} data-testid="check-risk-type" aria-label={t('risk.kind')}
           onChange={(e) => setRiskType(e.target.value)}
           className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100">
-          <option value="">{t('risk.kind')}</option>
+          <option value="">{t('risk.pickType')}</option>
           {(data?.items ?? []).map((i) => (
             <option key={i.key} value={i.key}>{i.label_en ?? i.key}</option>
           ))}
@@ -70,13 +74,20 @@ export default function ChecklistRiskForm({ changeId, departmentId, checklistKey
       {failure && <p role="alert" className="text-xs text-red-300">{failure}</p>}
       <div className="flex gap-2">
         <button type="button" data-testid="check-risk-submit"
-          disabled={!riskType || !note.trim() || raise.isPending}
+          disabled={missing.length > 0 || raise.isPending}
+          title={missing.length > 0 ? t('concern.missing').replace('{x}', missing.join(', ')) : undefined}
           onClick={() => raise.mutate()}
           className="bg-amber-700 hover:bg-amber-600 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed">
           {t('check.flagRisk')}
         </button>
         <button type="button" onClick={onDone}
           className="text-xs text-slate-400 hover:text-slate-200 px-1">{t('common.cancel')}</button>
+        {/* A disabled Flag button says what it still needs, in plain sight. */}
+        {missing.length > 0 && (
+          <span data-testid="check-risk-missing" className="self-center text-[11px] text-slate-400">
+            {t('concern.missing').replace('{x}', missing.join(', '))}
+          </span>
+        )}
       </div>
     </div>
   )

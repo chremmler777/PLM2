@@ -9,7 +9,7 @@
  */
 import { t } from '../i18n/cmLabels'
 import type {
-  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, ValidationState,
+  Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, StageAssessment, ValidationState,
 } from '../types/change'
 import type { IssueOut } from '../types/validationIssue'
 import { isIssueOpen, issueCode } from '../types/validationIssue'
@@ -402,4 +402,132 @@ export function resolveWaitStates(
   }
 
   return waits
+}
+
+/** The tabs a wait row may point at. */
+const WAIT_TABS = new Set(['overview', 'scoping', 'impacted', 'assessments', 'costing', 'offer', 'mother', 'timing', 'release'])
+
+/**
+ * The early-stage waits (spec §16): no lead, capture incomplete, open cancel
+ * votes, unconfirmed cost carrier, a declined or not-feasible department, a
+ * pending routing change, an offer that no longer covers the scope. The
+ * backend's stage-state names them when it has them; otherwise they are
+ * derived from what the page holds. Merged into the resolver's list without
+ * saying anything twice.
+ */
+export function earlyStageWaits(
+  change: Pick<ChangeRequest, 'status' | 'lead_id'> & Partial<Pick<ChangeRequest, 'rejected_at'
+    | 'scope_changed_after_quote' | 'scope_offer_version'>>,
+  existing: WaitState[],
+  stageWaits: { kind: string; text: string; target_tab?: string; department_id?: number }[] | null | undefined,
+  derived: {
+    concerns?: ChangeConcern[]
+    assessments?: Pick<Assessment, 'department_id' | 'verdict' | 'stage_order' | 'rasic_letter' | 'has_change_ppt'>[]
+    departmentName?: (id: number) => string
+  } = {},
+): WaitState[] {
+  const live = !['released', 'closed', 'rejected', 'cancelled'].includes(change.status)
+  const out: WaitState[] = [...existing]
+  const has = (k: string) => out.some((w) => w.key === k || w.key.startsWith(`${k}-`))
+  const push = (w: WaitState) => { if (!out.some((x) => x.key === w.key)) out.push(w) }
+  const tabOf = (x?: string) => (x && WAIT_TABS.has(x) ? x as WaitState['tab'] : undefined)
+
+  if (stageWaits) {
+    for (const w of stageWaits) {
+      // The client already says these in more detail.
+      if (w.kind === 'assessment_waiting') {
+        const i = out.findIndex((x) => x.key === 'assessment-round')
+        if (i >= 0) out.splice(i, 1)
+      }
+      if (w.kind === 'waiting_on_sales_answer' && has('sales-info')) continue
+      // The kickoff hint in "Next step" names the same things; Blocked by
+      // still lists them, once.
+      const key = w.kind === 'assessment_waiting' ? 'assessment-round'
+        : w.department_id != null ? `${w.kind}-${w.department_id}` : w.kind
+      push({
+        key,
+        text: w.text,
+        // The lead is picked on the Status card itself; no tab to jump to.
+        tab: w.kind === 'no_lead' || w.kind === 'kickoff_missing' ? undefined : tabOf(w.target_tab),
+      })
+    }
+    return out
+  }
+
+  // Fallback without stage-state: the same rows, derived.
+  if (live && change.lead_id == null) push({ key: 'no_lead', text: 'No lead assigned' })
+  const name = derived.departmentName ?? ((id: number) => `#${id}`)
+  const votes = (derived.concerns ?? []).filter((c) => c.is_open && c.kind === 'reject_proposal')
+  if (live && votes.length > 0) {
+    const who = [...new Set(votes.map((c) => c.raised_by_name ?? `user ${c.raised_by}`))].sort().join(', ')
+    push({
+      key: 'open_cancel_votes',
+      text: `${votes.length} open cancel vote${votes.length === 1 ? '' : 's'} from ${who}`,
+      tab: 'scoping',
+    })
+  }
+  if (change.status === 'in_assessment') {
+    const rows = derived.assessments ?? []
+    const first = rows.length ? Math.min(...rows.map((a) => a.stage_order)) : 0
+    for (const a of rows.filter((x) => x.stage_order === first && x.verdict === 'not_feasible')) {
+      push({
+        key: `not_feasible-${a.department_id}`,
+        text: `${name(a.department_id)}: not feasible ${a.has_change_ppt ? '(Change PPT)' : '(no Change PPT)'}`,
+        tab: 'assessments',
+      })
+    }
+  }
+  if (live && change.scope_changed_after_quote) {
+    push({
+      key: 'scope_not_covered',
+      text: `${change.scope_offer_version ? `Offer v${change.scope_offer_version}` : 'The offer'} no longer covers the scope: new offer version or approved deviation`,
+      tab: 'offer',
+    })
+  }
+  return out
+}
+
+/**
+ * The assessment round as stage-state reports it, derived from the change's
+ * rows when the backend does not send it: first stage, R/A rows only.
+ */
+export function deriveAssessmentState(
+  assessments: Pick<Assessment, 'id' | 'department_id' | 'rasic_letter' | 'status' | 'submitted_at'
+    | 'verdict' | 'stage_order' | 'has_change_ppt'>[],
+  departmentName: (id: number) => string = (id) => `#${id}`,
+  concerns: ChangeConcern[] = [],
+  routingPending = false,
+): StageAssessment | null {
+  if (assessments.length === 0) return null
+  const first = Math.min(...assessments.map((a) => a.stage_order))
+  const rows = assessments.filter((a) => a.stage_order === first && (a.rasic_letter === 'R' || a.rasic_letter === 'A'))
+  const done = (a: typeof rows[number]) => a.status === 'waived' || isSubmitted(a)
+  const dept = (a: typeof rows[number]) => ({
+    department_id: a.department_id, department_name: departmentName(a.department_id),
+    assessment_id: a.id, rasic_letter: a.rasic_letter,
+  })
+  const waiting = rows.filter((a) => !done(a))
+  const risks = concerns.filter((c) => c.kind === 'risk' && c.is_open)
+  return {
+    first_stage: first,
+    total: rows.length,
+    submitted: rows.length - waiting.length,
+    all_submitted: rows.length > 0 && waiting.length === 0,
+    waiting_on: waiting.map(dept),
+    not_feasible: rows.filter((a) => a.verdict === 'not_feasible')
+      .map((a) => ({ ...dept(a), has_change_ppt: !!a.has_change_ppt })),
+    declined_pending: [],
+    verdicts: rows.filter(done).map((a) => ({
+      ...dept(a), verdict: a.verdict,
+      open_risks: risks.filter((c) => c.department_id === a.department_id).length,
+    })),
+    open_risks: risks.map((c) => ({
+      id: c.id, department_id: c.department_id ?? null,
+      department_name: c.department_id != null ? departmentName(c.department_id) : null,
+      risk_type: c.risk_type ?? null, severity: c.severity ?? null, note: c.note,
+      checklist_key: c.checklist_key ?? null,
+    })),
+    routing_deviation_pending: routingPending,
+    can_close: false,
+  }
 }

@@ -21,6 +21,13 @@ const change = (over: Partial<ChangeRequest> = {}): ChangeRequest => ({
   release_due_date: null, release_due_reason: null, ...over,
 } as ChangeRequest)
 
+/** Types a date into the dd.mm.yyyy field and commits it (blur). */
+const typeDate = (container: HTMLElement, ddmmyyyy: string) => {
+  const inp = container.querySelector('[data-testid="deadline-form"] input[inputmode="numeric"]')!
+  fireEvent.change(inp, { target: { value: ddmmyyyy } })
+  fireEvent.blur(inp)
+}
+
 const wrap = (ui: React.ReactElement) => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
     {ui}
@@ -35,7 +42,7 @@ describe('DeadlineEditor', () => {
       release_due_date: '2026-10-01T23:59:59', release_due_reason: null,
     })} kind="release" />))
     fireEvent.click(screen.getByTestId('deadline-edit'))
-    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-11-15' } })
+    typeDate(container, '15.11.2026')
     fireEvent.click(screen.getByText(t('deadline.set')))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
       release_due_date: '2026-11-15T23:59:59Z', release_due_reason: null,
@@ -45,7 +52,7 @@ describe('DeadlineEditor', () => {
   it('defaults to editing required_by_date (quote kind)', async () => {
     const { container } = render(wrap(<DeadlineEditor change={change({ status: 'captured', required_by_date: null })} />))
     fireEvent.click(screen.getByTestId('deadline-edit'))
-    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-09-01' } })
+    typeDate(container, '01.09.2026')
     fireEvent.click(screen.getByText(t('deadline.set')))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
       required_by_date: '2026-09-01T23:59:59Z', required_by_reason: null,
@@ -60,7 +67,7 @@ describe('DeadlineEditor', () => {
     // No pushback rules at capture: the reason stays optional and prefilled.
     expect((screen.getByTestId('deadline-reason') as HTMLInputElement).value).toBe('customer ask')
     expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-09-15' } })
+    typeDate(container, '15.09.2026')
     fireEvent.click(screen.getByTestId('deadline-save'))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
       required_by_date: '2026-09-15T23:59:59Z', required_by_reason: 'customer ask',
@@ -72,15 +79,18 @@ describe('DeadlineEditor', () => {
       status: 'scoping', required_by_date: '2026-09-01T23:59:59', required_by_reason: 'customer ask',
     })} />))
     // Read-only until the pushback is opened: no date input, latest reason shown.
-    expect(container.querySelector('input[type="date"]')).toBeNull()
+    expect(container.querySelector('[data-testid="deadline-form"]')).toBeNull()
     expect(screen.getByText('customer ask')).toBeTruthy()
 
-    fireEvent.click(screen.getByText(t('deadline.pushback')))
+    fireEvent.click(screen.getByTestId('deadline-edit'))
+    // The pushback says what it moves, in plain words.
+    expect(screen.getByText(t('deadline.pushbackTitle'))).toBeTruthy()
+    expect(screen.getByText(t('deadline.pushbackWhy'))).toBeTruthy()
     const save = screen.getByTestId('deadline-save') as HTMLButtonElement
     // A date alone is not enough — the reason starts empty and is mandatory.
     expect((screen.getByTestId('deadline-reason') as HTMLTextAreaElement).value).toBe('')
     expect(save.disabled).toBe(true)
-    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-10-05' } })
+    typeDate(container, '05.10.2026')
     expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.change(screen.getByTestId('deadline-reason'),
@@ -98,11 +108,39 @@ describe('DeadlineEditor', () => {
       status: 'approved', release_due_date: '2026-10-01T23:59:59',
     })} kind="release" />))
     fireEvent.click(screen.getByTestId('deadline-edit'))
-    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: '2026-11-15' } })
+    typeDate(container, '15.11.2026')
     expect((screen.getByTestId('deadline-save') as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByTestId('deadline-save'))
     await waitFor(() => expect(changesApi.update).toHaveBeenCalledWith(7, {
       release_due_date: '2026-11-15T23:59:59Z', release_due_reason: null,
     }))
+  })
+
+  it('shows the date as dd.mm.yyyy, never the native mm/dd picker', () => {
+    const { container } = render(wrap(<DeadlineEditor change={change({
+      status: 'captured', required_by_date: '2026-09-01T23:59:59' })} />))
+    fireEvent.click(screen.getByTestId('deadline-edit'))
+    const inp = container.querySelector('[data-testid="deadline-form"] input') as HTMLInputElement
+    expect(inp.value).toBe('01.09.2026')
+    expect(container.querySelector('input[type="date"]')).toBeNull()
+  })
+
+  it('offers no deadline on a change that has ended', () => {
+    for (const status of ['rejected', 'closed', 'cancelled'] as const) {
+      const { container } = render(wrap(<DeadlineEditor change={change({
+        status, required_by_date: '2026-09-01T23:59:59' })} />))
+      expect(container.querySelector('[data-testid="deadline-edit"]')).toBeNull()
+      expect(container.querySelector('[data-testid="deadline-chip"]')).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('names the quote deadline in its save message', async () => {
+    const { toast } = await import('sonner')
+    const { container } = render(wrap(<DeadlineEditor change={change({ status: 'captured' })} />))
+    fireEvent.click(screen.getByTestId('deadline-edit'))
+    typeDate(container, '01.09.2026')
+    fireEvent.click(screen.getByTestId('deadline-save'))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(t('deadline.savedQuote')))
   })
 })

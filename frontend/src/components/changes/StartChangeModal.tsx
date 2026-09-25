@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -10,16 +10,17 @@ import { groupItems } from '../../lib/itemCategory';
 import type { ChangeType } from '../../types/change';
 import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
 import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
+import DateInput from '../gantt/DateInput';
 import MotherPlantFields, {
   emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
 } from './motherPlant/MotherPlantFields';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
-  { value: 'physical_part', label: 'Physical Part' },
+  { value: 'physical_part', label: 'Physical part' },
   { value: 'tooling', label: 'Tooling' },
-  { value: 'document_spec', label: 'Document / Spec' },
-  { value: 'process_im', label: 'Process / IM' },
+  { value: 'document_spec', label: 'Document / specification' },
+  { value: 'process_im', label: 'Process (IM)' },
   { value: 'packaging', label: 'Packaging' },
 ];
 
@@ -64,6 +65,20 @@ export function composeTitle(picked: PickedPart[]): string {
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+
+/**
+ * What the kickoff (captured -> scoping) still needs. Soft: the change is
+ * created either way; this only says what the hand-over will miss.
+ */
+function kickoffMissing(k: {
+  description: string; files: number; quoteDeadline: string; customer: boolean;
+}): string[] {
+  return [
+    ...(k.description.trim() ? [] : [t('kickoff.description')]),
+    ...(k.files > 0 ? [] : [t('kickoff.attachment')]),
+    ...(k.customer && !k.quoteDeadline ? [t('deadline.quote')] : []),
+  ];
+}
 
 interface PickedPart {
   id: number;
@@ -119,6 +134,20 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const [fromMotherPlant, setFromMotherPlant] = useState(false);
   const [motherPlant, setMotherPlant] = useState<MotherPlantDraft>(
     () => emptyMotherPlantDraft(FALLBACK_MOTHER_PLANTS[0]));
+  // Kickoff needs, collected here so the change can be handed to scoping at
+  // once: the fuller description, the customer's documents and, for customer
+  // work, the quote deadline. All optional; the ready check says what is left.
+  const [description, setDescription] = useState('');
+  const [quoteDeadline, setQuoteDeadline] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const addFiles = (list: FileList | File[] | null) => {
+    const incoming = Array.from(list ?? []);
+    if (incoming.length === 0) return;
+    setFiles((prev) => [...prev, ...incoming.filter(
+      (f) => !prev.some((p) => p.name === f.name && p.size === f.size))]);
+  };
   const [submitting, setSubmitting] = useState(false);
   // Server-side refusals (e.g. 403 for a user outside a change-starting
   // department) are shown in place, not only as a toast that scrolls away.
@@ -184,6 +213,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   else if (customerRelevant !== true) missing.push('cost carrier');
 
   const canSubmit = missing.length === 0 && !!title && !submitting;
+  const handOverMissing = fromMotherPlant ? [] : kickoffMissing({
+    description, files: files.length, quoteDeadline, customer: customerRelevant === true,
+  });
 
   const handleSubmit = async () => {
     if (missing.length > 0 || !projectId || picked.length === 0 || !title) return;
@@ -197,6 +229,12 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         change_type: changeType,
         reason: reason.trim() || undefined,
         lead_id: userId ?? undefined,
+        // One request: the items ride along, the first is the lead, and the
+        // composed title follows the lead from here on.
+        impacted_part_ids: picked.map((p) => p.id),
+        lead_part_id: picked[0].id,
+        title_auto: true,
+        ...(!fromMotherPlant && description.trim() ? { description: description.trim() } : {}),
         ...(fromMotherPlant
           ? {
             // Not customer relevant here: the mother plant handles the customer.
@@ -208,13 +246,25 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           // Never leaves as false — the backend refuses internal changes for now.
           : { customer_relevant: true }),
       });
-      // Sequential on purpose: the lead item must land first, and a partial
-      // failure has to name the parts that did not attach so they can be added
-      // in the impact tree instead of vanishing silently.
-      const failed: string[] = [];
-      for (const [i, p] of picked.entries()) {
+      // The items went in the create request. A backend that ignored them
+      // (older API) leaves some unattached: those are added one by one, lead
+      // first, and a part that still fails is named so it can be added in the
+      // impact tree instead of vanishing silently.
+      const returned = (change as unknown as { impacted_items?: { part_id: number }[] }).impacted_items;
+      let attached: number[] | null = Array.isArray(returned) ? returned.map((i) => i.part_id) : null;
+      if (attached === null) {
         try {
-          await changesApi.addImpactedItem(change.id, { part_id: p.id, is_lead: i === 0 });
+          attached = ((await changesApi.get(change.id))?.impacted_items ?? []).map((i) => i.part_id);
+        } catch {
+          attached = [];
+        }
+      }
+      const failed: string[] = [];
+      const hasLead = attached.length > 0;
+      for (const [i, p] of picked.entries()) {
+        if (attached.includes(p.id)) continue;
+        try {
+          await changesApi.addImpactedItem(change.id, { part_id: p.id, is_lead: i === 0 && !hasLead });
         } catch {
           failed.push(p.part_number);
         }
@@ -223,6 +273,28 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
         toast.error(
           `Could not attach ${failed.join(', ')}. Add ${failed.length > 1 ? 'them' : 'it'} in the impact tree.`,
         );
+      }
+      // The create request takes no deadline: it is set right after, as the
+      // deadline editor does. A refusal is named; the change itself stands.
+      if (!fromMotherPlant && quoteDeadline) {
+        try {
+          await changesApi.update(change.id, { required_by_date: `${quoteDeadline}T23:59:59Z` });
+        } catch (e) {
+          toast.error(`Could not set the quote deadline${errDetail(e) ? ` (${errDetail(e)})` : ''}. Set it on the Status card.`);
+        }
+      }
+      if (!fromMotherPlant && files.length > 0) {
+        const refused: string[] = [];
+        for (const f of files) {
+          try {
+            await changesApi.uploadAttachment(change.id, f);
+          } catch (e) {
+            refused.push(`${f.name}${errDetail(e) ? ` (${errDetail(e)})` : ''}`);
+          }
+        }
+        if (refused.length > 0) {
+          toast.error(`Could not attach ${refused.join(', ')}. Add it on the Overview tab.`);
+        }
       }
       if (fromMotherPlant) {
         // Their documents and timing file ride along; a refused file is named,
@@ -542,6 +614,73 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
         {fromMotherPlant && (
           <MotherPlantFields value={motherPlant} onChange={setMotherPlant} plants={motherPlants} />
+        )}
+
+        {!fromMotherPlant && (
+          <div data-testid="kickoff-fields" className="mb-6 space-y-4">
+            <div>
+              <label htmlFor="sc-description" className="block text-sm text-slate-300 mb-1">
+                {t('start.description')} <span className="text-slate-500">{t('start.optional')}</span>
+              </label>
+              <textarea id="sc-description" rows={3}
+                className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm"
+                placeholder={t('start.descriptionPlaceholder')}
+                value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+            {customerRelevant === true && (
+              <div>
+                <label htmlFor="sc-quote-deadline" className="block text-sm text-slate-300 mb-1">
+                  {t('deadline.quote')} <span className="text-slate-500">{t('start.optional')}</span>
+                </label>
+                <DateInput id="sc-quote-deadline" aria-label={t('deadline.quote')}
+                  value={quoteDeadline} onChange={setQuoteDeadline} placeholder="dd.mm.yyyy"
+                  className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm" />
+                <p className="mt-1 text-xs text-slate-500">{t('start.quoteDeadlineHint')}</p>
+              </div>
+            )}
+            <div>
+              <p className="block text-sm text-slate-300 mb-1">
+                {t('start.documents')} <span className="text-slate-500">{t('start.optional')}</span>
+              </p>
+              <div data-testid="start-dropzone" role="button" tabIndex={0}
+                onClick={() => fileInput.current?.click()}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.current?.click(); }}
+                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+                className={`rounded-lg border border-dashed px-3 py-3 text-center text-xs cursor-pointer ${
+                  dragging ? 'border-sky-500 bg-sky-950/30 text-sky-200' : 'border-slate-600 text-slate-400 hover:border-slate-500'}`}>
+                {t('start.dropFiles')}
+              </div>
+              <input ref={fileInput} type="file" multiple className="hidden" data-testid="start-file-input"
+                onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+              {files.length > 0 && (
+                <ul className="mt-1 space-y-0.5" data-testid="start-files">
+                  {files.map((f) => (
+                    <li key={`${f.name}-${f.size}`} className="flex items-center gap-2 text-xs text-slate-300">
+                      <span className="truncate min-w-0">{f.name}</span>
+                      <button type="button" className="ml-auto text-slate-500 hover:text-slate-200"
+                        aria-label={`${t('start.removeFile')}: ${f.name}`}
+                        onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}>✕</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* Soft: never blocks Create, only says what the hand-over will miss. */}
+            {handOverMissing.length > 0 ? (
+              <div data-testid="start-ready-missing"
+                className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs">
+                <p className="text-amber-200">{t('start.readyMissing')}</p>
+                <ul className="mt-1 list-disc list-inside text-amber-100/80">
+                  {handOverMissing.map((m) => <li key={m}>{m}</li>)}
+                </ul>
+                <p className="mt-1 text-slate-400">{t('start.readySoft')}</p>
+              </div>
+            ) : (
+              <p data-testid="start-ready" className="text-xs text-emerald-400">✓ {t('start.ready')}</p>
+            )}
+          </div>
         )}
 
         {createError && (

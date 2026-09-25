@@ -6,6 +6,12 @@ import Sidebar from './Sidebar'
 import { changesApi } from '../../api/changes'
 
 const clientMocks = vi.hoisted(() => ({ get: vi.fn() }))
+// The badge counts the rows My Tasks lists: workflow tasks (folded by step)
+// plus change tasks. Three distinct steps here.
+const wfTasks = (n: number) => Array.from({ length: n }, (_, i) => ({
+  task_id: i + 1, instance_id: 1, stage_order: 1, step_name: `step ${i}`,
+  department_name: 'D', rasic_letter: 'R', overdue: false, due_date: null, mine: false,
+}))
 vi.mock('../../api/client', () => ({ default: clientMocks, API_BASE_URL: '' }))
 vi.mock('../../api/changes', () => ({ changesApi: { myTasks: vi.fn().mockResolvedValue([]) } }))
 
@@ -25,7 +31,7 @@ function wrap(ui: React.ReactElement) {
 describe('Sidebar nav groups', () => {
   beforeEach(() => {
     clientMocks.get.mockImplementation((url: string) => {
-      if (url === '/v1/workflow-instances/open-task-count') return Promise.resolve({ data: { count: 3 } })
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
       if (url === '/v1/notifications/unread-count') return Promise.resolve({ data: { count: 0 } })
       if (url === '/v1/notifications') return Promise.resolve({ data: [] })
       return Promise.resolve({ data: [] })
@@ -83,7 +89,7 @@ describe('Sidebar My Tasks counter', () => {
   beforeEach(() => {
     authMock.current = { role: 'engineer', username: 'tester', logout: vi.fn() }
     clientMocks.get.mockImplementation((url: string) => {
-      if (url === '/v1/workflow-instances/open-task-count') return Promise.resolve({ data: { count: 3 } })
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: wfTasks(3) })
       return Promise.resolve({ data: [] })
     })
   })
@@ -100,13 +106,28 @@ describe('Sidebar My Tasks counter', () => {
 
   it('shows no badge when nothing is waiting', async () => {
     clientMocks.get.mockImplementation((url: string) => {
-      if (url === '/v1/workflow-instances/open-task-count') return Promise.resolve({ data: { count: 0 } })
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: [] })
       return Promise.resolve({ data: [] })
     })
     vi.mocked(changesApi.myTasks).mockResolvedValue([] as never)
     wrap(<Sidebar />)
     const myTasks = await screen.findByRole('button', { name: /My Tasks/ })
     expect(myTasks.textContent?.replace(/[^0-9]/g, '')).toBe('')
+  })
+
+  it('counts an R and an A row on the same step once, like the page', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url === '/v1/workflow-instances/my-tasks') return Promise.resolve({ data: [
+        ...wfTasks(1), { ...wfTasks(1)[0], task_id: 9, rasic_letter: 'A' }] })
+      return Promise.resolve({ data: [] })
+    })
+    vi.mocked(changesApi.myTasks).mockResolvedValue([
+      { kind: 'assessment', change_id: 1, department_id: 2 },
+      { kind: 'assessment', change_id: 1, department_id: 2 },
+    ] as never)
+    wrap(<Sidebar />)
+    const badge = await screen.findByText('2')
+    expect(badge.closest('button')?.textContent).toContain('My Tasks')
   })
 })
 

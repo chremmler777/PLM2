@@ -61,6 +61,7 @@ vi.mock('../api/changes', () => ({
     getGates: vi.fn().mockResolvedValue([]),
     listDeviations: vi.fn().mockResolvedValue([]),
     myActions: vi.fn().mockResolvedValue({ actions: [], memberships: [] }),
+    stageState: vi.fn().mockRejectedValue(new Error('404')),
     uploadAttachment: vi.fn(),
     signOff: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
@@ -113,7 +114,10 @@ vi.mock('../components/changes/D1MasterPanel', () => ({ default: () => <div>mock
 vi.mock('../components/changes/SummationView', () => ({ default: () => <div>mock-summation</div> }))
 vi.mock('../components/changes/CostLineGrid', () => ({ default: () => <div>mock-cost-line-grid</div> }))
 vi.mock('../components/changes/DeviationBanner', () => ({ default: () => <div>mock-deviation-banner</div> }))
-vi.mock('../components/changes/ReasonDialog', () => ({ default: () => <div>mock-reason-dialog</div> }))
+vi.mock('../components/changes/ReasonDialog', () => ({
+  default: (p: { open?: boolean; title?: string; warning?: string }) => (
+    <div>mock-reason-dialog{p.open ? <p data-testid={`reason-open-${p.title}`}>{p.warning}</p> : null}</div>),
+}))
 vi.mock('../components/changes/ImpactTree', () => ({ default: () => <div>mock-impact-tree</div> }))
 vi.mock('../components/changes/ImplementationPanel', () => ({ default: () => <div>mock-implementation-panel</div> }))
 vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>mock-lifecycle-stepper</div> }))
@@ -507,11 +511,22 @@ describe('ChangeDetailPage rejection', () => {
       status: 'rejected' as ChangeDetail['status'],
       rejection_reason: 'Customer withdrew the request',
     })
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1')
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(screen.getByText(/the flow is stopped/i)).toBeDefined()
     expect(screen.getByText('Customer withdrew the request')).toBeDefined()
     expect(screen.getByRole('button', { name: /Reopen/ })).toBeDefined()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('offers Reopen only to the lead, PM or admin (spec §16 P1 4)', async () => {
+    vi.mocked(changesApi.get).mockResolvedValue({
+      ...change, status: 'rejected' as ChangeDetail['status'],
+    })
+    wrap('/changes/1')
+    expect(await screen.findByText(/the flow is stopped/i)).toBeDefined()
+    expect(screen.queryByRole('button', { name: /Reopen/ })).toBeNull()
   })
 
   it('shows no rejection banner or Reopen button on a live change', async () => {
@@ -842,14 +857,34 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
   })
 
   it('offers no Cancel once the change is released or closed', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'released' as ChangeDetail['status']
     wrap('/changes/1')
     await screen.findByText('mock-cockpit-summary')
-    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Cancel change' })).toBeNull()
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
     wrap('/changes/1')
-    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeDefined()
+    expect(await screen.findByRole('button', { name: 'Cancel change' })).toBeDefined()
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('hides Cancel from a viewer without the right, and follows stage-state (spec §16 P1 4)', async () => {
+    wrap('/changes/1')
+    await screen.findByText('mock-cockpit-summary')
+    expect(screen.queryByTestId('header-cancel')).toBeNull()
+    cleanup()
+    vi.mocked(changesApi.stageState).mockResolvedValueOnce({ can_transition: { cancelled: true } } as never)
+    wrap('/changes/1')
+    expect(await screen.findByTestId('header-cancel')).toBeDefined()
+  })
+
+  it('states that cancelling is final', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1')
+    fireEvent.click(await screen.findByTestId('header-cancel'))
+    expect(screen.getByTestId('reason-open-Cancel change').textContent).toMatch(/^Cancelling is final/)
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
   })
 })
 

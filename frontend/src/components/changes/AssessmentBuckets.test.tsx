@@ -57,6 +57,9 @@ const buckets = (props: Record<string, unknown> = {}) =>
   wrap(<AssessmentBuckets change={change()} departments={DEPTS}
     myDepartmentIds={[]} editable {...props} />)
 
+// Drafts autosave to localStorage: every test starts without one.
+afterEach(() => { window.localStorage.clear() })
+
 describe('pickAssessment', () => {
   const row = (over: Partial<Assessment>) => assessment(over) as unknown as Assessment
 
@@ -176,7 +179,9 @@ describe('AssessmentBuckets', () => {
     await waitFor(() => expect(screen.getByText('20-3450-001-0')).toBeTruthy())
     // Objects are grouped by kind, with the via-part reference kept.
     expect(screen.getByText(t('objtype.gauge'))).toBeTruthy()
-    expect(screen.getByText(/via part #11/)).toBeTruthy()
+    // The via-part reference names the part, never a bare "#11".
+    expect(screen.getByText(/via part 20-3450-001-0 Clip/)).toBeTruthy()
+    expect(screen.queryByText(/#11/)).toBeNull()
     expect(screen.getByTestId('assessment-submit')).toBeTruthy()
   })
 
@@ -286,10 +291,23 @@ describe('AssessmentBuckets department questionnaires', () => {
     expect(submit.disabled).toBe(false)
     expect(submit.textContent).toBe(t('pkg.submitNotImpacted'))
     fireEvent.click(submit)
+    // Asked once more, with the answer spelled out.
+    expect(screen.getByTestId('confirm-info').textContent).toContain(t('pkg.notImpacted'))
+    fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         department_id: 6, verdict: 'feasible', details: { impacted: false },
       })))
+  })
+
+  it('asks the packaging question before the general checklist', async () => {
+    packaging()
+    await screen.findByTestId('bucket-6')
+    expect(screen.getByTestId('questionnaire-first')).toBeTruthy()
+    expect(screen.queryByTestId('check-no-new_process')).toBeNull()
+    fireEvent.click(screen.getByTestId('pkg-impacted-yes'))
+    expect(screen.getByTestId('pkg-detail').textContent).toContain(t('pkg.questions'))
+    expect(await screen.findByTestId('check-no-new_process')).toBeTruthy()
   })
 
   it('carries the checked boxes into the submission', async () => {
@@ -299,7 +317,7 @@ describe('AssessmentBuckets department questionnaires', () => {
     fireEvent.click(screen.getByTestId('pkg-layout_change'))
     fireEvent.click(await screen.findByTestId('check-no-new_process'))
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
-    fireEvent.click(screen.getByTestId('assessment-submit'))
+    fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         department_id: 6, verdict: 'feasible',
@@ -371,7 +389,7 @@ describe('AssessmentBuckets checklist', () => {
       { target: { value: '+2s per part' } })
     answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
-    fireEvent.click(screen.getByTestId('assessment-submit'))
+    fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         details: { impacts: expect.arrayContaining([
@@ -423,7 +441,7 @@ describe('AssessmentBuckets checklist', () => {
     fireEvent.click(screen.getByTestId('check-choice-article_design_update-customer_given'))
     answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
-    fireEvent.click(screen.getByTestId('assessment-submit'))
+    fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         details: { impacts: expect.arrayContaining([
@@ -439,7 +457,7 @@ describe('AssessmentBuckets checklist', () => {
       { target: { value: 'operator training' } })
     answerRestNo()
     fireEvent.change(screen.getByLabelText(/Verdict|Bewertung/i), { target: { value: 'feasible' } })
-    fireEvent.click(screen.getByTestId('assessment-submit'))
+    fireEvent.click(screen.getByTestId('assessment-submit')); fireEvent.click(screen.getByTestId('confirm-go'))
     await waitFor(() => expect(changesApi.submitAssessment).toHaveBeenCalledWith(7,
       expect.objectContaining({
         details: { impacts: expect.arrayContaining([
@@ -479,8 +497,9 @@ describe('AssessmentBuckets checklist', () => {
       { id: 4, kind: 'risk', is_open: true, department_id: 4, checklist_key: 'visual_risk', severity: 3 },
     ] as never)
     submittedWithAnswers()
+    // Grammar from the saved state: "1 area", "1 risk" (never "1 risks").
     await waitFor(() => expect(screen.getByTestId('bucket-areas-2').textContent)
-      .toBe(t('check.summary').replace('{n}', '1').replace('{k}', '1')))
+      .toBe('1 area impacted · 1 risk flagged'))
   })
 
   it('names the Yes rows in the answer and marks the ones carrying a risk', async () => {
@@ -651,9 +670,33 @@ describe('AssessmentBuckets with a re-routed history', () => {
     expect(screen.getAllByTestId(/^bucket-\d+$/)).toHaveLength(1)
     // The live R row, not the stale C leftover.
     expect(screen.getByTestId('bucket-toggle-4').textContent).toContain('R')
-    expect(screen.getByTestId('bucket-stale-4').textContent).toBe('+1')
+    // A later stage's row is not a leftover: no "+1" for it (spec §16).
+    expect(screen.queryByTestId('bucket-stale-4')).toBeNull()
     // And the member gets their entry mask.
     await waitFor(() => expect(screen.getByTestId('assessment-submit')).toBeTruthy())
+  })
+
+  it('explains a same-stage leftover row as "+1 earlier"', async () => {
+    buckets({ myDepartmentIds: [4], change: change({ assessments: [
+      assessment({ id: 7, department_id: 4, rasic_letter: 'C', stage_order: 1,
+        status: 'waived', verdict: 'pending' }),
+      assessment({ id: 8, department_id: 4, rasic_letter: 'R', stage_order: 1,
+        status: 'active', verdict: 'pending' }),
+    ] }) })
+    const chip = await screen.findByTestId('bucket-stale-4')
+    expect(chip.textContent).toBe('+1 earlier')
+    expect(chip.getAttribute('title')).toBe(t('bucket.staleRowsHint'))
+  })
+
+  it('never rebinds a bucket away from its submitted first-stage row', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [
+      assessment({ id: 8, department_id: 4, rasic_letter: 'R', stage_order: 1,
+        status: 'submitted', verdict: 'feasible', submitted_at: '2026-08-01T00:00:00' }),
+      assessment({ id: 9, department_id: 4, rasic_letter: 'C', stage_order: 2,
+        status: 'active', verdict: 'pending' }),
+    ] }) })
+    expect((await screen.findByTestId('bucket-state-4')).textContent).toBe(t('bucket.submitted'))
+    expect(screen.getByTestId('bucket-toggle-4').textContent).toContain('R')
   })
 
   it('falls back to the earliest pending row when none is active', async () => {

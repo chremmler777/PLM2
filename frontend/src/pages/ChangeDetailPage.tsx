@@ -7,7 +7,10 @@ import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
 import { planApi } from '../api/changePlan';
 import AssessmentBuckets from '../components/changes/AssessmentBuckets';
-import { resolveWaitStates } from '../lib/waitStates';
+import { resolveWaitStates, earlyStageWaits, deriveAssessmentState } from '../lib/waitStates';
+import LeadPicker from '../components/changes/LeadPicker';
+import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
+import { changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
@@ -108,6 +111,8 @@ export default function ChangeDetailPage() {
   const [reopenCostingOpen, setReopenCostingOpen] = useState(false);
   // F4: the last look before a step that cannot simply be undone.
   const [confirmTo, setConfirmTo] = useState<string | null>(null);
+  // Not feasible, and still going on: a transition deviation with a reason.
+  const [overrideOpen, setOverrideOpen] = useState(false);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
@@ -205,13 +210,23 @@ export default function ChangeDetailPage() {
     queryKey: ['change-my-actions', changeId],
     queryFn: () => changesApi.myActions(changeId),
   });
+  // Spec §16: waits, transition rights, the assessment round and the end
+  // state, as the backend judges them for this viewer. Under ['change', id]
+  // so every change mutation refreshes it; an older backend without the
+  // endpoint leaves it undefined and the page derives what it can.
+  const { data: stage } = useQuery({
+    queryKey: ['change', changeId, 'stage-state'],
+    queryFn: () => changesApi.stageState(changeId),
+    retry: false,
+  });
   // Resume (on_hold): the status held before the hold, read off the
   // changelog's status entries rather than assumed — a change can be held
   // from any status, not only in_assessment.
   const { data: changelog } = useQuery({
     queryKey: ['change', changeId, 'changelog'],
     queryFn: () => changesApi.changelog(changeId),
-    enabled: !!change && change.status === 'on_hold',
+    enabled: !!change && (change.status === 'on_hold'
+      || (['rejected', 'cancelled', 'closed'].includes(change.status) && !change.stopped_at)),
   });
   const resumeTo = (() => {
     const holdEntries = (changelog ?? []).filter(
@@ -287,6 +302,22 @@ export default function ChangeDetailPage() {
   const motherPlant = change?.origin === 'mother_plant';
   const canRunMotherPlant = isAdmin || isChangeLead || isPmMember;
 
+  // Transition rights (spec §16 P1 4): the backend's verdict for this viewer,
+  // else the client mirror. A step the viewer may not take is not shown.
+  const may = (to: string): boolean => {
+    if (stage?.can_transition) return stage.can_transition[to] === true;
+    return !!change && mayTransition(change, to,
+      { isAdmin, isChangeLead, isPm: isPmMember, isSales: isSalesMember });
+  };
+  const override = useMutation({
+    mutationFn: (reason: string) => changesApi.proposeDeviation(changeId, { to_status: 'costing', reason }),
+    onSuccess: () => {
+      toast.success(t('next.overrideSent'));
+      qc.invalidateQueries({ queryKey: ['change', changeId] });
+    },
+    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Proposing the deviation failed'),
+  });
+
   const transition = useMutation({
     mutationFn: (vars: {
       to: string; cancellation_reason?: string;
@@ -332,6 +363,11 @@ export default function ChangeDetailPage() {
     if (to === 'rejected') { setRejectOpen(true); return; }
     // Leaving a rejected change is a reopen, wherever the button lives.
     if (change.status === 'rejected') { setReopenOpen(true); return; }
+    // Kicking off, closing the assessment and recalling it are asked once more.
+    if ((change.status === 'captured' && to === 'scoping')
+      || (change.status === 'in_assessment' && (to === 'costing' || to === 'scoping'))) {
+      setConfirmTo(to); return;
+    }
     // Closing costing, ending implementation, releasing and closing are asked once more.
     if ((change.status === 'costing' && to === 'quoting')
       || ['in_validation', 'released', 'closed'].includes(to)) { setConfirmTo(to); return; }
@@ -362,8 +398,58 @@ export default function ChangeDetailPage() {
     }
   };
 
+  const deptLabel = (d: { department_id: number; department_name?: string | null }) =>
+    d.department_name ?? deptName(d.department_id);
+  // The assessment round: stage-state's, else derived from the rows.
+  const baseAssessment = change.status !== 'in_assessment' ? null
+    : stage?.assessment ?? deriveAssessmentState(change.assessments, deptName, concerns);
+  // A not-feasible answer overridden by a transition deviation to costing.
+  const costingDeviation = deviations.find((d) => d.to_status === 'costing' && d.status === 'approved')
+    ?? deviations.find((d) => d.to_status === 'costing' && d.status === 'pending');
+  const assessmentState = baseAssessment && costingDeviation
+    ? { ...baseAssessment, override: costingDeviation.status as 'pending' | 'approved' }
+    : baseAssessment;
+  const kickoffMissing = [
+    ...(change.description?.trim() ? [] : [t('kickoff.description')]),
+    ...((change.attachments?.length ?? 0) > 0 ? [] : [t('kickoff.attachment')]),
+    ...(change.customer_relevant && !change.required_by_date ? [t('deadline.quote')] : []),
+    ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
+  ];
   const confirm: TransitionConfirm | null = (() => {
     if (!confirmTo) return null;
+    if (change.status === 'captured' && confirmTo === 'scoping') {
+      return {
+        to: confirmTo, title: t('confirm.kickoffTitle'),
+        consequence: t('confirm.kickoffBody'),
+        open: kickoffMissing,
+        allClear: t('kickoff.ready'),
+        confirmLabel: t('confirm.kickoffGo'),
+      };
+    }
+    if (change.status === 'in_assessment' && confirmTo === 'scoping') {
+      return {
+        to: confirmTo, title: t('next.backToScoping'),
+        consequence: t('confirm.recallBody'),
+        open: [], confirmLabel: t('next.backToScoping'),
+      };
+    }
+    if (change.status === 'in_assessment' && confirmTo === 'costing') {
+      const a = assessmentState;
+      return {
+        to: confirmTo, title: t('confirm.closeAssessmentTitle'),
+        consequence: t('confirm.closeAssessmentBody'),
+        open: (a?.waiting_on ?? []).map((d) => `${deptLabel(d)}: ${t('confirm.notAnswered')}`),
+        allClear: t('confirm.allAnswered'),
+        info: [
+          ...(a?.verdicts ?? []).map((v) => `${deptLabel(v)}: ${v.verdict_label ?? verdictLabel(v.verdict)}`
+            + (v.open_risks ? `, ${plural(v.open_risks, 'open risk')}` : '')),
+          ...(a?.open_risks ?? []).map((r) => `${t('confirm.risk')} ${r.department_name ?? ''}: `
+            + `${r.risk_type_label ?? r.risk_type ?? ''}${r.severity ? ` (${r.severity})` : ''}, ${r.note}`),
+          ...(a?.override === 'approved' ? [t('confirm.overrideApproved')] : []),
+        ],
+        confirmLabel: t('next.closeAssessment'),
+      };
+    }
     if (confirmTo === 'quoting') {
       return {
         to: confirmTo, title: 'Close costing',
@@ -440,23 +526,33 @@ export default function ChangeDetailPage() {
           )}
         </h1>
         <div className="flex gap-2">
-          {change.status === 'rejected' && (
-            <button className="px-3 py-1.5 text-sm rounded-lg bg-amber-700 hover:bg-amber-600 text-white"
+          {change.status === 'rejected' && may('scoping') && (
+            <button data-testid="header-reopen"
+                    className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
                     onClick={() => setReopenOpen(true)}>Reopen</button>
           )}
-          {change.status === 'on_hold' && (
+          {change.status === 'on_hold' && may(resumeTo) && (
             <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
                     onClick={() => advance(resumeTo)}>Resume</button>
           )}
-          {CANCELLABLE.includes(change.status) && (
-            <button className="px-3 py-1.5 text-sm border rounded-lg text-red-600"
-                    onClick={() => advance('cancelled')}>Cancel</button>
+          {CANCELLABLE.includes(change.status) && may('cancelled') && (
+            <button data-testid="header-cancel"
+                    className="px-3 py-1.5 text-sm border border-red-800/70 rounded-lg text-red-400 hover:bg-red-950/40"
+                    onClick={() => advance('cancelled')}>Cancel change</button>
           )}
         </div>
       </div>
 
       <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant}
-        origin={change.origin} />
+        origin={change.origin}
+        end={(() => {
+          const kind = stage?.end_state?.kind ?? endStateOf(change);
+          if (kind !== 'rejected' && kind !== 'cancelled') return null;
+          const stoppedAt = stage?.end_state?.stopped_at ?? stoppedAtFrom(change,
+            (changelog ?? []).filter((e) => e.field_name === 'status')
+              .map((e) => ({ old_value: decodeLogValue(e.old_value), new_value: decodeLogValue(e.new_value) })));
+          return { kind, stoppedAt, closed: change.status === 'closed' };
+        })()} />
 
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
@@ -515,10 +611,21 @@ export default function ChangeDetailPage() {
         onClose={() => setConfirmTo(null)}
         onConfirm={() => { const to = confirmTo!; setConfirmTo(null); transition.mutate({ to }); }} />
       <ReasonDialog
+        open={overrideOpen}
+        title={t('next.override')}
+        warning={t('confirm.overrideBody')}
+        label={t('confirm.overrideLabel')}
+        submitLabel={t('confirm.overrideGo')}
+        onSubmit={(reason) => { setOverrideOpen(false); override.mutate(reason); }}
+        onClose={() => setOverrideOpen(false)}
+      />
+      <ReasonDialog
         open={cancelOpen}
         title="Cancel change"
-        label="Cancellation reason (required, audited)"
-        submitLabel="Cancel change"
+        warning={t('confirm.cancelFinal')}
+        label="Why is this change cancelled? (required, audited)"
+        submitLabel="Cancel change for good"
+        danger
         onSubmit={(reason) => { setCancelOpen(false); transition.mutate({ to: 'cancelled', cancellation_reason: reason }); }}
         onClose={() => setCancelOpen(false)}
       />
@@ -537,12 +644,23 @@ export default function ChangeDetailPage() {
         canSeeGovernance={canSeeGovernance}
         // What the change is waiting on — same list for every viewer, whoever
         // owns the next move.
-        waits={resolveWaitStates(change, concerns, deptName, change.assessments,
+        waits={earlyStageWaits(change, resolveWaitStates(change, concerns, deptName, change.assessments,
           { state: implState, escalations: implEscalations }, validation,
           change.status === 'approved' ? planFeedback : null,
-          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues })}
+          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues }),
+          stage?.waits, { concerns, assessments: change.assessments, departmentName: deptName })}
         onGo={goTab}
         needs={needs}
+        assessment={assessmentState}
+        may={may}
+        onStepAction={(key) => {
+          if (key === 'override-costing') setOverrideOpen(true);
+        }}
+        leadSlot={<LeadPicker change={change}
+          canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
+            && (isAdmin || isChangeLead || isPmMember)}
+          viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
+          isAdmin={isAdmin} />}
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
@@ -593,7 +711,7 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
-          <p><span className="text-slate-400">Type:</span> {change.change_type}</p>
+          <p><span className="text-slate-400">Type:</span> {changeTypeLabel(change.change_type)}</p>
           <p className="flex items-center gap-2">
             <span className="text-slate-400">Priority:</span>
             <PriorityEditor change={change} canEdit={isAdmin || isChangeLead} />
@@ -617,14 +735,23 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'scoping' && change && (
         <ScopingPanel change={change}
           canSendRejection={!myActions ? true : isSalesMember}
-          canAnswerConcerns={isSalesMember} isPm={isPmMember} />
+          canAnswerConcerns={isSalesMember} isPm={isPmMember}
+          myDepartmentIds={myActions?.memberships ?? []} />
       )}
 
       {effectiveTab === 'impacted' && change && (
         <ImpactTree changeId={change.id} status={change.status}
           impactConfirmedByName={change.impact_confirmed_by_name}
           impactConfirmedAt={change.impact_confirmed_at}
-          canConfirm={canConfirmImpact} />
+          canConfirm={canConfirmImpact}
+          // Spec §16 P1 5: lead, PM and admin edit the set; Development confirms it.
+          canEdit={stage ? stage.can_edit_impact : (isAdmin || isChangeLead || isPmMember)}
+          titleAuto={stage?.title_auto ?? change.title_auto}
+          scopeChangedAfterQuote={change.scope_changed_after_quote
+            ?? (stage?.scope_change ? !stage.scope_change.covered : false)}
+          quoted={stage?.impact_edit_needs_reason
+            ?? ['quoted', 'approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)}
+          onChanged={() => qc.invalidateQueries({ queryKey: ['change', changeId] })} />
       )}
 
       {effectiveTab === 'mother' && motherPlant && (
@@ -670,7 +797,8 @@ export default function ChangeDetailPage() {
             editable={change.status === 'in_assessment'} isPm={isPmMember}
             canSeeAll={canSeeCosts}
             canAddDepartment={isAdmin || isChangeLead || isPmMember}
-            userId={userId ?? null} isChangeLead={isChangeLead} />
+            userId={userId ?? null} isChangeLead={isChangeLead}
+            declinedIds={stage?.assessment?.declined_pending.map((d) => d.department_id)} />
         </div>
       )}
 
@@ -758,7 +886,7 @@ export default function ChangeDetailPage() {
       )}
 
       {effectiveTab === 'audit' && (
-        <AuditTimeline correlationId={change.change_number} />
+        <AuditTimeline correlationId={change.change_number} changeId={change.id} />
       )}
     </div>
   );

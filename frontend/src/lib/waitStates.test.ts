@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { assessmentProgress, resolveWaitStates } from './waitStates'
+import { assessmentProgress, resolveWaitStates, earlyStageWaits, deriveAssessmentState } from './waitStates'
 import { t } from '../i18n/cmLabels'
 
 const change = (over: Record<string, unknown> = {}) => ({
@@ -344,5 +344,49 @@ describe('resolveWaitStates: deviations and release blockers', () => {
       '1 plan deviation still open: lock or escalate them first'])
     expect(waits.every((w) => !w.info)).toBe(true)
     expect(waits[2].tab).toBe('timing')
+  })
+})
+
+describe('earlyStageWaits (spec §16)', () => {
+  const base = { status: 'in_assessment' as const, lead_id: 5 }
+  it('takes the backend rows, replacing the client assessment line and skipping duplicates', () => {
+    const out = earlyStageWaits(base,
+      [{ key: 'assessment-round', text: 'client line', tab: 'assessments' },
+        { key: 'sales-info-3', text: 'Waiting on Sales: X', tab: 'scoping' }],
+      [{ kind: 'assessment_waiting', text: 'Assessment: waiting on Development (1/2)', target_tab: 'assessments' },
+        { kind: 'waiting_on_sales_answer', text: 'Waiting on Sales to answer 1 question(s)', target_tab: 'scoping' },
+        { kind: 'not_feasible', text: 'Tool Engineer: not feasible (Change PPT)', department_id: 27, target_tab: 'assessments' },
+        { kind: 'no_lead', text: 'No lead assigned', target_tab: 'overview' }])
+    expect(out.map((w) => w.key)).toEqual(['sales-info-3', 'assessment-round', 'not_feasible-27', 'no_lead'])
+    expect(out.find((w) => w.key === 'assessment-round')!.text).toContain('Development')
+    expect(out.find((w) => w.key === 'no_lead')!.tab).toBeUndefined()
+  })
+  it('derives no lead, open cancel votes, not feasible and scope rows without stage-state', () => {
+    const out = earlyStageWaits({ ...base, lead_id: null, scope_changed_after_quote: true, scope_offer_version: 2 }, [], undefined, {
+      concerns: [{ id: 1, kind: 'reject_proposal', is_open: true, raised_by: 3, raised_by_name: 'Ann' } as never],
+      assessments: [{ department_id: 27, verdict: 'not_feasible', stage_order: 1, rasic_letter: 'R', has_change_ppt: false }],
+      departmentName: () => 'Tool Engineer',
+    })
+    expect(out.map((w) => w.text)).toEqual([
+      'No lead assigned',
+      '1 open cancel vote from Ann',
+      'Tool Engineer: not feasible (no Change PPT)',
+      'Offer v2 no longer covers the scope: new offer version or approved deviation',
+    ])
+  })
+})
+
+describe('deriveAssessmentState', () => {
+  it('counts first-stage R/A rows only', () => {
+    const a = deriveAssessmentState([
+      { id: 1, department_id: 1, rasic_letter: 'R', status: 'submitted', submitted_at: 'x', verdict: 'feasible', stage_order: 1 },
+      { id: 2, department_id: 2, rasic_letter: 'A', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 1 },
+      { id: 3, department_id: 3, rasic_letter: 'C', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 1 },
+      { id: 4, department_id: 4, rasic_letter: 'R', status: 'active', submitted_at: null, verdict: 'pending', stage_order: 2 },
+    ] as never, (id) => `D${id}`)!
+    expect(a.total).toBe(2)
+    expect(a.waiting_on.map((d) => d.department_name)).toEqual(['D2'])
+    expect(a.all_submitted).toBe(false)
+    expect(a.verdicts.map((v) => v.verdict)).toEqual(['feasible'])
   })
 })
