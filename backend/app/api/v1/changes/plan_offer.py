@@ -7,17 +7,18 @@ own every rule; this module maps their three refusal kinds onto HTTP
 the thing asked for is not on this change) and builds nothing itself.
 """
 from datetime import date
-from typing import List, Optional, Union
+from typing import Annotated, List, Optional, Union
 
 from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status,
 )
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user
 from app.models import User, get_db
+from app.services import plan_engine as eng
 from app.services.change_plan_service import (
     ChangePlanService, PlanConflict, PlanForbidden,
 )
@@ -31,8 +32,23 @@ router = APIRouter(prefix="/changes", tags=["changes"])
 # ----------------------------------------------------------------------
 # Request bodies
 # ----------------------------------------------------------------------
+def _plan_year(d: date) -> date:
+    if not eng.MIN_YEAR <= d.year <= eng.MAX_YEAR:
+        raise ValueError(f"dates lie between {eng.MIN_YEAR} and {eng.MAX_YEAR}")
+    return d
+
+
+# Plan dates, durations and lags within sane bounds (a year 9999 date or a
+# million-day block only ever comes from a typo or a hostile client).
+PlanDate = Annotated[date, AfterValidator(_plan_year)]
+Days = Annotated[int, Field(le=eng.MAX_DURATION_DAYS)]
+Lag = Annotated[int, Field(ge=-eng.MAX_LAG_DAYS, le=eng.MAX_LAG_DAYS)]
+
+
 class PlanIn(BaseModel):
     plan: str = "quote"
+    # after the baseline, scheduling moves dates: each move is a deviation
+    reason: Optional[str] = None
 
 
 class PlanSeedIn(BaseModel):
@@ -46,14 +62,14 @@ class TaskCreateIn(BaseModel):
     kind: str = "work"
     lane: Optional[str] = Field(default=None, max_length=80)
     department_id: Optional[int] = None
-    start_date: date
-    duration_days: int = 0
+    start_date: PlanDate
+    duration_days: Days = 0
     predecessors: List[int] = []
     is_idea: bool = False
     notes: Optional[str] = None
     parent_id: Optional[int] = None
     constraint_type: Optional[str] = None
-    constraint_date: Optional[date] = None
+    constraint_date: Optional[PlanDate] = None
 
 
 class TaskPatchIn(BaseModel):
@@ -61,25 +77,25 @@ class TaskPatchIn(BaseModel):
     kind: Optional[str] = None
     lane: Optional[str] = Field(default=None, max_length=80)
     department_id: Optional[int] = None
-    start_date: Optional[date] = None
-    duration_days: Optional[int] = None
+    start_date: Optional[PlanDate] = None
+    duration_days: Optional[Days] = None
     predecessors: Optional[List[int]] = None
     is_idea: Optional[bool] = None
     sort_order: Optional[int] = None
     progress_pct: Optional[int] = None
-    actual_start: Optional[date] = None
-    actual_finish: Optional[date] = None
+    actual_start: Optional[PlanDate] = None
+    actual_finish: Optional[PlanDate] = None
     notes: Optional[str] = None
     parent_id: Optional[int] = None
     constraint_type: Optional[str] = None
-    constraint_date: Optional[date] = None
+    constraint_date: Optional[PlanDate] = None
     reason: Optional[str] = None
 
 
 class BulkItem(BaseModel):
     id: int
-    start_date: Optional[date] = None
-    duration_days: Optional[int] = None
+    start_date: Optional[PlanDate] = None
+    duration_days: Optional[Days] = None
 
 
 class BulkIn(BaseModel):
@@ -93,18 +109,18 @@ class LinkIn(BaseModel):
     from_task_id: int
     to_task_id: int
     type: str = "FS"
-    lag_days: int = 0
+    lag_days: Lag = 0
 
 
 class LinkPatchIn(BaseModel):
     type: Optional[str] = None
-    lag_days: Optional[int] = None
+    lag_days: Optional[Lag] = None
 
 
 class CalendarIn(BaseModel):
     mode: str = "calendar"
     workdays: List[int] = [1, 2, 3, 4, 5]
-    holidays: List[date] = []
+    holidays: List[PlanDate] = Field(default=[], max_length=eng.MAX_HOLIDAYS)
 
 
 # Batch ChangeSet. Ids of new blocks / links may be client temp ids
@@ -118,18 +134,18 @@ class TaskUpsert(BaseModel):
     kind: Optional[str] = None
     lane: Optional[str] = Field(default=None, max_length=80)
     department_id: Optional[int] = None
-    start_date: Optional[date] = None
-    duration_days: Optional[int] = None
+    start_date: Optional[PlanDate] = None
+    duration_days: Optional[Days] = None
     predecessors: Optional[List[TempId]] = None
     is_idea: Optional[bool] = None
     sort_order: Optional[int] = None
     progress_pct: Optional[int] = None
-    actual_start: Optional[date] = None
-    actual_finish: Optional[date] = None
+    actual_start: Optional[PlanDate] = None
+    actual_finish: Optional[PlanDate] = None
     notes: Optional[str] = None
     parent_id: Optional[TempId] = None
     constraint_type: Optional[str] = None
-    constraint_date: Optional[date] = None
+    constraint_date: Optional[PlanDate] = None
 
 
 class LinkUpsert(BaseModel):
@@ -137,7 +153,7 @@ class LinkUpsert(BaseModel):
     from_task_id: Optional[TempId] = None
     to_task_id: Optional[TempId] = None
     type: Optional[str] = None
-    lag_days: Optional[int] = None
+    lag_days: Optional[Lag] = None
 
 
 class ChangeSetIn(BaseModel):
@@ -247,7 +263,10 @@ async def get_plan(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
-    return await _plan_out(db, change, plan, current_user)
+    out = await _plan_out(db, change, plan, current_user)
+    # reading converts legacy predecessor lists into links once: keep that
+    await db.commit()
+    return out
 
 
 @router.post("/{change_id}/plan/seed")
@@ -342,7 +361,8 @@ async def schedule_plan(
 ):
     change = await _change(db, change_id, current_user)
     try:
-        await ChangePlanService.schedule(db, change, body.plan, current_user)
+        await ChangePlanService.schedule(db, change, body.plan, current_user,
+                                         reason=body.reason)
     except _ERRORS as e:
         raise _http(e)
     out = await _plan_out(db, change, body.plan, current_user)
@@ -402,11 +422,12 @@ async def set_plan_calendar(
     change_id: int, body: CalendarIn, plan: str = Query("quote"),
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """One calendar for both plans; answers the PlanOut of `?plan=`."""
+    """The calendar of the plan `?plan=` (each plan has its own); answers
+    that plan's PlanOut."""
     change = await _change(db, change_id, current_user)
     try:
         await ChangePlanService.set_calendar(db, change, body.model_dump(),
-                                             current_user)
+                                             current_user, plan=plan)
     except _ERRORS as e:
         raise _http(e)
     out = await _plan_out(db, change, plan, current_user)
@@ -449,20 +470,21 @@ async def import_plan(
     replace: bool = Form(False),
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """MS Project XML (MSPDI) into a plan; refused after the baseline."""
+    """MS Project XML (MSPDI) into a plan; refused after the baseline.
+    Answers the PlanOut plus `import_warnings` (what was skipped, and why)."""
     change = await _change(db, change_id, current_user)
     content = await file.read(MAX_IMPORT_BYTES + 1)
     if len(content) > MAX_IMPORT_BYTES:
         raise HTTPException(status_code=400, detail="The file is larger than 10 MB")
     try:
-        await ChangePlanService.import_mspdi(db, change, plan, content,
-                                             current_user, replace=replace)
+        result = await ChangePlanService.import_mspdi(
+            db, change, plan, content, current_user, replace=replace)
     except _ERRORS as e:
         await db.rollback()
         raise _http(e)
     out = await _plan_out(db, change, plan, current_user)
     await db.commit()
-    return out
+    return {**out, "import_warnings": result["warnings"]}
 
 
 @router.get("/{change_id}/plan/export.xml")
@@ -648,6 +670,23 @@ async def refresh_offer(
     out = await _offer_out(db, change, offer)
     await db.commit()
     return out
+
+
+@router.delete("/{change_id}/offers/{offer_id}",
+               status_code=status.HTTP_204_NO_CONTENT)
+async def discard_offer(
+    change_id: int, offer_id: int,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Discard a draft offer (Sales, the change lead, admin)."""
+    change = await _change(db, change_id, current_user)
+    try:
+        offer = await OfferService.get_offer(db, change, offer_id)
+        await OfferService.discard(db, change, offer, current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{change_id}/offers/{offer_id}/send")

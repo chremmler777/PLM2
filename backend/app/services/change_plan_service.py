@@ -24,6 +24,7 @@ from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.change import BLOCKING_LETTERS, ChangeRequest
 from app.models.change_cost import CostingPosition
@@ -320,8 +321,28 @@ class ChangePlanService:
     # Reads
     # ------------------------------------------------------------------
     @staticmethod
-    def calendar(change: ChangeRequest) -> eng.Calendar:
-        return eng.Calendar.from_json(change.plan_calendar)
+    def _calendars(change: ChangeRequest) -> dict:
+        """plan -> calendar JSON (or None). change.plan_calendar holds one
+        calendar per plan; the older flat shape (one calendar for both
+        plans) still reads as that calendar for each."""
+        raw = change.plan_calendar or {}
+        if not isinstance(raw, dict):
+            return {}
+        if "mode" in raw or "workdays" in raw or "holidays" in raw:
+            return {k: raw for k in PLAN_KINDS}
+        return {k: raw.get(k) for k in PLAN_KINDS if raw.get(k)}
+
+    @staticmethod
+    def calendar(change: ChangeRequest, plan: str = "quote") -> eng.Calendar:
+        """The plan's own calendar: the quote plan's units stay what the
+        offer was written in while the detailed plan changes its own."""
+        return eng.Calendar.from_json(ChangePlanService._calendars(change).get(plan))
+
+    @staticmethod
+    def _store_calendar(change: ChangeRequest, plan: str, cal: eng.Calendar) -> None:
+        cals = {k: v for k, v in ChangePlanService._calendars(change).items() if v}
+        cals[plan] = cal.to_json()
+        change.plan_calendar = cals          # a new dict: JSON change tracked
 
     @staticmethod
     def _attach(tasks: list, cal: eng.Calendar) -> None:
@@ -340,18 +361,56 @@ class ChangePlanService:
                    ChangePlanTask.plan == plan)
             .order_by(ChangePlanTask.sort_order, ChangePlanTask.id)
         )).scalars().all())
-        ChangePlanService._attach(rows, ChangePlanService.calendar(change))
+        ChangePlanService._attach(rows, ChangePlanService.calendar(change, plan))
         by_id = {t.id: t for t in rows}
         return [by_id[i] for i, _ in eng.dfs_order(e_tasks(rows))]
 
     @staticmethod
     async def links(session: AsyncSession, change: ChangeRequest,
                     plan: str) -> list[ChangePlanLink]:
-        return list((await session.execute(
-            select(ChangePlanLink)
-            .where(ChangePlanLink.change_id == change.id,
-                   ChangePlanLink.plan == plan)
-            .order_by(ChangePlanLink.id))).scalars().all())
+        """The plan's links. A block still carrying a legacy `predecessors`
+        list (written by pre-088 code after the migration ran) is converted
+        here, once: an FS link per predecessor whose pair is not linked yet,
+        then the list is emptied. The caller's commit keeps it."""
+        async def load():
+            return list((await session.execute(
+                select(ChangePlanLink)
+                .where(ChangePlanLink.change_id == change.id,
+                       ChangePlanLink.plan == plan)
+                .order_by(ChangePlanLink.id))).scalars().all())
+        links = await load()
+        if await ChangePlanService._convert_legacy(session, change, plan, links):
+            links = await load()
+        return links
+
+    @staticmethod
+    async def _convert_legacy(session, change, plan, links: list) -> bool:
+        rows = list((await session.execute(
+            select(ChangePlanTask).where(ChangePlanTask.change_id == change.id,
+                                         ChangePlanTask.plan == plan)
+        )).scalars().all())
+        legacy = [t for t in rows if t.predecessors]
+        if not legacy:
+            return False
+        ids = {t.id for t in rows}
+        linked = {frozenset((lk.from_task_id, lk.to_task_id)) for lk in links}
+        for t in legacy:
+            for p in t.predecessors:
+                try:
+                    pid = int(p)
+                except (TypeError, ValueError):
+                    continue
+                pair = frozenset((pid, t.id))
+                if pid == t.id or pid not in ids or pair in linked:
+                    continue
+                linked.add(pair)
+                session.add(ChangePlanLink(
+                    change_id=change.id, plan=plan, from_task_id=pid,
+                    to_task_id=t.id, type="FS", lag_days=0,
+                    created_by=t.updated_by or t.created_by))
+            t.predecessors = []
+        await session.flush()
+        return True
 
     @staticmethod
     async def _dept_names(session: AsyncSession) -> dict[int, str]:
@@ -437,9 +496,9 @@ class ChangePlanService:
     async def get_plan(session: AsyncSession, change: ChangeRequest,
                        plan: str, user: User) -> dict:
         ChangePlanService._check_plan(plan)
-        cal = ChangePlanService.calendar(change)
-        tasks = await ChangePlanService.tasks(session, change, plan)
+        cal = ChangePlanService.calendar(change, plan)
         links = await ChangePlanService.links(session, change, plan)
+        tasks = await ChangePlanService.tasks(session, change, plan)
         res = analyse_plan(tasks, links, cal)
         all_e = e_tasks(tasks)
         summaries = eng.summary_ids(all_e)
@@ -531,7 +590,7 @@ class ChangePlanService:
         quote deadline, whichever is later, and every other block hangs off
         it by its links, so the first Gantt Sales sees is already a plan and
         not a list of bars to drag into place."""
-        cal = ChangePlanService.calendar(change)
+        cal = ChangePlanService.calendar(change, plan)
         names = await ChangePlanService._dept_names(session)
         ids_by_name = {n: i for i, n in names.items()}
         today = date.today()
@@ -708,8 +767,12 @@ class ChangePlanService:
                     user_id: int) -> list[ChangePlanTask]:
         """Copy blocks into another plan, remapping ids in parents and links.
         Ideas stay ideas: whether the parallel bank build happens is decided
-        on the detailed plan, not lost in the copy."""
-        cal = ChangePlanService.calendar(change)
+        on the detailed plan, not lost in the copy. The copy takes the
+        source plan's calendar: the durations are in its units."""
+        src_plan = source[0].plan if source else None
+        cal = ChangePlanService.calendar(change, src_plan or plan)
+        if src_plan and src_plan != plan:
+            ChangePlanService._store_calendar(change, plan, cal)
         id_map: dict[int, ChangePlanTask] = {}
         for t in source:
             n = ChangePlanTask(
@@ -728,7 +791,6 @@ class ChangePlanService:
         for t in source:
             if t.parent_id in id_map:
                 id_map[t.id].parent_id = id_map[t.parent_id].id
-        src_plan = source[0].plan if source else None
         for lk in await ChangePlanService.links(session, change, src_plan):
             if lk.from_task_id in id_map and lk.to_task_id in id_map:
                 session.add(ChangePlanLink(
@@ -766,8 +828,28 @@ class ChangePlanService:
         if "duration_days" in spec:
             if spec["duration_days"] is None or int(spec["duration_days"]) < 0:
                 raise ChangeError("Duration must be zero or more days")
+            if int(spec["duration_days"]) > eng.MAX_DURATION_DAYS:
+                raise ChangeError(
+                    f"Duration is at most {eng.MAX_DURATION_DAYS} days")
         if "start_date" in spec and spec["start_date"] is None:
             raise ChangeError("A block needs a start date")
+        if "sort_order" in spec and spec["sort_order"] is None:
+            raise ChangeError("The sort order is a number")
+        for k in ("start_date", "constraint_date", "actual_start", "actual_finish"):
+            d = _as_date(spec.get(k))
+            if d is not None and not eng.MIN_YEAR <= d.year <= eng.MAX_YEAR:
+                raise ChangeError(
+                    f"Dates lie between {eng.MIN_YEAR} and {eng.MAX_YEAR}")
+        # Actual dates report what happened: not later than today (server
+        # date, one day of slack for a browser a timezone ahead).
+        latest = date.today() + timedelta(days=1)
+        for k, label in (("actual_start", "actual start"),
+                         ("actual_finish", "actual finish")):
+            d = _as_date(spec.get(k))
+            if d is not None and d > latest:
+                raise ChangeError(
+                    f"The {label} {d.isoformat()} is in the future: report it "
+                    "when it has happened")
         if "predecessors" in spec:
             for p in spec["predecessors"] or []:
                 if own_id is not None and p == own_id:
@@ -819,6 +901,54 @@ class ChangePlanService:
         t.constraint_type, t.constraint_date = ct, _as_date(cd)
 
     @staticmethod
+    def _structure_issues(tasks: list, links: list) -> set:
+        """MS Project's rules for summaries and the outline depth, as
+        (code, task id): summary_pin (mso/mfo on a summary),
+        summary_finish_link (FF/SF into a summary), depth (deeper than
+        MAX_OUTLINE_DEPTH levels)."""
+        by_id = {t.id: t for t in tasks}
+        summaries = {t.parent_id for t in tasks if t.parent_id in by_id}
+        out = set()
+        for sid in summaries:
+            if by_id[sid].constraint_type in eng.PIN_CONSTRAINTS:
+                out.add(("summary_pin", sid))
+        for lk in links:
+            if lk.to_task_id in summaries and lk.type in eng.FINISH_TARGET_LINKS:
+                out.add(("summary_finish_link", lk.to_task_id))
+        for t in tasks:
+            depth, p, seen = 1, t.parent_id, {t.id}
+            while p in by_id and p not in seen:
+                seen.add(p)
+                depth += 1
+                p = by_id[p].parent_id
+            if depth > eng.MAX_OUTLINE_DEPTH:
+                out.add(("depth", t.id))
+        return out
+
+    @staticmethod
+    def _check_structure(before: set, tasks: list, links: list) -> None:
+        """Refuse an edit that breaks a summary rule or the depth cap (old
+        data already breaking one does not block unrelated edits)."""
+        new = ChangePlanService._structure_issues(tasks, links) - before
+        if not new:
+            return
+        by_id = {t.id: t for t in tasks}
+        code, tid = sorted(new, key=lambda x: (x[0], str(x[1])))[0]
+        name = by_id[tid].name if tid in by_id else str(tid)
+        if code == "summary_pin":
+            raise ChangeError(
+                f"'{name}' is a summary block: it cannot have a must-start-on or "
+                "must-finish-on constraint (its dates follow the blocks under "
+                "it); remove the constraint or put it on a block under it")
+        if code == "summary_finish_link":
+            raise ChangeError(
+                f"'{name}' is a summary block: a finish-to-finish or "
+                "start-to-finish link into it is not allowed; link to a block "
+                "under it")
+        raise ChangeError(
+            f"'{name}' would sit deeper than {eng.MAX_OUTLINE_DEPTH} outline levels")
+
+    @staticmethod
     async def _bump(change: ChangeRequest, plan: str) -> None:
         """Every edit of the detailed plan before its baseline invalidates the
         teams' confirmations: they confirmed a plan that no longer exists."""
@@ -827,9 +957,11 @@ class ChangePlanService:
 
     @staticmethod
     async def _set_preds(session, change, plan, task_id: int, pred_ids: list,
-                         links: list, user_id: int) -> None:
+                         links: list, user_id: int, by_id: dict) -> None:
         """Legacy `predecessors` write: the block's FS links become exactly
-        these (existing lags kept); SS/FF/SF links are left alone."""
+        these (existing lags kept); SS/FF/SF links are left alone. A new
+        link passes the same checks as any link (no self link, no second
+        link between two blocks, whatever its direction)."""
         want = []
         for p in pred_ids or []:
             if p not in want:
@@ -843,6 +975,7 @@ class ChangePlanService:
         for p in want:
             if p in have:
                 continue
+            ChangePlanService._check_link(by_id, links, p, task_id, "FS", 0)
             lk = ChangePlanLink(change_id=change.id, plan=plan, from_task_id=p,
                                 to_task_id=task_id, type="FS", lag_days=0,
                                 created_by=user_id)
@@ -858,7 +991,7 @@ class ChangePlanService:
         summaries = eng.summary_ids(e_tasks(tasks))
         if not summaries:
             return
-        cal = ChangePlanService.calendar(change)
+        cal = ChangePlanService.calendar(change, plan)
         res = eng.analyse(e_tasks(tasks), [], cal)
         by_id = {t.id: t for t in tasks}
         for sid in summaries:
@@ -892,9 +1025,9 @@ class ChangePlanService:
                        plan: str, spec: dict, user: User) -> ChangePlanTask:
         await ChangePlanService._require_edit(
             session, change, plan, user, structural=True)
-        cal = ChangePlanService.calendar(change)
-        existing = await ChangePlanService.tasks(session, change, plan)
+        cal = ChangePlanService.calendar(change, plan)
         links = await ChangePlanService.links(session, change, plan)
+        existing = await ChangePlanService.tasks(session, change, plan)
         spec = {k: v for k, v in spec.items() if k in WRITABLE_FIELDS}
         spec.setdefault("kind", "work")
         spec.setdefault("duration_days", 0)
@@ -903,6 +1036,7 @@ class ChangePlanService:
                 raise ChangeError(f"'{required}' is required")
         await ChangePlanService._check_fields(
             session, spec, {t.id for t in existing}, None)
+        before = ChangePlanService._structure_issues(existing, links)
         t = ChangePlanService._new_task(
             change, plan, spec,
             max((x.sort_order for x in existing), default=0) + 1, user.id, cal)
@@ -911,7 +1045,9 @@ class ChangePlanService:
         await session.flush()
         if spec.get("predecessors"):
             await ChangePlanService._set_preds(
-                session, change, plan, t.id, spec["predecessors"], links, user.id)
+                session, change, plan, t.id, spec["predecessors"], links, user.id,
+                {x.id: x for x in existing + [t]})
+        ChangePlanService._check_structure(before, existing + [t], links)
         await ChangePlanService._rollup(session, change, plan)
         await ChangePlanService._bump(change, plan)
         await ChangeService.append_changelog(
@@ -927,7 +1063,7 @@ class ChangePlanService:
         t = await session.get(ChangePlanTask, tid)
         if t is None or t.change_id != change.id:
             raise PlanConflict("Plan block not found on this change", not_found=True)
-        t._plan_cal = ChangePlanService.calendar(change)
+        t._plan_cal = ChangePlanService.calendar(change, t.plan)
         return t
 
     @staticmethod
@@ -990,6 +1126,7 @@ class ChangePlanService:
             raise ChangeError(
                 "A summary block's dates come from the blocks under it")
         links = await ChangePlanService.links(session, change, plan)
+        before_issues = ChangePlanService._structure_issues(siblings, links)
 
         date_spec = {k: spec.pop(k) for k in DATE_FIELDS if k in spec}
         before = {k: getattr(task, k) for k in spec if k != "predecessors"}
@@ -999,8 +1136,9 @@ class ChangePlanService:
                                       if lk.to_task_id == task.id and lk.type == "FS"]
             await ChangePlanService._set_preds(
                 session, change, plan, task.id, spec["predecessors"] or [],
-                links, user.id)
+                links, user.id, by_id)
         ChangePlanService._normalise(task)
+        ChangePlanService._check_structure(before_issues, siblings, links)
 
         moved = []
         if date_spec:
@@ -1062,8 +1200,12 @@ class ChangePlanService:
         """Apply start/duration edits. Before the baseline this is simply an
         edit (and bumps the revision). After it every changed block becomes a
         deviation: old and new dates, slip against its baseline end, and what
-        the move did to the finish of the whole plan."""
-        cal = ChangePlanService.calendar(change)
+        the move did to the finish of the whole plan. After the baseline a
+        move also pushes its successors along their links (a forward pass
+        over what the moved blocks drive, never earlier, pinned blocks
+        stay): each pushed block gets its own deviation with the same reason
+        and the block that caused it. Returns every moved block."""
+        cal = ChangePlanService.calendar(change, plan)
         by_id = {t.id: t for t in siblings}
         baselined = ChangePlanService.baselined(change, plan)
         reason = (reason or "").strip()
@@ -1092,15 +1234,28 @@ class ChangePlanService:
             if bump:
                 await ChangePlanService._bump(change, plan)
             return moved
+        links = await ChangePlanService.links(session, change, plan)
+        res, cause = eng.cascade(e_tasks(siblings), e_links(links), cal, moved)
+        caused: dict[int, int] = {}
+        for tid in res.moved:
+            t = by_id[tid]
+            old = (t.start_date, t.end_date)
+            t.start_date = res.tasks[tid].start
+            t.updated_by = user.id
+            if (t.start_date, t.end_date) != old:
+                olds[tid] = old
+                caused[tid] = cause[tid]
+        pushed = [t.id for t in siblings if t.id in caused]   # outline order
         finish_after = plan_finish([t for t in siblings if t.id not in summaries])
         impact = ((finish_after - finish_before).days
                   if finish_after and finish_before else 0)
         devs = []
-        for tid in moved:
+        for tid in moved + pushed:
             t = by_id[tid]
             base_end = t.baseline_finish or olds[tid][1]
             dev = ChangePlanDeviation(
                 change_id=change.id, task_id=tid,
+                caused_by_task_id=caused.get(tid),
                 old_start=olds[tid][0], old_end=olds[tid][1],
                 new_start=t.start_date, new_end=t.end_date,
                 slip_days=(t.end_date - base_end).days,
@@ -1111,11 +1266,13 @@ class ChangePlanService:
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "plan_deviation",
-            f"Plan deviation on {len(devs)} block(s), finish impact "
-            f"{impact:+d} days: {reason}", user.id, notes=reason,
+            f"Plan deviation on {len(devs)} block(s)"
+            + (f" ({len(pushed)} pushed by their links)" if pushed else "")
+            + f", finish impact {impact:+d} days: {reason}", user.id, notes=reason,
             new_value={"deviation_ids": [d.id for d in devs],
-                       "task_ids": moved, "finish_impact_days": impact})
-        return moved
+                       "task_ids": moved + pushed, "pushed_ids": pushed,
+                       "finish_impact_days": impact})
+        return moved + pushed
 
     @staticmethod
     async def _remove_task(session, change, plan, task: ChangePlanTask,
@@ -1152,20 +1309,33 @@ class ChangePlanService:
 
     @staticmethod
     async def schedule(session: AsyncSession, change: ChangeRequest,
-                       plan: str, user: User) -> list[int]:
+                       plan: str, user: User,
+                       *, reason: Optional[str] = None) -> list[int]:
         """Forward pass over every link type, lag and constraint: blocks move
         later when a link or constraint needs it, never earlier (only a
         must-start-on / must-finish-on pins a block to its date). Slack
-        somebody left on purpose is not the tool's to take."""
+        somebody left on purpose is not the tool's to take. After the
+        baseline it needs a reason and every moved block is a deviation."""
         await ChangePlanService._require_edit(
-            session, change, plan, user, structural=True)
-        cal = ChangePlanService.calendar(change)
-        tasks = await ChangePlanService.tasks(session, change, plan)
+            session, change, plan, user, structural=False)
+        baselined = ChangePlanService.baselined(change, plan)
+        if baselined and not (reason or "").strip():
+            raise ChangeError(
+                "Timing was validated: a reason is required to schedule the plan")
+        cal = ChangePlanService.calendar(change, plan)
         links = await ChangePlanService.links(session, change, plan)
+        tasks = await ChangePlanService.tasks(session, change, plan)
         res = eng.schedule(e_tasks(tasks), e_links(links), cal)
         if res.cycle:
             raise ChangeError("The dependencies form a loop - fix it before scheduling")
         by_id = {t.id: t for t in tasks}
+        if baselined:
+            moved = await ChangePlanService._apply_dates(
+                session, change, plan, tasks,
+                {tid: {"start_date": res.tasks[tid].start} for tid in res.moved},
+                user, reason=reason)
+            await ChangePlanService._rollup(session, change, plan)
+            return moved
         moved = []
         for tid in res.moved:
             t = by_id[tid]
@@ -1195,9 +1365,16 @@ class ChangePlanService:
         if typ not in LINK_TYPES:
             raise ChangeError(f"Unknown link type '{typ}' - one of FS, SS, FF, SF")
         try:
-            int(lag or 0)
+            lag = int(lag or 0)
         except (TypeError, ValueError):
             raise ChangeError("The lag must be a whole number of days")
+        if abs(lag) > eng.MAX_LAG_DAYS:
+            raise ChangeError(f"A lag is at most {eng.MAX_LAG_DAYS} days either way")
+        if typ in eng.FINISH_TARGET_LINKS and any(
+                t.parent_id == to for t in by_id.values()):
+            raise ChangeError(
+                f"'{by_id[to].name}' is a summary block: a {typ} link into it is "
+                "not allowed (MS Project refuses it); link to a block under it")
         for lk in links:
             if lk.id != own_id and lk is not own_id and \
                     {lk.from_task_id, lk.to_task_id} == {frm, to}:
@@ -1283,18 +1460,22 @@ class ChangePlanService:
     # ------------------------------------------------------------------
     @staticmethod
     async def set_calendar(session: AsyncSession, change: ChangeRequest,
-                           spec: dict, user: User) -> None:
-        """One calendar for both plans. Durations keep their numbers and are
-        read in the new unit, so every end date may move: refused once the
-        timing is validated (the baseline is in the old unit)."""
+                           spec: dict, user: User, plan: str = "quote") -> None:
+        """The calendar of ONE plan. Durations keep their numbers and are
+        read in the new unit, so every end date of that plan may move: only
+        inside the plan's edit window, and refused on the detailed plan once
+        timing is validated (the baseline is in the old unit). The other
+        plan keeps its calendar, so a frozen quote plan never moves."""
+        ChangePlanService._check_plan(plan)
         if not await ChangePlanService.is_editor(session, change, user):
             raise PlanForbidden(
                 "Only Sales, Project Management, Scheduling, the change lead "
                 "or an admin may edit the plan")
-        if change.status not in QUOTE_WINDOW + DETAILED_WINDOW:
+        if change.status not in ChangePlanService._window(plan):
             raise ChangeError(
-                f"The plan calendar is read-only while the change is '{change.status}'")
-        if change.timing_validated_at is not None:
+                f"The {plan} plan calendar is read-only while the change is "
+                f"'{change.status}'")
+        if ChangePlanService.baselined(change, plan):
             raise ChangeError(
                 "Timing was validated: the plan calendar is frozen with the baseline")
         mode = spec.get("mode") or "calendar"
@@ -1314,22 +1495,26 @@ class ChangePlanService:
             holidays = sorted({_as_date(h) for h in (spec.get("holidays") or [])})
         except ValueError:
             raise ChangeError("Holidays are dates (YYYY-MM-DD)")
-        before = change.plan_calendar
+        if any(not eng.MIN_YEAR <= h.year <= eng.MAX_YEAR for h in holidays):
+            raise ChangeError(
+                f"Holidays lie between {eng.MIN_YEAR} and {eng.MAX_YEAR}")
+        if len(holidays) > eng.MAX_HOLIDAYS:
+            raise ChangeError(f"At most {eng.MAX_HOLIDAYS} holidays")
+        before = ChangePlanService._calendars(change).get(plan)
         cal = eng.Calendar(mode, workdays, holidays)
-        change.plan_calendar = cal.to_json()
-        for plan in PLAN_KINDS:
-            tasks = await ChangePlanService.tasks(session, change, plan)
-            for t in tasks:
-                ChangePlanService._normalise(t, cal)
-            await ChangePlanService._rollup(session, change, plan)
-        if await ChangePlanService.tasks(session, change, "detailed"):
-            await ChangePlanService._bump(change, "detailed")
+        ChangePlanService._store_calendar(change, plan, cal)
+        tasks = await ChangePlanService.tasks(session, change, plan)
+        for t in tasks:
+            ChangePlanService._normalise(t, cal)
+        await ChangePlanService._rollup(session, change, plan)
+        if tasks:
+            await ChangePlanService._bump(change, plan)
         await session.flush()
         await ChangeService.append_changelog(
             session, change, "plan_calendar",
-            f"Plan calendar set to {mode} days"
+            f"{plan.capitalize()} plan calendar set to {mode} days"
             + (f" ({len(holidays)} holidays)" if holidays else ""), user.id,
-            old_value=before, new_value=change.plan_calendar)
+            old_value=before, new_value={"plan": plan, **cal.to_json()})
 
     # ------------------------------------------------------------------
     # Batch (one Gantt ChangeSet per user action)
@@ -1349,14 +1534,18 @@ class ChangePlanService:
         ldels = list(changes.get("links_delete") or [])
         if not (ups or dels or lups or ldels):
             raise ChangeError("Nothing to change")
-        cal = ChangePlanService.calendar(change)
-        tasks = await ChangePlanService.tasks(session, change, plan)
+        cal = ChangePlanService.calendar(change, plan)
         links = await ChangePlanService.links(session, change, plan)
+        tasks = await ChangePlanService.tasks(session, change, plan)
         by_id = {t.id: t for t in tasks}
         link_by_id = {lk.id: lk for lk in links}
+        before_issues = ChangePlanService._structure_issues(tasks, links)
 
         def is_existing(v) -> bool:
             return isinstance(v, int) and not isinstance(v, bool) and v in by_id
+
+        def fields(u):
+            return {k: v for k, v in u.items() if k in WRITABLE_FIELDS}
 
         for u in ups:
             tid = u.get("id")
@@ -1364,10 +1553,18 @@ class ChangePlanService:
                 raise PlanConflict(f"Plan block {tid} not found on this plan",
                                    not_found=True)
         creates = [u for u in ups if not is_existing(u.get("id"))]
-        updates = [u for u in ups if is_existing(u.get("id"))]
-
-        def fields(u):
-            return {k: v for k, v in u.items() if k in WRITABLE_FIELDS}
+        # An entry naming an existing block and no field is a no-op.
+        updates = [u for u in ups if is_existing(u.get("id")) and fields(u)]
+        for what, items in (("block", creates), ("link", [
+                x for x in lups if not (isinstance(x.get("id"), int)
+                                        and not isinstance(x.get("id"), bool))])):
+            temp = [str(x["id"]) for x in items if x.get("id") is not None]
+            dup = sorted({x for x in temp if temp.count(x) > 1})
+            if dup:
+                raise ChangeError(
+                    f"The temporary {what} id {dup[0]} is used twice in one change set")
+        if not (creates or updates or dels or lups or ldels):
+            return {"id_map": {}, "link_id_map": {}}
         progress_only = (not creates and not dels and not lups and not ldels
                          and all(all(k in PROGRESS_FIELDS for k in fields(u))
                                  for u in updates))
@@ -1456,7 +1653,7 @@ class ChangePlanService:
             if u.get("predecessors"):
                 await ChangePlanService._set_preds(
                     session, change, plan, t.id, [ref(p) for p in u["predecessors"]],
-                    links, user.id)
+                    links, user.id, by_id)
 
         # 3. updates on existing blocks
         summaries = eng.summary_ids(e_tasks(tasks))
@@ -1475,12 +1672,20 @@ class ChangePlanService:
             if "parent_id" in spec:
                 ChangePlanService._check_parent(by_id, t.id, spec["parent_id"])
             d = {k: spec.pop(k) for k in DATE_FIELDS if k in spec}
-            if d and t.id not in summaries:
+            if d and t.id in summaries:
+                same = {"start_date": lambda v: _as_date(v) == t.start_date,
+                        "duration_days": lambda v: int(v) == int(t.duration_days or 0)}
+                if any(v is not None and not same[k](v) for k, v in d.items()):
+                    raise ChangeError(
+                        f"'{t.name}' is a summary block: its dates come from the "
+                        "blocks under it")
+            elif d:
                 date_changes[t.id] = d
             ChangePlanService._apply_fields(t, spec, user.id)
             if "predecessors" in spec:
                 await ChangePlanService._set_preds(
-                    session, change, plan, t.id, spec["predecessors"], links, user.id)
+                    session, change, plan, t.id, spec["predecessors"], links, user.id,
+                    by_id)
             ChangePlanService._normalise(t)
             if spec:
                 touched.append(t.id)
@@ -1523,6 +1728,7 @@ class ChangePlanService:
                 if lid is not None:
                     link_id_map[str(lid)] = lk.id
 
+        ChangePlanService._check_structure(before_issues, tasks, links)
         await ChangePlanService._rollup(session, change, plan)
         if creates or dels or lups or ldels or moved or (touched and not progress_only):
             await ChangePlanService._bump(change, plan)
@@ -1544,18 +1750,24 @@ class ChangePlanService:
     @staticmethod
     async def import_mspdi(session: AsyncSession, change: ChangeRequest,
                            plan: str, content: bytes, user: User,
-                           *, replace: bool = False) -> int:
-        """Blocks, outline (summaries), links with type and lag, constraints
-        and the calendar from an MS Project XML file. Appends to the plan, or
-        replaces it with `replace`. The file's calendar becomes the plan
-        calendar when the plan holds only imported blocks afterwards."""
+                           *, replace: bool = False) -> dict:
+        """Blocks, outline (summaries), links with type and lag, constraints,
+        percent complete, actual dates, the baseline (number 0) and the
+        calendar from an MS Project XML file. Appends to the plan, or
+        replaces it with `replace`. The file's calendar becomes THIS plan's
+        calendar when the plan holds only imported blocks afterwards (the
+        other plan keeps its own). Returns {"tasks": n, "links": n,
+        "warnings": [str]}: what was skipped and why."""
         await ChangePlanService._require_edit(
             session, change, plan, user, structural=True)
         try:
             parsed = eng.parse_mspdi(content)
         except eng.MspdiError as e:
             raise ChangeError(str(e))
+        except (ValueError, OverflowError, RecursionError) as e:
+            raise ChangeError(f"The file could not be read as MS Project XML ({e})")
         rows = parsed["tasks"]
+        warnings = list(parsed.get("warnings") or [])
         if not rows:
             raise ChangeError("The file has no tasks to import")
         existing = await ChangePlanService.tasks(session, change, plan)
@@ -1563,8 +1775,15 @@ class ChangePlanService:
             await ChangePlanService._clear(session, change, plan)
             existing = []
         if not existing:
-            change.plan_calendar = parsed["calendar"].to_json()
-        cal = ChangePlanService.calendar(change)
+            ChangePlanService._store_calendar(change, plan, parsed["calendar"])
+        elif parsed["calendar"].to_json() != \
+                ChangePlanService.calendar(change, plan).to_json():
+            warnings.append(
+                "The file's calendar differs from the plan's; the plan keeps "
+                "its calendar (import with replace to take the file's)")
+        cal = ChangePlanService.calendar(change, plan)
+        old_links = await ChangePlanService.links(session, change, plan)
+        before_issues = ChangePlanService._structure_issues(existing, old_links)
         names = await ChangePlanService._dept_names(session)
         ids_by_name = {n: i for i, n in names.items()}
         sort = max((t.sort_order for t in existing), default=0) + 1
@@ -1578,7 +1797,12 @@ class ChangePlanService:
                 department_id=ids_by_name.get(r.get("lane")),
                 is_idea=bool(r.get("idea")), start_date=r["start"],
                 duration_days=int(r["duration"]), predecessors=[],
-                sort_order=sort, progress_pct=0, notes=r.get("notes"),
+                sort_order=sort, progress_pct=int(r.get("progress") or 0),
+                actual_start=r.get("actual_start"),
+                actual_finish=r.get("actual_finish"),
+                baseline_start=r.get("baseline_start"),
+                baseline_finish=r.get("baseline_finish"),
+                notes=r.get("notes"),
                 constraint_type=r.get("constraint_type"),
                 constraint_date=r.get("constraint_date"),
                 created_by=user.id, updated_by=user.id)
@@ -1593,19 +1817,27 @@ class ChangePlanService:
                 by_uid[r["uid"]].parent_id = by_uid[r["parent_uid"]].id
         seen = set()
         n_links = 0
+        new_links = []
         for lk in parsed["links"]:
             a, b = by_uid.get(lk["from_uid"]), by_uid.get(lk["to_uid"])
             if a is None or b is None or a is b:
+                if a is None or b is None:
+                    warnings.append(
+                        f"A link to an unknown task (UID {lk['from_uid']}) was skipped")
                 continue
             pair = frozenset((a.id, b.id))
             if pair in seen:
                 continue
             seen.add(pair)
-            session.add(ChangePlanLink(
+            new_links.append(ChangePlanLink(
                 change_id=change.id, plan=plan, from_task_id=a.id,
                 to_task_id=b.id, type=lk["type"], lag_days=int(lk["lag"]),
                 created_by=user.id))
+        for lk in new_links:
+            session.add(lk)
             n_links += 1
+        ChangePlanService._check_structure(
+            before_issues, existing + list(by_uid.values()), old_links + new_links)
         await ChangePlanService._rollup(session, change, plan)
         await ChangePlanService._bump(change, plan)
         await ChangeService.append_changelog(
@@ -1614,8 +1846,9 @@ class ChangePlanService:
             f"link(s) imported from MS Project"
             + (" (replaced)" if replace else ""), user.id,
             new_value={"plan": plan, "tasks": len(rows), "links": n_links,
-                       "replaced": bool(replace), "calendar": cal.to_json()})
-        return len(rows)
+                       "replaced": bool(replace), "calendar": cal.to_json(),
+                       "warnings": warnings})
+        return {"tasks": len(rows), "links": n_links, "warnings": warnings}
 
     # ------------------------------------------------------------------
     # Feedback and timing validation
@@ -1723,7 +1956,7 @@ class ChangePlanService:
         errors = validate_plan(
             tasks, plan="detailed",
             links=await ChangePlanService.links(session, change, "detailed"),
-            cal=ChangePlanService.calendar(change))["errors"]
+            cal=ChangePlanService.calendar(change, "detailed"))["errors"]
         if errors:
             raise ChangeError(
                 "The detailed plan has errors: "
@@ -1764,16 +1997,22 @@ class ChangePlanService:
     @staticmethod
     async def list_deviations(session: AsyncSession,
                               change: ChangeRequest) -> list[dict]:
+        cause = aliased(ChangePlanTask)
         rows = (await session.execute(
-            select(ChangePlanDeviation, ChangePlanTask.name)
+            select(ChangePlanDeviation, ChangePlanTask.name, cause.name)
             .join(ChangePlanTask, ChangePlanTask.id == ChangePlanDeviation.task_id,
+                  isouter=True)
+            .join(cause, cause.id == ChangePlanDeviation.caused_by_task_id,
                   isouter=True)
             .where(ChangePlanDeviation.change_id == change.id)
             .order_by(ChangePlanDeviation.id.desc()))).all()
         users = await ChangePlanService._user_names(
-            session, [d.created_by for d, _ in rows] + [d.decided_by for d, _ in rows])
+            session, [d.created_by for d, _, _ in rows]
+            + [d.decided_by for d, _, _ in rows])
         return [{
             "id": d.id, "task_id": d.task_id, "task_name": name,
+            "caused_by_task_id": d.caused_by_task_id,
+            "caused_by_task_name": cause_name,
             "old_start": d.old_start, "old_end": d.old_end,
             "new_start": d.new_start, "new_end": d.new_end,
             "slip_days": d.slip_days, "finish_impact_days": d.finish_impact_days,
@@ -1783,7 +2022,7 @@ class ChangePlanService:
             "escalation_id": d.escalation_id,
             "created_by": d.created_by, "created_by_name": users.get(d.created_by),
             "created_at": d.created_at,
-        } for d, name in rows]
+        } for d, name, cause_name in rows]
 
     @staticmethod
     async def _get_deviation(session, change, did) -> ChangePlanDeviation:
@@ -1875,7 +2114,7 @@ class ChangePlanService:
         start, so MS Project opens the plan as drawn instead of pulling it to
         the project start. Idea blocks are proposals, not work, and are left
         out (their children hang on the nearest exported parent)."""
-        cal = ChangePlanService.calendar(change)
+        cal = ChangePlanService.calendar(change, plan)
         ChangePlanService._attach(tasks, cal)
         links = links if links is not None else []
         real = [t for t in tasks if not t.is_idea]
@@ -1944,7 +2183,8 @@ class ChangePlanService:
                            if t.baseline_finish > t.baseline_start
                            else t.baseline_start)
             w.writerow([_csv_cell(v) for v in (
-                t.id, t.name + (" (idea)" if t.is_idea else ""), t.lane or "",
+                t.id, t.name + (" (idea)" if t.is_idea and not t.name.rstrip()
+                                .lower().endswith("(idea)") else ""), t.lane or "",
                 t.kind, t.start_date.isoformat(), _last_day(t).isoformat(),
                 int(t.duration_days or 0),
                 _pred_notation(links, t.id),

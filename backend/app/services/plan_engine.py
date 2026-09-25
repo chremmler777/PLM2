@@ -35,14 +35,28 @@ than total slack. critical = total slack <= 0.
 
 Summary tasks (a task some other task names as parent) roll up: start/end =
 min/max of the children, slack = min of the children, critical when any
-child is, progress weighted by child duration. A link or constraint on a
-summary applies to every leaf below it (MS Project behaviour; warning
-`summary_link`). Idea blocks are scheduled forward but left out of the
-backward pass (slack null, never critical). The project end is the max ef of
-non-idea leaves. A cycle stops the pass: blocks keep their dates, slack null.
+child is, progress weighted by child duration. Links on summaries follow MS
+Project, modelled as three points per summary instead of one link per pair
+of leaves (so nested summaries never multiply links):
+- a link FROM a summary binds to the summary's own start (the earliest child
+  start: SS, SF) or finish (the latest child end: FS, FF);
+- a link INTO a summary (FS, SS only) is a start bound on every leaf below
+  it; FF/SF into a summary are refused (error `summary_finish_link`) and not
+  used for scheduling;
+- a start or finish bound (snet, fnlt) on a summary applies to every leaf
+  below it; mso/mfo on a summary are refused (error `summary_pin`) and not
+  used;
+- a link between a block and its own summary is not used (warning
+  `summary_link`, as is any link on a summary).
+In the backward pass a finish-type link out of a summary bounds every leaf
+below it, a start-type link only the leaves that start the summary.
+Idea blocks are scheduled forward but left out of the backward pass (slack
+null, never critical). The project end is the max ef of non-idea leaves. A
+cycle stops the pass: blocks keep their dates, slack null.
 """
 from __future__ import annotations
 
+import heapq
 import re
 from bisect import bisect_left
 from collections import defaultdict
@@ -55,7 +69,15 @@ LINK_TYPES = ("FS", "SS", "FF", "SF")
 CONSTRAINT_TYPES = ("asap", "snet", "fnlt", "mso", "mfo")
 START_CONSTRAINTS = ("snet", "mso")
 FINISH_CONSTRAINTS = ("fnlt", "mfo")
+PIN_CONSTRAINTS = ("mso", "mfo")
+# Link types that bound the successor's END: not allowed into a summary.
+FINISH_TARGET_LINKS = ("FF", "SF")
 CALENDAR_MODES = ("calendar", "working")
+# Sanity bounds shared by the API, the service and the MSPDI import.
+MAX_OUTLINE_DEPTH = 50
+MAX_DURATION_DAYS = 36500
+MAX_LAG_DAYS = 3650
+MIN_YEAR, MAX_YEAR = 1900, 2200
 DEFAULT_WORKDAYS = [1, 2, 3, 4, 5]
 
 # A Monday, so the weekly arithmetic in Calendar.idx starts on ISO day 1.
@@ -241,16 +263,17 @@ def tree(tasks: list[ETask]) -> tuple[dict, list]:
 
 def dfs_order(tasks: list[ETask]) -> list:
     """Ids in outline order (parents before children, siblings in input
-    order) with the WBS number of each."""
+    order) with the WBS number of each. Iterative: a deep outline must not
+    hit the recursion limit."""
     children, roots = tree(tasks)
     out = []
-
-    def walk(ids, prefix):
-        for n, tid in enumerate(ids, start=1):
-            wbs = f"{prefix}{n}"
-            out.append((tid, wbs))
-            walk(children.get(tid, []), wbs + ".")
-    walk(roots, "")
+    stack = [(tid, str(n)) for n, tid in reversed(list(enumerate(roots, start=1)))]
+    while stack:
+        tid, wbs = stack.pop()
+        out.append((tid, wbs))
+        kids = children.get(tid, [])
+        for n in range(len(kids), 0, -1):
+            stack.append((kids[n - 1], f"{wbs}.{n}"))
     return out
 
 
@@ -273,54 +296,34 @@ def _ancestors(tasks: list[ETask]) -> dict:
     return out
 
 
-def _leaves_under(tasks: list[ETask]) -> dict:
-    """id -> the leaf ids at or below it."""
+def _leaves_under(tasks: list[ETask], ids=None) -> dict:
+    """id -> the leaf ids at or below it (for `ids`, default every task)."""
     children, _ = tree(tasks)
     memo: dict = {}
-
-    def walk(tid):
-        if tid not in memo:
-            kids = children.get(tid, [])
-            memo[tid] = [tid] if not kids else [x for k in kids for x in walk(k)]
-        return memo[tid]
-    return {t.id: walk(t.id) for t in tasks}
-
-
-def leaf_links(tasks: list[ETask], links: list[ELink]) -> list[ELink]:
-    """Links as the math uses them: a link on a summary applies to every
-    leaf below it (MS Project behaviour). A link between a block and its own
-    ancestor, a self link and a link to an unknown id are dropped."""
-    ids = {t.id for t in tasks}
-    under = _leaves_under(tasks)
-    anc = _ancestors(tasks)
-    out = []
-    for lk in links:
-        f, t = lk.from_id, lk.to_id
-        if f not in ids or t not in ids or f == t:
-            continue
-        if f in anc[t] or t in anc[f]:
-            continue
-        for a in under[f]:
-            for b in under[t]:
-                if a != b:
-                    out.append(ELink(from_id=a, to_id=b, type=lk.type,
-                                     lag=int(lk.lag or 0), id=lk.id))
-    return out
+    for tid, _w in reversed(dfs_order(tasks)):     # children before parents
+        kids = children.get(tid, [])
+        memo[tid] = [tid] if not kids else [x for k in kids for x in memo[k]]
+    wanted = [t.id for t in tasks] if ids is None else ids
+    return {i: memo[i] for i in wanted if i in memo}
 
 
 def _constraints(tasks: list[ETask]) -> dict:
-    """leaf id -> [(type, date)]: its own constraint first, then those of
-    its summaries, nearest first (a summary's constraint applies to every
-    leaf below it)."""
+    """leaf id -> [(type, date)]: its own constraint first, then the start /
+    finish bounds (snet, fnlt) of its summaries, nearest first. mso/mfo on
+    a summary are not used (MS Project refuses them)."""
     by_id = {t.id: t for t in tasks}
     anc = _ancestors(tasks)
     out = {}
     for t in tasks:
         cs = []
-        for x in [t.id] + anc[t.id]:
+        for n, x in enumerate([t.id] + anc[t.id]):
             y = by_id[x]
-            if y.constraint_type and y.constraint_type != "asap" and y.constraint_date:
-                cs.append((y.constraint_type, y.constraint_date))
+            ct = y.constraint_type
+            if not ct or ct == "asap" or not y.constraint_date:
+                continue
+            if n > 0 and ct in PIN_CONSTRAINTS:
+                continue
+            cs.append((ct, y.constraint_date))
         out[t.id] = cs
     return out
 
@@ -328,7 +331,6 @@ def _constraints(tasks: list[ETask]) -> dict:
 def topo(ids: list, links: list[ELink]) -> Optional[list]:
     """Ids ordered so every predecessor comes first (stable on input order);
     None on a cycle."""
-    import heapq
     pos = {i: n for n, i in enumerate(ids)}
     indeg = {i: 0 for i in ids}
     succ: dict = defaultdict(list)
@@ -349,6 +351,114 @@ def topo(ids: list, links: list[ELink]) -> Optional[list]:
             if indeg[s] == 0:
                 heapq.heappush(ready, (pos[s], s))
     return out if len(out) == len(ids) else None
+
+
+# ----------------------------------------------------------------------
+# The scheduling graph
+# ----------------------------------------------------------------------
+@dataclass
+class Graph:
+    """Tasks and links as the math uses them.
+
+    Nodes: ("L", id) a leaf, ("G", id) the start gate of a summary (the
+    start bound every leaf below it gets), ("P", id) the rolled-up dates of
+    a summary (what a link out of it reads). Edges: a link from its source
+    (L or P) to its target (L or G); G(parent) -> G/L(child) and
+    L/P(child) -> P(parent). `order` is a topological order of the nodes,
+    None on a cycle."""
+    by_id: dict
+    children: dict
+    parent: dict
+    anc: dict
+    summaries: set
+    leaves: list
+    links: list
+    succ: dict
+    order: Optional[list]
+
+    def src(self, tid):
+        return ("P", tid) if tid in self.summaries else ("L", tid)
+
+    def dst(self, tid):
+        return ("G", tid) if tid in self.summaries else ("L", tid)
+
+
+def usable_link(lk: ELink, by_id: dict, anc: dict, summaries: set) -> bool:
+    """A link the math uses: both ends known, not a self link, not between a
+    block and its own summary, not FF/SF into a summary."""
+    f, t = lk.from_id, lk.to_id
+    if f not in by_id or t not in by_id or f == t:
+        return False
+    if f in anc[t] or t in anc[f]:
+        return False
+    if t in summaries and lk.type in FINISH_TARGET_LINKS:
+        return False
+    return True
+
+
+def graph(tasks: list[ETask], links: list[ELink]) -> Graph:
+    by_id = {t.id: t for t in tasks}
+    children, _ = tree(tasks)
+    parent = {c: p for p, cs in children.items() for c in cs}
+    summaries = {p for p, cs in children.items() if cs}
+    anc = {}
+    for t in tasks:
+        chain, p = [], parent.get(t.id)
+        while p is not None:
+            chain.append(p)
+            p = parent.get(p)
+        anc[t.id] = chain
+    leaves = [t.id for t in tasks if t.id not in summaries]
+    # One link per (from, to, type); a duplicate keeps the larger lag.
+    use: dict = {}
+    for lk in links:
+        typ = lk.type if lk.type in LINK_TYPES else "FS"
+        e = ELink(from_id=lk.from_id, to_id=lk.to_id, type=typ,
+                  lag=int(lk.lag or 0), id=lk.id)
+        if not usable_link(e, by_id, anc, summaries):
+            continue
+        k = (e.from_id, e.to_id, typ)
+        if k not in use or e.lag > use[k].lag:
+            use[k] = e
+    ulinks = list(use.values())
+    g = Graph(by_id=by_id, children=children, parent=parent, anc=anc,
+              summaries=summaries, leaves=leaves, links=ulinks,
+              succ=defaultdict(list), order=None)
+    pos = {t.id: n for n, t in enumerate(tasks)}
+    rank = {"G": 0, "L": 1, "P": 2}
+    nodes = []
+    for t in tasks:
+        if t.id in summaries:
+            nodes += [("G", t.id), ("P", t.id)]
+        else:
+            nodes.append(("L", t.id))
+    indeg = {n: 0 for n in nodes}
+
+    def edge(a, b):
+        g.succ[a].append(b)
+        indeg[b] += 1
+    for p, cs in children.items():
+        for c in cs:
+            if c in summaries:
+                edge(("G", p), ("G", c))
+                edge(("P", c), ("P", p))
+            else:
+                edge(("G", p), ("L", c))
+                edge(("L", c), ("P", p))
+    for lk in ulinks:
+        edge(g.src(lk.from_id), g.dst(lk.to_id))
+    ready = [(pos[n[1]], rank[n[0]], n) for n in nodes if indeg[n] == 0]
+    heapq.heapify(ready)
+    order = []
+    while ready:
+        *_, n = heapq.heappop(ready)
+        order.append(n)
+        for m in g.succ[n]:
+            indeg[m] -= 1
+            if indeg[m] == 0:
+                heapq.heappush(ready, (pos[m[1]], rank[m[0]], m))
+    g.order = order if len(order) == len(nodes) else None
+    return g
 
 
 def _req_start(lk: ELink, p_es: int, p_ef: int, dur: int) -> int:
@@ -372,52 +482,77 @@ def _pin(cons: list, cal: Calendar, dur: int) -> Optional[int]:
     return None
 
 
+def _min(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
 def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
-            *, move: bool = True, pull: bool = False) -> PlanResult:
+            *, move: bool = True, pull: bool = False,
+            only: Optional[set] = None) -> PlanResult:
     """Forward pass (move=True: the schedule; move=False: the dates as they
     stand), backward pass over non-idea blocks, slack, critical path and
     summary rollup. pull=True: blocks without a predecessor start at the
-    project start instead of keeping their own start."""
+    project start instead of keeping their own start. only: the leaves the
+    forward pass may move; every other block keeps its dates."""
     res = PlanResult()
-    by_id = {t.id: t for t in tasks}
-    summaries = summary_ids(tasks)
-    leaves = [t.id for t in tasks if t.id not in summaries]
-    llinks = leaf_links(tasks, links)
+    g = graph(tasks, links)
+    by_id = g.by_id
+    leaves = g.leaves
     cons = _constraints(tasks)
-    order = topo(leaves, llinks)
-    preds: dict = defaultdict(list)
-    succs: dict = defaultdict(list)
-    for lk in llinks:
-        preds[lk.to_id].append(lk)
-        succs[lk.from_id].append(lk)
+    in_links: dict = defaultdict(list)
+    out_links: dict = defaultdict(list)
+    for lk in g.links:
+        in_links[g.dst(lk.to_id)].append(lk)
+        out_links[lk.from_id].append(lk)
 
     es: dict = {}
     ef: dict = {}
+    gate: dict = {}
     project_start = min((cal.idx(by_id[t].start) for t in leaves), default=0)
-    if order is None:
+    if g.order is None:
         res.cycle = True
         for tid in leaves:
             t = by_id[tid]
             es[tid] = cal.idx(t.start)
             ef[tid] = es[tid] + max(int(t.duration or 0), 0)
     else:
-        for tid in order:
-            t = by_id[tid]
-            dur = max(int(t.duration or 0), 0)
-            own = cal.idx(t.start)
-            pin = _pin(cons[tid], cal, dur) if move else None
-            if not move:
-                s = own
-            elif pin is not None:
-                s = pin
+        for kind, tid in g.order:
+            if kind == "G":
+                b = gate.get(g.parent.get(tid))
+                for lk in in_links[("G", tid)]:
+                    f = lk.from_id
+                    r = (es[f] if lk.type == "SS" else ef[f]) + lk.lag
+                    b = r if b is None else max(b, r)
+                gate[tid] = b
+            elif kind == "L":
+                t = by_id[tid]
+                dur = max(int(t.duration or 0), 0)
+                own = cal.idx(t.start)
+                fixed = not move or (only is not None and tid not in only)
+                pin = None if fixed else _pin(cons[tid], cal, dur)
+                if fixed:
+                    s = own
+                elif pin is not None:
+                    s = pin
+                else:
+                    s = project_start if pull else own
+                    for ct, cd in cons[tid]:
+                        if ct == "snet":
+                            s = max(s, cal.idx(cd))
+                    pg = gate.get(g.parent.get(tid))
+                    if pg is not None:
+                        s = max(s, pg)
+                    for lk in in_links[("L", tid)]:
+                        s = max(s, _req_start(lk, es[lk.from_id], ef[lk.from_id], dur))
+                es[tid], ef[tid] = s, s + dur
             else:
-                s = project_start if pull else own
-                for ct, cd in cons[tid]:
-                    if ct == "snet":
-                        s = max(s, cal.idx(cd))
-                for lk in preds[tid]:
-                    s = max(s, _req_start(lk, es[lk.from_id], ef[lk.from_id], dur))
-            es[tid], ef[tid] = s, s + dur
+                kids = g.children[tid]
+                es[tid] = min(es[k] for k in kids)
+                ef[tid] = max(ef[k] for k in kids)
 
     for tid in leaves:
         t = by_id[tid]
@@ -426,64 +561,107 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             start=start, end=cal.end_from_idx(es[tid], ef[tid]),
             start_idx=es[tid], end_idx=ef[tid],
             progress=int(t.progress or 0))
-        if move and start != t.start:
+        if move and start != t.start and (only is None or tid in only):
             res.moved.append(tid)
 
-    real = [tid for tid in (order or []) if not by_id[tid].idea]
-    if order is not None and real:
+    real = [tid for tid in leaves if not by_id[tid].idea]
+    if g.order is not None and real:
         project_end = max(ef[tid] for tid in real)
         lf: dict = {}
-        for tid in reversed(real):
-            dur = ef[tid] - es[tid]
-            f = project_end
-            for lk in succs[tid]:
-                s = lk.to_id
-                if s not in lf:
-                    continue                      # an idea successor
-                lag = int(lk.lag or 0)
-                ls_s = lf[s] - (ef[s] - es[s])
-                if lk.type == "SS":
-                    f = min(f, ls_s - lag + dur)
-                elif lk.type == "FF":
-                    f = min(f, lf[s] - lag)
-                elif lk.type == "SF":
-                    f = min(f, lf[s] - lag + dur)
+        lg: dict = {}
+        lpf: dict = {}
+        lps: dict = {}
+
+        def late(node, which):
+            kind, x = node
+            if kind == "L":
+                if x not in lf:
+                    return None                    # an idea successor
+                return lf[x] - (ef[x] - es[x]) if which == "start" else lf[x]
+            return lg.get(x) if which == "start" else None
+
+        def bounds(src):
+            """(finish bound, start bound) the links out of src put on it."""
+            fb = sb = None
+            for lk in out_links[src]:
+                v = late(g.dst(lk.to_id), "start" if lk.type in ("FS", "SS")
+                         else "finish")
+                if v is None:
+                    continue
+                if lk.type in ("FS", "FF"):
+                    fb = _min(fb, v - lk.lag)
                 else:
-                    f = min(f, ls_s - lag)
-            for ct, cd in cons[tid]:
-                if ct == "fnlt":
-                    f = min(f, cal.idx(cd))
-            if _pin(cons[tid], cal, dur) is not None:
-                f = min(f, ef[tid])
-            lf[tid] = f
+                    sb = _min(sb, v - lk.lag)
+            return fb, sb
+
+        for kind, tid in reversed(g.order):
+            if kind == "G":
+                v = None
+                for c in g.children[tid]:
+                    v = _min(v, lg.get(c) if c in g.summaries else late(("L", c), "start"))
+                lg[tid] = v
+            elif kind == "P":
+                fb, sb = bounds(tid)
+                p = g.parent.get(tid)
+                if p is not None:
+                    fb = _min(fb, lpf.get(p))
+                    if es[tid] == es[p]:
+                        sb = _min(sb, lps.get(p))
+                lpf[tid], lps[tid] = fb, sb
+            elif not by_id[tid].idea:
+                dur = ef[tid] - es[tid]
+                f = project_end
+                fb, sb = bounds(tid)
+                p = g.parent.get(tid)
+                if p is not None:
+                    fb = _min(fb, lpf.get(p))
+                    if es[tid] == es[p] and lps.get(p) is not None:
+                        sb = _min(sb, lps[p])
+                if fb is not None:
+                    f = min(f, fb)
+                if sb is not None:
+                    f = min(f, sb + dur)
+                for ct, cd in cons[tid]:
+                    if ct == "fnlt":
+                        f = min(f, cal.idx(cd))
+                if _pin(cons[tid], cal, dur) is not None:
+                    f = min(f, ef[tid])
+                lf[tid] = f
+
+        def early(node, which):
+            kind, x = node
+            if kind == "L":
+                if by_id[x].idea:
+                    return None
+                return es[x] if which == "start" else ef[x]
+            return es[x] if which == "start" else None
+
         for tid in real:
             total = lf[tid] - ef[tid]
-            free = None
-            for lk in succs[tid]:
-                s = lk.to_id
-                if s not in lf:
-                    continue
-                lag = int(lk.lag or 0)
-                room = {"SS": es[s] - lag - es[tid],
-                        "FF": ef[s] - lag - ef[tid],
-                        "SF": ef[s] - lag - es[tid]}.get(
-                            lk.type, es[s] - lag - ef[tid])
-                free = room if free is None else min(free, room)
-            if free is None:
-                free = project_end - ef[tid]
+            rooms = []
+            for src in [tid] + g.anc[tid]:
+                start_bound = src == tid or es[tid] == es[src]
+                for lk in out_links[src]:
+                    v = early(g.dst(lk.to_id), "start" if lk.type in ("FS", "SS")
+                              else "finish")
+                    if v is None:
+                        continue
+                    if lk.type in ("FS", "FF"):
+                        rooms.append(v - lk.lag - ef[tid])
+                    elif start_bound:
+                        rooms.append(v - lk.lag - es[tid])
+            free = min(rooms) if rooms else project_end - ef[tid]
             r = res.tasks[tid]
             r.total_slack = total
             r.free_slack = min(free, total)
             r.critical = total <= 0
 
     # summary rollup, children first
-    children, roots = tree(tasks)
-
-    def roll(tid):
-        kids = children.get(tid, [])
+    for tid, _w in reversed(dfs_order(tasks)):
+        kids = g.children.get(tid, [])
         if not kids:
-            return res.tasks[tid]
-        rs = [roll(k) for k in kids]
+            continue
+        rs = [res.tasks[k] for k in kids]
         weight = sum(max(r.end_idx - r.start_idx, 0) for r in rs)
         if weight > 0:
             prog = round(sum(r.progress * max(r.end_idx - r.start_idx, 0)
@@ -492,7 +670,7 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             prog = round(sum(r.progress for r in rs) / len(rs))
         slacks = [r.total_slack for r in rs if r.total_slack is not None]
         frees = [r.free_slack for r in rs if r.free_slack is not None]
-        r = TaskResult(
+        res.tasks[tid] = TaskResult(
             start=min(x.start for x in rs), end=max(x.end for x in rs),
             start_idx=min(x.start_idx for x in rs),
             end_idx=max(x.end_idx for x in rs),
@@ -500,10 +678,6 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             free_slack=min(frees) if frees else None,
             critical=any(x.critical for x in rs), is_summary=True,
             progress=prog)
-        res.tasks[tid] = r
-        return r
-    for rt in roots:
-        roll(rt)
     for tid, wbs in dfs_order(tasks):
         res.tasks[tid].wbs = wbs
     return res
@@ -518,6 +692,45 @@ def analyse(tasks: list[ETask], links: list[ELink], cal: Calendar) -> PlanResult
     return compute(tasks, links, cal, move=False)
 
 
+def downstream(tasks: list[ETask], links: list[ELink], sources: list) -> dict:
+    """leaf id -> the nearest source whose move can push it along the
+    links: successors, successors of every summary above it, every leaf
+    under a summary it links into. The walk stops at another source (that
+    one answers for what lies behind it); between two sources the first in
+    the given order wins. The sources themselves are not in the result."""
+    g = graph(tasks, links)
+    srcs = set(sources)
+    cause: dict = {}
+    for src in sources:
+        if src not in g.by_id:
+            continue
+        start = g.src(src)
+        seen, stack = {start}, [start]
+        while stack:
+            n = stack.pop()
+            for m in g.succ.get(n, []):
+                if m in seen or (m[0] == "L" and m[1] in srcs):
+                    continue                     # another source answers for it
+                seen.add(m)
+                stack.append(m)
+                if m[0] == "L" and m[1] not in cause:
+                    cause[m[1]] = src
+    return cause
+
+
+def cascade(tasks: list[ETask], links: list[ELink], cal: Calendar,
+            sources: list) -> tuple[PlanResult, dict]:
+    """The forward pass restricted to what moving `sources` pushes: only
+    their downstream leaves move (later, never earlier; a pinned block keeps
+    its date). Returns the result and {moved leaf: source that caused it}."""
+    cause = downstream(tasks, links, sources)
+    cons = _constraints(tasks)
+    movable = {tid for tid in cause
+               if _pin(cons.get(tid, []), cal, 0) is None}
+    res = compute(tasks, links, cal, move=True, only=movable)
+    return res, {tid: cause[tid] for tid in res.moved}
+
+
 # ----------------------------------------------------------------------
 # Validation
 # ----------------------------------------------------------------------
@@ -529,21 +742,33 @@ def _lag_txt(lag: int) -> str:
     return f" (lag {lag:+d}d)" if lag else ""
 
 
+_VERBS = {"FS": ("starts", "ends"), "SS": ("starts", "starts"),
+          "FF": ("ends", "ends"), "SF": ("ends", "starts")}
+
+
 def engine_issues(tasks: list[ETask], links: list[ELink], cal: Calendar) -> dict:
     """The scheduling issues on the dates as they stand. Errors:
     negative_duration, empty_name, unknown_predecessor, dependency_violation,
-    cycle. Warnings: constraint_conflict (also a link a pinned block breaks),
-    summary_link (a link on a summary, applied to every block under it)."""
+    cycle, summary_finish_link (FF/SF into a summary), summary_pin (mso/mfo
+    on a summary). Warnings: constraint_conflict (also a link a pinned block
+    breaks), summary_link (a link on a summary, applied to the blocks under
+    it, or between a block and its own summary)."""
     errors, warnings = [], []
-    by_id = {t.id: t for t in tasks}
-    summaries = summary_ids(tasks)
-    anc = _ancestors(tasks)
+    g = graph(tasks, links)
+    by_id, summaries, anc = g.by_id, g.summaries, g.anc
     for t in tasks:
         if not (t.name or "").strip():
             errors.append(issue("empty_name", "A block has no name", t.id))
         if int(t.duration or 0) < 0:
             errors.append(issue(
                 "negative_duration", f"'{t.name}' has a negative duration", t.id))
+        if t.id in summaries and t.constraint_type in PIN_CONSTRAINTS \
+                and t.constraint_date:
+            errors.append(issue(
+                "summary_pin",
+                f"'{t.name}' is a summary: a must-start-on or must-finish-on "
+                "constraint on it is not allowed (put it on a block under it)",
+                t.id))
     for lk in links:
         if lk.from_id not in by_id or lk.to_id not in by_id:
             owner = lk.to_id if lk.to_id in by_id else None
@@ -559,47 +784,77 @@ def engine_issues(tasks: list[ETask], links: list[ELink], cal: Calendar) -> dict
                 "summary_link",
                 f"The link between '{f.name}' and '{t.name}' joins a summary "
                 "and a block under it and is not used for scheduling", lk.to_id))
+        elif lk.to_id in summaries and lk.type in FINISH_TARGET_LINKS:
+            errors.append(issue(
+                "summary_finish_link",
+                f"The {lk.type} link from '{f.name}' into the summary '{t.name}' "
+                "is not allowed (link to a block under it)", lk.to_id))
         elif lk.from_id in summaries or lk.to_id in summaries:
             warnings.append(issue(
                 "summary_link",
                 f"The link from '{f.name}' to '{t.name}' is on a summary block: "
-                "it applies to every block under it", lk.to_id))
-    leaves = [t.id for t in tasks if t.id not in summaries]
-    llinks = leaf_links(tasks, links)
-    if topo(leaves, llinks) is None or any(lk.from_id == lk.to_id for lk in links):
+                "it applies to the blocks under it", lk.to_id))
+    if g.order is None or any(lk.from_id == lk.to_id for lk in links):
         errors.append(issue("cycle", "The dependencies form a loop"))
 
     cons = _constraints(tasks)
-
-    def se(t):
-        s = cal.idx(t.start)
-        return s, s + max(int(t.duration or 0), 0)
+    es: dict = {}
+    ef: dict = {}
+    for tid in g.leaves:
+        t = by_id[tid]
+        es[tid] = cal.idx(t.start)
+        ef[tid] = es[tid] + max(int(t.duration or 0), 0)
+    for tid, _w in reversed(dfs_order(tasks)):
+        kids = g.children.get(tid, [])
+        if kids:
+            es[tid] = min(es[k] for k in kids)
+            ef[tid] = max(ef[k] for k in kids)
+    under = _leaves_under(tasks, [lk.to_id for lk in g.links
+                                  if lk.to_id in summaries])
 
     seen = set()
-    for lk in llinks:
+    for lk in g.links:
         p, s = by_id[lk.from_id], by_id[lk.to_id]
-        ps, pe = se(p)
-        ss, sfin = se(s)
-        lag = int(lk.lag or 0)
-        need = _req_start(lk, ps, pe, sfin - ss)
-        if ss < need and (p.id, s.id, lk.type, lag) not in seen:
-            seen.add((p.id, s.id, lk.type, lag))
-            verb = {"FS": ("starts", "ends"), "SS": ("starts", "starts"),
-                    "FF": ("ends", "ends"), "SF": ("ends", "starts")}[
-                        lk.type if lk.type in LINK_TYPES else "FS"]
-            text = f"'{s.name}' {verb[0]} before '{p.name}' {verb[1]}{_lag_txt(lag)}"
-            if _pin(cons[s.id], cal, sfin - ss) is not None:
-                warnings.append(issue(
-                    "constraint_conflict", text + ", pinned by its constraint",
-                    s.id))
-            else:
-                errors.append(issue("dependency_violation", text, s.id))
-
-    for t in tasks:
-        if t.id in summaries:
+        key = (p.id, s.id, lk.type, lk.lag)
+        if key in seen:
             continue
-        s, e = se(t)
-        for ct, cdate in cons[t.id]:
+        verb = _VERBS[lk.type]
+        text = f"'{s.name}' {verb[0]} before '{p.name}' {verb[1]}{_lag_txt(lk.lag)}"
+        if s.id in summaries:
+            need = (es[p.id] if lk.type == "SS" else ef[p.id]) + lk.lag
+            bad = [x for x in under[s.id] if es[x] < need]
+            if not bad:
+                continue
+            seen.add(key)
+            pinned = all(_pin(cons[x], cal, ef[x] - es[x]) is not None for x in bad)
+        else:
+            need = _req_start(lk, es[p.id], ef[p.id], ef[s.id] - es[s.id])
+            if es[s.id] >= need:
+                continue
+            seen.add(key)
+            pinned = _pin(cons[s.id], cal, ef[s.id] - es[s.id]) is not None
+        if pinned:
+            warnings.append(issue(
+                "constraint_conflict", text + ", pinned by its constraint", s.id))
+        else:
+            errors.append(issue("dependency_violation", text, s.id))
+
+    # A leaf: its own constraint and the snet of every summary above it. A
+    # summary: its fnlt against its rolled-up finish (spec §11).
+    checks = []
+    for tid in g.leaves:
+        t = by_id[tid]
+        own = [(t.constraint_type, t.constraint_date)] if (
+            t.constraint_type and t.constraint_type != "asap"
+            and t.constraint_date) else []
+        checks.append((t, own + [c for c in cons[tid][len(own):] if c[0] == "snet"]))
+    for sid in summaries:
+        t = by_id[sid]
+        if t.constraint_type == "fnlt" and t.constraint_date:
+            checks.append((t, [("fnlt", t.constraint_date)]))
+    for t, tcons in checks:
+        s, e = es[t.id], ef[t.id]
+        for ct, cdate in tcons:
             c, cd = cal.idx(cdate), cdate.isoformat()
             bad = None
             if ct == "snet" and s < c:
@@ -746,6 +1001,10 @@ def build_mspdi(*, name: str, title: str, cal: Calendar, tasks: list[dict],
                 el(wt, "FromTime", a)
                 el(wt, "ToTime", b)
     if cal.holidays:
+        # Working mode: holidays are non-working days. Calendar mode: they
+        # only shade the chart, so they go out as WORKING exceptions (MS
+        # Project schedules through them, like we do) under a name the
+        # import reads back as shading.
         exs = el(c, "Exceptions")
         for h in cal.holidays:
             ex = el(exs, "Exception")
@@ -754,9 +1013,15 @@ def build_mspdi(*, name: str, title: str, cal: Calendar, tasks: list[dict],
             el(tp, "FromDate", ts(h, "00:00:00"))
             el(tp, "ToDate", ts(h, "23:59:00"))
             el(ex, "Occurrences", 1)
-            el(ex, "Name", "Holiday")
+            el(ex, "Name", "Holiday" if working else SHADING_HOLIDAY)
             el(ex, "Type", 1)
-            el(ex, "DayWorking", 0)
+            el(ex, "DayWorking", 0 if working else 1)
+            if not working:
+                wts = el(ex, "WorkingTimes")
+                for a, b in (("08:00:00", "12:00:00"), ("13:00:00", "17:00:00")):
+                    wt = el(wts, "WorkingTime")
+                    el(wt, "FromTime", a)
+                    el(wt, "ToTime", b)
 
     uid = {t["key"]: i for i, t in enumerate(tasks, start=1)}
     preds_of: dict = defaultdict(list)
@@ -787,17 +1052,18 @@ def build_mspdi(*, name: str, title: str, cal: Calendar, tasks: list[dict],
             el(te, "ActualStart", ts(t["actual_start"]))
         if t.get("actual_finish"):
             el(te, "ActualFinish", ts(t["actual_finish"], "17:00:00"))
-        if not t.get("summary"):
-            ct, cd = t.get("constraint_type"), t.get("constraint_date")
-            if ct in MSPDI_CONSTRAINT and ct != "asap" and cd:
-                el(te, "ConstraintType", MSPDI_CONSTRAINT[ct])
-                el(te, "ConstraintDate",
-                   ts(cd) if ct in START_CONSTRAINTS else fin(cd))
-            else:
-                # Keep MS Project from pulling the block to the project
-                # start: our plan never schedules earlier than drawn.
-                el(te, "ConstraintType", 4)
-                el(te, "ConstraintDate", ts(t["start"]))
+        ct, cd = t.get("constraint_type"), t.get("constraint_date")
+        if ct in MSPDI_CONSTRAINT and ct != "asap" and cd and not (
+                t.get("summary") and ct in PIN_CONSTRAINTS):
+            # a summary carries its own snet / fnlt (MS Project allows those)
+            el(te, "ConstraintType", MSPDI_CONSTRAINT[ct])
+            el(te, "ConstraintDate",
+               ts(cd) if ct in START_CONSTRAINTS else fin(cd))
+        elif not t.get("summary"):
+            # Keep MS Project from pulling the block to the project
+            # start: our plan never schedules earlier than drawn.
+            el(te, "ConstraintType", 4)
+            el(te, "ConstraintDate", ts(t["start"]))
         if t.get("notes"):
             el(te, "Notes", t["notes"])
         for lk in preds_of.get(t["key"], []):
@@ -853,23 +1119,154 @@ class MspdiError(ValueError):
     pass
 
 
-def parse_mspdi(content: bytes) -> dict:
-    """An MSPDI file as {calendar: Calendar, tasks: [...], links: [...]}.
+# Calendar exception Type (MSPDI): 1 daily, 2 yearly by month day, 3 yearly
+# by position, 4 monthly by month day, 5 monthly by position, 6 weekly.
+# MonthItem: 0 day, 1 weekday, 2 weekend day, 3..9 Sunday..Saturday.
+# MonthPosition: 0..3 first..fourth, 4 last. Month: 0..11. DaysOfWeek: bit
+# mask, 1 = Sunday .. 64 = Saturday.
+MAX_HOLIDAYS = 5000
+SHADING_HOLIDAY = "Holiday (shading only)"
 
-    tasks: {uid, name, start, duration, milestone, parent_uid, level,
-    summary, constraint_type, constraint_date, notes, lane, kind, idea}, in
-    file order.
-    links: {from_uid, to_uid, type, lag}. Durations and lags are converted
-    to the detected calendar's units; SNET on the task's own start (what our
-    export writes for unconstrained blocks) reads back as no constraint,
-    which our "never earlier" scheduling makes equivalent."""
-    if isinstance(content, str):
-        content = content.encode("utf-8")
-    upper = content.upper()
-    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
-        # MSPDI never needs a DTD; entities are how XML bombs get in.
+
+def _month_len(y: int, m: int) -> int:
+    nxt = date(y + (m == 12), m % 12 + 1, 1)
+    return (nxt - date(y, m, 1)).days
+
+
+def _month_day(y: int, m: int, day: int) -> Optional[date]:
+    if not 1 <= m <= 12 or day < 1:
+        return None
+    return date(y, m, min(day, _month_len(y, m)))
+
+
+def _month_pos(y: int, m: int, pos: int, item: int) -> Optional[date]:
+    if not 1 <= m <= 12 or not 0 <= pos <= 4 or not 0 <= item <= 9:
+        return None
+
+    def match(d: date) -> bool:
+        wd = d.isoweekday()
+        if item == 0:
+            return True
+        if item == 1:
+            return wd <= 5
+        if item == 2:
+            return wd >= 6
+        return wd == (7 if item == 3 else item - 3)
+    days = [d for d in (date(y, m, k) for k in range(1, _month_len(y, m) + 1))
+            if match(d)]
+    if not days:
+        return None
+    if pos == 4:
+        return days[-1]
+    return days[pos] if pos < len(days) else None
+
+
+def recurring_days(typ: int, a: date, b: date, *, period: int = 1,
+                   month: int = 0, month_day: int = 1, month_item: int = 0,
+                   month_pos: int = 0, days_of_week: int = 0,
+                   occurrences: int = 0, cap: int = MAX_HOLIDAYS) -> Optional[list]:
+    """The days of one calendar exception between a and b (inclusive), at
+    most `cap` (and `occurrences` when given). None for an unknown type."""
+    out: list = []
+    step = max(1, int(period or 1))
+    if typ == 1:
+        d = a
+        while d <= b and len(out) < cap:
+            out.append(d)
+            d += timedelta(days=step)
+    elif typ == 6:
+        mask = days_of_week or (1 << (a.isoweekday() % 7))
+        w = a - timedelta(days=a.isoweekday() % 7)          # the Sunday before
+        while w <= b and len(out) < cap:
+            for k in range(7):                                # 0 = Sunday
+                d = w + timedelta(days=k)
+                if mask & (1 << k) and a <= d <= b and len(out) < cap:
+                    out.append(d)
+            w += timedelta(days=7 * step)
+    elif typ in (2, 3):
+        for y in range(a.year, b.year + 1):
+            d = (_month_day(y, month + 1, month_day) if typ == 2
+                 else _month_pos(y, month + 1, month_pos, month_item))
+            if d is not None and a <= d <= b:
+                out.append(d)
+            if len(out) >= cap:
+                break
+    elif typ in (4, 5):
+        y, m = a.year, a.month
+        while (y, m) <= (b.year, b.month) and len(out) < cap:
+            d = (_month_day(y, m, month_day) if typ == 4
+                 else _month_pos(y, m, month_pos, month_item))
+            if d is not None and a <= d <= b:
+                out.append(d)
+            m += step
+            y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+    else:
+        return None
+    if occurrences and occurrences > 0:
+        out = out[:occurrences]
+    return out
+
+
+def _guard_xml(content: bytes) -> None:
+    """Refuse a DTD, entity or notation declaration before ElementTree sees
+    the file. A real parser (expat) instead of a byte search, so a UTF-16
+    file or a declaration split by whitespace cannot slip past."""
+    from xml.parsers import expat
+
+    def refuse(*_args):
         raise MspdiError(
             "The file declares a DTD or entities, which MS Project XML never does")
+    p = expat.ParserCreate()
+    p.StartDoctypeDeclHandler = refuse
+    p.EntityDeclHandler = refuse
+    p.UnparsedEntityDeclHandler = refuse
+    p.NotationDeclHandler = refuse
+    p.ExternalEntityRefHandler = refuse
+    try:
+        p.Parse(content, True)
+    except expat.ExpatError as e:
+        raise MspdiError(f"The file is not valid XML ({e})")
+
+
+def _bounded(d: date, what: str) -> date:
+    if not MIN_YEAR <= d.year <= MAX_YEAR:
+        raise MspdiError(f"{what}: the date {d.isoformat()} is outside the years "
+                         f"{MIN_YEAR}-{MAX_YEAR}")
+    return d
+
+
+def parse_mspdi(content: bytes) -> dict:
+    """An MSPDI file as {calendar: Calendar, tasks: [...], links: [...],
+    warnings: [str]}.
+
+    tasks: {uid, name, start, duration, milestone, parent_uid, level,
+    summary, constraint_type, constraint_date, notes, lane, kind, idea,
+    progress, actual_start, actual_finish, baseline_start, baseline_finish},
+    in file order.
+    links: {from_uid, to_uid, type, lag}. Durations and lags are converted
+    to the detected calendar's units (an elapsed lag in a working-day file
+    is scaled by the working days per week, and back); SNET on the task's
+    own start (what our export writes for unconstrained blocks) reads back as
+    no constraint, which our "never earlier" scheduling makes equivalent.
+    A start moment at or after the end of the working day (a milestone MS
+    Project puts at 17:00) is the next day. Refused (MspdiError): not XML, a
+    DTD or entities, dates outside 1900-2200, absurd durations or lags,
+    an outline deeper than MAX_OUTLINE_DEPTH, mso/mfo on a summary, FF/SF
+    into a summary. Skipped with a warning: cross-project links, calendar
+    exceptions of an unknown recurrence type, actual dates in the future."""
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    try:
+        return _parse_mspdi(content)
+    except MspdiError:
+        raise
+    except (ValueError, OverflowError, RecursionError, TypeError,
+            AttributeError) as e:
+        raise MspdiError(f"The file could not be read as MS Project XML ({e})")
+
+
+def _parse_mspdi(content: bytes) -> dict:
+    _guard_xml(content)
     try:
         root = ET.fromstring(content)
     except ET.ParseError as e:
@@ -879,6 +1276,7 @@ def parse_mspdi(content: bytes) -> dict:
         ns = root.tag[1:].split("}")[0]
     if root.tag.split("}")[-1] != "Project":
         raise MspdiError("The file is not an MS Project XML file (no Project element)")
+    warnings: list[str] = []
 
     def q(tag):
         return f"{{{ns}}}{tag}" if ns else tag
@@ -891,11 +1289,33 @@ def parse_mspdi(content: bytes) -> dict:
         v = txt(e, tag)
         try:
             return int(float(v)) if v is not None else default
-        except ValueError:
+        except (ValueError, OverflowError):
             return default
 
     minutes_per_day = num(root, "MinutesPerDay", MINUTES_PER_WORKDAY) or MINUTES_PER_WORKDAY
+    if not 1 <= minutes_per_day <= 1440:
+        minutes_per_day = MINUTES_PER_WORKDAY
     project_fmt = num(root, "DurationFormat", 7)
+    day_end = (17, 0)
+    dft = txt(root, "DefaultFinishTime")
+    if dft:
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2})?", dft)
+        if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+            day_end = (int(m.group(1)), int(m.group(2)))
+
+    def start_day(dt: datetime) -> date:
+        """A start moment as a day: at or after the end of the working day
+        it is the next day (a milestone MS Project puts at 17:00)."""
+        if (dt.hour, dt.minute) >= day_end:
+            return dt.date() + timedelta(days=1)
+        return dt.date()
+
+    def finish_day(dt: datetime) -> date:
+        """A finish moment as an exclusive end date: late in the day is the
+        end of that day."""
+        return dt.date() + timedelta(days=1) if dt.hour >= 12 else dt.date()
+
+    lo_d, hi_d = date(MIN_YEAR, 1, 1), date(MAX_YEAR, 12, 31)
 
     # calendar: the project's calendar, else the first base calendar
     cal_uid = txt(root, "CalendarUID")
@@ -909,6 +1329,16 @@ def parse_mspdi(content: bytes) -> dict:
                     break
     workdays = list(DEFAULT_WORKDAYS)
     holidays: list[date] = []
+    shading: list[date] = []
+
+    def period_of(el):
+        tp = el.find(q("TimePeriod"))
+        a, b = _parse_dt(txt(tp, "FromDate")), _parse_dt(txt(tp, "ToDate"))
+        if not a or not b:
+            return None
+        a, b = max(a.date(), lo_d), min(b.date(), hi_d)
+        return (a, b) if a <= b else None
+
     if cal_el is not None:
         wds = cal_el.find(q("WeekDays"))
         if wds is not None:
@@ -918,27 +1348,39 @@ def parse_mspdi(content: bytes) -> dict:
                 if 1 <= dt <= 7:
                     found[7 if dt == 1 else dt - 1] = num(wd, "DayWorking", 1) == 1
                 elif dt == 0 and num(wd, "DayWorking", 1) == 0:
-                    tp = wd.find(q("TimePeriod"))
-                    a, b = _parse_dt(txt(tp, "FromDate")), _parse_dt(txt(tp, "ToDate"))
-                    if a and b:
-                        d = a.date()
-                        while d <= b.date():
-                            holidays.append(d)
-                            d += timedelta(days=1)
+                    ab = period_of(wd)
+                    if ab:
+                        holidays += recurring_days(
+                            1, ab[0], ab[1], cap=MAX_HOLIDAYS - len(holidays))
             if found:
                 workdays = sorted(k for k, on in found.items() if on) or workdays
         exs = cal_el.find(q("Exceptions"))
         if exs is not None:
             for ex in exs.findall(q("Exception")):
-                if num(ex, "DayWorking", 0) == 1:
+                name = txt(ex, "Name") or ""
+                working = num(ex, "DayWorking", 0) == 1
+                if working and not name.startswith(SHADING_HOLIDAY):
                     continue
-                tp = ex.find(q("TimePeriod"))
-                a, b = _parse_dt(txt(tp, "FromDate")), _parse_dt(txt(tp, "ToDate"))
-                if a and b:
-                    d = a.date()
-                    while d <= b.date() and len(holidays) < 5000:
-                        holidays.append(d)
-                        d += timedelta(days=1)
+                ab = period_of(ex)
+                if not ab:
+                    continue
+                typ = num(ex, "Type", 1)
+                days = recurring_days(
+                    typ, ab[0], ab[1], period=num(ex, "Period", 1),
+                    month=num(ex, "Month", 0), month_day=num(ex, "MonthDay", 1),
+                    month_item=num(ex, "MonthItem", 0),
+                    month_pos=num(ex, "MonthPosition", 0),
+                    days_of_week=num(ex, "DaysOfWeek", 0),
+                    occurrences=(num(ex, "Occurrences", 0)
+                                 if num(ex, "EnteredByOccurrences", 0) == 1 else 0),
+                    cap=MAX_HOLIDAYS - len(holidays) - len(shading))
+                if days is None:
+                    warnings.append(
+                        f"Calendar exception '{name or '?'}' has an unknown "
+                        f"recurrence type {typ} and was skipped")
+                    continue
+                (shading if working else holidays).extend(days)
+    file_per_week = len(workdays) or 5
 
     raw = []
     tasks_el = root.find(q("Tasks"))
@@ -953,17 +1395,21 @@ def parse_mspdi(content: bytes) -> dict:
                  if num(te, "Summary", 0) == 0]
     elapsed = (project_fmt in _ELAPSED_FORMATS if not leaf_fmts
                else all(f in _ELAPSED_FORMATS for f in leaf_fmts))
-    if elapsed and len(workdays) == 7:
-        # our calendar-mode export marks every day working; the weekdays only
-        # shade the chart then, so keep the usual Mon-Fri shading
-        workdays = list(DEFAULT_WORKDAYS)
+    if elapsed:
+        holidays = holidays + shading
+        if len(workdays) == 7:
+            # our calendar-mode export marks every day working; the weekdays
+            # only shade the chart then, so keep the usual Mon-Fri shading
+            workdays = list(DEFAULT_WORKDAYS)
     cal = Calendar("calendar" if elapsed else "working", workdays, holidays)
 
     def to_days(hours: float, fmt: int) -> int:
-        if cal.working and fmt not in _ELAPSED_FORMATS:
-            return int(round(hours * 60 / minutes_per_day))
-        return int(round(hours / 24 if fmt in _ELAPSED_FORMATS
-                         else hours * 60 / minutes_per_day))
+        """Hours in a duration / lag format as days of the plan calendar."""
+        if fmt in _ELAPSED_FORMATS:
+            days = hours / 24
+            return int(round(days * file_per_week / 7 if cal.working else days))
+        days = hours * 60 / minutes_per_day
+        return int(round(days if cal.working else days * 7 / file_per_week))
 
     lane_by_uid = {}
     res_names = {}
@@ -976,18 +1422,26 @@ def parse_mspdi(content: bytes) -> dict:
         if name and txt(a, "TaskUID") not in lane_by_uid:
             lane_by_uid[txt(a, "TaskUID")] = name
 
+    latest_actual = date.today() + timedelta(days=1)
     tasks, links = [], []
     stack: list[tuple[int, str]] = []            # (level, uid)
     for te in raw:
         uid = txt(te, "UID")
+        name = (txt(te, "Name") or "").strip()
         level = max(1, num(te, "OutlineLevel", 1))
         while stack and stack[-1][0] >= level:
             stack.pop()
+        if len(stack) + 1 > MAX_OUTLINE_DEPTH:
+            raise MspdiError(
+                f"'{name}' sits deeper than {MAX_OUTLINE_DEPTH} outline levels")
         parent = stack[-1][1] if stack else None
         stack.append((level, uid))
-        start = _parse_dt(txt(te, "Start")).date()
+        start = _bounded(start_day(_parse_dt(txt(te, "Start"))), f"'{name}'")
         fmt = num(te, "DurationFormat", project_fmt)
         days = max(0, to_days(_parse_hours(txt(te, "Duration")), fmt))
+        if days > MAX_DURATION_DAYS:
+            raise MspdiError(f"'{name}' lasts {days} days, more than "
+                             f"{MAX_DURATION_DAYS}")
         milestone = num(te, "Milestone", 0) == 1
         if milestone:
             days = 0
@@ -995,14 +1449,15 @@ def parse_mspdi(content: bytes) -> dict:
         cdt = _parse_dt(txt(te, "ConstraintDate"))
         cd = None
         if ct in START_CONSTRAINTS and cdt:
-            cd = cdt.date()
+            cd = start_day(cdt)
         elif ct in FINISH_CONSTRAINTS and cdt:
-            # a finish moment late in the day is the end of that day
-            cd = cdt.date() + timedelta(days=1) if cdt.hour >= 12 else cdt.date()
+            cd = finish_day(cdt)
         if ct == "snet" and cd == start:
             ct, cd = None, None
         if ct == "asap" or cd is None:
             ct, cd = None, None
+        if cd is not None:
+            _bounded(cd, f"'{name}' constraint")
         notes = txt(te, "Notes") or ""
         lane, kind, idea = lane_by_uid.get(uid), None, False
         xattr = {}
@@ -1019,26 +1474,68 @@ def parse_mspdi(content: bytes) -> dict:
         if xattr.get(FIELD_TEXT1):
             kind = xattr[FIELD_TEXT1]
         idea = str(xattr.get(FIELD_FLAG1) or "0").strip().lower() in ("1", "true", "yes")
+        progress = min(100, max(0, num(te, "PercentComplete", 0)))
+        actual = {}
+        for key, tag in (("actual_start", "ActualStart"),
+                         ("actual_finish", "ActualFinish")):
+            v = _parse_dt(txt(te, tag))
+            if v is None:
+                actual[key] = None
+            elif v.date() > latest_actual:
+                warnings.append(f"'{name}': the {tag} {v.date().isoformat()} is "
+                                "in the future and was not imported")
+                actual[key] = None
+            else:
+                actual[key] = _bounded(v.date(), f"'{name}' {tag}")
+        bl_start = bl_finish = None
+        for bl in te.findall(q("Baseline")):
+            if num(bl, "Number", -1) != 0:
+                continue
+            bs, bf = _parse_dt(txt(bl, "Start")), _parse_dt(txt(bl, "Finish"))
+            if bs is None or bf is None:
+                continue
+            bl_start = _bounded(start_day(bs), f"'{name}' baseline")
+            bl_finish = bl_start if bf <= bs else max(
+                bl_start, _bounded(finish_day(bf), f"'{name}' baseline"))
         tasks.append({
-            "uid": uid, "name": (txt(te, "Name") or "").strip(),
+            "uid": uid, "name": name,
             "start": start, "duration": days, "milestone": milestone,
             "parent_uid": parent, "level": level,
             "summary": num(te, "Summary", 0) == 1,
             "constraint_type": ct, "constraint_date": cd,
             "notes": " | ".join(rest) or None, "lane": lane, "kind": kind,
-            "idea": idea,
+            "idea": idea, "progress": progress, **actual,
+            "baseline_start": bl_start, "baseline_finish": bl_finish,
         })
         for pl in te.findall(q("PredecessorLink")):
+            if num(pl, "CrossProject", 0) == 1:
+                warnings.append(f"'{name}': a link to another project "
+                                f"({txt(pl, 'CrossProjectName') or '?'}) was skipped")
+                continue
             lag_fmt = num(pl, "LagFormat", 7)
-            tenths = num(pl, "LinkLag", 0)
-            minutes = tenths / 10
-            if lag_fmt in _ELAPSED_FORMATS:
-                lag = minutes / 1440
-            else:
-                lag = minutes / minutes_per_day
+            minutes = num(pl, "LinkLag", 0) / 10
+            lag = to_days(minutes / 60, lag_fmt)
+            if abs(lag) > MAX_LAG_DAYS:
+                raise MspdiError(f"'{name}': a lag of {lag} days is more than "
+                                 f"{MAX_LAG_DAYS}")
             links.append({
                 "from_uid": txt(pl, "PredecessorUID"), "to_uid": uid,
                 "type": MSPDI_LINK_TYPE_BACK.get(num(pl, "Type", 1), "FS"),
-                "lag": int(round(lag)),
+                "lag": lag,
             })
-    return {"calendar": cal, "tasks": tasks, "links": links}
+
+    # MS Project's own rules for summaries, which our math relies on
+    parents = {t["parent_uid"] for t in tasks if t["parent_uid"] is not None}
+    names = {t["uid"]: t["name"] for t in tasks}
+    for t in tasks:
+        if t["uid"] in parents and t["constraint_type"] in PIN_CONSTRAINTS:
+            raise MspdiError(
+                f"'{t['name']}' is a summary task with a must-start-on or "
+                "must-finish-on constraint, which MS Project does not allow")
+    for lk in links:
+        if lk["to_uid"] in parents and lk["type"] in FINISH_TARGET_LINKS:
+            raise MspdiError(
+                f"The {lk['type']} link into the summary task "
+                f"'{names.get(lk['to_uid'])}' is not allowed (MS Project "
+                "refuses finish links into a summary)")
+    return {"calendar": cal, "tasks": tasks, "links": links, "warnings": warnings}

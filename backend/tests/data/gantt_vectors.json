@@ -1904,7 +1904,7 @@
    }
   },
   {
-   "name": "summary: a link on a summary applies to every leaf below it",
+   "name": "summary: FS from a summary binds to its rolled-up finish",
    "calendar": {
     "mode": "calendar",
     "workdays": [
@@ -1971,7 +1971,7 @@
    }
   },
   {
-   "name": "summary: a link into a summary pushes every leaf below it",
+   "name": "summary: FS into a summary bounds every leaf below it",
    "calendar": {
     "mode": "calendar",
     "workdays": [
@@ -2052,7 +2052,7 @@
    }
   },
   {
-   "name": "summary: a constraint on a summary applies to its leaves",
+   "name": "summary: snet on a summary bounds every leaf below it",
    "calendar": {
     "mode": "calendar",
     "workdays": [
@@ -2321,6 +2321,547 @@
     "C": {
      "start": "2026-10-07",
      "end": "2026-10-08",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "summary: SS into a summary bounds every leaf below it",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 5,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "B",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "C",
+     "start": "2026-10-08",
+     "duration": 3,
+     "constraint": null,
+     "parentId": "S"
+    }
+   ],
+   "links": [
+    {
+     "from": "A",
+     "to": "S",
+     "type": "SS",
+     "lag": 2
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 1,
+     "critical": false,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-07",
+     "end": "2026-10-09",
+     "total_slack": 2,
+     "critical": false,
+     "free_slack": 2
+    },
+    "C": {
+     "start": "2026-10-08",
+     "end": "2026-10-11",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "S": {
+     "start": "2026-10-07",
+     "end": "2026-10-11",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "summary: SS from a summary binds to its earliest start",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 5,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "B",
+     "start": "2026-10-09",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "X",
+     "start": "2026-10-01",
+     "duration": 3,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "S",
+     "to": "X",
+     "type": "SS",
+     "lag": 1
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 1,
+     "critical": false,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-09",
+     "end": "2026-10-11",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "X": {
+     "start": "2026-10-06",
+     "end": "2026-10-09",
+     "total_slack": 2,
+     "critical": false,
+     "free_slack": 2
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-11",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "summary: SF from a summary binds to its earliest start",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "B",
+     "start": "2026-10-12",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "X",
+     "start": "2026-10-01",
+     "duration": 3,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "S",
+     "to": "X",
+     "type": "SF",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 7,
+     "critical": false,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-12",
+     "end": "2026-10-14",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "X": {
+     "start": "2026-10-02",
+     "end": "2026-10-05",
+     "total_slack": 9,
+     "critical": false,
+     "free_slack": 9
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-14",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "summary refused: FF into a summary is not scheduled",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "options": {
+    "refused": "summary_finish_link"
+   },
+   "tasks": [
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 5,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "B",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    }
+   ],
+   "links": [
+    {
+     "from": "A",
+     "to": "S",
+     "type": "FF",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 3,
+     "critical": false,
+     "free_slack": 3
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 3,
+     "critical": false,
+     "free_slack": 3
+    }
+   }
+  },
+  {
+   "name": "summary refused: mso on a summary is not scheduled",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "options": {
+    "refused": "summary_pin"
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": {
+      "type": "mso",
+      "date": "2026-10-01"
+     },
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    }
+   ],
+   "links": [],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "cycle: blocks keep their dates and have no slack",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "options": {
+    "cycle": true
+   },
+   "tasks": [
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "B",
+     "start": "2026-10-06",
+     "duration": 2,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "A",
+     "to": "B",
+     "type": "FS",
+     "lag": 0
+    },
+    {
+     "from": "B",
+     "to": "A",
+     "type": "FS",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": null,
+     "critical": false
+    },
+    "B": {
+     "start": "2026-10-06",
+     "end": "2026-10-08",
+     "total_slack": null,
+     "critical": false
+    }
+   }
+  },
+  {
+   "name": "working: holiday on the start day",
+   "calendar": {
+    "mode": "working",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": [
+     "2026-10-05"
+    ]
+   },
+   "tasks": [
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "B",
+     "start": "2026-10-05",
+     "duration": 1,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "A",
+     "to": "B",
+     "type": "FS",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-06",
+     "end": "2026-10-08",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-08",
+     "end": "2026-10-09",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
+  },
+  {
+   "name": "working: negative lag across a weekend",
+   "calendar": {
+    "mode": "working",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "A",
+     "start": "2026-10-07",
+     "duration": 3,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "B",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "A",
+     "to": "B",
+     "type": "FS",
+     "lag": -2
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-07",
+     "end": "2026-10-10",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "B": {
+     "start": "2026-10-08",
+     "end": "2026-10-10",
      "total_slack": 0,
      "critical": true,
      "free_slack": 0

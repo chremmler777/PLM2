@@ -122,6 +122,10 @@ async def _seed(client, auth, cid, plan="quote", replace=False):
                              json={"plan": plan, "replace": replace}, headers=auth)
 
 
+def _today(n=0):
+    return (date.today() + timedelta(days=n)).isoformat()
+
+
 def _by_name(out):
     return {t["name"]: t for t in out["tasks"]}
 
@@ -331,9 +335,20 @@ async def test_rights_editors_and_department_progress(client, world, session_fac
     tool_task, apqp_task = t["Implementation"], t["Measurement and validation"]
     res = await client.patch(
         f"/api/v1/changes/{cid}/plan/tasks/{tool_task['id']}",
-        json={"progress_pct": 40, "actual_start": "2026-11-02"}, headers=tool)
+        json={"progress_pct": 40, "actual_start": _today(-3)}, headers=tool)
     assert res.status_code == 200, res.text
     assert _by_name(res.json())["Implementation"]["progress_pct"] == 40
+    # actual dates report what happened: tomorrow is tolerated (a browser a
+    # timezone ahead), later is refused
+    for key in ("actual_start", "actual_finish"):
+        res = await client.patch(
+            f"/api/v1/changes/{cid}/plan/tasks/{tool_task['id']}",
+            json={key: _today(2)}, headers=tool)
+        assert res.status_code == 400 and "future" in res.json()["detail"]
+    res = await client.patch(
+        f"/api/v1/changes/{cid}/plan/tasks/{tool_task['id']}",
+        json={"actual_finish": _today(1)}, headers=tool)
+    assert res.status_code == 200, res.text
     # not its own block
     res = await client.patch(
         f"/api/v1/changes/{cid}/plan/tasks/{apqp_task['id']}",
@@ -486,18 +501,29 @@ async def test_deviations_after_baseline(client, world, session_factory):
     assert res.status_code == 200, res.text
     devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
                              headers=sales)).json()
-    assert len(devs) == 1
-    d = devs[0]
-    assert d["task_name"] == "Implementation" and d["status"] == "open"
+    by_task = {x["task_name"]: x for x in devs}
+    d = by_task["Implementation"]
+    assert d["status"] == "open" and d["caused_by_task_id"] is None
     assert d["slip_days"] == 5 and d["reason"] == "supplier late"
-    # Successors are not dragged along (no forward pass after the baseline),
-    # so the finish did not move yet, and the overlap shows as an error.
-    assert d["finish_impact_days"] == 0
     assert d["created_by_name"] == "Plan sales"
+    # The move pushes every successor along its link: one deviation each,
+    # same reason, naming the block that caused it, and the finish impact is
+    # the real new finish of the plan.
+    pushed = [x for x in devs if x["caused_by_task_id"] == impl["id"]]
+    assert {x["task_name"] for x in pushed} == {
+        "Sampling / trial", "Measurement and validation",
+        "Customer approval (PPAP / ISIR)", "Safety buffer",
+        "Start of production (change)"}
+    assert len(devs) == 1 + len(pushed)
+    for x in pushed:
+        assert x["caused_by_task_name"] == "Implementation"
+        assert x["reason"] == "supplier late" and x["slip_days"] == 5
+    assert {x["finish_impact_days"] for x in devs} == {5}
     out = await _plan(client, sales, cid, "detailed")
-    assert "dependency_violation" in {e["code"] for e in out["validation"]["errors"]}
-    # Moving the last milestone moves the finish.
-    sop = t["Start of production (change)"]
+    assert "dependency_violation" not in {
+        e["code"] for e in out["validation"]["errors"]}
+    # Moving the last milestone moves the finish again.
+    sop = _by_name(out)["Start of production (change)"]
     new_start = (date.fromisoformat(sop["start_date"]) + timedelta(days=5)).isoformat()
     res = await client.patch(f"/api/v1/changes/{cid}/plan/tasks/{sop['id']}",
                              json={"start_date": new_start, "reason": "late PPAP"},
@@ -505,7 +531,8 @@ async def test_deviations_after_baseline(client, world, session_factory):
     assert res.status_code == 200, res.text
     devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
                              headers=sales)).json()
-    assert devs[0]["finish_impact_days"] == 5 and devs[0]["slip_days"] == 5
+    assert len(devs) == 7
+    assert devs[0]["finish_impact_days"] == 5 and devs[0]["slip_days"] == 10
 
     # a bulk move after the baseline: one deviation per task, same reason
     val = t["Measurement and validation"]
@@ -518,7 +545,14 @@ async def test_deviations_after_baseline(client, world, session_factory):
     assert res.status_code == 200, res.text
     devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
                              headers=sales)).json()
-    assert len(devs) == 4 and {x["reason"] for x in devs[:2]} == {"shift"}
+    # two moved, buffer and start of production pushed behind them
+    shift = [x for x in devs if x["reason"] == "shift"]
+    assert len(devs) == 11 and len(shift) == 4
+    assert {x["task_name"]: x["caused_by_task_name"] for x in shift} == {
+        "Measurement and validation": None,
+        "Customer approval (PPAP / ISIR)": None,
+        "Safety buffer": "Customer approval (PPAP / ISIR)",
+        "Start of production (change)": "Customer approval (PPAP / ISIR)"}
 
     # decide: an outsider may not
     res = await client.post(f"/api/v1/changes/{cid}/plan/deviations/{d['id']}/lock",
@@ -828,7 +862,9 @@ async def test_batch_after_baseline_moves_dates_as_deviations(client, world,
     assert res.status_code == 200, res.text
     devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
                              headers=sales)).json()
-    assert len(devs) == 1 and devs[0]["reason"] == "late steel"
+    # the move and the five successors it pushed, one reason
+    assert len(devs) == 6 and {x["reason"] for x in devs} == {"late steel"}
+    assert sum(1 for x in devs if x["caused_by_task_id"] == impl["id"]) == 5
     # structure stays frozen
     res = await client.post(url, json={"plan": "detailed", "changes": {
         "tasks_upsert": [{"id": "tmp-1", "name": "new", "start_date": "2026-12-01"}]}},
@@ -989,3 +1025,266 @@ async def test_deviation_decisions_only_while_the_plan_runs(client, world,
     res = await client.post(f"/api/v1/changes/{cid}/plan/deviations/{did}/lock",
                             json={}, headers=sales)
     assert res.status_code == 200
+
+
+# --- review round 2 ------------------------------------------------------------
+
+async def test_legacy_predecessors_convert_on_read(client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-09", 2)
+    # a row written by pre-088 code: only the legacy list
+    async with session_factory() as s:
+        row = await s.get(ChangePlanTask, b["id"])
+        row.predecessors = [a["id"], a["id"], 99999, b["id"]]
+        await s.commit()
+    out = await _plan(client, sales, cid)
+    assert [(lk["from_task_id"], lk["to_task_id"], lk["type"]) for lk in out["links"]] \
+        == [(a["id"], b["id"], "FS")]
+    assert _by_name(out)["B"]["predecessors"] == [a["id"]]
+    async with session_factory() as s:
+        assert (await s.get(ChangePlanTask, b["id"])).predecessors == []
+    # read again: nothing more to convert, no duplicate
+    assert len((await _plan(client, sales, cid))["links"]) == 1
+
+
+async def test_each_plan_has_its_own_calendar(client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    url = f"/api/v1/changes/{cid}/plan/calendar"
+    await _task(client, sales, cid, "A", "2026-11-02", 5)
+    working = {"mode": "working", "workdays": [1, 2, 3, 4, 5], "holidays": []}
+    res = await client.put(f"{url}?plan=quote", json=working, headers=sales)
+    assert res.status_code == 200 and res.json()["calendar"] == working
+    # the detailed plan is seeded with the quote plan's calendar
+    await _set(session_factory, cid, status="approved")
+    res = await _seed(client, sales, cid, plan="detailed")
+    assert res.status_code == 200, res.text
+    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == working
+    # the quote plan is frozen once accepted: its calendar is too, and a
+    # change of the detailed calendar leaves it alone
+    res = await client.put(f"{url}?plan=quote", json={"mode": "calendar"},
+                           headers=sales)
+    assert res.status_code == 400
+    res = await client.put(f"{url}?plan=detailed", json={
+        "mode": "calendar", "workdays": [1, 2, 3, 4, 5], "holidays": []},
+        headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["calendar"]["mode"] == "calendar"
+    quote = await _plan(client, sales, cid, "quote")
+    assert quote["calendar"] == working
+    assert _by_name(quote)["A"]["end_date"] == "2026-11-07"   # 5 working days
+    # the older flat shape still reads as the calendar of both plans
+    await _set(session_factory, cid, plan_calendar=working)
+    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == working
+
+
+async def test_summary_rules_on_write(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    s = await _task(client, sales, cid, "Phase", "2026-11-02", 1)
+    await _task(client, sales, cid, "A", "2026-11-02", 3, parent_id=s["id"])
+    x = await _task(client, sales, cid, "X", "2026-10-26", 2)
+    url = f"/api/v1/changes/{cid}/plan/links"
+    for typ in ("FF", "SF"):
+        res = await client.post(url, json={"plan": "quote", "from_task_id": x["id"],
+                                           "to_task_id": s["id"], "type": typ},
+                                headers=sales)
+        assert res.status_code == 400 and "summary" in res.json()["detail"]
+    # FS and SS into a summary, anything out of it: fine
+    res = await client.post(url, json={"plan": "quote", "from_task_id": x["id"],
+                                       "to_task_id": s["id"], "type": "SS"},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    lid = res.json()["links"][0]["id"]
+    # ... and it cannot be turned into FF afterwards
+    res = await client.patch(f"{url}/{lid}", json={"type": "FF"}, headers=sales)
+    assert res.status_code == 400
+    # mso / mfo on a summary
+    res = await client.patch(f"/api/v1/changes/{cid}/plan/tasks/{s['id']}", json={
+        "constraint_type": "mso", "constraint_date": "2026-11-02"}, headers=sales)
+    assert res.status_code == 400 and "summary" in res.json()["detail"]
+    # snet on a summary is fine
+    res = await client.patch(f"/api/v1/changes/{cid}/plan/tasks/{s['id']}", json={
+        "constraint_type": "snet", "constraint_date": "2026-11-02"}, headers=sales)
+    assert res.status_code == 200, res.text
+    # a block with mfo cannot become a summary, nor one with an FF link in
+    m = await _task(client, sales, cid, "M", "2026-11-02", 2,
+                    constraint_type="mfo", constraint_date="2026-11-04")
+    res = await client.post(f"/api/v1/changes/{cid}/plan/tasks", json={
+        "plan": "quote", "name": "under M", "start_date": "2026-11-02",
+        "parent_id": m["id"]}, headers=sales)
+    assert res.status_code == 400 and "summary" in res.json()["detail"]
+    res = await client.post(f"/api/v1/changes/{cid}/plan/changes", json={
+        "plan": "quote", "changes": {"tasks_upsert": [
+            {"id": x["id"], "parent_id": m["id"]}]}}, headers=sales)
+    assert res.status_code == 400
+    y = await _task(client, sales, cid, "Y", "2026-11-02", 2)
+    await client.post(url, json={"plan": "quote", "from_task_id": x["id"],
+                                 "to_task_id": y["id"], "type": "FF"}, headers=sales)
+    res = await client.patch(f"/api/v1/changes/{cid}/plan/tasks/{x['id']}",
+                             json={"parent_id": y["id"]}, headers=sales)
+    assert res.status_code == 400
+
+
+async def test_batch_review_fixes(client, world):
+    sales, pack = await _auth(client, "sales"), await _auth(client, "pack")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-09", 2, predecessors=[a["id"]])
+    s = await _task(client, sales, cid, "Phase", "2026-11-02", 1)
+    await _task(client, sales, cid, "Kid", "2026-11-02", 3, parent_id=s["id"])
+    url = f"/api/v1/changes/{cid}/plan/changes"
+
+    async def post(changes, headers=sales):
+        return await client.post(url, json={"plan": "quote", "changes": changes},
+                                 headers=headers)
+    # duplicate temp ids
+    res = await post({"tasks_upsert": [
+        {"id": "tmp-1", "name": "x", "start_date": "2026-11-02"},
+        {"id": "tmp-1", "name": "y", "start_date": "2026-11-02"}]})
+    assert res.status_code == 400 and "twice" in res.json()["detail"]
+    res = await post({"links_upsert": [
+        {"id": "l-1", "from_task_id": a["id"], "to_task_id": s["id"]},
+        {"id": "l-1", "from_task_id": b["id"], "to_task_id": s["id"]}]})
+    assert res.status_code == 400
+    # predecessors go through the link checks: self, reverse
+    res = await post({"tasks_upsert": [
+        {"id": "tmp-2", "name": "self", "start_date": "2026-11-02",
+         "predecessors": ["tmp-2"]}]})
+    assert res.status_code == 400
+    res = await post({"tasks_upsert": [{"id": a["id"], "predecessors": [b["id"]]}]})
+    assert res.status_code == 400 and "already linked" in res.json()["detail"]
+    # a summary's dates: a change is refused, the same value is not
+    res = await post({"tasks_upsert": [{"id": s["id"], "start_date": "2026-12-01"}]})
+    assert res.status_code == 400 and "summary" in res.json()["detail"]
+    res = await post({"tasks_upsert": [{"id": s["id"], "start_date": "2026-11-02",
+                                        "name": "Phase 1"}]})
+    assert res.status_code == 200, res.text
+    # an entry without fields is a no-op, not a rights question
+    before = await _plan(client, sales, cid)
+    res = await post({"tasks_upsert": [{"id": a["id"]}]}, headers=pack)
+    assert res.status_code == 200, res.text
+    assert res.json()["revision"] == before["revision"]
+    # sort_order null
+    res = await post({"tasks_upsert": [{"id": a["id"], "sort_order": None}]})
+    assert res.status_code == 400
+    # the outline stops at 50 levels
+    chain = [{"id": "d-0", "name": "d0", "start_date": "2026-11-02",
+              "duration_days": 1}]
+    for i in range(1, 51):
+        chain.append({"id": f"d-{i}", "name": f"d{i}", "start_date": "2026-11-02",
+                      "duration_days": 1, "parent_id": f"d-{i - 1}"})
+    res = await post({"tasks_upsert": chain})
+    assert res.status_code == 400 and "50" in res.json()["detail"]
+    res = await post({"tasks_upsert": chain[:50]})
+    assert res.status_code == 200, res.text
+
+
+async def test_api_bounds(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-09", 2)
+    url = f"/api/v1/changes/{cid}/plan"
+    bad = [
+        ("post", f"{url}/tasks", {"plan": "quote", "name": "x",
+                                  "start_date": "9999-01-01"}),
+        ("post", f"{url}/tasks", {"plan": "quote", "name": "x",
+                                  "start_date": "2026-11-02",
+                                  "duration_days": 10 ** 9}),
+        ("patch", f"{url}/tasks/{a['id']}", {"duration_days": 99999999}),
+        ("post", f"{url}/links", {"plan": "quote", "from_task_id": a["id"],
+                                  "to_task_id": b["id"], "lag_days": 10 ** 6}),
+        ("post", f"{url}/changes", {"plan": "quote", "changes": {"tasks_upsert": [
+            {"id": a["id"], "start_date": "0001-01-01"}]}}),
+        ("put", f"{url}/calendar", {"mode": "working", "holidays": ["1066-10-14"]}),
+    ]
+    for method, u, body in bad:
+        res = await getattr(client, method)(u, json=body, headers=sales)
+        assert res.status_code == 422, (u, body, res.text)
+
+
+async def test_csv_does_not_double_the_idea_suffix(client, world, session_factory):
+    await _add_positions(session_factory, world)
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    await _seed(client, sales, cid)
+    res = await client.get(f"/api/v1/changes/{cid}/plan/export.csv?plan=quote",
+                           headers=sales)
+    names = [r[1] for r in csv.reader(io.StringIO(res.text))][1:]
+    assert "Bank build (idea)" in names
+    assert not any("(idea) (idea)" in n for n in names)
+    await _task(client, sales, cid, "Spare", "2026-11-02", 1, is_idea=True)
+    res = await client.get(f"/api/v1/changes/{cid}/plan/export.csv?plan=quote",
+                           headers=sales)
+    assert "Spare (idea)" in [r[1] for r in csv.reader(io.StringIO(res.text))]
+
+
+async def test_schedule_after_baseline_needs_a_reason(client, world, session_factory):
+    cid, sales = await _baselined(client, world, session_factory)
+    t = _by_name(await _plan(client, sales, cid, "detailed"))
+    val = t["Measurement and validation"]
+    # an admin fix in the database: validation starts 3 days too early
+    async with session_factory() as s:
+        row = await s.get(ChangePlanTask, val["id"])
+        row.start_date = row.start_date - timedelta(days=3)
+        await s.commit()
+    url = f"/api/v1/changes/{cid}/plan/schedule"
+    res = await client.post(url, json={"plan": "detailed"}, headers=sales)
+    assert res.status_code == 400 and "reason" in res.json()["detail"]
+    res = await client.post(url, json={"plan": "detailed", "reason": "re-plan"},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    devs = (await client.get(f"/api/v1/changes/{cid}/plan/deviations",
+                             headers=sales)).json()
+    assert [(x["task_name"], x["reason"], x["caused_by_task_id"]) for x in devs] == [
+        ("Measurement and validation", "re-plan", None)]
+    assert devs[0]["new_start"] == val["start_date"]
+
+
+async def test_import_warnings_and_refusals(client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    url = f"/api/v1/changes/{cid}/plan/import"
+    xml = (
+        '<?xml version="1.0"?><Project xmlns="http://schemas.microsoft.com/project">'
+        '<DurationFormat>7</DurationFormat><Tasks>'
+        '<Task><UID>1</UID><Name>A</Name><Start>2026-10-05T08:00:00</Start>'
+        '<Duration>PT16H0M0S</Duration><OutlineLevel>1</OutlineLevel>'
+        '<PercentComplete>30</PercentComplete>'
+        '<PredecessorLink><PredecessorUID>9</PredecessorUID><CrossProject>1'
+        '</CrossProject></PredecessorLink></Task></Tasks></Project>')
+    res = await client.post(url, data={"plan": "quote"},
+                            files={"file": ("p.xml", xml.encode(), "application/xml")},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    out = res.json()
+    assert len(out["import_warnings"]) == 1 and "another project" in \
+        out["import_warnings"][0]
+    assert _by_name(out)["A"]["progress_pct"] == 30
+    # a summary with a must-start-on is refused, the plan stays as it was
+    bad = xml.replace(
+        '<PercentComplete>30</PercentComplete>',
+        '<ConstraintType>2</ConstraintType>'
+        '<ConstraintDate>2026-10-05T08:00:00</ConstraintDate>').replace(
+        '</Task></Tasks>', '</Task><Task><UID>2</UID><Name>B</Name>'
+        '<Start>2026-10-05T08:00:00</Start><Duration>PT8H0M0S</Duration>'
+        '<OutlineLevel>2</OutlineLevel></Task></Tasks>')
+    res = await client.post(url, data={"plan": "quote"},
+                            files={"file": ("p.xml", bad.encode(), "application/xml")},
+                            headers=sales)
+    assert res.status_code == 400 and "summary" in res.json()["detail"]
+    assert len((await _plan(client, sales, cid))["tasks"]) == 1
+    # an import into the detailed plan does not change the quote calendar
+    await _set(session_factory, cid, status="approved")
+    elapsed = xml.replace("<DurationFormat>7</DurationFormat>",
+                          "<DurationFormat>8</DurationFormat>")
+    res = await client.post(url, data={"plan": "detailed"},
+                            files={"file": ("p.xml", elapsed.encode(),
+                                            "application/xml")},
+                            headers=sales)
+    assert res.status_code == 200, res.text
+    assert res.json()["calendar"]["mode"] == "calendar"
+    assert (await _plan(client, sales, cid, "quote"))["calendar"]["mode"] == "working"

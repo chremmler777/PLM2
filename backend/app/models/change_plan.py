@@ -9,11 +9,13 @@ because the baseline is what the customer was told.
 
 Dates are calendar dates, not timestamps: a block starts on a day, and a
 timezone shifting it to the day before would move a promise. Durations count
-days of the plan calendar (change_requests.plan_calendar: calendar days by
-default, working days in "working" mode) and end_date is exclusive, so a
+days of the plan calendar (calendar days by default, working days in
+"working" mode) and end_date is exclusive, so a
 successor may start on its predecessor's end_date. Links (FS/SS/FF/SF with a
-lag) live in change_plan_links; the old `predecessors` JSON is legacy, only
-read for rows written before migration 088.
+lag) live in change_plan_links; the old `predecessors` JSON is legacy: a
+row still carrying one is converted into FS links when the plan is read.
+Each plan has its own calendar (change_requests.plan_calendar holds
+{"quote": {...}, "detailed": {...}}; the older flat shape applies to both).
 """
 from datetime import date, datetime, timedelta
 
@@ -156,6 +158,10 @@ class ChangePlanDeviation(Base):
     change_id: Mapped[int] = mapped_column(
         ForeignKey("change_requests.id"), index=True)
     task_id: Mapped[int] = mapped_column(ForeignKey("change_plan_tasks.id"))
+    # A cascaded deviation: the block whose move pushed this one along its
+    # links (None when the block itself was moved). No FK, like
+    # source_position_id: the column is informational.
+    caused_by_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     old_start: Mapped[date] = mapped_column(Date)
     old_end: Mapped[date] = mapped_column(Date)
     new_start: Mapped[date] = mapped_column(Date)
