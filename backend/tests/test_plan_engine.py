@@ -74,7 +74,8 @@ def test_vector_file_shape():
                  "summary: SS from a summary binds a block only when no other "
                  "block holds its start",
                  "summary: SS from a summary to a block feeding a later child "
-                 "is not a cycle"):
+                 "is not a cycle",
+                 "summary: idea blocks do not stretch a summary"):
         assert must in names
 
 

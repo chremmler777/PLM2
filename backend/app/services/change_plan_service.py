@@ -240,6 +240,27 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
     return {"errors": errors, "warnings": warnings}
 
 
+def chain_buffer_days(tasks: list, links=None) -> int:
+    """Buffer days that protect the finish: buffer blocks that end the plan
+    or lead to a block that does (along the links, through summaries). A
+    buffer on a dead-end branch protects nothing."""
+    lks = e_links(links) if links is not None else legacy_links(tasks)
+    ets = e_tasks(tasks)
+    summaries = eng.summary_ids(ets)
+    real = [t for t in tasks if not t.is_idea and t.id not in summaries]
+    if not real:
+        return 0
+    end = max(t.end_date for t in real)
+    finish_ids = {t.id for t in real if t.end_date == end}
+    total = 0
+    for b in real:
+        if b.kind != "buffer":
+            continue
+        if b.id in finish_ids or finish_ids & set(eng.downstream(ets, lks, [b.id])):
+            total += int(b.duration_days or 0)
+    return total
+
+
 def _pred_notation(links: list, t_id: int) -> str:
     """MS Project notation of a block's predecessors: 12, 13SS+2d, 14FF-1d."""
     parts = []
@@ -341,9 +362,23 @@ class ChangePlanService:
         return eng.Calendar.from_json(ChangePlanService._calendars(change).get(plan))
 
     @staticmethod
-    def _store_calendar(change: ChangeRequest, plan: str, cal: eng.Calendar) -> None:
+    def auto(change: ChangeRequest, plan: str) -> bool:
+        """Automatic scheduling (default on): an edit pushes the blocks its
+        links drive, as the Gantt does, before the baseline too."""
+        raw = ChangePlanService._calendars(change).get(plan) or {}
+        return bool(raw.get("auto", True))
+
+    @staticmethod
+    def calendar_out(change: ChangeRequest, plan: str) -> dict:
+        return {**ChangePlanService.calendar(change, plan).to_json(),
+                "auto": ChangePlanService.auto(change, plan)}
+
+    @staticmethod
+    def _store_calendar(change: ChangeRequest, plan: str, cal: eng.Calendar,
+                        auto: Optional[bool] = None) -> None:
+        keep = ChangePlanService.auto(change, plan) if auto is None else bool(auto)
         cals = {k: v for k, v in ChangePlanService._calendars(change).items() if v}
-        cals[plan] = cal.to_json()
+        cals[plan] = {**cal.to_json(), "auto": keep}
         change.plan_calendar = cals          # a new dict: JSON change tracked
 
     @staticmethod
@@ -480,7 +515,9 @@ class ChangePlanService:
                 ChangeOffer.status.in_(("sent", "accepted")))
             .order_by(ChangeOffer.version.desc()).limit(1)
         )).scalar_one_or_none()
-        if offer is not None and offer.valid_until is not None:
+        # once the customer accepted, the offer's validity is history
+        if offer is not None and offer.status != "accepted" \
+                and offer.valid_until is not None:
             out.append({"key": "offer_valid_until", "label": "Offer valid until",
                         "date": offer.valid_until})
         return out
@@ -536,7 +573,7 @@ class ChangePlanService:
                 {"id": None, "from_task_id": lk.from_id, "to_task_id": lk.to_id,
                  "type": "FS", "lag_days": 0, "legacy": True}
                 for lk in math_links[len(links):]],
-            "calendar": cal.to_json(),
+            "calendar": ChangePlanService.calendar_out(change, plan),
             "revision": int(change.plan_revision or 0),
             "baseline_set": any(t.baseline_start is not None for t in tasks),
             "can_edit": bool(editor and in_window and not baselined),
@@ -544,8 +581,7 @@ class ChangePlanService:
             "progress_department_ids": progress_ids,
             "summary": {
                 "start": start, "finish": finish, "duration_days": span,
-                "buffer_days": sum(int(t.duration_days or 0) for t in real
-                                   if t.kind == "buffer"),
+                "buffer_days": chain_buffer_days(tasks, math_links),
                 "critical_ids": critical,
                 "ideas": sum(1 for t in tasks if t.is_idea),
             },
@@ -771,7 +807,8 @@ class ChangePlanService:
         src_plan = source[0].plan if source else None
         cal = ChangePlanService.calendar(change, src_plan or plan)
         if src_plan and src_plan != plan:
-            ChangePlanService._store_calendar(change, plan, cal)
+            ChangePlanService._store_calendar(
+                change, plan, cal, auto=ChangePlanService.auto(change, src_plan))
         id_map: dict[int, ChangePlanTask] = {}
         for t in source:
             n = ChangePlanTask(
@@ -1146,6 +1183,11 @@ class ChangePlanService:
             moved = await ChangePlanService._apply_dates(
                 session, change, plan, siblings,
                 {task.id: date_spec}, user, reason=reason, bump=False)
+        relinked = any(k in spec for k in ("predecessors", "constraint_type",
+                                           "constraint_date", "parent_id"))
+        moved += await ChangePlanService._auto_push(
+            change, plan, siblings, links, moved, [task.id] if relinked else [],
+            user)
         await ChangePlanService._rollup(session, change, plan)
         if (spec and not progress_only) or moved:
             await ChangePlanService._bump(change, plan)
@@ -1188,11 +1230,39 @@ class ChangePlanService:
             raise ChangeError("Nothing to update")
         moved = await ChangePlanService._apply_dates(
             session, change, plan, siblings, changes, user, reason=reason)
+        moved += await ChangePlanService._auto_push(
+            change, plan, siblings, await ChangePlanService.links(session, change, plan),
+            moved, [], user)
         await ChangePlanService._rollup(session, change, plan)
         await ChangeService.append_changelog(
             session, change, "plan_task_updated",
             f"{plan.capitalize()} plan: {len(moved)} block(s) moved", user.id,
             new_value={"plan": plan, "task_ids": moved})
+
+    @staticmethod
+    async def _auto_push(change, plan, tasks: list, links: list, sources,
+                         also, user: User) -> list[int]:
+        """Automatic scheduling before the baseline: what the edit drives
+        moves along its links (later only; pinned and started blocks stay),
+        the same forward pass the Gantt runs, so an API client gets the plan
+        the UI shows. No deviations: nothing was promised yet. After the
+        baseline _apply_dates cascades (with deviations) instead."""
+        sources, also = list(dict.fromkeys(sources)), list(dict.fromkeys(also))
+        if (not sources and not also) or ChangePlanService.baselined(change, plan) \
+                or not ChangePlanService.auto(change, plan):
+            return []
+        cal = ChangePlanService.calendar(change, plan)
+        res, _cause = eng.push(e_tasks(tasks), e_links(links), cal, sources,
+                               also=also)
+        by_id = {t.id: t for t in tasks}
+        moved = []
+        for tid in res.moved:
+            t = by_id[tid]
+            if t.start_date != res.tasks[tid].start:
+                t.start_date = res.tasks[tid].start
+                t.updated_by = user.id
+                moved.append(tid)
+        return moved
 
     @staticmethod
     async def _apply_dates(session, change, plan, siblings: list,
@@ -1502,9 +1572,29 @@ class ChangePlanService:
         if len(holidays) > eng.MAX_HOLIDAYS:
             raise ChangeError(f"At most {eng.MAX_HOLIDAYS} holidays")
         before = ChangePlanService._calendars(change).get(plan)
+        old = ChangePlanService.calendar(change, plan)
         cal = eng.Calendar(mode, workdays, holidays)
-        ChangePlanService._store_calendar(change, plan, cal)
+        auto = spec.get("auto")
+        ChangePlanService._store_calendar(change, plan, cal, auto=auto)
         tasks = await ChangePlanService.tasks(session, change, plan)
+        converted = 0
+        if spec.get("convert") and old.working != cal.working:
+            # keep the real length: calendar -> working ceil(d * n / 7),
+            # working -> calendar ceil(d * 7 / n), n = working days a week
+            n = len(cal.workdays if cal.working else old.workdays) or 5
+            num, den = (n, 7) if cal.working else (7, n)
+
+            def conv(d: int) -> int:
+                d = int(d or 0)
+                return (1 if d >= 0 else -1) * math.ceil(abs(d) * num / den)
+            summaries = eng.summary_ids(e_tasks(tasks))
+            for t in tasks:
+                if t.id not in summaries and int(t.duration_days or 0) > 0:
+                    t.duration_days = conv(t.duration_days)
+                    converted += 1
+            for lk in await ChangePlanService.links(session, change, plan):
+                if lk.lag_days:
+                    lk.lag_days = conv(lk.lag_days)
         for t in tasks:
             ChangePlanService._normalise(t, cal)
         await ChangePlanService._rollup(session, change, plan)
@@ -1514,8 +1604,11 @@ class ChangePlanService:
         await ChangeService.append_changelog(
             session, change, "plan_calendar",
             f"{plan.capitalize()} plan calendar set to {mode} days"
-            + (f" ({len(holidays)} holidays)" if holidays else ""), user.id,
-            old_value=before, new_value={"plan": plan, **cal.to_json()})
+            + (f" ({len(holidays)} holidays)" if holidays else "")
+            + (f", {converted} durations converted" if converted else ""), user.id,
+            old_value=before,
+            new_value={"plan": plan, **ChangePlanService.calendar_out(change, plan),
+                       "converted": bool(spec.get("convert"))})
 
     # ------------------------------------------------------------------
     # Batch (one Gantt ChangeSet per user action)
@@ -1696,7 +1789,13 @@ class ChangePlanService:
                 session, change, plan, tasks, date_changes, user,
                 reason=reason, bump=False)
 
-        # 4. links
+        # 4. links (their targets, like blocks given new links or
+        # constraints, may move themselves under automatic scheduling)
+        push_keys = ("predecessors", "constraint_type", "constraint_date", "parent_id")
+        relinked = [t.id for u, t in new_tasks
+                    if any(u.get(k) for k in push_keys)]
+        relinked += [u["id"] for u in updates if any(k in u for k in push_keys)
+                     and u["id"] in by_id]
         for item in lups:
             lid = item.get("id")
             typ = (item.get("type") or "FS").upper()
@@ -1716,6 +1815,7 @@ class ChangePlanService:
                                               own_id=lk.id)
                 lk.from_task_id, lk.to_task_id, lk.type, lk.lag_days = \
                     frm, to, typ, lag
+                relinked.append(to)
             else:
                 frm, to = ref(item.get("from_task_id")), ref(item.get("to_task_id"))
                 lag = int(item.get("lag_days") or 0)
@@ -1725,12 +1825,15 @@ class ChangePlanService:
                                     lag_days=lag, created_by=user.id)
                 session.add(lk)
                 links.append(lk)
+                relinked.append(to)
                 await ChangePlanService._flush_links(session)
                 if lid is not None:
                     link_id_map[str(lid)] = lk.id
         await ChangePlanService._flush_links(session)
 
         ChangePlanService._check_structure(before_issues, tasks, links)
+        moved += await ChangePlanService._auto_push(
+            change, plan, tasks, links, moved, relinked, user)
         await ChangePlanService._rollup(session, change, plan)
         if creates or dels or lups or ldels or moved or (touched and not progress_only):
             await ChangePlanService._bump(change, plan)
@@ -2173,7 +2276,7 @@ class ChangePlanService:
                    for lk in links
                    if lk.from_task_id in real_ids and lk.to_task_id in real_ids]
         return eng.build_mspdi(
-            name=f"{change.change_number}-{plan}.xml",
+            name=f"{change.change_number} {change.title}",
             title=f"{change.change_number} {plan} plan: {change.title}",
             cal=cal, tasks=rows, links=lk_rows)
 

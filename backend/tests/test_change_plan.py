@@ -661,7 +661,7 @@ async def test_predecessors_are_served_from_links(client, world):
     t = _by_name(out)
     assert t["B"]["predecessors"] == [a["id"]]
     assert out["calendar"] == {"mode": "calendar", "workdays": [1, 2, 3, 4, 5],
-                               "holidays": []}
+                               "holidays": [], "auto": True}
     for key in ("parent_id", "constraint_type", "constraint_date", "total_slack",
                 "free_slack", "wbs", "is_summary"):
         assert key in t["A"]
@@ -784,7 +784,7 @@ async def test_working_calendar(client, world):
     res = await client.put(url, json=body, headers=sales)
     assert res.status_code == 200, res.text
     out = res.json()
-    assert out["calendar"] == body
+    assert out["calendar"] == {**body, "auto": True}
     t = _by_name(out)
     # snapped to Monday 9 Nov; Mon, Tue, (Wed holiday), Thu, Fri, Mon -> Tue 17
     assert t["A"]["start_date"] == "2026-11-09" and t["A"]["end_date"] == "2026-11-17"
@@ -1131,12 +1131,13 @@ async def test_each_plan_has_its_own_calendar(client, world, session_factory):
     await _task(client, sales, cid, "A", "2026-11-02", 5)
     working = {"mode": "working", "workdays": [1, 2, 3, 4, 5], "holidays": []}
     res = await client.put(f"{url}?plan=quote", json=working, headers=sales)
-    assert res.status_code == 200 and res.json()["calendar"] == working
+    assert res.status_code == 200 and res.json()["calendar"] == {**working, "auto": True}
     # the detailed plan is seeded with the quote plan's calendar
     await _set(session_factory, cid, status="approved")
     res = await _seed(client, sales, cid, plan="detailed")
     assert res.status_code == 200, res.text
-    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == working
+    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == {
+        **working, "auto": True}
     # the quote plan is frozen once accepted: its calendar is too, and a
     # change of the detailed calendar leaves it alone
     res = await client.put(f"{url}?plan=quote", json={"mode": "calendar"},
@@ -1148,11 +1149,12 @@ async def test_each_plan_has_its_own_calendar(client, world, session_factory):
     assert res.status_code == 200, res.text
     assert res.json()["calendar"]["mode"] == "calendar"
     quote = await _plan(client, sales, cid, "quote")
-    assert quote["calendar"] == working
+    assert quote["calendar"] == {**working, "auto": True}
     assert _by_name(quote)["A"]["end_date"] == "2026-11-07"   # 5 working days
     # the older flat shape still reads as the calendar of both plans
     await _set(session_factory, cid, plan_calendar=working)
-    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == working
+    assert (await _plan(client, sales, cid, "detailed"))["calendar"] == {
+        **working, "auto": True}
 
 
 async def test_summary_rules_on_write(client, world):
@@ -1362,3 +1364,131 @@ async def test_import_warnings_and_refusals(client, world, session_factory):
     assert res.status_code == 200, res.text
     assert res.json()["calendar"]["mode"] == "calendar"
     assert (await _plan(client, sales, cid, "quote"))["calendar"]["mode"] == "working"
+
+
+# --- live walk: plan backend P1-P6 ---------------------------------------------
+
+async def test_auto_scheduling_before_the_baseline(client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-07", 2, predecessors=[a["id"]])
+    c = await _task(client, sales, cid, "C", "2026-11-09", 1, predecessors=[b["id"]])
+    url = f"/api/v1/changes/{cid}/plan"
+    # a longer A pushes B and C (the user sent only A)
+    res = await client.patch(f"{url}/tasks/{a['id']}", json={"duration_days": 7},
+                             headers=sales)
+    t = _by_name(res.json())
+    assert (t["B"]["start_date"], t["C"]["start_date"]) == ("2026-11-09", "2026-11-11")
+    assert res.json()["validation"]["errors"] == []
+    # a new link or lag in a change set moves its target
+    d = await _task(client, sales, cid, "D", "2026-11-02", 1)
+    res = await client.post(f"{url}/changes", json={"plan": "quote", "changes": {
+        "links_upsert": [{"from_task_id": c["id"], "to_task_id": d["id"],
+                          "type": "FS", "lag_days": 2}]}}, headers=sales)
+    assert res.status_code == 200, res.text
+    assert _by_name(res.json())["D"]["start_date"] == "2026-11-14"
+    # a constraint moves the block and what follows it
+    res = await client.patch(f"{url}/tasks/{b['id']}", json={
+        "constraint_type": "snet", "constraint_date": "2026-11-20"}, headers=sales)
+    t = _by_name(res.json())
+    assert (t["B"]["start_date"], t["C"]["start_date"], t["D"]["start_date"]) == \
+        ("2026-11-20", "2026-11-22", "2026-11-25")
+    # bulk moves push too; never a deviation before the baseline
+    res = await client.patch(f"{url}/tasks", json={"plan": "quote", "updates": [
+        {"id": a["id"], "start_date": "2026-11-20"}]}, headers=sales)
+    assert _by_name(await _plan(client, sales, cid))["B"]["start_date"] == "2026-11-27"
+    assert (await client.get(f"{url}/deviations", headers=sales)).json() == []
+    # auto off: the edit stands alone, the overlap is reported
+    res = await client.put(f"{url}/calendar?plan=quote",
+                           json={"mode": "calendar", "auto": False}, headers=sales)
+    assert res.json()["calendar"]["auto"] is False
+    res = await client.patch(f"{url}/tasks/{a['id']}", json={"duration_days": 12},
+                             headers=sales)
+    assert _by_name(res.json())["B"]["start_date"] == "2026-11-27"
+    assert "dependency_violation" in {e["code"] for e in res.json()["validation"]["errors"]}
+    # a calendar change without `auto` keeps the setting
+    res = await client.put(f"{url}/calendar?plan=quote", json={"mode": "calendar"},
+                           headers=sales)
+    assert res.json()["calendar"]["auto"] is False
+
+
+async def test_calendar_convert_keeps_real_lengths(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 10)
+    b = await _task(client, sales, cid, "B", "2026-11-20", 3)
+    await _task(client, sales, cid, "M", "2026-11-20", 0, kind="milestone")
+    url = f"/api/v1/changes/{cid}/plan"
+    await client.post(f"{url}/links", json={"plan": "quote", "from_task_id": a["id"],
+                                            "to_task_id": b["id"], "lag_days": -3},
+                      headers=sales)
+    res = await client.put(f"{url}/calendar?plan=quote", json={
+        "mode": "working", "convert": True}, headers=sales)
+    out = res.json()
+    t = _by_name(out)
+    # calendar -> working: ceil(d * 5 / 7)
+    assert (t["A"]["duration_days"], t["B"]["duration_days"],
+            t["M"]["duration_days"]) == (8, 3, 0)
+    assert out["links"][0]["lag_days"] == -3          # -ceil(3 * 5 / 7)
+    res = await client.put(f"{url}/calendar?plan=quote", json={
+        "mode": "calendar", "convert": True}, headers=sales)
+    t = _by_name(res.json())
+    # working -> calendar: ceil(d * 7 / 5)
+    assert (t["A"]["duration_days"], t["B"]["duration_days"]) == (12, 5)
+    assert res.json()["links"][0]["lag_days"] == -5
+    # without convert the numbers stay
+    res = await client.put(f"{url}/calendar?plan=quote", json={"mode": "working"},
+                           headers=sales)
+    assert _by_name(res.json())["A"]["duration_days"] == 12
+
+
+async def test_buffer_days_count_the_chain_only(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    await _task(client, sales, cid, "Buffer", "2026-11-07", 4, kind="buffer",
+                predecessors=[a["id"]])
+    # a dead-end buffer next to the chain
+    await _task(client, sales, cid, "Side buffer", "2026-11-02", 2, kind="buffer")
+    out = await _plan(client, sales, cid)
+    assert out["summary"]["buffer_days"] == 4
+
+
+async def test_export_name_and_deadlines(client, world, session_factory):
+    from app.models.change_offer import ChangeOffer
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    await _task(client, sales, cid, "A", "2026-11-02", 5)
+    await _task(client, sales, cid, "Maybe", "2026-10-01", 5, is_idea=True)
+    xml = (await client.get(f"/api/v1/changes/{cid}/plan/export.xml?plan=quote",
+                            headers=sales)).content
+    root = ET.fromstring(xml)
+    assert root.find(f"{NS}Name").text == "C-P-1 plan me"
+    assert root.find(f"{NS}StartDate").text.startswith("2026-11-02")
+    async with session_factory() as s:
+        s.add(ChangeOffer(change_id=cid, version=1, status="sent", currency="EUR",
+                          data={}, valid_until=date(2026, 12, 31),
+                          created_by=world["users"]["sales"]))
+        await s.commit()
+    keys = {d["key"] for d in (await _plan(client, sales, cid))["deadlines"]}
+    assert "offer_valid_until" in keys
+    async with session_factory() as s:
+        from sqlalchemy import update
+        await s.execute(update(ChangeOffer).where(ChangeOffer.change_id == cid)
+                        .values(status="accepted"))
+        await s.commit()
+    keys = {d["key"] for d in (await _plan(client, sales, cid))["deadlines"]}
+    assert "offer_valid_until" not in keys
+
+
+async def test_summary_rollup_leaves_ideas_out(client, world):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    s = await _task(client, sales, cid, "Phase", "2026-11-02", 1)
+    await _task(client, sales, cid, "A", "2026-11-02", 3, parent_id=s["id"])
+    await _task(client, sales, cid, "Idea", "2026-11-02", 20, parent_id=s["id"],
+                is_idea=True)
+    t = _by_name(await _plan(client, sales, cid))
+    assert (t["Phase"]["start_date"], t["Phase"]["end_date"]) == \
+        ("2026-11-02", "2026-11-05")

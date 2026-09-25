@@ -3037,6 +3037,85 @@
      "free_slack": 0
     }
    }
+  },
+  {
+   "name": "summary: idea blocks do not stretch a summary",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 3,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "I",
+     "start": "2026-10-05",
+     "duration": 10,
+     "constraint": null,
+     "parentId": "S",
+     "isIdea": true
+    },
+    {
+     "id": "X",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "S",
+     "to": "X",
+     "type": "FS",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-08",
+     "total_slack": 0,
+     "critical": true
+    },
+    "I": {
+     "start": "2026-10-05",
+     "end": "2026-10-15",
+     "total_slack": null,
+     "critical": false
+    },
+    "X": {
+     "start": "2026-10-08",
+     "end": "2026-10-10",
+     "total_slack": 0,
+     "critical": true
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-08",
+     "total_slack": 0,
+     "critical": true
+    }
+   }
   }
  ]
 }

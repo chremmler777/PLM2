@@ -34,7 +34,8 @@ before that link binds (project end - ef without successors), never more
 than total slack. critical = total slack <= 0.
 
 Summary tasks (a task some other task names as parent) roll up: start/end =
-min/max of the children, slack = min of the children, critical when any
+min/max of the children with committed work below them (idea blocks do not
+stretch a summary; a summary of ideas only rolls up its ideas), slack = min of the children, critical when any
 child is, progress weighted by child duration. Links on summaries follow MS
 Project, modelled as three points per summary instead of one link per pair
 of leaves (so nested summaries never multiply links):
@@ -385,6 +386,9 @@ class Graph:
     order: Optional[list]
     # summary id -> the children its start point rolls up
     start_kids: dict = field(default_factory=dict)
+    # summary id -> the children its dates roll up: those with committed
+    # (non-idea) work below them; all children when there is none
+    real_kids: dict = field(default_factory=dict)
 
     def src(self, tid, typ="FS"):
         if tid not in self.summaries:
@@ -470,12 +474,22 @@ def graph(tasks: list[ETask], links: list[ELink]) -> Graph:
                     seen.add(m)
                     stack.append(m)
         return seen
-    # Start points roll up their children, deepest summary first, leaving
-    # out a child the start point itself drives.
+    # Summary dates roll up the children with committed work (an idea is a
+    # proposal: it does not stretch a summary). Start points, deepest
+    # summary first, also leave out a child the start point itself drives.
+    has_real: dict = {}
+    for tid, _w in reversed(dfs_order(tasks)):
+        if tid not in summaries:
+            has_real[tid] = not by_id[tid].idea
+            continue
+        kids = children[tid]
+        real = [c for c in kids if has_real[c]]
+        has_real[tid] = bool(real)
+        g.real_kids[tid] = real or kids
     for sid, _w in reversed(dfs_order(tasks)):
         if sid not in summaries:
             continue
-        kids = children[sid]
+        kids = g.real_kids[sid]
         driven = reach(("PS", sid)) if succ.get(("PS", sid)) else set()
         keep = [c for c in kids if g.node(c, "S") not in driven] or kids
         g.start_kids[sid] = keep
@@ -593,7 +607,7 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             elif kind == "PS":
                 es[tid] = min(es[k] for k in g.start_kids[tid])
             else:
-                ef[tid] = max(ef[k] for k in g.children[tid])
+                ef[tid] = max(ef[k] for k in g.real_kids[tid])
 
     for tid in leaves:
         t = by_id[tid]
@@ -715,7 +729,7 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
         kids = g.children.get(tid, [])
         if not kids:
             continue
-        rs = [res.tasks[k] for k in kids]
+        rs = [res.tasks[k] for k in g.real_kids[tid]]
         weight = sum(max(r.end_idx - r.start_idx, 0) for r in rs)
         # weights: each child's span (a nested summary's rolled-up span);
         # half-up rounding, the same in the browser (not banker's round())
@@ -782,11 +796,25 @@ def cascade(tasks: list[ETask], links: list[ELink], cal: Calendar,
     its date, and so does a block whose work has started: the walk goes on
     through it, it stays put). Returns the result and {moved leaf: source
     that caused it}."""
-    cause = downstream(tasks, links, sources)
+    return push(tasks, links, cal, sources)
+
+
+def push(tasks: list[ETask], links: list[ELink], cal: Calendar, sources: list,
+         also: Iterable = ()) -> tuple[PlanResult, dict]:
+    """cascade(), plus `also`: blocks that may move themselves (a new link
+    or lag into them, a changed constraint on them), each its own cause.
+    Automatic scheduling before the baseline and the deviation cascade
+    after it are this one forward pass."""
+    cause = downstream(tasks, links, list(sources) + [a for a in also
+                                                      if a not in sources])
+    for a in also:
+        cause.setdefault(a, a)
     cons = _constraints(tasks)
     started = {t.id for t in tasks if t.started}
+    summaries = summary_ids(tasks)
     movable = {tid for tid in cause
-               if _pin(cons.get(tid, []), cal, 0) is None and tid not in started}
+               if tid not in summaries and tid not in started
+               and (tid in also or _pin(cons.get(tid, []), cal, 0) is None)}
     res = compute(tasks, links, cal, move=True, only=movable)
     return res, {tid: cause[tid] for tid in res.moved}
 
@@ -865,7 +893,7 @@ def engine_issues(tasks: list[ETask], links: list[ELink], cal: Calendar) -> dict
         es[tid] = cal.idx(t.start)
         ef[tid] = es[tid] + max(int(t.duration or 0), 0)
     for tid, _w in reversed(dfs_order(tasks)):
-        kids = g.children.get(tid, [])
+        kids = g.real_kids.get(tid, [])
         if kids:
             es[tid] = min(es[k] for k in kids)
             ef[tid] = max(ef[k] for k in kids)

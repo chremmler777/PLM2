@@ -121,6 +121,11 @@ class CalendarIn(BaseModel):
     mode: str = "calendar"
     workdays: List[int] = [1, 2, 3, 4, 5]
     holidays: List[PlanDate] = Field(default=[], max_length=eng.MAX_HOLIDAYS)
+    # convert durations and lags when the mode changes (keeps real lengths)
+    convert: bool = False
+    # automatic scheduling: edits push the blocks their links drive; None
+    # keeps the plan's current setting (default on)
+    auto: Optional[bool] = None
 
 
 # Batch ChangeSet. Ids of new blocks / links may be client temp ids
