@@ -224,33 +224,74 @@ class ReleaseService:
     # State
     # ------------------------------------------------------------------
     @staticmethod
+    async def open_deviation_count(session: AsyncSession,
+                                   change: ChangeRequest) -> int:
+        """Plan deviations nobody decided yet (neither locked nor escalated).
+        Read-only use of the plan model."""
+        from sqlalchemy import func
+        from app.models.change_plan import ChangePlanDeviation
+        return int((await session.execute(
+            select(func.count()).select_from(ChangePlanDeviation).where(
+                ChangePlanDeviation.change_id == change.id,
+                ChangePlanDeviation.status == "open"))).scalar() or 0)
+
+    @staticmethod
+    def deviations_message(n: int) -> str:
+        return (f"{n} plan deviation{'s' if n != 1 else ''} still open: "
+                "lock or escalate them first")
+
+    @staticmethod
+    def not_ready_message(progress: dict) -> Optional[str]:
+        """The ready-to-go half, in the same words for the guard and the
+        Release tab: None when every impacted revision is through its check
+        workflow."""
+        if progress["ready_to_go"]:
+            return None
+        pending = sum(1 for e in progress["items"] if not e["ready"])
+        if not progress["items"]:
+            return "Not ready to go: no impacted revision to release"
+        if pending == 1:
+            return ("Not ready to go: 1 impacted revision has not completed "
+                    "its check workflow")
+        return (f"Not ready to go: {pending} impacted revisions have not "
+                "completed their check workflow")
+
+    @staticmethod
     async def guard_reason(session: AsyncSession,
                            change: ChangeRequest) -> Optional[str]:
-        """The release checklist + lessons half of the released guard."""
+        """The release checklist, lessons and plan deviation half of the
+        released guard."""
         n = await ReleaseService.open_count(session, change)
         if n:
             return f"Release checklist incomplete: {n} open"
         if change.lessons_done_at is None:
             return "Lessons learned step not done"
+        n = await ReleaseService.open_deviation_count(session, change)
+        if n:
+            return ReleaseService.deviations_message(n)
         return None
 
     @staticmethod
     async def blockers(session: AsyncSession, change: ChangeRequest) -> list[str]:
+        """Every reason the release would be refused today, in the guard's
+        order and words."""
         from app.services.validation_service import ValidationService
         out = []
         blocker = await ValidationService.release_blocker(session, change)
         if blocker:
             out.append(blocker)
-        progress = await ChangeService.implementation_progress(session, change)
-        if not progress["ready_to_go"]:
-            pending = sum(1 for e in progress["items"] if not e["ready"])
-            out.append(f"not ready to go: {pending} of {len(progress['items'])} "
-                       "impacted revisions have not completed their check workflow")
+        not_ready = ReleaseService.not_ready_message(
+            await ChangeService.implementation_progress(session, change))
+        if not_ready:
+            out.append(not_ready)
         n = await ReleaseService.open_count(session, change)
         if n:
             out.append(f"Release checklist incomplete: {n} open")
         if change.lessons_done_at is None:
             out.append("Lessons learned step not done")
+        n = await ReleaseService.open_deviation_count(session, change)
+        if n:
+            out.append(ReleaseService.deviations_message(n))
         return out
 
     @staticmethod

@@ -33,6 +33,26 @@ from app.services.change_service import _org_scope
 router = APIRouter(prefix="/audit", tags=["audit"])
 
 
+async def _price_redactor(db: AsyncSession, current_user: User):
+    """A function row -> bool: must this row's money be blanked for the
+    caller? Rows correlated to a change follow NegotiationService.may_read
+    for that change (admin, lead, PM, Sales); other rows carry no prices."""
+    from app.services.price_redaction import PriceViewer
+    viewer = PriceViewer(db, current_user)
+    cache: dict[str, bool] = {}
+
+    async def must_redact(row) -> bool:
+        cid = row.correlation_id
+        if not cid:
+            return False
+        if cid not in cache:
+            change = (await db.execute(select(ChangeRequest).where(
+                ChangeRequest.change_number == cid))).scalars().first()
+            cache[cid] = change is not None and not await viewer.may_read(change)
+        return cache[cid]
+    return must_redact
+
+
 def _filtered(correlation_id, entity_type, entity_id, user_id, date_from, date_to):
     q = select(AuditLog)
     if correlation_id is not None:
@@ -79,7 +99,9 @@ async def list_audit(
     # Newest-first by id so a limit-truncated result drops the OLDEST entries,
     # not the newest (the frontend timeline re-sorts for display either way).
     rows = (await db.execute(q.order_by(AuditLog.id.desc()).limit(limit).offset(offset))).scalars().all()
-    return rows
+    from app.services.price_redaction import redact_audit_row
+    must_redact = await _price_redactor(db, current_user)
+    return [redact_audit_row(r) if await must_redact(r) else r for r in rows]
 
 
 @router.get("/verify", response_model=AuditVerifyResponse)
@@ -118,9 +140,14 @@ async def export_audit(
     writer.writerow(["id", "timestamp", "correlation_id", "entity_type", "entity_id",
                      "action", "user_id", "old_values", "new_values",
                      "previous_hash", "entry_hash"])
+    from app.services.price_redaction import redact_json
+    must_redact = await _price_redactor(db, current_user)
     for r in rows:
+        old, new = r.old_values, r.new_values
+        if await must_redact(r):
+            old, new = redact_json(old, r.action), redact_json(new, r.action)
         writer.writerow([r.id, r.timestamp.isoformat(), r.correlation_id, r.entity_type,
-                         r.entity_id, r.action, r.user_id, r.old_values, r.new_values,
+                         r.entity_id, r.action, r.user_id, old, new,
                          r.previous_hash, r.entry_hash])
     buf.seek(0)
     return StreamingResponse(

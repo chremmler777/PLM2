@@ -92,7 +92,10 @@ async def test_v1_is_seeded_from_costing_and_register(client, offer_world):
     o = await _create(client, sales, cid)
     assert (o["version"], o["status"], o["currency"]) == (1, "draft", "EUR")
     d = o["data"]
-    assert d["recipient"]["company"] == "Project"
+    # the project name is not an addressee: Sales types the company
+    assert d["recipient"]["company"] == ""
+    assert "recipient_missing" in {w["code"] for w in o["warnings"]}
+    assert d["scope_text"] == "Rib +0.5 mm" and d["customer_note"] == ""
     assert d["subject"] == "Offer for engineering change C-O-1: offer me"
     line = next(l for l in d["cost_lines"]
                 if l["key"] == f"pos:{offer_world['position_id']}")
@@ -208,15 +211,16 @@ async def test_send_moves_to_quoted_and_versions(client, offer_world, session_fa
     assert res.status_code == 400 and "quote plan" in res.json()["detail"]
     await _seed_quote_plan(client, sales, cid)
     today = date.today()
-    tomorrow = (today + timedelta(days=2)).isoformat()   # beyond any UTC offset
+    tomorrow = (today + timedelta(days=3)).isoformat()   # beyond any UTC offset + 1 day
     # the customer cannot receive it tomorrow, nor before it was sent
     res = await client.post(_url(cid, f"/{o['id']}/send"),
                             json={"received_at": tomorrow}, headers=sales)
     assert res.status_code == 400 and "future" in res.json()["detail"]
+    # recorded after the fact is fine, two months back is not
     res = await client.post(_url(cid, f"/{o['id']}/send"),
-                            json={"received_at": (today - timedelta(days=3)).isoformat()},
+                            json={"received_at": (today - timedelta(days=61)).isoformat()},
                             headers=sales)
-    assert res.status_code == 400 and "before the offer was sent" in res.json()["detail"]
+    assert res.status_code == 400 and "days ago" in res.json()["detail"]
     res = await client.post(_url(cid, f"/{o['id']}/send"),
                             json={"received_at": today.isoformat()}, headers=sales)
     assert res.status_code == 200, res.text

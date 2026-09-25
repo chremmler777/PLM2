@@ -205,6 +205,14 @@ class ChangelogResponse(BaseModel):
     performed_by: int
     performed_at: datetime
     notes: Optional[str] = None
+    # Which field changed, and its before/after (e.g. field_name="status",
+    # old_value="on_hold", new_value="in_assessment"). Absent on rows that
+    # don't carry a single before/after (most actions), and blanked by
+    # price_redaction.redact_changelog_row for a money-carrying field_name
+    # when the viewer may not read prices.
+    field_name: Optional[str] = None
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -1191,6 +1199,8 @@ class ValidationCheckState(BaseModel):
     # weight only: what the quote was built on, and the gap to the weighed part.
     estimated_part_weight_g: Optional[float] = None
     delta_g: Optional[float] = None
+    # An answered row an older catalog seeded; shown, never counted.
+    retired: bool = False
 
 
 class ValidationDepartmentState(BaseModel):

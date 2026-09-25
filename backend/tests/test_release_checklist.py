@@ -251,3 +251,81 @@ async def test_timing_guard_cannot_be_bypassed_through_on_hold(session_factory, 
         c.status = "in_validation"
         assert "Timing not validated" not in (
             await ChangeService._guard(s, c, "in_implementation") or "")
+
+
+async def test_open_plan_deviations_block_the_release(client, rel_world, monkeypatch,
+                                                      session_factory):
+    """An open plan deviation is a decision nobody took: lock or escalate it
+    before the change is released. Locked / escalated ones do not block."""
+    from datetime import date
+    from app.models.change_plan import ChangePlanDeviation, ChangePlanTask
+
+    async def ready(session, change):
+        return {"ready_to_go": True, "items": []}
+    monkeypatch.setattr(ChangeService, "implementation_progress", staticmethod(ready))
+    cid = rel_world["change_id"]
+    pm = await _auth(client, "pm")
+    async with session_factory() as s:
+        t = ChangePlanTask(change_id=cid, plan="detailed", name="Tool rework",
+                           start_date=date(2026, 10, 1), duration_days=5,
+                           created_by=rel_world["users"]["pm"])
+        s.add(t)
+        await s.flush()
+        for st in ("open", "open", "locked"):
+            s.add(ChangePlanDeviation(
+                change_id=cid, task_id=t.id, old_start=date(2026, 10, 1),
+                old_end=date(2026, 10, 6), new_start=date(2026, 10, 3),
+                new_end=date(2026, 10, 8), slip_days=2, reason="late steel",
+                status=st, created_by=rel_world["users"]["pm"]))
+        await s.commit()
+    st = await _state(client, pm, cid)
+    for c in st["checks"]:
+        assert (await _check(client, pm, cid, c["key"], "done")).status_code == 200
+    res = await client.post(f"/api/v1/changes/{cid}/lessons/complete",
+                            json={"none_reason": "routine"}, headers=pm)
+    msg = "2 plan deviations still open: lock or escalate them first"
+    assert res.json()["blockers"] == [msg] and res.json()["can_release"] is False
+    res = await client.post(f"/api/v1/changes/{cid}/transition",
+                            json={"to_status": "released"}, headers=pm)
+    assert res.status_code == 400 and msg in res.json()["detail"]
+    async with session_factory() as s:
+        from sqlalchemy import update
+        await s.execute(update(ChangePlanDeviation).where(
+            ChangePlanDeviation.change_id == cid).values(status="escalated"))
+        await s.commit()
+    assert (await _state(client, pm, cid))["blockers"] == []
+
+
+async def test_not_ready_to_go_is_a_blocker_on_the_release_tab(client, rel_world,
+                                                               monkeypatch):
+    async def pending(session, change):
+        return {"ready_to_go": False,
+                "items": [{"ready": False}, {"ready": True}, {"ready": False}]}
+    monkeypatch.setattr(ChangeService, "implementation_progress",
+                        staticmethod(pending))
+    pm = await _auth(client, "pm")
+    st = await _state(client, pm, rel_world["change_id"])
+    assert ("Not ready to go: 2 impacted revisions have not completed their "
+            "check workflow") in st["blockers"]
+    assert not any("—" in b for b in st["blockers"])
+
+
+async def test_release_and_close_are_pm_lead_or_admin(client, rel_world, session_factory,
+                                                       admin_auth):
+    cid = rel_world["change_id"]
+    dev, pm = await _auth(client, "dev"), await _auth(client, "pm")
+
+    async def move(auth, to):
+        return await client.post(f"/api/v1/changes/{cid}/transition",
+                                 json={"to_status": to}, headers=auth)
+
+    res = await move(dev, "released")
+    assert res.status_code == 403 and "Project Management" in res.json()["detail"]
+    # PM passes the role check (and is refused on the guard instead)
+    assert (await move(pm, "released")).status_code == 400
+    async with session_factory() as s:
+        c = await s.get(ChangeRequest, cid)
+        c.status = "released"
+        await s.commit()
+    assert (await move(dev, "closed")).status_code == 403
+    assert (await move(admin_auth, "closed")).status_code == 200

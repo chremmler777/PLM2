@@ -22,7 +22,9 @@ from app.models.change import (
     ChangeImpactedItem, SIGN_OFF_ROLES, BLOCKING_LETTERS,
 )
 from app.models.workflow import UserDepartment, Department
-from app.services.change_service import ChangeService, ChangeError, _org_scope
+from app.services.change_service import (
+    ALLOWED_TRANSITIONS, ChangeService, ChangeError, _org_scope,
+)
 from app.services.workflow_service import WorkflowService
 from app.services.meeting_service import MeetingService
 from app.schemas.change import (
@@ -101,7 +103,7 @@ async def create_change(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.get("", response_model=List[ChangeResponse])
@@ -117,9 +119,16 @@ async def list_changes(
         db, viewer=current_user, project_id=project_id, status=status,
         change_type=change_type, lead_id=lead_id,
     )
+    from app.services.price_redaction import PriceViewer, redact_change_out
+    viewer = PriceViewer(db, current_user)
+    out = []
     for change in changes:
         change.deadline_state = await ChangeService.deadline_state(db, change)
-    return changes
+        row = ChangeResponse.model_validate(change)
+        if not await viewer.may_read(change):
+            redact_change_out(row)
+        out.append(row)
+    return out
 
 
 @router.get("/permissions")
@@ -933,7 +942,7 @@ async def get_change(
         a.has_change_ppt = state.get("has_change_ppt", False)
         a.has_rfq = state.get("has_rfq", False)
         a.rfq_expected = state.get("rfq_expected", False)
-    return change
+    return await _price_safe(db, change, current_user, ChangeDetailResponse)
 
 
 @router.get("/{change_id}/my-actions")
@@ -974,23 +983,18 @@ async def get_changelog(
 
 
 def _redact_changelog(row) -> dict:
-    import re
-    desc = row.action_description or ""
-    notes = row.notes
-    if row.action == "offer_sent":
-        # legacy "Offer v2 sent: 1234.00 EUR, valid until ..."
-        desc = re.sub(r"\s*sent:\s*-?[\d.,]+\s*[A-Z]{3},", " sent,", desc)
-    elif row.action == "internal_costs_approved":
-        desc = "Internal costs approved"
-    elif row.action == "costing_offer_added":
-        desc = re.sub(r":\s*-?[\d.,]+\s*$", "", desc)
-    elif row.action == "negotiation_final":
-        m = re.match(r"(Negotiation closed \([^)]*\))", desc)
-        desc = m.group(1) if m else "Negotiation closed"
-        notes = None
-    return {"id": row.id, "action": row.action, "action_description": desc,
-            "performed_by": row.performed_by, "performed_at": row.performed_at,
-            "notes": notes}
+    from app.services.price_redaction import redact_changelog_row
+    return redact_changelog_row(row)
+
+
+async def _price_safe(db, change, user, model):
+    """The change header as `model`, its money fields nulled for a viewer
+    outside the cost roles (see price_redaction)."""
+    from app.services.price_redaction import PriceViewer, redact_change_out
+    out = model.model_validate(change)
+    if not await PriceViewer(db, user).may_read(change):
+        redact_change_out(out)
+    return out
 
 
 @router.get("/{change_id}/implementation")
@@ -1185,6 +1189,17 @@ async def transition_change(
                 detail="Only Project Management, Sales, the change lead or an "
                        "admin may send a change back from validation to "
                        "implementation")
+    # Releasing and closing are the programme's calls: Project Management,
+    # the change lead or an admin (acting-as aware, like the release tab).
+    # (Only for a hop that exists: an illegal one keeps its 400.)
+    if (body.to_status in ("released", "closed") and body.to_status
+            in ALLOWED_TRANSITIONS.get(change.status, set())):
+        from app.services.release_service import ReleaseService
+        if not await ReleaseService.is_pm_or_lead(db, change, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only Project Management, the change lead or an admin "
+                       f"may move a change to '{body.to_status}'")
     try:
         await ChangeService.transition(
             db, change, body.to_status, current_user.id,
@@ -1197,7 +1212,7 @@ async def transition_change(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/impacted-items", response_model=ImpactedItemResponse)
@@ -1323,7 +1338,7 @@ async def confirm_impact(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/assessments", response_model=AssessmentResponse)
@@ -1438,7 +1453,7 @@ async def update_change(
     )
     change = result.scalar_one()
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/customer-response", response_model=ChangeResponse)
@@ -1467,7 +1482,7 @@ async def customer_response(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/rejection-sent", response_model=ChangeResponse)
@@ -1497,7 +1512,7 @@ async def confirm_rejection_sent(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/sign-off", response_model=ChangeResponse)
@@ -1521,7 +1536,7 @@ async def sign_off(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/internal-approval", response_model=ChangeResponse)
@@ -1547,7 +1562,7 @@ async def approve_internal_costs(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.put("/{change_id}/weight-estimate", response_model=ChangeResponse)
@@ -1578,7 +1593,7 @@ async def put_weight_estimate(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.put("/{change_id}/bank-build", response_model=ChangeResponse)
@@ -1610,7 +1625,7 @@ async def put_bank_build(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/bank-build/publish", response_model=ChangeResponse)
@@ -1638,7 +1653,7 @@ async def publish_bank_build(
     await db.commit()
     await db.refresh(change)
     change.deadline_state = await ChangeService.deadline_state(db, change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)
 
 
 @router.post("/{change_id}/attachments", status_code=status.HTTP_201_CREATED)
@@ -2734,4 +2749,4 @@ async def acknowledge_weight_delta(
         raise HTTPException(status_code=400, detail=str(e))
     await db.commit()
     await db.refresh(change)
-    return change
+    return await _price_safe(db, change, current_user, ChangeResponse)

@@ -16,6 +16,7 @@ reason on the record.
 """
 import copy
 import math
+import re
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -51,6 +52,22 @@ DEFAULT_FACTORS = [
     ("discount", "Discount", "pct", -1),
 ]
 SEEDED_LINE_PREFIXES = ("dept:", "dept_ext:", "pos:")
+# Factors the customer does not see as a line by default: their amount is
+# folded into the cost lines on the PDF (the total is the same).
+HIDDEN_FACTOR_KEYS = ("overhead", "margin")
+# What the PDF of a sent version is rendered from (parts, quote plan,
+# letterhead as they were when it was sent). Server-owned: never patched.
+SNAPSHOT_KEY = "_snapshot"
+# A sent receipt date may be recorded after the fact, but not absurdly so.
+RECEIVED_MAX_PAST_DAYS = 60
+
+
+def _bool(v, default: bool = False) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
 
 
 def _num(v, default: float = 0.0) -> float:
@@ -66,6 +83,10 @@ def default_data() -> dict:
     return {
         "recipient": {"company": "", "contact": "", "address": ""},
         "subject": "", "intro": "",
+        # What the customer reads as the scope (seeded from the change's
+        # description, Sales edits it) and what the customer reads about
+        # this version; the internal change_note never goes on the PDF.
+        "scope_text": "", "customer_note": "",
         "cbd_mode": "detailed", "rough_description": "",
         "cost_lines": [], "factors": [], "risks": [],
         "changeover": {"mode": "running_change", "scrap_qty": 0,
@@ -76,38 +97,69 @@ def default_data() -> dict:
         "free_fields": [],
         "terms": {"payment": "30 days net", "incoterms": "", "delivery": "",
                   "notes": ""},
+        "show_risk_surcharge": False,
     }
+
+
+_DOT_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(\.\d{3})+$")
+_COMMA_GROUPS = re.compile(r"^[+-]?[1-9]\d{0,2}(,\d{3})+$")
+_PLAIN = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
+
+
+def read_number(text: str) -> Optional[float]:
+    """The Offer tab's parseNum rule (offerFormat.ts), plus en-US input with
+    both separators: comma is the decimal separator and dots group thousands
+    ("1.234" = 1234, "1.234,5" = 1234.5, "1,5" = 1.5); a lone dot that is not
+    a thousands group is a decimal point ("1.5", "0.125", "1.2345"); "1,234.50"
+    (comma groups, dot last) is 1234.5. None for anything else ("1.23.4",
+    "1,2,3", "1_000", "abc")."""
+    t = re.sub(r"\s", "", text).replace("\u00a0", "").replace("'", "")
+    if not t:
+        return None
+    if "," in t and "." in t and t.rfind(".") > t.rfind(","):
+        int_part, _, frac = t.rpartition(".")
+        if not _COMMA_GROUPS.match(int_part) or not frac.isdigit():
+            return None
+        norm = int_part.replace(",", "") + "." + frac
+    elif "," in t:
+        int_part, *rest = t.split(",")
+        if len(rest) != 1:
+            return None
+        if "." in int_part and not _DOT_GROUPS.match(int_part):
+            return None
+        norm = int_part.replace(".", "") + "." + rest[0]
+    elif _DOT_GROUPS.match(t):
+        norm = t.replace(".", "")
+    else:
+        norm = t
+    if not _PLAIN.match(norm):
+        return None
+    try:
+        out = float(norm)
+    except ValueError:
+        return None
+    return None if math.isnan(out) or math.isinf(out) else out
 
 
 def parse_number(v, field: str = "value", *, strict: bool = True,
                  default=0.0, allow_none: bool = False):
     """One number from what a browser or a spreadsheet paste sends: a JSON
-    number, or a string in either notation ("12.5", "12,5", "1.234,50",
-    "1,234.50", "1 234,5"). Anything else is refused (strict) or replaced by
-    the default (lenient, for rows stored before this check existed)."""
+    number, or a string read by read_number. Anything else is refused
+    (strict) or replaced by the default (lenient, for rows stored before
+    this check existed)."""
     if v is None or (isinstance(v, str) and not v.strip()):
         return None if allow_none else default
     if isinstance(v, bool):
         out = None
     elif isinstance(v, (int, float)):
         out = float(v)
-    elif isinstance(v, str):
-        t = v.strip().replace(" ", "").replace("\u00a0", "").replace("'", "")
-        if "," in t and "." in t:
-            # the later separator is the decimal one
-            if t.rfind(",") > t.rfind("."):
-                t = t.replace(".", "").replace(",", ".")
-            else:
-                t = t.replace(",", "")
-        elif "," in t:
-            t = t.replace(",", ".")
-        try:
-            out = float(t)
-        except ValueError:
+        if math.isnan(out) or math.isinf(out):
             out = None
+    elif isinstance(v, str):
+        out = read_number(v)
     else:
         out = None
-    if out is None or math.isnan(out) or math.isinf(out):
+    if out is None:
         if strict:
             raise ChangeError(f"'{field}' must be a number (got {str(v)[:40]!r})")
         return None if allow_none else default
@@ -126,14 +178,20 @@ def _dict_items(items, key: str, strict: bool) -> list:
     return out
 
 
-def normalise(data: Optional[dict], *, strict: bool = False) -> dict:
+def normalise(data: Optional[dict], *, strict: bool = False,
+              issues: Optional[list] = None) -> dict:
     """Fill every missing key with its default (the server owns the shape),
     check the enumerations the totals depend on and coerce every number the
     totals read. `strict` (a PATCH) refuses bad input with a 400; the lenient
-    mode repairs stored data so a legacy row still renders."""
+    mode repairs stored data so a legacy row still renders: a bad
+    enumeration falls back to its default, a list that is not a list is
+    emptied, and a number it cannot read becomes None (never a silent 0) with
+    its label appended to `issues`."""
     out = default_data()
     if data is not None and not isinstance(data, dict):
-        raise ChangeError("Offer data must be an object")
+        if strict:
+            raise ChangeError("Offer data must be an object")
+        data = {}
     for k, v in (data or {}).items():
         if k in out and isinstance(out[k], dict):
             if isinstance(v, dict):
@@ -142,35 +200,64 @@ def normalise(data: Optional[dict], *, strict: bool = False) -> dict:
                 raise ChangeError(f"'{k}' must be an object")
         else:
             out[k] = v
+
+    def refuse(message: str, repair) -> None:
+        if strict:
+            raise ChangeError(message)
+        repair()
+
     if out["cbd_mode"] not in ("detailed", "rough"):
-        raise ChangeError("cbd_mode must be 'detailed' or 'rough'")
+        refuse("cbd_mode must be 'detailed' or 'rough'",
+               lambda: out.__setitem__("cbd_mode", "detailed"))
     if out["changeover"].get("mode") not in ("running_change", "customer_pays_scrap"):
-        raise ChangeError(
-            "changeover.mode must be 'running_change' or 'customer_pays_scrap'")
+        refuse("changeover.mode must be 'running_change' or 'customer_pays_scrap'",
+               lambda: out["changeover"].__setitem__("mode", "running_change"))
+    for key in ("scope_text", "customer_note"):
+        if out.get(key) is None:
+            out[key] = ""
+        elif not isinstance(out[key], str):
+            if strict:
+                raise ChangeError(f"'{key}' must be text")
+            out[key] = str(out[key])
     for key in ("cost_lines", "factors", "risks", "free_fields"):
         if out[key] is None:
             out[key] = []
         if not isinstance(out[key], list):
-            raise ChangeError(f"'{key}' must be a list")
+            refuse(f"'{key}' must be a list", lambda: out.__setitem__(key, []))
         out[key] = _dict_items(out[key], key, strict)
 
     def num(obj, fld, label, **kw):
-        if fld in obj or not kw.get("allow_none"):
-            obj[fld] = parse_number(obj.get(fld), label, strict=strict, **kw)
+        if fld not in obj and kw.get("allow_none"):
+            return
+        raw = obj.get(fld)
+        if strict or raw is None or (isinstance(raw, str) and not raw.strip()):
+            obj[fld] = parse_number(raw, label, strict=strict, **kw)
+            return
+        v = parse_number(raw, label, strict=False, allow_none=True, default=None)
+        if v is None and issues is not None:
+            issues.append(label)
+        obj[fld] = v
 
     for line in out["cost_lines"]:
         if line.get("category", "other") not in ("internal", "external", "other"):
-            raise ChangeError("cost line category must be internal, external or other")
-        num(line, "amount", "cost line amount")
+            refuse("cost line category must be internal, external or other",
+                   lambda: line.__setitem__("category", "other"))
+        num(line, "amount", f"cost line {line.get('label') or line.get('key') or ''}".strip())
         if "source_amount" in line:
             num(line, "source_amount", "cost line source amount")
     for f in out["factors"] + out["risks"]:
         if f.get("type", "pct") not in ("pct", "amount"):
-            raise ChangeError("factor and risk type must be 'pct' or 'amount'")
-        num(f, "value", "factor or risk value")
+            refuse("factor and risk type must be 'pct' or 'amount'",
+                   lambda: f.__setitem__("type", "pct"))
+        num(f, "value", f"{f.get('label') or f.get('key') or 'factor or risk'} value")
     for f in out["factors"]:
         if f.get("sign", 1) not in (1, -1):
-            raise ChangeError("factor sign must be 1 or -1")
+            refuse("factor sign must be 1 or -1", lambda: f.__setitem__("sign", 1))
+        # Shown as its own line on the offer? Overhead and margin are not,
+        # by default; any other factor (custom ones too) is.
+        f["show"] = _bool(f.get("show"),
+                          default=f.get("key") not in HIDDEN_FACTOR_KEYS)
+    out["show_risk_surcharge"] = _bool(out.get("show_risk_surcharge"))
     for f in out["free_fields"]:
         # A free field without an amount is a text line in the terms.
         num(f, "amount", "free field amount", allow_none=True, default=None)
@@ -183,7 +270,9 @@ def normalise(data: Optional[dict], *, strict: bool = False) -> dict:
     if rows is None:
         rows = []
     if not isinstance(rows, list):
-        raise ChangeError("'piece_price.rows' must be a list")
+        if strict:
+            raise ChangeError("'piece_price.rows' must be a list")
+        rows = []
     pp["rows"] = _dict_items(rows, "piece_price.rows", strict)
     for r in pp["rows"]:
         num(r, "delta_per_piece", "delta per piece")
@@ -192,7 +281,9 @@ def normalise(data: Optional[dict], *, strict: bool = False) -> dict:
     if ms is None:
         ms = []
     if not isinstance(ms, list):
-        raise ChangeError("'timing.milestones' must be a list")
+        if strict:
+            raise ChangeError("'timing.milestones' must be a list")
+        ms = []
     tm["milestones"] = _dict_items(ms, "timing.milestones", strict)
     if tm.get("weeks_from_order") not in (None, ""):
         w = parse_number(tm["weeks_from_order"], "weeks from order",
@@ -213,7 +304,9 @@ def compute_totals(data: dict, internal_cost: float) -> dict:
         amount = (value / 100.0 * base if f.get("type", "pct") == "pct" else value)
         amount *= -1 if f.get("sign", 1) == -1 else 1
         factors.append({"key": f.get("key"), "label": f.get("label"),
-                        "amount": round(amount, 2)})
+                        "amount": round(amount, 2),
+                        "show": _bool(f.get("show"), default=f.get("key")
+                                      not in HIDDEN_FACTOR_KEYS)})
     risks_total = 0.0
     for r in data.get("risks") or []:
         value = _num(r.get("value"))
@@ -243,10 +336,14 @@ def compute_totals(data: dict, internal_cost: float) -> dict:
     }
 
 
-def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict) -> list[dict]:
+def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict,
+               *, prev_currency: Optional[str] = None,
+               cur_currency: Optional[str] = None) -> list[dict]:
     """What changed against the previous version, in the terms a customer
     asks about: the totals, each cost line, factors, risks, changeover,
-    timing weeks and terms."""
+    piece price, timing, free fields, terms and the texts. Anything the
+    customer would see differently is a row: an empty diff means the new
+    version is the old one again."""
     out = []
 
     def add(field, before, after):
@@ -257,39 +354,96 @@ def offer_diff(prev: dict, prev_totals: dict, cur: dict, cur_totals: dict) -> li
         cur_totals.get("total_one_time"))
     add("Piece price delta", prev_totals.get("piece_price_delta"),
         cur_totals.get("piece_price_delta"))
+    add("Currency", prev_currency, cur_currency)
 
     def by(items, key):
         return {str(i.get(key)): i for i in items or [] if i.get(key) is not None}
 
+    def keys(a, b):
+        return list(a) + [k for k in b if k not in a]
+
     pl, cl = by(prev.get("cost_lines"), "key"), by(cur.get("cost_lines"), "key")
-    for k in list(pl) + [k for k in cl if k not in pl]:
+    for k in keys(pl, cl):
         a, b = pl.get(k), cl.get(k)
         label = (b or a).get("label") or k
-        before = _num(a.get("amount")) if a and a.get("include", True) else None
-        after = _num(b.get("amount")) if b and b.get("include", True) else None
-        add(f"Cost line {label}", before, after)
+        if a is None or b is None:
+            add(f"Cost line {label} {'added' if a is None else 'removed'}",
+                None if a is None else _num(a.get("amount")),
+                None if b is None else _num(b.get("amount")))
+            continue
+        add(f"Cost line {label}",
+            _num(a.get("amount")) if a.get("include", True) else None,
+            _num(b.get("amount")) if b.get("include", True) else None)
+        add(f"Cost line {k} label", a.get("label"), b.get("label"))
     pf, cf = by(prev.get("factors"), "key"), by(cur.get("factors"), "key")
-    for k in list(pf) + [k for k in cf if k not in pf]:
-        a, b = pf.get(k) or {}, cf.get(k) or {}
-        label = b.get("label") or a.get("label") or k
+    for k in keys(pf, cf):
+        a, b = pf.get(k), cf.get(k)
+        label = (b or a).get("label") or k
+        if a is None or b is None:
+            add(f"Factor {label} {'added' if a is None else 'removed'}",
+                None if a is None else (_num(a.get("value")) if a.get("enabled") else "off"),
+                None if b is None else (_num(b.get("value")) if b.get("enabled") else "off"))
+            continue
         add(f"Factor {label}",
             _num(a.get("value")) if a.get("enabled") else None,
             _num(b.get("value")) if b.get("enabled") else None)
+        add(f"Factor {label} shown on offer", a.get("show"), b.get("show"))
     pr, cr = by(prev.get("risks"), "concern_id"), by(cur.get("risks"), "concern_id")
-    for k in list(pr) + [k for k in cr if k not in pr]:
+    for k in keys(pr, cr):
         a, b = pr.get(k) or {}, cr.get(k) or {}
         label = b.get("label") or a.get("label") or k
         add(f"Risk {label}", _num(a.get("value")) if a else None,
             _num(b.get("value")) if b else None)
+        if a and b:
+            add(f"Risk {label} shown", bool(a.get("show")), bool(b.get("show")))
+    add("Risk surcharges shown on offer", bool(prev.get("show_risk_surcharge")),
+        bool(cur.get("show_risk_surcharge")))
     pc, cc = prev.get("changeover") or {}, cur.get("changeover") or {}
     add("Changeover", pc.get("mode"), cc.get("mode"))
     add("Scrap quantity", pc.get("scrap_qty"), cc.get("scrap_qty"))
     add("Scrap unit price", pc.get("scrap_unit_price"), cc.get("scrap_unit_price"))
-    add("Timing weeks from order", (prev.get("timing") or {}).get("weeks_from_order"),
-        (cur.get("timing") or {}).get("weeks_from_order"))
+    add("Changeover note", pc.get("note") or "", cc.get("note") or "")
+    pp, cp = prev.get("piece_price") or {}, cur.get("piece_price") or {}
+    add("Piece price effect", bool(pp.get("enabled")), bool(cp.get("enabled")))
+    add("Annual volume", pp.get("annual_volume"), cp.get("annual_volume"))
+    prow, crow = by(pp.get("rows"), "label"), by(cp.get("rows"), "label")
+    for k in keys(prow, crow):
+        a, b = prow.get(k), crow.get(k)
+        add(f"Piece price {k}",
+            None if a is None else _num(a.get("delta_per_piece")),
+            None if b is None else _num(b.get("delta_per_piece")))
+        if a is not None and b is not None:
+            add(f"Piece price {k} driver", a.get("driver") or "", b.get("driver") or "")
+    pt_, ct_ = prev.get("timing") or {}, cur.get("timing") or {}
+    add("Timing included", bool(pt_.get("include", True)), bool(ct_.get("include", True)))
+    add("Timing weeks from order", pt_.get("weeks_from_order"), ct_.get("weeks_from_order"))
+    add("Timing milestones",
+        [(m.get("label"), m.get("date")) for m in pt_.get("milestones") or []],
+        [(m.get("label"), m.get("date")) for m in ct_.get("milestones") or []])
+    pfree, cfree = by(prev.get("free_fields"), "label"), by(cur.get("free_fields"), "label")
+    for k in keys(pfree, cfree):
+        a, b = pfree.get(k), cfree.get(k)
+        if a is None or b is None:
+            gone = a if b is None else b
+            add(f"Free field {k} {'added' if a is None else 'removed'}",
+                None if a is None else (gone.get("amount") if gone.get("amount") is not None
+                                        else gone.get("value")),
+                None if b is None else (gone.get("amount") if gone.get("amount") is not None
+                                        else gone.get("value")))
+            continue
+        add(f"Free field {k}", a.get("value"), b.get("value"))
+        add(f"Free field {k} amount", a.get("amount"), b.get("amount"))
     pt, ct = prev.get("terms") or {}, cur.get("terms") or {}
     for k in sorted(set(pt) | set(ct)):
         add(f"Terms {k}", pt.get(k), ct.get(k))
+    for k, label in (("subject", "Subject"), ("intro", "Intro"),
+                     ("scope_text", "Scope"), ("customer_note", "Note to the customer"),
+                     ("cbd_mode", "Cost breakdown mode"),
+                     ("rough_description", "Rough description")):
+        add(label, prev.get(k) or "", cur.get(k) or "")
+    prec, crec = prev.get("recipient") or {}, cur.get("recipient") or {}
+    for k in ("company", "contact", "address"):
+        add(f"Recipient {k}", prec.get(k) or "", crec.get(k) or "")
     return out
 
 
@@ -364,7 +518,9 @@ class OfferService:
 
     @staticmethod
     def days_left(offer: ChangeOffer) -> Optional[int]:
-        if offer.valid_until is None:
+        """Days until the validity ends, only while the offer is out (sent):
+        an accepted, declined or superseded offer has no clock."""
+        if offer.status != "sent" or offer.valid_until is None:
             return None
         return (offer.valid_until - date.today()).days
 
@@ -467,11 +623,13 @@ class OfferService:
     @staticmethod
     async def seed_data(session: AsyncSession, change: ChangeRequest) -> dict:
         data = default_data()
-        data["recipient"]["company"] = change.project_name or ""
+        # The customer's company is Sales' to type: the project name is not
+        # a legal addressee (warning recipient_missing until it is set).
         data["subject"] = (f"Offer for engineering change {change.change_number}: "
                            f"{change.title}")
         data["intro"] = ("Thank you for your request. Please find below our "
                          "offer for the engineering change described.")
+        data["scope_text"] = (change.description or "").strip()
         data["cost_lines"], _ = await OfferService._costing_basis(session, change)
         data["factors"] = [
             {"key": k, "label": lbl, "type": typ, "value": 0, "sign": sign,
@@ -515,6 +673,9 @@ class OfferService:
             source = "seeded from the costing"
         else:
             data = normalise(copy.deepcopy(base.data))
+            data.pop(SNAPSHOT_KEY, None)
+            # the note to the customer is about one version, not the next
+            data["customer_note"] = ""
             source = f"cloned from v{base.version}"
         offer = ChangeOffer(
             change_id=change.id, version=version, status="draft",
@@ -561,13 +722,23 @@ class OfferService:
         content is recorded when it is sent, which is when it becomes a fact."""
         await OfferService._require_write(session, change, user)
         OfferService._require_draft(offer)
+        if data is not None and not isinstance(data, dict):
+            raise ChangeError("Offer data must be an object")
+        # Server-owned keys (the send snapshot) are not writable.
+        data = {k: v for k, v in (data or {}).items() if not str(k).startswith("_")}
         merged = copy.deepcopy(offer.data or {})
-        for k, v in (data or {}).items():
+        for k, v in data.items():
             if isinstance(v, dict) and isinstance(merged.get(k), dict):
                 merged[k] = {**merged[k], **v}
             else:
                 merged[k] = v
-        offer.data = normalise(merged, strict=True)
+        # Strict for what this PATCH sends; legacy data elsewhere in the
+        # offer is repaired leniently rather than refusing an unrelated edit.
+        checked = normalise({k: merged[k] for k in data}, strict=True)
+        stored = normalise(merged)
+        for k in data:
+            stored[k] = checked[k]
+        offer.data = stored
         if currency is not None:
             cur = currency.strip().upper()
             if len(cur) != 3:
@@ -576,6 +747,27 @@ class OfferService:
         await OfferService._store_totals(session, change, offer)
         await session.flush()
         return offer
+
+    @staticmethod
+    async def discard(session: AsyncSession, change: ChangeRequest,
+                      offer: ChangeOffer, user: User) -> None:
+        """Throw a draft away. Only a draft: a sent version is a document the
+        customer holds. Allowed to the offer writers whatever the status, so
+        a draft left behind when the customer accepted can still go."""
+        if not await OfferService.may_write(session, change, user):
+            raise PlanForbidden(
+                "Only Sales, the change lead or an admin may discard a draft offer")
+        if offer.status != "draft":
+            raise ChangeError(
+                f"Offer v{offer.version} is {offer.status}: only a draft can be "
+                "discarded")
+        version, oid = offer.version, offer.id
+        await session.delete(offer)
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "offer_draft_discarded",
+            f"Draft offer v{version} discarded", user.id,
+            old_value={"offer_id": oid, "version": version})
 
     @staticmethod
     async def refresh(session: AsyncSession, change: ChangeRequest,
@@ -634,8 +826,20 @@ class OfferService:
             raise ChangeError(
                 "The offer includes timing but the quote plan is empty - plan "
                 "it first or leave timing out")
+        if offer.version >= 2:
+            prev = await OfferService._previous_sent(session, change, offer)
+            changed = [d for d in await OfferService._diff_against(
+                session, change, prev, offer) if d["field"] != "Note to the customer"] \
+                if prev is not None else True
+            if prev is not None and not changed:
+                raise ChangeError(
+                    f"Nothing changed since v{prev.version}; change the offer "
+                    f"or keep v{prev.version}")
         received = received_at or date.today()
-        OfferService._check_received(received, datetime.utcnow())
+        OfferService._check_received(received)
+        data = copy.deepcopy(offer.data or {})
+        data[SNAPSHOT_KEY] = await OfferService._snapshot(session, change)
+        offer.data = data
         for prev in await OfferService.list_offers(session, change):
             if prev.id != offer.id and prev.status == "sent":
                 prev.status = "superseded"
@@ -664,20 +868,35 @@ class OfferService:
         return offer
 
     @staticmethod
-    def _check_received(received: date, sent_at: Optional[datetime]) -> None:
-        """The customer cannot receive an offer before it was sent, nor on a
-        day that has not come yet. sent_at is UTC; the bounds allow for the
-        server's local day differing from the UTC day by one."""
-        today = max(date.today(), datetime.utcnow().date())
-        if received > today:
+    async def _previous_sent(session, change, offer) -> Optional[ChangeOffer]:
+        """The version this one is compared against: the latest non-draft
+        version before it."""
+        return next((p for p in await OfferService.list_offers(session, change)
+                     if p.version < offer.version and p.status != "draft"), None)
+
+    @staticmethod
+    async def _diff_against(session, change, prev: ChangeOffer,
+                            offer: ChangeOffer) -> list[dict]:
+        internal = await OfferService._internal_cost(session, change)
+        pdata, data = normalise(prev.data), normalise(offer.data)
+        return offer_diff(pdata, compute_totals(pdata, internal),
+                          data, compute_totals(data, internal),
+                          prev_currency=prev.currency, cur_currency=offer.currency)
+
+    @staticmethod
+    def _check_received(received: date, sent_at: Optional[datetime] = None) -> None:
+        """Not in the future (one day of tolerance: the browser sends its
+        LOCAL day, the server thinks in UTC) and not absurdly far back. Sales
+        records sends after the fact, so a receipt date before the day the
+        offer was entered is fine."""
+        today = datetime.utcnow().date()
+        if received > today + timedelta(days=1):
             raise ChangeError(
                 f"The receipt date {received.isoformat()} is in the future")
-        if sent_at is not None:
-            sent_day = min(sent_at.date(), date.today())
-            if received < sent_day:
-                raise ChangeError(
-                    f"The receipt date {received.isoformat()} is before the "
-                    f"offer was sent ({sent_at.date().isoformat()})")
+        if received < today - timedelta(days=RECEIVED_MAX_PAST_DAYS):
+            raise ChangeError(
+                f"The receipt date {received.isoformat()} is more than "
+                f"{RECEIVED_MAX_PAST_DAYS} days ago")
 
     @staticmethod
     async def mark_received(session: AsyncSession, change: ChangeRequest,
@@ -736,6 +955,8 @@ class OfferService:
         if response == "accepted":
             change.accepted_offer_id = offer.id
         await session.flush()
+        if response == "accepted":
+            await OfferService._bank_build_from_offer(session, change, offer, user_id)
         reason = (override_reason or "").strip() or None
         await ChangeService.append_changelog(
             session, change, f"offer_{response}",
@@ -745,6 +966,36 @@ class OfferService:
             new_value={"offer_id": offer.id, "version": offer.version,
                        "expired": expired,
                        "expired_override_reason": reason if expired else None})
+
+    @staticmethod
+    async def _bank_build_from_offer(session: AsyncSession, change: ChangeRequest,
+                                     offer: ChangeOffer, user_id: int) -> None:
+        """The accepted offer already says how the changeover goes: when
+        nobody decided the bank build yet, take it from there (running change,
+        or planned scrap at the offered scrap qty x unit price). A decision
+        already on the change is never overwritten."""
+        if change.bank_build_mode is not None:
+            return
+        co = normalise(offer.data)["changeover"]
+        if co.get("mode") == "customer_pays_scrap":
+            price = round(_num(co.get("scrap_qty")) * _num(co.get("scrap_unit_price")), 2)
+            if price <= 0:
+                # planned scrap needs a price; without one the PM decides.
+                return
+            mode, desc = "planned_scrap", "planned scrap"
+        else:
+            mode, price, desc = "running_change", None, "running change"
+        change.bank_build_mode = mode
+        change.scrap_quote_price = price
+        change.bank_build_set_by = user_id
+        change.bank_build_set_at = datetime.utcnow()
+        await session.flush()
+        await ChangeService.append_changelog(
+            session, change, "bank_build_decided",
+            f"Bank build decided: {desc}, from the accepted offer v{offer.version}",
+            user_id, field_name="bank_build_mode",
+            new_value={"mode": mode, "scrap_quote_price": price,
+                       "offer_id": offer.id})
 
     # ------------------------------------------------------------------
     # Serialization
@@ -762,7 +1013,9 @@ class OfferService:
         all_offers = await OfferService.list_offers(session, change)
         out = []
         for o in offers:
-            data = normalise(o.data)
+            unreadable: list[str] = []
+            data = normalise(o.data, issues=unreadable)
+            data.pop(SNAPSHOT_KEY, None)
             totals = compute_totals(data, internal)
             diff = None
             if o.version >= 2:
@@ -771,8 +1024,18 @@ class OfferService:
                 if prev is not None:
                     pdata = normalise(prev.data)
                     diff = offer_diff(pdata, compute_totals(pdata, internal),
-                                      data, totals)
+                                      data, totals, prev_currency=prev.currency,
+                                      cur_currency=o.currency)
             warnings = []
+            if unreadable:
+                warnings.append(_issue(
+                    "number_unreadable",
+                    "Numbers that cannot be read are left out of the totals: "
+                    + ", ".join(dict.fromkeys(unreadable))))
+            if not str(data["recipient"].get("company") or "").strip():
+                warnings.append(_issue(
+                    "recipient_missing",
+                    "The recipient company is empty: say who the offer is for"))
             if not any(l.get("include", True) for l in data["cost_lines"]):
                 warnings.append(_issue("no_cost_lines", "No cost line is included"))
             if totals["total_one_time"] <= 0:
@@ -812,7 +1075,7 @@ class OfferService:
                 "sent_at": o.sent_at, "sent_by": o.sent_by,
                 "sent_by_name": users.get(o.sent_by),
                 "received_at": o.received_at, "valid_until": o.valid_until,
-                "days_left": OfferService.days_left(o) if o.status == "sent" else None,
+                "days_left": OfferService.days_left(o),
                 "expired": expired,
                 "created_at": o.created_at, "created_by": o.created_by,
                 "created_by_name": users.get(o.created_by),
@@ -822,12 +1085,12 @@ class OfferService:
         return out
 
     @staticmethod
-    async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
-                        offer: ChangeOffer) -> bytes:
+    async def _snapshot(session: AsyncSession, change: ChangeRequest) -> dict:
+        """What the PDF shows besides the offer data, as it is now: the
+        letterhead, the impacted parts and the quote plan. Frozen into a sent
+        version so its PDF never changes afterwards."""
         from app.models.entities import Organization, Plant, Project
         from app.models.part import Part
-        from app.services.offer_pdf import render_offer_pdf
-        out = (await OfferService.serialize(session, change, [offer]))[0]
         project = await session.get(Project, change.project_id)
         plant = await session.get(Plant, project.plant_id) if project else None
         org = (await session.get(Organization, plant.organization_id)
@@ -842,17 +1105,47 @@ class OfferService:
             })
         tasks = [t for t in await ChangePlanService.tasks(session, change, "quote")
                  if not t.is_idea]
-        return render_offer_pdf({
+        return {
+            "taken_at": datetime.utcnow().isoformat(),
             "org_name": org.name if org else "",
             "plant_name": plant.name if plant else "",
             "plant_location": plant.location if plant else "",
             "project_name": project.name if project else "",
             "change_number": change.change_number, "title": change.title,
-            "reason": change.reason or "", "description": change.description or "",
-            "items": items, "offer": out,
+            "items": items,
             "tasks": [{"name": t.name, "lane": t.lane or "", "kind": t.kind,
-                       "start": t.start_date, "end": t.end_date,
+                       "start": t.start_date.isoformat(),
+                       "end": t.end_date.isoformat(),
                        "duration": int(t.duration_days or 0)} for t in tasks],
+        }
+
+    @staticmethod
+    async def pdf_bytes(session: AsyncSession, change: ChangeRequest,
+                        offer: ChangeOffer) -> bytes:
+        """A draft renders from the change as it is now; a version that went
+        out renders from the snapshot taken when it was sent (legacy versions
+        sent before snapshots existed fall back to the live data)."""
+        from app.services.offer_pdf import render_offer_pdf
+        out = (await OfferService.serialize(session, change, [offer]))[0]
+        snap = (offer.data or {}).get(SNAPSHOT_KEY) if offer.status != "draft" else None
+        if not isinstance(snap, dict):
+            snap = await OfferService._snapshot(session, change)
+
+        def day(v):
+            try:
+                return date.fromisoformat(str(v)[:10])
+            except ValueError:
+                return None
+        tasks = [{**t, "start": day(t.get("start")), "end": day(t.get("end"))}
+                 for t in snap.get("tasks") or [] if isinstance(t, dict)]
+        return render_offer_pdf({
+            "org_name": snap.get("org_name") or "",
+            "plant_name": snap.get("plant_name") or "",
+            "plant_location": snap.get("plant_location") or "",
+            "project_name": snap.get("project_name") or "",
+            "change_number": change.change_number,
+            "title": snap.get("title") or change.title,
+            "items": snap.get("items") or [], "offer": out, "tasks": tasks,
         })
 
     @staticmethod

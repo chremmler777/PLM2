@@ -17,6 +17,7 @@ from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.platypus import (
     CondPageBreak, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table,
@@ -62,25 +63,73 @@ def _f(v, default: float = 0.0) -> float:
     return parse_number(v, strict=False, default=default)
 
 
-def _de(v: float, decimals: int = 2, sign: bool = False) -> str:
-    """German grouping, like the Offer tab: 12.345,50."""
+# Currencies whose customers read 1,234.56; every other currency (EUR, CHF,
+# ...) prints German style 1.234,56, like the Offer tab.
+EN_NUMBER_CURRENCIES = frozenset((
+    "USD", "GBP", "CAD", "AUD", "NZD", "JPY", "CNY", "HKD", "SGD", "INR",
+    "MXN", "KRW"))
+
+
+def number_locale(cur: str | None) -> str:
+    return "en" if (cur or "").strip().upper() in EN_NUMBER_CURRENCIES else "de"
+
+
+def _num_fmt(v: float, decimals: int = 2, sign: bool = False,
+             loc: str = "de") -> str:
+    """Grouped number in the offer's locale: de 12.345,50 / en 12,345.50."""
     s = f"{v:{'+' if sign else ''},.{decimals}f}"
+    if loc == "en":
+        return s
     return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+def _de(v: float, decimals: int = 2, sign: bool = False) -> str:
+    return _num_fmt(v, decimals, sign, "de")
 
 
 def _money(v, cur: str, sign: bool = False) -> str:
     if v is None or v == "":
         return ""
-    return f"{_de(_f(v), 2, sign)} {_clean(cur)}"
+    return f"{_num_fmt(_f(v), 2, sign, number_locale(cur))} {_clean(cur)}"
 
 
 def _piece(v, cur: str) -> str:
-    return f"{_de(_f(v), 4, sign=True)} {_clean(cur)}"
+    return f"{_num_fmt(_f(v), 4, True, number_locale(cur))} {_clean(cur)}"
 
 
-def _qty(v) -> str:
+def _qty(v, loc: str = "de") -> str:
     n = _f(v)
-    return _de(n, 0) if n == int(n) else _de(n, 2)
+    return _num_fmt(n, 0, loc=loc) if n == int(n) else _num_fmt(n, 2, loc=loc)
+
+
+def plant_line(name, location) -> str:
+    """Plant name and location, the location left out when the name already
+    says it ("Plant Wolfsburg", "Wolfsburg")."""
+    name, location = _clean(name).strip(), _clean(location).strip()
+    if location and name and location.lower() in name.lower():
+        return name
+    return ", ".join(x for x in (name, location) if x)
+
+
+def spread_cbd(lines: list[dict], hidden: float) -> list[float]:
+    """The customer's cost breakdown: `hidden` (factors not shown as their
+    own line, folded risk surcharges) spread over the included cost lines in
+    proportion to their amounts, each rounded to the cent; the last line
+    absorbs the rounding difference so the lines add up to exactly
+    sum(amounts) + hidden. Equal shares when the amounts sum to zero."""
+    amounts = [round(_f(l.get("amount")), 2) for l in lines]
+    if not amounts:
+        return []
+    target = round(sum(amounts) + hidden, 2)
+    base = sum(amounts)
+    if abs(hidden) < 0.005:
+        return amounts
+    if abs(base) >= 0.005:
+        out = [round(a + hidden * a / base, 2) for a in amounts]
+    else:
+        out = [round(a + hidden / len(amounts), 2) for a in amounts]
+    out[-1] = round(target - sum(out[:-1]), 2)
+    return out
 
 
 def _d(v) -> str:
@@ -94,7 +143,23 @@ def _d(v) -> str:
         return _clean(v)
 
 
-def _numbered_canvas(change_number: str, number: str, org: str, draft: bool):
+def fit_text(text: str, font: str, size: float, width: float) -> str:
+    """`text` cut (with "...") so it is at most `width` points wide."""
+    text = _clean(text)
+    if stringWidth(text, font, size) <= width:
+        return text
+    while text and stringWidth(text + "...", font, size) > width:
+        text = text[:-1]
+    return text.rstrip() + "..." if text else ""
+
+
+# The watermark per offer status: the customer can tell at a glance that a
+# copy is not the offer in force.
+WATERMARKS = {"draft": "DRAFT", "superseded": "SUPERSEDED", "declined": "DECLINED"}
+
+
+def _numbered_canvas(change_number: str, number: str, org: str,
+                     watermark: str | None):
     """Two-pass canvas: pages are buffered so the footer can say 'page x/y'.
     Pages after the first carry a slim running header."""
 
@@ -121,24 +186,31 @@ def _numbered_canvas(change_number: str, number: str, org: str, draft: bool):
             self.setStrokeColor(GRID)
             self.setLineWidth(0.4)
             self.line(MARGIN, 13 * mm, w - MARGIN, 13 * mm)
-            self.setFont("Helvetica", 7.5)
+            font, size = "Helvetica", 7.5
+            self.setFont(font, size)
             self.setFillColor(MUTED)
-            self.drawString(MARGIN, 9 * mm, _clean(f"Offer {number}"))
+            left = fit_text(f"Offer {number}", font, size, 60 * mm)
+            right = f"Page {self._pageNumber} of {total}"
+            self.drawString(MARGIN, 9 * mm, left)
             if org:
-                self.drawCentredString(w / 2, 9 * mm, _clean(org))
-            self.drawRightString(w - MARGIN, 9 * mm,
-                                 f"Page {self._pageNumber} of {total}")
+                # Centred between the two ends, never over them.
+                side = max(stringWidth(left, font, size), stringWidth(right, font, size))
+                room = w - 2 * MARGIN - 2 * side - 8 * mm
+                self.drawCentredString(w / 2, 9 * mm, fit_text(org, font, size, room))
+            self.drawRightString(w - MARGIN, 9 * mm, right)
             if self._pageNumber > 1:
-                self.drawString(MARGIN, h - 10 * mm, _clean(org))
-                self.drawRightString(w - MARGIN, h - 10 * mm,
-                                     _clean(f"Offer {number}  |  {change_number}"))
+                tag = fit_text(f"Offer {number}  |  {change_number}", font, size, 90 * mm)
+                room = w - 2 * MARGIN - stringWidth(tag, font, size) - 6 * mm
+                self.drawString(MARGIN, h - 10 * mm, fit_text(org, font, size, room))
+                self.drawRightString(w - MARGIN, h - 10 * mm, tag)
                 self.line(MARGIN, h - 11.5 * mm, w - MARGIN, h - 11.5 * mm)
-            if draft:
-                self.setFont("Helvetica-Bold", 96)
+            if watermark:
+                big = 96 if len(watermark) <= 5 else 72
+                self.setFont("Helvetica-Bold", big)
                 self.setFillColor(colors.Color(0.75, 0.1, 0.1, alpha=0.10))
                 self.translate(w / 2, h / 2)
                 self.rotate(45)
-                self.drawCentredString(0, -30, "DRAFT")
+                self.drawCentredString(0, -30, watermark)
             self.restoreState()
 
     return NumberedCanvas
@@ -158,7 +230,9 @@ def _plan_charts(tasks: list[dict], width: float) -> list[Drawing]:
     start = min(t["start"] for t in tasks)
     end = max(max(t["end"], t["start"]) for t in tasks)
     span = max(1, (end - start).days)
-    chart_w = width - label_w - 2 * mm
+    # 4 mm right padding: the last diamond (radius 1.4 mm) and the last bar
+    # end stay inside the text frame.
+    chart_w = width - label_w - 4 * mm
     lanes = sorted({t.get("lane") or "" for t in tasks})
     colour = {lane: LANE_COLOURS[i % len(LANE_COLOURS)] for i, lane in enumerate(lanes)}
     # Grid step: the smallest week multiple whose labels do not collide.
@@ -184,7 +258,7 @@ def _plan_charts(tasks: list[dict], width: float) -> list[Drawing]:
             gx = label_w + chart_w * day / span
             dwg.add(Line(gx, 0, gx, body_top, strokeColor=GRID, strokeWidth=0.3))
             d = date.fromordinal(start.toordinal() + day)
-            if gx + 10 * mm <= width:        # the last label must not run off the page
+            if gx + 10 * mm <= width - 2 * mm:   # the last label must not run off the page
                 dwg.add(String(gx + 0.8, body_top + 1.8 * mm, d.strftime("%d.%m.%y"),
                                fontName="Helvetica", fontSize=5.5, fillColor=MUTED))
             day += step
@@ -192,9 +266,7 @@ def _plan_charts(tasks: list[dict], width: float) -> list[Drawing]:
                      strokeWidth=0.5))
         for i, t in enumerate(chunk):
             y = body_top - (i + 1) * row_h
-            name = _clean(t.get("name"))
-            if len(name) > 44:
-                name = name[:42] + ".."
+            name = fit_text(t.get("name"), "Helvetica", 6.3, label_w - 2 * mm)
             dwg.add(String(1 * mm, y + 1.4 * mm, name, fontName="Helvetica",
                            fontSize=6.3, fillColor=INK))
             c = colour.get(t.get("lane") or "", LANE_COLOURS[0])
@@ -228,7 +300,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
     data = offer.get("data") or {}
     totals = offer.get("totals") or {}
     cur = _clean(offer.get("currency") or "EUR")
+    loc = number_locale(cur)
     draft = offer.get("status") == "draft"
+    watermark = WATERMARKS.get(offer.get("status") or "")
     number = f"{ctx['change_number']}-Q{offer['version']}"
     org = _clean(ctx.get("org_name"))
 
@@ -266,8 +340,7 @@ def render_offer_pdf(ctx: dict) -> bytes:
 
     # ---- Letterhead ---------------------------------------------------
     left = [_p(org or " ", org_style)]
-    plant = ", ".join(_clean(x) for x in (ctx.get("plant_name"),
-                                           ctx.get("plant_location")) if x)
+    plant = plant_line(ctx.get("plant_name"), ctx.get("plant_location"))
     if plant:
         left.append(_p(plant, muted))
     if ctx.get("project_name"):
@@ -285,7 +358,9 @@ def render_offer_pdf(ctx: dict) -> bytes:
                                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                 ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
-    right_col = [_p("OFFER" if not draft else "OFFER (DRAFT)", title_r),
+    right_col = [_p("OFFER" if not watermark else f"OFFER ({watermark})", ParagraphStyle(
+                     "titler2", parent=title_r,
+                     fontSize=20 if not watermark else 14, leading=24)),
                  Spacer(1, 1.5 * mm), meta_t]
     head = Table([[left, right_col]], colWidths=[width - 64 * mm, 64 * mm])
     head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -330,21 +405,24 @@ def render_offer_pdf(ctx: dict) -> bytes:
         t.setStyle(TableStyle(style))
         return t
 
-    def section(title):
+    def section(title, first=()):
+        """A section heading, kept on one page with the section's first
+        content: a heading never ends a page on its own."""
         story.append(CondPageBreak(30 * mm))
-        story.append(_p(title, h2))
+        first = [f for f in first if f is not None]
+        story.append(KeepTogether([_p(title, h2)] + first) if first
+                     else _p(title, h2))
 
     # ---- 1 Scope ------------------------------------------------------
-    section("1. Scope of change")
-    if ctx.get("title"):
-        story.append(_p(ctx["title"], bold))
-    if ctx.get("reason"):
-        story.append(_p(f"Reason: {ctx['reason']}", body))
-    desc = _clean(ctx.get("description"))
-    if len(desc) > 1200:
-        desc = desc[:1197].rstrip() + "..."
-    if desc:
-        story += [Spacer(1, 1.5 * mm), _p(desc, body)]
+    # The scope is Sales' text for the customer (data.scope_text), never the
+    # change's internal reason or description.
+    scope = [p for p in _clean(data.get("scope_text")).strip().split("\n\n") if p.strip()]
+    first = [_p(ctx["title"], bold)] if ctx.get("title") else []
+    if scope:
+        first += [Spacer(1, 1 * mm), _p(scope[0], body)]
+    section("1. Scope of change", first)
+    for para in scope[1:]:
+        story += [Spacer(1, 1.5 * mm), _p(para, body)]
     if ctx.get("items"):
         rows = [[_p("Part number", head_c), _p("Name", head_c), _p("Index", head_c)]]
         rows += [[_p(i.get("number"), cell, 120), _p(i.get("name"), cell, 300),
@@ -353,44 +431,57 @@ def render_offer_pdf(ctx: dict) -> bytes:
                   table(rows, [width * 0.28, width * 0.57, width * 0.15])]
 
     # ---- 2 Price ------------------------------------------------------
-    section("2. Price")
     total_label = f"Total one-time price ({cur}, net)"
     if data.get("cbd_mode") == "rough":
+        first = []
         if data.get("rough_description"):
-            story += [_p(data["rough_description"], body), Spacer(1, 2 * mm)]
+            first = [_p(data["rough_description"], body), Spacer(1, 2 * mm)]
         rows = [[_p("Item", head_c), _p("Amount", head_r)],
                 [_p(total_label, cell_b),
                  _p(_money(totals.get("total_one_time"), cur), cell_rb)]]
-        story.append(table(rows, [width * 0.7, width * 0.3], total_rows=1))
+        section("2. Price", first + [table(rows, [width * 0.7, width * 0.3],
+                                           total_rows=1)])
     else:
-        rows = [[_p("Cost breakdown", head_c), _p("Category", head_c),
-                 _p("Amount", head_r)]]
-        for line in data.get("cost_lines") or []:
-            if isinstance(line, dict) and line.get("include", True):
-                rows.append([_p(line.get("label"), cell, CELL_TEXT_MAX),
-                             _p(_clean(line.get("category")).capitalize(), cell),
-                             _p(_money(line.get("amount"), cur), cell_r)])
-        rows.append([_p("Cost basis", cell_b), _p("", cell),
-                     _p(_money(totals.get("base"), cur), cell_rb)])
+        # Factors not shown as their own line (overhead and margin by
+        # default) and, unless Sales shows them, the risk surcharges are
+        # folded into the cost lines: the customer sees a breakdown that adds
+        # up to the same total without the business rule behind it.
+        all_factors = [f for f in totals.get("factors") or [] if isinstance(f, dict)]
+        shown_factors = [f for f in all_factors if f.get("show", True)]
+        show_risk = bool(data.get("show_risk_surcharge"))
+        hidden = sum(_f(f.get("amount")) for f in all_factors if not f.get("show", True))
+        if not show_risk:
+            hidden += _f(totals.get("risks_total"))
+        included = [l for l in data.get("cost_lines") or []
+                    if isinstance(l, dict) and l.get("include", True)]
+        amounts = spread_cbd(included, hidden)
+        # No category column: internal vs external is our business.
+        rows = [[_p("Cost breakdown", head_c), _p("Amount", head_r)]]
+        for line, amount in zip(included, amounts):
+            rows.append([_p(line.get("label"), cell, CELL_TEXT_MAX),
+                         _p(_money(amount, cur), cell_r)])
+        if not included and abs(hidden) >= 0.005:
+            rows.append([_p("Costs", cell), _p(_money(hidden, cur), cell_r)])
+        basis = round(sum(amounts), 2) if included else round(hidden, 2)
+        rows.append([_p("Cost basis", cell_b), _p(_money(basis, cur), cell_rb)])
         subtotal = [len(rows) - 1]
-        for f in totals.get("factors") or []:
-            rows.append([_p(f.get("label"), cell, CELL_TEXT_MAX), _p("Factor", cell),
+        for f in shown_factors:
+            rows.append([_p(f.get("label"), cell, CELL_TEXT_MAX),
                          _p(_money(f.get("amount"), cur), cell_r)])
-        if _f(totals.get("risks_total")):
-            rows.append([_p("Risk surcharges", cell), _p("Risk", cell),
+        if show_risk and _f(totals.get("risks_total")):
+            rows.append([_p("Risk surcharges", cell),
                          _p(_money(totals["risks_total"], cur), cell_r)])
         if _f(totals.get("scrap")):
             rows.append([_p("Scrap of existing stock (customer paid)", cell),
-                         _p("Changeover", cell),
                          _p(_money(totals["scrap"], cur), cell_r)])
         for ff in data.get("free_fields") or []:
             if isinstance(ff, dict) and _f(ff.get("amount")):
-                rows.append([_p(ff.get("label"), cell, CELL_TEXT_MAX), _p("Other", cell),
+                rows.append([_p(ff.get("label"), cell, CELL_TEXT_MAX),
                              _p(_money(ff.get("amount"), cur), cell_r)])
-        rows.append([_p(total_label, cell_b), _p("", cell),
+        rows.append([_p(total_label, cell_b),
                      _p(_money(totals.get("total_one_time"), cur), cell_rb)])
-        story.append(table(rows, [width * 0.58, width * 0.17, width * 0.25],
-                           total_rows=1, subtotal_rows=subtotal))
+        section("2. Price", [table(rows, [width * 0.72, width * 0.28],
+                                   total_rows=1, subtotal_rows=subtotal)])
     pp = data.get("piece_price") or {}
     if pp.get("enabled"):
         rows = [[_p("Piece price effect", head_c), _p("Driver", head_c),
@@ -401,7 +492,7 @@ def render_offer_pdf(ctx: dict) -> bytes:
                              _p(r.get("driver"), cell, 200),
                              _p(_piece(r.get("delta_per_piece"), cur), cell_r)])
         rows.append([_p("Piece price delta", cell_b),
-                     _p(f"Annual volume {_qty(pp.get('annual_volume'))} pcs", cell),
+                     _p(f"Annual volume {_qty(pp.get('annual_volume'), loc)} pcs", cell),
                      _p(_piece(totals.get("piece_price_delta"), cur), cell_rb)])
         if totals.get("annual_effect") is not None:
             rows.append([_p("Annual effect", cell_b), _p("", cell),
@@ -413,16 +504,16 @@ def render_offer_pdf(ctx: dict) -> bytes:
     story.append(_p("All prices are net, excluding VAT.", muted))
 
     # ---- 3 Changeover -------------------------------------------------
-    section("3. Changeover")
     co = data.get("changeover") or {}
     if co.get("mode") == "customer_pays_scrap":
         qty, price = _f(co.get("scrap_qty")), _f(co.get("scrap_unit_price"))
-        story.append(_p(
-            f"The existing stock is scrapped at the customer's cost: {_qty(qty)} pcs "
-            f"x {_money(price, cur)} = {_money(qty * price, cur)}.", body))
+        section("3. Changeover", [_p(
+            f"The existing stock is scrapped at the customer's cost: {_qty(qty, loc)} pcs "
+            f"x {_money(price, cur)} = {_money(qty * price, cur)}.", body)])
     else:
-        story.append(_p("Running change: the existing stock is consumed before "
-                        "the changed part is introduced.", body))
+        section("3. Changeover", [_p(
+            "Running change: the existing stock is consumed before the "
+            "changed part is introduced.", body)])
     if co.get("note"):
         story.append(_p(co["note"], small))
 
@@ -430,29 +521,36 @@ def render_offer_pdf(ctx: dict) -> bytes:
     timing = data.get("timing") or {}
     sec = 4
     if timing.get("include", True):
-        section(f"{sec}. Timing")
+        first = []
         if timing.get("disclaimer"):
-            story.append(_p(timing["disclaimer"], italic))
+            first.append(_p(timing["disclaimer"], italic))
         weeks = _f(timing.get("weeks_from_order"), 0)
         if weeks:
-            wk = escape(_qty(weeks))
-            story += [Spacer(1, 1 * mm), Paragraph(
+            wk = escape(_qty(weeks, loc))
+            first += [Spacer(1, 1 * mm), Paragraph(
                 f"Implementation time: approx. <b>{wk} weeks</b> from order.", body)]
         ms = [m for m in timing.get("milestones") or [] if isinstance(m, dict)]
         if ms:
             rows = [[_p("Key milestone", head_c), _p("Planned", head_r)]]
             rows += [[_p(m.get("label"), cell, CELL_TEXT_MAX), _p(_d(m.get("date")), cell_r)]
                      for m in ms]
-            story += [Spacer(1, 2.5 * mm), table(rows, [width * 0.75, width * 0.25])]
+            first += [Spacer(1, 2.5 * mm), table(rows, [width * 0.75, width * 0.25])]
         tasks = ctx.get("tasks") or []
         charts = _plan_charts(tasks, width)
+        chart_head = ([Spacer(1, 4 * mm), _p("Draft plan", cell_b), Spacer(1, 1 * mm),
+                       charts[0]] if charts else [])
+        if ms or not charts:
+            section(f"{sec}. Timing", first)
+            if charts:
+                # Each block is at most CHART_ROWS_PER_BLOCK rows (well under
+                # a page), so keeping the caption with the first block is safe.
+                story.append(KeepTogether(chart_head))
+        else:
+            # No milestone table: the heading and the text go with the chart.
+            section(f"{sec}. Timing", first + chart_head)
+        for chart in charts[1:]:
+            story += [Spacer(1, 2 * mm), chart]
         if charts:
-            # Each block is at most CHART_ROWS_PER_BLOCK rows (well under a
-            # page), so keeping the caption with the first block is safe.
-            story += [Spacer(1, 4 * mm), KeepTogether(
-                [_p("Draft plan", cell_b), Spacer(1, 1 * mm), charts[0]])]
-            for chart in charts[1:]:
-                story += [Spacer(1, 2 * mm), chart]
             legend = _lane_legend(tasks, muted)
             if legend is not None:
                 story += [Spacer(1, 1.5 * mm), legend]
@@ -460,7 +558,6 @@ def render_offer_pdf(ctx: dict) -> bytes:
 
     # ---- Risks --------------------------------------------------------
     shown = [r for r in data.get("risks") or [] if isinstance(r, dict) and r.get("show")]
-    section(f"{sec}. Technical risks and assumptions")
     if shown:
         sev = {1: "Low", 2: "Medium", 3: "High"}
         rows = [[_p("Risk", head_c), _p("Severity", head_c), _p("Department", head_c),
@@ -469,12 +566,13 @@ def render_offer_pdf(ctx: dict) -> bytes:
                   _p(sev.get(int(_f(r.get("severity"))), ""), cell),
                   _p(r.get("department"), cell, 120),
                   _p(r.get("note"), cell, CELL_TEXT_MAX)] for r in shown]
-        story.append(table(rows, [width * 0.22, width * 0.12, width * 0.2, width * 0.46]))
+        section(f"{sec}. Technical risks and assumptions", [
+            table(rows, [width * 0.22, width * 0.12, width * 0.2, width * 0.46])])
     else:
-        story.append(_p("No particular technical risks are stated for this change.", body))
+        section(f"{sec}. Technical risks and assumptions", [_p(
+            "No particular technical risks are stated for this change.", body)])
 
     # ---- Terms --------------------------------------------------------
-    section(f"{sec + 1}. Terms")
     terms = data.get("terms") or {}
     rows = []
     for label, key in (("Payment", "payment"), ("Incoterms", "incoterms"),
@@ -496,16 +594,19 @@ def render_offer_pdf(ctx: dict) -> bytes:
                            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
                            ("LINEBELOW", (0, 0), (-1, -1), 0.25, GRID)]))
-    story.append(t)
+    section(f"{sec + 1}. Terms", [t])
     notes = _clean(terms.get("notes")).strip()
     if notes:
         # Paragraphs, not a table cell: a long note flows over pages.
         story += [Spacer(1, 3 * mm), _p("Notes", cell_b)]
         for para in notes.split("\n\n"):
             story.append(_p(para, small))
-    if offer.get("change_note") and offer.get("version", 1) >= 2:
+    # The internal change note never goes to the customer; what Sales wants
+    # the customer to read about this version is data.customer_note.
+    customer_note = _clean(data.get("customer_note")).strip()
+    if customer_note:
         story += [Spacer(1, 3 * mm), _p("Changes against the previous version", cell_b),
-                  _p(offer["change_note"], small)]
+                  _p(customer_note, small)]
     story += [Spacer(1, 8 * mm),
               _p("We look forward to your order. For questions on this offer "
                  "please contact us quoting the offer number above.", body)]
@@ -513,5 +614,5 @@ def render_offer_pdf(ctx: dict) -> bytes:
         story += [Spacer(1, 2 * mm), _p(org, bold)]
 
     doc.build(story, canvasmaker=_numbered_canvas(ctx["change_number"], number,
-                                                  org, draft))
+                                                  org, watermark))
     return buf.getvalue()

@@ -647,15 +647,15 @@ class ChangeService:
             blocker = await ValidationService.release_blocker(session, change)
             if blocker is not None:
                 return blocker
-            progress = await ChangeService.implementation_progress(session, change)
-            if not progress["ready_to_go"]:
-                pending = sum(1 for e in progress["items"] if not e["ready"])
-                return (f"not ready to go: {pending} of {len(progress['items'])} "
-                        "impacted revisions have not completed their check workflow")
-            # Stage 10: the paperwork around the part (release checklist) and
-            # the lessons-learned step. After the validation blocker, so the
-            # more concrete refusal wins while validation is still open.
             from app.services.release_service import ReleaseService
+            not_ready = ReleaseService.not_ready_message(
+                await ChangeService.implementation_progress(session, change))
+            if not_ready:
+                return not_ready
+            # Stage 10: the paperwork around the part (release checklist),
+            # the lessons-learned step and the open plan deviations. After
+            # the validation blocker, so the more concrete refusal wins while
+            # validation is still open.
             blocker = await ReleaseService.guard_reason(session, change)
             if blocker is not None:
                 return blocker
@@ -665,6 +665,25 @@ class ChangeService:
             if GATE_TARGET_STATUS.get(gate.gate_key) == to_status and gate.decision != "yes":
                 return f"Gate '{gate.gate_key}' is not approved ('{gate.decision}')"
         return None
+
+    @staticmethod
+    async def _status_before_hold(session: AsyncSession,
+                                  change: ChangeRequest) -> Optional[str]:
+        """The status the change had before its latest hop to 'on_hold', from
+        the status changelog; None when no such hop was recorded (legacy)."""
+        row = (await session.execute(
+            select(ChangeChangelog.old_value).where(
+                ChangeChangelog.change_id == change.id,
+                ChangeChangelog.field_name == "status",
+                ChangeChangelog.new_value == json.dumps("on_hold"))
+            .order_by(ChangeChangelog.performed_at.desc(),
+                      ChangeChangelog.id.desc()).limit(1))).first()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return json.loads(row[0])
+        except (TypeError, ValueError):
+            return row[0]
 
     @staticmethod
     async def _approved_not_yet_implemented(session: AsyncSession,
@@ -745,6 +764,16 @@ class ChangeService:
         if to_status in ("quoting", "quoted") and not change.customer_relevant:
             raise ChangeError(
                 "Internal changes skip the quote — record internal cost approval instead")
+        # HARD: a hold is resumed into the stage it was taken from.
+        # Implementation starts once, out of 'approved', after the timing is
+        # validated; resuming a hold taken earlier must not jump there.
+        if change.status == "on_hold" and to_status == "in_implementation":
+            before = await ChangeService._status_before_hold(session, change)
+            if before is not None and before not in ("in_implementation",
+                                                      "in_validation"):
+                raise ChangeError(
+                    "Resume to the stage the change was in; implementation "
+                    "starts after the timing is validated")
 
         # HARD precondition: recall (in_assessment -> scoping) is a correction for
         # a premature submit, not a silent undo of real work. Allowed only while no
@@ -2747,6 +2776,15 @@ class ChangeService:
     ) -> ChangeRequest:
         if response not in CUSTOMER_RESPONSES:
             raise ChangeError(f"Invalid customer response '{response}'")
+        # An acceptance is final: the price and the release deadline were
+        # committed on it. A change of mind is a new change, not an edit.
+        if change.customer_response == "accepted":
+            from app.models.change_offer import ChangeOffer
+            accepted = (await session.get(ChangeOffer, change.accepted_offer_id)
+                        if change.accepted_offer_id else None)
+            what = f"v{accepted.version}" if accepted is not None else "the quote"
+            raise ChangeError(
+                f"The customer accepted {what}; the answer cannot be changed")
         if change.status != "quoted":
             raise ChangeError(
                 "The customer response is recorded while the quote is out "
