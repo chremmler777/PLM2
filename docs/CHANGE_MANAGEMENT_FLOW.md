@@ -40,18 +40,40 @@ checked field-by-field. Do this before writing the formal description.
 
 ## 2. Stages
 
+```mermaid
+flowchart TD
+    A[captured] -->|kickoff gate, soft| B[scoping]
+    A -->|reject with reason| X[rejected]
+    B -->|proceed + impact lock HARD| C[in_assessment]
+    B -->|reject| X
+    C -->|not feasible| X
+    C --> D[costing]
+    D -->|customer change| E[quoting: Offer]
+    D -->|internal change: internal approval| H
+    E -->|offer v1 sent, auto| F[quoted: negotiation]
+    F -->|declined| X
+    F -->|accepted, unexpired + PM and Quality sign-off| H[approved: Timing]
+    H -->|timing validated, soft| I[in_implementation]
+    I --> J[in_validation: Release]
+    J -->|check failed: validation issue,<br/>routes 1 to 3 with a recovery group| I
+    J -->|checklist + lessons + no open issue, soft| K[released]
+    K -->|PM closes| M[closed]
+    MA[captured, origin mother_plant] --> MB[scoping-lite:<br/>impact lock + team informed]
+    MB -->|HARD: lock + inform list sent| H
+```
+
 | Stage | What happens | Who |
 |---|---|---|
-| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here** | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
-| `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached | PM convenes; decision recorded by any member |
-| `in_assessment` | Routed departments answer feasibility + cost per the D1 matrix | Departments (RASIC) |
-| `costing` | Costs summed | — |
+| `captured` | Originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. **No meetings here**. Origin `customer`, `internal` or `mother_plant` (§3 "Mother-plant changes") | Sales; **Project Management may act alternatively** (both departments carry `can_start_change`; the flag, not a hardcoded role, is what the API enforces) |
+| `scoping` | Team decides: proceed / needs info / reject. Impacted set worked out and locked (first PM action), documents gathered. Description is frozen (Sales' capture text); discussion happens by email, thread attached. Mother-plant changes: scoping-lite, impact lock + team informed (read receipts), then straight to `approved` | PM convenes; decision recorded by any member |
+| `in_assessment` | Routed departments answer feasibility + risks per the D1 matrix | Departments (RASIC) |
+| `costing` | Cost lines with lead time, internal hours, estimates or vendor quotes; planned P&L starts. Closing forks on the cost carrier: customer → `quoting`, internal → internal approval → `approved` | Departments; PM runs it |
 | `quoting` | Offer tab (Approval for internal changes): quote plan, price (cost basis, factors, risk weighting, changeover, piece price), document (CBD/rough, free fields, terms, PDF). Sending v1 auto-moves to `quoted` | Sales |
-| `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed" | Sales |
-| `approved` | Timing tab: detailed plan seeded from the quote plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", plan published, MS Project export | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
-| `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated | departments; PM/Sales/lead/admin for deviations |
-| `in_validation` | Release tab: validation checks (existing) plus the release checklist (13 items) and the lessons learned step | departments, PM |
-| `released` → `closed` | Change is live (checklist + lessons done), then PM wraps it up | PM |
+| `quoted` | Offer sent, valid 30 days from receipt; negotiation rounds against an offer version, new versions with "what changed". Acceptance of a sent, unexpired version freezes the planned P&L | Sales |
+| `approved` | Timing tab: detailed plan seeded from the quote plan, bank build / scrap plan, every responsible team confirms or raises a concern, baseline set by "Timing validated", plan published, MS Project export. Mother plant: release deadline = their SOP | PM + Quality sign-off (customer changes) or internal cost approval; then PM + Scheduling + all teams for timing |
+| `in_implementation` | Tracker: progress/actuals per block; date changes only via a deviation (reason required), locked or escalated. Recovery groups from validation issues land here. Actual P&L from here | departments; PM/Sales/lead/admin for deviations |
+| `in_validation` | Release tab: validation checks plus the release checklist (13 items) and the lessons learned step; a failed check raises a validation issue (§3 "Validation issues") | departments, PM |
+| `released` → `closed` | Change is live (checklist + lessons done, no open issue); summary with the P&L offer vs doing; then PM wraps it up | PM |
 
 Off-path: `on_hold`, `rejected` (reversible), `cancelled` (terminal).
 
@@ -556,6 +578,94 @@ unbypassable gates):
 - `in_validation -> released`: release checklist complete and lessons step
   done (previous section), checked after the pre-existing validation
   blocker and ready-to-go check so the most concrete refusal wins.
+
+### Validation issues: the failure branch (2026-09-25, spec §12)
+
+A failed validation check becomes an issue `VI-n` (`change_validation_issues`,
+migration `090`), not just a bounce back. Shape, in order:
+- **Raise**: routed department member, PM, lead or admin, in `in_validation`
+  (or `in_implementation` after a loop back); a failed check offers "Raise
+  issue" prefilled, one open issue per failed check.
+- **Containment** (owner department, PM, lead): required before a route when
+  severity is 3.
+- **Root cause**: required before any route, except a concession the
+  customer accepts as-is.
+- **Route**, by PM or lead with a reason, 4-eyes (the decider is not the
+  raiser unless admin): 1 `internal_rework`, 2 `supplier_rework`, 3
+  `design_change` loop the change back to `in_implementation` with fix
+  actions and a recovery group in the plan; 4 `customer_concession` closes as
+  `accepted` only when Sales records `accept_deviation` **with a customer
+  mail filed** (hard rule), `require_fix` reopens the route; 5
+  `follow_up_change` spawns a new change at `captured` and marks the issue
+  `transferred`.
+- **Re-validation**: all fix actions done → `revalidation`; the linked check
+  answered `passed` closes the issue, a new `failed` reopens `fixing`.
+- **Guard**: `in_validation -> released` adds "n validation issues open"
+  (soft guard, after the checklist and lessons reasons).
+Code: `validation_issue_service.py`, `api/v1/changes/validation_issues.py`,
+`components/changes/validation/`. Changelog `validation_issue_*`.
+
+### Recovery timing and the escalation ladder (spec §12a)
+
+A fix route (1 to 3) adds a **recovery group** to the detailed plan: summary
+"Recovery VI-n", one block per fix action, "Re-validation VI-n", linked FS
+into the blocks that waited on the failed validation (SOP, customer
+approval), so scheduling pushes them. After the baseline every move is a
+deviation with reason "VI-n: <route reason>". When the recovery ends after
+the release deadline, Sales records the customer's `new_timing` (release
+deadline moved, audited as `release_deadline_set`) or `require_fix` (PM
+shortens the recovery); the recovery deviations are escalated together.
+
+Every issue has an **escalation level** with history
+(`change_validation_issue_escalations`):
+- **L1 department**: on raise; owner department + PM informed.
+- **L2 project**: automatic on severity 3, an overdue fix action, a recovery
+  past the baseline finish, or no route after 2 working days; PM + change
+  lead + Sales, Sales decides whether the customer is told.
+- **L3 management + customer**: automatic when the recovery ends after the
+  release deadline, an L2 is not acknowledged in 2 working days, or the
+  customer requires a fix on a concession; Sales informs the customer (mail
+  filed into the issue), management is notified; for a mother-plant change
+  the PM informs the mother-plant contact instead.
+Each level change writes a row, changelog `validation_issue_escalated`, a
+notification and an "Acknowledge escalation" action; manual escalation needs
+a reason; de-escalation only by closing or by the PM with a reason.
+
+### P&L: offer vs doing (spec §13)
+
+Every change compares the offer with what happened
+(`GET /api/v1/pnl/changes/{id}/offer-vs-actual`, cost roles only). Planned
+figures (revenue, internal, external, scrap) are **frozen at customer
+acceptance** or internal approval in the accepted offer's `_snapshot.pnl`
+(older changes fall back to current costing, basis `costing`). Actuals come
+from booked hours x department rate, `change_actual_costs` entries
+(migration `091`) and validation-issue costs by bearer (internal = our cost,
+supplier = recoverable, customer = revenue once quoted). The result carries
+planned and actual margin, variance and the timing slip. Touchpoints: planned
+at costing and acceptance; actual at implementation, validation and release
+(the release summary uses the same card). Code: `pnl_service.py`,
+`api/v1/changes/actual_costs.py`, `components/changes/pnl/`.
+
+### Mother-plant changes (spec §14, to build)
+
+Changes engineered and commercially handled by the mother plant:
+`change_requests.origin = mother_plant`, `mother_plant_name` (dropdown,
+default **KTX Weissenburg (WUG)**, second **KTX Solingen**, list in
+`app/services/mother_plants.py`), `mother_plant_ref`, `mother_plant_sop`.
+- **Flow**: `captured -> scoping -> approved -> in_implementation ->
+  in_validation -> released -> closed`. No assessment, costing, offer or
+  quote deadline (`customer_relevant` stays false).
+- **Scoping-lite**: impact lock (Development) as usual, then "Send
+  information" to the chosen departments: one `change_info_receipts` row
+  each and a "Read and understood" task; open receipts show in Blocked by as
+  information, not a gate.
+- **Gate**: `scoping -> approved` only for origin `mother_plant`, hard-gated
+  on the impact lock and the inform list being sent.
+- **Approved**: `release_due_date = mother_plant_sop` (reason "Mother plant
+  timing"); detailed plan from their MS Project file, else empty with the SOP
+  milestone. Timing as usual, with an "Inform mother plant" stamp instead of
+  the customer publish; escalation L3 informs the mother-plant contact via
+  the PM. P&L: actual local costs only (basis `none`).
 
 ### The tab structure (2026-09-25)
 
