@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react'
+import { AlertTriangle, ArrowRight, Ban, Check, Hourglass, Info } from 'lucide-react'
 import type { ChangeDetail, ChangeStatus, Gate, GateKey, MyAction, StageAssessment } from '../../types/change'
 import { hasEnded, endLabel } from '../../lib/transitionRights'
-import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor } from '../../lib/changeStatus'
+import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, GATE_TARGET_STATUS, DECIDED_BY_MEETING, changeTabLabel, nextStatusesFor, transitionLabel } from '../../lib/changeStatus'
+import { btnBase, btnSizes, btnSm, buttonClass, type ButtonSize } from '../common/buttonStyles'
 import { t } from '../../i18n/cmLabels'
 import { DeadlineEditor } from './DeadlineEditor'
 import { QuotedFactChip } from './DeadlineChip'
 import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
-import { formatDate } from '../../lib/format'
+import { formatCalendarDate, formatDate } from '../../lib/format'
 import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
 import { plantText } from '../../lib/plantName'
 
@@ -72,7 +74,42 @@ interface Props {
   /** "Ask for a deviation" on a gate held step: the page asks for one to
       that status (the gate's key names what holds it). */
   onAskDeviation?: (to: ChangeStatus, gateKey: GateKey) => void
+  /** The engineering review's answers (spec §17): the next step waits once
+      the viewer's own answer is in. */
+  review?: ReviewProgress | null
+  /** `compact`: the slim sticky bar on every tab but Overview (status, the
+      blockers count, the one next step). Same logic, same source. */
+  variant?: 'full' | 'compact'
+  /** Compact bar: the blockers count and the actions count lead to Overview. */
+  onShowOverview?: () => void
 }
+
+/** What the cockpit needs of the engineering review state. */
+export interface ReviewProgress {
+  open_count: number
+  impact_count: number
+  escalated?: boolean
+  can_escalate?: boolean
+  answers?: { answer: string | null; can_answer: boolean }[]
+}
+
+/** Your-actions kinds that are the same job as a next step: listed once, as the step. */
+const SAME_JOB_AS_STEP: Record<string, string[]> = {
+  offer: ['offer_build'],
+  'validate-timing': ['timing_validate'],
+  'lock-impact': ['impact_confirm'],
+  review: ['review_answer'],
+}
+
+/** A gate's state in words, keyed on its decision like the backend's gate_message:
+    'no' answered No, 'na' not answered Yes (it is n/a), none not decided yet. */
+export const gateStateText = (decision: string | null | undefined): string =>
+  t(decision === 'no' ? 'cockpit.gateStateNo' : decision === 'na' ? 'cockpit.gateStateOpen' : 'cockpit.gateStateNone')
+const gateRowText = (decision: string | null | undefined): string =>
+  t(decision === 'no' ? 'cockpit.gateNo' : decision === 'na' ? 'cockpit.gateOpen' : 'cockpit.gateNone')
+
+/** "1 blocker", "3 blockers". */
+const plural = (text: string, n: number) => text.replace('{n}', String(n)).replace('{s}', n === 1 ? '' : 's')
 
 /** One next step: a place to go and do the work, or a status to move to. */
 export type NextStep =
@@ -93,7 +130,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
   & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'
     | 'costing_pending_department_ids' | 'impact_confirmed_at' | 'mother_plant_name'>>,
-  assessment?: StageAssessment | null): NextStep[] {
+  assessment?: StageAssessment | null, review?: ReviewProgress | null): NextStep[] {
   const s = change.status
   // The assessment round (spec §16 P1 6/8): no primary while departments are
   // still answering; a not-feasible answer offers the three ways out; a full
@@ -137,9 +174,21 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   // departments answer; the answers release it (or Development escalates).
   if (change.origin === 'engineering_review') {
     if (s === 'scoping') {
-      return change.impact_confirmed_at
-        ? [{ kind: 'go', key: 'review', label: 'Answer the review', tab: 'review' }]
-        : [{ kind: 'go', key: 'lock-impact', label: 'Lock the impacted set (Development)', tab: 'impacted' }]
+      if (!change.impact_confirmed_at) {
+        return [{ kind: 'go', key: 'lock-impact', label: t('next.lockImpact'), tab: 'impacted' }]
+      }
+      // Once the viewer's answer is in, the step is waiting, not "answer".
+      const mineOpen = !review || (review.answers ?? []).some((a) => a.can_answer && a.answer == null)
+      if (mineOpen) return [{ kind: 'go', key: 'review', label: t('next.answerReview'), tab: 'review' }]
+      if (review.open_count > 0) {
+        return [{ kind: 'wait', key: 'review-answers', text: plural(t('next.waitingReview'), review.open_count) }]
+      }
+      if (review.impact_count > 0 && !review.escalated) {
+        return review.can_escalate
+          ? [{ kind: 'go', key: 'review-escalate', label: t('next.reviewImpact'), tab: 'review' }]
+          : [{ kind: 'wait', key: 'review-escalate', text: t('next.reviewImpactWait') }]
+      }
+      return [{ kind: 'wait', key: 'review-done', text: t('next.reviewDone') }]
     }
     if (s === 'captured') return [{ kind: 'advance', to: 'scoping' }]
     return []
@@ -218,7 +267,25 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
 export const pluralizeLabel = (label: string): string =>
   label.replace(/\b(\d+)(\s+[^()\d]*?)\(s\)/g, (_m, n: string, word: string) => `${n}${word}${n === '1' ? '' : 's'}`)
 
-export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation }: Props) {
+/** Classes of the step buttons: wrap long labels instead of overflowing the card. */
+const stepCls = (primary: boolean, size: ButtonSize = 'md') => buttonClass(primary ? 'primary' : 'secondary', size,
+  size === 'md' ? 'h-auto min-h-9 whitespace-normal py-2 text-center' : '')
+/** The viewer's own actions: an accent, not a second primary. */
+const actionCls = `${btnBase} ${btnSizes.md} h-auto min-h-9 whitespace-normal py-1.5 text-left `
+  + 'border border-sky-700 bg-sky-900/40 text-sky-100 hover:bg-sky-800/60'
+const linkRow = 'inline-flex items-start gap-1.5 text-left hover:underline decoration-dotted underline-offset-2 '
+  + 'rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400'
+/** Where a row leads, inline after its text so it wraps with it: "-> Release". */
+const Where = ({ to }: { to: string }) => (
+  <span className="ml-1 inline-flex items-center gap-0.5 whitespace-nowrap align-baseline text-xs opacity-70">
+    <ArrowRight aria-hidden="true" size={11} className="self-center" />{to}
+  </span>
+)
+
+/** One blocker, as the Blocked-by card and the "Resolve first" button both read it. */
+interface Blocker { key: string; text: string; go?: () => void }
+
+export default function CockpitSummary({ change, gates, pendingDeviations, impl, onAdvance, advancing, onResolveGate, onShowImpact, actions = [], onAction, canSeeGovernance = true, canRecordMeeting = true, waits = [], onGo, needs = () => null, assessment = null, may = () => true, mayNotText, onStepAction, leadSlot, onDecideDeviation, deviationTargets, onAskDeviation, review = null, variant = 'full', onShowOverview }: Props) {
   const motherPlant = change.origin === 'mother_plant'
   const next = nextStatusesFor(change.status, change.origin).filter((s) =>
     // Out of costing a customer change goes to Sales' quote creation; an
@@ -229,10 +296,16 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         ? s !== 'approved' && s !== 'quoted'
         : s !== 'quoted' && s !== 'quoting'))
   const ended = hasEnded(change)
+  // The gate is a soft guard (ChangeService._guard): an approved transition
+  // deviation to its target lets the step through.
+  const deviationCovers = (to: string) => deviationTargets?.approved.includes(to) ?? false
+  const deviationAsked = (to: string) => deviationTargets?.pending.includes(to) ?? false
   const openGates = gates.filter((g) => g.decision !== 'yes')
-  // A gate only blocks when it guards a transition that's currently available —
-  // gates seeded 'na' but guarding a later transition are just "outstanding later".
-  const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key]))
+  // A gate only blocks when it guards a transition that's currently available
+  // and no approved deviation covers it; gates seeded 'na' but guarding a
+  // later transition are just "outstanding later".
+  const blockingGates = openGates.filter((g) => next.includes(GATE_TARGET_STATUS[g.gate_key])
+    && !deviationCovers(GATE_TARGET_STATUS[g.gate_key]))
   // A gate nobody has set ("NA") guarding a later step is noise, not news:
   // only a later gate that was actually answered No is worth a line.
   const laterGates = openGates.filter((g) => !next.includes(GATE_TARGET_STATUS[g.gate_key])
@@ -244,8 +317,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const impactUnconfirmed = !change.impact_confirmed_at
     && (change.impacted_items?.length ?? 0) > 0
     && (change.status === 'scoping' || change.status === 'approved')
-  // Kickoff (captured -> scoping) needs a description, something attached, and —
-  // for customer work — the quote-by date. The gate is soft on the backend, so
+  // Kickoff (captured -> scoping) needs a description, something attached, and,
+  // for customer work, the quote-by date. The gate is soft on the backend, so
   // this warns and names what is missing rather than blocking the button.
   const kickoffMissing: string[] = change.status !== 'captured' ? [] : [
     ...(change.description?.trim() ? [] : [t('kickoff.description')]),
@@ -254,11 +327,34 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     // Kickoff wants a lead (soft): scoping is the lead's to run.
     ...(change.lead_id == null ? [t('cockpit.noLead')] : []),
   ]
+  const gateText = (g: Gate) => `${t('gate.' + g.gate_key)} ${t('cockpit.gateWord')}: ${gateRowText(g.decision)}`
+  // One list of what holds the change up. The Blocked-by card, the count in
+  // the compact bar and the "Resolve first" button all read it, so the next
+  // step can never look free while blockers are listed next to it.
+  const hardBlockers: Blocker[] = [
+    ...waits.filter((w) => !w.info).map((w) => ({
+      key: `wait-${w.key}`, text: w.text,
+      go: w.tab && onGo ? () => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!)) : undefined,
+    })),
+    ...blockingGates.map((g) => ({
+      key: `gate-${g.gate_key}`, text: gateText(g),
+      go: onResolveGate && canSeeGovernance ? () => onResolveGate(g.gate_key) : undefined,
+    })),
+    ...(pendingDeviations > 0 ? [{
+      key: 'deviations', text: `${t('cockpit.pendingDeviations')}: ${pendingDeviations}`,
+      go: onDecideDeviation ? () => onDecideDeviation() : undefined,
+    }] : []),
+    ...(overdue > 0 ? [{
+      key: 'overdue', text: `${t('cockpit.overdueAssessments')}: ${overdue}`,
+      go: onGo ? () => onGo('assessments') : undefined,
+    }] : []),
+    ...(impactUnconfirmed ? [{ key: 'impact', text: t('impact.pending'), go: onShowImpact }] : []),
+  ]
+  const infoWaits = waits.filter((w) => w.info)
   // Held departments, open assessments, customer questions, … arrive as waits.
-  const blockers = blockingGates.length + (pendingDeviations > 0 ? 1 : 0)
-    + (overdue > 0 ? 1 : 0) + (impactUnconfirmed ? 1 : 0) + waits.length
+  const listed = hardBlockers.length + infoWaits.length
   // Steps the viewer may not take are not offered (spec §16 P1 4).
-  const allSteps = nextStepFor(change, assessment)
+  const allSteps = nextStepFor(change, assessment, review)
   // A not-feasible answer is the lead's and PM's call (reject, back to
   // scoping, or a deviation to costing). Anyone else reads who decides
   // instead of "choose how to go on" with nothing to choose.
@@ -273,6 +369,14 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   const hiddenSteps = allSteps.length - steps.length
   const buttons = steps.filter((st): st is Exclude<NextStep, { kind: 'wait' }> => st.kind !== 'wait')
   const offPath = OFF_PATH_STATUSES.includes(change.status)
+  // A status move is not the primary while anything is listed as blocking:
+  // the primary becomes "Resolve n blockers first" and leads to the first one.
+  // The move stays offered (secondary): the guards are soft, and a refused
+  // move offers a deviation.
+  const demoted = hardBlockers.length > 0 && steps[0]?.kind === 'advance'
+  const lead = hardBlockers.find((b) => b.go) ?? hardBlockers[0]
+  const meetingDecides = DECIDED_BY_MEETING.includes(change.status) && !motherPlant
+    && change.origin !== 'engineering_review'
 
   // Same names as the tab bar.
   // Old names (commercial, implementation) resolve to the tab for the stage.
@@ -282,29 +386,33 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
     // In words: "Release gate not answered Yes (it is n/a)", "Release gate answered No".
     const label = (
       <>
-        {blocking && '⚠ '}{t('gate.' + g.gate_key)} {t('cockpit.gateWord')}:{' '}
-        {g.decision === 'no' ? t('cockpit.gateNo') : t('cockpit.gateOpen')}
+        {blocking && <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />}
+        <span>{gateText(g)}{onResolveGate && canSeeGovernance ? <Where to="D1" /> : null}</span>
       </>
     )
     return (
-      <li key={g.gate_key} className={blocking ? 'text-amber-300' : 'text-slate-400'}>
+      <li key={g.gate_key} data-blocking={blocking ? 'true' : undefined}
+        className={blocking ? 'text-amber-300' : 'text-slate-400'}>
         {onResolveGate && canSeeGovernance ? (
-          <button type="button"
-            className="text-left hover:underline decoration-dotted underline-offset-2"
+          <button type="button" className={linkRow}
             onClick={() => onResolveGate(g.gate_key)}
             title={t('cockpit.resolveGate')}>
-            {label} <span className="text-xs opacity-70">→ D1</span>
+            {label}
           </button>
-        ) : label}
+        ) : <span className="inline-flex items-start gap-1.5">{label}</span>}
       </li>
     )
   }
 
   // Project team (spec §18): items where the viewer is only backup (the
   // project has another responsible for the role) are listed apart, muted,
-  // with the main's name; they stay actionable.
-  const mainActions = actions.filter((a) => a.role !== 'backup')
-  const backupActions = actions.filter((a) => a.role === 'backup')
+  // with the main's name; they stay actionable. An action that is the same
+  // job as a next-step button is listed once, as the step.
+  const stepKeys = buttons.map((st) => (st.kind === 'advance' ? '' : st.key))
+  const sameJob = (a: MyAction) => stepKeys.some((k) => (SAME_JOB_AS_STEP[k] ?? []).includes(a.kind))
+  const shownActions = actions.filter((a) => !sameJob(a))
+  const mainActions = shownActions.filter((a) => a.role !== 'backup')
+  const backupActions = shownActions.filter((a) => a.role === 'backup')
   const actionKey = (a: MyAction, i: number) =>
     `${a.kind}-${a.assessment_id ?? a.task_id ?? a.deviation_id ?? a.gate_key ?? a.escalation_id ?? a.issue_id ?? i}`
   // An issue act opens the tab that shows the issues now (Timing during a
@@ -320,14 +428,101 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
   // the gate's reason, and the way to D1 is right under it.
   const gateHolding = (to: ChangeStatus): Gate | undefined =>
     gates.find((g) => GATE_TARGET_STATUS[g.gate_key] === to && g.decision !== 'yes')
-  // The gate is a soft guard (ChangeService._guard): an approved transition
-  // deviation to its target lets the step through.
-  const deviationCovers = (to: string) => deviationTargets?.approved.includes(to) ?? false
-  const deviationAsked = (to: string) => deviationTargets?.pending.includes(to) ?? false
-  const gateState = (g: Gate) => t(g.decision === 'no' ? 'cockpit.gateStateNo' : 'cockpit.gateStateOpen')
+  const gateState = (g: Gate) => gateStateText(g.decision)
   const gateWhy = (g: Gate, mine = true) => t(mine ? 'cockpit.gateHolds' : 'cockpit.gateHoldsNotYours')
     .replace('{gate}', t('gate.' + g.gate_key))
     .replace('{state}', gateState(g))
+
+  /** Why a step cannot be taken by this viewer right now, or null. */
+  const deniedFor = (st: Exclude<NextStep, { kind: 'wait' }>): string | null => {
+    const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
+    const gate = st.kind === 'advance' && !deviationCovers(st.to) ? gateHolding(st.to) : undefined
+    return st.kind === 'action' ? null : needs(key) ?? (gate ? gateWhy(gate) : null)
+  }
+  /** One next-step button; the same in the cockpit and the compact bar. */
+  const stepButton = (st: Exclude<NextStep, { kind: 'wait' }>, primary: boolean, size: ButtonSize = 'md') => {
+    const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
+    const denied = deniedFor(st)
+    const blockedHint = demoted && st.kind === 'advance'
+      ? plural(t('next.blockedStepHint'), hardBlockers.length) : undefined
+    return (
+      <button key={key} type="button" data-testid={`next-${key.replace(':', '-')}`}
+        className={stepCls(primary, size)}
+        disabled={!!denied || (st.kind === 'advance' && advancing)}
+        title={denied ?? blockedHint ?? (st.kind === 'advance' || st.kind === 'action' ? st.hint : undefined) ?? undefined}
+        onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab)
+          : st.kind === 'action' ? onStepAction?.(st.key) : onAdvance(st.to))}>
+        {st.kind === 'go' || st.kind === 'action' ? st.label : (st.label ?? transitionLabel(st.to, change.status))}
+      </button>
+    )
+  }
+  const resolveButton = (size: ButtonSize = 'md') => (
+    <button type="button" data-testid="next-resolve-blockers" className={stepCls(true, size)}
+      disabled={!lead?.go} onClick={() => lead?.go?.()}
+      title={lead ? t('next.resolveFirst').replace('{x}', lead.text) : undefined}>
+      {plural(t('next.resolveBlockers'), hardBlockers.length)}
+    </button>
+  )
+  const statusPill = (small = false) => (
+    <span data-testid="status-pill" className={`whitespace-nowrap rounded-full font-semibold ${
+      small ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-sm'} ${
+      endLabel(change) ? 'bg-red-900 text-red-100' : STATUS_PILL[change.status]}`}>
+      {endLabel(change) ?? STATUS_LABELS[change.status]}
+    </span>
+  )
+
+  if (variant === 'compact') {
+    const primaryStep = !demoted && buttons[0] && steps[0] === buttons[0] ? buttons[0] : null
+    const firstWait = steps.find((st) => st.kind === 'wait')
+    return (
+      <div data-testid="cockpit-compact" className="flex min-w-0 flex-1 items-center gap-2">
+        {statusPill(true)}
+        {hardBlockers.length > 0 ? (
+          <button type="button" data-testid="compact-blockers" onClick={onShowOverview}
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-amber-700/60 bg-amber-950/40 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+            <AlertTriangle aria-hidden="true" size={12} />
+            {plural(t('cockpit.blockersCount'), hardBlockers.length)}
+          </button>
+        ) : !ended && (
+          <span className="hidden shrink-0 items-center gap-1 text-xs text-emerald-400 sm:inline-flex">
+            <Check aria-hidden="true" size={12} />{t('cockpit.nothingBlocking')}
+          </span>
+        )}
+        {mainActions.length > 0 && (
+          <button type="button" data-testid="compact-actions" onClick={onShowOverview}
+            className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-sky-700 bg-sky-900/40 px-2 py-0.5 text-xs text-sky-100 hover:bg-sky-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400">
+            {plural(t('cockpit.actionsCount'), mainActions.length)}
+          </button>
+        )}
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {meetingDecides ? (
+            <button type="button" className={btnSm.secondary} onClick={() => onAction?.('scoping')}>
+              {canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')}
+            </button>
+          ) : demoted ? resolveButton('sm')
+            : primaryStep ? (
+              <>
+                {/* A held step says why right beside it, not only in a tooltip. */}
+                {deniedFor(primaryStep) && (
+                  <span data-testid="compact-held" className="min-w-0 truncate text-xs text-amber-200"
+                    title={deniedFor(primaryStep) ?? undefined}>
+                    {deniedFor(primaryStep)}
+                  </span>
+                )}
+                {stepButton(primaryStep, true, 'sm')}
+              </>
+            )
+            : firstWait && firstWait.kind === 'wait' ? (
+              <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-400">
+                <Hourglass aria-hidden="true" size={12} className="shrink-0" />
+                <span className="truncate">{firstWait.text}</span>
+              </span>
+            ) : null}
+        </div>
+      </div>
+    )
+  }
+
   const backupGroup = (
     <div data-testid="backup-actions">
       <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('actions.asBackup')}</h3>
@@ -337,7 +532,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             key={actionKey(a, i)}
             type="button"
             title={t('team.backupHint')}
-            className="border border-slate-600 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-left"
+            className={`${btnBase} ${btnSizes.md} h-auto min-h-9 whitespace-normal flex-col items-start py-1.5 text-left border border-slate-600 text-slate-300 hover:bg-slate-700`}
             onClick={() => runAction(a)}>
             {pluralizeLabel(a.label)}
             {a.main_name && (
@@ -360,7 +555,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
                 key={actionKey(a, i)}
                 type="button"
                 data-testid={a.issue_id != null ? `action-${a.kind}-${a.issue_id}` : undefined}
-                className="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg text-sm"
+                className={actionCls}
                 onClick={() => runAction(a)}>
                 {pluralizeLabel(a.label)}
               </button>
@@ -374,11 +569,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       )}
       <div className="grid md:grid-cols-3 gap-3">
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.where')}</h3>
-        <span data-testid="status-pill" className={`px-2.5 py-1 rounded-full text-sm font-semibold ${
-          endLabel(change) ? 'bg-red-900 text-red-100' : STATUS_PILL[change.status]}`}>
-          {endLabel(change) ?? STATUS_LABELS[change.status]}
-        </span>
+        <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('cockpit.where')}</h3>
+        {statusPill()}
         {' '}
         <StageResponsibleBadge status={change.status} origin={change.origin} />
         {' '}
@@ -394,7 +586,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           // Until approval makes it the release deadline, the SOP is a fact.
           <span data-testid="mother-plant-sop"
             className="inline-flex items-center rounded-full border border-purple-700/60 bg-purple-950/40 px-2 py-0.5 text-xs text-purple-200">
-            {plantText('mp.sop', change.mother_plant_name)} {formatDate(change.mother_plant_sop)}
+            {plantText('mp.sop', change.mother_plant_name)} {formatCalendarDate(change.mother_plant_sop)}
           </span>
         ) : null}
         {motherPlant && (
@@ -408,16 +600,18 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <p>{t('cockpit.lead')}: <span className="text-slate-100">{change.lead_name ?? t('cockpit.noLead')}</span></p>
           )}
         </div>
-        <p data-testid="status-dates" className="mt-1 text-xs text-slate-500">
+        <p data-testid="status-dates" className="mt-1 text-xs text-slate-400">
           {t('cockpit.created')} {formatDate(change.created_at)} · {t('cockpit.updated')} {formatDate(change.updated_at)}
         </p>
       </div>
 
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.blocking')}</h3>
-        {blockers === 0 ? (
+        <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('cockpit.blocking')}</h3>
+        {listed === 0 ? (
           <>
-            <p className="text-sm text-emerald-400">✓ {t('cockpit.nothingBlocking')}</p>
+            <p className="inline-flex items-center gap-1.5 text-sm text-emerald-400">
+              <Check aria-hidden="true" size={14} />{t('cockpit.nothingBlocking')}
+            </p>
             {laterGates.length > 0 && (
               <ul className="space-y-1.5 text-sm mt-2">
                 {laterGates.map((g) => gateRow(g, false))}
@@ -426,43 +620,60 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           </>
         ) : (
           <ul className="space-y-1.5 text-sm">
-            {waits.map((w) => (
-              <li key={w.key} data-testid={`wait-${w.key}`}
-                className={w.level === 3 ? 'text-rose-300 font-medium' : w.info ? 'text-slate-300' : 'text-amber-300'}>
-                {w.tab && onGo ? (
-                  <button type="button"
-                    className="text-left hover:underline decoration-dotted underline-offset-2"
-                    onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
-                    {w.info ? 'ℹ' : '⏳'} {w.text} <span className="text-xs opacity-70 whitespace-nowrap">→ {tabName(w.tab)}</span>
-                  </button>
-                ) : <>{w.info ? 'ℹ' : '⏳'} {w.text}</>}
-              </li>
-            ))}
+            {waits.map((w) => {
+              const Icon = w.info ? Info : Hourglass
+              const body = (
+                <>
+                  <Icon aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                  <span>{w.text}{w.tab && onGo ? <Where to={tabName(w.tab)} /> : null}</span>
+                </>
+              )
+              return (
+                <li key={w.key} data-testid={`wait-${w.key}`}
+                  className={w.level === 3 ? 'text-rose-300 font-medium' : w.info ? 'text-slate-300' : 'text-amber-300'}>
+                  {w.tab && onGo ? (
+                    <button type="button" className={linkRow}
+                      onClick={() => (w.issueId != null ? onGo(w.tab!, w.issueId) : onGo(w.tab!))}>
+                      {body}
+                    </button>
+                  ) : <span className="inline-flex items-start gap-1.5">{body}</span>}
+                </li>
+              )
+            })}
             {blockingGates.map((g) => gateRow(g, true))}
             {pendingDeviations > 0 && (
               <li data-testid="blocked-pending-deviations" className="text-amber-300">
                 {onDecideDeviation ? (
-                  <button type="button"
-                    className="text-left hover:underline decoration-dotted underline-offset-2"
-                    onClick={() => onDecideDeviation()}>
-                    ⚠ {t('cockpit.pendingDeviations')}: {pendingDeviations}{' '}
-                    <span className="text-xs opacity-70">→ {tabName('overview')}</span>
+                  <button type="button" className={linkRow} onClick={() => onDecideDeviation()}>
+                    <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                    <span>{t('cockpit.pendingDeviations')}: {pendingDeviations}<Where to={tabName('overview')} /></span>
                   </button>
-                ) : <>⚠ {t('cockpit.pendingDeviations')}: {pendingDeviations}</>}
+                ) : (
+                  <span className="inline-flex items-start gap-1.5">
+                    <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                    {t('cockpit.pendingDeviations')}: {pendingDeviations}
+                  </span>
+                )}
               </li>
             )}
             {overdue > 0 && (
-              <li className="text-red-400">⚠ {t('cockpit.overdueAssessments')}: {overdue}</li>
+              <li className="flex items-start gap-1.5 text-red-400">
+                <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                {t('cockpit.overdueAssessments')}: {overdue}
+              </li>
             )}
             {impactUnconfirmed && (
               <li className="text-amber-300">
                 {onShowImpact ? (
-                  <button type="button"
-                    className="text-left hover:underline decoration-dotted underline-offset-2"
-                    onClick={onShowImpact}>
-                    ⚠ {t('impact.pending')} <span className="text-xs opacity-70">→ {t('impact.title')}</span>
+                  <button type="button" className={linkRow} onClick={onShowImpact}>
+                    <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />
+                    <span>{t('impact.pending')}<Where to={t('impact.title')} /></span>
                   </button>
-                ) : <>⚠ {t('impact.pending')}</>}
+                ) : (
+                  <span className="inline-flex items-start gap-1.5">
+                    <AlertTriangle aria-hidden="true" size={14} className="mt-0.5 shrink-0" />{t('impact.pending')}
+                  </span>
+                )}
               </li>
             )}
             {laterGates.map((g) => gateRow(g, false))}
@@ -471,16 +682,18 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
       </div>
 
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-        <h3 className="text-xs uppercase tracking-wide text-slate-500 mb-2">{t('cockpit.next')}</h3>
+        <h3 className="text-xs uppercase tracking-wide text-slate-400 mb-2">{t('cockpit.next')}</h3>
         {impl?.ready_to_go && (
-          <span className="inline-block mb-2 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
-            ✓ {t('impl.readyToGo')}
+          <span className="mb-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-200">
+            <Check aria-hidden="true" size={12} />{t('impl.readyToGo')}
           </span>
         )}
         {kickoffMissing.length > 0 && (
           <div data-testid="kickoff-hint"
             className="mb-2 rounded-lg border border-amber-700/60 bg-amber-950/30 p-2 text-xs">
-            <p className="text-amber-200">⚠ {t('kickoff.title')}</p>
+            <p className="inline-flex items-center gap-1.5 text-amber-200">
+              <AlertTriangle aria-hidden="true" size={12} />{t('kickoff.title')}
+            </p>
             <ul className="mt-1 list-disc list-inside text-amber-100/80">
               {kickoffMissing.map((m) => <li key={m}>{m}</li>)}
             </ul>
@@ -488,13 +701,13 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           </div>
         )}
         {change.status === 'captured' && kickoffMissing.length === 0 && (
-          <p data-testid="kickoff-ready" className="mb-2 text-xs text-emerald-400">
-            ✓ {t('kickoff.ready')}
+          <p data-testid="kickoff-ready" className="mb-2 inline-flex items-center gap-1.5 text-xs text-emerald-400">
+            <Check aria-hidden="true" size={12} />{t('kickoff.ready')}
           </p>
         )}
-        {DECIDED_BY_MEETING.includes(change.status) && !motherPlant && change.origin !== 'engineering_review' ? (
+        {meetingDecides ? (
           // The decision lives in the meeting record, not on a button here.
-          <button
+          <button type="button"
             className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"
             onClick={() => onAction?.('scoping')}>
             {canRecordMeeting ? t('cockpit.decideInMeeting') : t('cockpit.meetingDecides')}
@@ -507,30 +720,23 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           <div className="flex flex-col gap-2">
             {steps.filter((st) => st.kind === 'wait').map((st) => (
               <p key={st.key} data-testid={`next-wait-${st.key}`}
-                className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
-                ⏳ {st.kind === 'wait' ? st.text : ''}
+                className="flex items-start gap-1.5 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2 text-sm text-slate-300">
+                <Hourglass aria-hidden="true" size={14} className="mt-0.5 shrink-0 text-slate-400" />
+                <span>{st.kind === 'wait' ? st.text : ''}</span>
               </p>
             ))}
-            {buttons.map((st) => {
-              const key = st.kind === 'go' || st.kind === 'action' ? st.key : `to:${st.to}`
-              const gate = st.kind === 'advance' && !deviationCovers(st.to) ? gateHolding(st.to) : undefined
-              const denied = st.kind === 'action' ? null : needs(key) ?? (gate ? gateWhy(gate) : null)
-              // While the step waits there is no primary button at all.
-              const primary = steps[0] === st
-              const cls = primary
-                ? 'bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-sky-600'
-                : 'border border-slate-600 text-slate-300 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed'
-              return (
-                <button key={key} type="button" data-testid={`next-${key.replace(':', '-')}`}
-                  className={cls}
-                  disabled={!!denied || (st.kind === 'advance' && advancing)}
-                  title={denied ?? (st.kind === 'advance' || st.kind === 'action' ? st.hint : undefined) ?? undefined}
-                  onClick={() => (st.kind === 'go' ? (onGo ?? onAction)?.(st.tab)
-                    : st.kind === 'action' ? onStepAction?.(st.key) : onAdvance(st.to))}>
-                  {st.kind === 'go' || st.kind === 'action' ? st.label : (st.label ?? `→ ${STATUS_LABELS[st.to]}`)}
-                </button>
-              )
-            })}
+            {demoted && (
+              <>
+                {resolveButton()}
+                {lead && (
+                  <p data-testid="next-resolve-first" className="-mt-1 text-xs text-slate-400">
+                    {t('next.resolveFirst').replace('{x}', lead.text)}
+                  </p>
+                )}
+              </>
+            )}
+            {/* While the step waits there is no primary button at all. */}
+            {buttons.map((st) => stepButton(st, !demoted && steps[0] === st))}
             {/* The gate that holds a step, with the way to where it is decided. */}
             {[...new Map(buttons.flatMap((st) => {
               const g = st.kind === 'advance' ? gateHolding(st.to) : undefined
@@ -538,9 +744,11 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             })).values()].map(({ g, to }) => {
               if (deviationCovers(to)) {
                 return (
-                  <p key={g.gate_key} data-testid={`next-gate-${g.gate_key}`} className="text-xs text-emerald-300">
-                    ✓ {t('cockpit.gateDeviationApproved').replace('{gate}', t('gate.' + g.gate_key))
-                      .replace('{state}', gateState(g))}
+                  <p key={g.gate_key} data-testid={`next-gate-${g.gate_key}`}
+                    className="flex items-start gap-1.5 text-xs text-emerald-300">
+                    <Check aria-hidden="true" size={12} className="mt-0.5 shrink-0" />
+                    <span>{t('cockpit.gateDeviationApproved').replace('{gate}', t('gate.' + g.gate_key))
+                      .replace('{state}', gateState(g))}</span>
                   </p>
                 )
               }
@@ -548,16 +756,24 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               return (
                 <div key={g.gate_key} data-testid={`next-gate-${g.gate_key}`} className="text-xs text-amber-300">
                   {canJump ? (
-                    <button type="button" className="text-left hover:underline decoration-dotted underline-offset-2"
+                    <button type="button" className={linkRow}
                       onClick={() => onResolveGate!(g.gate_key)} title={t('cockpit.resolveGate')}>
-                      ⛔ {gateWhy(g)} <span className="opacity-70">→ D1</span>
+                      <Ban aria-hidden="true" size={12} className="mt-0.5 shrink-0" />
+                      <span>{gateWhy(g)}<Where to="D1" /></span>
                     </button>
-                  ) : <p>⛔ {gateWhy(g, false)}</p>}
+                  ) : (
+                    <p className="flex items-start gap-1.5">
+                      <Ban aria-hidden="true" size={12} className="mt-0.5 shrink-0" /><span>{gateWhy(g, false)}</span>
+                    </p>
+                  )}
                   {deviationAsked(to) ? (
-                    <p className="mt-1 text-slate-400">⏳ {t('cockpit.gateDeviationPending')}</p>
+                    <p className="mt-1 flex items-start gap-1.5 text-slate-400">
+                      <Hourglass aria-hidden="true" size={12} className="mt-0.5 shrink-0" />
+                      <span>{t('cockpit.gateDeviationPending')}</span>
+                    </p>
                   ) : onAskDeviation ? (
                     <button type="button" data-testid={`next-ask-deviation-${to}`}
-                      className="mt-1 block text-left text-amber-200 hover:underline decoration-dotted underline-offset-2"
+                      className={`mt-1 block text-amber-200 ${linkRow}`}
                       title={t('cockpit.askDeviationHint')}
                       onClick={() => onAskDeviation(to, g.gate_key)}>
                       {t('cockpit.askDeviation')}
@@ -570,7 +786,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
               const why = buttons.map((st) => (st.kind === 'go' ? needs(st.key)
                 : st.kind === 'advance' ? needs(`to:${st.to}`) : null)).find(Boolean)
                 ?? (hiddenSteps > 0 && buttons.length === 0 ? mayNotText ?? t('next.notYours') : null)
-              return why ? <p data-testid="next-needs" className="text-xs text-slate-500">{why}</p> : null
+              return why ? <p data-testid="next-needs" className="text-xs text-slate-400">{why}</p> : null
             })()}
           </div>
         )}

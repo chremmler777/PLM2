@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { btnSm } from '../common/buttonStyles'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
@@ -51,7 +52,7 @@ export default function TransitionDeviationsPanel({
       qc.invalidateQueries({ queryKey: ['change', changeId] })
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
     },
-    onError: (e) => toast.error(apiErrorMessage(e, 'The decision failed')),
+    onError: (e) => toast.error(apiErrorMessage(e, 'Could not record the decision')),
   })
 
   if (pending.length === 0) return null
@@ -87,12 +88,12 @@ export default function TransitionDeviationsPanel({
                     className="min-w-0 flex-1 rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100 placeholder-slate-500" />
                   <button type="button" data-testid={`deviation-approve-${d.id}`} disabled={decide.isPending}
                     onClick={() => decide.mutate({ id: d.id, decision: 'approved' })}
-                    className="rounded-lg bg-emerald-700 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50">
+                    className={btnSm.primary}>
                     Approve
                   </button>
                   <button type="button" data-testid={`deviation-reject-${d.id}`} disabled={decide.isPending}
                     onClick={() => decide.mutate({ id: d.id, decision: 'rejected' })}
-                    className="rounded-lg border border-red-700 px-3 py-1 text-xs text-red-200 hover:bg-red-900/30 disabled:opacity-50">
+                    className={`${btnSm.secondary} text-red-200`}>
                     Reject
                   </button>
                 </div>

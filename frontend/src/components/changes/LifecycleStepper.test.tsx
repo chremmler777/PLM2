@@ -8,9 +8,12 @@ describe('LifecycleStepper', () => {
 
   it('marks past, current and future statuses', () => {
     render(<LifecycleStepper status="costing" />)
-    expect(screen.getByText('Captured').className).toContain('emerald')
-    expect(screen.getByText('Costing').className).toContain('sky-600')
-    expect(screen.getByText('Released').className).toContain('slate-800')
+    expect(screen.getByTestId('step-captured').className).toContain('emerald')
+    // Past stages collapse to a check and a muted name.
+    expect(screen.getByTestId('step-captured').querySelector('svg')).not.toBeNull()
+    expect(screen.getByTestId('step-costing').className).toContain('sky-500')
+    expect(screen.getByTestId('step-costing').closest('li')?.getAttribute('aria-current')).toBe('step')
+    expect(screen.getByTestId('step-released').className).toContain('text-slate-500')
   })
 
   it('shows an off-path badge for on_hold', () => {
@@ -40,34 +43,37 @@ describe('LifecycleStepper', () => {
 })
 
 describe('LifecycleStepper stage responsibility', () => {
-  it('tags every stage with its agreed owner along the whole path', () => {
+  afterEach(cleanup)
+
+  it('names the owner on the running stage only, not on every stage', () => {
     // Agreed 2026-08-12: Sales owns capture and everything quote-shaped,
     // the team owns assessment/costing/implementation/validation, PM the
-    // scoping and the release. Closed states carry no badge.
+    // scoping and the release. Only the current stage carries the chip.
     render(<LifecycleStepper status="scoping" customerRelevant />)
     const tags = screen.getAllByTestId('stage-responsible')
-    expect(tags.length).toBeGreaterThanOrEqual(2)
-    expect(tags[0].textContent).toContain(t('role.sales'))
-    expect(tags[0].parentElement?.textContent).toContain('Captured')
-    expect(tags[1].textContent).toContain(t('role.pmShort'))
-    expect(tags[1].parentElement?.textContent).toContain('Scoping')
-    const all = tags.map((el) => el.textContent).join('|')
-    expect(all).toContain(t('role.team'))
+    expect(tags).toHaveLength(1)
+    expect(tags[0].textContent).toContain(t('role.pmShort'))
+    expect(tags[0].parentElement?.textContent).toContain('Scoping')
+    cleanup()
+    render(<LifecycleStepper status="costing" customerRelevant />)
+    expect(screen.getByTestId('stage-responsible').textContent).toContain(t('role.team'))
+  })
+
+  it('shows no owner on a closed change', () => {
+    render(<LifecycleStepper status="closed" customerRelevant />)
+    expect(screen.queryByTestId('stage-responsible')).toBeNull()
+    expect(screen.getByTestId('step-closed').className).toContain('emerald')
   })
 })
 
 describe('LifecycleStepper engineering review track', () => {
   afterEach(cleanup)
 
-  it('gives every review stage to Development, never Sales or PM', () => {
-    const { container } = render(<LifecycleStepper status="scoping" origin="engineering_review" />)
-    const tags = [...container.querySelectorAll('[data-testid="stage-responsible"]')].map((el) => [
-      el.parentElement?.querySelector('[data-testid^="step-"]')?.textContent, el.textContent])
-    expect(tags).toEqual([
-      ['Captured', 'Development / intake'],
-      ['Impact and review', 'Development'],
-      ['Released', 'Development'],
-    ])
+  it('gives the running review stage to Development, never Sales or PM', () => {
+    render(<LifecycleStepper status="scoping" origin="engineering_review" />)
+    const tag = screen.getByTestId('stage-responsible')
+    expect(tag.textContent).toContain('Development')
+    expect(tag.parentElement?.querySelector('[data-testid^="step-"]')?.textContent).toBe('Impact and review')
   })
 })
 
@@ -106,7 +112,7 @@ describe('LifecycleStepper end states (spec §16)', () => {
     expect(screen.getByTestId('stepper-end').textContent).toContain('Rejected, closed')
     cleanup()
     render(<LifecycleStepper status="cancelled" end={{ kind: 'cancelled', stoppedAt: 'costing' }} />)
-    expect(screen.getByTestId('stepper-end').textContent).toContain('Cancelled')
+    expect(screen.getByTestId('stepper-end').textContent).toContain('Canceled')
     expect(screen.getByTestId('stepper-stopped-at')).toBeTruthy()
   })
 })

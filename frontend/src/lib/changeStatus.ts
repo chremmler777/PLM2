@@ -5,7 +5,39 @@ export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
   quoting: 'Quote creation', quoted: 'Quoted', approved: 'Approved', in_implementation: 'Implementing',
   in_validation: 'Validation', released: 'Released', closed: 'Closed',
-  on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Cancelled',
+  on_hold: 'On Hold', rejected: 'Rejected', cancelled: 'Canceled',
+}
+
+/**
+ * One verb per step (UI polish plan 2.4): the cockpit button, the confirm
+ * dialog's title and button, My Tasks and the process flow all say the same
+ * thing for the same move. Keyed by the target status; `transitionLabel`
+ * covers the few targets whose verb depends on where the change comes from.
+ */
+export const TRANSITION_LABELS: Record<ChangeStatus, string> = {
+  captured: 'Back to capture',
+  scoping: 'Hand over to scoping',
+  in_assessment: 'Start assessment',
+  costing: 'Close assessment',
+  quoting: 'Close costing',
+  quoted: 'Mark offer as sent',
+  approved: 'Record approval',
+  in_implementation: 'Start implementation',
+  in_validation: 'Finish implementation',
+  released: 'Release change',
+  closed: 'Close change',
+  on_hold: 'Put on hold',
+  rejected: 'Reject change',
+  cancelled: 'Cancel change',
+}
+
+/** The verb for moving a change from `from` to `to`. */
+export function transitionLabel(to: ChangeStatus | string, from?: ChangeStatus | string | null): string {
+  if (to === 'scoping' && from === 'in_assessment') return 'Back to scoping'
+  if (to === 'scoping' && from === 'rejected') return 'Reopen change'
+  if (from === 'on_hold') return 'Resume'
+  if (to === 'costing' && from === 'quoting') return 'Reopen costing'
+  return TRANSITION_LABELS[to as ChangeStatus] ?? STATUS_LABELS[to as ChangeStatus] ?? String(to)
 }
 
 /**

@@ -26,11 +26,11 @@ export function PriorityEditor({ change, canEdit }: {
 
   const save = useMutation({
     mutationFn: (priority: Priority) => changesApi.update(change.id, { priority }),
-    onSuccess: () => {
+    onSuccess: (_data, priority) => {
       qc.invalidateQueries({ queryKey: ['change', change.id] })
-      toast.success('Priority updated')
+      toast.success(`Priority set to ${PRIORITIES.find((p) => p.value === priority)?.label ?? priority}`)
     },
-    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Failed to update priority')),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not update the priority')),
   })
 
   if (!canEdit) {

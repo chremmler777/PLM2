@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
-import { DeadlineChip } from './DeadlineChip'
+import { DeadlineChip, deadlineText } from './DeadlineChip'
 import { addDaysIso, formatDate, todayIso } from '../../lib/format'
 
 describe('DeadlineChip', () => {
@@ -36,7 +36,7 @@ describe('DeadlineChip', () => {
     const tomorrow = addDaysIso(todayIso(), 1)
     render(<DeadlineChip date={tomorrow} state="on_track" />)
     const chip = screen.getByTestId('deadline-chip')
-    expect(chip.textContent).toContain('1d')
+    expect(chip.textContent).toBe('in 1 d')
     expect(chip.getAttribute('title')).toBe(formatDate(tomorrow))
   })
   it('reads as a sentence for a named deadline', () => {
@@ -46,5 +46,16 @@ describe('DeadlineChip', () => {
   it('names an overdue release deadline', () => {
     render(<DeadlineChip date={addDaysIso(todayIso(), -2)} state="overdue" kind="release" />)
     expect(screen.getByTestId('deadline-chip').textContent).toBe('Release 2 d overdue')
+  })
+  it('uses the same short words in lists: today, in n d, n d overdue', () => {
+    expect(deadlineText(0)).toBe('today')
+    expect(deadlineText(5)).toBe('in 5 d')
+    expect(deadlineText(-2)).toBe('2 d overdue')
+  })
+  it('shows a clock icon, not a glyph, on the short chip', () => {
+    render(<DeadlineChip date={addDaysIso(todayIso(), 3)} state="on_track" />)
+    const chip = screen.getByTestId('deadline-chip')
+    expect(chip.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+    expect(chip.textContent).toBe('in 3 d')
   })
 })

@@ -57,7 +57,7 @@ describe('MyTasksPage ownership', () => {
     // somebody has worked it.
     wrap(<MyTasksPage />)
     expect(await screen.findByText('Eva Eng')).toBeDefined()
-    expect(screen.getByText(/overdue/)).toBeDefined()
+    expect(screen.getAllByText(/overdue/).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /accept/i })).toBeNull()
     expect(screen.getByText('unclaimed step')).toBeDefined()
     await waitFor(() => expect(clientMocks.post).not.toHaveBeenCalledWith(
@@ -128,9 +128,11 @@ describe('MyTasksPage change tasks by kind', () => {
       kind: 'impact_confirm', due_date: '2026-06-01T23:59:59', overdue: true,
     }))
     expect(screen.getByText(t('tasks.hint.impact_confirm'))).toBeDefined()
-    // The date cell carries the overdue styling; the mark sits inside it.
-    const due = screen.getByText(/overdue/).closest('span')?.parentElement
-    expect(due?.className).toContain('text-red-400')
+    // The due cell reads like the changes list: a red "n d overdue" chip, the date under it.
+    const chip = screen.getByTestId('task-due').querySelector('[data-testid="deadline-chip"]')
+    expect(chip?.className).toContain('red')
+    expect(chip?.textContent).toMatch(/\d+ d overdue/)
+    expect(screen.getByTestId('task-due').textContent).toContain('1 Jun 2026')
     fireEvent.click(screen.getByRole('button', { name: t('tasks.open') }))
     expect(navigate).toHaveBeenCalledWith('/changes/7?tab=impacted')
   })
@@ -357,7 +359,7 @@ describe('MyTasksPage one list (spec §16)', () => {
     expect(stages.length).toBe(3)
   })
 
-  it('shows the change stage and dates as dd.mm.yyyy, overdue first', async () => {
+  it('shows the change stage and dates as 25 Sep 2026, overdue first', async () => {
     vi.mocked(changesApi.myTasks).mockResolvedValue([
       changeTask({ kind: 'costing_input', status: 'costing', due_date: '2026-11-20' }),
       changeTask({ change_id: 8, change_number: 'GB-CM-0008', kind: 'kickoff', status: 'captured',

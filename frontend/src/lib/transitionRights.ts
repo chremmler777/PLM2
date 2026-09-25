@@ -64,7 +64,7 @@ export const hasEnded = (change: Pick<ChangeRequest, 'status'> & Partial<Pick<Ch
 /** Human end label for lists: "Rejected", "Rejected, closed", "Cancelled". */
 export function endLabel(change: Pick<ChangeRequest, 'status'> & Partial<Pick<ChangeRequest, 'rejected_at'>>): string | null {
   const e = endStateOf(change)
-  if (e === 'cancelled') return 'Cancelled'
+  if (e === 'cancelled') return 'Canceled'
   if (e === 'rejected') return change.status === 'closed' ? 'Rejected, closed' : 'Rejected'
   return null
 }

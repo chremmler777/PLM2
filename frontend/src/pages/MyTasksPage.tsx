@@ -9,7 +9,12 @@ import { useDepartments, useMyTasks } from '../hooks/queries/useWorkflows';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EscalationsCard from '../components/EscalationsCard';
 import { rasicColors } from '../lib/constants';
-import { formatDate } from '../lib/format';
+import { formatCalendarDate, formatDate } from '../lib/format';
+import { DeadlineChip } from '../components/changes/DeadlineChip';
+import { btnSm } from '../components/common/buttonStyles';
+import EmptyState from '../components/common/EmptyState';
+import { toastError } from '../lib/apiError';
+import { BookOpen, ClipboardList, FileText } from 'lucide-react';
 import { STATUS_LABELS } from '../lib/changeStatus';
 import { humanize, taskKindLabel } from '../lib/humanLabels';
 import { foldChangeTasks, foldWorkflowTasks, isBackup, mainFirst, type FoldedWorkflowTask } from '../lib/myTasks';
@@ -24,9 +29,6 @@ import FormPanel from '../forms/FormPanel';
 import IntakeSection from '../components/intake/IntakeSection';
 import CostSheetReviewTask from '../components/costSheet/CostSheetReviewTask';
 import { useMyTaskCounts } from '../hooks/queries/useOpenTaskCount';
-
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
 
 interface MyLessonAction {
   id: number;
@@ -53,18 +55,18 @@ function LessonActionsSection() {
     mutationFn: async (actionId: number) =>
       client.patch(`/v1/lessons/actions/${actionId}`, { status: 'done' }),
     onSuccess: () => {
-      toast.success('Action completed');
+      toast.success('Lesson action marked done');
       queryClient.invalidateQueries({ queryKey: ['my-lesson-actions'] });
     },
-    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to complete'),
+    onError: (error: unknown) => toastError(error, 'Could not mark the lesson action done'),
   });
 
   if (actions.length === 0) return null;
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        📘 Lesson Actions ({actions.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <BookOpen aria-hidden="true" size={14} className="text-slate-400" />Lesson actions ({actions.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -78,31 +80,23 @@ function LessonActionsSection() {
           </thead>
           <tbody>
             {actions.map((a) => (
-              <tr key={a.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+              <tr key={a.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
                 <td className="px-4 py-3 text-slate-100">{a.description}</td>
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/lessons?lesson=${a.lesson_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2 text-left"
                   >
                     {a.lesson_title}
                   </button>
                   <span className="text-xs text-slate-500 ml-2">{a.lesson_status.replace(/_/g, ' ')}</span>
                 </td>
-                <td className="px-4 py-3 text-xs">
-                  {a.due_date ? (
-                    <span className={a.overdue ? 'text-red-400 font-semibold' : 'text-slate-400'}>
-                      {formatDate(a.due_date)}{a.overdue && ' ⚠ overdue'}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500">-</span>
-                  )}
-                </td>
+                <td className="px-4 py-3 text-xs"><DueCell due={a.due_date} overdue={a.overdue} /></td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => complete.mutate(a.id)}
                     disabled={complete.isPending}
-                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                    className={btnSm.secondary}
                   >
                     Mark done
                   </button>
@@ -145,15 +139,15 @@ function SepItemsSection() {
       queryClient.invalidateQueries({ queryKey: ['my-sep-items'] });
       queryClient.invalidateQueries({ queryKey: ['sep'] });
     },
-    onError: (error: unknown) => toast.error(errDetail(error) || 'Failed to update'),
+    onError: (error: unknown) => toastError(error, 'Could not mark the work package done'),
   });
 
   if (items.length === 0) return null;
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        🚦 SEP Work Packages ({items.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <ClipboardList aria-hidden="true" size={14} className="text-slate-400" />SEP work packages ({items.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -167,7 +161,7 @@ function SepItemsSection() {
           </thead>
           <tbody>
             {items.map((i) => (
-              <tr key={i.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-750">
+              <tr key={i.id} className="border-b border-slate-700 last:border-0 hover:bg-slate-700/30">
                 <td className="px-4 py-3 text-slate-100">
                   {i.title_en}
                   <span className="text-xs text-slate-500 ml-2">{i.department}</span>
@@ -175,20 +169,20 @@ function SepItemsSection() {
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/projects/${i.project_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline text-left"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2 text-left"
                   >
                     {i.project_name}
                   </button>
                   <span className="text-xs text-slate-500 ml-2">{i.gate_code}</span>
                 </td>
                 <td className="px-4 py-3 text-xs text-slate-400">
-                  {formatDate(i.gate_target_date)}
+                  {formatCalendarDate(i.gate_target_date)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => markDone.mutate(i.id)}
                     disabled={markDone.isPending}
-                    className="text-xs px-3 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white"
+                    className={btnSm.secondary}
                   >
                     Mark done
                   </button>
@@ -228,8 +222,8 @@ function FormsSection() {
 
   return (
     <div>
-      <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-2">
-        📝 SEP Forms ({forms.length})
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+        <FileText aria-hidden="true" size={14} className="text-slate-400" />SEP forms ({forms.length})
       </h2>
       <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
@@ -243,7 +237,7 @@ function FormsSection() {
                 <td className="px-4 py-3">
                   <button
                     onClick={() => navigate(`/projects/${f.project_id}`)}
-                    className="text-blue-400 hover:text-blue-300 underline"
+                    className="text-sky-400 hover:text-sky-300 underline underline-offset-2"
                   >
                     {f.project_name}
                   </button>
@@ -341,13 +335,15 @@ const taskHint = (task: ChangeTask): string | null => {
   }
 };
 
-/** The due cell: dd.mm.yyyy, red with a mark when overdue, "-" when undated. */
+/** The due cell: the same chip as the changes list ("in 5 d", "2 d overdue"),
+ *  the date ("25 Sep 2026") under it; "-" when undated. The backend's overdue
+ *  flag decides the color. */
 function DueCell({ due, overdue }: { due: string | null; overdue: boolean }) {
   if (!due) return <span className="text-slate-500">-</span>;
   return (
-    <span className={`whitespace-nowrap ${overdue ? 'text-red-400 font-semibold' : 'text-slate-300'}`}>
-      {formatDate(due)}
-      {overdue && <span className="ml-1">⚠ {t('tasks.overdue')}</span>}
+    <span data-testid="task-due" className="inline-flex flex-col items-start gap-0.5">
+      <DeadlineChip date={due} state={overdue ? 'overdue' : 'on_track'} />
+      <span className="text-[11px] tabular-nums text-slate-400">{formatCalendarDate(due)}</span>
     </span>
   );
 }
@@ -358,7 +354,8 @@ const LetterChips = ({ letters }: { letters: string[] }) => (
       const colors = rasicColors[l] ?? rasicColors['R'];
       return (
         <span key={l} data-testid="task-rasic"
-          className={`${colors.bg} ${colors.text} text-[10px] font-semibold px-1.5 py-0 rounded`}>
+          title={t(`rasic.${l}`)}
+          className={`${colors.bg} ${colors.text} text-[11px] font-semibold px-1.5 py-px rounded`}>
           {l}
         </span>
       );
@@ -439,9 +436,8 @@ function TaskList() {
       {(loadingWf || loadingChange) && rows.length === 0 ? (
         <LoadingSkeleton count={4} />
       ) : rows.length === 0 ? (
-        <p data-testid="task-list-empty" className="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-8 text-center text-sm text-slate-400">
-          {selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')}
-        </p>
+        <EmptyState data-testid="task-list-empty"
+          title={selectedDeptId === 0 ? t('tasks.emptyMine') : t('tasks.emptyDept')} />
       ) : (
         <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
@@ -466,10 +462,10 @@ function TaskList() {
   );
 }
 
-/** Mine rows carry the accent; backup rows (spec §18) read muted. */
+/** Mine rows carry a quiet tint; backup rows (spec §18) read muted. */
 const rowClass = (task: { mine?: boolean; role?: string }) =>
-  `border-b border-slate-700 last:border-0 hover:bg-slate-750${
-    task.mine ? ' border-l-2 border-sky-500' : ''}${isBackup(task) ? ' opacity-60' : ''}`;
+  `border-b border-slate-700 last:border-0 hover:bg-slate-700/30${
+    task.mine ? ' bg-sky-950/30' : ''}${isBackup(task) ? ' opacity-60' : ''}`;
 
 /** The row's stage: the backend's label, else its stage key, else the change status. */
 function taskStageLabel(task: Pick<ChangeTask, 'stage' | 'stage_label' | 'status'>): string {
@@ -513,8 +509,9 @@ function ChangeTaskRow({ task, navigate }: { task: ChangeTask; navigate: (to: st
       <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
       <td className="px-4 py-3 align-top text-right">
         <button
+          type="button"
           onClick={() => navigate(`/changes/${task.change_id}${TASK_TAB[task.kind] ?? ''}`)}
-          className="text-xs px-3 py-1 rounded bg-blue-700 hover:bg-blue-600 text-white"
+          className={btnSm.primary}
         >
           {task.kind === 'assessment' ? 'Assess' : t('tasks.open')}
         </button>
@@ -549,8 +546,9 @@ function WorkflowTaskRow({ task, navigate }: { task: FoldedWorkflowTask; navigat
       <td className="px-4 py-3 align-top text-xs"><DueCell due={task.due_date} overdue={task.overdue} /></td>
       <td className="px-4 py-3 align-top text-right">
         <button
+          type="button"
           onClick={() => navigate(`/projects/${task.project_id}`)}
-          className="text-xs px-3 py-1 rounded border border-slate-600 text-slate-200 hover:bg-slate-700 whitespace-nowrap"
+          className={btnSm.secondary}
         >
           {t('tasks.viewPart')}
         </button>

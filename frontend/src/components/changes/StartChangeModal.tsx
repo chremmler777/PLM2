@@ -1,5 +1,8 @@
 import { useId, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { btnPrimary } from '../common/buttonStyles';
+import { Check, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiErrorMessage } from '../../lib/apiError';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import client from '../../api/client';
@@ -64,8 +67,8 @@ export function composeTitle(picked: PickedPart[]): string {
   return parts.join(' - ').slice(0, TITLE_MAX_LENGTH);
 }
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+/** The backend's reason as text (also a 422 list), or undefined when it gave none. */
+const errDetail = (e: unknown): string | undefined => apiErrorMessage(e, '') || undefined;
 
 /**
  * What the kickoff (captured -> scoping) still needs. Soft: the change is
@@ -224,6 +227,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useDialogFocus(dialogRef, open, onClose);
+  const qc = useQueryClient();
   if (!open) return null;
 
   const missing: string[] = [];
@@ -338,6 +342,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           toast.error(plantText('mp.attachFailed', motherPlant.name).replace('{x}', refused.join(', ')));
         }
       }
+      // Every change list (the Changes page, the project's list) shows it on the way back.
+      qc.invalidateQueries({ queryKey: ['changes'] });
       onClose();
       navigate(`/changes/${change.id}`);
     } catch (e) {
@@ -478,7 +484,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                     onClick={() => removePart(p.id)}
                     aria-label={`${t('start.clearItem')}: ${p.part_number}`}
                   >
-                    ✕
+                    <X aria-hidden="true" size={14} />
                   </button>
                 </li>
               ))}
@@ -692,7 +698,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                       <span className="truncate min-w-0">{f.name}</span>
                       <button type="button" className="ml-auto text-slate-500 hover:text-slate-200"
                         aria-label={`${t('start.removeFile')}: ${f.name}`}
-                        onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}>✕</button>
+                        onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}><X aria-hidden="true" size={14} /></button>
                     </li>
                   ))}
                 </ul>
@@ -709,7 +715,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                 <p className="mt-1 text-slate-400">{t('start.readySoft')}</p>
               </div>
             ) : (
-              <p data-testid="start-ready" className="text-xs text-emerald-400">✓ {t('start.ready')}</p>
+              <p data-testid="start-ready" className="inline-flex items-center gap-1 text-xs text-emerald-400">
+                <Check aria-hidden="true" size={12} />{t('start.ready')}
+              </p>
             )}
           </div>
         )}
@@ -733,8 +741,8 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           >
             {t('common.cancel')}
           </button>
-          <button
-            className="px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-500 disabled:opacity-50"
+          <button type="button"
+            className={btnPrimary}
             disabled={!canSubmit}
             onClick={handleSubmit}
           >

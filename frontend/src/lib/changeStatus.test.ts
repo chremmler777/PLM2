@@ -108,3 +108,29 @@ describe('engineering review track (spec §17)', () => {
     expect(m.changeTabLabel('review')).toBe('Review')
   })
 })
+
+describe('one verb per step (UI polish 2.4)', () => {
+  it('names every forward step the same way everywhere', async () => {
+    const { transitionLabel, TRANSITION_LABELS } = await import('./changeStatus')
+    expect(transitionLabel('scoping', 'captured')).toBe('Hand over to scoping')
+    expect(transitionLabel('in_assessment', 'scoping')).toBe('Start assessment')
+    expect(transitionLabel('costing', 'in_assessment')).toBe('Close assessment')
+    expect(transitionLabel('quoting', 'costing')).toBe('Close costing')
+    expect(transitionLabel('approved', 'quoted')).toBe('Record approval')
+    expect(transitionLabel('in_implementation', 'approved')).toBe('Start implementation')
+    expect(transitionLabel('in_validation', 'in_implementation')).toBe('Finish implementation')
+    expect(transitionLabel('released', 'in_validation')).toBe('Release change')
+    expect(transitionLabel('closed', 'released')).toBe('Close change')
+    expect(transitionLabel('rejected', 'scoping')).toBe('Reject change')
+    // Where the change comes from changes the verb.
+    expect(transitionLabel('scoping', 'in_assessment')).toBe('Back to scoping')
+    expect(transitionLabel('scoping', 'rejected')).toBe('Reopen change')
+    expect(transitionLabel('in_assessment', 'on_hold')).toBe('Resume')
+    // Every status has a verb, and none is an arrow.
+    for (const v of Object.values(TRANSITION_LABELS)) expect(v).not.toMatch(/→/)
+  })
+
+  it('spells statuses en-US', () => {
+    expect(STATUS_LABELS.cancelled).toBe('Canceled')
+  })
+})

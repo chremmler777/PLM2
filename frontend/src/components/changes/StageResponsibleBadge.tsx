@@ -43,9 +43,9 @@ export function StageResponsibleBadge({ status, origin }: { status: ChangeStatus
   const key = stageResponsibleKey(status, origin)
   if (!key) return null
   return (
-    <span data-testid="stage-responsible" title={t('responsible.label')}
-      className="inline-flex items-center rounded bg-fuchsia-900/60 text-fuchsia-200 px-1 py-0 text-[10px] leading-tight font-medium align-middle">
-      {t(key)}
+    <span data-testid="stage-responsible" title={`${t('responsible.label')}: ${t(key)}`}
+      className="inline-flex items-center rounded bg-fuchsia-900/60 text-fuchsia-200 px-1.5 py-px text-[11px] leading-tight font-medium align-middle">
+      <span className="sr-only">{t('responsible.label')}: </span>{t(key)}
     </span>
   )
 }

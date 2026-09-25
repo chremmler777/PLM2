@@ -57,7 +57,8 @@ describe('ChangesPage list polish (spec §16)', () => {
 
   it('shows human labels for type, priority and status, number and pill never wrap', async () => {
     vi.mocked(changesApi.list).mockResolvedValue([
-      row({ status: 'in_assessment', priority: 'high' })] as never)
+      row({ status: 'in_assessment', priority: 'high' }),
+      row({ id: 2, change_number: 'GB-CM-0002', change_type: 'tooling' })] as never)
     wrap()
     await screen.findByText('GB-CM-0001')
     expect(screen.getByText('Physical part')).toBeDefined()
@@ -109,11 +110,47 @@ describe('ChangesPage list polish (spec §16)', () => {
     ] as never)
     wrap()
     await screen.findByText('GB-CM-0003')
+    fireEvent.change(screen.getByTestId('changes-sort'), { target: { value: 'recent' } })
     expect(within(rows()[0]).getByRole('link').textContent).toBe('GB-CM-0001')
     fireEvent.change(screen.getByTestId('changes-sort'), { target: { value: 'overdue' } })
     const order = rows().map((r) => within(r).getByRole('link').textContent)
     expect(order.slice(0, 2).sort()).toEqual(['GB-CM-0002', 'GB-CM-0003'])
     expect(order[2]).toBe('GB-CM-0001')
+  })
+
+  it('hides the Type column when every row has the same type, and Medium priority', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue([row(), row({ id: 2, change_number: 'GB-CM-0002', priority: 'critical' })] as never)
+    wrap()
+    await screen.findByText('GB-CM-0002')
+    expect(screen.queryByRole('columnheader', { name: 'Type' })).toBeNull()
+    expect(screen.queryByText('Physical part')).toBeNull()
+    expect(screen.getByTestId('change-priority-1').textContent).toBe('')
+    expect(screen.getByTestId('change-priority-2').textContent).toBe('Critical')
+  })
+
+  it('sorts open overdue changes first and ended ones last by default', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue([
+      row({ id: 1, status: 'closed' }),
+      row({ id: 2, change_number: 'GB-CM-0002' }),
+      row({ id: 3, change_number: 'GB-CM-0003', deadline_state: 'overdue', active_deadline: 'quote', required_by_date: '2020-01-01' }),
+    ] as never)
+    wrap()
+    await screen.findByText('GB-CM-0003')
+    expect(rows().map((r) => within(r).getByRole('link').textContent)).toEqual(['GB-CM-0003', 'GB-CM-0002', 'GB-CM-0001'])
+  })
+
+  it('keeps search, mine, intake and sort in the URL', async () => {
+    vi.mocked(changesApi.list).mockResolvedValue([
+      row({ id: 1, lead_id: 5 }), row({ id: 2, change_number: 'GB-CM-0002', title: 'Grille', lead_id: 9 }),
+    ] as never)
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/changes?q=grille&sort=recent']}><ChangesPage /></MemoryRouter>
+      </QueryClientProvider>)
+    await screen.findByText('GB-CM-0002')
+    expect((screen.getByTestId('changes-search') as HTMLInputElement).value).toBe('grille')
+    expect((screen.getByTestId('changes-sort') as HTMLSelectElement).value).toBe('recent')
+    expect(rows()).toHaveLength(1)
   })
 
   it('names the stage owner: the server word, else the role badge for the stage', async () => {
@@ -127,7 +164,7 @@ describe('ChangesPage list polish (spec §16)', () => {
     expect(within(screen.getByTestId('change-owner-1')).getByTestId('stage-responsible')).toBeDefined()
   })
 
-  it('shows Rejected, Rejected closed and Cancelled distinctly, without a deadline chip', async () => {
+  it('shows Rejected, Rejected closed and Canceled distinctly, without a deadline chip', async () => {
     vi.mocked(changesApi.list).mockResolvedValue([
       row({ id: 1, status: 'rejected', active_deadline: 'quote', required_by_date: '2020-01-01', deadline_state: 'overdue' }),
       row({ id: 2, change_number: 'GB-CM-0002', status: 'closed', rejected_at: '2026-09-01T00:00:00' }),
@@ -139,7 +176,7 @@ describe('ChangesPage list polish (spec §16)', () => {
     expect(screen.getByTestId('change-status-1').textContent).toBe('Rejected')
     expect(screen.getByTestId('change-status-2').textContent).toBe('Rejected, closed')
     expect(screen.getByTestId('change-status-2').className).toContain('bg-red-900')
-    expect(screen.getByTestId('change-status-3').textContent).toBe('Cancelled')
+    expect(screen.getByTestId('change-status-3').textContent).toBe('Canceled')
     expect(screen.getByTestId('change-status-4').textContent).toBe('Closed')
     expect(screen.queryByTestId('deadline-chip')).toBeNull()
   })

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { toastError } from '../../lib/apiError';
+import { btnSm } from '../common/buttonStyles';
+import { transitionLabel } from '../../lib/changeStatus';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import ReasonDialog from './ReasonDialog';
 
@@ -55,8 +57,7 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
     mutationFn: (vars: { devId: number; decision: 'approved' | 'rejected' }) =>
       changesApi.decideDeviation(changeId, vars.devId, { decision: vars.decision }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['change', changeId, 'deviations'] }),
-    onError: (e: Error & { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Decision failed'),
+    onError: (e: unknown) => toastError(e, 'Could not record the decision'),
   });
 
   const relevant = deviations.filter((d) => d.to_status === blockedTo);
@@ -74,7 +75,7 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
           <p className="font-medium text-amber-200">Transition blocked</p>
           <p className="text-amber-200 mt-0.5">{blockedReason}</p>
         </div>
-        <button className="text-amber-200 text-xs" onClick={onClose}>Dismiss</button>
+        <button type="button" className={btnSm.ghost} onClick={onClose}>Dismiss</button>
       </div>
 
       {relevant.length > 0 && (
@@ -85,9 +86,9 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
               <span className="text-slate-400">{d.reason}</span>
               {d.status === 'pending' && (
                 <span className="ml-auto flex gap-1">
-                  <button className="px-2 py-0.5 text-xs border border-emerald-700 text-emerald-200 rounded-lg hover:bg-emerald-900/30"
+                  <button type="button" className={btnSm.secondary}
                           onClick={() => decide.mutate({ devId: d.id, decision: 'approved' })}>Approve</button>
-                  <button className="px-2 py-0.5 text-xs border border-red-700 text-red-200 rounded-lg hover:bg-red-900/30"
+                  <button type="button" className={`${btnSm.secondary} text-red-200`}
                           onClick={() => decide.mutate({ devId: d.id, decision: 'rejected' })}>Reject</button>
                 </span>
               )}
@@ -98,18 +99,18 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
 
       <div className="flex gap-2 mt-3">
         {deviable && !hasPending && !hasApproved && (
-          <button className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs"
+          <button type="button" className={btnSm.primary}
                   onClick={() => setDialogOpen(true)}>Request deviation</button>
         )}
         {deviable && hasApproved && (
-          <button className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs"
+          <button type="button" className={btnSm.primary}
                   onClick={onRetry}>Retry transition</button>
         )}
       </div>
 
       <ReasonDialog
         open={dialogOpen}
-        title={`Deviation for transition to "${blockedTo}"`}
+        title={`Deviation: ${transitionLabel(blockedTo)}`}
         label="Reason (recorded in the audit trail, requires 4-eyes approval)"
         submitLabel="Submit"
         onSubmit={(reason) => { propose.mutate(reason); setDialogOpen(false); }}

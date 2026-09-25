@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Check, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
 import { changesApi } from '../../api/changes'
@@ -155,11 +156,11 @@ export default function AuditTimeline({ correlationId, changeId }: {
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-200">{t('audit.title')}</h3>
           {badge && (
-            <span data-testid="audit-chain" className={`text-xs px-2 py-0.5 rounded-full ${
+            <span data-testid="audit-chain" className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
               !badge.ok ? 'bg-red-900 text-red-200'
               : 'warn' in badge && badge.warn ? 'bg-amber-900/70 text-amber-200'
               : 'bg-emerald-900 text-emerald-200'}`}>
-              {badge.ok ? '✓' : '✗'} {badge.text}
+              {badge.ok ? <Check aria-hidden="true" size={12} /> : <X aria-hidden="true" size={12} />}{badge.text}
             </span>
           )}
         </div>

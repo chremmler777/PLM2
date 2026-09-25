@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { toastError } from '../../lib/apiError'
+import { btnSm } from '../common/buttonStyles'
+import { Pencil } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { changesApi } from '../../api/changes'
@@ -7,8 +10,6 @@ import DateInput from '../gantt/DateInput'
 import { t } from '../../i18n/cmLabels'
 import type { ChangeRequest } from '../../types/change'
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
 
 /** A change that has stopped or finished has no live deadline to move. */
 const ENDED = new Set(['rejected', 'closed', 'cancelled'])
@@ -36,7 +37,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
       toast.success(t(kind === 'release' ? 'deadline.savedRelease' : 'deadline.savedQuote'))
       setOpen(false)
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not save the deadline'),
+    onError: (e: unknown) => toastError(e, 'Could not save the deadline'),
   })
   if (ENDED.has(change.status)) return null
   const what = t(kind === 'release' ? 'deadline.release' : 'deadline.quote')
@@ -45,6 +46,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
       <DeadlineChip date={curDate} state={change.deadline_state} kind={kind} />
       <button type="button"
         title={pushback ? t('deadline.pushbackTitle') : curDate ? `${t('deadline.set')}: ${what}` : undefined}
+        aria-label={!pushback && curDate ? `${t('deadline.set')}: ${what}` : undefined}
         data-testid="deadline-edit"
         aria-expanded={open}
         onClick={() => setOpen((o) => {
@@ -60,7 +62,7 @@ export function DeadlineEditor({ change, kind = 'quote' }:
         })}
         className="text-xs text-slate-400 hover:text-slate-200 underline decoration-dotted underline-offset-2">
         {pushback ? t('deadline.pushback')
-          : curDate ? '✎'
+          : curDate ? <Pencil aria-hidden="true" size={12} className="inline" />
           : `+ ${what}`}
       </button>
       {pushback && curReason && !open && (
@@ -101,8 +103,8 @@ export function DeadlineEditor({ change, kind = 'quote' }:
               className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-100 w-full" />
           )}
           <span className="flex gap-2">
-            <button data-testid="deadline-save"
-              className="bg-sky-600 hover:bg-sky-500 text-white px-2.5 py-1 rounded text-xs disabled:opacity-50"
+            <button type="button" data-testid="deadline-save"
+              className={btnSm.primary}
               disabled={save.isPending || (pushback && !(date && reason.trim()))}
               onClick={() => save.mutate({
                 // End-of-day UTC: picking *today* must not render as overdue.

@@ -67,7 +67,7 @@ export default function LeadPicker({ change, canEdit, viewer, isAdmin = false }:
       setEditing(false)
       qc.invalidateQueries({ queryKey: ['change', change.id] })
     },
-    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Setting the lead failed')),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e, 'Could not set the lead')),
   })
   const defaultId = candidates.find((c) => c.is_default)?.id
 

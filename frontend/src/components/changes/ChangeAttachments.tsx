@@ -13,12 +13,17 @@ import { changesApi } from '../../api/changes'
 import { apiErrorMessage } from '../../lib/apiError'
 import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow, InfoRequestBlock, attachmentBlocks } from './AttachmentRow'
+import { Lock } from 'lucide-react'
 import { t } from '../../i18n/cmLabels'
 import type { Attachment, ChangeDetail } from '../../types/change'
 
 const isScopingPhase = (status: string) => status === 'captured' || status === 'scoping'
 
-export default function ChangeAttachments({ change }: { change: ChangeDetail }) {
+export default function ChangeAttachments({ change, readOnly = false }: {
+  change: ChangeDetail
+  /** Closed or canceled: documents are a record, nothing is added or deleted. */
+  readOnly?: boolean
+}) {
   const qc = useQueryClient()
   const invalidate = () => qc.invalidateQueries({ queryKey: ['change', change.id] })
 
@@ -35,7 +40,7 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
   const baseline = change.attachments.filter((a) => a.phase !== 'post_scoping')
   const post = change.attachments.filter((a) => a.phase === 'post_scoping')
   // Baseline docs are only deletable while the change is still in scoping.
-  const baselineDeletable = isScopingPhase(change.status)
+  const baselineDeletable = !readOnly && isScopingPhase(change.status)
 
   // One renderer for every row; requests carry their answers with them.
   const list = (items: Attachment[], deletable: boolean) =>
@@ -51,12 +56,12 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
 
   return (
     <div className="pt-3 space-y-4">
-      <div>
-        <label className="text-sm text-slate-400 block mb-1">
-          {t('attach.uploadLabel')}
-        </label>
-        <AttachmentDropzone changeId={change.id} onUploaded={invalidate} />
-      </div>
+      {!readOnly && (
+        <div>
+          <p className="text-sm text-slate-400 mb-1">{t('attach.uploadLabel')}</p>
+          <AttachmentDropzone changeId={change.id} onUploaded={invalidate} />
+        </div>
+      )}
 
       <div>
         <div className="flex items-center gap-2 mb-1">
@@ -64,8 +69,8 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
             {t('attach.baseline')}
           </span>
           {!baselineDeletable && (
-            <span className="text-xs text-slate-500" title={t('attach.frozenHint')}>
-              🔒 {t('attach.frozen')}
+            <span className="inline-flex items-center gap-1 text-xs text-slate-400" title={t('attach.frozenHint')}>
+              <Lock aria-hidden="true" size={11} />{t('attach.frozen')}
             </span>
           )}
         </div>
@@ -84,7 +89,7 @@ export default function ChangeAttachments({ change }: { change: ChangeDetail }) 
           <ul className="text-sm divide-y divide-slate-700/60">
             {post.length === 0
               ? <li className="py-1 text-slate-500">{t('attach.none')}</li>
-              : list(post, true)}
+              : list(post, !readOnly)}
           </ul>
         </div>
       )}

@@ -37,7 +37,7 @@ describe('end states (spec §16 P1 7)', () => {
     expect(endStateOf({ status: 'cancelled' })).toBe('cancelled')
     expect(endStateOf({ status: 'on_hold' })).toBeNull()
     expect(endLabel({ status: 'closed', rejected_at: '2026-09-01' })).toBe('Rejected, closed')
-    expect(endLabel({ status: 'cancelled' })).toBe('Cancelled')
+    expect(endLabel({ status: 'cancelled' })).toBe('Canceled')
     expect(hasEnded({ status: 'costing' })).toBe(false)
   })
   it('reads the stopped stage from the backend, else the last stop in the log', () => {

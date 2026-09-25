@@ -14,7 +14,7 @@ describe('TransitionConfirmDialog', () => {
     render(<TransitionConfirmDialog confirm={base} onConfirm={() => {}} onClose={onClose} />)
     const dialog = screen.getByRole('dialog', { name: 'Back to scoping' })
     expect(dialog.getAttribute('aria-modal')).toBe('true')
-    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -23,9 +23,9 @@ describe('TransitionConfirmDialog', () => {
     const [notYet, go] = screen.getAllByRole('button')
     expect(document.activeElement).toBe(notYet)
     go.focus()
-    fireEvent.keyDown(document, { key: 'Tab' })
+    fireEvent.keyDown(go, { key: 'Tab' })
     expect(document.activeElement).toBe(notYet)
-    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+    fireEvent.keyDown(notYet, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(go)
   })
 

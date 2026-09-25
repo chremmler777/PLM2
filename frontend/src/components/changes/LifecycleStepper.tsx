@@ -1,3 +1,4 @@
+import { Check, ChevronRight } from 'lucide-react'
 import type { ChangeStatus } from '../../types/change'
 import { STATUS_LABELS, STATUS_PILL, OFF_PATH_STATUSES, branchStepOrder, stepperLabel } from '../../lib/changeStatus'
 import { t } from '../../i18n/cmLabels'
@@ -12,6 +13,11 @@ export interface StepperEnd {
   closed?: boolean
 }
 
+/**
+ * The change's path, quiet by default: past stages are a check and a muted
+ * name, the current stage is the one filled pill (with its owner and a
+ * plain-language hint), future stages are plain text.
+ */
 export default function LifecycleStepper({
   status,
   customerRelevant,
@@ -32,16 +38,20 @@ export default function LifecycleStepper({
   const stopIdx = end?.stoppedAt ? order.indexOf(end.stoppedAt) : -1
   const idx = end ? stopIdx : order.indexOf(status)
   const visible = end ? order.filter((s) => s !== 'closed') : order
+  // A closed change finished its path: every stage, Closed included, is done.
+  const allDone = !end && status === 'closed'
   const endLabel = end
     ? (end.kind === 'cancelled' ? t('stepper.endCancelled')
       : end.closed ? t('stepper.endRejectedClosed') : t('stepper.endRejected'))
     : null
   return (
-    <div className="flex items-center gap-1 text-xs flex-wrap" data-testid="lifecycle-stepper">
+    <ol className={`flex flex-wrap items-center gap-x-0.5 gap-y-2 text-xs ${
+      !offPath && !end && !allDone ? 'pb-5' : ''}`} data-testid="lifecycle-stepper"
+      aria-label="Lifecycle">
       {offPath && !end && (
-        <span className={`px-2 py-1 rounded-full font-semibold mr-2 ${STATUS_PILL[status]}`}>
+        <li className={`px-2 py-1 rounded-full font-semibold mr-2 ${STATUS_PILL[status]}`}>
           {STATUS_LABELS[status]}
-        </span>
+        </li>
       )}
       {visible.map((s, i) => {
         // At capture, the scoping node says who takes over next rather than
@@ -55,37 +65,45 @@ export default function LifecycleStepper({
           : origin === 'engineering_review' && s === 'released' ? 'Every answer "no impact": index active'
           : t(`stepper.hint.${s}`)
         const stoppedHere = !!end && i === stopIdx
+        const current = !offPath && !end && !allDone && i === idx
+        const past = end ? i < stopIdx : !offPath && (allDone || i < idx)
         const cls = end
-          ? (i < stopIdx ? 'bg-emerald-900/60 text-emerald-200/80'
-            : stoppedHere ? 'bg-red-950 text-red-200 ring-1 ring-red-700'
-            : 'bg-slate-800/60 text-slate-600')
-          : offPath ? 'bg-slate-800 text-slate-600'
-          : i < idx ? 'bg-emerald-900 text-emerald-200'
-          : i === idx ? 'bg-sky-600 text-white'
-          : 'bg-slate-800 text-slate-500'
+          ? (past ? 'text-emerald-300/80'
+            : stoppedHere ? 'bg-red-950 text-red-200 ring-1 ring-red-700 rounded-full'
+            : 'text-slate-600')
+          : offPath ? 'text-slate-600'
+          : past ? 'text-emerald-300'
+          : current ? 'bg-sky-500/15 text-sky-100 ring-1 ring-sky-500/60 font-semibold rounded-full'
+          : 'text-slate-500'
+        const label = origin === 'engineering_review' && s === 'scoping' ? 'Impact and review' : stepperLabel(s)
         return (
-          <div key={s} className="flex items-center gap-1">
-            <div className="flex flex-col items-center">
+          <li key={s} className="flex items-center gap-0.5" aria-current={current ? 'step' : undefined}>
+            <div className="relative flex items-center gap-1">
               <span title={hint} data-testid={`step-${s}`}
-                className={`px-2 py-1 rounded-full ${cls}`}>
-                {origin === 'engineering_review' && s === 'scoping' ? 'Impact and review' : stepperLabel(s)}</span>
-              {/* Who owns the stage, shown on the stage node itself. */}
-              <StageResponsibleBadge status={s} origin={origin} />
-              {!offPath && !end && i === idx && (
-                <span className="text-[10px] text-slate-400">{hint}</span>
+                className={`inline-flex items-center gap-1 whitespace-nowrap px-1.5 py-1 ${current ? 'px-2.5' : ''} ${cls}`}>
+                {past && <Check aria-hidden="true" size={12} strokeWidth={2.5} className="shrink-0" />}
+                {label}
+              </span>
+              {/* Who owns the stage: only on the stage that is running now. */}
+              {current && <StageResponsibleBadge status={s} origin={origin} />}
+              {/* The hint hangs under the pill so it never widens the path. */}
+              {current && (
+                <span className="absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-[11px] text-slate-400">{hint}</span>
               )}
               {stoppedHere && (
-                <span data-testid="stepper-stopped-at" className="text-[10px] text-red-300">
+                <span data-testid="stepper-stopped-at" className="whitespace-nowrap text-[11px] text-red-300">
                   {t('stepper.stoppedHere')}
                 </span>
               )}
             </div>
-            {(i < visible.length - 1 || end) && <span className="text-slate-600">→</span>}
-          </div>
+            {(i < visible.length - 1 || end) && (
+              <ChevronRight aria-hidden="true" size={13} className="shrink-0 text-slate-600" />
+            )}
+          </li>
         )
       })}
       {end && (
-        <span data-testid="stepper-end"
+        <li data-testid="stepper-end"
           className="px-2.5 py-1 rounded-full font-semibold bg-red-900 text-red-100">
           {endLabel}
           {end.stoppedAt && (
@@ -93,8 +111,8 @@ export default function LifecycleStepper({
               {t('stepper.stoppedAt').replace('{x}', STATUS_LABELS[end.stoppedAt])}
             </span>
           )}
-        </span>
+        </li>
       )}
-    </div>
+    </ol>
   )
 }

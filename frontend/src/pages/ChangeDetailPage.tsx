@@ -1,7 +1,9 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Check, Lock, MoreHorizontal } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { apiErrorMessage, toastError } from '../lib/apiError';
 import client from '../api/client';
 import { changesApi } from '../api/changes';
 import { plantsApi } from '../api/plants';
@@ -23,7 +25,7 @@ import OfferTab from '../components/changes/offer/OfferTab';
 import ReleaseTab from '../components/changes/release/ReleaseTab';
 import TimingTab from '../components/changes/timing/TimingTab';
 import LifecycleStepper from '../components/changes/LifecycleStepper';
-import CockpitSummary from '../components/changes/CockpitSummary';
+import CockpitSummary, { gateStateText } from '../components/changes/CockpitSummary';
 import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
 import { changeReleaseApi } from '../api/changeRelease';
 import { validationIssuesApi, validationIssuesKey } from '../api/validationIssues';
@@ -46,17 +48,21 @@ import { useDepartments } from '../hooks/queries/useWorkflows';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
 import {
-  STATUS_LABELS, OFF_PATH_STATUSES, everydayTabsFor, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
+  OFF_PATH_STATUSES, everydayTabsFor, transitionLabel, GOVERNANCE_TABS, TAB_UNLOCK_STATUS, STATUS_ACTIVE_TAB,
   activeTabsFor, resolveChangeTab, changeTabLabel, stoppedTabLocked, stoppedDefaultTab, type ChangeTab,
   decodeLogValue,
 } from '../lib/changeStatus';
 import { getActsAsDepartmentId } from '../lib/actsAs';
 import { projectLabel } from '../lib/project';
 import { unpricedByDepartment } from '../lib/unpriced';
-import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
+import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change';
+import { btnIcon, btnSm } from '../components/common/buttonStyles';
+import { formatDate, formatMoney } from '../lib/format';
 
-const errDetail = (e: unknown): string | undefined =>
-  (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+/** The change-detail queries refresh when the user comes back to the tab:
+ *  other departments answer, approve and block while it sits in the
+ *  background, and a stale cockpit invites 409s (the app default is off). */
+const LIVE = { refetchOnWindowFocus: true } as const;
 
 type Tab = ChangeTab;
 // F2: before costing there's no cost basis yet: the costing tab is locked and
@@ -122,10 +128,13 @@ export default function ChangeDetailPage() {
   // "Decide deviation #n": the Overview's decision panel scrolls to it once
   // (null: the panel itself; undefined: nothing to focus).
   const [focusDeviation, setFocusDeviation] = useState<number | null | undefined>(undefined);
+  const tabsId = useId();
+  const moreRef = useRef<HTMLDetailsElement>(null);
 
   const { data: change, isLoading } = useQuery({
     queryKey: ['change', changeId],
     queryFn: () => changesApi.get(changeId),
+    ...LIVE,
   });
   const { data: allPlants = [] } = useQuery({
     queryKey: ['plants'],
@@ -145,6 +154,7 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'implementation'],
     queryFn: () => changesApi.getImplementation(changeId),
     enabled: !!change && ['in_implementation', 'in_validation', 'released'].includes(change.status),
+    ...LIVE,
   });
   // Stage 8: the per-department board and its escalations. The tracking card
   // asks for the same keys, so the banner costs no extra request; both are
@@ -154,6 +164,7 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'impl-state'],
     queryFn: () => changesApi.implementationState(changeId),
     enabled: implTracked,
+    ...LIVE,
   });
   const { data: implEscalations = [] } = useQuery({
     queryKey: ['change', changeId, 'impl-escalations'],
@@ -204,10 +215,12 @@ export default function ChangeDetailPage() {
   const { data: gates = [] } = useQuery({
     queryKey: ['change', changeId, 'gates'],
     queryFn: () => changesApi.getGates(changeId),
+    ...LIVE,
   });
   const { data: deviations = [] } = useQuery({
     queryKey: ['change', changeId, 'deviations'],
     queryFn: () => changesApi.listDeviations(changeId),
+    ...LIVE,
   });
   // The waits are derived from data the page already shows; this shares the
   // concern cache key with the strips, so it costs no extra request.
@@ -226,7 +239,20 @@ export default function ChangeDetailPage() {
   const { data: myActions } = useQuery({
     queryKey: ['change-my-actions', changeId],
     queryFn: () => changesApi.myActions(changeId),
+    ...LIVE,
   });
+  // Your actions follow the change: an act done on any tab (confirming the
+  // impact, answering, deciding) updates the change, and the list must not
+  // keep offering what was just done. The first load is not a change.
+  const seenChange = useRef<string | null>(null);
+  const changeStamp = change ? `${change.updated_at}|${change.status}|${change.impact_confirmed_at ?? ''}` : null;
+  useEffect(() => {
+    if (!changeStamp) return;
+    if (seenChange.current !== null && seenChange.current !== changeStamp) {
+      qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
+    }
+    seenChange.current = changeStamp;
+  }, [changeStamp, changeId, qc]);
   // Spec §16: waits, transition rights, the assessment round and the end
   // state, as the backend judges them for this viewer. Under ['change', id]
   // so every change mutation refreshes it; an older backend without the
@@ -235,6 +261,7 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'stage-state'],
     queryFn: () => changesApi.stageState(changeId),
     retry: false,
+    ...LIVE,
   });
   // Resume (on_hold): the status held before the hold, read off the
   // changelog's status entries rather than assumed — a change can be held
@@ -242,8 +269,9 @@ export default function ChangeDetailPage() {
   const { data: changelog } = useQuery({
     queryKey: ['change', changeId, 'changelog'],
     queryFn: () => changesApi.changelog(changeId),
-    enabled: !!change && (change.status === 'on_hold'
-      || (['rejected', 'cancelled', 'closed'].includes(change.status) && !change.stopped_at)),
+    // Closed: the read-only banner names the day it closed.
+    enabled: !!change && (change.status === 'on_hold' || change.status === 'closed'
+      || (['rejected', 'cancelled'].includes(change.status) && !change.stopped_at)),
   });
   const resumeTo = (() => {
     const holdEntries = (changelog ?? []).filter(
@@ -251,7 +279,11 @@ export default function ChangeDetailPage() {
     const lastHold = holdEntries[holdEntries.length - 1];
     return decodeLogValue(lastHold?.old_value) || 'in_assessment';
   })();
-  const { data: departments = [] } = useDepartments();
+  const { data: allDepartments = [] } = useDepartments();
+  // Retired departments stay out of every picker below; one this change
+  // already routed to keeps its name.
+  const routedIds = new Set((change?.assessments ?? []).map((a) => a.department_id));
+  const departments = allDepartments.filter((d) => d.is_active !== false || routedIds.has(d.id));
   const { isAdmin: isRealAdmin, userId } = useAuth();
   // The whole point of acts-as is walking the flow through a department's
   // eyes: the backend already drops the admin bypass then (spec D2), so the
@@ -261,7 +293,7 @@ export default function ChangeDetailPage() {
   const actingAs = getActsAsDepartmentId() != null;
   const isAdmin = isRealAdmin && !actingAs;
   const pendingDeviations = deviations.filter((d) => d.status === 'pending').length;
-  const deptName = (id: number) => departments.find((d) => d.id === id)?.name ?? '#' + id;
+  const deptName = (id: number) => allDepartments.find((d) => d.id === id)?.name ?? '#' + id;
   // Client-side mirror of the confirm-impact authz: Development members only —
   // no admin shortcut, because the backend dropped it too (an admin who needs to
   // confirm acts as Development). Defaults to true until departments/memberships
@@ -335,16 +367,38 @@ export default function ChangeDetailPage() {
       toast.success(t('next.overrideSent'));
       qc.invalidateQueries({ queryKey: ['change', changeId] });
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Proposing the deviation failed'),
+    onError: (e: unknown) => toastError(e, 'Could not propose the deviation'),
   });
 
   // Close costing names the hours nobody can price (no cost sheet rate): the
   // summation lists them. Cost roles only, like every figure.
+  // Also read while costing runs: the "Close costing" step holds on the same
+  // facts the Costing tab states (nothing costed, departments not costed yet).
   const { data: closingSummation, isLoading: closingSummationLoading } = useQuery({
     queryKey: ['change-summation', changeId],
     queryFn: () => changesApi.getSummation(changeId),
-    enabled: confirmTo === 'quoting' && canSeeCosts,
+    enabled: (confirmTo === 'quoting' || change?.status === 'costing') && canSeeCosts,
   });
+  // Why "Close costing" is held, read like CostingBuckets reads it: a total of
+  // zero with nothing waiting for a rate, or departments with nothing booked.
+  const costingHold = (() => {
+    const sum = closingSummation;
+    if (!change || change.status !== 'costing' || !sum || !canSeeCosts) return null;
+    const unpricedDepts = new Set((sum.unpriced_lines ?? []).map((l) => l.department_id));
+    if (Math.abs(sum.totals?.grand_total ?? 0) < 0.005 && unpricedDepts.size === 0) {
+      return `Nothing is costed yet: the total is ${formatMoney(0, sum.currency ?? 'EUR')}.`;
+    }
+    const deptIds = [...new Set(change.assessments.map((a) => a.department_id))];
+    const unbooked = deptIds.filter((id) => {
+      const row = sum.by_department.find((d) => d.department_id === id);
+      const total = row ? row.one_time_internal + row.one_time_external
+        + row.lifecycle_internal + row.lifecycle_external : 0;
+      return total === 0 && !unpricedDepts.has(id);
+    });
+    if (unbooked.length === 0) return null;
+    return `${unbooked.length} of ${deptIds.length} department${deptIds.length === 1 ? '' : 's'} `
+      + `ha${unbooked.length === 1 ? 's' : 've'} not costed yet: ${unbooked.map(deptName).join(', ')}.`;
+  })();
   // Releasing past open guards asks for a deviation with the reason, here and
   // now, instead of a bare refusal and a second dialog.
   const askDeviation = useMutation({
@@ -355,7 +409,7 @@ export default function ChangeDetailPage() {
       qc.invalidateQueries({ queryKey: ['change', changeId] });
       qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] });
     },
-    onError: (e: unknown) => toast.error(errDetail(e) ?? 'Asking for the deviation failed'),
+    onError: (e: unknown) => toastError(e, 'Could not ask for the deviation'),
   });
 
   const transition = useMutation({
@@ -369,7 +423,7 @@ export default function ChangeDetailPage() {
       qc.invalidateQueries({ queryKey: ['change', changeId] });
     },
     onError: (e: unknown, vars) => {
-      const detail = errDetail(e) ?? 'Transition failed';
+      const detail = apiErrorMessage(e, `Could not ${transitionLabel(vars.to, change?.status).toLowerCase()}`);
       // The memo-dialog transitions report inline; only the ordinary forward
       // moves offer the deviation banner.
       const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason || vars.reason;
@@ -423,8 +477,10 @@ export default function ChangeDetailPage() {
       || (change.status === 'in_assessment' && (to === 'costing' || to === 'scoping'))) {
       setConfirmTo(to); return;
     }
-    // Closing costing, ending implementation, releasing and closing are asked once more.
+    // Closing costing, recording the approval, finishing implementation,
+    // releasing and closing are asked once more.
     if ((change.status === 'costing' && to === 'quoting')
+      || ((change.status === 'quoted' || change.status === 'costing') && to === 'approved' && !motherPlant)
       || ['in_validation', 'released', 'closed'].includes(to)) { setConfirmTo(to); return; }
     transition.mutate({ to });
   };
@@ -432,8 +488,9 @@ export default function ChangeDetailPage() {
   // F10: who may take which next step, mirroring the backend's 403 gates.
   const needs = (step: string): string | null => {
     switch (step) {
-      case 'to:quoting': return isAdmin || isChangeLead || isSalesMember || isPmMember ? null
-        : 'Needs Sales, the Project Manager or the change lead';
+      case 'to:quoting': return !(isAdmin || isChangeLead || isSalesMember || isPmMember)
+        ? 'Needs Sales, the Project Manager or the change lead'
+        : costingHold;
       case 'offer':
       case 'answer': return canEditQuotedPrice ? null : 'Needs Sales or the change lead';
       // Only the missing side gates the step: a viewer who can sign PM but
@@ -532,7 +589,7 @@ export default function ChangeDetailPage() {
       // entered but have no rate (not counted, the total is too low).
       const unpriced = unpricedByDepartment(closingSummation?.unpriced_lines, deptName);
       return {
-        to: confirmTo, title: 'Close costing',
+        to: confirmTo, title: transitionLabel('quoting'),
         consequence: 'Closing costing freezes every department\'s numbers and hands the change to Sales for the offer. '
           + 'Reopening costing later needs a reason and is recorded.',
         open: [
@@ -540,7 +597,7 @@ export default function ChangeDetailPage() {
           ...unpriced.map((u) => `${u.message}: the total is too low`),
         ],
         allClear: 'Every department has entered its cost input, and every line has a rate.',
-        confirmLabel: 'Close costing',
+        confirmLabel: transitionLabel('quoting'),
         loading: canSeeCosts && closingSummationLoading,
       };
     }
@@ -551,7 +608,7 @@ export default function ChangeDetailPage() {
       const implRows = Array.isArray(implState) ? implState : implState.departments ?? [];
       const owing = implRows.filter((r) => r.owes_report).map((r) => deptName(r.department_id));
       return {
-        to: confirmTo, title: 'End implementation',
+        to: confirmTo, title: transitionLabel('in_validation'),
         consequence: 'Implementation ends and the departments start validating. Sending the change back to '
           + 'implementation later needs a reason and is recorded.',
         open: [
@@ -565,7 +622,7 @@ export default function ChangeDetailPage() {
           ? [`Still fixing: ${validationIssues.filter((i) => i.status === 'fixing')
             .map((i) => `VI-${i.number} ${i.title}`).join(', ')}`]
           : undefined,
-        confirmLabel: 'Move to validation',
+        confirmLabel: transitionLabel('in_validation'),
         loading: detailedPlanLoading,
       };
     }
@@ -574,11 +631,11 @@ export default function ChangeDetailPage() {
       const approved = deviations.find((d) => d.to_status === 'released' && d.status === 'approved');
       const pending = deviations.find((d) => d.to_status === 'released' && d.status === 'pending');
       const base = {
-        to: confirmTo, title: 'Release the change',
+        to: confirmTo, title: transitionLabel('released'),
         consequence: 'Releasing puts the change live. It cannot be moved back; after release it can only be closed.',
         open: blockers,
         allClear: 'Validation, checklist and lessons are done.',
-        confirmLabel: 'Release change',
+        confirmLabel: transitionLabel('released'),
         final: true,
         loading: !releaseState,
       };
@@ -603,56 +660,218 @@ export default function ChangeDetailPage() {
         asksDeviation: true,
       };
     }
-    return {
-      to: confirmTo, title: 'Close the change',
-      consequence: 'Closing is final. The change and its records become read only.',
-      open: [], confirmLabel: 'Close change', final: true,
-    };
+    if (confirmTo === 'approved') {
+      return {
+        to: confirmTo, title: transitionLabel('approved'),
+        consequence: t('confirm.approveBody'),
+        open: [],
+        allClear: t(change.customer_relevant ? 'confirm.approveClear' : 'confirm.approveClearInternal'),
+        confirmLabel: transitionLabel('approved'),
+      };
+    }
+    if (confirmTo === 'closed') {
+      return {
+        to: confirmTo, title: transitionLabel('closed'),
+        consequence: 'Closing is final. The change and its records become read only.',
+        open: [], confirmLabel: transitionLabel('closed'), final: true,
+      };
+    }
+    // Any other step asked here reads by its own verb, never another step's.
+    const verb = transitionLabel(confirmTo, change.status);
+    return { to: confirmTo, title: verb, consequence: `${verb}: this step is recorded in the audit trail.`,
+      open: [], confirmLabel: verb };
   })();
+
+  const tabButton = (tb: Tab, governance: boolean) => {
+    const locked = !governance && tabLocked(tb);
+    const selected = effectiveTab === tb;
+    const isActivePhase = !governance && !locked && !stopped
+      && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
+    // Scoping leaves two jobs on the impact tab: pick the impacted items,
+    // then confirm the set. Both are done when the confirmation lands.
+    const openWork = tb === 'impacted' && change.status === 'scoping' && !change.impact_confirmed_at;
+    const lockReason = locked ? t(stoppedLocked(tb) ? 'tab.lockedStopped' : lockedTitleKey(tb)) : null;
+    const state = openWork ? t('tab.openWork') : isActivePhase ? t('tab.activePhase') : null;
+    const label = governance ? changeTabLabel(tb)
+      : changeTabLabel(tb, change.customer_relevant, change.status, change.mother_plant_name);
+    return (
+      <div key={tb} className="group relative shrink-0">
+        <button type="button" role="tab" id={`${tabsId}-tab-${tb}`}
+          aria-selected={selected} aria-controls={`${tabsId}-panel`} tabIndex={selected ? 0 : -1}
+          aria-disabled={locked || undefined}
+          aria-describedby={lockReason ? `${tabsId}-why-${tb}` : undefined}
+          title={lockReason ? undefined : state ?? undefined}
+          className={`-mb-px inline-flex items-center gap-1.5 border-b-2 pb-2 pt-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
+            governance ? 'text-[13px] ' : ''}${
+            locked ? 'border-transparent text-slate-600 cursor-not-allowed'
+            : selected ? 'border-sky-400 text-sky-300 font-medium'
+            : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          onClick={() => { if (!locked) setTab(tb); }}>
+          {isActivePhase && (
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-emerald-400 motion-safe:animate-pulse" />
+          )}
+          {openWork && (
+            <span aria-hidden="true" data-testid="tab-open-work"
+              className="h-1.5 w-1.5 rounded-full bg-lime-400 ring-1 ring-lime-300/50" />
+          )}
+          {locked && <Lock aria-hidden="true" size={11} className="shrink-0" />}
+          {label}
+          {state && <span className="sr-only">, {state}</span>}
+        </button>
+        {lockReason && (
+          <span role="tooltip" id={`${tabsId}-why-${tb}`} data-testid={`tab-why-${tb}`}
+            className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-[16rem] rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 shadow-lift group-hover:block group-focus-within:block">
+            {lockReason}
+          </span>
+        )}
+      </div>
+    );
+  };
+  // Arrow keys move between tabs (roving focus); Enter or Space opens one.
+  const onTabKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
+    const list = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const at = list.indexOf(document.activeElement as HTMLButtonElement);
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1
+      : (at + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
+    e.preventDefault();
+    list[n]?.focus();
+  };
+
+  const isOverview = effectiveTab === 'overview';
+  // Closed and canceled changes are records: nothing on them is editable.
+  const readOnly = change.status === 'closed' || change.status === 'cancelled';
+  const closedOn = change.status === 'closed'
+    ? [...(changelog ?? [])].reverse().find((e) => e.field_name === 'status'
+      && decodeLogValue(e.new_value) === 'closed')?.performed_at ?? null
+    : null;
+  const cockpitProps = {
+    change, gates, pendingDeviations, impl,
+    onAdvance: advance,
+    advancing: transition.isPending,
+    onResolveGate: () => setTab('d1'),
+    onShowImpact: () => setTab('impacted'),
+    actions: myActions?.actions ?? [],
+    onAction: goTab,
+    canRecordMeeting, canSeeGovernance,
+    // What the change is waiting on: same list for every viewer, whoever
+    // owns the next move.
+    waits: earlyStageWaits(change, resolveWaitStates(change, concerns, deptName, change.assessments,
+      { state: implState, escalations: implEscalations }, validation,
+      change.status === 'approved' ? planFeedback : null,
+      { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues,
+        revisionsInCheck: revisionsInCheckOf(impl?.items) }),
+      stage?.waits, { concerns, assessments: change.assessments, departmentName: deptName }),
+    onGo: goTab,
+    needs,
+    assessment: assessmentState,
+    may,
+    review: review ?? null,
+    onStepAction: (key: string) => {
+      if (key === 'override-costing') setOverrideOpen(true);
+    },
+    onDecideDeviation: (id?: number) => { setTab('overview'); setFocusDeviation(id ?? null); },
+    deviationTargets: {
+      approved: deviations.filter((d) => d.status === 'approved').map((d) => d.to_status),
+      pending: deviations.filter((d) => d.status === 'pending').map((d) => d.to_status),
+    },
+    // A gate held step: the deviation banner asks for the deviation (the
+    // gate is a soft guard; an approved one lets the step through).
+    onAskDeviation: (to: ChangeStatus, gateKey: GateKey) => {
+      const g = gates.find((x) => x.gate_key === gateKey);
+      setBlocked({ to, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
+        gateStateText(g?.decision)}. `
+        + 'An approved deviation is required to proceed.' });
+      setBlockedSeq((n) => n + 1);
+    },
+    leadSlot: <LeadPicker change={change}
+      canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
+        && (isAdmin || isChangeLead || isPmMember)}
+      viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
+      isAdmin={isAdmin} />,
+  };
+
+  // Rare and destructive moves live behind "More actions", not beside the title.
+  const canCancel = CANCELLABLE.includes(change.status) && may('cancelled');
+  const headerActions = (
+    <div className="flex shrink-0 items-center gap-2">
+      {change.status === 'rejected' && may('scoping') && (
+        <button type="button" data-testid="header-reopen" className={btnSm.secondary}
+          onClick={() => setReopenOpen(true)}>{transitionLabel('scoping', 'rejected')}</button>
+      )}
+      {change.status === 'on_hold' && may(resumeTo) && (
+        <button type="button" className={btnSm.secondary}
+          onClick={() => advance(resumeTo)}>{transitionLabel(resumeTo, 'on_hold')}</button>
+      )}
+      {canCancel && (
+        <details ref={moreRef} className="relative"
+          onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) e.currentTarget.open = false; }}>
+          <summary aria-label={t('change.moreActions')} title={t('change.moreActions')}
+            className={`${btnIcon} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
+            <MoreHorizontal aria-hidden="true" size={18} />
+          </summary>
+          <div role="menu" className="absolute right-0 z-30 mt-1 w-48 rounded-lg border border-slate-700 bg-slate-800 p-1 shadow-lift">
+            <button type="button" role="menuitem" data-testid="header-cancel"
+              className="w-full rounded-md px-3 py-2 text-left text-sm text-red-300 hover:bg-red-950/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              onClick={() => { if (moreRef.current) moreRef.current.open = false; advance('cancelled'); }}>
+              {transitionLabel('cancelled')}…
+            </button>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+  const project = projectLabel(change.project_number, change.project_name);
 
   return (
     // One width for every tab, so switching tabs never moves the header.
-    <div className="max-w-[1400px] mx-auto p-6">
-      <div className="flex items-center justify-between mb-2">
-        <h1 className="text-2xl font-semibold flex items-center gap-3">
-          <span>
-            <span className="font-mono text-slate-400">{change.change_number}</span> · {change.title}
-            {/* Which project this belongs to, one line under the name. */}
-            {projectLabel(change.project_number, change.project_name) && (
-              <Link data-testid="change-project"
-                to={`/projects/${change.project_id}`}
-                className="block text-sm font-normal text-slate-400 hover:text-sky-300">
-                {projectLabel(change.project_number, change.project_name)}
-              </Link>
-            )}
-          </span>
-          {impl?.ready_to_go && (
-            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100">
-              ✓ {t('impl.readyToGo')}
+    <div className="max-w-[1400px] mx-auto px-6 pb-6 pt-4">
+      <a href="#change-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-slate-800 focus:px-3 focus:py-2 focus:text-sm focus:text-sky-200 focus:ring-2 focus:ring-sky-400">
+        Skip to the tab content
+      </a>
+      {isOverview ? (
+        <div className="flex items-start justify-between gap-4 pt-2 mb-3">
+          <h1 className="text-2xl font-semibold text-balance flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              <span className="font-mono text-slate-400">{change.change_number}</span> · {change.title}
+              {/* Which project this belongs to, one line under the name. */}
+              {project && (
+                <Link data-testid="change-project"
+                  to={`/projects/${change.project_id}`}
+                  className="block text-sm font-normal text-slate-400 hover:text-sky-300">
+                  {project}
+                </Link>
+              )}
             </span>
-          )}
-        </h1>
-        <div className="flex gap-2">
-          {change.status === 'rejected' && may('scoping') && (
-            <button data-testid="header-reopen"
-                    className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
-                    onClick={() => setReopenOpen(true)}>Reopen</button>
-          )}
-          {change.status === 'on_hold' && may(resumeTo) && (
-            <button className="px-3 py-1.5 text-sm border border-slate-600 rounded-lg text-slate-200 hover:bg-slate-700"
-                    onClick={() => advance(resumeTo)}>Resume</button>
-          )}
-          {CANCELLABLE.includes(change.status) && may('cancelled') && (
-            <button data-testid="header-cancel"
-                    className="px-3 py-1.5 text-sm border border-red-800/70 rounded-lg text-red-400 hover:bg-red-950/40"
-                    onClick={() => advance('cancelled')}>Cancel change</button>
-          )}
+            {impl?.ready_to_go && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-900 text-emerald-100">
+                <Check aria-hidden="true" size={12} />{t('impl.readyToGo')}
+              </span>
+            )}
+          </h1>
+          {headerActions}
         </div>
-      </div>
+      ) : (
+        // Every other tab: one slim bar that stays put while the tab scrolls.
+        <div data-testid="change-bar"
+          className="sticky top-0 z-20 -mx-6 mb-3 flex min-h-14 flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-800 bg-slate-900 px-6 py-2">
+          <h1 className="flex min-w-0 max-w-[40%] items-baseline gap-2 text-base font-semibold">
+            <span className="shrink-0 font-mono text-slate-400">{change.change_number}</span>
+            <span className="truncate text-slate-100" title={project ? `${change.title} (${project})` : change.title}>
+              {change.title}
+            </span>
+          </h1>
+          <CockpitSummary {...cockpitProps} variant="compact" onShowOverview={() => setTab('overview')} />
+          {headerActions}
+        </div>
+      )}
 
-      <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant}
-        origin={change.origin}
-        end={stopped ? { kind: stopped.kind, stoppedAt: stopped.at, closed: change.status === 'closed' } : null} />
+      {isOverview && (
+        <LifecycleStepper status={change.status} customerRelevant={change.customer_relevant}
+          origin={change.origin}
+          end={stopped ? { kind: stopped.kind, stoppedAt: stopped.at, closed: change.status === 'closed' } : null} />
+      )}
 
       {change.status === 'rejected' && (
         <div role="alert" className="mt-3 rounded-lg border border-red-800/60 bg-red-950/40 px-4 py-3 text-sm">
@@ -664,6 +883,15 @@ export default function ChangeDetailPage() {
             Reopen it to put it back into scoping. Both the rejection and the reopen are audited.
           </p>
         </div>
+      )}
+      {readOnly && (
+        <p role="status" data-testid="closed-banner"
+          className="mt-3 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm text-slate-300">
+          <Lock aria-hidden="true" size={14} className="shrink-0 text-slate-400" />
+          {change.status === 'closed'
+            ? t('change.closedBanner').replace('{d}', closedOn ? ` ${formatDate(closedOn)}` : '')
+            : t('change.canceledBanner')}
+        </p>
       )}
 
       {blocked && (
@@ -741,101 +969,25 @@ export default function ChangeDetailPage() {
         onClose={() => setCancelOpen(false)}
       />
 
-      <CockpitSummary
-        change={change}
-        gates={gates}
-        pendingDeviations={pendingDeviations}
-        impl={impl}
-        onAdvance={advance}
-        advancing={transition.isPending}
-        onResolveGate={() => setTab('d1')}
-        onShowImpact={() => setTab('impacted')}
-        actions={myActions?.actions ?? []}
-        onAction={goTab}
-        canRecordMeeting={canRecordMeeting}
-        canSeeGovernance={canSeeGovernance}
-        // What the change is waiting on — same list for every viewer, whoever
-        // owns the next move.
-        waits={earlyStageWaits(change, resolveWaitStates(change, concerns, deptName, change.assessments,
-          { state: implState, escalations: implEscalations }, validation,
-          change.status === 'approved' ? planFeedback : null,
-          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues,
-            revisionsInCheck: revisionsInCheckOf(impl?.items) }),
-          stage?.waits, { concerns, assessments: change.assessments, departmentName: deptName })}
-        onGo={goTab}
-        needs={needs}
-        assessment={assessmentState}
-        may={may}
-        onStepAction={(key) => {
-          if (key === 'override-costing') setOverrideOpen(true);
-        }}
-        onDecideDeviation={(id) => { setTab('overview'); setFocusDeviation(id ?? null); }}
-        deviationTargets={{
-          approved: deviations.filter((d) => d.status === 'approved').map((d) => d.to_status),
-          pending: deviations.filter((d) => d.status === 'pending').map((d) => d.to_status),
-        }}
-        // A gate held step: the deviation banner asks for the deviation (the
-        // gate is a soft guard; an approved one lets the step through).
-        onAskDeviation={(to, gateKey) => {
-          const g = gates.find((x) => x.gate_key === gateKey);
-          setBlocked({ to, reason: `${t('gate.' + gateKey)} ${t('cockpit.gateWord')} ${
-            t(g?.decision === 'no' ? 'cockpit.gateStateNo' : 'cockpit.gateStateOpen')}. `
-            + 'An approved deviation is required to proceed.' });
-          setBlockedSeq((n) => n + 1);
-        }}
-        leadSlot={<LeadPicker change={change}
-          canEdit={!['closed', 'cancelled', 'rejected', 'released'].includes(change.status)
-            && (isAdmin || isChangeLead || isPmMember)}
-          viewer={!actingAs && userId != null ? { id: userId, name: t('cockpit.leadMe') } : null}
-          isAdmin={isAdmin} />}
-      />
+      {isOverview && <CockpitSummary {...cockpitProps} />}
 
-      <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
-        {everydayTabsFor(change.origin, hasReview).map((tb) => {
-          const locked = tabLocked(tb);
-          const isActivePhase = !locked && !stopped
-            && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
-          // Scoping leaves two jobs on the impact tab — pick the impacted items,
-          // then confirm the set. Both are done when the confirmation lands.
-          const openWork = tb === 'impacted'
-            && change.status === 'scoping' && !change.impact_confirmed_at;
-          return (
-            <button key={tb}
-              disabled={locked}
-              title={locked ? t(stoppedLocked(tb) ? 'tab.lockedStopped' : lockedTitleKey(tb))
-                : openWork ? t('tab.openWork')
-                : isActivePhase ? t('tab.activePhase') : undefined}
-              className={`pb-2 flex items-center gap-1.5 ${
-                locked ? 'text-slate-600 cursor-not-allowed'
-                : effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium'
-                : 'text-slate-400 hover:text-slate-200'}`}
-              onClick={() => { if (!locked) setTab(tb); }}>
-              {isActivePhase && (
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-label={t('tab.activePhase')} />
-              )}
-              {openWork && (
-                <span data-testid="tab-open-work"
-                  className="w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-300/50"
-                  aria-label={t('tab.openWork')} />
-              )}
-              {changeTabLabel(tb, change.customer_relevant, change.status, change.mother_plant_name)}
-            </button>
-          );
-        })}
+      {/* Tabs: a real tablist. A locked tab stays focusable and says why,
+          on hover and on keyboard focus, not only in a mouse tooltip. */}
+      <div role="tablist" aria-label={t('change.tabs')} onKeyDown={onTabKey}
+        className="mb-4 flex flex-nowrap items-end gap-x-4 overflow-x-auto border-b border-slate-700 text-sm sm:flex-wrap sm:overflow-visible">
+        {everydayTabsFor(change.origin, hasReview).map((tb) => tabButton(tb, false))}
         {canSeeGovernance && (
           <>
-            <span className="ml-auto text-xs uppercase tracking-wide text-slate-500">Governance</span>
-            {GOVERNANCE_TABS.map((tb) => (
-              <button key={tb}
-                className={`pb-2 ${effectiveTab === tb ? 'border-b-2 border-sky-400 text-sky-300 font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-                onClick={() => setTab(tb)}>
-                {changeTabLabel(tb)}
-              </button>
-            ))}
+            <span aria-hidden="true" className="ml-auto mb-2.5 h-4 w-px bg-slate-700" />
+            <span className="mb-2 text-[11px] text-slate-500">{t('change.governance')}</span>
+            {GOVERNANCE_TABS.map((tb) => tabButton(tb, true))}
           </>
         )}
       </div>
 
+      <div id={`${tabsId}-panel`} role="tabpanel" tabIndex={-1}
+        aria-labelledby={`${tabsId}-tab-${effectiveTab}`}>
+        <span id="change-main" className="sr-only" tabIndex={-1} />
       {effectiveTab === 'overview' && (
         <div className="space-y-2 text-sm">
           <TransitionDeviationsPanel changeId={changeId} deviations={deviations}
@@ -845,9 +997,8 @@ export default function ChangeDetailPage() {
           <p><span className="text-slate-400">Type:</span> {changeTypeLabel(change.change_type)}</p>
           <p className="flex items-center gap-2">
             <span className="text-slate-400">Priority:</span>
-            <PriorityEditor change={change} canEdit={isAdmin || isChangeLead} />
+            <PriorityEditor change={change} canEdit={!readOnly && (isAdmin || isChangeLead)} />
           </p>
-          <p><span className="text-slate-400">Status:</span> {STATUS_LABELS[change.status] ?? change.status}</p>
           <p><span className="text-slate-400">Reason:</span> {change.reason ?? '-'}</p>
           <DescriptionEditor change={change} canEdit={canEditDescription} />
           {/* A mother-plant change is never customer relevant here. */}
@@ -856,10 +1007,10 @@ export default function ChangeDetailPage() {
           {/* Customer correspondence sits above the document lists: it is what
               everyone comes looking for, and it belongs to no phase. */}
           <div className="pt-3">
-            <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} />
+            <CustomerMailLog changeId={change.id} attachments={change.attachments ?? []} readOnly={readOnly} />
           </div>
 
-          <ChangeAttachments change={change} />
+          <ChangeAttachments change={change} readOnly={readOnly} />
         </div>
       )}
 
@@ -941,10 +1092,10 @@ export default function ChangeDetailPage() {
 
       {effectiveTab === 'costing' && (
         <div className="space-y-3 text-sm">
-          <div data-testid="costing-stage" className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
-            <h2 className="text-sm font-semibold text-slate-100">{t('costing.stageTitle')}</h2>
-            <p className="mt-0.5 text-xs text-slate-400">{t('costing.stageBody')}</p>
-          </div>
+          {/* The tab names itself; while departments price, one line says how costing works. */}
+          {change.status === 'costing' && (
+            <p data-testid="costing-stage" className="text-xs text-slate-400">{t('costing.stageBody')}</p>
+          )}
           {/* Costing closed: departments read only; whoever may close it may
               reopen it, with a reason on the record. */}
           {change.status === 'quoting' && (
@@ -1025,6 +1176,7 @@ export default function ChangeDetailPage() {
       {effectiveTab === 'audit' && (
         <AuditTimeline correlationId={change.change_number} changeId={change.id} />
       )}
+      </div>
     </div>
   );
 }

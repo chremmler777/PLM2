@@ -54,6 +54,11 @@ const { change } = vi.hoisted(() => ({
   } satisfies ChangeDetail,
 }))
 
+/** A tab the phase has not reached: focusable, but aria-disabled. */
+const locked = (el: HTMLElement) => el.getAttribute('aria-disabled') === 'true'
+/** Why a tab is locked: its accessible description (the tooltip shown on hover and focus). */
+const why = (el: HTMLElement) => document.getElementById(el.getAttribute('aria-describedby') ?? '')?.textContent ?? null
+
 vi.mock('../api/changes', () => ({
   changesApi: {
     get: vi.fn().mockResolvedValue(change),
@@ -131,8 +136,9 @@ vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>m
 // F10/finding 6: `needs` is a plain function prop — CockpitSummary itself is
 // mocked out (its own tests cover rendering), so it's exercised here by
 // probing it for the keys these tests care about.
-const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing'] as const
+const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing', 'to:quoting'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
+  gateStateText: (d?: string | null) => (d === 'no' ? 'answered No' : d === 'na' ? 'not answered Yes (it is n/a)' : 'not decided yet'),
   default: ({ waits = [], needs, onAdvance, onDecideDeviation, deviationTargets, onAskDeviation }: {
     waits?: { key: string; text: string }[]
     needs?: (step: string) => string | null
@@ -152,6 +158,7 @@ vi.mock('../components/changes/CockpitSummary', () => ({
       <button type="button" onClick={() => onAdvance?.('in_validation')}>mock-advance-in_validation</button>
       <button type="button" onClick={() => onAdvance?.('scoping')}>mock-advance-scoping</button>
       <button type="button" onClick={() => onAdvance?.('quoting')}>mock-advance-quoting</button>
+      <button type="button" onClick={() => onAdvance?.('approved')}>mock-advance-approved</button>
       <button type="button" onClick={() => onDecideDeviation?.(5)}>mock-decide-deviation</button>
     </div>
   ),
@@ -205,25 +212,25 @@ describe('ChangeDetailPage URL-driven tabs', () => {
   it('renders with the D1 tab active when ?tab=d1 for an admin', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1?tab=d1')
-    const d1Button = await screen.findByRole('button', { name: 'D1' })
-    expect(d1Button.className).toContain('border-b-2')
+    const d1Button = await screen.findByRole('tab', { name: 'D1' })
+    expect(d1Button.getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('mock-d1-panel')).toBeDefined()
   })
 
   it('falls back to the phase tab when ?tab is invalid', async () => {
     wrap('/changes/1?tab=bogus')
     // in_assessment works on the Assessments tab.
-    const phaseButton = await screen.findByRole('button', { name: /Assessments/ })
-    expect(phaseButton.className).toContain('border-b-2')
+    const phaseButton = await screen.findByRole('tab', { name: /Assessments/ })
+    expect(phaseButton.getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByText('mock-d1-panel')).toBeNull()
   })
 
   it('F8: opens on the tab of the current phase without ?tab, and Overview stays reachable', async () => {
     wrap('/changes/1')
-    const phaseButton = await screen.findByRole('button', { name: /Assessments/ })
-    expect(phaseButton.className).toContain('border-b-2')
-    fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Overview' }).className).toContain('border-b-2'))
+    const phaseButton = await screen.findByRole('tab', { name: /Assessments/ })
+    expect(phaseButton.getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true'))
   })
 })
 
@@ -238,37 +245,37 @@ describe('ChangeDetailPage governance tab gating', () => {
 
   it('hides D1/Audit buttons and the Governance group for a non-lead, non-admin viewer', async () => {
     wrap('/changes/1')
-    await screen.findByRole('button', { name: 'Overview' })
-    expect(screen.queryByRole('button', { name: 'D1' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+    await screen.findByRole('tab', { name: 'Overview' })
+    expect(screen.queryByRole('tab', { name: 'D1' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Audit' })).toBeNull()
     expect(screen.queryByText('Governance')).toBeNull()
   })
 
   it('shows the Governance group with D1 and Audit for an admin', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1')
-    await screen.findByRole('button', { name: 'Overview' })
+    await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'Audit' })).toBeDefined()
   })
 
   it('falls back to overview content for an unauthorized ?tab=audit deep link', async () => {
     wrap('/changes/1?tab=audit')
-    const overviewButton = await screen.findByRole('button', { name: 'Overview' })
-    expect(overviewButton.className).toContain('border-b-2')
+    const overviewButton = await screen.findByRole('tab', { name: 'Overview' })
+    expect(overviewButton.getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByText('mock-audit-timeline')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Audit' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Audit' })).toBeNull()
   })
 
   it('shows the Governance group with D1 and Audit for the change lead', async () => {
     change.lead_id = 42
     authState.current = { isAdmin: false, role: 'engineer', userId: 42 }
     wrap('/changes/1')
-    await screen.findByRole('button', { name: 'Overview' })
+    await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'Audit' })).toBeDefined()
   })
 
   it('shows the Governance group with D1 and Audit for a Quality department member', async () => {
@@ -278,10 +285,10 @@ describe('ChangeDetailPage governance tab gating', () => {
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [7] })
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
     wrap('/changes/1')
-    await screen.findByRole('button', { name: 'Overview' })
+    await screen.findByRole('tab', { name: 'Overview' })
     expect(screen.getByText('Governance')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'D1' })).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Audit' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'D1' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: 'Audit' })).toBeDefined()
   })
 })
 
@@ -339,8 +346,8 @@ describe('ChangeDetailPage offer tab rights', () => {
     change.status = 'costing'
     change.customer_relevant = false
     wrap('/changes/1')
-    expect(await screen.findByRole('button', { name: /Approval/ })).toBeDefined()
-    expect(screen.queryByRole('button', { name: /^Offer$/ })).toBeNull()
+    expect(await screen.findByRole('tab', { name: /Approval/ })).toBeDefined()
+    expect(screen.queryByRole('tab', { name: /^Offer$/ })).toBeNull()
   })
 })
 
@@ -354,13 +361,13 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [] })
   })
 
-  const btn = (name: RegExp) => screen.getByRole('button', { name }) as HTMLButtonElement
+  const btn = (name: RegExp) => ({ disabled: locked(screen.getByRole('tab', { name })) })
 
   it('unlocks costing and offer at costing, timing at approved, release at in_validation', async () => {
     change.customer_relevant = true
     change.status = 'costing' as ChangeDetail['status']
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Costing/ })
+    await screen.findByRole('tab', { name: /Costing/ })
     expect(btn(/Costing/).disabled).toBe(false)
     expect(btn(/Offer/).disabled).toBe(false)
     expect(btn(/Timing/).disabled).toBe(true)
@@ -368,13 +375,13 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     cleanup()
     change.status = 'approved' as ChangeDetail['status']
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Timing/ })
+    await screen.findByRole('tab', { name: /Timing/ })
     expect(btn(/Timing/).disabled).toBe(false)
     expect(btn(/Release/).disabled).toBe(true)
     cleanup()
     change.status = 'in_validation' as ChangeDetail['status']
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Release/ })
+    await screen.findByRole('tab', { name: /Release/ })
     expect(btn(/Release/).disabled).toBe(false)
   })
 
@@ -390,8 +397,9 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     change.customer_relevant = true
     change.status = status as ChangeDetail['status']
     wrap('/changes/1')
-    const tab = await screen.findByRole('button', { name })
-    expect(tab.querySelector('[aria-label="' + t('tab.activePhase') + '"]')).not.toBeNull()
+    const tab = await screen.findByRole('tab', { name })
+    // The state is part of the tab's name ("Timing, Current phase"), not a label on a dot.
+    expect(tab.textContent).toContain(t('tab.activePhase'))
   })
 
   it.each([
@@ -404,8 +412,8 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     change.customer_relevant = true
     change.status = status as ChangeDetail['status']
     wrap(`/changes/1?tab=${alias}`)
-    const tab = await screen.findByRole('button', { name })
-    expect(tab.className).toContain('border-b-2')
+    const tab = await screen.findByRole('tab', { name })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
   })
 
   it('renders the timing tab with plan and publish rights for Scheduling', async () => {
@@ -485,8 +493,8 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     change.customer_relevant = false
     change.status = 'costing' as ChangeDetail['status']
     wrap('/changes/1')
-    const approval = await screen.findByRole('button', { name: /Approval/ })
-    expect(approval.querySelector('[aria-label="' + t('tab.activePhase') + '"]')).not.toBeNull()
+    const approval = await screen.findByRole('tab', { name: /Approval/ })
+    expect(approval.textContent).toContain(t('tab.activePhase'))
     change.customer_relevant = true
   })
 
@@ -498,7 +506,7 @@ describe('ChangeDetailPage tab model (costing to close)', () => {
     expect((container.firstChild as HTMLElement).className).toContain('max-w-[1400px]')
     cleanup()
     const r = wrap('/changes/1?tab=overview')
-    await screen.findByRole('button', { name: /Overview/ })
+    await screen.findByRole('tab', { name: /Overview/ })
     expect((r.container.firstChild as HTMLElement).className).toContain('max-w-[1400px]')
   })
 
@@ -546,7 +554,7 @@ describe('ChangeDetailPage rejection', () => {
   })
 
   it('shows no rejection banner or Reopen button on a live change', async () => {
-    wrap('/changes/1')
+    wrap('/changes/1?tab=overview')
     await screen.findByText('mock-lifecycle-stepper')
     expect(screen.queryByText(/the flow is stopped/i)).toBeNull()
     expect(screen.queryByRole('button', { name: /Reopen/ })).toBeNull()
@@ -576,21 +584,21 @@ describe('ChangeDetailPage capture phase', () => {
   it('locks the later-phase tabs while the change is captured', async () => {
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
-    const scoping = await screen.findByRole('button', { name: /Scoping/ })
-    expect((scoping as HTMLButtonElement).disabled).toBe(true)
+    const scoping = await screen.findByRole('tab', { name: /Scoping/ })
+    expect(locked(scoping)).toBe(true)
     // Scoping gets the handoff note; the other locked tabs the generic one.
-    expect(scoping.getAttribute('title')).toBe(t('tab.scopingHandoff'))
-    const impacted = screen.getByRole('button', { name: /Impacted/ })
-    expect((impacted as HTMLButtonElement).disabled).toBe(true)
-    expect(impacted.getAttribute('title')).toBe(t('tab.lockedUntilScoping'))
-    expect((screen.getByRole('button', { name: /Overview/ }) as HTMLButtonElement).disabled).toBe(false)
+    expect(why(scoping)).toBe(t('tab.scopingHandoff'))
+    const impacted = screen.getByRole('tab', { name: /Impacted/ })
+    expect(locked(impacted)).toBe(true)
+    expect(why(impacted)).toBe(t('tab.lockedUntilScoping'))
+    expect(locked(screen.getByRole('tab', { name: /Overview/ }))).toBe(false)
   })
 
   it('sends a deep link into a locked tab back to overview', async () => {
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1?tab=scoping')
-    const overview = await screen.findByRole('button', { name: /Overview/ })
-    expect(overview.className).toContain('border-b-2')
+    const overview = await screen.findByRole('tab', { name: /Overview/ })
+    expect(overview.getAttribute('aria-selected')).toBe('true')
     // Overview content, not the scoping panel.
     expect(screen.getByText(/Reason:/)).toBeDefined()
   })
@@ -598,38 +606,40 @@ describe('ChangeDetailPage capture phase', () => {
   it('unlocks scoping and impacted at scoping, but not the later phases', async () => {
     change.status = 'scoping' as ChangeDetail['status']
     wrap('/changes/1')
-    const scoping = await screen.findByRole('button', { name: /Scoping/ })
-    expect((scoping as HTMLButtonElement).disabled).toBe(false)
-    expect((screen.getByRole('button', { name: /Impacted/ }) as HTMLButtonElement).disabled).toBe(false)
-    const costing = screen.getByRole('button', { name: /Costing/ })
-    expect((costing as HTMLButtonElement).disabled).toBe(true)
-    expect(costing.getAttribute('title')).toBe(t('tab.lockedUntilPhase'))
-    expect((screen.getByRole('button', { name: /Timing/ }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(true)
+    const scoping = await screen.findByRole('tab', { name: /Scoping/ })
+    expect(locked(scoping)).toBe(false)
+    expect(locked(screen.getByRole('tab', { name: /Impacted/ }))).toBe(false)
+    const costing = screen.getByRole('tab', { name: /Costing/ })
+    expect(locked(costing)).toBe(true)
+    expect(why(costing)).toBe(t('tab.lockedUntilPhase'))
+    expect(locked(screen.getByRole('tab', { name: /Timing/ }))).toBe(true)
+    expect(locked(screen.getByRole('tab', { name: /Assessments/ }))).toBe(true)
   })
 
   it('unlocks the costing tab once the change reaches costing', async () => {
     change.status = 'costing' as ChangeDetail['status']
     wrap('/changes/1')
-    const costing = await screen.findByRole('button', { name: /Costing/ })
-    expect((costing as HTMLButtonElement).disabled).toBe(false)
-    expect((screen.getByRole('button', { name: /Assessments/ }) as HTMLButtonElement).disabled).toBe(false)
+    const costing = await screen.findByRole('tab', { name: /Costing/ })
+    expect(locked(costing)).toBe(false)
+    expect(locked(screen.getByRole('tab', { name: /Assessments/ }))).toBe(false)
     // Timing is still a phase away.
-    expect((screen.getByRole('button', { name: /Timing/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(locked(screen.getByRole('tab', { name: /Timing/ }))).toBe(true)
   })
 
   it('a change rejected at scoping opens on Scoping and keeps the later stages locked', async () => {
     Object.assign(change, { status: 'rejected', stopped_at: 'scoping' })
     try {
       wrap('/changes/1')
-      const scoping = await screen.findByRole('button', { name: /Scoping/ })
-      expect(scoping.className).toContain('border-b-2')
-      expect((screen.getByRole('button', { name: /Costing/ }) as HTMLButtonElement).disabled).toBe(true)
-      const release = screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement
-      expect(release.disabled).toBe(true)
-      expect(release.title).toBe(t('tab.lockedStopped'))
+      const scoping = await screen.findByRole('tab', { name: /Scoping/ })
+      expect(scoping.getAttribute('aria-selected')).toBe('true')
+      expect(locked(screen.getByRole('tab', { name: /Costing/ }))).toBe(true)
+      const release = screen.getByRole('tab', { name: /Release/ })
+      expect(locked(release)).toBe(true)
+      // The reason is reachable by keyboard: the tab's description, shown on focus.
+      expect(screen.getByTestId('tab-why-release').textContent).toBe(t('tab.lockedStopped'))
+      expect(release.getAttribute('aria-describedby')).toBe(screen.getByTestId('tab-why-release').id)
       // No tab is the current phase of a stopped change.
-      expect(screen.queryByLabelText(t('tab.activePhase'))).toBeNull()
+      expect(screen.queryByText(new RegExp(t('tab.activePhase')))).toBeNull()
     } finally {
       Object.assign(change, { stopped_at: undefined })
     }
@@ -639,10 +649,10 @@ describe('ChangeDetailPage capture phase', () => {
     Object.assign(change, { status: 'cancelled', stopped_at: 'costing' })
     try {
       wrap('/changes/1')
-      const overview = await screen.findByRole('button', { name: 'Overview' })
-      expect(overview.className).toContain('border-b-2')
-      expect((screen.getByRole('button', { name: /Costing/ }) as HTMLButtonElement).disabled).toBe(false)
-      expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(true)
+      const overview = await screen.findByRole('tab', { name: 'Overview' })
+      expect(overview.getAttribute('aria-selected')).toBe('true')
+      expect(locked(screen.getByRole('tab', { name: /Costing/ }))).toBe(false)
+      expect(locked(screen.getByRole('tab', { name: /Release/ }))).toBe(true)
     } finally {
       Object.assign(change, { stopped_at: undefined })
     }
@@ -651,8 +661,8 @@ describe('ChangeDetailPage capture phase', () => {
   it('withholds nothing from an off-path change', async () => {
     change.status = 'rejected' as ChangeDetail['status']
     wrap('/changes/1')
-    const costing = await screen.findByRole('button', { name: /Costing/ })
-    expect((costing as HTMLButtonElement).disabled).toBe(false)
+    const costing = await screen.findByRole('tab', { name: /Costing/ })
+    expect(locked(costing)).toBe(false)
   })
 })
 
@@ -708,9 +718,9 @@ describe('ChangeDetailPage costing tab', () => {
     change.status = 'quoting' as ChangeDetail['status']
     change.customer_relevant = true
     wrap('/changes/1?tab=commercial')
-    const offer = await screen.findByRole('button', { name: /Offer/ })
-    expect((offer as HTMLButtonElement).disabled).toBe(false)
-    expect(offer.className).toContain('border-b-2')
+    const offer = await screen.findByRole('tab', { name: /Offer/ })
+    expect(locked(offer)).toBe(false)
+    expect(offer.getAttribute('aria-selected')).toBe('true')
   })
 })
 
@@ -743,7 +753,7 @@ describe('ChangeDetailPage description authz', () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'scoping' as ChangeDetail['status']
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Overview/ })
+    await screen.findByRole('tab', { name: /Overview/ })
     expect(screen.queryByTestId('description-input')).toBeNull()
   })
 
@@ -751,7 +761,7 @@ describe('ChangeDetailPage description authz', () => {
     authState.current = { isAdmin: false, role: 'engineer', userId: 5 }
     change.status = 'captured' as ChangeDetail['status']
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Overview/ })
+    await screen.findByRole('tab', { name: /Overview/ })
     expect(screen.queryByTestId('description-input')).toBeNull()
   })
 })
@@ -775,7 +785,7 @@ describe('ChangeDetailPage impacted-tab attention dot', () => {
     change.status = 'scoping' as ChangeDetail['status']
     change.impact_confirmed_at = '2026-07-05T10:00:00'
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Impacted/ })
+    await screen.findByRole('tab', { name: /Impacted/ })
     expect(screen.queryByTestId('tab-open-work')).toBeNull()
   })
 
@@ -783,7 +793,7 @@ describe('ChangeDetailPage impacted-tab attention dot', () => {
     change.status = 'in_assessment' as ChangeDetail['status']
     change.impact_confirmed_at = null
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Impacted/ })
+    await screen.findByRole('tab', { name: /Impacted/ })
     expect(screen.queryByTestId('tab-open-work')).toBeNull()
   })
 })
@@ -796,7 +806,7 @@ describe('ChangeDetailPage project in the header', () => {
   })
 
   it('names the project under the change, number first, linking to it', async () => {
-    wrap('/changes/1')
+    wrap('/changes/1?tab=overview')
     const link = await screen.findByTestId('change-project')
     expect(link.textContent).toBe('1864 · VW426 Atlas')
     expect(link.getAttribute('href')).toBe('/projects/1')
@@ -806,7 +816,7 @@ describe('ChangeDetailPage project in the header', () => {
     change.project_number = null
     change.project_name = null
     wrap('/changes/1')
-    await screen.findByRole('button', { name: /Overview/ })
+    await screen.findByRole('tab', { name: /Overview/ })
     expect(screen.queryByTestId('change-project')).toBeNull()
   })
 })
@@ -944,11 +954,14 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     change.status = 'released' as ChangeDetail['status']
     wrap('/changes/1')
     await screen.findByText('mock-cockpit-summary')
-    expect(screen.queryByRole('button', { name: 'Cancel change' })).toBeNull()
+    expect(screen.queryByTestId('header-cancel')).toBeNull()
     cleanup()
     change.status = 'in_assessment' as ChangeDetail['status']
     wrap('/changes/1')
-    expect(await screen.findByRole('button', { name: 'Cancel change' })).toBeDefined()
+    // Rare and destructive: behind "More actions", not beside the title.
+    const item = await screen.findByTestId('header-cancel')
+    expect(item.getAttribute('role')).toBe('menuitem')
+    expect(item.closest('details')?.querySelector('summary')?.getAttribute('aria-label')).toBe('More actions')
     authState.current = { isAdmin: false, role: 'engineer', userId: null }
   })
 
@@ -962,11 +975,11 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     expect(await screen.findByTestId('header-cancel')).toBeDefined()
   })
 
-  it('states that cancelling is final', async () => {
+  it('states that canceling is final', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     wrap('/changes/1')
     fireEvent.click(await screen.findByTestId('header-cancel'))
-    expect(screen.getByTestId('reason-open-Cancel change').textContent).toMatch(/^Cancelling is final/)
+    expect(screen.getByTestId('reason-open-Cancel change').textContent).toMatch(/^Canceling is final/)
     authState.current = { isAdmin: false, role: 'engineer', userId: null }
   })
 })
@@ -1159,8 +1172,8 @@ describe('ChangeDetailPage validation issues after the loop back (review F1)', (
     wrap('/changes/1?tab=timing&issue=21')
     const panel = await screen.findByTestId('mock-issues-panel')
     expect(panel.textContent).toBe('Validation issues / recovery status=in_implementation focus=21')
-    await waitFor(() => expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(false))
-    fireEvent.click(screen.getByRole('button', { name: /Release/ }))
+    await waitFor(() => expect(locked(screen.getByRole('tab', { name: /Release/ }))).toBe(false))
+    fireEvent.click(screen.getByRole('tab', { name: /Release/ }))
     expect(await screen.findByTestId('mock-release-tab')).toBeDefined()
   })
 
@@ -1177,7 +1190,7 @@ describe('ChangeDetailPage validation issues after the loop back (review F1)', (
     wrap('/changes/1?tab=timing')
     await screen.findByTestId('mock-timing-tab')
     expect(screen.queryByTestId('mock-issues-panel')).toBeNull()
-    expect((screen.getByRole('button', { name: /Release/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(locked(screen.getByRole('tab', { name: /Release/ }))).toBe(true)
   })
 
   it('the end-implementation dialog names the issues still fixing', async () => {
@@ -1307,5 +1320,98 @@ describe('ChangeDetailPage deviations and truthful dialogs (final walk P2-3, P2-
     wrap('/changes/1?tab=timing')
     expect((await screen.findByTestId('wait-revisions-in-check')).textContent)
       .toBe('1 impacted revision has not completed its check workflow; needs Development')
+  })
+})
+
+describe('ChangeDetailPage UI polish (WP3)', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    vi.mocked(changesApi.changelog).mockResolvedValue([])
+  })
+
+  it('keeps the full cockpit on Overview and a slim sticky bar on every other tab', async () => {
+    wrap('/changes/1?tab=overview')
+    await screen.findByText('mock-lifecycle-stepper')
+    expect(screen.queryByTestId('change-bar')).toBeNull()
+    cleanup()
+    wrap('/changes/1?tab=assessments')
+    const bar = await screen.findByTestId('change-bar')
+    expect(bar.className).toContain('sticky')
+    expect(bar.querySelector('h1')?.textContent).toContain(change.change_number)
+    // The same cockpit (one source for the next step), in its compact form.
+    expect(bar.textContent).toContain('mock-cockpit-summary')
+    expect(screen.queryByText('mock-lifecycle-stepper')).toBeNull()
+  })
+
+  it('has a skip link to the tab content and a labelled tab panel', async () => {
+    wrap('/changes/1?tab=overview')
+    const skip = await screen.findByText('Skip to the tab content')
+    expect(skip.getAttribute('href')).toBe('#change-main')
+    const panel = screen.getByRole('tabpanel')
+    expect(panel.getAttribute('aria-labelledby')).toBe(screen.getByRole('tab', { name: 'Overview' }).id)
+  })
+
+  it('moves between tabs with the arrow keys', async () => {
+    wrap('/changes/1?tab=overview')
+    const overview = await screen.findByRole('tab', { name: 'Overview' })
+    overview.focus()
+    fireEvent.keyDown(overview, { key: 'ArrowRight' })
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /Scoping/ }))
+  })
+
+  it('shows a closed change as a read-only record, without a duplicate status line', async () => {
+    change.status = 'closed' as ChangeDetail['status']
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'status', action_description: '', performed_by: 1, performed_at: '2026-09-25T10:00:00',
+        field_name: 'status', old_value: 'released', new_value: 'closed' },
+    ] as never)
+    wrap('/changes/1?tab=overview')
+    const banner = await screen.findByTestId('closed-banner')
+    await waitFor(() => expect(banner.textContent).toContain('Closed 25 Sep 2026'))
+    expect(screen.queryByText('Status:')).toBeNull()
+    expect(screen.queryByLabelText('Priority')).toBeNull()
+  })
+
+  it('asks once more before recording the approval, by the same verb as the button', async () => {
+    change.status = 'quoted' as ChangeDetail['status']
+    wrap('/changes/1?tab=overview')
+    await screen.findByText('mock-cockpit-summary')
+    fireEvent.click(screen.getByText('mock-advance-approved'))
+    const dialog = await screen.findByTestId('confirm-approved')
+    expect(dialog.textContent).toContain('Record approval')
+    expect(screen.getByTestId('confirm-go').textContent).toBe('Record approval')
+  })
+
+  it('holds "Close costing" while nothing is costed, and names departments not costed yet', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'costing' as ChangeDetail['status']
+    const zero = { one_time_internal: 0, one_time_external: 0, lifecycle_internal: 0, lifecycle_external: 0 }
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      currency: 'USD', unpriced_lines: [], by_department: [],
+      totals: { ...zero, grand_total: 0 }, effort_by_department: [],
+    } as never)
+    wrap('/changes/1?tab=overview')
+    await waitFor(() => expect(screen.getByTestId('needs-to:quoting').textContent)
+      .toBe('Nothing is costed yet: the total is 0.00 USD.'))
+    cleanup()
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      currency: 'USD', unpriced_lines: [],
+      by_department: [{ department_id: change.assessments[0]?.department_id ?? 1, ...zero, one_time_internal: 100 }],
+      totals: { ...zero, grand_total: 100 }, effort_by_department: [],
+    } as never)
+    wrap('/changes/1?tab=overview')
+    await waitFor(() => expect(screen.getByTestId('needs-to:quoting').textContent).not.toContain('Nothing is costed'))
+    vi.mocked(changesApi.getSummation).mockRejectedValue(new Error('not in this test'))
+  })
+
+  it('titles the finish-implementation confirm with its verb', async () => {
+    change.status = 'in_implementation' as ChangeDetail['status']
+    wrap('/changes/1?tab=overview')
+    fireEvent.click(await screen.findByText('mock-advance-in_validation'))
+    await screen.findByTestId('confirm-in_validation')
+    expect(screen.getByRole('dialog', { name: 'Finish implementation' })).toBeDefined()
+    expect(screen.getByTestId('confirm-go').textContent).toBe('Finish implementation')
   })
 })

@@ -13,9 +13,11 @@ import { DeadlineChip } from '../components/changes/DeadlineChip';
 import { StageResponsibleBadge } from '../components/changes/StageResponsibleBadge';
 import { useAuth } from '../contexts/AuthContext';
 import { t } from '../i18n/cmLabels';
+import EmptyState from '../components/common/EmptyState';
 import type { ChangeRequest } from '../types/change';
 
-type Sort = 'recent' | 'overdue';
+type Sort = 'action' | 'recent' | 'overdue';
+const SORTS: Sort[] = ['action', 'recent', 'overdue'];
 
 /** The date the running phase is measured against; none once the change ended. */
 const activeDue = (c: ChangeRequest): string | null =>
@@ -33,20 +35,37 @@ const isOverdue = (c: ChangeRequest): boolean => {
 
 const PRIORITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
+/** Priority reads as a chip only when it is not the usual Medium. */
+const PRIORITY_CHIP: Record<string, string> = {
+  low: 'bg-slate-700 text-slate-200',
+  high: 'bg-amber-900/70 text-amber-200',
+  critical: 'bg-red-900 text-red-200',
+};
+
+/** "Needs action first": open and overdue, then open, then ended; the API's
+ *  newest-first order inside each group. */
+const actionRank = (c: ChangeRequest): number => (hasEnded(c) ? 2 : isOverdue(c) ? 0 : 1);
+
 export default function ChangesPage() {
   const [showCreate, setShowCreate] = useState(false);
+  // Every filter lives in the URL, so Back and a shared link keep them.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') ?? '');
-  const [query, setQuery] = useState('');
-  const [mineOnly, setMineOnly] = useState(false);
+  const statusFilter = searchParams.get('status') ?? '';
+  const query = searchParams.get('q') ?? '';
+  const mineOnly = searchParams.get('mine') === '1';
   // Spec §17: the changes a new customer index started (or joined).
-  const [intakeOnly, setIntakeOnly] = useState(false);
-  const [sort, setSort] = useState<Sort>('recent');
+  const intakeOnly = searchParams.get('intake') === '1';
+  const rawSort = searchParams.get('sort') as Sort | null;
+  const sort: Sort = rawSort && SORTS.includes(rawSort) ? rawSort : 'action';
   const { userId } = useAuth();
 
-  const onStatusChange = (value: string) => {
-    setStatusFilter(value);
-    setSearchParams(value ? { status: value } : {}, { replace: true });
+  /** One URL parameter; the default value drops out of the URL. */
+  const setParam = (key: string, value: string | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set(key, value); else next.delete(key);
+      return next;
+    }, { replace: true });
   };
 
   const { data, isLoading } = useQuery({
@@ -62,6 +81,9 @@ export default function ChangesPage() {
     const rows = all.filter((c) => (!mineOnly || mine(c)) && (!intakeOnly || !!c.from_intake) && (!q || [
       c.change_number, c.title, c.project_number, c.project_name,
     ].some((f) => (f ?? '').toLowerCase().includes(q))));
+    if (sort === 'action') {
+      return [...rows].sort((a, b) => actionRank(a) - actionRank(b));
+    }
     if (sort === 'overdue') {
       // Overdue first; then the nearest running deadline; then by priority.
       const due = (c: ChangeRequest) => activeDue(c) ?? '9999-12-31';
@@ -74,6 +96,9 @@ export default function ChangesPage() {
   }, [data, query, mineOnly, intakeOnly, sort, userId]);
 
   const filtered = query.trim() !== '' || mineOnly || intakeOnly;
+  // Type only earns a column when the list actually mixes types.
+  const showType = new Set(shown.map((c) => c.change_type)).size > 1;
+  const cols = showType ? 9 : 8;
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -96,14 +121,14 @@ export default function ChangesPage() {
           aria-label={t('changes.search')}
           placeholder={t('changes.search')}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => setParam('q', e.target.value)}
           className="w-72 border border-slate-700 bg-slate-900 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500"
         />
         <select
           aria-label={t('changes.statusFilter')}
           className="border border-slate-700 rounded-lg px-3 py-2 text-sm"
           value={statusFilter}
-          onChange={(e) => onStatusChange(e.target.value)}
+          onChange={(e) => setParam('status', e.target.value)}
         >
           <option value="">All statuses</option>
           {Object.entries(STATUS_LABELS).map(([k, v]) => (
@@ -112,13 +137,13 @@ export default function ChangesPage() {
         </select>
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
           <input type="checkbox" data-testid="changes-mine" checked={mineOnly}
-            onChange={(e) => setMineOnly(e.target.checked)} />
+            onChange={(e) => setParam('mine', e.target.checked ? '1' : null)} />
           {t('changes.mine')}
         </label>
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"
           title="Changes started by a new customer index (or that took one)">
           <input type="checkbox" data-testid="changes-from-intake" checked={intakeOnly}
-            onChange={(e) => setIntakeOnly(e.target.checked)} />
+            onChange={(e) => setParam('intake', e.target.checked ? '1' : null)} />
           From intake
         </label>
         <select
@@ -126,8 +151,9 @@ export default function ChangesPage() {
           aria-label={t('changes.sort')}
           className="border border-slate-700 rounded-lg px-3 py-2 text-sm"
           value={sort}
-          onChange={(e) => setSort(e.target.value as Sort)}
+          onChange={(e) => setParam('sort', e.target.value === 'action' ? null : e.target.value)}
         >
+          <option value="action">{t('changes.sortAction')}</option>
           <option value="recent">{t('changes.sortRecent')}</option>
           <option value="overdue">{t('changes.sortOverdue')}</option>
         </select>
@@ -138,15 +164,15 @@ export default function ChangesPage() {
       ) : (
         <div className="border border-slate-700 rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-700 text-left text-slate-400">
+            <thead className="bg-slate-800 text-left text-slate-400">
               <tr className="whitespace-nowrap">
                 <th className="px-4 py-3">Project</th>
                 <th className="px-4 py-3">Number</th>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3 w-full">Title</th>
+                {showType && <th className="px-4 py-3">Type</th>}
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">{t('changes.owner')}</th>
-                <th className="px-4 py-3">Priority</th>
+                <th className="px-4 py-3" title={t('changes.priorityMediumHint')}>Priority</th>
                 <th className="px-4 py-3">Deadline</th>
                 <th className="px-4 py-3">Progress</th>
               </tr>
@@ -160,7 +186,7 @@ export default function ChangesPage() {
                 const due = activeDue(c);
                 return (
                 <tr key={c.id} data-testid={`change-row-${c.id}`}
-                  className="border-t border-slate-700 hover:bg-slate-800/60">
+                  className={`border-t border-slate-700 hover:bg-slate-800/60${hasEnded(c) ? ' text-slate-400' : ''}`}>
                   <td className="px-4 py-3 max-w-[12rem]">
                     {projectLabel(c.project_number, c.project_name) ? (
                       <span className="block truncate text-slate-300"
@@ -174,8 +200,8 @@ export default function ChangesPage() {
                       {c.change_number}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 min-w-[16rem]">
-                    <span className="line-clamp-2" title={c.title}>{c.title}</span>
+                  <td className="px-4 py-3 min-w-[20rem]">
+                    <span className="line-clamp-2 text-slate-100" title={c.title}>{c.title}</span>
                     {c.origin === 'engineering_review' ? (
                       <span data-testid={`change-review-${c.id}`}
                         className="mt-0.5 inline-block rounded-full bg-teal-900/60 px-2 py-0.5 text-[11px] text-teal-200">
@@ -187,7 +213,7 @@ export default function ChangesPage() {
                       </span>
                     ) : null}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">{changeTypeLabel(c.change_type)}</td>
+                  {showType && <td className="px-4 py-3 whitespace-nowrap">{changeTypeLabel(c.change_type)}</td>}
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span data-testid={`change-status-${c.id}`}
                       className={`inline-block whitespace-nowrap px-2.5 py-1 rounded-full text-xs font-semibold ${pill}`}>
@@ -199,7 +225,13 @@ export default function ChangesPage() {
                       : c.stage_owner ? <span className="text-slate-300">{c.stage_owner}</span>
                         : <StageResponsibleBadge status={c.status} origin={c.origin} />}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">{priorityLabel(c.priority)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap" data-testid={`change-priority-${c.id}`}>
+                    {c.priority !== 'medium' && (
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_CHIP[c.priority] ?? PRIORITY_CHIP.low}`}>
+                        {priorityLabel(c.priority)}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {/* Whichever phase is running owns the visible date; an
                         ended change has no live deadline. */}
@@ -210,7 +242,7 @@ export default function ChangesPage() {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {pos && (
-                      <span className="text-xs text-slate-400" title={`Step ${pos.index + 1} of ${pos.total}`}>
+                      <span className="text-xs tabular-nums text-slate-400" title={`Step ${pos.index + 1} of ${pos.total}`}>
                         {pos.index + 1}/{pos.total}
                       </span>
                     )}
@@ -218,8 +250,10 @@ export default function ChangesPage() {
                 </tr>
               );})}
               {shown.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400">
-                  {filtered ? t('changes.noMatch') : 'No changes yet.'}
+                <tr><td colSpan={cols} className="p-4">
+                  <EmptyState size="sm" bordered={false}
+                    title={filtered ? t('changes.noMatch') : 'No changes yet'}
+                    hint={filtered ? undefined : 'A change request starts from a part, a tool or the button above.'} />
                 </td></tr>
               )}
             </tbody>

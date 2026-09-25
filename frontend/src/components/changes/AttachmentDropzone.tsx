@@ -7,6 +7,7 @@
  * yield a file in the browser — save it as .msg first, then drop that.
  */
 import { useRef, useState } from 'react';
+import { LoaderCircle, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { changesApi } from '../../api/changes';
 import { apiErrorMessage } from '../../lib/apiError';
@@ -111,8 +112,10 @@ export default function AttachmentDropzone({
             : 'border-slate-600 bg-slate-900/40 text-slate-400 hover:border-slate-500')
         }
       >
-        <span className={compact ? 'leading-none' : 'text-2xl leading-none'} aria-hidden>
-          {busy ? '⏳' : '📎'}
+        <span className="leading-none" aria-hidden="true">
+          {busy
+            ? <LoaderCircle size={compact ? 14 : 22} className="motion-safe:animate-spin" />
+            : <Paperclip size={compact ? 14 : 22} />}
         </span>
         <span className={compact ? 'text-xs' : 'text-sm'}>
           {busy ? t('attach.uploading') : label ?? t('attach.dropHere')}

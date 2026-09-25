@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import CockpitSummary, { nextStepFor, pluralizeLabel } from './CockpitSummary'
-import type { ChangeDetail } from '../../types/change'
+import type { ChangeDetail, MyAction } from '../../types/change'
 import { t } from '../../i18n/cmLabels'
 
 const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
@@ -45,12 +45,96 @@ describe('CockpitSummary', () => {
     const releaseRow = screen.getByText(/Release/).closest('li')
     expect(releaseRow?.textContent).not.toContain('⚠')
     expect(releaseRow?.className).toContain('text-slate-400')
-    expect(screen.getByText(/Pending deviations/)).toBeDefined()
+    expect(screen.getByTestId('blocked-pending-deviations')).toBeDefined()
     expect(screen.getByText(/Overdue assessments/)).toBeDefined()
-    const primary = screen.getByRole('button', { name: /Approved/ })
-    expect(primary.className).toContain('bg-sky-600')
+    expect(screen.getByTestId('next-resolve-first').textContent).toBe('First: Pending deviations: 1')
+    // One truth: with blockers listed, the move is not the primary. The
+    // primary says how many and leads to the first; the move stays secondary.
+    const resolve = screen.getByTestId('next-resolve-blockers')
+    expect(resolve.textContent).toBe('Resolve 2 blockers first')
+    expect(resolve.className).toContain('bg-sky-700')
+    const move = screen.getByRole('button', { name: 'Record approval' })
+    expect(move.className).not.toContain('bg-sky-700')
+    expect(move.title).toContain('2 blockers open')
+    fireEvent.click(move)
+    expect(onAdvance).toHaveBeenCalledWith('approved')
+  })
+
+  it('without blockers the move is the one primary, named by its verb', () => {
+    const onAdvance = vi.fn()
+    render(wrap(<CockpitSummary
+      change={change({ customer_response: 'accepted', pm_signed_by: 1, quality_signed_by: 2 })}
+      gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false} />))
+    expect(screen.queryByTestId('next-resolve-blockers')).toBeNull()
+    const primary = screen.getByRole('button', { name: 'Record approval' })
+    expect(primary.className).toContain('bg-sky-700')
     fireEvent.click(primary)
     expect(onAdvance).toHaveBeenCalledWith('approved')
+  })
+
+  it('"Resolve first" leads to the first blocker that has a place to go', () => {
+    const onGo = vi.fn()
+    render(wrap(<CockpitSummary change={change({ status: 'in_validation' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} onGo={onGo}
+      waits={[
+        { key: 'info', text: 'FYI only', info: true },
+        { key: 'checks', text: 'validation checks open (2 departments)', tab: 'release' },
+        { key: 'lessons', text: 'Lessons learned step not done', tab: 'release' },
+      ]} />))
+    const resolve = screen.getByTestId('next-resolve-blockers')
+    // Info lines are listed but hold nothing up.
+    expect(resolve.textContent).toBe('Resolve 2 blockers first')
+    expect(screen.getByTestId('next-resolve-first').textContent).toContain('validation checks open')
+    fireEvent.click(resolve)
+    expect(onGo).toHaveBeenCalledWith('release')
+    expect(screen.getByTestId('next-to-released').textContent).toBe('Release change')
+  })
+
+  it('does not list an action that is the same job as the next step', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'quoting' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      actions={[
+        { kind: 'offer_build', label: 'Build and send the offer', target_tab: 'offer' },
+        { kind: 'deviation_decision', label: 'Decide deviation #3', target_tab: 'overview', deviation_id: 3 },
+      ] as MyAction[]} />))
+    expect(screen.getAllByText('Build and send the offer')).toHaveLength(1)
+    expect(screen.getByTestId('your-actions').textContent).toContain('Decide deviation #3')
+  })
+
+  it('compact bar: the same next step and the blockers count, from one source', () => {
+    const onShowOverview = vi.fn()
+    render(wrap(<CockpitSummary variant="compact" change={change({ status: 'in_validation' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      onShowOverview={onShowOverview}
+      waits={[{ key: 'checks', text: 'validation checks open', tab: 'release' }]} />))
+    expect(screen.getByTestId('cockpit-compact')).toBeDefined()
+    expect(screen.getByTestId('compact-blockers').textContent).toBe('1 blocker')
+    fireEvent.click(screen.getByTestId('compact-blockers'))
+    expect(onShowOverview).toHaveBeenCalled()
+    expect(screen.getByTestId('next-resolve-blockers').textContent).toBe('Resolve 1 blocker first')
+    expect(screen.queryByText('Blocked by')).toBeNull()
+  })
+
+  it('compact bar without blockers shows the primary step itself', () => {
+    render(wrap(<CockpitSummary variant="compact" change={change({ status: 'released' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByTestId('next-to-closed').textContent).toBe('Close change')
+    expect(screen.queryByTestId('compact-blockers')).toBeNull()
+  })
+
+  it('compact bar says why a held step is held, beside the button', () => {
+    render(wrap(<CockpitSummary variant="compact" change={change({ status: 'released' })}
+      gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false}
+      needs={(k) => (k === 'to:closed' ? 'Needs the Project Manager or the change lead' : null)} />))
+    expect((screen.getByTestId('next-to-closed') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('compact-held').textContent).toBe('Needs the Project Manager or the change lead')
+  })
+
+  it('names an undecided gate "not decided yet", not "n/a"', () => {
+    render(wrap(<CockpitSummary change={change({ status: 'scoping', assessments: [] })}
+      gates={[{ gate_key: 'feasibility', decision: null as unknown as 'na' }]}
+      pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
+    expect(screen.getByText(/Feasibility gate: not decided yet/)).toBeDefined()
   })
 
   it('shows nothing-blocking empty state', () => {
@@ -75,7 +159,7 @@ describe('CockpitSummary', () => {
     expect(screen.getByText(/Feasibility gate: not answered Yes \(it is n\/a\)/)).toBeDefined()
     expect(screen.queryByText(/\bNA\b/)).toBeNull()
     const feasibilityRow = screen.getByText(/Feasibility/).closest('li')
-    expect(feasibilityRow?.textContent).toContain('⚠')
+    expect(feasibilityRow?.getAttribute('data-blocking')).toBe('true')
     expect(feasibilityRow?.className).toContain('text-amber-300')
     const budgetRow = screen.getByText(/Budget/).closest('li')
     expect(budgetRow?.textContent).not.toContain('⚠')
@@ -266,7 +350,7 @@ describe('CockpitSummary scoping decisions belong to the meeting', () => {
   it('still offers the ordinary advance button on statuses the meeting does not own', () => {
     render(wrap(<CockpitSummary change={change({ status: 'captured', assessments: [] })}
       gates={[]} pendingDeviations={0} onAdvance={() => {}} advancing={false} />))
-    expect(screen.getByRole('button', { name: /Scoping/ })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Hand over to scoping' })).toBeDefined()
     expect(screen.queryByText(/Record the scoping meeting: proceed/)).toBeNull()
   })
 })
@@ -409,6 +493,25 @@ describe('CockpitSummary waits', () => {
     expect(nextStepFor({ ...base, status: 'closed' } as never)).toEqual([])
   })
 
+  it('the review step waits once the viewer answered (P3 final walk)', () => {
+    const base = { status: 'scoping', origin: 'engineering_review', customer_relevant: true,
+      customer_response: null, pm_signed_by: null, quality_signed_by: null,
+      timing_validated_at: null, internal_approved_at: null, impact_confirmed_at: '2026-09-25T08:00:00' }
+    const mine = { answer: null, can_answer: true }
+    const done = { answer: 'no_impact', can_answer: true }
+    const other = { answer: null, can_answer: false }
+    expect(nextStepFor(base as never, null, { open_count: 2, impact_count: 0, answers: [mine, other] }))
+      .toEqual([{ kind: 'go', key: 'review', label: 'Answer the review', tab: 'review' }])
+    expect(nextStepFor(base as never, null, { open_count: 1, impact_count: 0, answers: [done, other] }))
+      .toEqual([{ kind: 'wait', key: 'review-answers', text: 'Waiting on 1 review answer' }])
+    expect(nextStepFor(base as never, null, { open_count: 0, impact_count: 1, can_escalate: true, answers: [done] })[0])
+      .toMatchObject({ kind: 'go', key: 'review-escalate' })
+    expect(nextStepFor(base as never, null, { open_count: 0, impact_count: 1, can_escalate: false, answers: [done] })[0])
+      .toMatchObject({ kind: 'wait', key: 'review-escalate' })
+    expect(nextStepFor(base as never, null, { open_count: 0, impact_count: 0, answers: [done] })[0])
+      .toMatchObject({ kind: 'wait', key: 'review-done' })
+  })
+
   it('F3: a dedicated act drives quoting, quoted and approved; no raw transition buttons', () => {
     const base = { customer_relevant: true, pm_signed_by: null, quality_signed_by: null, timing_validated_at: null }
     expect(nextStepFor({ ...base, status: 'quoting', customer_response: 'pending' } as never))
@@ -440,9 +543,9 @@ describe('CockpitSummary waits', () => {
       timing_validated_at: null,
     })} gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false} />))
     const primary = screen.getByRole('button', { name: 'Validate the timing' })
-    expect(primary.className).toContain('bg-sky-600')
+    expect(primary.className).toContain('bg-sky-700')
     const secondary = screen.getByRole('button', { name: t('cockpit.startImplementation') })
-    expect(secondary.className).not.toContain('bg-sky-600')
+    expect(secondary.className).not.toContain('bg-sky-700')
     expect((secondary as HTMLButtonElement).disabled).toBe(false)
     expect(secondary.title).toBe(t('cockpit.startImplementationHint'))
     fireEvent.click(secondary)
@@ -472,7 +575,7 @@ describe('CockpitSummary waits', () => {
     expect(screen.getByTestId('next-wait-costing-input').textContent)
       .toContain('Waiting on cost input from 2 departments')
     const quote = screen.getByTestId('next-to-quoting')
-    expect(quote.className).not.toContain('bg-sky-600')
+    expect(quote.className).not.toContain('bg-sky-700')
   })
 
   it('the Approve internal costs step is gated by needs("internal-approval") like any other', () => {
@@ -499,7 +602,7 @@ describe('CockpitSummary waits', () => {
     render(wrap(<CockpitSummary change={change({ status: 'released' })}
       gates={[]} pendingDeviations={0} onAdvance={onAdvance} advancing={false}
       needs={(k) => (k === 'to:closed' ? 'Needs the Project Manager or the change lead' : null)} />))
-    const btn = screen.getByRole('button', { name: /Closed/ }) as HTMLButtonElement
+    const btn = screen.getByRole('button', { name: 'Close change' }) as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     expect(btn.title).toBe('Needs the Project Manager or the change lead')
     expect(screen.getByTestId('next-needs').textContent).toContain('Needs the Project Manager')
@@ -526,17 +629,17 @@ describe('CockpitSummary early stages (spec §16)', () => {
       onAdvance={() => {}} advancing={false} assessment={round()} />))
     expect(screen.getByTestId('next-wait-waiting').textContent).toContain('Waiting on 1 department')
     expect(screen.queryByTestId('next-to-costing')).toBeNull()
-    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-600')
+    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-700')
   })
 
-  it('offers "Close assessment -> Costing" once every first-stage R/A answered', () => {
+  it('offers "Close assessment" once every first-stage R/A answered', () => {
     const onAdvance = vi.fn()
     render(wrap(<CockpitSummary change={inAssessment} gates={[]} pendingDeviations={0}
       onAdvance={onAdvance} advancing={false}
       assessment={round({ waiting_on: [], all_submitted: true, submitted: 2 })} />))
     const go = screen.getByTestId('next-to-costing')
-    expect(go.textContent).toBe('Close assessment → Costing')
-    expect(go.className).toContain('bg-sky-600')
+    expect(go.textContent).toBe('Close assessment')
+    expect(go.className).toContain('bg-sky-700')
     fireEvent.click(go)
     expect(onAdvance).toHaveBeenCalledWith('costing')
   })
@@ -550,7 +653,7 @@ describe('CockpitSummary early stages (spec §16)', () => {
     expect(screen.getByTestId('next-wait-not-feasible').textContent).toContain('Tool Engineer: not feasible')
     expect(screen.getByTestId('next-to-rejected').textContent).toBe('Reject change')
     // None of the three ways out is pre-chosen.
-    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-600')
+    expect(screen.getByTestId('next-to-rejected').className).not.toContain('bg-sky-700')
     expect(screen.getByTestId('next-to-scoping').textContent).toBe('Back to scoping')
     fireEvent.click(screen.getByTestId('next-override-costing'))
     expect(onStepAction).toHaveBeenCalledWith('override-costing')
