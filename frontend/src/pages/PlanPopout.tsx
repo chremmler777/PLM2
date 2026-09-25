@@ -6,7 +6,7 @@
  * planner's BroadcastChannel, so both windows stay current.
  */
 import { useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { changesApi } from '../api/changes';
 import { planApi } from '../api/changePlan';
@@ -14,32 +14,39 @@ import { CHANGE_STATUS_ORDER, type ChangeStatus } from '../types/change';
 import GanttPlanner from '../components/changes/plan/GanttPlanner';
 
 const phase = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
+const statusOf = (e: unknown) => (e as { response?: { status?: number } })?.response?.status;
+/** A plan that does not exist or is not ours to see stays so: no retries. */
+const retry = (count: number, e: unknown) => ![401, 403, 404].includes(statusOf(e) ?? 0) && count < 2;
 
 export default function PlanPopout() {
   const params = useParams<{ changeId: string; plan: string }>();
   const id = params.changeId ? parseInt(params.changeId, 10) : 0;
   const plan = params.plan === 'quote' || params.plan === 'detailed' ? params.plan : null;
   const valid = id > 0 && plan !== null;
+  const [search] = useSearchParams();
+  const taskParam = Number(search.get('task'));
+  const focusTaskId = Number.isInteger(taskParam) && taskParam > 0 ? taskParam : undefined;
 
-  const { data: change } = useQuery({
-    queryKey: ['change', id], queryFn: () => changesApi.get(id), enabled: valid,
+  const { data: change, error: changeError } = useQuery({
+    queryKey: ['change', id], queryFn: () => changesApi.get(id), enabled: valid, retry,
   });
   const detailed = valid && plan === 'detailed';
   const { data: planOut } = useQuery({
-    queryKey: ['change', id, 'plan', 'detailed'], queryFn: () => planApi.get(id, 'detailed'), enabled: detailed,
+    queryKey: ['change', id, 'plan', 'detailed'], queryFn: () => planApi.get(id, 'detailed'), enabled: detailed, retry,
   });
   const { data: feedback } = useQuery({
-    queryKey: ['change', id, 'plan-feedback'], queryFn: () => planApi.feedback(id), enabled: detailed,
+    queryKey: ['change', id, 'plan-feedback'], queryFn: () => planApi.feedback(id), enabled: detailed, retry,
   });
 
   const label = plan === 'quote' ? 'Quote plan' : 'Detailed plan';
   const number = change?.change_number ?? `Change ${id}`;
   useEffect(() => { if (valid) document.title = `${number} - ${label}`; }, [valid, number, label]);
 
-  if (!valid) {
+  const denied = [403, 404].includes(statusOf(changeError) ?? 0);
+  if (!valid || denied) {
     return (
-      <div className="h-screen bg-slate-900 p-6 text-sm text-slate-300" data-testid="plan-popout-invalid">
-        This plan does not exist. Use a quote or detailed plan of a change.
+      <div className="h-screen bg-slate-900 p-6 text-sm text-slate-300" data-testid="plan-popout-invalid" role="alert">
+        This plan was not found or you can't open it.
       </div>
     );
   }
@@ -58,7 +65,7 @@ export default function PlanPopout() {
       <main className="flex-1 min-h-0 overflow-auto p-3">
         <GanttPlanner changeId={id} plan={plan} changeNumber={change?.change_number}
           mode={track ? 'track' : 'plan'} status={plan === 'detailed' ? status : undefined}
-          hideSeed={plan === 'detailed'} height="calc(100vh - 11rem)" inWindow />
+          hideSeed={plan === 'detailed'} height="calc(100vh - 11rem)" inWindow focusTaskId={focusTaskId} />
       </main>
     </div>
   );

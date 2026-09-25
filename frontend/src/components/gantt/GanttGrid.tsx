@@ -9,7 +9,7 @@ import type { GanttTask } from './engine/types'
 import { HEADER_H } from './GanttChart'
 import { gridTiming, gridWidth, type CellContext, type EditKind, type GanttColumn } from './columns'
 import { formatDateInput, parseDateInput } from './dateText'
-import type { Row } from './layout'
+import { textWidth, type Row } from './layout'
 import { v } from './theme'
 
 export interface GridProps {
@@ -41,6 +41,8 @@ export interface GridProps {
 
 
 export function GridHeader({ columns, height = HEADER_H, extra }: { columns: GanttColumn[]; height?: number; extra?: ReactNode }) {
+  // All short or none: "Base start" next to "B. finish" reads as two things.
+  const abbreviate = columns.some((c) => c.short && textWidth(c.title.toUpperCase(), 10) + 12 > c.width)
   return (
     <div className="relative flex items-end border-b text-[10px] uppercase tracking-wide"
       style={{ height, width: gridWidth(columns), background: v('headerBg'), borderColor: v('gridLine'), color: v('textFaint') }}
@@ -48,7 +50,9 @@ export function GridHeader({ columns, height = HEADER_H, extra }: { columns: Gan
       {extra && <div className="absolute left-1 top-1 normal-case tracking-normal">{extra}</div>}
       {columns.map((c) => (
         <div key={c.key} role="columnheader" className={`truncate px-1.5 pb-1.5 ${c.align === 'right' ? 'text-right' : ''}`}
-          title={c.title} style={{ width: c.width, flex: `0 0 ${c.width}px` }}>{c.title}</div>
+          title={c.title} style={{ width: c.width, flex: `0 0 ${c.width}px` }}>
+          {c.short && abbreviate ? c.short : c.title}
+        </div>
       ))}
     </div>
   )

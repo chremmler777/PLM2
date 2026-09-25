@@ -33,6 +33,8 @@ export interface GanttColumn {
   width: number
   /** Narrowest useful width: a crowded grid shrinks to it before dropping columns. */
   minWidth?: number
+  /** Header text when the column is too narrow for the title (the title stays the tooltip). */
+  short?: string
   align?: 'left' | 'right'
   /** Inline editor type; omit for read-only columns. */
   edit?: EditKind
@@ -58,12 +60,12 @@ export const BUILTIN_COLUMNS: Record<ColumnKey, GanttColumn> = {
     editValue: (_t, c) => (c.geo ? toIso(c.geo.milestone ? c.geo.s : c.geo.e - 1) : ''),
   },
   duration: {
-    key: 'duration', title: 'Dur.', width: 50, minWidth: 42, align: 'right', edit: 'number',
+    key: 'duration', title: 'Dur.', width: 50, minWidth: 42, short: 'Dur.', align: 'right', edit: 'number',
     text: (t, c) => (c.summary ? `${c.summaryDuration ?? 0}${c.working ? 'wd' : 'd'}`
       : t.duration === 0 ? '0d' : `${t.duration}${c.working ? 'wd' : 'd'}`),
     editValue: (t) => String(t.duration),
   },
-  predecessors: { key: 'predecessors', title: 'Predecessors', width: 92, minWidth: 64, edit: 'predecessors', field: 'links', text: (_t, c) => c.predecessors },
+  predecessors: { key: 'predecessors', title: 'Predecessors', width: 92, minWidth: 64, short: 'Pred.', edit: 'predecessors', field: 'links', text: (_t, c) => c.predecessors },
   lane: { key: 'lane', title: 'Lane', width: 96, minWidth: 64, edit: 'text', text: (t) => t.lane ?? '' },
   kind: { key: 'kind', title: 'Kind', width: 84, minWidth: 60, text: (t, c) => (t.kind ? (c.kinds[t.kind] ?? DEFAULT_KIND).label : '') },
   progress: {
@@ -76,23 +78,23 @@ export const BUILTIN_COLUMNS: Record<ColumnKey, GanttColumn> = {
     text: (_t, c) => (c.sched?.totalSlack == null ? '' : `${c.sched.totalSlack}d`),
   },
   baselineStart: {
-    key: 'baselineStart', title: 'Base start', width: 76, minWidth: 62,
+    key: 'baselineStart', title: 'Base start', width: 76, minWidth: 62, short: 'B. start',
     text: (t) => (t.baselineStart ? fmtShort(toDay(t.baselineStart)) : ''),
   },
   baselineEnd: {
-    key: 'baselineEnd', title: 'Base finish', width: 76, minWidth: 62,
+    key: 'baselineEnd', title: 'Base finish', width: 76, minWidth: 62, short: 'B. finish',
     text: (t) => (t.baselineEnd ? fmtShort(toDay(t.baselineEnd) - (t.baselineStart && t.baselineEnd > t.baselineStart ? 1 : 0)) : ''),
   },
   variance: {
-    key: 'variance', title: 'Var.', width: 50, minWidth: 40, align: 'right',
+    key: 'variance', title: 'Var.', width: 50, minWidth: 40, short: 'Var.', align: 'right',
     text: (_t, c) => (c.variance == null ? '' : c.variance === 0 ? '0' : `${c.variance > 0 ? '+' : ''}${c.variance}${c.working ? 'wd' : 'd'}`),
   },
   actualStart: {
-    key: 'actualStart', title: 'Act. start', width: 76, minWidth: 62, edit: 'date', field: 'progress',
+    key: 'actualStart', title: 'Act. start', width: 76, minWidth: 62, short: 'A. start', edit: 'date', field: 'progress',
     text: (t) => (t.actualStart ? fmtShort(toDay(t.actualStart)) : ''), editValue: (t) => t.actualStart ?? '',
   },
   actualEnd: {
-    key: 'actualEnd', title: 'Act. finish', width: 76, minWidth: 62, edit: 'date', field: 'progress',
+    key: 'actualEnd', title: 'Act. finish', width: 76, minWidth: 62, short: 'A. finish', edit: 'date', field: 'progress',
     text: (t) => (t.actualEnd ? fmtShort(toDay(t.actualEnd)) : ''), editValue: (t) => t.actualEnd ?? '',
   },
 

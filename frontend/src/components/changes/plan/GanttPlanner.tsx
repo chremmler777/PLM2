@@ -181,6 +181,8 @@ export default function GanttPlanner({
         qc.invalidateQueries({ queryKey })
         qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-deviations'] })
         qc.invalidateQueries({ queryKey: ['change', changeId, 'plan-feedback'] })
+        qc.invalidateQueries({ queryKey: ['change', changeId, 'offers'] })
+        qc.invalidateQueries({ queryKey: ['change-my-actions', changeId] })
       }
       channelRef.current = ch
     } catch { /* no BroadcastChannel: focus refetch still keeps windows current */ }
@@ -217,7 +219,7 @@ export default function GanttPlanner({
         const answered = planToModel(out)
         return {
           idMap: translateIdMap(out.id_map), linkIdMap: translateIdMap(out.link_id_map),
-          server: { tasks: answered.tasks, links: answered.links },
+          server: { tasks: answered.tasks, links: answered.links }, serverBefore: before,
         }
       }
       const calls = toLegacyCalls(cs, plan, before.tasks, before.links, reason)
@@ -230,7 +232,7 @@ export default function GanttPlanner({
       afterSave(out)
       if (!out) return { idMap }
       const answered = planToModel(out)
-      return { idMap, server: { tasks: answered.tasks, links: answered.links } }
+      return { idMap, server: { tasks: answered.tasks, links: answered.links }, serverBefore: before }
     } catch (e) {
       // Part of a multi-call save may have landed: the server copy is the truth.
       qc.invalidateQueries({ queryKey })
@@ -459,7 +461,7 @@ export default function GanttPlanner({
   // Tracking preset (G17): planned vs baseline vs actual.
   const columns = useMemo<(ColumnKey | GanttColumn)[]>(() => (track
     // Listed by importance: narrow screens drop columns from the end.
-    ? ['row', 'name', 'start', 'end', 'progress', 'variance', 'baselineEnd', 'actualStart', 'actualEnd', 'baselineStart', 'predecessors']
+    ? ['row', 'name', 'start', 'end', 'progress', 'baselineStart', 'baselineEnd', 'actualStart', 'actualEnd', 'variance', 'predecessors']
     : modern ? ['row', 'wbs', 'name', 'start', 'end', 'duration', 'predecessors', SERVER_SLACK] : ['row', 'name', 'start', 'end', 'duration', 'predecessors']), [track, modern])
   const issues = useMemo(() => (data ? [...data.validation.errors, ...data.validation.warnings.map((w) => ({ ...w, warn: true }))]
     .map((i) => ({ code: i.code, message: i.message, taskId: i.task_id, level: ('warn' in i ? 'warning' : 'error') as 'warning' | 'error' })) : []), [data])
@@ -543,35 +545,6 @@ export default function GanttPlanner({
 
   return (
     <div ref={plannerRef} className="space-y-2" data-testid="gantt-planner">
-      {!compact && (
-        <div className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2" data-testid="gantt-summary">
-          {/* Wraps instead of squeezing: the issue pill never covers a figure on a narrow screen. */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            {stat('Start', fmtShort(firstDay))}
-            {stat('Finish', fmtShort(lastDay))}
-            {stat('Duration', `${s.duration_days} ${unitLabel} (${spanWeeks} wk)`)}
-            {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
-            {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
-            {stat('Critical path', `${s.critical_ids.length} task${s.critical_ids.length === 1 ? '' : 's'}`)}
-            <div className="ml-auto">
-              <button type="button" onClick={() => setShowIssues((v) => !v)} aria-expanded={showIssues}
-                data-testid="gantt-validation-pill"
-                className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs ${nErr > 0
-                  ? 'border-red-700 bg-red-950/50 text-red-200'
-                  : nWarn > 0 ? 'border-amber-700 bg-amber-950/40 text-amber-200'
-                    : 'border-emerald-800 bg-emerald-950/40 text-emerald-200'}`}>
-                {nErr + nWarn === 0 ? 'No issues' : `${nErr} error${nErr === 1 ? '' : 's'}, ${nWarn} warning${nWarn === 1 ? '' : 's'}`}
-              </button>
-            </div>
-          </div>
-          {showIssues && (
-            <div className="mt-2 border-t border-slate-700 pt-2">
-              <ValidationList errors={data.validation.errors} warnings={data.validation.warnings}
-                rowNo={rowNo} onFocusTask={(id) => ganttRef.current?.focusTask(id)} />
-            </div>
-          )}
-        </div>
-      )}
 
       <Gantt ref={ganttRef} tasks={model.tasks} links={model.links} calendar={model.calendar}
         rights={rights} readOnly={compact} compact={compact}
@@ -605,6 +578,35 @@ export default function GanttPlanner({
         ariaLabel={`${plan === 'quote' ? 'Quote' : 'Detailed'} plan`}
         title={`${changeNumber ?? `Change ${changeId}`} - ${plan === 'quote' ? 'Quote plan' : 'Detailed plan'}`}
         fullScreen={!compact}
+        above={compact ? undefined : (
+        <div className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2" data-testid="gantt-summary">
+          {/* Wraps instead of squeezing: the issue pill never covers a figure on a narrow screen. */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {stat('Start', fmtShort(firstDay))}
+            {stat('Finish', fmtShort(lastDay))}
+            {stat('Duration', `${s.duration_days} ${unitLabel} (${spanWeeks} wk)`)}
+            {stat('Buffer', `${s.buffer_days} d`, s.buffer_days === 0 ? 'text-amber-300' : 'text-slate-100')}
+            {stat('Ideas', String(s.ideas), s.ideas > 0 ? 'text-amber-300' : 'text-slate-100')}
+            {stat('Critical path', `${s.critical_ids.length} task${s.critical_ids.length === 1 ? '' : 's'}`)}
+            <div className="ml-auto">
+              <button type="button" onClick={() => setShowIssues((v) => !v)} aria-expanded={showIssues}
+                data-testid="gantt-validation-pill"
+                className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs ${nErr > 0
+                  ? 'border-red-700 bg-red-950/50 text-red-200'
+                  : nWarn > 0 ? 'border-amber-700 bg-amber-950/40 text-amber-200'
+                    : 'border-emerald-800 bg-emerald-950/40 text-emerald-200'}`}>
+                {nErr + nWarn === 0 ? 'No issues' : `${nErr} error${nErr === 1 ? '' : 's'}, ${nWarn} warning${nWarn === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+          {showIssues && (
+            <div className="mt-2 border-t border-slate-700 pt-2">
+              <ValidationList errors={data.validation.errors} warnings={data.validation.warnings}
+                rowNo={rowNo} onFocusTask={(id) => ganttRef.current?.focusTask(id)} />
+            </div>
+          )}
+        </div>
+        )}
         below={compact ? undefined : (
           <>
           {!compact && (

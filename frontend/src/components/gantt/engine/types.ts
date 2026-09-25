@@ -104,6 +104,11 @@ export interface ApplyResult {
    * tasks the server moved on its own (not in the ChangeSet) join the undo step.
    */
   server?: GanttModel
+  /**
+   * The server's previous answer (what the save was made against): server
+   * moves are measured from it, so edits from elsewhere never join the step.
+   */
+  serverBefore?: GanttModel
 }
 
 export interface Issue {

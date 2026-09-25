@@ -69,6 +69,9 @@ function ideaHolding(m: GanttModel, cs: ChangeSet): string | null {
     : `'${holder.name}' is an idea block: it cannot hold tasks`
 }
 
+/** Gantts on the page: with only one, Ctrl+Shift+F works from anywhere. */
+const mounted = new Set<symbol>()
+
 export interface GanttHandle {
   focusTask: (id: GanttId) => void
   undo: () => void
@@ -151,6 +154,8 @@ export interface GanttProps {
    * under it, and inside the full-screen layer too.
    */
   below?: ReactNode
+  /** Host content above the toolbar (e.g. a summary strip), inside the full-screen layer too. */
+  above?: ReactNode
   /** Offer the full-screen button (default true unless compact). */
   fullScreen?: boolean
   /** Largest share of the width the table may take (columns drop out beyond it). Default 0.45. */
@@ -229,17 +234,26 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     if (e instanceof Error && e.message) return e.message
     return 'The change could not be saved'
   }
+  /** Undo / redo waiting for a step's save to answer, by history entry. */
+  const settleWaiters = useRef(new Map<number, (() => void)[]>())
+  const releaseWaiters = (entry: number) => {
+    const list = settleWaiters.current.get(entry)
+    if (!list) return
+    settleWaiters.current.delete(entry)
+    for (const r of list) r()
+  }
   const remapViewRef = useRef<(m: Record<string, GanttId>) => void>(() => undefined)
   const queue = useSaveQueue(base, {
     onChange: p.onChange,
     // Only the refused change is rolled back (and forgotten by undo).
     onError: (e, tag, seq) => {
       const forgotten = tag ? history.current.refused(tag.entry, seq, tag.dir) : false
+      if (tag) releaseWaiters(tag.entry)
       bumpHist()
       notifyError(errMessage(e), e)
       return forgotten && tag ? tag.entry : undefined
     },
-    onSettled: (tag, seq) => { if (tag) history.current.settled(tag.entry, seq) },
+    onSettled: (tag, seq) => { if (tag) { history.current.settled(tag.entry, seq); releaseWaiters(tag.entry) } },
     // Tasks the server pushed on its own for a user action: undo restores them too.
     onServerMoves: (tag, moves) => {
       if (!tag || tag.dir !== 'do') return
@@ -276,6 +290,21 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
    * undo history, open panels and draft rows stay.
    */
   const [full, setFull] = useState(false)
+  // One Gantt on the page: its full-screen shortcut works anywhere (not only
+  // with focus inside it). With several, each answers only for itself.
+  useEffect(() => {
+    if (p.compact || p.fullScreen === false) return
+    const me = Symbol('gantt')
+    mounted.add(me)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || mounted.size !== 1) return
+      if (!((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F'))) return
+      e.preventDefault()
+      setFull((f) => !f)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => { mounted.delete(me); document.removeEventListener('keydown', onKey) }
+  }, [p.compact, p.fullScreen])
   const fullReturnFocus = useRef<HTMLElement | null>(null)
   const [flashKey, setFlashKey] = useState<string | null>(null)
   const [zoom, setZoom] = useState<Zoom | 'fit'>(p.defaultZoom ?? (p.compact ? 'week' : 'day'))
@@ -433,7 +462,8 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
     // Keep the chart readable: the grid takes at most a share of the width.
     const max = viewW ? Math.max(240, viewW * (p.maxGridFraction ?? 0.45)) : Infinity
     const width = () => cols.reduce((n, c) => n + c.width, 0)
-    if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(150, c.width - (width() - max)) } : c))
+    // The task name keeps at least 180 px (it is what people read).
+    if (width() > max) cols = cols.map((c) => (c.key === 'name' ? { ...c, width: Math.max(Math.min(180, c.width), c.width - (width() - max)) } : c))
     // Then every column narrows towards its minimum width (dd.mm.yy dates stay readable).
     if (width() > max) {
       const room = cols.reduce((n, c) => n + (c.minWidth != null ? c.width - c.minWidth : 0), 0)
@@ -636,18 +666,32 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
 
   // The entry moves to the other stack only once the change really went out
   // (a cancelled reason dialog leaves the history as it was).
-  const undo = useCallback(async () => {
-    const h = history.current.peekUndo()
-    if (!h) return
-    await commit(h.cs, { undo: h.id })
-    bumpHist()
-  }, [commit])
-  const redo = useCallback(async () => {
-    const h = history.current.peekRedo()
-    if (!h) return
-    await commit(h.cs, { redo: h.id })
-    bumpHist()
-  }, [commit])
+  // Undo / redo run one after the other, and each waits until the step's own
+  // save answered: what the server did on its own for it (pushed tasks) is in
+  // the step by then, so undo and redo stay symmetric.
+  const stepChain = useRef<Promise<unknown>>(Promise.resolve())
+  const whenSettled = useCallback((id: number) => new Promise<void>((resolve) => {
+    if (!history.current.isPending(id)) { resolve(); return }
+    const list = settleWaiters.current.get(id) ?? []
+    list.push(resolve)
+    settleWaiters.current.set(id, list)
+  }), [])
+  const step = useCallback((which: 'undo' | 'redo') => {
+    const run = async () => {
+      const peek = which === 'undo' ? history.current.peekUndo() : history.current.peekRedo()
+      if (!peek) return
+      await whenSettled(peek.id)
+      const h = which === 'undo' ? history.current.peekUndo() : history.current.peekRedo()
+      if (!h) return
+      await commit(h.cs, which === 'undo' ? { undo: h.id } : { redo: h.id })
+      bumpHist()
+    }
+    const next = stepChain.current.then(run, run)
+    stepChain.current = next.catch(() => undefined)
+    return next
+  }, [commit, whenSettled])
+  const undo = useCallback(() => step('undo'), [step])
+  const redo = useCallback(() => step('redo'), [step])
 
   // ---------------------------------------------------------------- actions
   const leafKeys = (keys: string[]) => {
@@ -1366,6 +1410,9 @@ export const Gantt = forwardRef<GanttHandle, GanttProps>(function Gantt(p, ref) 
             style={{ borderColor: v('gridLine'), color: v('text'), background: v('panel') }}
             aria-label="Close full screen" onClick={() => setFull(false)}>Close &#10005;</button>
         </div>
+      )}
+      {p.above != null && (
+        <div className={full ? 'max-h-[35vh] shrink-0 overflow-y-auto' : undefined} data-testid="gantt-above">{p.above}</div>
       )}
       {p.toolbar !== false && !p.compact && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="gantt-toolbar" role="toolbar" aria-label="Gantt tools">

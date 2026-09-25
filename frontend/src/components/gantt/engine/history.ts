@@ -149,6 +149,11 @@ export class History {
     this.limbo = this.limbo.filter((e) => e.id !== id)
   }
 
+  /** Is a save of this entry still unanswered? */
+  isPending(id: number): boolean {
+    return [...this.past, ...this.future, ...this.limbo].some((e) => e.id === id && !!e.pending)
+  }
+
   get canUndo() { return this.past.length > 0 }
   get canRedo() { return this.future.length > 0 }
   get undoLabel() { return this.past[this.past.length - 1]?.forward.label }

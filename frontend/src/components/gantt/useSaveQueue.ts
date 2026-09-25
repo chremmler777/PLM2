@@ -23,14 +23,48 @@ interface Item { seq: number; cs: ChangeSet; status: Status; at: number; tag?: S
 /** A task the server moved on its own while saving a ChangeSet. */
 export interface ServerMove { id: GanttId; from: { start: string; duration: number }; to: { start: string; duration: number } }
 
-/** Tasks the ChangeSet did not touch whose dates the server answered differently. */
+/**
+ * Tasks the server moved on its own for this ChangeSet: not touched by it,
+ * reachable from what it touched (successors along links, the tasks under
+ * and above them), leaves only (a summary's dates are a roll-up the server
+ * computes; it refuses date patches on them), and dated differently than in
+ * `before` (the server's previous answer).
+ */
 export function serverMoves(before: GanttModel, cs: ChangeSet, server: GanttModel): ServerMove[] {
   const touched = new Set(touchedTaskIds(cs).map(String))
+  for (const l of [...(cs.addLinks ?? []), ...(cs.updateLinks ?? []).map((u) => u.patch)]) if (l.to != null) touched.add(String(l.to))
+  const parentOf = new Map<string, string>()
+  const kids = new Map<string, string[]>()
+  for (const m of [server, before]) {
+    for (const t of m.tasks) {
+      if (t.parentId == null) continue
+      const k = String(t.id), p = String(t.parentId)
+      if (!parentOf.has(k)) parentOf.set(k, p)
+      if (!kids.has(p)) kids.set(p, [])
+      if (!kids.get(p)!.includes(k)) kids.get(p)!.push(k)
+    }
+  }
+  const succ = new Map<string, string[]>()
+  for (const l of server.links) {
+    const f = String(l.from)
+    if (!succ.has(f)) succ.set(f, [])
+    succ.get(f)!.push(String(l.to))
+  }
+  const reach = new Set(touched)
+  const stack = [...touched]
+  const visit = (x: string | undefined) => { if (x != null && !reach.has(x)) { reach.add(x); stack.push(x) } }
+  while (stack.length) {
+    const x = stack.pop()!
+    for (const y of succ.get(x) ?? []) visit(y)
+    for (const y of kids.get(x) ?? []) visit(y)
+    visit(parentOf.get(x))
+  }
   const was = new Map(before.tasks.map((t) => [String(t.id), t]))
   const out: ServerMove[] = []
   for (const t of server.tasks) {
-    const b = was.get(String(t.id))
-    if (!b || touched.has(String(t.id))) continue
+    const k = String(t.id)
+    const b = was.get(k)
+    if (!b || touched.has(k) || !reach.has(k) || kids.has(k)) continue
     if (b.start !== t.start || b.duration !== t.duration) {
       out.push({ id: t.id, from: { start: b.start, duration: b.duration }, to: { start: t.start, duration: t.duration } })
     }
@@ -141,7 +175,8 @@ export function useSaveQueue(base: GanttModel, opts: SaveQueueOptions) {
       }
       const server = res && typeof res === 'object' ? res.server : undefined
       if (server) {
-        const moves = serverMoves(beforeSend, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, server)
+        const was = res && typeof res === 'object' && res.serverBefore ? res.serverBefore : beforeSend
+        const moves = serverMoves(was, any ? remapChangeSet(cs, idMap, linkIdMap) : cs, server)
         if (moves.length) optsRef.current.onServerMoves?.(next.tag, moves)
       }
       // Answered in full and already shown by the host: nothing left to overlay.

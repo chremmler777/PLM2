@@ -13,7 +13,7 @@ vi.mock('../api/changePlan', () => ({ planApi: { get: mocks.plan, feedback: mock
 vi.mock('../components/changes/plan/GanttPlanner', () => ({
   default: (p: Record<string, unknown>) => {
     mocks.planner(p)
-    return <div data-testid="planner">{`${p.changeId} ${p.plan} ${p.mode} ${String(p.inWindow)} ${String(p.changeNumber)}`}</div>
+    return <div data-testid="planner" data-focus={String(p.focusTaskId)}>{`${p.changeId} ${p.plan} ${p.mode} ${String(p.inWindow)} ${String(p.changeNumber)}`}</div>
   },
 }))
 
@@ -54,5 +54,17 @@ describe('PlanPopout', () => {
     mount('/changes/6/plan/other')
     expect(screen.getByTestId('plan-popout-invalid')).toBeTruthy()
     expect(screen.queryByTestId('planner')).toBeNull()
+  })
+
+  it('a plan that is not there or not ours says so, without retrying', async () => {
+    mocks.change.mockRejectedValue({ response: { status: 404 } })
+    mount('/changes/6/plan/quote')
+    expect((await screen.findByTestId('plan-popout-invalid')).textContent).toBe("This plan was not found or you can't open it.")
+    expect(mocks.change).toHaveBeenCalledTimes(1)
+  })
+
+  it('passes ?task= on to the planner', async () => {
+    mount('/changes/6/plan/detailed?task=12')
+    await waitFor(() => expect(screen.getByTestId('planner').getAttribute('data-focus')).toBe('12'))
   })
 })

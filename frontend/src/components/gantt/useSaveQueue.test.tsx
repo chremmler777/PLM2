@@ -169,13 +169,14 @@ describe('useSaveQueue', () => {
   })
 
   describe('the server answer (review 4b93d732 #11)', () => {
+    const L12 = { id: 'L', from: 1, to: 2, type: 'FS' as const, lagDays: 0 }
     const two = (): GanttModel => ({
-      tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 3 }, { id: 2, name: 'B', start: '2026-10-08', duration: 2 }], links: [],
+      tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 3 }, { id: 2, name: 'B', start: '2026-10-08', duration: 2 }], links: [L12],
     })
 
     it('reports the tasks the server moved on its own and shows its answer without waiting', async () => {
       const server: GanttModel = {
-        tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 5 }, { id: 2, name: 'B', start: '2026-10-12', duration: 2 }], links: [],
+        tasks: [{ id: 1, name: 'A', start: '2026-10-05', duration: 5 }, { id: 2, name: 'B', start: '2026-10-12', duration: 2 }], links: [L12],
       }
       const onServerMoves = vi.fn()
       const onChange = vi.fn(async () => ({ server }))
@@ -186,7 +187,7 @@ describe('useSaveQueue', () => {
         [{ id: 2, from: { start: '2026-10-08', duration: 2 }, to: { start: '2026-10-12', duration: 2 } }]])
       // the host now shows a server answer that differs from the optimistic view
       // for the edited task too: it wins at once, not after settleMs
-      const other: GanttModel = { tasks: [{ ...server.tasks[0], duration: 6 }, server.tasks[1]], links: [] }
+      const other: GanttModel = { tasks: [{ ...server.tasks[0], duration: 6 }, server.tasks[1]], links: [L12] }
       rerender({ b: other, o: { onChange, onServerMoves, settleMs: 60_000 } })
       await waitFor(() => expect(result.current.display.tasks[0].duration).toBe(6))
     })
@@ -204,6 +205,32 @@ describe('useSaveQueue', () => {
       act(() => { result.current.enqueue({ updateTasks: [{ id: 1, patch: { duration: 5 } }] }) })
       await waitFor(() => expect(result.current.saving).toBe(false))
       expect(result.current.display.tasks[0].duration).toBe(4)
+    })
+  
+    it('never counts summaries (roll-ups), unreachable tasks or edits from elsewhere as server moves (review ee43fb8c #1, #2)', async () => {
+      const { serverMoves } = await import('./useSaveQueue')
+      const before: GanttModel = {
+        tasks: [
+          { id: 'S', name: 'S', start: '2026-10-05', duration: 5 },
+          { id: 1, name: 'A', start: '2026-10-05', duration: 3, parentId: 'S' },
+          { id: 2, name: 'B', start: '2026-10-08', duration: 2, parentId: 'S' },
+          { id: 3, name: 'C', start: '2026-10-05', duration: 1 },
+          { id: 4, name: 'D', start: '2026-10-20', duration: 1 },
+        ],
+        links: [{ id: 'L', from: 1, to: 2, type: 'FS', lagDays: 0 }, { id: 'M', from: 'S', to: 4, type: 'FS', lagDays: 0 }],
+      }
+      const server: GanttModel = {
+        tasks: [
+          { id: 'S', name: 'S', start: '2026-10-05', duration: 8 },
+          { id: 1, name: 'A', start: '2026-10-05', duration: 5, parentId: 'S' },
+          { id: 2, name: 'B', start: '2026-10-10', duration: 2, parentId: 'S' },
+          { id: 3, name: 'C', start: '2026-10-09', duration: 1 }, // someone else moved it
+          { id: 4, name: 'D', start: '2026-10-21', duration: 1 },
+        ],
+        links: before.links,
+      }
+      const moves = serverMoves(before, { updateTasks: [{ id: 1, patch: { duration: 5 } }] }, server)
+      expect(moves.map((m) => m.id)).toEqual([2, 4])
     })
   })
 })

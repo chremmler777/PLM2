@@ -794,6 +794,9 @@ describe('GanttPlanner (ECR adapter)', () => {
       expect(screen.getByTestId('gantt-full-header').textContent).toContain('CR-2026-0006 - Quote plan')
       // the legend travels into the layer with the chart
       expect(within(screen.getByTestId('gantt-root')).getByLabelText('Legend')).toBeTruthy()
+      // and so do the summary strip and the issue pill (review ee43fb8c #5)
+      expect(within(screen.getByTestId('gantt-root')).getByTestId('gantt-summary')).toBeTruthy()
+      expect(within(screen.getByTestId('gantt-root')).getByTestId('gantt-validation-pill')).toBeTruthy()
     })
 
     it('tells other windows after a save and refetches when they save', async () => {
@@ -806,7 +809,10 @@ describe('GanttPlanner (ECR adapter)', () => {
       drag(screen.getByTestId('gantt-bar-shape-3'), 28)
       await waitFor(() => expect(ch.posted).toContain('changed'))
       const calls = vi.mocked(planApi.get).mock.calls.length
+      const inval = vi.spyOn(qc, 'invalidateQueries')
       act(() => ch.onmessage?.({ data: 'changed' } as MessageEvent))
+      const keys = inval.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey))
+      expect(keys).toEqual(expect.arrayContaining(['["change",7,"offers"]', '["change-my-actions",7]', '["change",7,"plan-deviations"]']))
       await waitFor(() => expect(vi.mocked(planApi.get).mock.calls.length).toBeGreaterThan(calls))
       act(() => ch.onmessage?.({ data: 'other' } as MessageEvent))
       cleanup()

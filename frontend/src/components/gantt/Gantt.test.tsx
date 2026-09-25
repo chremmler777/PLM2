@@ -1312,6 +1312,17 @@ describe('Gantt: full screen', () => {
     expect(full()).toBe('false')
   })
 
+  it('Ctrl+Shift+F works from anywhere when this is the only Gantt on the page, not with two', () => {
+    setup()
+    fireEvent.keyDown(document.body, { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('true')
+    fireEvent.keyDown(document.body, { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(full()).toBe('false')
+    render(<Gantt tasks={base()} links={[]} onChange={vi.fn()} showToday={false} />)
+    fireEvent.keyDown(document.body, { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(screen.getAllByTestId('gantt-root').every((r) => r.getAttribute('data-full-screen') !== 'true')).toBe(true)
+  })
+
   it('Escape from outside the chart closes too, unless a dialog is open', () => {
     setup()
     fireEvent.click(screen.getByTestId('gantt-full-screen'))
@@ -1406,15 +1417,20 @@ describe('Gantt: click, double-click and modifier clicks (review 4b93d732 #2, #3
 })
 
 describe('Gantt: columns that do not fit (review 4b93d732 #9)', () => {
-  const TRACK = ['row', 'name', 'start', 'end', 'progress', 'variance', 'baselineEnd', 'actualStart', 'actualEnd', 'baselineStart', 'predecessors'] as const
+  const TRACK = ['row', 'name', 'start', 'end', 'progress', 'baselineStart', 'baselineEnd', 'actualStart', 'actualEnd', 'variance', 'predecessors'] as const
   const withWidth = (w: number) => vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(w)
-  const headers = () => screen.getAllByRole('columnheader').map((h) => h.textContent)
+  const headers = () => screen.getAllByRole('columnheader').map((h) => h.getAttribute('title'))
 
   it('all tracking columns fit a 1600 px screen at 0.6 of the width (narrowed, not dropped)', () => {
     withWidth(1350)
     setup({ columns: [...TRACK], maxGridFraction: 0.6 })
-    expect(headers()).toEqual(['#', 'Task', 'Start', 'Finish', 'Done', 'Var.', 'Base finish', 'Act. start', 'Act. finish', 'Base start', 'Predecessors'])
+    expect(headers()).toEqual(['#', 'Task', 'Start', 'Finish', 'Done', 'Base start', 'Base finish', 'Act. start', 'Act. finish', 'Var.', 'Predecessors'])
     expect(screen.getByTestId('gantt-columns').textContent).toBe('Columns')
+    // names keep at least 180 px; narrowed headers are abbreviated, the full title is the tooltip
+    const cols = screen.getAllByRole('columnheader')
+    expect(parseFloat(cols[1].style.width)).toBeGreaterThanOrEqual(180)
+    const pred = cols.find((h) => h.getAttribute('title') === 'Predecessors')!
+    expect(pred.textContent).toBe('Pred.')
   })
 
   it('says how many columns were dropped and brings one back from the picker', () => {
@@ -1477,11 +1493,12 @@ describe('Gantt: server pushes join the undo step (review 4b93d732 #11)', () => 
       calls.push(cs)
       if (calls.length === 1) {
         // the server also pushed Gamma (not in the ChangeSet) by two days
-        return { server: { tasks: [base()[0], { ...base()[1], duration: 4 }, { ...base()[2], start: '2026-10-17' }], links: baseLinks() } }
+        return { server: { tasks: [base()[0], { ...base()[1], duration: 4 }, { ...base()[2], start: '2026-10-17' }], links: chain } }
       }
       return {}
     })
-    render(<Gantt tasks={base()} links={baseLinks()} onChange={onChange}
+    const chain: GanttLink[] = [...baseLinks(), { id: 'L2', from: 2, to: 3, type: 'FS', lagDays: 0 }]
+    render(<Gantt tasks={base()} links={chain} onChange={onChange}
       columns={['row', 'name', 'start', 'end', 'duration']} defaultZoom="day" showToday={false} />)
     editCell(2, 'duration', '4')
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
@@ -1504,5 +1521,35 @@ describe('Gantt: server refusals with an object detail', () => {
       columns={['row', 'name']} defaultZoom="day" showToday={false} />)
     editCell(1, 'name', 'Renamed')
     await waitFor(() => expect(onError).toHaveBeenCalledWith('A block with blocks under it cannot be an idea', err))
+  })
+})
+
+describe('Gantt: undo while the step is still saving (review ee43fb8c #3)', () => {
+  it('waits for the answer, so the server moves are undone too', async () => {
+    const chain: GanttLink[] = [...baseLinks(), { id: 'L2', from: 2, to: 3, type: 'FS', lagDays: 0 }]
+    let release!: (v: unknown) => void
+    const calls: ChangeSet[] = []
+    const onChange = vi.fn((cs: ChangeSet) => {
+      calls.push(cs)
+      if (calls.length === 1) {
+        return new Promise((r) => { release = r }).then(() => ({
+          server: { tasks: [base()[0], { ...base()[1], duration: 4 }, { ...base()[2], start: '2026-10-17' }], links: chain },
+        }))
+      }
+      return Promise.resolve({})
+    })
+    render(<Gantt tasks={base()} links={chain} onChange={onChange}
+      columns={['row', 'name', 'start', 'end', 'duration']} defaultZoom="day" showToday={false} />)
+    editCell(2, 'duration', '4')
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByTestId('gantt-undo'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(onChange).toHaveBeenCalledTimes(1) // the undo waits
+    release(undefined)
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2))
+    expect(calls[1].updateTasks).toEqual(expect.arrayContaining([
+      { id: 2, patch: { duration: 3 } },
+      { id: 3, patch: { start: '2026-10-15', duration: 2 } },
+    ]))
   })
 })
