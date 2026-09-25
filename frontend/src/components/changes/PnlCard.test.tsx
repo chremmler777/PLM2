@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import PnlCard from './PnlCard'
 import type { ChangeDetail, Summation } from '../../types/change'
@@ -9,6 +9,38 @@ import { t } from '../../i18n/cmLabels'
 vi.mock('../../api/changes', () => ({
   changesApi: { getSummation: vi.fn() },
 }))
+
+const ovaMock = vi.fn().mockResolvedValue(null)
+const costListMock = vi.fn().mockResolvedValue(null)
+const costAddMock = vi.fn()
+vi.mock('../../api/pnl', () => ({
+  pnlApi: { offerVsActual: (...a: unknown[]) => ovaMock(...a) },
+}))
+vi.mock('../../api/actualCosts', () => ({
+  actualCostsApi: {
+    list: (...a: unknown[]) => costListMock(...a),
+    add: (...a: unknown[]) => costAddMock(...a),
+    remove: vi.fn(),
+  },
+}))
+
+const ova = {
+  change_id: 7, currency: 'EUR', basis: 'accepted_offer', phase: 'actual',
+  offer_version: 2, frozen_at: '2026-06-01T10:00:00',
+  lines: [
+    { key: 'revenue', label: 'Revenue (offer)', kind: 'revenue', planned: 3000, actual: 3000, variance: 0, in_margin: true },
+    { key: 'internal', label: 'Internal effort (hours x rate)', kind: 'cost', planned: 1000, actual: 1050, variance: 50, in_margin: true },
+    { key: 'external', label: 'External (supplier)', kind: 'cost', planned: 500, actual: 700, variance: 200, in_margin: true },
+    { key: 'issues_supplier', label: 'Validation issues, recoverable from supplier', kind: 'info', planned: 0, actual: 40, variance: 40, in_margin: false },
+  ],
+  planned_revenue: 3000, actual_revenue: 3000, planned_cost: 1500, actual_cost: 1750,
+  planned_margin: 1500, actual_margin: 1250, planned_margin_pct: 50, actual_margin_pct: 41.7,
+  variance: -250, booked_hours: 10.5, issue_count: 1,
+  timing: { baseline_finish: '2026-07-07', forecast_finish: '2026-07-10', actual_finish: null,
+            slip_days: 3, unit: 'working days', baseline_source: 'detailed_baseline' },
+  piece_price: { delta_per_piece: 0.12, annual_volume: 10000, annual_effect: 1200 },
+  warnings: ['No supplier invoice entered yet'],
+}
 
 const change = (over: Partial<ChangeDetail> = {}): ChangeDetail => ({
   id: 7, change_number: 'CR-2026-0007', project_id: 1, title: 'Housing fix',
@@ -189,5 +221,58 @@ describe('PnlCard', () => {
     expect((await screen.findByTestId('pnl-actuals-total')).textContent).toBe('1.400,00 EUR')
     // 900 - 1000, not 1400 - 1000.
     expect(screen.getByTestId('pnl-actuals-delta').textContent).toContain('-100,00')
+  })
+
+  it('shows no offer-vs-actual block before implementation', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    render(wrap(<PnlCard change={change({ status: 'quoted', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByText('Revenue')
+    expect(screen.queryByTestId('pnl-offer-vs-actual')).toBeNull()
+    expect(ovaMock).not.toHaveBeenCalled()
+  })
+
+  it('shows offer vs actual with variance chips, margins, slip, piece price and warnings', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue(ova)
+    costListMock.mockResolvedValue({ items: [], total: 0, can_write: true,
+      writable_department_ids: null, cost_role: true })
+    render(wrap(<PnlCard change={change({ status: 'in_implementation', customer_relevant: true, quoted_price: 3000 })} />))
+    await screen.findByTestId('pnl-offer-vs-actual')
+    expect(screen.getByTestId('ova-chip-internal').getAttribute('data-tone')).toBe('amber')   // +5 %
+    expect(screen.getByTestId('ova-chip-external').getAttribute('data-tone')).toBe('rose')    // +40 %
+    expect(screen.getByTestId('ova-chip-revenue').getAttribute('data-tone')).toBe('green')
+    expect(screen.queryByTestId('ova-chip-issues_supplier')).toBeNull()
+    expect(screen.getByTestId('ova-actual-margin').textContent).toContain('1.250,00 EUR')
+    expect(screen.getByTestId('ova-margin-variance').getAttribute('data-tone')).toBe('rose')
+    expect(screen.getByTestId('ova-timing').textContent).toContain('3 working days late')
+    expect(screen.getByTestId('ova-piece-price').textContent).toContain('1.200,00 EUR per year')
+    expect(screen.getByTestId('ova-warnings').textContent).toContain('No supplier invoice')
+    expect(document.body.textContent).not.toContain('\u2014')
+  })
+
+  it('adds an actual cost through the form', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue(summation())
+    ovaMock.mockResolvedValue(ova)
+    costListMock.mockResolvedValue({ items: [
+      { id: 3, change_id: 7, department_id: 1, department_name: 'Tooling', category: 'external',
+        vendor_name: 'Hasco', amount: 700, cost_date: '2026-06-02', note: null, attachment_id: null,
+        created_by: 1, created_by_name: 'Anna', created_at: '2026-06-02T08:00:00', can_delete: true },
+    ], total: 700, can_write: true, writable_department_ids: [1], cost_role: false })
+    costAddMock.mockResolvedValue({})
+    render(wrap(<PnlCard change={change({ status: 'in_validation', customer_relevant: true })}
+      departments={[{ id: 1, name: 'Tooling' }, { id: 2, name: 'Quality' }]} />))
+    expect((await screen.findByTestId('actual-cost-3')).textContent).toContain('Hasco')
+    expect(screen.getByTestId('actual-cost-delete-3')).toBeDefined()
+    fireEvent.click(screen.getByTestId('actual-cost-open'))
+    const dept = screen.getByLabelText('Department') as HTMLSelectElement
+    // a department member only sees their own department
+    expect([...dept.options].map((o) => o.textContent)).toEqual(['Choose', 'Tooling'])
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '250,50' } })
+    expect((screen.getByTestId('actual-cost-save') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(dept, { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('Vendor'), { target: { value: 'Meusburger' } })
+    fireEvent.click(screen.getByTestId('actual-cost-save'))
+    await waitFor(() => expect(costAddMock).toHaveBeenCalledWith(7, expect.objectContaining({
+      category: 'external', amount: 250.5, department_id: 1, vendor_name: 'Meusburger' })))
   })
 })

@@ -7,20 +7,55 @@
  * budget snapshot, not a sale price - so "margin" there means "vs. approved
  * budget", never "profit". This is called out in the table header/tooltip.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import client from '../api/client';
 import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
-import type { PnlBranch, PnlStatusGroup, PnlFilters } from '../types/pnl';
+import { formatMoney } from '../lib/format';
+import { TONE_CLASS, varianceTone } from '../components/changes/pnl/variance';
+import type { PnlBranch, PnlStatusGroup, PnlFilters, PnlRow } from '../types/pnl';
 
 const fmtMoney = (v: number | null | undefined) =>
-  v === null || v === undefined ? '—' : v.toLocaleString('de-DE');
+  v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v);
 
 const fmtPct = (v: number | null | undefined) =>
-  v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+  v === null || v === undefined ? '-' : `${v.toFixed(1)}%`;
+
+type SortKey = 'change_number' | 'title' | 'status' | 'offer_revenue' | 'planned_cost'
+  | 'actual_cost' | 'planned_margin' | 'actual_margin' | 'variance' | 'slip_days';
+
+const COLUMNS: { key: SortKey; label: string; numeric?: boolean; title?: string }[] = [
+  { key: 'change_number', label: 'Change #' },
+  { key: 'title', label: 'Title' },
+  { key: 'status', label: 'Status' },
+  { key: 'offer_revenue', label: 'Offer revenue', numeric: true,
+    title: 'Accepted offer total; for internal changes the approved budget' },
+  { key: 'planned_cost', label: 'Planned cost', numeric: true,
+    title: 'Costing frozen at customer acceptance' },
+  { key: 'actual_cost', label: 'Actual cost', numeric: true,
+    title: 'Booked hours x rate, supplier invoices, scrap, validation issues. From implementation on.' },
+  { key: 'planned_margin', label: 'Planned margin', numeric: true,
+    title: 'For internal changes: vs. approved budget, not profit' },
+  { key: 'actual_margin', label: 'Actual margin', numeric: true,
+    title: 'While running: open cost lines at plan (forecast); after release: actual' },
+  { key: 'variance', label: 'Variance', numeric: true, title: 'Actual margin minus planned margin' },
+  { key: 'slip_days', label: 'Slip', numeric: true, title: 'Finish against the baseline, in plan units' },
+];
+
+function sortRows(rows: PnlRow[], key: SortKey, dir: 1 | -1): PnlRow[] {
+  return [...rows].sort((a, b) => {
+    const va = a[key] as unknown;
+    const vb = b[key] as unknown;
+    // missing values always last, whatever the direction
+    if (va === null || va === undefined) return vb === null || vb === undefined ? 0 : 1;
+    if (vb === null || vb === undefined) return -1;
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
 
 function marginAccent(v: number | null | undefined): string {
   if (v === null || v === undefined) return 'text-slate-400';
@@ -133,9 +168,16 @@ export default function PnlPage() {
     queryFn: () => pnlApi.changes(filters),
   });
   const rows = changesData?.rows ?? [];
+  const [sortKey, setSortKey] = useState<SortKey>('change_number');
+  const [sortDir, setSortDir] = useState<1 | -1>(-1);
+  const sorted = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
+  const toggleSort = (k: SortKey) => {
+    if (k === sortKey) setSortDir((d) => (d === 1 ? -1 : 1));
+    else { setSortKey(k); setSortDir(k === 'change_number' || k === 'title' || k === 'status' ? 1 : -1); }
+  };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
+    <div className="max-w-7xl mx-auto p-6">
       <h1 className="text-2xl font-semibold mb-6">P&amp;L</h1>
 
       {/* Filter bar */}
@@ -218,29 +260,55 @@ export default function PnlPage() {
         </label>
       </div>
 
-      {/* Summary tiles */}
+      {/* Summary tiles: offer versus doing across the rows in scope */}
       {summaryLoading || !summary ? (
         <div className="text-sm text-slate-400 mb-6">Loading…</div>
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <Tile
-              title="Revenue"
-              value={fmtMoney(summary.totals.revenue)}
-              sub="incl. internal budgets"
+              title="Offer revenue"
+              value={fmtMoney(summary.totals.offer_revenue ?? summary.totals.revenue)}
+              sub={`${summary.count} changes, incl. internal budgets`}
               subClassName="text-[10px] text-slate-500"
             />
             <Tile
-              title="Cost"
-              value={fmtMoney(summary.totals.total_cost)}
-              sub={`Int. ${fmtMoney(summary.totals.internal_cost)} · Ext. ${fmtMoney(summary.totals.external_cost)}`}
+              title="Planned cost"
+              value={fmtMoney(summary.totals.planned_cost ?? summary.totals.total_cost)}
+              sub="internal hours x rate, external, scrap"
             />
             <Tile
-              title="Margin"
-              value={fmtMoney(summary.totals.margin)}
-              accent={marginAccent(summary.totals.margin)}
+              title="Planned margin"
+              value={fmtMoney(summary.totals.planned_margin ?? summary.totals.margin)}
+              accent={marginAccent(summary.totals.planned_margin ?? summary.totals.margin)}
+              sub={`on the plan frozen at acceptance`}
             />
-            <Tile title="Margin %" value={fmtPct(summary.totals.margin_pct)} accent={marginAccent(summary.totals.margin)} />
+            <Tile
+              title="Late"
+              value={summary.totals.late_count ?? 0}
+              sub={summary.totals.max_slip_days ? `worst slip ${summary.totals.max_slip_days} days` : 'no slip'}
+              accent={(summary.totals.late_count ?? 0) > 0 ? 'text-rose-300' : 'text-slate-100'}
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <Tile
+              title="Actual cost"
+              value={fmtMoney(summary.totals.actual_cost)}
+              sub={`${summary.totals.actual_count ?? 0} changes with hours, invoices or issue costs`}
+            />
+            <Tile
+              title="Actual margin"
+              value={fmtMoney(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
+              accent={marginAccent(summary.totals.forecast_margin ?? summary.totals.actual_margin)}
+              sub={`forecast, to date ${fmtMoney(summary.totals.actual_margin)}`}
+            />
+            <Tile
+              title="Variance"
+              value={fmtMoney(summary.totals.variance)}
+              sub="actual minus planned margin, changes with actuals"
+              accent={summary.totals.variance === undefined ? 'text-slate-100'
+                : summary.totals.variance < -0.005 ? 'text-rose-300' : 'text-emerald-400'}
+            />
           </div>
 
           {/* Pipeline vs. Realized */}
@@ -267,75 +335,92 @@ export default function PnlPage() {
       {rowsLoading ? (
         <div className="text-sm text-slate-400">Loading…</div>
       ) : (
-        <div className="border border-slate-700 rounded-xl overflow-hidden">
+        <div className="border border-slate-700 rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-700 text-left text-slate-400">
               <tr>
-                <th className="px-4 py-3">Change #</th>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Branch</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Revenue</th>
-                <th className="px-4 py-3 text-right">Int. cost</th>
-                <th className="px-4 py-3 text-right">Ext. cost</th>
-                <th
-                  className="px-4 py-3 text-right"
-                  title="For internal changes, margin means vs. approved budget, not profit"
-                >
-                  Margin
-                </th>
+                {COLUMNS.map((c) => (
+                  <th key={c.key} title={c.title}
+                    aria-sort={sortKey === c.key ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'}
+                    className={`px-2 py-2.5 whitespace-nowrap ${c.numeric ? 'text-right' : ''}`}>
+                    <button type="button" className="hover:text-slate-200"
+                      onClick={() => toggleSort(c.key)}>
+                      {c.label}{sortKey === c.key ? (sortDir === 1 ? ' ▲' : ' ▼') : ''}
+                    </button>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {sorted.map((r) => {
+                const tone = varianceTone(r.variance, r.planned_margin, 1);
+                return (
                 <tr key={r.change_id} className="border-t border-slate-700 hover:bg-slate-800/60">
-                  <td className="px-4 py-3 font-mono">
-                    <Link className="text-blue-400 hover:underline" to={`/changes/${r.change_id}?tab=commercial`}>
+                  <td className="px-2 py-2.5 font-mono whitespace-nowrap">
+                    <Link className="text-blue-400 hover:underline" to={`/changes/${r.change_id}?tab=costing`}>
                       {r.change_number}
                     </Link>
-                  </td>
-                  <td className="px-4 py-3 text-slate-200 truncate max-w-[240px]">{r.title}</td>
-                  <td className="px-4 py-3">
                     <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      className={`ml-2 px-1.5 py-0.5 rounded-full text-[10px] font-semibold font-sans ${
                         r.branch === 'internal' ? 'bg-violet-900 text-violet-200' : 'bg-blue-900 text-blue-200'
                       }`}
                       title={r.branch === 'internal' ? 'Internal: margin vs. approved budget' : undefined}
                     >
-                      {r.branch === 'internal' ? 'Internal' : 'Customer'}
+                      {r.branch === 'internal' ? 'Int' : 'Cust'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_PILL[r.status as ChangeStatus]}`}>
+                  <td className="px-2 py-2.5 text-slate-200 truncate max-w-[180px]" title={r.title}>{r.title}</td>
+                  <td className="px-2 py-2.5">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${STATUS_PILL[r.status as ChangeStatus]}`}>
                       {STATUS_LABELS[r.status as ChangeStatus] ?? r.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    {r.pending_price ? (
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap">
+                    {r.pending_price && (r.offer_revenue === null || r.offer_revenue === undefined) ? (
                       <span className="inline-flex items-center gap-1">
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400">-</span>
                         <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-900 text-amber-200">
                           price pending
                         </span>
                       </span>
                     ) : (
-                      <span className="text-slate-100">{fmtMoney(r.revenue)}</span>
+                      <span className="text-slate-100">{fmtMoney(r.offer_revenue ?? r.revenue)}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right text-slate-200">{fmtMoney(r.internal_cost)}</td>
-                  <td className="px-4 py-3 text-right text-slate-200">{fmtMoney(r.external_cost)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">{fmtMoney(r.planned_cost ?? r.total_cost)}</td>
+                  <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">{fmtMoney(r.actual_cost)}</td>
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap">
                     <span
-                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${marginBadgeClasses(r.margin)}`}
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${marginBadgeClasses(r.planned_margin ?? r.margin)}`}
                       title={r.branch === 'internal' ? 'vs. approved budget' : undefined}
                     >
-                      {fmtMoney(r.margin)}
+                      {fmtMoney(r.planned_margin ?? r.margin)}
                     </span>
                   </td>
+                  <td className={`px-2 py-2.5 text-right whitespace-nowrap ${marginAccent(r.forecast_margin ?? r.actual_margin)}`}>{fmtMoney(r.forecast_margin ?? r.actual_margin)}</td>
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap">
+                    {r.variance === null || r.variance === undefined ? (
+                      <span className="text-slate-500">-</span>
+                    ) : (
+                      <span className={`rounded px-1.5 py-0.5 text-xs ${TONE_CLASS[tone]}`}>
+                        {r.variance > 0 ? '+' : ''}{fmtMoney(r.variance)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap" title={r.slip_unit}>
+                    {r.slip_days === null || r.slip_days === undefined ? (
+                      <span className="text-slate-500">-</span>
+                    ) : (
+                      <span className={r.slip_days > 0 ? 'text-rose-300' : 'text-emerald-400'}>
+                        {r.slip_days > 0 ? '+' : ''}{r.slip_days} d
+                      </span>
+                    )}
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
               {rows.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No changes in scope.</td></tr>
+                <tr><td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-slate-400">No changes in scope.</td></tr>
               )}
             </tbody>
           </table>

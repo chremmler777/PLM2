@@ -3,6 +3,7 @@ import { changesApi } from '../../api/changes';
 import { t } from '../../i18n/cmLabels';
 import { formatMoney } from '../../lib/format';
 import type { ChangeDetail, ChangeStatus, PnlActualExtra, PnlActuals } from '../../types/change';
+import OfferVsActualSection from './pnl/OfferVsActualSection';
 
 const HIDDEN_STATUSES: ChangeStatus[] = ['captured', 'scoping', 'in_assessment'];
 /** Stages where booked hours exist, so an actuals block is expected. */
@@ -237,6 +238,12 @@ export default function PnlCard({ change, departments = [] }: {
         <div className="text-xs text-slate-400 uppercase tracking-wide">{marginLabel}</div>
         <div className={`text-xl font-semibold mt-1 ${marginAccent(margin)}`}>{fmtMoney(margin)}</div>
       </div>
+
+      {/* Offer versus doing (spec §13): only once there is doing. Before
+          implementation the card is the plan alone. */}
+      {ACTUALS_STATUSES.includes(change.status) && (
+        <OfferVsActualSection changeId={change.id} departments={departments} />
+      )}
 
       {showActuals && actuals && (
         <ActualsSection actuals={actuals}
