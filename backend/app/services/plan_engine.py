@@ -72,6 +72,8 @@ FINISH_CONSTRAINTS = ("fnlt", "mfo")
 PIN_CONSTRAINTS = ("mso", "mfo")
 # Link types that bound the successor's END: not allowed into a summary.
 FINISH_TARGET_LINKS = ("FF", "SF")
+# Link types that read the predecessor's START (out of a summary: its start point).
+START_SOURCE_LINKS = ("SS", "SF")
 CALENDAR_MODES = ("calendar", "working")
 # Sanity bounds shared by the API, the service and the MSPDI import.
 MAX_OUTLINE_DEPTH = 50
@@ -203,6 +205,7 @@ class ETask:
     name: str = ""
     progress: int = 0
     idea: bool = False
+    started: bool = False               # has an actual start: work is under way
 
 
 @dataclass
@@ -360,12 +363,16 @@ def topo(ids: list, links: list[ELink]) -> Optional[list]:
 class Graph:
     """Tasks and links as the math uses them.
 
-    Nodes: ("L", id) a leaf, ("G", id) the start gate of a summary (the
-    start bound every leaf below it gets), ("P", id) the rolled-up dates of
-    a summary (what a link out of it reads). Edges: a link from its source
-    (L or P) to its target (L or G); G(parent) -> G/L(child) and
-    L/P(child) -> P(parent). `order` is a topological order of the nodes,
-    None on a cycle."""
+    Nodes: ("L", id) a leaf; for a summary ("G", id) its start gate (the
+    start bound every leaf below it gets), ("PS", id) its start point (the
+    earliest child start, what SS/SF out of it read) and ("PF", id) its
+    finish point (the latest child end, what FS/FF out of it read). Edges: a
+    link from its source (L, PS or PF) to its target (L or G);
+    G(parent) -> G/L(child); L/PF(child) -> PF(parent); L/PS(child) ->
+    PS(parent), except from a child the start point itself drives (a block
+    fed through a successor of the summary's start starts after it, so it
+    cannot be the earliest: leaving it out avoids a false cycle).
+    `order` is a topological order of the nodes, None on a cycle."""
     by_id: dict
     children: dict
     parent: dict
@@ -375,12 +382,22 @@ class Graph:
     links: list
     succ: dict
     order: Optional[list]
+    # summary id -> the children its start point rolls up
+    start_kids: dict = field(default_factory=dict)
 
-    def src(self, tid):
-        return ("P", tid) if tid in self.summaries else ("L", tid)
+    def src(self, tid, typ="FS"):
+        if tid not in self.summaries:
+            return ("L", tid)
+        return ("PS", tid) if typ in START_SOURCE_LINKS else ("PF", tid)
 
     def dst(self, tid):
         return ("G", tid) if tid in self.summaries else ("L", tid)
+
+    def node(self, tid, point):
+        """A task's start ("S") or finish ("F") node."""
+        if tid not in self.summaries:
+            return ("L", tid)
+        return ("PS", tid) if point == "S" else ("PF", tid)
 
 
 def usable_link(lk: ELink, by_id: dict, anc: dict, summaries: set) -> bool:
@@ -425,35 +442,56 @@ def graph(tasks: list[ETask], links: list[ELink]) -> Graph:
               summaries=summaries, leaves=leaves, links=ulinks,
               succ=defaultdict(list), order=None)
     pos = {t.id: n for n, t in enumerate(tasks)}
-    rank = {"G": 0, "L": 1, "P": 2}
+    rank = {"G": 0, "L": 1, "PS": 2, "PF": 3}
     nodes = []
     for t in tasks:
         if t.id in summaries:
-            nodes += [("G", t.id), ("P", t.id)]
+            nodes += [("G", t.id), ("PS", t.id), ("PF", t.id)]
         else:
             nodes.append(("L", t.id))
-    indeg = {n: 0 for n in nodes}
-
-    def edge(a, b):
-        g.succ[a].append(b)
-        indeg[b] += 1
+    succ = g.succ
     for p, cs in children.items():
         for c in cs:
             if c in summaries:
-                edge(("G", p), ("G", c))
-                edge(("P", c), ("P", p))
+                succ[("G", p)].append(("G", c))
+                succ[("PF", c)].append(("PF", p))
             else:
-                edge(("G", p), ("L", c))
-                edge(("L", c), ("P", p))
+                succ[("G", p)].append(("L", c))
+                succ[("L", c)].append(("PF", p))
     for lk in ulinks:
-        edge(g.src(lk.from_id), g.dst(lk.to_id))
+        succ[g.src(lk.from_id, lk.type)].append(g.dst(lk.to_id))
+
+    def reach(start) -> set:
+        seen, stack = {start}, [start]
+        while stack:
+            for m in succ.get(stack.pop(), []):
+                if m not in seen:
+                    seen.add(m)
+                    stack.append(m)
+        return seen
+    # Start points roll up their children, deepest summary first, leaving
+    # out a child the start point itself drives.
+    for sid, _w in reversed(dfs_order(tasks)):
+        if sid not in summaries:
+            continue
+        kids = children[sid]
+        driven = reach(("PS", sid)) if succ.get(("PS", sid)) else set()
+        keep = [c for c in kids if g.node(c, "S") not in driven] or kids
+        g.start_kids[sid] = keep
+        for c in keep:
+            succ[g.node(c, "S")].append(("PS", sid))
+
+    indeg = {n: 0 for n in nodes}
+    for n, ms in succ.items():
+        for m in ms:
+            indeg[m] += 1
     ready = [(pos[n[1]], rank[n[0]], n) for n in nodes if indeg[n] == 0]
     heapq.heapify(ready)
     order = []
     while ready:
         *_, n = heapq.heappop(ready)
         order.append(n)
-        for m in g.succ[n]:
+        for m in succ[n]:
             indeg[m] -= 1
             if indeg[m] == 0:
                 heapq.heappush(ready, (pos[m[1]], rank[m[0]], m))
@@ -547,12 +585,14 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
                     if pg is not None:
                         s = max(s, pg)
                     for lk in in_links[("L", tid)]:
-                        s = max(s, _req_start(lk, es[lk.from_id], ef[lk.from_id], dur))
+                        # a summary source has only the point this link reads yet
+                        s = max(s, _req_start(lk, es.get(lk.from_id),
+                                              ef.get(lk.from_id), dur))
                 es[tid], ef[tid] = s, s + dur
+            elif kind == "PS":
+                es[tid] = min(es[k] for k in g.start_kids[tid])
             else:
-                kids = g.children[tid]
-                es[tid] = min(es[k] for k in kids)
-                ef[tid] = max(ef[k] for k in kids)
+                ef[tid] = max(ef[k] for k in g.children[tid])
 
     for tid in leaves:
         t = by_id[tid]
@@ -567,6 +607,18 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
     real = [tid for tid in leaves if not by_id[tid].idea]
     if g.order is not None and real:
         project_end = max(ef[tid] for tid in real)
+        # the two earliest non-idea starts under each summary: a start
+        # bound out of a summary binds a block only when every OTHER block
+        # under it starts after the bound (one of them keeps it otherwise)
+        first2: dict = {}
+        for tid in real:
+            for a in g.anc[tid]:
+                first2[a] = sorted(first2.get(a, []) + [(es[tid], str(tid), tid)])[:2]
+
+        def others_start(a, tid):
+            rest = [x for x in first2.get(a, []) if x[2] != tid]
+            return rest[0][0] if rest else None
+
         lf: dict = {}
         lg: dict = {}
         lpf: dict = {}
@@ -600,14 +652,12 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
                 for c in g.children[tid]:
                     v = _min(v, lg.get(c) if c in g.summaries else late(("L", c), "start"))
                 lg[tid] = v
-            elif kind == "P":
-                fb, sb = bounds(tid)
+            elif kind == "PF":
+                fb, _sb = bounds(tid)
                 p = g.parent.get(tid)
-                if p is not None:
-                    fb = _min(fb, lpf.get(p))
-                    if es[tid] == es[p]:
-                        sb = _min(sb, lps.get(p))
-                lpf[tid], lps[tid] = fb, sb
+                lpf[tid] = _min(fb, lpf.get(p)) if p is not None else fb
+            elif kind == "PS":
+                lps[tid] = bounds(tid)[1]
             elif not by_id[tid].idea:
                 dur = ef[tid] - es[tid]
                 f = project_end
@@ -615,8 +665,11 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
                 p = g.parent.get(tid)
                 if p is not None:
                     fb = _min(fb, lpf.get(p))
-                    if es[tid] == es[p] and lps.get(p) is not None:
-                        sb = _min(sb, lps[p])
+                for a in g.anc[tid]:
+                    b = lps.get(a)
+                    o = others_start(a, tid)
+                    if b is not None and (o is None or o > b):
+                        sb = _min(sb, b)
                 if fb is not None:
                     f = min(f, fb)
                 if sb is not None:
@@ -640,7 +693,7 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
             total = lf[tid] - ef[tid]
             rooms = []
             for src in [tid] + g.anc[tid]:
-                start_bound = src == tid or es[tid] == es[src]
+                o = None if src == tid else others_start(src, tid)
                 for lk in out_links[src]:
                     v = early(g.dst(lk.to_id), "start" if lk.type in ("FS", "SS")
                               else "finish")
@@ -648,7 +701,7 @@ def compute(tasks: list[ETask], links: list[ELink], cal: Calendar,
                         continue
                     if lk.type in ("FS", "FF"):
                         rooms.append(v - lk.lag - ef[tid])
-                    elif start_bound:
+                    elif o is None or o > v - lk.lag:
                         rooms.append(v - lk.lag - es[tid])
             free = min(rooms) if rooms else project_end - ef[tid]
             r = res.tasks[tid]
@@ -704,8 +757,9 @@ def downstream(tasks: list[ETask], links: list[ELink], sources: list) -> dict:
     for src in sources:
         if src not in g.by_id:
             continue
-        start = g.src(src)
-        seen, stack = {start}, [start]
+        starts = ([("PS", src), ("PF", src)] if src in g.summaries
+                  else [("L", src)])
+        seen, stack = set(starts), list(starts)
         while stack:
             n = stack.pop()
             for m in g.succ.get(n, []):
@@ -722,11 +776,14 @@ def cascade(tasks: list[ETask], links: list[ELink], cal: Calendar,
             sources: list) -> tuple[PlanResult, dict]:
     """The forward pass restricted to what moving `sources` pushes: only
     their downstream leaves move (later, never earlier; a pinned block keeps
-    its date). Returns the result and {moved leaf: source that caused it}."""
+    its date, and so does a block whose work has started: the walk goes on
+    through it, it stays put). Returns the result and {moved leaf: source
+    that caused it}."""
     cause = downstream(tasks, links, sources)
     cons = _constraints(tasks)
+    started = {t.id for t in tasks if t.started}
     movable = {tid for tid in cause
-               if _pin(cons.get(tid, []), cal, 0) is None}
+               if _pin(cons.get(tid, []), cal, 0) is None and tid not in started}
     res = compute(tasks, links, cal, move=True, only=movable)
     return res, {tid: cause[tid] for tid in res.moved}
 
@@ -1317,16 +1374,37 @@ def _parse_mspdi(content: bytes) -> dict:
 
     lo_d, hi_d = date(MIN_YEAR, 1, 1), date(MAX_YEAR, 12, 31)
 
-    # calendar: the project's calendar, else the first base calendar
+    # The calendar: the project's (CalendarUID), else the first base
+    # calendar; never a resource calendar. Weekdays it does not list come
+    # from its base calendar (BaseCalendarUID, followed up the chain), else
+    # Mon-Fri; exceptions of the whole chain are merged.
     cal_uid = txt(root, "CalendarUID")
-    cal_el = None
+    all_cals: dict = {}
+    base_flag: dict = {}
     cals = root.find(q("Calendars"))
-    if cals is not None:
-        for c in cals.findall(q("Calendar")):
-            if cal_el is None or txt(c, "UID") == cal_uid:
-                cal_el = c
-                if txt(c, "UID") == cal_uid:
-                    break
+    for c in (cals.findall(q("Calendar")) if cals is not None else []):
+        uid = txt(c, "UID")
+        if uid is not None and uid not in all_cals:
+            all_cals[uid] = c
+            base_flag[uid] = txt(c, "IsBaseCalendar")
+    res_root = root.find(q("Resources"))
+    resource_cals = {txt(r, "CalendarUID") for r in (
+        res_root.findall(q("Resource")) if res_root is not None else [])}
+    resource_cals |= {u for u, f in base_flag.items() if f == "0"}
+    resource_cals.discard(None)
+    cal_el = None
+    if cal_uid in all_cals and cal_uid not in resource_cals:
+        cal_el = all_cals[cal_uid]
+    else:
+        cal_el = next((c for u, c in all_cals.items() if base_flag[u] == "1"), None) \
+            or next((c for u, c in all_cals.items() if u not in resource_cals), None)
+    chain = []
+    c, seen_uids = cal_el, set()
+    while c is not None and len(chain) < 10:
+        chain.append(c)
+        seen_uids.add(txt(c, "UID"))
+        nxt = txt(c, "BaseCalendarUID")
+        c = all_cals.get(nxt) if nxt not in seen_uids else None
     workdays = list(DEFAULT_WORKDAYS)
     holidays: list[date] = []
     shading: list[date] = []
@@ -1339,21 +1417,21 @@ def _parse_mspdi(content: bytes) -> dict:
         a, b = max(a.date(), lo_d), min(b.date(), hi_d)
         return (a, b) if a <= b else None
 
-    if cal_el is not None:
+    found: dict = {}
+    for cal_el in chain:
         wds = cal_el.find(q("WeekDays"))
         if wds is not None:
-            found = {}
             for wd in wds.findall(q("WeekDay")):
                 dt = num(wd, "DayType", -1)
                 if 1 <= dt <= 7:
-                    found[7 if dt == 1 else dt - 1] = num(wd, "DayWorking", 1) == 1
+                    iso = 7 if dt == 1 else dt - 1
+                    if iso not in found:          # the derived calendar wins
+                        found[iso] = num(wd, "DayWorking", 1) == 1
                 elif dt == 0 and num(wd, "DayWorking", 1) == 0:
                     ab = period_of(wd)
                     if ab:
                         holidays += recurring_days(
                             1, ab[0], ab[1], cap=MAX_HOLIDAYS - len(holidays))
-            if found:
-                workdays = sorted(k for k, on in found.items() if on) or workdays
         exs = cal_el.find(q("Exceptions"))
         if exs is not None:
             for ex in exs.findall(q("Exception")):
@@ -1380,6 +1458,11 @@ def _parse_mspdi(content: bytes) -> dict:
                         f"recurrence type {typ} and was skipped")
                     continue
                 (shading if working else holidays).extend(days)
+    if found:
+        week = {d: found.get(d, d in DEFAULT_WORKDAYS) for d in range(1, 8)}
+        workdays = sorted(d for d, on in week.items() if on) or workdays
+    holidays = sorted(set(holidays))
+    shading = sorted(set(shading))
     file_per_week = len(workdays) or 5
 
     raw = []

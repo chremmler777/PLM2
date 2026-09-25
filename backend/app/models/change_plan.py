@@ -12,15 +12,16 @@ timezone shifting it to the day before would move a promise. Durations count
 days of the plan calendar (calendar days by default, working days in
 "working" mode) and end_date is exclusive, so a
 successor may start on its predecessor's end_date. Links (FS/SS/FF/SF with a
-lag) live in change_plan_links; the old `predecessors` JSON is legacy: a
-row still carrying one is converted into FS links when the plan is read.
+lag) live in change_plan_links; the old `predecessors` JSON is legacy
+(migration 088 converted it); a row still carrying one is shown as FS links
+on read, never written back.
 Each plan has its own calendar (change_requests.plan_calendar holds
 {"quote": {...}, "detailed": {...}}; the older flat shape applies to both).
 """
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, ForeignKey, Integer, JSON, String, Text,
+    Boolean, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text,
 )
 from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column
@@ -110,6 +111,9 @@ class ChangePlanLink(Base):
     """A dependency between two blocks of the same plan: FS, SS, FF or SF,
     with a lag in plan-calendar days (negative = lead)."""
     __tablename__ = "change_plan_links"
+    # one link per ordered pair (migration 089)
+    __table_args__ = (Index("uq_change_plan_links_pair", "change_id", "plan",
+                            "from_task_id", "to_task_id", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     change_id: Mapped[int] = mapped_column(

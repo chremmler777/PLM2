@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -147,7 +148,8 @@ def e_tasks(tasks: list) -> list:
         constraint_date=getattr(t, "constraint_date", None),
         parent_id=getattr(t, "parent_id", None), name=t.name or "",
         progress=int(getattr(t, "progress_pct", 0) or 0),
-        idea=bool(getattr(t, "is_idea", False))) for t in tasks]
+        idea=bool(getattr(t, "is_idea", False)),
+        started=getattr(t, "actual_start", None) is not None) for t in tasks]
 
 
 def _cal(cal) -> eng.Calendar:
@@ -368,49 +370,40 @@ class ChangePlanService:
     @staticmethod
     async def links(session: AsyncSession, change: ChangeRequest,
                     plan: str) -> list[ChangePlanLink]:
-        """The plan's links. A block still carrying a legacy `predecessors`
-        list (written by pre-088 code after the migration ran) is converted
-        here, once: an FS link per predecessor whose pair is not linked yet,
-        then the list is emptied. The caller's commit keeps it."""
-        async def load():
-            return list((await session.execute(
-                select(ChangePlanLink)
-                .where(ChangePlanLink.change_id == change.id,
-                       ChangePlanLink.plan == plan)
-                .order_by(ChangePlanLink.id))).scalars().all())
-        links = await load()
-        if await ChangePlanService._convert_legacy(session, change, plan, links):
-            links = await load()
-        return links
+        return list((await session.execute(
+            select(ChangePlanLink)
+            .where(ChangePlanLink.change_id == change.id,
+                   ChangePlanLink.plan == plan)
+            .order_by(ChangePlanLink.id))).scalars().all())
 
     @staticmethod
-    async def _convert_legacy(session, change, plan, links: list) -> bool:
-        rows = list((await session.execute(
-            select(ChangePlanTask).where(ChangePlanTask.change_id == change.id,
-                                         ChangePlanTask.plan == plan)
-        )).scalars().all())
-        legacy = [t for t in rows if t.predecessors]
-        if not legacy:
-            return False
-        ids = {t.id for t in rows}
+    def _legacy_extra(tasks: list, links: list) -> list:
+        """FS links a row's legacy `predecessors` list still names and no
+        link covers (a row written by pre-088 code): shown and used for the
+        math on read, never written. Migration 088 converted the rest."""
+        ids = {t.id for t in tasks}
         linked = {frozenset((lk.from_task_id, lk.to_task_id)) for lk in links}
-        for t in legacy:
-            for p in t.predecessors:
-                try:
-                    pid = int(p)
-                except (TypeError, ValueError):
-                    continue
-                pair = frozenset((pid, t.id))
-                if pid == t.id or pid not in ids or pair in linked:
-                    continue
-                linked.add(pair)
-                session.add(ChangePlanLink(
-                    change_id=change.id, plan=plan, from_task_id=pid,
-                    to_task_id=t.id, type="FS", lag_days=0,
-                    created_by=t.updated_by or t.created_by))
-            t.predecessors = []
-        await session.flush()
-        return True
+        out = []
+        for lk in legacy_links(tasks):
+            try:
+                pid = int(lk.from_id)
+            except (TypeError, ValueError):
+                continue
+            pair = frozenset((pid, lk.to_id))
+            if pid == lk.to_id or pid not in ids or pair in linked:
+                continue
+            linked.add(pair)
+            out.append(eng.ELink(from_id=pid, to_id=lk.to_id, type="FS", lag=0))
+        return out
+
+    @staticmethod
+    async def _flush_links(session) -> None:
+        """Flush new or changed links; the unique pair index turns a race
+        (two requests linking the same pair) into a plain refusal."""
+        try:
+            await session.flush()
+        except IntegrityError:
+            raise ChangeError("These two blocks are already linked")
 
     @staticmethod
     async def _dept_names(session: AsyncSession) -> dict[int, str]:
@@ -499,14 +492,15 @@ class ChangePlanService:
         cal = ChangePlanService.calendar(change, plan)
         links = await ChangePlanService.links(session, change, plan)
         tasks = await ChangePlanService.tasks(session, change, plan)
-        res = analyse_plan(tasks, links, cal)
+        math_links = e_links(links) + ChangePlanService._legacy_extra(tasks, links)
+        res = analyse_plan(tasks, math_links, cal)
         all_e = e_tasks(tasks)
         summaries = eng.summary_ids(all_e)
         wbs = dict(eng.dfs_order(all_e))
         preds: dict = defaultdict(list)
-        for lk in links:
+        for lk in math_links:
             if lk.type == "FS":
-                preds[lk.to_task_id].append(lk.from_task_id)
+                preds[lk.to_id].append(lk.from_id)
         critical = sorted(
             t.id for t in tasks
             if not t.is_idea and t.id not in summaries
@@ -552,7 +546,7 @@ class ChangePlanService:
             },
             "validation": validate_plan(
                 tasks, plan=plan, release_due=_as_date(change.release_due_date),
-                links=links, cal=cal),
+                links=math_links, cal=cal),
             "deadlines": await ChangePlanService.deadlines(session, change),
         }
 
@@ -971,6 +965,7 @@ class ChangePlanService:
                     and lk.from_task_id not in want:
                 links.remove(lk)
                 await session.delete(lk)
+        await session.flush()               # deletes before inserts (unique pair)
         have = {lk.from_task_id for lk in links if lk.to_task_id == task_id}
         for p in want:
             if p in have:
@@ -981,6 +976,7 @@ class ChangePlanService:
                                 created_by=user_id)
             session.add(lk)
             links.append(lk)
+        await ChangePlanService._flush_links(session)
 
     @staticmethod
     async def _rollup(session, change, plan) -> None:
@@ -1404,7 +1400,7 @@ class ChangePlanService:
                             to_task_id=spec["to_task_id"], type=typ,
                             lag_days=lag, created_by=user.id)
         session.add(lk)
-        await session.flush()
+        await ChangePlanService._flush_links(session)
         await ChangePlanService._bump(change, plan)
         await ChangeService.append_changelog(
             session, change, "plan_link_added",
@@ -1724,9 +1720,10 @@ class ChangePlanService:
                                     lag_days=lag, created_by=user.id)
                 session.add(lk)
                 links.append(lk)
-                await session.flush()
+                await ChangePlanService._flush_links(session)
                 if lid is not None:
                     link_id_map[str(lid)] = lk.id
+        await ChangePlanService._flush_links(session)
 
         ChangePlanService._check_structure(before_issues, tasks, links)
         await ChangePlanService._rollup(session, change, plan)
@@ -1781,6 +1778,18 @@ class ChangePlanService:
             warnings.append(
                 "The file's calendar differs from the plan's; the plan keeps "
                 "its calendar (import with replace to take the file's)")
+        # Progress is tracker work (the detailed plan in implementation); a
+        # baseline is only ever set by "Timing validated", never by a file.
+        tracking = plan == "detailed" and change.status in PROGRESS_WINDOW
+        if not tracking and any(r.get("progress") or r.get("actual_start")
+                                or r.get("actual_finish") for r in rows):
+            warnings.append(
+                "Percent complete and actual dates were not imported: progress "
+                "is reported on the detailed plan during implementation")
+        if any(r.get("baseline_start") for r in rows):
+            warnings.append(
+                "The file's baseline was not imported: the baseline is set by "
+                "validating the timing")
         cal = ChangePlanService.calendar(change, plan)
         old_links = await ChangePlanService.links(session, change, plan)
         before_issues = ChangePlanService._structure_issues(existing, old_links)
@@ -1797,11 +1806,10 @@ class ChangePlanService:
                 department_id=ids_by_name.get(r.get("lane")),
                 is_idea=bool(r.get("idea")), start_date=r["start"],
                 duration_days=int(r["duration"]), predecessors=[],
-                sort_order=sort, progress_pct=int(r.get("progress") or 0),
-                actual_start=r.get("actual_start"),
-                actual_finish=r.get("actual_finish"),
-                baseline_start=r.get("baseline_start"),
-                baseline_finish=r.get("baseline_finish"),
+                sort_order=sort,
+                progress_pct=int(r.get("progress") or 0) if tracking else 0,
+                actual_start=r.get("actual_start") if tracking else None,
+                actual_finish=r.get("actual_finish") if tracking else None,
                 notes=r.get("notes"),
                 constraint_type=r.get("constraint_type"),
                 constraint_date=r.get("constraint_date"),

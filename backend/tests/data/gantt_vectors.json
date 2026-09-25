@@ -2867,6 +2867,176 @@
      "free_slack": 0
     }
    }
+  },
+  {
+   "name": "summary: SS from a summary binds a block only when no other block holds its start",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 5,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "B",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "X",
+     "start": "2026-10-05",
+     "duration": 10,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "S",
+     "to": "X",
+     "type": "SS",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 5,
+     "critical": false,
+     "free_slack": 5
+    },
+    "B": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 8,
+     "critical": false,
+     "free_slack": 8
+    },
+    "X": {
+     "start": "2026-10-05",
+     "end": "2026-10-15",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 5,
+     "critical": false,
+     "free_slack": 5
+    }
+   }
+  },
+  {
+   "name": "summary: SS from a summary to a block feeding a later child is not a cycle",
+   "calendar": {
+    "mode": "calendar",
+    "workdays": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "holidays": []
+   },
+   "tasks": [
+    {
+     "id": "S",
+     "start": "2026-10-05",
+     "duration": 0,
+     "constraint": null,
+     "parentId": null
+    },
+    {
+     "id": "A",
+     "start": "2026-10-05",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "C",
+     "start": "2026-10-08",
+     "duration": 2,
+     "constraint": null,
+     "parentId": "S"
+    },
+    {
+     "id": "Y",
+     "start": "2026-10-05",
+     "duration": 1,
+     "constraint": null,
+     "parentId": null
+    }
+   ],
+   "links": [
+    {
+     "from": "S",
+     "to": "Y",
+     "type": "SS",
+     "lag": 1
+    },
+    {
+     "from": "Y",
+     "to": "C",
+     "type": "FS",
+     "lag": 0
+    }
+   ],
+   "expected": {
+    "A": {
+     "start": "2026-10-05",
+     "end": "2026-10-07",
+     "total_slack": 1,
+     "critical": false,
+     "free_slack": 0
+    },
+    "C": {
+     "start": "2026-10-08",
+     "end": "2026-10-10",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    },
+    "Y": {
+     "start": "2026-10-06",
+     "end": "2026-10-07",
+     "total_slack": 1,
+     "critical": false,
+     "free_slack": 1
+    },
+    "S": {
+     "start": "2026-10-05",
+     "end": "2026-10-10",
+     "total_slack": 0,
+     "critical": true,
+     "free_slack": 0
+    }
+   }
   }
  ]
 }

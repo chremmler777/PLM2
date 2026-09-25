@@ -70,7 +70,11 @@ def test_vector_file_shape():
                  "summary: snet on a summary bounds every leaf below it",
                  "cycle: blocks keep their dates and have no slack",
                  "working: holiday on the start day",
-                 "working: negative lag across a weekend"):
+                 "working: negative lag across a weekend",
+                 "summary: SS from a summary binds a block only when no other "
+                 "block holds its start",
+                 "summary: SS from a summary to a block feeding a later child "
+                 "is not a cycle"):
         assert must in names
 
 
@@ -377,6 +381,17 @@ def test_cascade_moves_only_what_the_moved_block_drives():
     assert res.tasks["P"].start == date(2026, 10, 12)      # pinned: stays
     assert res.tasks["Y"].start == d                       # not driven by A
     assert cause == {"B": "A", "C": "A"}
+    # a block whose work has started stays put; the walk goes on through it
+    started = [ETask(t.id, t.start, t.duration, t.constraint_type,
+                     t.constraint_date, name=t.name, started=(t.id == "B"))
+               for t in tasks]
+    res, cause = cascade(started, links, cal, ["A"])
+    assert res.tasks["B"].start == date(2026, 10, 10)
+    assert res.tasks["C"].start == date(2026, 10, 12)       # B did not move
+    assert cause == {}
+    started[2] = ETask("C", date(2026, 10, 11), 1, name="C")  # C now violates B
+    res, cause = cascade(started, links, cal, ["A"])
+    assert cause == {"C": "A"} and res.tasks["C"].start == date(2026, 10, 12)
     # through a summary: a link out of the summary drives what follows it
     tasks2 = [ETask("S", d, 0, name="S"), ETask("A", d, 3, parent_id="S", name="A"),
               ETask("Z", date(2026, 10, 8), 1, name="Z")]
@@ -655,3 +670,85 @@ def test_migration_088_up_and_down_on_sqlite():
         assert "change_plan_links" not in sa.inspect(c).get_table_names()
         mod.upgrade()           # and back, now with a named FK
         mod.downgrade()
+
+
+def test_mspdi_calendar_choice_and_base_chain():
+    wd = lambda k, on: (f"<WeekDay><DayType>{k}</DayType><DayWorking>{on}"
+                        "</DayWorking></WeekDay>")
+    hol = lambda d: ("<Exceptions><Exception><Name>H</Name><Type>1</Type>"
+                     "<DayWorking>0</DayWorking><TimePeriod>"
+                     f"<FromDate>{d}T00:00:00</FromDate><ToDate>{d}T23:59:00"
+                     "</ToDate></TimePeriod></Exception></Exceptions>")
+    cals = (
+        # 1: a resource calendar (the project wrongly points at it): never used
+        "<Calendar><UID>1</UID><IsBaseCalendar>0</IsBaseCalendar>"
+        "<BaseCalendarUID>3</BaseCalendarUID><WeekDays>"
+        + "".join(wd(k, 1) for k in range(1, 8)) + "</WeekDays></Calendar>"
+        # 2: derived: Saturday works, Friday off, one holiday
+        "<Calendar><UID>2</UID><IsBaseCalendar>1</IsBaseCalendar>"
+        "<BaseCalendarUID>3</BaseCalendarUID><WeekDays>" + wd(7, 1) + wd(6, 0)
+        + "</WeekDays>" + hol("2026-10-07") + "</Calendar>"
+        # 3: its base: Mon-Fri, Sunday off, one holiday
+        "<Calendar><UID>3</UID><IsBaseCalendar>1</IsBaseCalendar><WeekDays>"
+        + "".join(wd(k, 0 if k in (1, 7) else 1) for k in range(1, 8))
+        + "</WeekDays>" + hol("2026-12-25") + "</Calendar>")
+    xml = ('<?xml version="1.0"?><Project xmlns="http://schemas.microsoft.com/'
+           'project"><DurationFormat>7</DurationFormat><CalendarUID>1'
+           f'</CalendarUID><Calendars>{cals}</Calendars>'
+           f'<Resources><Resource><UID>1</UID><Name>R</Name><CalendarUID>1'
+           '</CalendarUID></Resource></Resources><Tasks>'
+           + _task_xml(1, "A") + '</Tasks></Project>').encode()
+    cal = parse_mspdi(xml)["calendar"]
+    # UID 1 is a resource calendar: the first base calendar (2) is taken,
+    # Mon-Thu from its base, Friday off and Saturday on from itself
+    assert cal.workdays == [1, 2, 3, 4, 6]
+    assert cal.holidays == [date(2026, 10, 7), date(2026, 12, 25)]
+    # a calendar listing no weekdays at all: Mon-Fri
+    bare = xml.replace(b"<CalendarUID>1</CalendarUID></Resource>",
+                       b"</Resource>").replace(
+        cals.encode(), b"<Calendar><UID>9</UID><IsBaseCalendar>1</IsBaseCalendar>"
+                       b"</Calendar>").replace(b"<CalendarUID>1</CalendarUID>",
+                                               b"<CalendarUID>9</CalendarUID>")
+    assert parse_mspdi(bare)["calendar"].workdays == [1, 2, 3, 4, 5]
+
+
+def test_migration_089_dedupes_and_indexes():
+    import sys
+    import types
+    import sqlalchemy as sa
+    MigrationContext, Operations = _real_alembic()
+    path = (Path(__file__).parent.parent / "alembic" / "versions"
+            / "089_plan_link_pair_unique.py")
+    saved = sys.modules.get("alembic")
+    sys.modules["alembic"] = types.SimpleNamespace(op=None)
+    try:
+        spec = importlib.util.spec_from_file_location("m089", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        if saved is None:
+            sys.modules.pop("alembic", None)
+        else:
+            sys.modules["alembic"] = saved
+    assert mod.duplicate_ids([(5, 1, "q", 1, 2), (3, 1, "q", 1, 2), (4, 1, "q", 2, 1),
+                              (7, 1, "d", 1, 2), (9, 1, "q", 1, 2)]) == [5, 9]
+    eng_ = sa.create_engine("sqlite://")
+    md = sa.MetaData()
+    sa.Table("change_plan_links", md, sa.Column("id", sa.Integer, primary_key=True),
+             sa.Column("change_id", sa.Integer), sa.Column("plan", sa.String(10)),
+             sa.Column("from_task_id", sa.Integer), sa.Column("to_task_id", sa.Integer))
+    md.create_all(eng_)
+    with eng_.begin() as c:
+        c.execute(sa.text("insert into change_plan_links values (1, 1, 'q', 1, 2), "
+                          "(2, 1, 'q', 1, 2), (3, 1, 'q', 2, 3)"))
+        mod.op = Operations(MigrationContext.configure(c))
+        mod.upgrade()
+        mod.upgrade()                       # idempotent
+        assert c.execute(sa.text("select id from change_plan_links order by id")
+                         ).scalars().all() == [1, 3]
+        with pytest.raises(sa.exc.IntegrityError):
+            c.execute(sa.text("insert into change_plan_links values (4, 1, 'q', 1, 2)"))
+    with eng_.begin() as c:
+        mod.op = Operations(MigrationContext.configure(c))
+        mod.downgrade()
+        c.execute(sa.text("insert into change_plan_links values (4, 1, 'q', 1, 2)"))

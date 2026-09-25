@@ -263,10 +263,7 @@ async def get_plan(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     change = await _change(db, change_id, current_user)
-    out = await _plan_out(db, change, plan, current_user)
-    # reading converts legacy predecessor lists into links once: keep that
-    await db.commit()
-    return out
+    return await _plan_out(db, change, plan, current_user)
 
 
 @router.post("/{change_id}/plan/seed")
@@ -680,6 +677,11 @@ async def discard_offer(
 ):
     """Discard a draft offer (Sales, the change lead, admin)."""
     change = await _change(db, change_id, current_user)
+    # Rights first: a non-writer learns nothing about which offer ids exist.
+    if not await OfferService.may_write(db, change, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only Sales, the change lead or an admin may discard a draft offer")
     try:
         offer = await OfferService.get_offer(db, change, offer_id)
         await OfferService.discard(db, change, offer, current_user)

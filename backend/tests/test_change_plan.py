@@ -1029,7 +1029,8 @@ async def test_deviation_decisions_only_while_the_plan_runs(client, world,
 
 # --- review round 2 ------------------------------------------------------------
 
-async def test_legacy_predecessors_convert_on_read(client, world, session_factory):
+async def test_legacy_predecessors_are_shown_not_written(client, world,
+                                                        session_factory):
     sales = await _auth(client, "sales")
     cid = world["change_id"]
     a = await _task(client, sales, cid, "A", "2026-11-02", 5)
@@ -1040,13 +1041,84 @@ async def test_legacy_predecessors_convert_on_read(client, world, session_factor
         row.predecessors = [a["id"], a["id"], 99999, b["id"]]
         await s.commit()
     out = await _plan(client, sales, cid)
-    assert [(lk["from_task_id"], lk["to_task_id"], lk["type"]) for lk in out["links"]] \
-        == [(a["id"], b["id"], "FS")]
+    # used for the math and shown, but a GET writes nothing
     assert _by_name(out)["B"]["predecessors"] == [a["id"]]
+    assert out["links"] == []
+    assert _by_name(out)["A"]["free_slack"] == 2      # B binds it (4 without)
     async with session_factory() as s:
-        assert (await s.get(ChangePlanTask, b["id"])).predecessors == []
-    # read again: nothing more to convert, no duplicate
-    assert len((await _plan(client, sales, cid))["links"]) == 1
+        assert (await s.get(ChangePlanTask, b["id"])).predecessors == \
+            [a["id"], a["id"], 99999, b["id"]]
+
+
+async def test_one_link_per_pair_even_in_a_race(client, world, session_factory,
+                                               monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    from app.models.change_plan import ChangePlanLink
+    from app.services.change_plan_service import ChangePlanService
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    a = await _task(client, sales, cid, "A", "2026-11-02", 5)
+    b = await _task(client, sales, cid, "B", "2026-11-09", 2)
+    url = f"/api/v1/changes/{cid}/plan/links"
+    body = {"plan": "quote", "from_task_id": a["id"], "to_task_id": b["id"]}
+    assert (await client.post(url, json=body, headers=sales)).status_code == 200
+    # the database refuses a second row for the pair
+    async with session_factory() as s:
+        s.add(ChangePlanLink(change_id=cid, plan="quote", from_task_id=a["id"],
+                             to_task_id=b["id"], type="SS"))
+        with pytest.raises(IntegrityError):
+            await s.flush()
+    # a request that passed the check before the other one committed
+    monkeypatch.setattr(ChangePlanService, "_check_link",
+                        staticmethod(lambda *a, **k: None))
+    res = await client.post(url, json=body, headers=sales)
+    assert res.status_code == 400 and "already linked" in res.json()["detail"]
+
+
+async def test_discard_offer_checks_rights_first(client, world):
+    cid = world["change_id"]
+    res = await client.delete(f"/api/v1/changes/{cid}/offers/99999",
+                              headers=await _auth(client, "pack"))
+    assert res.status_code == 403
+    res = await client.delete(f"/api/v1/changes/{cid}/offers/99999",
+                              headers=await _auth(client, "sales"))
+    assert res.status_code == 404
+
+
+async def test_import_keeps_progress_to_the_tracker_and_never_baselines(
+        client, world, session_factory):
+    sales = await _auth(client, "sales")
+    cid = world["change_id"]
+    past = _today(-5)
+    xml = (
+        '<?xml version="1.0"?><Project xmlns="http://schemas.microsoft.com/project">'
+        '<DurationFormat>7</DurationFormat><Tasks>'
+        '<Task><UID>1</UID><Name>A</Name><Start>2026-10-05T08:00:00</Start>'
+        '<Duration>PT16H0M0S</Duration><OutlineLevel>1</OutlineLevel>'
+        f'<PercentComplete>30</PercentComplete><ActualStart>{past}T08:00:00'
+        '</ActualStart><Baseline><Number>0</Number><Start>2026-10-05T08:00:00'
+        '</Start><Finish>2026-10-06T17:00:00</Finish></Baseline>'
+        '</Task></Tasks></Project>').encode()
+
+    async def imp(plan):
+        res = await client.post(f"/api/v1/changes/{cid}/plan/import",
+                                data={"plan": plan, "replace": "true"},
+                                files={"file": ("p.xml", xml, "application/xml")},
+                                headers=sales)
+        assert res.status_code == 200, res.text
+        return res.json()
+    out = await imp("quote")
+    a = _by_name(out)["A"]
+    assert (a["progress_pct"], a["actual_start"], a["baseline_start"]) == (0, None, None)
+    assert any("Percent complete" in w for w in out["import_warnings"])
+    assert any("baseline" in w for w in out["import_warnings"])
+    await _set(session_factory, cid, status="in_implementation")
+    out = await imp("detailed")
+    a = _by_name(out)["A"]
+    assert (a["progress_pct"], a["actual_start"], a["baseline_start"]) == \
+        (30, past, None)
+    assert out["baseline_set"] is False
+    assert not any("Percent complete" in w for w in out["import_warnings"])
 
 
 async def test_each_plan_has_its_own_calendar(client, world, session_factory):
@@ -1261,9 +1333,8 @@ async def test_import_warnings_and_refusals(client, world, session_factory):
                             headers=sales)
     assert res.status_code == 200, res.text
     out = res.json()
-    assert len(out["import_warnings"]) == 1 and "another project" in \
-        out["import_warnings"][0]
-    assert _by_name(out)["A"]["progress_pct"] == 30
+    assert any("another project" in w for w in out["import_warnings"])
+    assert _by_name(out)["A"]["progress_pct"] == 0        # not the tracker
     # a summary with a must-start-on is refused, the plan stays as it was
     bad = xml.replace(
         '<PercentComplete>30</PercentComplete>',
