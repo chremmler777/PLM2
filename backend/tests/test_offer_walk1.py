@@ -10,6 +10,8 @@ strict only for what it sends; the send snapshot; customer_note vs the
 internal change_note; prices redacted for non-cost viewers; an accepted
 answer is final; a hold resumes into the stage it was taken from.
 """
+import csv
+import io
 import json
 import shutil
 import subprocess
@@ -429,7 +431,12 @@ async def test_prices_are_redacted_for_non_cost_viewers(client, offer_world,
                and json.loads(r["new_values"])["counter_price"] is None for r in audit)
     csv_text = (await client.get("/api/v1/audit/export?correlation_id=C-O-1",
                                  headers=tool)).text
-    assert "876.5" not in csv_text and "555" not in csv_text
+    # Only the value columns: the hash columns are random hex and may hold
+    # "555" by chance.
+    values = " ".join(f"{r['old_values']} {r['new_values']}"
+                      for r in csv.DictReader(io.StringIO(csv_text)))
+    assert "counter_price" in values                 # the rows are there
+    assert "876.5" not in values and "555" not in values
     audit_sales = json.dumps((await client.get(
         "/api/v1/audit?correlation_id=C-O-1", headers=sales)).json())
     assert "876.5" in audit_sales

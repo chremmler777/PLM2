@@ -1147,6 +1147,7 @@ class OfferService:
         version so its PDF never changes afterwards."""
         from app.models.entities import Organization, Plant, Project
         from app.models.part import Part
+        from app.services.company_profile import company_profile
         project = await session.get(Project, change.project_id)
         plant = await session.get(Plant, project.plant_id) if project else None
         org = (await session.get(Organization, plant.organization_id)
@@ -1164,6 +1165,9 @@ class OfferService:
         return {
             "taken_at": datetime.utcnow().isoformat(),
             "org_name": org.name if org else "",
+            # The letterhead as it stood when the version went out: a later
+            # change of address or signature never rewrites a sent offer.
+            "company": company_profile(org.name if org else ""),
             "plant_name": plant.name if plant else "",
             "plant_location": plant.location if plant else "",
             "project_name": project.name if project else "",
@@ -1221,6 +1225,10 @@ class OfferService:
             "change_number": change.change_number,
             "title": snap.get("title") or change.title,
             "items": snap.get("items") or [], "offer": out, "tasks": tasks,
+            # A snapshot taken before the letterhead was frozen has none:
+            # the renderer then uses the live profile.
+            "company": snap.get("company") if isinstance(snap.get("company"), dict)
+            else None,
         })
 
     @staticmethod

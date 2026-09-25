@@ -10,6 +10,9 @@ from app.services.company_profile import (
     DEFAULTS, company_profile, contact_line, signature_line,
 )
 from tests.test_offer_walk1 import _pdf_ctx
+from tests.test_offers import (  # noqa: F401  (offer_world is a fixture)
+    _auth, _create, _sent_v1, _url, offer_world,
+)
 
 
 def _text(pdf: bytes) -> str:
@@ -114,3 +117,47 @@ def test_axis_picks_days_weeks_or_months():
     assert a0.weekday() == 0 and not shaded and len(bottom) == (a1 - a0).days // 7
     _, _, top, bottom, _ = _axis(s, s + timedelta(days=900), 90 * mm)
     assert top[0][2] == "2026" and len(bottom) >= 29
+
+
+def test_issued_by_says_each_place_once():
+    from app.services.offer_pdf import issued_by
+    assert issued_by("KTX Toccoa", "Plant Toccoa", "Toccoa, GA") == "KTX Toccoa, GA"
+    assert issued_by("Org", "Plant Wolfsburg", "Wolfsburg") == "Org, Plant Wolfsburg"
+    assert issued_by("", "Plant 2", "Wolfsburg") == "Plant 2, Wolfsburg"
+    assert issued_by("KTX", "", "") == "KTX"
+    assert issued_by(None, None, None) == ""
+
+
+async def test_usd_offer_prints_us_dates_and_numbers():
+    from app.services.offer_pdf import _chart_date, _d, render_offer_pdf
+    assert _d(date(2026, 9, 25), "en") == "09/25/2026"
+    assert _d("2026-09-25") == "25.09.2026"
+    assert _chart_date(date(2026, 9, 25), "en") == "09/25/26"
+    ctx = _pdf_ctx({"cost_lines": [{"key": "a", "label": "Tooling", "amount": 1234.5}],
+                    "timing": {"include": True, "weeks_from_order": 1500,
+                               "milestones": [{"label": "M", "date": "2026-12-04"}]}},
+                   currency="USD")
+    s = date(2026, 10, 5)
+    ctx["tasks"] = [{"name": "Work", "lane": "", "kind": "work", "start": s,
+                     "end": s + timedelta(days=3), "duration": 3}]
+    ctx["offer"]["sent_at"] = date(2026, 9, 25)
+    ctx["offer"]["valid_until"] = date(2026, 10, 25)
+    text = _text(render_offer_pdf(ctx))
+    assert "09/25/2026" in text and "10/25/2026" in text and "12/04/2026" in text
+    assert "10/05/26" in text and "1,500 weeks" in text and "1,234.50 USD" in text
+    assert "25.09.2026" not in text
+
+
+async def test_sent_offer_keeps_its_letterhead(client, offer_world, monkeypatch):
+    cid = offer_world["change_id"]
+    sales = await _auth(client, "sales")
+    v1 = await _sent_v1(client, sales, cid)
+    monkeypatch.setenv("KTX_COMPANY_LEGAL_NAME", "Renamed Corp")
+    monkeypatch.setenv("KTX_COMPANY_ADDRESS", "1 New Street|Elsewhere")
+    sent = _text((await client.get(_url(cid, f"/{v1['id']}/pdf"), headers=sales)).content)
+    assert "KTX Group US Corp." in sent and "325 Hammerstone Drive" in sent
+    assert "Renamed Corp" not in sent
+    v2 = await _create(client, sales, cid)
+    draft = _text((await client.get(_url(cid, f"/{v2['id']}/pdf"), headers=sales)).content)
+    assert "Renamed Corp" in draft and "1 New Street" in draft
+    assert "Hammerstone" not in draft

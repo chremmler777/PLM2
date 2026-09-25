@@ -7,6 +7,7 @@ dashes with a plain hyphen: the house style for customer documents.
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 from functools import lru_cache
 from io import BytesIO
@@ -131,6 +132,28 @@ def plant_line(name, location) -> str:
     return ", ".join(x for x in (name, location) if x)
 
 
+# Words that name the kind of site, not the site: "Plant Toccoa" says no
+# more than "Toccoa" once "KTX Toccoa" is printed.
+SITE_WORDS = frozenset(("plant", "werk", "site", "factory", "location"))
+
+
+def issued_by(org, plant_name, location) -> str:
+    """Organisation, plant and location on one line, each comma part printed
+    only when it adds a word not said yet ("KTX Toccoa", "Plant Toccoa",
+    "Toccoa, GA" -> "KTX Toccoa, GA")."""
+    seen: set[str] = set()
+    out = []
+    for field in (org, plant_name, location):
+        for part in _clean(field).split(","):
+            part = part.strip()
+            words = {w for w in re.findall(r"\w+", part.lower())}
+            if not part or not (words - seen - SITE_WORDS):
+                continue
+            out.append(part)
+            seen |= words
+    return ", ".join(out)
+
+
 # The line a hidden amount goes on when no cost line can carry it.
 EXTRA_CBD_LABEL = "Engineering and handling"
 
@@ -169,13 +192,20 @@ def spread_cbd(lines: list[dict], hidden: float,
     return rows
 
 
-def _d(v) -> str:
+DATE_FORMATS = {"de": "%d.%m.%Y", "en": "%m/%d/%Y"}
+SHORT_DATE_FORMATS = {"de": "%d.%m.%y", "en": "%m/%d/%y"}
+
+
+def _d(v, loc: str = "de") -> str:
+    """A date in the offer's locale (number_locale): de 25.09.2026,
+    en 09/25/2026."""
     if v is None or v == "":
         return ""
+    fmt = DATE_FORMATS.get(loc, DATE_FORMATS["de"])
     if isinstance(v, date):
-        return v.strftime("%d.%m.%Y")
+        return v.strftime(fmt)
     try:
-        return date.fromisoformat(str(v)[:10]).strftime("%d.%m.%Y")
+        return date.fromisoformat(str(v)[:10]).strftime(fmt)
     except ValueError:
         return _clean(v)
 
@@ -419,11 +449,11 @@ def _axis(start: date, end: date, chart_w: float):
     return a0, a1, top, bottom, []
 
 
-def _chart_date(d: date | None) -> str:
-    return d.strftime("%d.%m.%y") if d else ""
+def _chart_date(d: date | None, loc: str = "de") -> str:
+    return d.strftime(SHORT_DATE_FORMATS.get(loc, SHORT_DATE_FORMATS["de"])) if d else ""
 
 
-def _plan_charts(tasks: list[dict], width: float) -> list[Drawing]:
+def _plan_charts(tasks: list[dict], width: float, loc: str = "de") -> list[Drawing]:
     """The quote plan in the KTX timing style: black header (calendar weeks
     and days, or months and weeks for a long plan), group rows per lane,
     grey bars, black milestone diamonds, weekends shaded. Split into drawings
@@ -507,7 +537,7 @@ def _plan_charts(tasks: list[dict], width: float) -> list[Drawing]:
             last = t["start"] if ms else date.fromordinal(
                 max(t["end"], date.fromordinal(t["start"].toordinal() + 1)).toordinal() - 1)
             for j, d in enumerate((t["start"], last)):
-                dwg.add(String(name_w + date_w * (j + 0.5), y + 1.35 * mm, _chart_date(d),
+                dwg.add(String(name_w + date_w * (j + 0.5), y + 1.35 * mm, _chart_date(d, loc),
                                fontName=FONT, fontSize=5.8, fillColor=BLACK,
                                textAnchor="middle"))
             if ms:
@@ -582,8 +612,14 @@ def render_offer_pdf(ctx: dict) -> bytes:
     watermark = WATERMARKS.get(offer.get("status") or "")
     number = f"{ctx['change_number']}-Q{offer['version']}"
     org = _clean(ctx.get("org_name"))
-    profile = {k: (_clean(v) if isinstance(v, str) else [_clean(x) for x in v])
-               for k, v in (ctx.get("company") or company_profile(org)).items()}
+    raw_profile = ctx.get("company")
+    if not isinstance(raw_profile, dict):
+        raw_profile = company_profile(org)
+    # A frozen profile is JSON from the database: anything but text or a
+    # list of text is treated as empty.
+    profile = {k: ([_clean(x) for x in v if isinstance(x, str)] if isinstance(v, list)
+                   else _clean(v) if isinstance(v, str) else "")
+               for k, v in raw_profile.items()}
     legal = profile.get("legal_name") or org
 
     styles = getSampleStyleSheet()
@@ -655,14 +691,13 @@ def render_offer_pdf(ctx: dict) -> bytes:
 
     # ---- Offer data strip ---------------------------------------------
     meta = [("Offer no.", number),
-            ("Date", _d(offer.get("sent_at") or date.today()))]
+            ("Date", _d(offer.get("sent_at") or date.today(), loc))]
     if offer.get("valid_until"):
-        meta.append(("Valid until", _d(offer["valid_until"])))
+        meta.append(("Valid until", _d(offer["valid_until"], loc)))
     meta.append(("Change", ctx["change_number"]))
     if offer.get("version", 1) >= 2:
         meta.append(("Version", str(offer["version"])))
-    issued = ", ".join(x for x in (org, plant_line(ctx.get("plant_name"),
-                                                   ctx.get("plant_location"))) if x)
+    issued = issued_by(org, ctx.get("plant_name"), ctx.get("plant_location"))
     if issued:
         meta.append(("Issued by", issued))
     if ctx.get("project_name"):
@@ -862,11 +897,11 @@ def render_offer_pdf(ctx: dict) -> bytes:
         ms = [m for m in timing.get("milestones") or [] if isinstance(m, dict)]
         if ms:
             rows = [[_p("Key milestone", head_c), _p("Planned", head_r)]]
-            rows += [[_p(m.get("label"), cell, CELL_TEXT_MAX), _p(_d(m.get("date")), cell_r)]
+            rows += [[_p(m.get("label"), cell, CELL_TEXT_MAX), _p(_d(m.get("date"), loc), cell_r)]
                      for m in ms]
             first += [Spacer(1, 2.5 * mm), table(rows, [width * 0.75, width * 0.25])]
         tasks = ctx.get("tasks") or []
-        charts = _plan_charts(tasks, width)
+        charts = _plan_charts(tasks, width, loc)
         chart_head = ([Spacer(1, 4 * mm), _p("Draft plan", cell_b), Spacer(1, 1 * mm),
                        charts[0]] if charts else [])
         if ms or not charts:
@@ -911,7 +946,7 @@ def render_offer_pdf(ctx: dict) -> bytes:
             rows.append([_p(label, cell_b), _p(terms[key], cell, CELL_TEXT_MAX)])
     validity = "This offer is valid for 30 days from receipt"
     if offer.get("valid_until"):
-        validity += f" (until {_d(offer['valid_until'])})"
+        validity += f" (until {_d(offer['valid_until'], loc)})"
     rows.append([_p("Validity", cell_b), _p(validity + ".", cell)])
     for ff in data.get("free_fields") or []:
         if (isinstance(ff, dict) and not _f(ff.get("amount"))
