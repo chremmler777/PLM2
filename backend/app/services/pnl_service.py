@@ -88,23 +88,7 @@ class PnlService:
         from app.models.entities import Plant
         plant_info = {pid: (org, cur or "EUR") for pid, org, cur in (await session.execute(
             select(Plant.id, Plant.organization_id, Plant.currency))).all()}
-        cost_rows = (await session.execute(
-            select(ChangeAssessment.change_id, AssessmentCostLine.currency,
-                   AssessmentCostLine.plant_id,
-                   func.coalesce(func.sum(AssessmentCostLine.internal_cost), 0.0),
-                   func.coalesce(func.sum(AssessmentCostLine.external_cost), 0.0))
-            .select_from(AssessmentCostLine)
-            .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
-            .where(ChangeAssessment.change_id.in_(change_ids))
-            .group_by(ChangeAssessment.change_id, AssessmentCostLine.currency,
-                      AssessmentCostLine.plant_id)
-        )).all()
-        line_costs: dict[int, dict[str, list]] = {}
-        for cid, cur, pid, internal, external in cost_rows:
-            cur = cur or (plant_info.get(pid) or (None, "EUR"))[1]
-            bucket = line_costs.setdefault(cid, {}).setdefault(cur, [0.0, 0.0])
-            bucket[0] += internal or 0.0
-            bucket[1] += external or 0.0
+        line_costs = await PnlService.cost_lines_by_currency(session, change_ids, plant_info)
 
         if plant_id is not None:
             plant_change_ids = set((await session.execute(
@@ -207,6 +191,136 @@ class PnlService:
         return rows
 
     @staticmethod
+    async def cost_lines_by_currency(
+        session, change_ids: list[int], plant_info: Optional[dict] = None,
+    ) -> dict[int, dict[str, tuple[float, float]]]:
+        """Assessment cost line internal/external totals per change, grouped
+        by the line's own currency (falling back to its plant's currency) -
+        never added across currencies (spec §15 phase 2, no FX). The shared
+        cost-line half of the P&L's cost basis; ReportService.cost() reuses
+        this so the report and the P&L never disagree about what a change's
+        cost lines add up to."""
+        if not change_ids:
+            return {}
+        if plant_info is None:
+            from app.models.entities import Plant
+            plant_info = {pid: (org, cur or "EUR") for pid, org, cur in (await session.execute(
+                select(Plant.id, Plant.organization_id, Plant.currency))).all()}
+        cost_rows = (await session.execute(
+            select(ChangeAssessment.change_id, AssessmentCostLine.currency,
+                   AssessmentCostLine.plant_id,
+                   func.coalesce(func.sum(AssessmentCostLine.internal_cost), 0.0),
+                   func.coalesce(func.sum(AssessmentCostLine.external_cost), 0.0))
+            .select_from(AssessmentCostLine)
+            .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
+            .where(ChangeAssessment.change_id.in_(change_ids))
+            .group_by(ChangeAssessment.change_id, AssessmentCostLine.currency,
+                      AssessmentCostLine.plant_id)
+        )).all()
+        line_costs: dict[int, dict[str, list]] = {}
+        for cid, cur, pid, internal, external in cost_rows:
+            cur = cur or (plant_info.get(pid) or (None, "EUR"))[1]
+            bucket = line_costs.setdefault(cid, {}).setdefault(cur, [0.0, 0.0])
+            bucket[0] += internal or 0.0
+            bucket[1] += external or 0.0
+        return line_costs
+
+    @staticmethod
+    async def positions_cost(
+        session, changes, ctx: dict,
+    ) -> tuple[dict[int, list], set[int]]:
+        """Costing position internal/external totals per change, in each
+        change's costing currency only (a position priced in another
+        currency is left out entirely, same as everywhere else in the P&L -
+        no FX): quoted/estimated cost by kind, plus the position's own hours
+        priced live from `ctx["book"]` where there is no stored snapshot.
+        Returns (pos_cost, no_rate) - no_rate is the set of change ids that
+        have a position whose hours could not be priced at all."""
+        from app.models.change import ChangeImpactedItem
+        from app.models.change_cost import CostingPosition
+        from app.models.part import Part
+        from app.services import costing_rates
+        book = ctx["book"]
+        ids = [c.id for c in changes]
+        by_id = {c.id: c for c in changes}
+        pos_cost: dict[int, list] = {}
+        no_rate: set[int] = set()
+        tonnage: Optional[dict[int, float]] = None
+
+        async def change_class(c) -> Optional[int]:
+            """The change's own class, else its tonnage default: one grouped
+            query for every change, the classes from the book."""
+            nonlocal tonnage
+            if getattr(c, "machine_class_id", None):
+                return c.machine_class_id
+            if tonnage is None:
+                tonnage = {cid: t for cid, t in (await session.execute(
+                    select(ChangeImpactedItem.change_id, func.max(Part.tool_tonnage_class))
+                    .join(Part, Part.id == ChangeImpactedItem.part_id)
+                    .where(ChangeImpactedItem.change_id.in_(ids),
+                           Part.tool_tonnage_class.is_not(None))
+                    .group_by(ChangeImpactedItem.change_id))).all()}
+            return await book.class_for_tonnage(ctx["org"][c.id], tonnage.get(c.id))
+        for p in (await session.execute(select(CostingPosition).where(
+                CostingPosition.change_id.in_(ids)))).scalars().all():
+            cid = p.change_id
+            cur = ctx["currency"][cid]
+            bucket = pos_cost.setdefault(cid, [0.0, 0.0])
+            if (p.currency or cur) == cur:
+                bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
+            price = costing_rates.stored_price(p)
+            if price is None and costing_rates.quantity(p):
+                if p.kind in ("machine_time", "sampling"):
+                    cls = p.machine_class_id or await change_class(by_id[cid])
+                    fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
+                    price = await fn(ctx["org"][cid], cls, ctx["plant"][cid])
+                else:
+                    price = await book.labour_price(ctx["org"][cid], p.department_id,
+                                                    ctx["plant"][cid], p.labour_position)
+            if price is None:
+                continue
+            value = costing_rates.line_value(p, price)
+            if value is None:
+                no_rate.add(cid)
+            elif price.currency == cur:
+                bucket[0] += value
+        return pos_cost, no_rate
+
+    @staticmethod
+    async def cost_basis_by_currency(
+        session, changes,
+    ) -> tuple[dict[int, dict[str, tuple[float, float]]], dict[int, Optional[int]]]:
+        """Per change: (internal, external) cost totals by currency - exactly
+        the P&L's cost basis (assessment cost lines, all their currencies,
+        plus costing positions in the costing currency), reused so a cost
+        roll-up and the P&L list never disagree about what a change costs.
+        Returns (basis, plant_of) - plant_of is each change's costing plant
+        (ctx["plant"]), for a caller that also wants a per-plant view."""
+        if not changes:
+            return {}, {}
+        from app.models.entities import Plant
+        plant_info = {pid: (org, cur or "EUR") for pid, org, cur in (await session.execute(
+            select(Plant.id, Plant.organization_id, Plant.currency))).all()}
+        ctx = await PnlService._portfolio_context(session, changes, plant_info)
+        change_ids = [c.id for c in changes]
+        line_costs = await PnlService.cost_lines_by_currency(session, change_ids, plant_info)
+        pos_cost, _no_rate = await PnlService.positions_cost(session, changes, ctx)
+        out: dict[int, dict[str, list]] = {
+            cid: {cur: [i, e] for cur, (i, e) in by_cur.items()}
+            for cid, by_cur in line_costs.items()
+        }
+        for cid, (pi, pe) in pos_cost.items():
+            if not pi and not pe:
+                continue
+            cur = ctx["currency"][cid]
+            bucket = out.setdefault(cid, {}).setdefault(cur, [0.0, 0.0])
+            bucket[0] += pi
+            bucket[1] += pe
+        basis = {cid: {cur: (i, e) for cur, (i, e) in by_cur.items()}
+                 for cid, by_cur in out.items()}
+        return basis, ctx["plant"]
+
+    @staticmethod
     async def _portfolio_context(session, changes, plant_info: dict) -> dict:
         """Per change of the list: its costing plant, organisation and
         currency, resolved with two grouped queries, plus the request's
@@ -301,50 +415,7 @@ class PnlService:
         # costing positions belong to the plan exactly as in the summation:
         # quoted cost by kind, their own hours at the rate snapshot (priced
         # live, from the same book, where there is none)
-        from app.models.change_cost import CostingPosition
-        pos_cost: dict[int, list] = {}
-        no_rate: set[int] = set()
-        tonnage: Optional[dict[int, float]] = None
-
-        async def change_class(c) -> Optional[int]:
-            """The change's own class, else its tonnage default: one grouped
-            query for every change, the classes from the book."""
-            nonlocal tonnage
-            if getattr(c, "machine_class_id", None):
-                return c.machine_class_id
-            if tonnage is None:
-                from app.models.change import ChangeImpactedItem
-                from app.models.part import Part
-                tonnage = {cid: t for cid, t in (await session.execute(
-                    select(ChangeImpactedItem.change_id, func.max(Part.tool_tonnage_class))
-                    .join(Part, Part.id == ChangeImpactedItem.part_id)
-                    .where(ChangeImpactedItem.change_id.in_(ids),
-                           Part.tool_tonnage_class.is_not(None))
-                    .group_by(ChangeImpactedItem.change_id))).all()}
-            return await book.class_for_tonnage(ctx["org"][c.id], tonnage.get(c.id))
-        for p in (await session.execute(select(CostingPosition).where(
-                CostingPosition.change_id.in_(ids)))).scalars().all():
-            cid = p.change_id
-            cur = ctx["currency"][cid]
-            bucket = pos_cost.setdefault(cid, [0.0, 0.0])
-            if (p.currency or cur) == cur:
-                bucket[1 if p.kind == "external" else 0] += float(p.quoted_cost or 0.0)
-            price = costing_rates.stored_price(p)
-            if price is None and costing_rates.quantity(p):
-                if p.kind in ("machine_time", "sampling"):
-                    cls = p.machine_class_id or await change_class(by_id[cid])
-                    fn = book.machine_price if p.kind == "machine_time" else book.sampling_price
-                    price = await fn(ctx["org"][cid], cls, ctx["plant"][cid])
-                else:
-                    price = await book.labour_price(ctx["org"][cid], p.department_id,
-                                                    ctx["plant"][cid], p.labour_position)
-            if price is None:
-                continue
-            value = costing_rates.line_value(p, price)
-            if value is None:
-                no_rate.add(cid)
-            elif price.currency == cur:
-                bucket[0] += value
+        pos_cost, no_rate = await PnlService.positions_cost(session, changes, ctx)
 
         extra = await PnlService.actual_cost_sums(session, ids)
         issues = await PnlService.issue_costs(session, ids)

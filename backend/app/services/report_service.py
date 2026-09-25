@@ -15,10 +15,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.change import (
-    ChangeAssessment, ChangeRequest, CHANGE_STATUSES, TERMINAL_STATUSES,
-)
-from app.models.change_cost import AssessmentCostLine
+from app.models.change import ChangeRequest, CHANGE_STATUSES, TERMINAL_STATUSES
 from app.models.entities import AuditLog, Plant, Project, User
 from app.services.change_service import ChangeService, _org_scope
 
@@ -211,8 +208,8 @@ class ReportService:
 
     @staticmethod
     async def cost(session: AsyncSession, viewer: Optional[User]) -> dict:
+        from app.services.pnl_service import PnlService
         from app.services.price_redaction import price_scope
-        cost_expr = AssessmentCostLine.internal_cost + AssessmentCostLine.external_cost
 
         # Budgets and costs are money: only the changes whose prices the
         # viewer may read (price_redaction.price_scope) are rolled up.
@@ -224,45 +221,87 @@ class ReportService:
             .group_by(ChangeRequest.project_id),
         ))).all()
 
-        actual_rows = (await session.execute(await _scope(
-            select(ChangeRequest.project_id, func.sum(cost_expr))
-            .select_from(AssessmentCostLine)
-            .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
-            .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
-            .group_by(ChangeRequest.project_id),
-        ))).all()
+        # Same cost basis as the P&L list (PnlService.changes_pnl): assessment
+        # cost lines plus costing positions, in the costing currency, never
+        # summed across currencies. cost_basis_by_currency is the P&L's own
+        # helper, so this report and the P&L can never disagree about what a
+        # change costs.
+        changes = (await session.execute(await _scope(select(ChangeRequest)))).scalars().all()
+        basis, plant_of = await PnlService.cost_basis_by_currency(session, changes)
 
-        project_ids = {pid for pid, _ in (*budget_rows, *actual_rows) if pid is not None}
+        project_of = {c.id: c.project_id for c in changes}
+        project_ids = {pid for pid, _ in budget_rows if pid is not None} \
+            | {project_of[cid] for cid in basis if project_of.get(cid) is not None}
         names: dict[int, str] = {}
         if project_ids:
             names = dict((await session.execute(
                 select(Project.id, Project.name).where(Project.id.in_(project_ids))
             )).all())
 
+        # --- projects ---
         merged: dict[int, dict] = {}
         for pid, budget in budget_rows:
             if pid is None:
                 continue
             merged.setdefault(pid, {"project_id": pid, "name": names.get(pid, ""),
-                                     "budget": 0.0, "actual": 0.0})
+                                     "budget": 0.0, "actual": 0.0, "currency": None,
+                                     "actual_by_currency": {}, "mixed_currency": False})
             merged[pid]["budget"] = budget or 0.0
-        for pid, actual in actual_rows:
+        for cid, by_cur in basis.items():
+            pid = project_of.get(cid)
             if pid is None:
                 continue
-            merged.setdefault(pid, {"project_id": pid, "name": names.get(pid, ""),
-                                     "budget": 0.0, "actual": 0.0})
-            merged[pid]["actual"] = actual or 0.0
+            row = merged.setdefault(pid, {"project_id": pid, "name": names.get(pid, ""),
+                                          "budget": 0.0, "actual": 0.0, "currency": None,
+                                          "actual_by_currency": {}, "mixed_currency": False})
+            for cur, (internal, external) in by_cur.items():
+                row["actual_by_currency"][cur] = (
+                    row["actual_by_currency"].get(cur, 0.0) + (internal or 0.0) + (external or 0.0))
+        for row in merged.values():
+            ReportService._finish_actual(row)
         projects = list(merged.values())
 
-        plant_rows = (await session.execute(await _scope(
-            select(AssessmentCostLine.plant_id, Plant.name, func.sum(cost_expr))
-            .select_from(AssessmentCostLine)
-            .join(ChangeAssessment, ChangeAssessment.id == AssessmentCostLine.assessment_id)
-            .join(ChangeRequest, ChangeRequest.id == ChangeAssessment.change_id)
-            .join(Plant, Plant.id == AssessmentCostLine.plant_id)
-            .group_by(AssessmentCostLine.plant_id, Plant.name),
-        ))).all()
-        plants = [{"plant_id": pid, "name": name, "actual": actual or 0.0}
-                  for pid, name, actual in plant_rows]
+        # --- plants: attributed to each change's costing plant (the same
+        # plant the P&L prices it at - PnlService._portfolio_context), not
+        # to a cost line's own plant_id as before. A costing position has no
+        # plant of its own, so once positions are part of the basis there is
+        # no per-line plant left to attribute them to; the costing plant is
+        # the one place both cost lines and positions agree on. ---
+        plant_merged: dict[int, dict] = {}
+        for cid, by_cur in basis.items():
+            pid = plant_of.get(cid)
+            if pid is None:
+                continue
+            row = plant_merged.setdefault(pid, {"plant_id": pid, "name": "",
+                                                "actual": 0.0, "currency": None,
+                                                "actual_by_currency": {}, "mixed_currency": False})
+            for cur, (internal, external) in by_cur.items():
+                row["actual_by_currency"][cur] = (
+                    row["actual_by_currency"].get(cur, 0.0) + (internal or 0.0) + (external or 0.0))
+        plant_ids = set(plant_merged)
+        if plant_ids:
+            plant_names = dict((await session.execute(
+                select(Plant.id, Plant.name).where(Plant.id.in_(plant_ids))
+            )).all())
+            for pid, row in plant_merged.items():
+                row["name"] = plant_names.get(pid, "")
+        for row in plant_merged.values():
+            ReportService._finish_actual(row)
+        plants = list(plant_merged.values())
 
         return {"projects": projects, "plants": plants}
+
+    @staticmethod
+    def _finish_actual(row: dict) -> None:
+        """Fill `actual`/`currency` from `actual_by_currency`: the single
+        number and its currency when there is only one, else the largest
+        currency's total (best-effort, for callers still reading the old
+        scalar field) with `mixed_currency` raised so a caller that cares
+        can fall back to the accurate `actual_by_currency` breakdown."""
+        by_cur = row["actual_by_currency"]
+        if not by_cur:
+            return
+        row["mixed_currency"] = len(by_cur) > 1
+        primary = max(by_cur, key=lambda c: abs(by_cur[c]))
+        row["currency"] = primary
+        row["actual"] = by_cur[primary]
