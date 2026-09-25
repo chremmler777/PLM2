@@ -22,6 +22,7 @@ import LifecycleStepper from '../components/changes/LifecycleStepper';
 import CockpitSummary from '../components/changes/CockpitSummary';
 import TransitionConfirmDialog, { type TransitionConfirm } from '../components/changes/TransitionConfirmDialog';
 import { changeReleaseApi } from '../api/changeRelease';
+import { validationIssuesApi, validationIssuesKey } from '../api/validationIssues';
 import { releaseKey } from '../components/changes/release/releaseKeys';
 import PnlCard from '../components/changes/PnlCard';
 import ScopingPanel from '../components/changes/ScopingPanel';
@@ -159,6 +160,12 @@ export default function ChangeDetailPage() {
     enabled: tracking && !!change?.timing_validated_at,
   });
   const openPlanDeviations = planDeviations.filter((d) => d.status === 'open').length;
+  // Open validation issues hold the release and name their escalation level.
+  const { data: validationIssues = [] } = useQuery({
+    queryKey: validationIssuesKey(changeId),
+    queryFn: () => validationIssuesApi.list(changeId),
+    enabled: !!change && ['in_validation', 'in_implementation'].includes(change.status),
+  });
   // The release guard's reasons (same key as the Release tab).
   const { data: releaseState } = useQuery({
     queryKey: releaseKey(changeId),
@@ -504,7 +511,7 @@ export default function ChangeDetailPage() {
         waits={resolveWaitStates(change, concerns, deptName, change.assessments,
           { state: implState, escalations: implEscalations }, validation,
           change.status === 'approved' ? planFeedback : null,
-          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null })}
+          { openPlanDeviations, releaseBlockers: releaseState?.blockers ?? null, validationIssues })}
         onGo={goTab}
         needs={needs}
       />
@@ -601,6 +608,7 @@ export default function ChangeDetailPage() {
           myDepartmentIds={myActions?.memberships ?? []}
           canSeeAll={canSeeCosts} canAcknowledge={canPublishPlan}
           canManage={canManageRelease}
+          viewerId={actingAs ? null : userId} isAdmin={isAdmin} isSales={isSalesMember}
           onAdvance={advance} advancing={transition.isPending} />
       )}
 

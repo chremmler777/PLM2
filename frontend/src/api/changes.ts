@@ -100,6 +100,7 @@ export const changesApi = {
     opts?: {
       kind?: AttachmentKind; respondsToId?: number;
       concernId?: number; assessmentId?: number; costingOfferId?: number;
+      validationIssueId?: number;
     },
   ) => {
     const fd = new FormData();
@@ -114,6 +115,8 @@ export const changesApi = {
     if (opts?.assessmentId !== undefined) fd.append('assessment_id', String(opts.assessmentId));
     // A vendor quote belongs to the offer it prices, not to the change at large.
     if (opts?.costingOfferId !== undefined) fd.append('costing_offer_id', String(opts.costingOfferId));
+    // Evidence and customer mails filed into one validation issue.
+    if (opts?.validationIssueId !== undefined) fd.append('validation_issue_id', String(opts.validationIssueId));
     // The client sets a global Content-Type: application/json default; it must
     // be cleared here so the browser sets multipart/form-data WITH its boundary.
     // Otherwise FastAPI can't find the `file` field and returns 422.

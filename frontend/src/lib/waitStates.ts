@@ -11,6 +11,9 @@ import { t } from '../i18n/cmLabels'
 import type {
   Assessment, ChangeConcern, ChangeRequest, ImplDepartmentState, ValidationState,
 } from '../types/change'
+import type { IssueOut } from '../types/validationIssue'
+import { isIssueOpen, issueCode } from '../types/validationIssue'
+import { formatDate } from './format'
 
 /** The slice of GET /plan/feedback the waits need. */
 export interface PlanFeedbackLite {
@@ -27,6 +30,65 @@ export interface WaitState {
   tab?: 'overview' | 'scoping' | 'impacted' | 'assessments' | 'costing' | 'offer' | 'timing' | 'release'
   /** Worth knowing, not holding anything up yet (shown muted). */
   info?: boolean
+  /** An escalation line: 2 amber, 3 rose. */
+  level?: 1 | 2 | 3
+}
+
+/** The slice of a validation issue the waits need. */
+export type IssueLite = Pick<IssueOut, 'id' | 'number' | 'title' | 'status' | 'severity'
+  | 'escalation_level' | 'escalations' | 'customer_inform' | 'customer_decision' | 'customer_decided_at'
+  | 'attachments' | 'department_name'>
+
+const STATUS_WORDS: Record<IssueOut['status'], string> = {
+  open: 'open', contained: 'contained', route_decided: 'route decided', fixing: 'fixing',
+  revalidation: 're-validation', closed: 'closed', accepted: 'accepted', transferred: 'transferred',
+}
+
+const dayMonth = (iso?: string | null) => (iso ? formatDate(iso).slice(0, 5) : '')
+
+/**
+ * Open validation issues as waits: the highest escalation level first
+ * ("Escalation L3: VI-2 Tool cannot run, customer informed 25.09"), then one
+ * line per open issue (more than three fold into one line).
+ */
+export function issueWaits(issues: IssueLite[]): WaitState[] {
+  const open = issues.filter(isIssueOpen)
+  if (open.length === 0) return []
+  const waits: WaitState[] = []
+  const level = (i: IssueLite) => i.escalation_level ?? 1
+  const top = [...open].sort((a, b) => level(b) - level(a) || b.severity - a.severity || a.number - b.number)[0]
+  if (level(top) >= 2) {
+    const mails = (top.attachments ?? []).filter((a) => a.kind === 'customer_email')
+      .map((a) => a.created_at).sort()
+    const lastEsc = [...(top.escalations ?? [])].filter((e) => e.level === level(top))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+    const tail = top.customer_decided_at ? `customer decided ${dayMonth(top.customer_decided_at)}`
+      : mails.length ? `customer informed ${dayMonth(mails[mails.length - 1])}`
+        : lastEsc ? `since ${dayMonth(lastEsc.created_at)}${lastEsc.acknowledged_at ? '' : ', not acknowledged'}`
+          : ''
+    waits.push({
+      key: 'issue-escalation',
+      text: `Escalation L${level(top)}: ${issueCode(top)} ${top.title}${tail ? `, ${tail}` : ''}`,
+      tab: 'release',
+      level: level(top) as 2 | 3,
+    })
+  }
+  if (open.length > 3) {
+    waits.push({
+      key: 'validation-issues',
+      text: `${open.length} validation issues open: ${open.map(issueCode).join(', ')}`,
+      tab: 'release',
+    })
+  } else {
+    for (const i of open) {
+      waits.push({
+        key: `validation-issue-${i.id}`,
+        text: `${issueCode(i)} open: ${excerpt(i.title, 60)} (${STATUS_WORDS[i.status]})`,
+        tab: 'release',
+      })
+    }
+  }
+  return waits
 }
 
 /** Long reasons are a banner, not an essay. */
@@ -107,7 +169,11 @@ export function resolveWaitStates(
    * blocker at release), and at validation the release guard's own reasons
    * (GET /release blockers) in its words.
    */
-  more: { openPlanDeviations?: number; releaseBlockers?: string[] | null } = {},
+  more: {
+    openPlanDeviations?: number; releaseBlockers?: string[] | null
+    /** GET /validation/issues: open ones block the release (spec §12). */
+    validationIssues?: IssueLite[] | null
+  } = {},
 ): WaitState[] {
   const waits: WaitState[] = []
   const releaseBlockers = change.status === 'in_validation' ? more.releaseBlockers ?? null : null
@@ -255,6 +321,12 @@ export function resolveWaitStates(
     }
   }
 
+  // Validation issues: open ones hold the release, and the loop back keeps
+  // them alive while the fix is implemented.
+  const issueLines = ['in_validation', 'in_implementation'].includes(change.status)
+    ? issueWaits(more.validationIssues ?? []) : []
+  waits.push(...issueLines)
+
   // Open plan deviations: PM/Sales lock or escalate them. Worth knowing while
   // the work runs; at validation the release guard names them itself.
   const devs = more.openPlanDeviations ?? 0
@@ -279,6 +351,8 @@ export function resolveWaitStates(
   if (releaseBlockers) {
     releaseBlockers.forEach((b, i) => {
       if (/^validation (incomplete|failed)/i.test(b) && waits.some((w) => w.key === 'validation-checks')) return
+      // The issues are listed one by one above.
+      if (/validation issue|\bVI-\d+/i.test(b) && issueLines.length > 0) return
       waits.push({
         key: `release-${i}`,
         text: b,

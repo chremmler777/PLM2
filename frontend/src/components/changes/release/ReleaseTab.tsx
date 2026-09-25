@@ -19,6 +19,8 @@ import { fmtDate, sectionLabel } from '../offer/offerFormat'
 import ReleaseChecklist from './ReleaseChecklist'
 import { releaseKey } from './releaseKeys'
 import LessonsStep from './LessonsStep'
+import IssuesPanel, { issueBlockers, useValidationIssues } from '../validation/IssuesPanel'
+import { isIssueOpen } from '../../../types/validationIssue'
 
 export interface ReleaseTabProps {
   change: ChangeDetail
@@ -30,6 +32,20 @@ export interface ReleaseTabProps {
   canManage: boolean
   onAdvance: (to: string) => void
   advancing: boolean
+  /** The viewer, for the 4-eyes rule on the route of an issue they raised. */
+  viewerId?: number | null
+  isAdmin?: boolean
+  /** Sales records the customer's decision on validation issues. */
+  isSales?: boolean
+}
+
+/**
+ * The release guard's blockers plus one line per open validation issue,
+ * unless the guard already names the issues itself.
+ */
+export function releaseBlockers(guard: string[], issues: Parameters<typeof issueBlockers>[0]): string[] {
+  const named = guard.some((b) => /validation issue|\bVI-\d+/i.test(b))
+  return named ? guard : [...issueBlockers(issues), ...guard]
 }
 
 const AFTER: string[] = ['released', 'closed']
@@ -133,6 +149,7 @@ function Collapsible({ title, children, testId }: { title: string; children: Rea
 
 export default function ReleaseTab({
   change, departments, myDepartmentIds, canSeeAll, canAcknowledge, canManage, onAdvance, advancing,
+  viewerId = null, isAdmin = false, isSales = false,
 }: ReleaseTabProps) {
   const { data: release } = useQuery({
     queryKey: releaseKey(change.id),
@@ -142,10 +159,12 @@ export default function ReleaseTab({
     queryKey: ['change', change.id, 'validation'],
     queryFn: () => changesApi.validationState(change.id),
   })
+  const { data: issues = [] } = useValidationIssues(change.id)
   const inValidation = change.status === 'in_validation'
   const after = AFTER.includes(change.status)
+  const openIssues = issues.filter(isIssueOpen).length
 
-  const validationDone = after || ((validation?.departments?.length ?? 0) > 0
+  const validationDone = after || ((validation?.departments?.length ?? 0) > 0 && openIssues === 0
     && (validation?.departments ?? []).every((d) => d.checks.every((c) => c.retired || c.status === 'passed')))
   const checklistDone = after || (!!release && release.checks.length > 0 && release.open_count === 0)
   const lessonsDone = !!release?.lessons?.done_at
@@ -157,7 +176,7 @@ export default function ReleaseTab({
     ['Lessons learned', lessonsDone, 'release-lessons'],
     ['Release & close', releasedDone, 'release-final'],
   ]
-  const blockers = release?.blockers ?? []
+  const blockers = releaseBlockers(release?.blockers ?? [], issues)
 
   return (
     <div className="space-y-4">
@@ -187,10 +206,20 @@ export default function ReleaseTab({
 
       {after && <ClosingSummary change={change} departments={departments} />}
 
-      <StepSection id="release-validation" n={1} title="Validation checks" done={validationDone}>
+      <StepSection id="release-validation" n={1} title="Validation checks" done={validationDone}
+        right={openIssues > 0 ? (
+          <span data-testid="release-validation-issues" className="text-xs text-amber-300">
+            {openIssues} issue{openIssues === 1 ? '' : 's'} open
+          </span>
+        ) : undefined}>
+        <IssuesPanel changeId={change.id} changeStatus={change.status} departments={departments}
+          viewer={{ id: viewerId, isAdmin, canManage, isSales, canSeeCosts: canSeeAll, myDepartmentIds }}
+          canRaise={canManage || (validation?.departments ?? []).some((d) => myDepartmentIds.includes(d.department_id))}
+          releaseDueDate={change.release_due_date} />
         <ValidationPanel changeId={change.id} status={change.status}
           departments={departments} myDepartmentIds={myDepartmentIds}
-          canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll} />
+          canSeeAll={canSeeAll} canAcknowledge={canAcknowledge} canEscalate={canSeeAll}
+          canRaiseAny={canManage} />
       </StepSection>
 
       <StepSection id="release-checklist" n={2} title="Release checklist" done={checklistDone}

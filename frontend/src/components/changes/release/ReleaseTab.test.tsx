@@ -6,6 +6,7 @@ import ReleaseChecklist from './ReleaseChecklist'
 import LessonsStep from './LessonsStep'
 import { changeReleaseApi } from '../../../api/changeRelease'
 import { changesApi } from '../../../api/changes'
+import { validationIssuesApi } from '../../../api/validationIssues'
 import type { ChangeDetail } from '../../../types/change'
 import type { ReleaseCheck, ReleaseState } from '../../../types/changeRelease'
 
@@ -30,6 +31,10 @@ vi.mock('../../../api/changePlan', () => ({
       summary: { finish: '2026-10-14' },
     }),
   },
+}))
+vi.mock('../../../api/validationIssues', () => ({
+  validationIssuesKey: (id: number) => ['change', id, 'validation-issues'],
+  validationIssuesApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 vi.mock('../ValidationPanel', () => ({ default: () => <div>mock-validation</div> }))
 vi.mock('../ImplementationPanel', () => ({ default: () => <div>mock-ecn</div> }))
@@ -155,6 +160,25 @@ describe('ReleaseTab', () => {
     // The page's advance runs the transition; a refusal opens its DeviationBanner.
     fireEvent.click(btn)
     expect(onAdvance).toHaveBeenCalledWith('released')
+  })
+
+  it('open validation issues join the release blockers and hold the validation step', async () => {
+    vi.mocked(changeReleaseApi.get).mockResolvedValue(state())
+    vi.mocked(changesApi.validationState).mockResolvedValue({ departments: [{ department_id: 4, checks: [
+      { check_key: 'sampled', status: 'passed' }] }] } as never)
+    vi.mocked(validationIssuesApi.list).mockResolvedValueOnce([{
+      id: 11, change_id: 7, number: 2, title: 'Tool cannot run', category: 'tool', severity: 3,
+      description: 'x', status: 'fixing', created_by: 1, created_at: '2026-09-24T08:00:00',
+      actions: [], attachments: [], escalation_level: 2,
+    }] as never)
+    wrap(<ReleaseTab change={change()} departments={[]} myDepartmentIds={[]} canSeeAll canAcknowledge
+      canManage onAdvance={vi.fn()} advancing={false} />)
+    await waitFor(() => expect(screen.getByTestId('release-blockers').textContent)
+      .toContain('VI-2 open: Tool cannot run (fixing)'))
+    expect(screen.getByTestId('release-blockers').textContent).toContain('Release checklist incomplete')
+    expect(screen.getByTestId('release-validation-issues').textContent).toBe('1 issue open')
+    expect(screen.getByTestId('issue-card-11')).toBeDefined()
+    expect(screen.getByRole('link', { name: /Validation checks/ }).className).not.toContain('border-emerald-800')
   })
 
   it('counts validation done with only a retired row still open', async () => {

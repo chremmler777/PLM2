@@ -132,6 +132,8 @@ export interface Attachment {
   assessment_id?: number | null;
   /** The vendor offer this quote document belongs to. */
   costing_offer_id?: number | null;
+  /** The validation issue this evidence or customer mail is filed into. */
+  validation_issue_id?: number | null;
   created_at: string;
   /** Who put the file on the record — optional until every endpoint sends it. */
   uploaded_by?: number | null;

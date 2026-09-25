@@ -28,6 +28,10 @@ import type {
   ValidationCheck, ValidationDepartmentState, ValidationState,
 } from '../../types/change'
 import { formatDate } from '../../lib/format'
+import type { IssueOut } from '../../types/validationIssue'
+import { isIssueOpen, issueCode } from '../../types/validationIssue'
+import RaiseIssueDialog, { type RaisePrefill } from './validation/RaiseIssueDialog'
+import { RAISE_STATUSES, useValidationIssues } from './validation/IssuesPanel'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -69,8 +73,13 @@ export const departmentOpenChecks = (d: ValidationDepartmentState): number =>
 export const weightAckOutstanding = (state?: ValidationState | null): boolean =>
   !!state && (state.weight_delta_g ?? 0) !== 0 && !state.weight_ack_at
 
+/** The open issue raised from this failed check, if any (one per check). */
+export const openIssueForCheck = (issues: IssueOut[], deptId: number, key: string): IssueOut | undefined =>
+  issues.find((i) => isIssueOpen(i) && i.check_key === key
+    && (i.check_department_id ?? i.department_id) === deptId)
+
 function CheckRow({
-  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG,
+  changeId, deptId, check, editable, mine, plannedCycleMin, weightEstimateG, openIssue, onRaise,
 }: {
   changeId: number
   deptId: number
@@ -79,6 +88,10 @@ function CheckRow({
   mine: boolean
   plannedCycleMin?: number | null
   weightEstimateG?: number | null
+  /** The open issue this failed check already has. */
+  openIssue?: IssueOut
+  /** Offered on a failed check without an open issue, to those who may raise. */
+  onRaise?: () => void
 }) {
   const qc = useQueryClient()
   const key = String(check.check_key)
@@ -132,6 +145,22 @@ function CheckRow({
               .replace('{who}', check.checked_by_name ?? '-')
               .replace('{d}', onDay(check.checked_at))}
           </span>
+        )}
+        {check.status === 'failed' && openIssue && (
+          <a href={`#issue-${openIssue.id}`} data-testid={`validation-issue-link-${id}`}
+            onClick={(e) => {
+              e.preventDefault()
+              document.querySelector(`[data-testid="issue-card-${openIssue.id}"]`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+            }}
+            className="ml-auto rounded border border-amber-800 bg-amber-950/40 px-1.5 py-0 text-[10px] leading-tight text-amber-200 hover:bg-amber-950/70">
+            {issueCode(openIssue)} open
+          </a>
+        )}
+        {check.status === 'failed' && !openIssue && onRaise && (
+          <button type="button" data-testid={`validation-raise-${id}`} onClick={onRaise}
+            className="ml-auto rounded border border-rose-800 px-2 py-0.5 text-[11px] text-rose-200 hover:bg-rose-950/50">
+            Raise issue
+          </button>
         )}
       </div>
 
@@ -233,7 +262,7 @@ function CheckRow({
 }
 
 function DepartmentBlock({
-  changeId, dept, name, mine, editable, state,
+  changeId, dept, name, mine, editable, state, issues, onRaise,
 }: {
   changeId: number
   dept: ValidationDepartmentState
@@ -241,6 +270,8 @@ function DepartmentBlock({
   mine: boolean
   editable: boolean
   state: ValidationState
+  issues: IssueOut[]
+  onRaise?: (p: RaisePrefill) => void
 }) {
   const open = departmentOpenChecks(dept)
   return (
@@ -264,7 +295,15 @@ function DepartmentBlock({
           <CheckRow key={String(c.check_key)} changeId={changeId}
             deptId={dept.department_id} check={c} editable={editable} mine={mine}
             plannedCycleMin={state.planned_cycle_time_min_per_part}
-            weightEstimateG={state.weight_estimate_g} />
+            weightEstimateG={state.weight_estimate_g}
+            openIssue={openIssueForCheck(issues, dept.department_id, String(c.check_key))}
+            onRaise={onRaise ? () => onRaise({
+              checkKey: String(c.check_key),
+              checkId: (c as ValidationCheck & { id?: number | null }).id ?? null,
+              checkLabel: checkLabel(String(c.check_key), c.label_en),
+              departmentId: dept.department_id,
+              note: c.note,
+            }) : undefined} />
         ))}
       </ul>
     </section>
@@ -273,7 +312,7 @@ function DepartmentBlock({
 
 export default function ValidationPanel({
   changeId, status, departments, myDepartmentIds, canSeeAll,
-  canAcknowledge = false, canEscalate = false,
+  canAcknowledge = false, canEscalate = false, canRaiseAny = false,
 }: {
   changeId: number
   status: string
@@ -285,11 +324,14 @@ export default function ValidationPanel({
   canAcknowledge?: boolean
   /** PM, Sales, the change lead and admins send the change back a stage. */
   canEscalate?: boolean
+  /** PM, the change lead, admin raise an issue on any failed check; members on their own. */
+  canRaiseAny?: boolean
 }) {
   const qc = useQueryClient()
   const editable = status === 'in_validation'
   const [ackNote, setAckNote] = useState('')
   const [escalateOpen, setEscalateOpen] = useState(false)
+  const [raise, setRaise] = useState<RaisePrefill | null>(null)
 
   const { data: state } = useQuery({
     queryKey: ['change', changeId, 'validation'],
@@ -319,6 +361,10 @@ export default function ValidationPanel({
     },
     onError: (e: unknown) => toast.error(errDetail(e) ?? 'Could not return the change'),
   })
+
+  const anyFailed = (state?.departments ?? []).some((d) => d.checks.some((c) => c.status === 'failed'))
+  const { data: issues = [] } = useValidationIssues(changeId, anyFailed)
+  const raiseStatus = RAISE_STATUSES.includes(status)
 
   if (!state) return null
 
@@ -386,7 +432,8 @@ export default function ValidationPanel({
         <DepartmentBlock key={d.department_id} changeId={changeId} dept={d}
           name={deptName(d.department_id)}
           mine={myDepartmentIds.includes(d.department_id)}
-          editable={editable} state={state} />
+          editable={editable} state={state} issues={issues}
+          onRaise={raiseStatus && (canRaiseAny || myDepartmentIds.includes(d.department_id)) ? setRaise : undefined} />
       ))}
 
       {!canSeeAll && others > 0 && (
@@ -404,6 +451,9 @@ export default function ValidationPanel({
           {t('validation.escalate')}
         </button>
       )}
+
+      <RaiseIssueDialog open={!!raise} changeId={changeId} departments={departments} prefill={raise}
+        onClose={() => setRaise(null)} />
 
       <ReasonDialog open={escalateOpen}
         title={t('validation.escalateTitle')}

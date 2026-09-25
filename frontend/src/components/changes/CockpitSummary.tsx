@@ -216,7 +216,8 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
         ) : (
           <ul className="space-y-1.5 text-sm">
             {waits.map((w) => (
-              <li key={w.key} data-testid={`wait-${w.key}`} className={w.info ? 'text-slate-300' : 'text-amber-300'}>
+              <li key={w.key} data-testid={`wait-${w.key}`}
+                className={w.level === 3 ? 'text-rose-300 font-medium' : w.info ? 'text-slate-300' : 'text-amber-300'}>
                 {w.tab && onGo ? (
                   <button type="button"
                     className="text-left hover:underline decoration-dotted underline-offset-2"
