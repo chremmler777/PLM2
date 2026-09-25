@@ -244,4 +244,10 @@ export interface PlanDeviation {
   /** Set when the row was pushed by another task's move (successor cascade). */
   caused_by_task_id?: number | null
   caused_by_task_name?: string | null
+  /**
+   * The edit this row came from: the move and what it pushed share one id
+   * and are decided in one call. Null on older rows the server could not
+   * place (decided row by row).
+   */
+  group_id?: number | null
 }

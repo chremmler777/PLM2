@@ -6,7 +6,12 @@ import type { PlanDeviation } from '../../../types/changePlan'
 import { planApi } from '../../../api/changePlan'
 import { toast } from 'sonner'
 
-vi.mock('../../../api/changePlan', () => ({ planApi: { lockDeviation: vi.fn(), escalateDeviation: vi.fn() } }))
+vi.mock('../../../api/changePlan', () => ({
+  planApi: {
+    lockDeviation: vi.fn(), escalateDeviation: vi.fn(),
+    lockDeviationGroup: vi.fn(), escalateDeviationGroup: vi.fn(),
+  },
+}))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const dev = (over: Partial<PlanDeviation> & { id: number; task_id: number; task_name: string }): PlanDeviation => ({
@@ -118,5 +123,83 @@ describe('DeviationsPanel grouped by cause (G18)', () => {
     release()
     await new Promise((r) => setTimeout(r, 20))
     expect(planApi.lockDeviation).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('DeviationsPanel with server groups', () => {
+  afterEach(cleanup)
+  // one bulk move of two blocks (40, 41) that pushed a successor (42), group 9
+  const grouped = () => [
+    dev({ id: 42, task_id: 3, task_name: 'Buffer', caused_by_task_id: 2, caused_by_task_name: 'Approval', group_id: 9 }),
+    dev({ id: 41, task_id: 2, task_name: 'Approval', group_id: 9 }),
+    dev({ id: 40, task_id: 1, task_name: 'Validation', group_id: 9 }),
+    // a legacy row caused by a grouped task stays out of the server group
+    dev({ id: 30, task_id: 5, task_name: 'Legacy', caused_by_task_id: 2 }),
+  ]
+  const mount = (rows = grouped()) => render(<QueryClientProvider client={new QueryClient()}>
+    <DeviationsPanel changeId={7} canDecide status="in_implementation" deviations={rows} />
+  </QueryClientProvider>)
+
+  it('keeps one edit together: the first move leads, the rest follow', () => {
+    mount()
+    const rows = screen.getAllByTestId(/^deviation-\d+$/).map((r) => r.getAttribute('data-testid'))
+    expect(rows).toEqual(['deviation-40', 'deviation-41', 'deviation-42', 'deviation-30'])
+    expect(screen.getByTestId('deviation-cause-41').textContent).toBe('moved with Validation')
+    expect(screen.getByTestId('deviation-cause-42').textContent).toBe('pushed by Approval')
+    expect(screen.getByTestId('deviation-group-40').textContent).toBe('moved with 1 other block, moved 1 successor along')
+    expect(screen.queryByTestId('deviation-cause-30')).toBeNull()
+    expect(screen.getByTestId('deviation-lock-40').textContent).toBe('Lock all 3')
+  })
+
+  it('locks the whole group in one call', async () => {
+    vi.mocked(planApi.lockDeviationGroup).mockReset().mockResolvedValue([])
+    vi.mocked(planApi.lockDeviation).mockReset()
+    vi.mocked(toast.success).mockClear()
+    mount()
+    fireEvent.click(screen.getByTestId('deviation-lock-40'))
+    fireEvent.change(screen.getByLabelText('Lock note'), { target: { value: 'absorbed' } })
+    fireEvent.click(screen.getByTestId('deviation-lock-confirm-40'))
+    await waitFor(() => expect(planApi.lockDeviationGroup).toHaveBeenCalledWith(7, 9, 'absorbed'))
+    expect(planApi.lockDeviationGroup).toHaveBeenCalledTimes(1)
+    expect(planApi.lockDeviation).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Locked 3 deviations'))
+  })
+
+  it('escalates the whole group under one escalation', async () => {
+    vi.mocked(planApi.escalateDeviationGroup).mockReset().mockResolvedValue([])
+    vi.mocked(planApi.escalateDeviation).mockReset()
+    vi.mocked(planApi.lockDeviation).mockReset()
+    vi.mocked(toast.success).mockClear()
+    mount()
+    fireEvent.click(screen.getByTestId('deviation-escalate-40'))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.textContent).toContain('The 2 other open rows of this move are escalated with it')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'SOP moves a week' } })
+    fireEvent.click(within(dialog).getByText('Escalate'))
+    await waitFor(() => expect(planApi.escalateDeviationGroup).toHaveBeenCalledWith(7, 9, 'SOP moves a week'))
+    expect(planApi.escalateDeviation).not.toHaveBeenCalled()
+    expect(planApi.lockDeviation).not.toHaveBeenCalled()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Escalated 3 deviations to the customer together'))
+  })
+
+  it('after an escalated move, "Lock remaining" sends the escalation note in one call', async () => {
+    vi.mocked(planApi.lockDeviationGroup).mockReset().mockResolvedValue([])
+    const [pushed, other, root] = grouped()
+    mount([pushed, { ...other, status: 'escalated', escalation_id: 55 }, { ...root, status: 'escalated', escalation_id: 55 }])
+    expect(screen.queryByTestId('deviation-escalate-40')).toBeNull()
+    fireEvent.click(screen.getByTestId('deviation-lock-40'))
+    fireEvent.click(screen.getByTestId('deviation-lock-confirm-40'))
+    await waitFor(() => expect(planApi.lockDeviationGroup).toHaveBeenCalledWith(
+      7, 9, 'Pushed by the move of Validation, which was escalated to the customer (escalation #55)'))
+  })
+
+  it('a refused group call changes nothing and says so', async () => {
+    vi.mocked(planApi.lockDeviationGroup).mockReset().mockRejectedValue(new Error('no'))
+    vi.mocked(toast.error).mockClear()
+    mount()
+    fireEvent.click(screen.getByTestId('deviation-lock-40'))
+    fireEvent.click(screen.getByTestId('deviation-lock-confirm-40'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(planApi.lockDeviationGroup).toHaveBeenCalledTimes(1)
   })
 })

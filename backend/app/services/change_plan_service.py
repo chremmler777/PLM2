@@ -34,8 +34,10 @@ from app.models.change_cost import CostingPosition
 from app.models.change_impl import ImplementationEscalation
 from app.models.change_plan import (
     CONSTRAINT_TYPES, FEEDBACK_VERDICTS, LINK_TYPES, PLAN_KINDS, TASK_KINDS,
-    ChangePlanDeviation, ChangePlanFeedback, ChangePlanLink, ChangePlanTask,
+    ChangePlanDeviation, ChangePlanDeviationGroup, ChangePlanFeedback,
+    ChangePlanLink, ChangePlanTask,
 )
+from app.core.display import fmt_date
 from app.models.entities import User
 from app.models.workflow import Department
 from app.services import plan_engine as eng
@@ -220,8 +222,8 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
         if release_due is not None and finish is not None and finish > release_due:
             warnings.append(_issue(
                 "after_release_deadline",
-                f"The plan finishes on {finish.isoformat()}, after the release "
-                f"deadline {release_due.isoformat()}"))
+                f"The plan finishes on {fmt_date(finish)}, after the release "
+                f"deadline {fmt_date(release_due)}"))
         buffers = [t for t in real if t.kind == "buffer"]
         if not buffers:
             warnings.append(_issue("no_buffer", "The plan has no buffer block"))
@@ -240,7 +242,7 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
                 warnings.append(_issue(
                     "bank_build_late",
                     f"'{t.name}' ends after the first downtime starts "
-                    f"({first_down.isoformat()})", t.id))
+                    f"({fmt_date(first_down)})", t.id))
     # A link out of an idea does not drive its successor (the idea follows,
     # it never pushes committed work): say so when the idea overlaps it.
     by_id = {t.id: t for t in tasks}
@@ -254,7 +256,7 @@ def validate_plan(tasks: list, *, plan: str, release_due: Optional[date] = None,
             warnings.append(_issue(
                 "bank_build_late",
                 f"'{p.name}' (idea) ends after '{q.name}' starts "
-                f"({q.start_date.isoformat()})", p.id))
+                f"({fmt_date(q.start_date)})", p.id))
     if plan == "detailed" and any(t.is_idea for t in tasks):
         warnings.append(_issue(
             "idea_blocks", "The detailed plan still contains idea blocks"))
@@ -344,6 +346,33 @@ class ChangePlanService:
         return QUOTE_WINDOW if plan == "quote" else DETAILED_WINDOW
 
     @staticmethod
+    def offer_accepted(change: ChangeRequest) -> bool:
+        """The customer said yes: the change stays 'quoted' until it is
+        approved, but the quote plan is what was accepted."""
+        return (change.accepted_offer_id is not None
+                or change.customer_response == "accepted")
+
+    @staticmethod
+    def in_window(change: ChangeRequest, plan: str) -> bool:
+        """The plan may be edited now: its status window, and for the quote
+        plan only until the customer has accepted the offer."""
+        if change.status not in ChangePlanService._window(plan):
+            return False
+        return not (plan == "quote" and ChangePlanService.offer_accepted(change))
+
+    @staticmethod
+    def _require_window(change: ChangeRequest, plan: str,
+                        what: Optional[str] = None) -> None:
+        what = what or f"The {plan} plan"
+        if change.status not in ChangePlanService._window(plan):
+            raise ChangeError(
+                f"{what} is read-only while the change is '{change.status}'")
+        if plan == "quote" and ChangePlanService.offer_accepted(change):
+            raise ChangeError(
+                f"{what} is read-only: the customer accepted the offer on it. "
+                "Timing changes from here on go into the detailed plan")
+
+    @staticmethod
     def baselined(change: ChangeRequest, plan: str) -> bool:
         return plan == "detailed" and change.timing_validated_at is not None
 
@@ -359,10 +388,7 @@ class ChangePlanService:
             raise PlanForbidden(
                 "Only Sales, Project Management, Scheduling, the change lead "
                 "or an admin may edit the plan")
-        if change.status not in ChangePlanService._window(plan):
-            raise ChangeError(
-                f"The {plan} plan is read-only while the change is "
-                f"'{change.status}'")
+        ChangePlanService._require_window(change, plan)
         if structural and ChangePlanService.baselined(change, plan):
             raise ChangeError(
                 "Timing was validated: the detailed plan's structure is "
@@ -576,7 +602,7 @@ class ChangePlanService:
             and res.tasks[t.id].critical)
         names = await ChangePlanService._dept_names(session)
         editor = await ChangePlanService.is_editor(session, change, user)
-        in_window = change.status in ChangePlanService._window(plan)
+        in_window = ChangePlanService.in_window(change, plan)
         baselined = ChangePlanService.baselined(change, plan)
 
         progress_ids: list[int] = []
@@ -882,8 +908,31 @@ class ChangePlanService:
             t.start_date = cal.snap(t.start_date)
 
     @staticmethod
+    def _check_actuals(start: Optional[date], finish: Optional[date], *,
+                       check=("actual_start", "actual_finish"),
+                       name: Optional[str] = None) -> None:
+        """Actual dates report what happened: not later than today (server
+        date, one day of slack for a browser a timezone ahead), and a block
+        does not finish before it started. `check`: the dates being written
+        (a stored one is not refused again for being in the future)."""
+        latest = business_today() + timedelta(days=1)
+        of = f" of '{name}'" if name else ""
+        for k, d in (("actual_start", start), ("actual_finish", finish)):
+            if k in check and d is not None and d > latest:
+                raise ChangeError(
+                    f"The {k.replace('_', ' ')}{of} {fmt_date(d)} is in the "
+                    "future: report it when it has happened")
+        if start is not None and finish is not None and finish < start:
+            raise ChangeError(
+                f"The actual finish{of} {fmt_date(finish)} is before its "
+                f"actual start {fmt_date(start)}")
+
+    @staticmethod
     async def _check_fields(session, spec: dict, plan_ids: set,
-                            own_id: Optional[int]) -> None:
+                            own_id: Optional[int],
+                            current: Optional[ChangePlanTask] = None) -> None:
+        """`current`: the block being edited, whose stored actual dates
+        count where the spec leaves one of them out."""
         if "name" in spec:
             name = (spec["name"] or "").strip()
             if not name:
@@ -909,14 +958,12 @@ class ChangePlanService:
                     f"Dates lie between {eng.MIN_YEAR} and {eng.MAX_YEAR}")
         # Actual dates report what happened: not later than today (server
         # date, one day of slack for a browser a timezone ahead).
-        latest = business_today() + timedelta(days=1)
-        for k, label in (("actual_start", "actual start"),
-                         ("actual_finish", "actual finish")):
-            d = _as_date(spec.get(k))
-            if d is not None and d > latest:
-                raise ChangeError(
-                    f"The {label} {d.isoformat()} is in the future: report it "
-                    "when it has happened")
+        ChangePlanService._check_actuals(
+            _as_date(spec["actual_start"]) if "actual_start" in spec
+            else getattr(current, "actual_start", None),
+            _as_date(spec["actual_finish"]) if "actual_finish" in spec
+            else getattr(current, "actual_finish", None),
+            check=[k for k in ("actual_start", "actual_finish") if k in spec])
         if "predecessors" in spec:
             for p in spec["predecessors"] or []:
                 if own_id is not None and p == own_id:
@@ -1198,7 +1245,8 @@ class ChangePlanService:
                     "Progress is reported during implementation only")
         siblings = await ChangePlanService.tasks(session, change, plan)
         by_id = {t.id: t for t in siblings}
-        await ChangePlanService._check_fields(session, spec, set(by_id), task.id)
+        await ChangePlanService._check_fields(
+            session, spec, set(by_id), task.id, task)
         if "parent_id" in spec:
             ChangePlanService._check_parent(by_id, task.id, spec["parent_id"])
         summaries = eng.summary_ids(e_tasks(siblings))
@@ -1393,12 +1441,14 @@ class ChangePlanService:
         finish_after = plan_finish([t for t in siblings if t.id not in summaries])
         impact = ((finish_after - finish_before).days
                   if finish_after and finish_before else 0)
+        group = await ChangePlanService._new_group(
+            session, change, moved[0], reason, user)
         devs = []
         for tid in moved + pushed:
             t = by_id[tid]
             base_end = t.baseline_finish or olds[tid][1]
             dev = ChangePlanDeviation(
-                change_id=change.id, task_id=tid,
+                change_id=change.id, task_id=tid, group_id=group.id,
                 caused_by_task_id=caused.get(tid),
                 old_start=olds[tid][0], old_end=olds[tid][1],
                 new_start=t.start_date, new_end=t.end_date,
@@ -1414,6 +1464,7 @@ class ChangePlanService:
             + (f" ({len(pushed)} pushed by their links)" if pushed else "")
             + f", finish impact {impact:+d} days: {reason}", user.id, notes=reason,
             new_value={"deviation_ids": [d.id for d in devs],
+                       "group_id": group.id,
                        "task_ids": moved + pushed, "pushed_ids": pushed,
                        "finish_impact_days": impact})
         return moved + pushed
@@ -1624,10 +1675,8 @@ class ChangePlanService:
             raise PlanForbidden(
                 "Only Sales, Project Management, Scheduling, the change lead "
                 "or an admin may edit the plan")
-        if change.status not in ChangePlanService._window(plan):
-            raise ChangeError(
-                f"The {plan} plan calendar is read-only while the change is "
-                f"'{change.status}'")
+        ChangePlanService._require_window(
+            change, plan, f"The {plan} plan calendar")
         if ChangePlanService.baselined(change, plan):
             raise ChangeError(
                 "Timing was validated: the plan calendar is frozen with the baseline")
@@ -1888,7 +1937,8 @@ class ChangePlanService:
                 spec["parent_id"] = ref(spec["parent_id"])
             if "predecessors" in spec:
                 spec["predecessors"] = [ref(p) for p in spec["predecessors"] or []]
-            await ChangePlanService._check_fields(session, spec, set(by_id), t.id)
+            await ChangePlanService._check_fields(
+                session, spec, set(by_id), t.id, t)
             if "parent_id" in spec:
                 ChangePlanService._check_parent(by_id, t.id, spec["parent_id"])
             d = {k: spec.pop(k) for k in DATE_FIELDS if k in spec}
@@ -2113,7 +2163,12 @@ class ChangePlanService:
                 slip_days=(t.end_date - base_end).days,
                 finish_impact_days=impact, reason=reason, status="open",
                 created_by=user.id))
+        top = [t.id for _u, t in made if t.parent_id not in new_ids]
+        group = await ChangePlanService._new_group(
+            session, change, cause_id if cause_id is not None else top[0],
+            reason, user)
         for d in devs:
+            d.group_id = group.id
             session.add(d)
         await session.flush()
         ChangePlanService._record_moved(change, pushed)
@@ -2126,6 +2181,7 @@ class ChangePlanService:
             new_value={"deviation_ids": [d.id for d in devs],
                        "task_ids": [d.task_id for d in devs],
                        "added": sorted(new_ids), "finish_impact_days": impact,
+                       "group_id": group.id,
                        **(extra or {})})
         out = await ChangePlanService.get_plan(session, change, plan, user)
         return {**out, "id_map": id_map, "link_id_map": link_id_map,
@@ -2176,6 +2232,27 @@ class ChangePlanService:
             warnings.append(
                 "Percent complete and actual dates were not imported: progress "
                 "is reported on the detailed plan during implementation")
+        if tracking:
+            # the file's actual dates follow the same rules as typed ones:
+            # one that breaks them is left out with a warning, like the
+            # parser does with a date in the future
+            for r in rows:
+                for k in ("actual_start", "actual_finish"):
+                    try:
+                        ChangePlanService._check_actuals(
+                            _as_date(r.get(k)) if k == "actual_start" else None,
+                            _as_date(r.get(k)) if k == "actual_finish" else None,
+                            name=r.get("name"))
+                    except ChangeError as e:
+                        warnings.append(f"{e}; not imported")
+                        r[k] = None
+                try:
+                    ChangePlanService._check_actuals(
+                        _as_date(r.get("actual_start")),
+                        _as_date(r.get("actual_finish")), name=r.get("name"))
+                except ChangeError as e:
+                    warnings.append(f"{e}; the actual finish was not imported")
+                    r["actual_finish"] = None
         if any(r.get("baseline_start") for r in rows):
             warnings.append(
                 "The file's baseline was not imported: the baseline is set by "
@@ -2425,6 +2502,7 @@ class ChangePlanService:
             + [d.decided_by for d, _, _ in rows])
         return [{
             "id": d.id, "task_id": d.task_id, "task_name": name,
+            "group_id": d.group_id,
             "caused_by_task_id": d.caused_by_task_id,
             "caused_by_task_name": cause_name,
             "old_start": d.old_start, "old_end": d.old_end,
@@ -2468,6 +2546,7 @@ class ChangePlanService:
         d.decided_at = datetime.utcnow()
         d.decision_note = (note or "").strip() or None
         await session.flush()
+        await ChangePlanService.settle_groups(session, [d.group_id])
         await ChangeService.append_changelog(
             session, change, "deviation_locked",
             f"Plan deviation #{d.id} accepted internally", user.id,
@@ -2499,6 +2578,7 @@ class ChangePlanService:
         d.decided_at = datetime.utcnow()
         d.decision_note = note
         await session.flush()
+        await ChangePlanService.settle_groups(session, [d.group_id])
         await ChangeService.append_changelog(
             session, change, "deviation_escalated",
             f"Plan deviation #{d.id} escalated to the customer", user.id,
@@ -2510,10 +2590,127 @@ class ChangePlanService:
     @staticmethod
     async def open_deviation_count(session: AsyncSession,
                                    change: ChangeRequest) -> int:
-        return (await session.execute(
-            select(func.count()).select_from(ChangePlanDeviation).where(
-                ChangePlanDeviation.change_id == change.id,
-                ChangePlanDeviation.status == "open"))).scalar() or 0
+        """Decisions still to take: one per edit (group) with an open row,
+        plus every open row that belongs to no group (older rows)."""
+        rows = (await session.execute(
+            select(ChangePlanDeviation.group_id, func.count())
+            .where(ChangePlanDeviation.change_id == change.id,
+                   ChangePlanDeviation.status == "open")
+            .group_by(ChangePlanDeviation.group_id))).all()
+        return sum(n if gid is None else 1 for gid, n in rows)
+
+    # ------------------------------------------------------------------
+    # Deviation groups: one edit, one decision
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def _new_group(session, change, root_task_id, reason: str,
+                         user: User) -> ChangePlanDeviationGroup:
+        g = ChangePlanDeviationGroup(
+            change_id=change.id, root_task_id=root_task_id, reason=reason,
+            status="open", created_by=user.id)
+        session.add(g)
+        await session.flush()
+        return g
+
+    @staticmethod
+    async def settle_groups(session, group_ids) -> None:
+        """A group whose last open row was decided one by one takes its
+        rows' common status ("mixed" when they differ); one with an open row
+        is open."""
+        for gid in {g for g in group_ids if g is not None}:
+            g = await session.get(ChangePlanDeviationGroup, gid)
+            if g is None:
+                continue
+            statuses = set((await session.execute(
+                select(ChangePlanDeviation.status).where(
+                    ChangePlanDeviation.group_id == gid))).scalars().all())
+            if "open" in statuses or not statuses:
+                g.status = "open"
+            else:
+                g.status = statuses.pop() if len(statuses) == 1 else "mixed"
+        await session.flush()
+
+    @staticmethod
+    async def _open_group(session, change, gid: int, user: User):
+        """The group and its open rows, after the same checks as a row."""
+        if not await ChangePlanService.may_decide_deviation(session, change, user):
+            raise PlanForbidden(
+                "Only Project Management, Sales, the change lead or an admin "
+                "may decide a plan deviation")
+        g = await session.get(ChangePlanDeviationGroup, gid)
+        if g is None or g.change_id != change.id:
+            raise PlanConflict("Deviation group not found on this change",
+                               not_found=True)
+        ChangePlanService._check_decision_window(change)
+        rows = list((await session.execute(
+            select(ChangePlanDeviation).where(
+                ChangePlanDeviation.group_id == g.id,
+                ChangePlanDeviation.status == "open")
+            .order_by(ChangePlanDeviation.id))).scalars().all())
+        if not rows:
+            raise ChangeError("Every deviation of this move is already decided")
+        return g, rows
+
+    @staticmethod
+    async def lock_group(session: AsyncSession, change: ChangeRequest,
+                         gid: int, note: Optional[str], user: User
+                         ) -> ChangePlanDeviationGroup:
+        """Accept every open row of one edit internally, in one go."""
+        g, rows = await ChangePlanService._open_group(session, change, gid, user)
+        note = (note or "").strip() or None
+        now = datetime.utcnow()
+        for d in rows:
+            d.status = "locked"
+            d.decided_by = user.id
+            d.decided_at = now
+            d.decision_note = note
+        g.decided_by, g.decided_at, g.decision_note = user.id, now, note
+        await session.flush()
+        await ChangePlanService.settle_groups(session, [g.id])
+        await ChangeService.append_changelog(
+            session, change, "deviation_locked",
+            f"{len(rows)} plan deviation(s) of one move accepted internally",
+            user.id, notes=note,
+            new_value={"group_id": g.id, "deviation_ids": [d.id for d in rows],
+                       "slip_days": max(d.slip_days for d in rows)})
+        return g
+
+    @staticmethod
+    async def escalate_group(session: AsyncSession, change: ChangeRequest,
+                             gid: int, note: str, user: User
+                             ) -> ChangePlanDeviationGroup:
+        """Take one edit to the customer: one escalation record, every open
+        row of the group escalated under it, one changelog entry."""
+        note = (note or "").strip()
+        if not note:
+            raise ChangeError("Escalating to the customer needs a note")
+        g, rows = await ChangePlanService._open_group(session, change, gid, user)
+        now = datetime.utcnow()
+        esc = ImplementationEscalation(
+            change_id=change.id, direction="customer", note=note,
+            created_by=user.id, created_at=now)
+        session.add(esc)
+        await session.flush()
+        for d in rows:
+            d.status = "escalated"
+            d.escalation_id = esc.id
+            d.decided_by = user.id
+            d.decided_at = now
+            d.decision_note = note
+        g.decided_by, g.decided_at, g.decision_note = user.id, now, note
+        g.escalation_id = esc.id
+        await session.flush()
+        await ChangePlanService.settle_groups(session, [g.id])
+        await ChangeService.append_changelog(
+            session, change, "deviation_escalated",
+            f"{len(rows)} plan deviation(s) of one move escalated to the "
+            "customer", user.id, notes=note,
+            new_value={"group_id": g.id, "deviation_ids": [d.id for d in rows],
+                       "escalation_id": esc.id,
+                       "slip_days": max(d.slip_days for d in rows),
+                       "finish_impact_days": max(
+                           d.finish_impact_days for d in rows)})
+        return g
 
     # ------------------------------------------------------------------
     # Exports

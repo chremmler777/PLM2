@@ -103,6 +103,14 @@ def workdays_between(a: date, b: date) -> int:
     return sign * n
 
 
+def _baseline_last_day(t) -> date:
+    """The inclusive last day of a block's baseline (baseline_finish is
+    exclusive); a baselined milestone sits on its baseline start."""
+    start = t.baseline_start or t.baseline_finish
+    return (t.baseline_finish - timedelta(days=1)
+            if t.baseline_finish > start else start)
+
+
 def _d(v) -> Optional[date]:
     if v is None:
         return None
@@ -523,14 +531,16 @@ class ValidationIssueService:
         """The detailed plan's dates, read once for every issue of the change."""
         from app.services.change_plan_service import ChangePlanService, e_tasks
         from app.services import plan_engine as eng
+        from app.services.change_plan_service import plan_finish
         tasks = await ChangePlanService.tasks(session, change, "detailed")
         summaries = eng.summary_ids(e_tasks(tasks))
         leaves = [t for t in tasks if t.id not in summaries and not t.is_idea]
-        finish = max((t.end_date for t in leaves), default=None)
-        base = max((t.baseline_finish for t in leaves
+        # inclusive last days, counted as the plan counts them (a milestone
+        # sits on its start day, it does not end the day before)
+        base = max((_baseline_last_day(t) for t in leaves
                     if t.baseline_finish is not None), default=None)
-        return {"by_id": {t.id: t for t in tasks}, "finish_excl": finish,
-                "baseline_excl": base,
+        return {"by_id": {t.id: t for t in tasks}, "finish": plan_finish(leaves),
+                "baseline": base,
                 "cal": ChangePlanService.calendar(change, "detailed")}
 
     @staticmethod
@@ -542,20 +552,19 @@ class ValidationIssueService:
         if t is None:
             return None
 
-        def incl(d):
-            return d - timedelta(days=1) if d is not None else None
+        from app.services.change_plan_service import _last_day
         # The group's dates are its blocks' dates, counted like the plan
-        # finish (exclusive end -> inclusive last day); the summary's own
-        # stored duration may lag behind a child that moved.
+        # finish (inclusive last day, a milestone on its start); the
+        # summary's own stored duration may lag behind a child that moved.
         kids = [c for c in ctx["by_id"].values() if c.parent_id == t.id]
         if kids:
             start = min(c.start_date for c in kids)
-            finish = incl(max(c.end_date for c in kids))
+            finish = max(_last_day(c) for c in kids)
         else:
             start = t.start_date
-            finish = incl(t.end_date) if int(t.duration_days or 0) > 0 else t.start_date
-        plan_finish = incl(ctx["finish_excl"])
-        base = incl(ctx["baseline_excl"])
+            finish = _last_day(t)
+        plan_finish = ctx["finish"]
+        base = ctx["baseline"]
         deadline = _d(change.release_due_date)
         slip = (plan_finish - base).days if plan_finish and base else None
         past = (finish - deadline).days if deadline and finish else None
@@ -1459,6 +1468,19 @@ class ValidationIssueService:
             d.decided_by = user.id
             d.decided_at = now
             d.decision_note = f"{issue.ref}: new timing agreed with the customer"
+        await session.flush()
+        # the recovery's group(s) settle with their rows; a group escalated
+        # whole points at the same escalation
+        from app.models.change_plan import ChangePlanDeviationGroup
+        from app.services.change_plan_service import ChangePlanService
+        gids = {d.group_id for d in devs if d.group_id is not None}
+        await ChangePlanService.settle_groups(session, gids)
+        for gid in gids:
+            g = await session.get(ChangePlanDeviationGroup, gid)
+            if g is not None and g.status == "escalated" and g.escalation_id is None:
+                g.escalation_id = esc.id
+                g.decided_by, g.decided_at = user.id, now
+                g.decision_note = f"{issue.ref}: new timing agreed with the customer"
         await session.flush()
         if devs:
             await ChangeService.append_changelog(

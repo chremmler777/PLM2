@@ -127,6 +127,16 @@ export const planApi = {
     client.post(`${base(id)}/deviations/${deviationId}/escalate`, { note })
       .then((r) => r.data),
 
+  /** Locks every open row of one move in one transaction; answers the group's rows. */
+  lockDeviationGroup: (id: number, groupId: number, note?: string) =>
+    client.post<PlanDeviation[]>(`${base(id)}/deviations/groups/${groupId}/lock`,
+      note ? { note } : {}).then((r) => r.data),
+
+  /** Escalates every open row of one move under one customer escalation. */
+  escalateDeviationGroup: (id: number, groupId: number, note: string) =>
+    client.post<PlanDeviation[]>(`${base(id)}/deviations/groups/${groupId}/escalate`, { note })
+      .then((r) => r.data),
+
   /** Sales puts the validated plan in front of the customer (existing endpoint). */
   publishPlan: (id: number) =>
     client.post(`/v1/changes/${id}/bank-build/publish`).then((r) => r.data),

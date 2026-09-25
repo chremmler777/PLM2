@@ -406,6 +406,10 @@ class ValidationService:
             row.value = value
         if spec.get("note") is not None:
             row.note = spec.get("note") or None
+        elif status == "passed" and old_status != "passed":
+            # the note said why it was not passing; a pass without a new
+            # note leaves no stale explanation behind
+            row.note = None
         row.checked_by = actor.id
         row.checked_at = datetime.utcnow()
         await session.flush()

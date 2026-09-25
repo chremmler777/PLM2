@@ -35,6 +35,9 @@ TASK_KINDS = ("work", "supplier", "downtime", "bank_build", "sampling",
               "validation", "customer", "buffer", "milestone")
 FEEDBACK_VERDICTS = ("confirmed", "concern")
 DEVIATION_STATUSES = ("open", "locked", "escalated")
+# A group is decided as one (locked / escalated) or settles row by row: then
+# it takes its rows' common status, "mixed" when they differ.
+DEVIATION_GROUP_STATUSES = DEVIATION_STATUSES + ("mixed",)
 
 
 class ChangePlanTask(Base):
@@ -148,6 +151,34 @@ class ChangePlanFeedback(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ChangePlanDeviationGroup(Base):
+    """One edit after the baseline and every deviation it produced: the
+    block(s) the user moved and the successors that move pushed along its
+    links, or a recovery's new blocks and what they pushed. Decided as one
+    (lock or escalate every open row in one call), because the pushed rows
+    are the same story as the move. Migration 102; rows recorded before it
+    carry no group unless one could be inferred."""
+    __tablename__ = "change_plan_deviation_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    change_id: Mapped[int] = mapped_column(
+        ForeignKey("change_requests.id"), index=True)
+    # The block the edit started from (the first moved block, the recovery's
+    # cause or its first new block). No FK, like caused_by_task_id.
+    root_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        String(15), default="open", server_default="open")
+    decided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    escalation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("implementation_escalations.id"), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ChangePlanDeviation(Base):
     """A date moved on a baselined block, with the reason and its fate.
 
@@ -166,6 +197,10 @@ class ChangePlanDeviation(Base):
     # links (None when the block itself was moved). No FK, like
     # source_position_id: the column is informational.
     caused_by_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The edit this row came from (migration 102); None for older rows the
+    # migration could not place: they are decided one by one.
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("change_plan_deviation_groups.id"), nullable=True, index=True)
     old_start: Mapped[date] = mapped_column(Date)
     old_end: Mapped[date] = mapped_column(Date)
     new_start: Mapped[date] = mapped_column(Date)

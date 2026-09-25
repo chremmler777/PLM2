@@ -591,6 +591,46 @@ async def _deviation_out(db, change, did):
                  if d["id"] == did), None)
 
 
+async def _group_out(db, change, gid):
+    """The group's rows as list_deviations shows them."""
+    return [d for d in await ChangePlanService.list_deviations(db, change)
+            if d["group_id"] == gid]
+
+
+@router.post("/{change_id}/plan/deviations/groups/{group_id}/lock")
+async def lock_plan_deviation_group(
+    change_id: int, group_id: int, body: DeviationLockIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Lock every open deviation of one move in one transaction."""
+    change = await _change(db, change_id, current_user)
+    try:
+        await ChangePlanService.lock_group(
+            db, change, group_id, body.note, current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _group_out(db, change, group_id)
+    await db.commit()
+    return out
+
+
+@router.post("/{change_id}/plan/deviations/groups/{group_id}/escalate")
+async def escalate_plan_deviation_group(
+    change_id: int, group_id: int, body: DeviationEscalateIn,
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Escalate every open deviation of one move under one escalation."""
+    change = await _change(db, change_id, current_user)
+    try:
+        await ChangePlanService.escalate_group(
+            db, change, group_id, body.note, current_user)
+    except _ERRORS as e:
+        raise _http(e)
+    out = await _group_out(db, change, group_id)
+    await db.commit()
+    return out
+
+
 @router.post("/{change_id}/plan/deviations/{deviation_id}/lock")
 async def lock_plan_deviation(
     change_id: int, deviation_id: int, body: DeviationLockIn,
