@@ -66,7 +66,9 @@ export function daysUntil(iso: string, now: number = Date.now()): number {
     const from = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
     return Math.round((Date.UTC(y, m - 1, d) - from) / 864e5)
   }
-  return Math.ceil((parseApiDateTime(iso).getTime() - now) / 864e5) || 0 // no -0
+  const ms = parseApiDateTime(iso).getTime()
+  if (Number.isNaN(ms)) return NaN
+  return Math.ceil((ms - now) / 864e5) || 0 // no -0
 }
 
 const moneyFmt = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

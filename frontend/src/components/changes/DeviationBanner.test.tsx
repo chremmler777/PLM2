@@ -13,7 +13,7 @@ vi.mock('../../api/changes', () => ({
   },
 }));
 
-function renderBanner() {
+function renderBanner(seq = 1) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -21,6 +21,7 @@ function renderBanner() {
         changeId={7}
         blockedTo="in_assessment"
         blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+        seq={seq}
         onRetry={() => {}}
         onClose={() => {}}
       />
@@ -48,6 +49,34 @@ describe('DeviationBanner', () => {
       expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
       expect(targets[0]).toBe(banner);
       expect(document.activeElement).toBe(banner);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = orig;
+    }
+  });
+
+  it('scrolls into view again when an identical block is reported a second time (seq bumped)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const scroll = vi.fn();
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scroll;
+    try {
+      const { rerender } = render(
+        <QueryClientProvider client={qc}>
+          <DeviationBanner changeId={7} blockedTo="in_assessment" blockedReason="Same reason"
+            seq={1} onRetry={() => {}} onClose={() => {}} />
+        </QueryClientProvider>
+      );
+      await screen.findByTestId('deviation-banner');
+      expect(scroll).toHaveBeenCalledTimes(1);
+
+      // Same blockedTo/blockedReason, but a new block was reported: seq bumps.
+      rerender(
+        <QueryClientProvider client={qc}>
+          <DeviationBanner changeId={7} blockedTo="in_assessment" blockedReason="Same reason"
+            seq={2} onRetry={() => {}} onClose={() => {}} />
+        </QueryClientProvider>
+      );
+      expect(scroll).toHaveBeenCalledTimes(2);
     } finally {
       HTMLElement.prototype.scrollIntoView = orig;
     }

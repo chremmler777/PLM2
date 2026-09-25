@@ -10,6 +10,10 @@ describe('DeadlineChip', () => {
     const { container } = render(<DeadlineChip date={null} state={null} />)
     expect(container.firstChild).toBeNull()
   })
+  it('renders nothing for a garbage date', () => {
+    const { container } = render(<DeadlineChip date="not-a-date" state={null} />)
+    expect(container.firstChild).toBeNull()
+  })
   it('shows days left and at-risk styling', () => {
     const inTen = new Date(Date.now() + 10 * 864e5).toISOString()
     render(<DeadlineChip date={inTen} state="at_risk" />)

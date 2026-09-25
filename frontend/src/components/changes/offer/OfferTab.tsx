@@ -298,12 +298,16 @@ function OfferWorkspace({ props, offers, offer }: {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 space-y-4">
+          {/* The Gantt planner is its own tool and stays interactive while a
+              refresh runs; only the offer's own timing fields (and the other
+              sections below) wait for the refreshed draft. */}
+          <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
+            <OfferTimingSection changeId={change.id} data={data} update={update} editable={editable}
+              fieldsDisabled={refresh.isPending} />
+          </StepSection>
           {/* While a refresh runs the server rewrites the draft: no typing into it meanwhile. */}
           <fieldset disabled={refresh.isPending} aria-busy={refresh.isPending} data-testid="offer-edit-fieldset"
             className="m-0 min-w-0 space-y-4 border-0 p-0">
-          <StepSection id="offer-timing" n={1} title="Timing" done={done['offer-timing']}>
-            <OfferTimingSection changeId={change.id} data={data} update={update} editable={editable} />
-          </StepSection>
           <StepSection id="offer-price" n={2} title="Price" done={done['offer-price']}>
             <OfferPriceSection data={data} update={update} editable={editable} currency={cur}
               annualEffect={offer.totals.annual_effect}

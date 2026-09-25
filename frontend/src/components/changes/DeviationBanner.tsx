@@ -8,6 +8,10 @@ interface Props {
   changeId: number;
   blockedTo: string;
   blockedReason: string;
+  /** Bumped by the caller on every block report, even an identical one, so
+   * the scroll-into-view effect below re-fires when the same transition is
+   * blocked twice in a row. */
+  seq: number;
   onRetry: () => void;
   onClose: () => void;
 }
@@ -19,7 +23,7 @@ const STATUS_STYLE: Record<string, string> = {
   consumed: 'bg-slate-700 text-slate-400',
 };
 
-export default function DeviationBanner({ changeId, blockedTo, blockedReason, onRetry, onClose }: Props) {
+export default function DeviationBanner({ changeId, blockedTo, blockedReason, seq, onRetry, onClose }: Props) {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -32,7 +36,7 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, on
     if (!el) return;
     el.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     el.focus({ preventScroll: true });
-  }, [blockedTo, blockedReason]);
+  }, [blockedTo, blockedReason, seq]);
 
   const { data: deviations = [] } = useQuery({
     queryKey: ['change', changeId, 'deviations'],

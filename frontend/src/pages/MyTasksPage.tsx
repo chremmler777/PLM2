@@ -323,7 +323,7 @@ const taskHint = (task: ChangeTask): string | null => {
       // say how many so the row does not read as a single job.
       const newest = task.reason?.trim() || t(`tasks.hint.${task.kind}`);
       return (task.question_count ?? 0) > 1
-        ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} — ${newest}`
+        ? `${t('tasks.hint.questionsOpen').replace('{n}', String(task.question_count))} ${newest}`
         : newest;
     }
     case 'customer_response':

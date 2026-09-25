@@ -70,6 +70,16 @@ describe('TimingTab', () => {
     vi.mocked(planApi.validateTiming).mockResolvedValue({})
   })
 
+  it('shows a retryable error when the confirmations fail to load', async () => {
+    vi.mocked(planApi.feedback).mockRejectedValue(new Error('boom'))
+    renderTab()
+    const err = await screen.findByTestId('timing-feedback-error')
+    expect(err.textContent).toContain('Could not load confirmations')
+    vi.mocked(planApi.feedback).mockResolvedValue(fb())
+    fireEvent.click(err)
+    await waitFor(() => expect(screen.queryByTestId('timing-feedback-error')).toBeNull())
+  })
+
   it('offers to create the detailed plan from the quote plan when empty', async () => {
     vi.mocked(planApi.get).mockResolvedValue(plan({ tasks: [] }))
     vi.mocked(planApi.seed).mockResolvedValue(plan())

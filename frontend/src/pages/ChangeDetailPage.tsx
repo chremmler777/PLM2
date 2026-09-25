@@ -74,6 +74,9 @@ export default function ChangeDetailPage() {
   const rawTab = searchParams.get('tab');
   const setTab = (t: Tab) => setSearchParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const [blocked, setBlocked] = useState<{ to: string; reason: string } | null>(null);
+  // Bumped on every reported block, even an identical one, so the banner's
+  // scroll-into-view effect re-fires on a second, otherwise-unchanged block.
+  const [blockedSeq, setBlockedSeq] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
   // Rejecting and reopening both stop or restart the flow, so both go through
   // a memo dialog rather than a bare button.
@@ -231,7 +234,7 @@ export default function ChangeDetailPage() {
       // The memo-dialog transitions report inline; only the ordinary forward
       // moves offer the deviation banner.
       const viaDialog = vars.cancellation_reason || vars.rejection_reason || vars.reopen_reason || vars.reason;
-      if (!viaDialog) setBlocked({ to: vars.to, reason: detail });
+      if (!viaDialog) { setBlocked({ to: vars.to, reason: detail }); setBlockedSeq((n) => n + 1); }
       else toast.error(detail);
     },
   });
@@ -312,6 +315,7 @@ export default function ChangeDetailPage() {
           changeId={changeId}
           blockedTo={blocked.to}
           blockedReason={blocked.reason}
+          seq={blockedSeq}
           onRetry={() => transition.mutate({ to: blocked.to })}
           onClose={() => setBlocked(null)}
         />

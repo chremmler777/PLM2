@@ -386,10 +386,10 @@ export default function SummationView({
                     {deadline?.date && (
                       <span className="block text-slate-500">
                         {t('summation.earliestDone')}:{' '}
-                        {formatDate(addDaysIso(todayIso(), data.max_lead_time_days))}
+                        {formatDate(addDaysIso(todayIso(), Math.ceil(data.max_lead_time_days)))}
                         {' · '}{deadline.label}:{' '}
                         {formatDate(deadline.date)}
-                        {data.max_lead_time_days > daysUntil(deadline.date) && (
+                        {Math.ceil(data.max_lead_time_days) > daysUntil(deadline.date) && (
                           <span className="text-red-400"> ⚠ {t('summation.pastDeadline')}</span>
                         )}
                       </span>

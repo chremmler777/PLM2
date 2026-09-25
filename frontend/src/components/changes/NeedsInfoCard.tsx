@@ -85,7 +85,7 @@ export default function NeedsInfoCard({
         <span className="text-sm text-slate-400 truncate">{c.note}</span>
         {trailing && (
           <span className="text-xs text-slate-500 truncate flex-shrink-0">
-            , {solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
+            {' · '}{solved ? t('concern.solvedBy') : t('concern.answeredBy')} {trailing}
           </span>
         )}
         <span className="ml-auto text-xs text-slate-600 flex-shrink-0">

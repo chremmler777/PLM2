@@ -45,6 +45,11 @@ describe('daysUntil / todayIso / addDaysIso', () => {
     expect(daysUntil('2026-10-04T22:00:00Z', now)).toBe(0)
   })
 
+  it('returns NaN for a garbage datetime instead of throwing or coercing to 0', () => {
+    expect(Number.isNaN(daysUntil('not-a-date'))).toBe(true)
+    expect(Number.isNaN(daysUntil(''))).toBe(true)
+  })
+
   it('does calendar math without time-zone shifts', () => {
     expect(todayIso(new Date(2026, 0, 1, 0, 5))).toBe('2026-01-01')
     expect(addDaysIso('2026-03-28', 2)).toBe('2026-03-30')

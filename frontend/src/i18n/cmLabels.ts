@@ -41,7 +41,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'impact.suggested': { de: 'Vorschlag', en: 'Suggested' },
   'impact.lead': { de: 'Leit-Teil', en: 'Lead item' },
   'impact.leadPinned': {
-    de: 'Ab der Bewertung fest: die Fachbereiche sind darauf geroutet.',
+    de: 'Ab der Bewertung fest: Die Fachbereiche sind darauf geroutet.',
     en: 'Pinned from assessment on: departments are routed against it.',
   },
   'impact.apply': { de: 'Auswahl übernehmen', en: 'Apply selection' },
@@ -106,8 +106,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'tasks.kind.obtain_info': { de: 'Kundeninfo einholen', en: 'Obtain info from customer' },
   'tasks.hint.questionsOpen': {
-    de: '{n} offene Fragen, neueste',
-    en: '{n} questions open, newest',
+    de: '{n} offene Fragen, neueste:',
+    en: '{n} questions open, newest:',
   },
   'tasks.hint.obtain_info': {
     de: 'Offene Rückfrage beim Kunden klären',
@@ -172,7 +172,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'audit.chainBrokenScoped': { de: 'Kette beschädigt (diese Änderung)', en: 'chain broken (this change)' },
   'audit.truncated': {
     de: 'Zeigt die neuesten 1000 Einträge. Für die vollständige Historie CSV exportieren.',
-    en: 'showing the newest 1000 entries, export CSV for the full trail',
+    en: 'showing the newest 1000 entries; export CSV for the full trail',
   },
   'audit.export': { de: 'CSV exportieren', en: 'Export CSV' },
   'audit.empty': { de: 'Noch keine Audit-Einträge.', en: 'No audit entries yet.' },
@@ -206,8 +206,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Internal changes where the physical part does not change will be tracked in a separate system (coming later).',
   },
   'start.typeMoreSoon': {
-    de: 'Vorerst nur physische Teileänderungen, weitere Arten folgen.',
-    en: 'Physical part changes only for now, more types coming.',
+    de: 'Vorerst nur physische Teileänderungen; weitere Arten folgen.',
+    en: 'Physical part changes only for now; more types are coming.',
   },
   'start.hiddenNonPhysical': {
     de: '{n} Nicht-Physische-Teile ausgeblendet (Verpackung, Material … folgen später).',
@@ -219,8 +219,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
     en: 'Built from project, customer number and lead item, the same way the data-management system names its files.',
   },
   'start.titlePlaceholder': {
-    de: 'Teil wählen, der Titel entsteht daraus',
-    en: 'Pick an item, the title follows from it',
+    de: 'Teil wählen; der Titel entsteht daraus',
+    en: 'Pick an item; the title follows from it',
   },
   'start.reason': { de: 'Kurzbeschreibung', en: 'Short description' },
   'start.reasonPlaceholder': {
@@ -257,7 +257,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'risk.hint': {
     // Risks are a register, not a gate: they are rated, tracked and closed with
     // a proposal. Nothing about them stops the assessment.
-    de: 'Ein Risiko hält nichts auf: es wird bewertet, verfolgt und mit einem '
+    de: 'Ein Risiko hält nichts auf: Es wird bewertet, verfolgt und mit einem '
       + 'Lösungsvorschlag geschlossen. Entschieden wird mit dem Urteil.',
     en: 'A risk blocks nothing: it is rated, tracked and closed with a mitigation '
       + 'proposal. The verdict is the decision.',
@@ -333,7 +333,7 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   'concern.proposalBy': { de: 'vorgeschlagen von', en: 'proposed by' },
   'concern.none': {
     de: 'Keine Einwände. Wer etwas blockiert sieht, kann es hier markieren, auch vor dem Termin.',
-    en: 'No concerns. Anyone who sees a blocker can flag it here, before the meeting, too.',
+    en: 'No concerns. Anyone who sees a blocker can flag it here, even before the meeting.',
   },
   'concern.raise': { de: 'Einwand', en: 'Flag' },
   'concern.blocking': {
@@ -987,8 +987,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   // Reads as what it is — an open question going out to the customer — not as a
   // validation error about the meeting form.
   'meeting.missingInfo': {
-    de: 'Offene Rückfrage: Vertrieb holt die Info beim Kunden ein:',
-    en: 'Open info request: Sales obtains this from the customer:',
+    de: 'Offene Rückfrage. Vertrieb holt die Info beim Kunden ein:',
+    en: 'Open info request. Sales obtains this from the customer:',
   },
   'start.internalLater': {
     de: 'Interne Änderungen folgen später',
@@ -1263,8 +1263,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'tasks.kind.bank_build': { de: 'Bankbau festlegen', en: 'Decide bank build' },
   'tasks.hint.bank_build': {
-    de: 'Fließende Änderung oder geplanter Ausschuss, und den Plan skizzieren',
-    en: 'Running change or planned scrap, and outline the plan',
+    de: 'Fließende Änderung oder geplanter Ausschuss? Plan skizzieren.',
+    en: 'Running change or planned scrap? Outline the plan.',
   },
   'tasks.kind.publish_plan': { de: 'Plan veröffentlichen', en: 'Publish plan' },
   'tasks.hint.publish_plan': {
@@ -1502,8 +1502,8 @@ export const cmLabels: Record<string, Record<Lang, string>> = {
   },
   'tasks.kind.update_quote': { de: 'Angebot nachziehen', en: 'Update the quote' },
   'tasks.hint.update_quote': {
-    de: 'Das validierte Gewicht weicht von der Schätzung ab. Angebot nachziehen',
-    en: 'The validated weight differs from the estimate. Bring the quote in line',
+    de: 'Das validierte Gewicht weicht von der Schätzung ab: Angebot nachziehen',
+    en: 'The validated weight differs from the estimate: bring the quote in line',
   },
 
   // Waits, stage 9

@@ -515,10 +515,9 @@ function PositionRow({ changeId, position, editable, index, categories, onChange
     <span data-testid={`costpos-cost-${p.id}`} className="text-slate-200 tabular-nums">
       {type === 'time'
         ? (p.hours != null ? `${p.hours} h` : '-')
-        : <>
-            {cost != null ? money(cost) : '-'}
-            {p.hours != null && ` + ${p.hours} h`}
-          </>}
+        : cost != null
+          ? <>{money(cost)}{p.hours != null && ` + ${p.hours} h`}</>
+          : p.hours != null ? `${p.hours} h` : '-'}
     </span>
   )
 

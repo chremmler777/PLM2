@@ -63,10 +63,10 @@ export default function AuditTimeline({ correlationId }: { correlationId: string
   const byDay = useMemo(() => {
     const groups = new Map<string, AuditEntry[]>()
     for (const e of shown) {
-      // Day grouping is computed in UTC (not the browser's local timezone) so
-      // the heading is stable across viewers - suffixed "(UTC)" so it reads
-      // unambiguously either way.
-      const day = `${parseApiDateTime(e.timestamp).toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+      // Day grouping matches the row times below (both local): a local
+      // midnight boundary keeps entries under the heading their time reads
+      // under, instead of splitting across a UTC day boundary.
+      const day = parseApiDateTime(e.timestamp).toLocaleDateString()
       if (!groups.has(day)) groups.set(day, [])
       groups.get(day)!.push(e)
     }

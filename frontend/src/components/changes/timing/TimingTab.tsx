@@ -68,7 +68,7 @@ export default function TimingTab({
   const { data: plan } = useQuery({
     queryKey: ['change', id, 'plan', 'detailed'], queryFn: () => planApi.get(id, 'detailed'),
   })
-  const { data: feedback } = useQuery({
+  const { data: feedback, isPending: feedbackPending, isError: feedbackError, refetch: refetchFeedback } = useQuery({
     queryKey: ['change', id, 'plan-feedback'], queryFn: () => planApi.feedback(id),
   })
   const baseline = !!plan?.baseline_set || !!feedback?.validated_at
@@ -129,7 +129,7 @@ export default function TimingTab({
 
   const step1: 'done' | 'current' = tasks.length > 0 ? 'done' : 'current'
   // Until the feedback arrives the confirmations are unknown: keep step 2 open.
-  const feedbackLoading = feedback === undefined
+  const feedbackLoading = feedbackPending
   const step2 = tasks.length === 0 ? 'todo' : baseline ? 'done' : feedbackLoading || waiting.length > 0 ? 'current' : 'done'
   const step3 = baseline ? 'done' : step2 === 'done' ? 'current' : 'todo'
 
@@ -157,13 +157,22 @@ export default function TimingTab({
           <Step n={1} title="Detailed plan" state={step1}
             detail={tasks.length > 0 ? `${tasks.length} task${tasks.length === 1 ? '' : 's'}` : 'Copy the quote plan and refine it'} />
           <Step n={2} title="Team confirmation" state={step2}
-            detail={feedbackLoading && !baseline ? 'Loading confirmations'
+            detail={feedbackError && !baseline ? 'Could not load confirmations'
+              : feedbackLoading && !baseline ? 'Loading confirmations'
               : required.length > 0 ? `${confirmed} of ${required.length} confirmed` : 'Every responsible team confirms'} />
           <Step n={3} title={baseline ? 'Timing validated' : 'Validate timing'} state={step3}
             detail={baseline
               ? `${formatDate(feedback?.validated_at ?? change.timing_validated_at)}${feedback?.validated_by_name ? `, ${feedback.validated_by_name}` : ''}`
               : 'Timing validated sets the baseline'} />
         </ol>
+
+        {feedbackError && !baseline && (
+          <button type="button" data-testid="timing-feedback-error"
+            className="text-xs text-red-300 underline hover:text-red-200"
+            onClick={() => refetchFeedback()}>
+            Could not load confirmations. Retry
+          </button>
+        )}
 
         <div className="border-t border-slate-700 pt-3" data-testid="timing-primary">
           {empty ? (

@@ -11,6 +11,7 @@ const STATE_CLASS: Record<string, string> = {
 export function DeadlineChip({ date, state }: { date: string | null; state: string | null }) {
   if (!date) return null
   const days = daysUntil(date)
+  if (Number.isNaN(days)) return null
   const label = days >= 0 ? `${days}d` : `${Math.abs(days)}d over`
   return (
     <span data-testid="deadline-chip"

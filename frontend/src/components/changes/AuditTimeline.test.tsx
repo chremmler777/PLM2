@@ -87,33 +87,31 @@ describe('AuditTimeline', () => {
     expect(auditApi.downloadCsv).toHaveBeenCalledWith({ correlation_id: 'CR-2026-0007' })
   })
 
-  it('groups entries under UTC day headings suffixed "(UTC)"', async () => {
+  it('groups entries under a local-day heading with no "(UTC)" suffix', async () => {
     vi.mocked(auditApi.list).mockResolvedValue([
-      // 23:30 UTC on 2026-07-01 - a local-timezone browser (e.g. UTC+2)
-      // would incorrectly bucket this into 2026-07-02 if grouping used
-      // local time instead of UTC.
-      entry({ id: 1, action: 'gate_decided', timestamp: '2026-07-01T23:30:00Z' }),
+      entry({ id: 1, action: 'gate_decided', timestamp: '2026-07-01T10:00:00Z' }),
     ])
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
-    expect(screen.getByText(/\(UTC\)/)).toBeDefined()
+    expect(screen.queryByText(/\(UTC\)/)).toBeNull()
+    const expectedDay = new Date('2026-07-01T10:00:00Z').toLocaleDateString()
+    expect(screen.getByText(expectedDay)).toBeDefined()
   })
 
-  it('buckets entries straddling midnight UTC into two distinct day headings', async () => {
-    // One entry 30 minutes before midnight UTC on 2026-07-01, one 30 minutes
-    // after - these must land on two DIFFERENT UTC calendar days. A
-    // local-timezone (non-UTC) grouping bug would merge them into one
-    // heading for browsers ahead of UTC, or could otherwise miscompute the
-    // date. Assert both expected UTC-dated headings are present.
+  it('buckets entries straddling local midnight into two distinct day headings', async () => {
+    // The test environment pins TZ=Europe/Berlin (UTC+2 in July), where local
+    // midnight falls at 22:00 UTC. Naive timestamps (no "Z") are read as UTC
+    // by parseApiDateTime, so 21:30 UTC / 22:30 UTC straddle that boundary:
+    // 23:30 local on 2026-07-01 and 00:30 local on 2026-07-02.
     vi.mocked(auditApi.list).mockResolvedValue([
-      entry({ id: 2, action: 'gate_decided', timestamp: '2026-07-02T00:30:00Z' }),
-      entry({ id: 1, action: 'wf_started', timestamp: '2026-07-01T23:30:00Z' }),
+      entry({ id: 2, action: 'gate_decided', timestamp: '2026-07-01T22:30:00' }),
+      entry({ id: 1, action: 'wf_started', timestamp: '2026-07-01T21:30:00' }),
     ])
     wrap(<AuditTimeline correlationId="CR-2026-0007" />)
     await screen.findByText('gate decided')
 
-    const expectedDay1 = `${new Date('2026-07-01T23:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
-    const expectedDay2 = `${new Date('2026-07-02T00:30:00Z').toLocaleDateString(undefined, { timeZone: 'UTC' })} (UTC)`
+    const expectedDay1 = new Date('2026-07-01T21:30:00Z').toLocaleDateString()
+    const expectedDay2 = new Date('2026-07-01T22:30:00Z').toLocaleDateString()
     expect(expectedDay1).not.toBe(expectedDay2)
     expect(screen.getByText(expectedDay1)).toBeDefined()
     expect(screen.getByText(expectedDay2)).toBeDefined()

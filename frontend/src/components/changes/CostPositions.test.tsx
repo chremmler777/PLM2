@@ -307,8 +307,10 @@ describe('CostPositions', () => {
     await screen.findByTestId('costpos-row-11')
     expect(screen.getByTestId('costpos-needs-favorite-11').textContent)
       .toContain(t('costpos.pickFavorite'))
-    // No vote, no price and no date — the job is not finished.
-    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('- + 6 h')
+    // No vote, no price and no date — the job is not finished. Hours alone
+    // (own coordination time) still show; there is no "-" for the missing
+    // price once something real is known.
+    expect(screen.getByTestId('costpos-cost-11').textContent).toBe('6 h')
     expect(screen.queryByTestId('costpos-lead-11')).toBeNull()
   })
 

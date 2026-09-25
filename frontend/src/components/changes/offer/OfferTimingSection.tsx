@@ -11,13 +11,17 @@ import { DEFAULT_DISCLAIMER, inputCls, planWeeks, quotePlanKey } from './offerFo
 import { Field, NumField, Toggle } from './ui'
 
 export default function OfferTimingSection({
-  changeId, data, update, editable,
+  changeId, data, update, editable, fieldsDisabled,
 }: {
   changeId: number
   /** Absent before an offer exists: the Gantt alone. */
   data?: OfferData
   update?: <K extends keyof OfferData>(key: K, value: OfferData[K]) => void
   editable: boolean
+  /** True while a costing refresh is rewriting the draft: disables only the
+   * offer's own timing fields below, never the Gantt planner above (it is
+   * its own tool, unaffected by the offer refresh). */
+  fieldsDisabled?: boolean
 }) {
   const { data: plan } = useQuery({
     queryKey: quotePlanKey(changeId),
@@ -38,7 +42,8 @@ export default function OfferTimingSection({
         <GanttPlanner changeId={changeId} plan="quote" />
       </div>
       {data && update && (
-        <div className="grid gap-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3 sm:grid-cols-[auto_10rem_minmax(0,1fr)]">
+        <fieldset disabled={fieldsDisabled} aria-busy={fieldsDisabled}
+          className="m-0 grid gap-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3 sm:grid-cols-[auto_10rem_minmax(0,1fr)]">
           <label className="flex items-center gap-2 self-end pb-1.5 text-sm text-slate-200">
             <Toggle checked={timing.include !== false} disabled={!editable} label="Include timing in the offer"
               testId="timing-include" onChange={(v) => set({ include: v })} />
@@ -62,7 +67,7 @@ export default function OfferTimingSection({
               value={timing.disclaimer ?? DEFAULT_DISCLAIMER}
               onChange={(e) => set({ disclaimer: e.target.value })} />
           </Field>
-        </div>
+        </fieldset>
       )}
     </div>
   )
