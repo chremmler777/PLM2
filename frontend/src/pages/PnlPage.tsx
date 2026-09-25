@@ -15,7 +15,7 @@ import { pnlApi } from '../api/pnl';
 import { STATUS_LABELS, STATUS_PILL } from '../lib/changeStatus';
 import type { ChangeStatus } from '../types/change';
 import { formatDays, formatMoney, formatMoneyDelta, formatPercent } from '../lib/format';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleAlert } from 'lucide-react';
 import DateInput from '../components/gantt/DateInput';
 import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -39,10 +39,11 @@ const fmtPct = (v: number | null | undefined) =>
 const IN_PROGRESS: ChangeStatus[] = ['in_implementation', 'in_validation'];
 const runningRow = (r: PnlRow) => r.phase === 'actual' && IN_PROGRESS.includes(r.status);
 
-/** Engineering reviews carry no price by design (spec §17). The list does not
- *  send the origin yet; read it when it does. */
-type Row = PnlRow & { origin?: string | null };
-const isReview = (r: Row) => r.origin === 'engineering_review';
+/** Engineering reviews carry no price by design (spec §17): the row's origin
+ *  (pnl_service UNPRICED_BY_DESIGN). */
+/** Actual costs in another currency than the row's: left out, not converted. */
+const otherCurrencyActual = (r: PnlRow) => r.warnings?.find((w) => w.code === 'other_currency_actual');
+const isReview = (r: PnlRow) => r.origin === 'engineering_review';
 
 type SortKey = 'change_number' | 'title' | 'status' | 'offer_revenue' | 'planned_cost'
   | 'actual_cost' | 'planned_margin' | 'actual_margin' | 'variance' | 'slip_days';
@@ -435,13 +436,14 @@ export default function PnlPage() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((r: Row) => {
+              {sorted.map((r) => {
                 const tone = varianceTone(r.variance, r.planned_margin, 1);
                 // costs and margins in the costing currency, the revenue in its own
                 const cur = r.currency;
                 const rcur = r.revenue_currency ?? r.currency;
                 const running = runningRow(r);
                 const shownMargin = r.forecast_margin ?? r.actual_margin;
+                const otherCur = otherCurrencyActual(r);
                 return (
                 <tr key={r.change_id} className="group border-t border-slate-700 hover:bg-slate-800/60">
                   <td className="sticky left-0 z-[1] bg-slate-900 group-hover:bg-slate-800 px-2 py-2.5 font-mono whitespace-nowrap">
@@ -500,6 +502,15 @@ export default function PnlPage() {
                   </td>
                   <td className="px-2 py-2.5 text-right text-slate-200 whitespace-nowrap">
                     {fmtMoney(r.actual_cost, cur)}
+                    {otherCur && (
+                      <div data-testid={`pnl-other-currency-${r.change_id}`}
+                        className="flex items-center justify-end gap-1 text-[11px] text-amber-300"
+                        title={otherCur.message}>
+                        <CircleAlert aria-hidden="true" size={11} className="shrink-0" />
+                        other currency left out
+                        <span className="sr-only">: {otherCur.message}</span>
+                      </div>
+                    )}
                     {differs(r.forecast_cost, r.actual_cost) && (
                       <div data-testid={`pnl-forecast-cost-${r.change_id}`} className="text-[11px] text-slate-500"
                         title="Expected cost at release: open cost lines count at plan">

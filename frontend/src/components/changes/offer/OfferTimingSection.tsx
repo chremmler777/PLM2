@@ -8,7 +8,7 @@ import { RotateCcw } from 'lucide-react'
 import GanttPlanner from '../plan/GanttPlanner'
 import { planApi } from '../../../api/changePlan'
 import type { OfferData } from '../../../types/changeOffer'
-import { DEFAULT_DISCLAIMER, inputCls, planWeeks, quotePlanKey } from './offerFormat'
+import { DEFAULT_DISCLAIMER, fmtDate, inputCls, planWeeks, quotePlanKey } from './offerFormat'
 import { Field, NumField, Toggle } from './ui'
 
 export default function OfferTimingSection({
@@ -34,7 +34,10 @@ export default function OfferTimingSection({
     queryFn: () => planApi.get(changeId, 'quote'),
   })
   const timing = data?.timing ?? { include: true }
+  // The plan summary's span leaves idea blocks out (backend plan_out), so
+  // the weeks never count an option; the offer's own weeks_from_order too.
   const auto = planWeeks(plan?.summary)
+  const milestones = timing.milestones ?? []
   const set = (patch: Partial<NonNullable<OfferData['timing']>>) =>
     update?.('timing', { ...timing, ...patch })
 
@@ -78,6 +81,26 @@ export default function OfferTimingSection({
               onChange={(e) => set({ disclaimer: e.target.value })} />
           </Field>
         </fieldset>
+      )}
+      {data && milestones.length > 0 && (
+        <div data-testid="offer-timing-milestones">
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-slate-500">Milestones in the offer</p>
+          <ul className="flex flex-wrap gap-1.5">
+            {milestones.map((m, i) => (
+              <li key={`${m.label}-${m.date}-${i}`} data-testid="offer-timing-milestone" data-idea={m.idea || undefined}
+                title={m.idea ? 'Option: an idea block of the quote plan, not committed. It does not count in the weeks from order.' : undefined}
+                className={m.idea
+                  ? 'inline-flex items-center gap-1.5 rounded border border-dashed border-slate-500 bg-[repeating-linear-gradient(135deg,transparent_0_4px,rgba(148,163,184,0.18)_4px_6px)] px-2 py-0.5 text-xs text-slate-300'
+                  : 'inline-flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-xs text-slate-200'}>
+                <span className="font-medium">{m.label}</span>
+                <span className="tabular-nums text-slate-400">{fmtDate(m.date)}</span>
+                {m.idea && (
+                  <span className="rounded bg-slate-700 px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-200">Option</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   )

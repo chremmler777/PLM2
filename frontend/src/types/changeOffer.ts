@@ -83,7 +83,9 @@ export interface OfferPiecePrice {
 export interface OfferTiming {
   include: boolean
   weeks_from_order?: number | null
-  milestones?: { label: string; date: string }[]
+  /** From the quote plan. `idea: true` marks an idea block (not committed):
+   *  an option for the customer, never part of the weeks from order. */
+  milestones?: { label: string; date: string; idea?: boolean }[]
   disclaimer?: string | null
 }
 

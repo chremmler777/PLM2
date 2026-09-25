@@ -427,4 +427,34 @@ describe('OfferTab', () => {
     expect(margin.textContent).toContain('No internal cost yet')
     expect(margin.textContent).not.toContain('EUR')
   })
+  it('marks an idea milestone as an option, apart from the committed ones', async () => {
+    const o = offer()
+    o.data.timing = { include: true, weeks_from_order: 9, milestones: [
+      { label: 'SOP', date: '2026-12-01' },
+      { label: 'Extra trial', date: '2026-11-10', idea: true },
+    ] }
+    vi.mocked(changeOfferApi.list).mockResolvedValue([o])
+    renderTab(props())
+    const items = await screen.findAllByTestId('offer-timing-milestone')
+    expect(items).toHaveLength(2)
+    expect(items[0].dataset.idea).toBeUndefined()
+    expect(items[0].textContent).not.toContain('Option')
+    expect(items[1].dataset.idea).toBe('true')
+    expect(items[1].textContent).toContain('Extra trial')
+    expect(items[1].textContent).toContain('Option')
+    expect(items[1].getAttribute('title')).toContain('does not count in the weeks from order')
+  })
+
+  it('shows override_split in the price section and jumps there from the header', async () => {
+    const msg = "Machine time and sampling now have their own lines: the amount set by hand on 'Development' was reduced by them so they are not counted twice. Check it"
+    vi.mocked(changeOfferApi.list).mockResolvedValue([offer({ warnings: [{ code: 'override_split', message: msg, task_id: null }] })])
+    renderTab(props())
+    const priceWarnings = await screen.findByTestId('offer-price-warnings')
+    expect(priceWarnings.querySelector('[data-code="override_split"]')?.textContent).toBe(msg)
+    const price = document.getElementById('offer-price')!
+    const spy = vi.fn()
+    price.scrollIntoView = spy
+    fireEvent.click(within(screen.getByTestId('offer-warnings')).getByText(msg))
+    expect(spy).toHaveBeenCalled()
+  })
 })

@@ -61,8 +61,16 @@ export interface OfferTabProps {
 
 type SectionId = 'offer-timing' | 'offer-price' | 'offer-risks' | 'offer-document' | 'offer-negotiation'
 
+/** Codes whose section the name patterns below would not find (or would
+ *  find wrongly). override_split: a hand-set cost line amount the refresh
+ *  reduced by the new machine-time and sampling lines, to be re-checked. */
+const SECTION_BY_CODE: Record<string, SectionId> = {
+  override_split: 'offer-price',
+}
+
 const SECTION_OF = (code: string): SectionId => {
   const c = code.toLowerCase()
+  if (SECTION_BY_CODE[c]) return SECTION_BY_CODE[c]
   if (/timing|plan|week/.test(c)) return 'offer-timing'
   if (/risk/.test(c)) return 'offer-risks'
   if (/recipient|subject|term|document|rough|intro/.test(c)) return 'offer-document'
@@ -355,9 +363,9 @@ function OfferWorkspace({ props, offers, offer }: {
   const errorsOf: Partial<Record<SectionId, number>> = { 'offer-timing': planErrors }
   const acceptedOffer = offers.find((o) => o.id === change.accepted_offer_id)
     ?? offers.find((o) => o.status === 'accepted')
-  // What stops the send, said before the click. The backend refuses a closed
-  // offer, a zero total and an empty quote plan with the timing included;
-  // quote-plan errors are held here as well (the backend is to refuse them too).
+  // What stops the send, said before the click. The backend refuses the same:
+  // a closed offer, a zero total, and, with the timing included, an empty
+  // quote plan or one with errors (OfferService._check_quote_plan).
   const sendReasons = [
     ...(closed ? [acceptedOffer
       ? `The customer accepted v${acceptedOffer.version}: the offer is closed`

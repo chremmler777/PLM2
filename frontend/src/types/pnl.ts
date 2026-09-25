@@ -14,6 +14,9 @@ export interface PnlRow {
   project_name: string | null;
   branch: PnlBranch;
   status: ChangeStatus;
+  /** Where the change came from (customer, engineering_review, ...). An
+   *  engineering review has no price by design (spec §17): not "unpriced". */
+  origin?: string | null;
   /** The costing currency: every amount of the row except the revenue. */
   currency?: string;
   /** The revenue's currency (the offer's); no margin when it differs. */
@@ -21,7 +24,9 @@ export interface PnlRow {
   currency_mismatch?: boolean;
   /** Costing lines without a rate in the cost sheet: the cost is too low. */
   no_rate?: boolean;
-  /** no_rate_department names its department_id. */
+  /** no_rate_department names its department_id. other_currency_actual:
+   *  actual costs entered or booked in another currency, left out of the
+   *  actual cost (never converted). */
   warnings?: { code: string; message: string; department_id?: number | null }[];
   revenue: number | null;
   /** The costing's cost as the summation counts it: assessment cost lines plus costing positions, in `currency`. */
@@ -225,7 +230,10 @@ export interface ActualCostList {
 
 export interface ActualCostIn {
   category: ActualCostCategory;
-  amount: number;
+  /** A number, or the text as typed when it carries a currency mark
+   *  ("$1,250", "1,250 EUR"): the backend reads the mark and refuses (400)
+   *  one that contradicts the entry's currency. */
+  amount: number | string;
   cost_date: string;
   department_id?: number | null;
   vendor_name?: string | null;

@@ -307,4 +307,16 @@ describe('PnlPage', () => {
     expect(row.textContent).toContain('engineering review')
     expect(row.textContent).not.toMatch(/price pending/i)
   })
+  it('flags actual costs in another currency on the row, with the reason as tooltip', async () => {
+    const message = 'Actual costs in USD are not in the EUR actual cost (no conversion)'
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[1], change_id: 36, change_number: 'CR-36',
+        warnings: [{ code: 'other_currency_actual', message }] },
+    ] })
+    renderPage()
+    await screen.findByText('CR-36')
+    const flag = screen.getByTestId('pnl-other-currency-36')
+    expect(flag.getAttribute('title')).toBe(message)
+    expect(flag.textContent).toContain('other currency left out')
+  })
 })

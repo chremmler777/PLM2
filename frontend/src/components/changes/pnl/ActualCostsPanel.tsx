@@ -18,6 +18,16 @@ const CATEGORY_LABEL: Record<ActualCostCategory, string> = {
   other: 'Other',
 }
 
+/** A currency mark before or after the typed number ("$1,250", "1,250 EUR",
+ *  "€ 12"): the number part is checked here, the mark is the backend's to
+ *  read against the currency (actual_costs.split_amount_sign). */
+const MARKED = /^(?:([A-Za-z]{3}|[€£$])\s*)?(.*?)(?:\s*([A-Za-z]{3}|[€£$]))?$/
+function splitCurrencyMark(text: string): { num: string; mark: string | null } {
+  const m = MARKED.exec(text.trim())
+  const mark = m?.[1] ?? m?.[3] ?? null
+  return m && mark ? { num: m[2], mark } : { num: text, mark: null }
+}
+
 const input = 'bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200'
 
 
@@ -58,7 +68,11 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   }
   const add = useMutation({
     mutationFn: () => actualCostsApi.add(changeId, {
-      category, amount: amountRead.value as number, cost_date: costDate,
+      category,
+      // with a currency mark the text goes as typed: the backend reads the
+      // mark (and refuses one that contradicts the currency, shown below)
+      amount: amountMark ? amount.trim() : amountRead.value as number,
+      cost_date: costDate,
       vendor_name: vendor || null, department_id: dept === '' ? null : dept,
       note: note || null,
     }),
@@ -74,7 +88,8 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
   })
   const [removing, setRemoving] = useState<ActualCost | null>(null)
   // en-US like everything shown: "1,500" is fifteen hundred, "12,5" is refused.
-  const amountRead = readNumberInput(amount)
+  const { num: amountNum, mark: amountMark } = splitCurrencyMark(amount)
+  const amountRead = readNumberInput(amountNum)
 
   if (!data) return null
   const allowed = data.writable_department_ids
@@ -129,7 +144,7 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
             <input aria-label="Amount" className={input} inputMode="decimal" value={amount}
               aria-invalid={amountHint ? true : undefined}
               aria-describedby={amountHint ? `actual-cost-amount-hint-${changeId}` : undefined}
-              onChange={(e) => setAmount(e.target.value)} />
+              onChange={(e) => { setAmount(e.target.value); setError(null) }} />
             {amountHint && (
               <span id={`actual-cost-amount-hint-${changeId}`} data-testid="actual-cost-amount-hint"
                 className="text-[11px] text-rose-300">{amountHint}</span>
