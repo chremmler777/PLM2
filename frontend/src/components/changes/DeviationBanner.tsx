@@ -16,6 +16,10 @@ interface Props {
   onClose: () => void;
 }
 
+/** A soft guard's refusal ends in this sentence (ChangeService.transition);
+ * a hard rule never does, and no deviation lifts it. */
+const isDeviable = (reason: string): boolean => /approved deviation is required/i.test(reason);
+
 const STATUS_STYLE: Record<string, string> = {
   pending: 'bg-amber-900 text-amber-200',
   approved: 'bg-emerald-900 text-emerald-200',
@@ -58,6 +62,8 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
   const relevant = deviations.filter((d) => d.to_status === blockedTo);
   const hasApproved = relevant.some((d) => d.status === 'approved');
   const hasPending = relevant.some((d) => d.status === 'pending');
+  // Only a soft guard can be deviated from: a hard rule gets no request button.
+  const deviable = isDeviable(blockedReason);
 
   return (
     <div ref={rootRef} tabIndex={-1} role="alert" aria-label="Transition blocked"
@@ -91,11 +97,11 @@ export default function DeviationBanner({ changeId, blockedTo, blockedReason, se
       )}
 
       <div className="flex gap-2 mt-3">
-        {!hasPending && !hasApproved && (
+        {deviable && !hasPending && !hasApproved && (
           <button className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs"
                   onClick={() => setDialogOpen(true)}>Request deviation</button>
         )}
-        {hasApproved && (
+        {deviable && hasApproved && (
           <button className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs"
                   onClick={onRetry}>Retry transition</button>
         )}

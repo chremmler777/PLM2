@@ -120,6 +120,11 @@ export default function IssueCard({
     ref.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
   }, [highlight])
   const code = issueCode(issue)
+  // A failed re-check sends the issue back to fixing: the "answer the check
+  // again" note it opened no longer applies.
+  useEffect(() => {
+    if (issue.status !== 'revalidation') setActive((a) => (a === 'recheck' ? null : a))
+  }, [issue.status])
 
   const acts = issueActs(issue, viewer)
   // 4 eyes: a PM or lead who raised the issue sees the route step, but not as theirs.
@@ -135,6 +140,10 @@ export default function IssueCard({
   const checkRow = recheckTarget(issue)
   const canEdit = open && acts.includes('edit')
   const myAck = (issue.escalations ?? []).find((e) => !e.acknowledged_at && e.can_acknowledge)
+  // Fixed during the loop back: the re-check waits for validation (the
+  // backend offers no act in implementation), so the card names the step.
+  const recheckWaits = open && issue.status === 'revalidation' && changeStatus === 'in_implementation'
+    && !acts.includes('recheck')
 
   const contain = useIssueMutation(changeId, (t: string) => validationIssuesApi.contain(changeId, issue.id, t),
     { error: 'Could not save the containment', onDone: () => setActive(null) })
@@ -172,6 +181,11 @@ export default function IssueCard({
       className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
       {ACT_LABEL[primary]}
     </button>
+  ) : recheckWaits ? (
+    <span data-testid={`issue-recheck-waits-${issue.id}`}
+      className="max-w-[18rem] text-right text-[11px] text-slate-400">
+      Fix done. The check is answered again once the change is back in validation.
+    </span>
   ) : fourEyes ? (
     <button type="button" data-testid={`issue-primary-${issue.id}`} data-act="route" disabled
       title="You raised this issue. Another PM or the change lead decides the route (4 eyes)."

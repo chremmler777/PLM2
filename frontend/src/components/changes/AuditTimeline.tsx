@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { auditApi, type AuditEntry } from '../../api/audit'
+import { changesApi } from '../../api/changes'
 import { t } from '../../i18n/cmLabels'
-import { formatDate, formatDateTime } from '../../lib/format'
+import { formatDate, formatDateTime, parseApiDateTime } from '../../lib/format'
 import { auditValueLabel, humanize } from '../../lib/humanLabels'
 
 // Short codes the backend stores for a handful of fields, in words.
@@ -20,23 +21,29 @@ const humanValue = (v: unknown, field?: string): string => {
   if (v === null || v === undefined) return '-'
   if (Array.isArray(v)) return v.length ? v.map((x) => humanValue(x, field)).join(', ') : '(none)'
   if (typeof v === 'object') {
-    // Empty fields say nothing: "concern id: -" is noise in a trail.
-    return Object.entries(v as Record<string, unknown>)
+    // Empty fields say nothing: "concern id: -" is noise in a trail. An id
+    // whose name travels with it ("department id" next to "department name")
+    // is said once, by the name.
+    const obj = v as Record<string, unknown>
+    return Object.entries(obj)
       .filter(([, val]) => val !== null && val !== undefined && val !== '')
-      .map(([k, val]) => `${keyLabel(k, val)}: ${humanValue(val, k)}`)
+      .filter(([k]) => !(k.endsWith('_id') && obj[`${k.slice(0, -3)}_name`] != null))
+      .map(([k, val]) => `${keyLabel(k)}: ${humanValue(val, k)}`)
       .join(', ')
   }
   const f = (field ?? '').toLowerCase()
   if (FIELD_WORDS[f] && typeof v === 'string') return FIELD_WORDS[f](v)
   // A bare record id reads as a reference, not as a quantity.
-  if (f.endsWith('_id') && typeof v === 'number') return `#${v}`
+  if ((f.endsWith('_id') || f.endsWith('_ids')) && typeof v === 'number') return `#${v}`
   return auditValueLabel(field ?? null, String(v))
 }
 
-// "part id" with a resolved "3457-10" reads "part"; a bare id keeps its word.
-const keyLabel = (k: string, val: unknown): string => {
+// "part id" reads "part" ("part: 3457-10", "meeting: #41"); "superseded
+// assessment ids" reads "superseded assessments" ("#258, #259"). The value
+// says it is a reference, the key names what it refers to.
+const keyLabel = (k: string): string => {
   const words = humanize(k).toLowerCase()
-  return k.endsWith('_id') && typeof val === 'string' ? words.replace(/ id$/, '') : words
+  return k.endsWith('_ids') ? words.replace(/ ids$/, 's') : k.endsWith('_id') ? words.replace(/ id$/, '') : words
 }
 
 const parse = (s: string | null): unknown => {
@@ -104,6 +111,20 @@ export default function AuditTimeline({ correlationId, changeId }: {
     }
     : { ok: false, text: t('audit.chainBrokenScoped') }
   const truncated = entries.length === LIST_LIMIT
+  // The memo a step was taken with (back to scoping, superseded answers ...)
+  // lives on the change's own log, not in the audit row: same key as the page.
+  const { data: changelog = [] } = useQuery({
+    queryKey: ['change', changeId, 'changelog'],
+    queryFn: () => changesApi.changelog(changeId!),
+    enabled: changeId != null,
+  })
+  const reasonOf = (e: AuditEntry): string | null => {
+    if (e.entity_type !== 'change') return null
+    const at = parseApiDateTime(e.timestamp).getTime()
+    const row = changelog.find((c) => c.action === e.action && !!c.notes?.trim()
+      && Math.abs(parseApiDateTime(c.performed_at).getTime() - at) < 5000)
+    return row?.notes?.trim() ?? null
+  }
 
   const entityTypes = useMemo(
     () => Array.from(new Set(entries.map((e) => e.entity_type))), [entries])
@@ -171,6 +192,7 @@ export default function AuditTimeline({ correlationId, changeId }: {
           <ol className="space-y-1.5 border-l border-slate-700 pl-4">
             {dayEntries.map((e) => {
               const detail = describeChange(e)
+              const reason = reasonOf(e)
               return (
                 <li key={e.id} className="text-sm flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono text-xs text-slate-500">
@@ -186,6 +208,11 @@ export default function AuditTimeline({ correlationId, changeId }: {
                   </span>
                   <span className="text-slate-300">{humanize(e.action).toLowerCase()}</span>
                   {detail && <span className="text-slate-400">: {detail}</span>}
+                  {reason && !(detail ?? '').includes(reason) && (
+                    <span data-testid={`audit-reason-${e.id}`} className="text-slate-300">
+                      ({t('audit.reason')}: {reason})
+                    </span>
+                  )}
                   <span className="text-xs text-slate-600">{humanize(e.entity_type)} {e.entity_id}</span>
                 </li>
               )

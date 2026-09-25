@@ -68,6 +68,31 @@ describe('StartChangeModal', () => {
     expect(navigate).toHaveBeenCalledWith('/changes/42')
   })
 
+  it('shows the project PM as the default lead when the project has one', async () => {
+    clientMocks.get.mockImplementation((url: string) => {
+      if (url.includes('/plants/projects'))
+        return Promise.resolve({ data: [{ id: 1, code: '1864', name: 'VW426 Atlas' }] })
+      if (url.includes('/parts/project/')) return Promise.resolve({ data: [] })
+      if (url.includes('/projects/1/team'))
+        return Promise.resolve({ data: [
+          { department_id: 6, department_name: 'Project Manager',
+            responsible: { id: 3, name: 'Petra PM' } },
+          { department_id: 5, department_name: 'Sales', responsible: null },
+        ] })
+      return Promise.resolve({ data: [] })
+    })
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    await waitFor(() => expect(screen.getByTestId('start-default-lead').textContent)
+      .toContain('Petra PM'))
+    expect(screen.getByTestId('start-default-lead').textContent).toContain('project PM')
+  })
+
+  it('shows no default-lead info when the project has none', async () => {
+    wrap(<StartChangeModal open onClose={() => {}} prefill={{ projectId: 1 }} />)
+    await screen.findByLabelText(/Change type/)
+    expect(screen.queryByTestId('start-default-lead')).toBeNull()
+  })
+
   it('sends customer_relevant: true when the Yes option is picked', async () => {
     wrap(<StartChangeModal open onClose={() => {}} prefill={{
       projectId: 1,

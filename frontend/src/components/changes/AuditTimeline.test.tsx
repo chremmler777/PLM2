@@ -8,6 +8,11 @@ import { auditApi } from '../../api/audit'
 vi.mock('../../api/audit', () => ({
   auditApi: { list: vi.fn(), verify: vi.fn(), downloadCsv: vi.fn() },
 }))
+vi.mock('../../api/changes', () => ({
+  changesApi: { changelog: vi.fn().mockResolvedValue([]) },
+}))
+import { changesApi } from '../../api/changes'
+import { formatDateTime } from '../../lib/format'
 
 const entry = (over: Record<string, unknown>) => ({
   id: 1, entity_type: 'change', entity_id: 7, action: 'status_changed',
@@ -76,7 +81,7 @@ describe('AuditTimeline', () => {
     expect(screen.getByText(/Chris D/)).toBeDefined()
     expect(screen.getByText(/part: 3457-10/)).toBeDefined()
     expect(screen.queryByText(/2267/)).toBeNull()
-    expect(screen.getByText(/meeting id: #27, channel: E-?mail/i)).toBeDefined()
+    expect(screen.getByText(/meeting: #27, channel: E-?mail/i)).toBeDefined()
     expect(screen.getByText(/30\.09\.2026 23:59/)).toBeDefined()
   })
 
@@ -184,5 +189,38 @@ describe('AuditTimeline', () => {
     expect(await screen.findByText(/verdict: Not answered yet → verdict: Feasible with conditions/)).toBeDefined()
     expect(screen.getByText('01.07.2026')).toBeDefined()
     expect(screen.getAllByText(/Change assessment/).length).toBeGreaterThan(0)
+  })
+
+  it('names what an id refers to, drops ids a name already says, and reads moments in local time', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 5, action: 'back_to_scoping', old_values: null,
+        new_values: '{"superseded_assessment_ids": [258, 259]}' }),
+      entry({ id: 6, action: 'assessment_superseded', new_values: null,
+        old_values: '{"assessment_id": 258, "department_id": 28, "department_name": "Development", '
+          + '"submitted_at": "2026-09-25T12:17:00"}' }),
+      entry({ id: 7, action: 'scoping_meeting_recorded', old_values: null,
+        new_values: '{"meeting_id": 41, "channel": "meeting"}' }),
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" />)
+    expect(await screen.findByText(/superseded assessments: #258, #259/)).toBeDefined()
+    const superseded = screen.getByText(/assessment: #258/).textContent ?? ''
+    expect(superseded).toContain('department name: Development')
+    expect(superseded).not.toContain('department:')
+    expect(superseded).toContain(`submitted at: ${formatDateTime('2026-09-25T12:17:00')}`)
+    expect(screen.getByText(/meeting: #41/)).toBeDefined()
+  })
+
+  it('shows the reason back to scoping was taken with', async () => {
+    vi.mocked(auditApi.list).mockResolvedValue([
+      entry({ id: 5, action: 'back_to_scoping', old_values: null, timestamp: '2026-09-25T12:17:30',
+        new_values: '{"superseded_assessment_ids": [258]}' }),
+    ])
+    vi.mocked(changesApi.changelog).mockResolvedValue([
+      { id: 1, action: 'back_to_scoping', action_description: 'Back to scoping', performed_by: 1,
+        performed_at: '2026-09-25T12:17:31', notes: 'Hole cannot move, rescope with Tooling' },
+    ])
+    wrap(<AuditTimeline correlationId="CR-2026-0007" changeId={7} />)
+    expect((await screen.findByTestId('audit-reason-5')).textContent)
+      .toBe('(reason: Hole cannot move, rescope with Tooling)')
   })
 })

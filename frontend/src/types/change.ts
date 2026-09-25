@@ -266,6 +266,8 @@ export interface ChangeRequest {
   /** Where the change comes from (spec §14): customer, internal, or the
    *  mother-plant side track (no assessment, costing or quote). */
   origin?: ChangeOrigin;
+  /** Spec §17: started by (or took) a revision intake. */
+  from_intake?: boolean;
   mother_plant_name?: string | null;
   mother_plant_ref?: string | null;
   /** The mother plant's SOP (YYYY-MM-DD); the release deadline at approval. */
@@ -325,7 +327,8 @@ export interface LeadCandidate {
   is_default?: boolean;
 }
 
-export type ChangeOrigin = 'customer' | 'internal' | 'mother_plant';
+/** engineering_review: the light track of a new customer index (spec §17). */
+export type ChangeOrigin = 'customer' | 'internal' | 'mother_plant' | 'engineering_review';
 
 /** Running change vs planned scrap — the two ways a change reaches the line. */
 export type BankBuildMode = 'running_change' | 'planned_scrap';

@@ -138,6 +138,8 @@ export default function UploadDialog(props: UploadDialogProps) {
           const res = await client.post(`/v1/parts/${partId}/revisions/customer-data`, {
             statement: effectiveStatement, received_at: receivedAt,
             customer_index: index.trim() || undefined, summary: summary.trim() || undefined,
+            // spec §17: the new index waits for Development's triage
+            source: 'upload',
           });
           targetId = res.data.id;
           setSessionTargetId(targetId);

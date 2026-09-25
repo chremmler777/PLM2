@@ -39,6 +39,8 @@ export default function ChangesPage() {
   const [statusFilter, setStatusFilter] = useState<string>(searchParams.get('status') ?? '');
   const [query, setQuery] = useState('');
   const [mineOnly, setMineOnly] = useState(false);
+  // Spec §17: the changes a new customer index started (or joined).
+  const [intakeOnly, setIntakeOnly] = useState(false);
   const [sort, setSort] = useState<Sort>('recent');
   const { userId } = useAuth();
 
@@ -57,7 +59,7 @@ export default function ChangesPage() {
     const q = query.trim().toLowerCase();
     const mine = (c: ChangeRequest) =>
       c.is_mine ?? (userId != null && c.lead_id === userId);
-    const rows = all.filter((c) => (!mineOnly || mine(c)) && (!q || [
+    const rows = all.filter((c) => (!mineOnly || mine(c)) && (!intakeOnly || !!c.from_intake) && (!q || [
       c.change_number, c.title, c.project_number, c.project_name,
     ].some((f) => (f ?? '').toLowerCase().includes(q))));
     if (sort === 'overdue') {
@@ -69,9 +71,9 @@ export default function ChangesPage() {
         || (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9));
     }
     return rows;
-  }, [data, query, mineOnly, sort, userId]);
+  }, [data, query, mineOnly, intakeOnly, sort, userId]);
 
-  const filtered = query.trim() !== '' || mineOnly;
+  const filtered = query.trim() !== '' || mineOnly || intakeOnly;
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -112,6 +114,12 @@ export default function ChangesPage() {
           <input type="checkbox" data-testid="changes-mine" checked={mineOnly}
             onChange={(e) => setMineOnly(e.target.checked)} />
           {t('changes.mine')}
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"
+          title="Changes started by a new customer index (or that took one)">
+          <input type="checkbox" data-testid="changes-from-intake" checked={intakeOnly}
+            onChange={(e) => setIntakeOnly(e.target.checked)} />
+          From intake
         </label>
         <select
           data-testid="changes-sort"
@@ -168,6 +176,16 @@ export default function ChangesPage() {
                   </td>
                   <td className="px-4 py-3 min-w-[16rem]">
                     <span className="line-clamp-2" title={c.title}>{c.title}</span>
+                    {c.origin === 'engineering_review' ? (
+                      <span data-testid={`change-review-${c.id}`}
+                        className="mt-0.5 inline-block rounded-full bg-teal-900/60 px-2 py-0.5 text-[11px] text-teal-200">
+                        Engineering review
+                      </span>
+                    ) : c.from_intake ? (
+                      <span className="mt-0.5 inline-block rounded-full bg-amber-900/50 px-2 py-0.5 text-[11px] text-amber-200">
+                        From intake
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">{changeTypeLabel(c.change_type)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">

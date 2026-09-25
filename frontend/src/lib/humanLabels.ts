@@ -5,6 +5,7 @@
  */
 import { t } from '../i18n/cmLabels'
 import { STATUS_LABELS } from './changeStatus'
+import { formatDateTime } from './format'
 import type { ChangeStatus } from '../types/change'
 
 /** "some_code_value" -> "Some code value": the last resort for an unknown code. */
@@ -22,6 +23,12 @@ export const VERDICT_LABELS: Record<string, string> = {
 }
 export const verdictLabel = (v: string | null | undefined): string =>
   (v && VERDICT_LABELS[v]) || humanize(v)
+
+/** An assessment's answer in words: a questionnaire that said "not impacted"
+ *  reads so, not as the "feasible" it is stored as. */
+export const assessmentVerdictLabel = (a: { verdict?: string | null; details?: Record<string, unknown> | null }
+  | null | undefined): string =>
+  a?.details?.impacted === false && a.verdict === 'feasible' ? t('pkg.notImpacted') : verdictLabel(a?.verdict)
 
 export const CHANGE_TYPE_LABELS: Record<string, string> = {
   physical_part: 'Physical part',
@@ -76,6 +83,10 @@ export function auditValueLabel(field: string | null | undefined, value: string 
   if (f === 'cost_carrier') return COST_CARRIER_LABELS[v] ?? humanize(v)
   if (f === 'customer_relevant') return v === '1' ? 'Yes' : v === '0' ? 'No' : v
   const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(v)
+  // A recorded moment ("submitted_at") reads in local time, the backend
+  // stores it as naive UTC. A deadline is wall-clock (end of the day as set)
+  // and a bare day is a day wherever it is read: both stay as written.
+  if (iso && iso[4] && f.endsWith('_at')) return formatDateTime(v)
   if (iso) return iso[4] ? `${iso[3]}.${iso[2]}.${iso[1]} ${iso[4]}:${iso[5]}` : `${iso[3]}.${iso[2]}.${iso[1]}`
   if (STATUS_LABELS[v as ChangeStatus]) return STATUS_LABELS[v as ChangeStatus]
   if (VERDICT_LABELS[v]) return VERDICT_LABELS[v]

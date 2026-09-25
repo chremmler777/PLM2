@@ -6,13 +6,20 @@ export interface PackageRow {
   filename: string; part_id: number | null; part_number: string | null; customer_part_number: string | null;
   customer_index: string | null; current_revision: string | null; current_index: string | null;
   action: 'new_major' | 'unchanged' | 'unmatched' | 'error'; suggested_name: string | null; major: number | null; error: string | null;
+  /** Spec §17: the current index is still pending triage (a new one supersedes it). */
+  current_pending?: boolean; pending_note?: string | null;
+}
+
+export interface PackageResult {
+  created: { part_id?: number; part_number?: string | null; revision_name?: string; filename?: string; pending?: boolean }[];
+  kept: unknown[]; skipped: string[]; pending_count?: number;
 }
 
 interface Props {
   open: boolean; assemblyId: number;
   projectParts: { id: number; part_number: string; name: string }[];
   officialOnly?: boolean; onClose(): void;
-  onDone(result: { created: unknown[]; kept: unknown[]; skipped: string[] }): void;
+  onDone(result: PackageResult): void;
 }
 
 const ACTIONS: PackageRow['action'][] = ['new_major', 'unchanged', 'unmatched'];
@@ -25,6 +32,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec §17: the stored package's new indexes wait for Development's triage.
+  const [result, setResult] = useState<PackageResult | null>(null);
   if (!open) return null;
   const effective = officialOnly ? 'official' : statement;
 
@@ -59,7 +68,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
       fd.append('rows', JSON.stringify(rows.map((r) => ({
         filename: r.filename, part_id: r.part_id, customer_index: r.customer_index, action: r.action, major: r.major }))));
       const res = await client.post(`/v1/parts/${assemblyId}/revisions/customer-package`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      onDone(res.data);
+      if ((res.data as PackageResult).created?.length) setResult(res.data);
+      else onDone(res.data);
     } catch (e) {
       const err = e as { response?: { status?: number; data?: { detail?: string; rows?: PackageRow[] } } };
       if (err.response?.status === 409 && err.response.data?.rows) setRows(err.response.data.rows);
@@ -86,6 +96,34 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
     && !rows.some((r) => r.action === 'error')
     && rows.some((r) => r.part_id != null && (r.action === 'new_major' || r.action === 'unchanged'))
     && !rows.some((r) => r.action === 'new_major' && r.part_id == null);
+
+  if (result) {
+    const n = result.created.length;
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div data-testid="package-result" className="bg-slate-800 rounded-lg shadow-lg max-w-xl w-full mx-4 p-6 space-y-3">
+          <h3 className="text-lg font-bold text-slate-100">{n} new, pending triage</h3>
+          <p className="text-sm text-slate-300">
+            Each new index waits for Development to decide the route (engineering review, full ECR, attach to a
+            change, or administrative). Until then the current index stays active.
+          </p>
+          <ul className="text-sm space-y-1">
+            {result.created.map((c, i) => (
+              <li key={i} className="flex items-center gap-2">
+                <span className="font-mono text-slate-100">{c.part_number}</span>
+                <span className="font-mono text-blue-300">{c.revision_name}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-200">pending triage</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-slate-400">Kept {result.kept.length}, skipped {result.skipped.length}.</p>
+          <div className="flex justify-end">
+            <button onClick={() => onDone(result)} className="px-4 py-2 rounded bg-blue-600 text-white">Done</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -153,7 +191,8 @@ export default function CustomerPackageDialog({ open, assemblyId, projectParts, 
                     className="w-16 bg-slate-900 border border-slate-700 rounded px-1 text-slate-100 disabled:opacity-40" /></td>
                   <td className="text-xs">
                     {r.action === 'error' && <span className="text-red-300">{r.error}</span>}
-                    {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}</span>}
+                    {r.action === 'new_major' && <span className="text-blue-300">→ {r.major ? `${effective === 'review' ? 'E' : ''}${r.major}` : (r.suggested_name ?? '?')}<span className="block text-amber-300">pending triage</span></span>}
+                    {r.pending_note && <span className="block text-amber-300">{r.pending_note}</span>}
                     {r.action === 'unchanged' && <span className="text-slate-400">kept {r.current_revision ?? '—'}</span>}
                     {r.action === 'unmatched' && <span className="text-slate-500">skipped</span>}
                   </td>

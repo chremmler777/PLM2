@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -10,9 +10,11 @@ import type { ChangeType } from '../../types/change';
 import { useChangePermissions } from '../../hooks/queries/useCanStartChange';
 import { FALLBACK_MOTHER_PLANTS } from '../../api/motherPlant';
 import DateInput from '../gantt/DateInput';
+import { useDialogFocus } from '../../hooks/useDialogFocus';
 import MotherPlantFields, {
   emptyMotherPlantDraft, motherPlantMissing, type MotherPlantDraft,
 } from './motherPlant/MotherPlantFields';
+import { plantText } from '../../lib/plantName';
 
 // Full vocabulary the backend understands. Kept for typing and future rollout.
 export const CHANGE_TYPES: { value: ChangeType; label: string }[] = [
@@ -104,6 +106,12 @@ interface ProjectRef {
   name: string;
 }
 
+interface ProjectTeamRow {
+  department_id: number;
+  department_name: string;
+  responsible: { id: number; name: string } | null;
+}
+
 // Projects read number-first: "1864 · VW426 Atlas".
 const projectLabel = (p: ProjectRef): string =>
   p.code ? `${p.code} · ${p.name}` : p.name;
@@ -163,6 +171,17 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     enabled: open && !!projectId,
   });
 
+  // The project's Project Manager responsible: no lead_id goes in the create
+  // request (spec above), the backend defaults to this person on its own.
+  // Shown here as info only, so starting a change is no surprise.
+  const { data: team = [] } = useQuery<ProjectTeamRow[]>({
+    queryKey: ['project-team', projectId],
+    queryFn: async () => (await client.get(`/v1/projects/${projectId}/team`)).data,
+    enabled: open && !!projectId,
+    retry: false,
+  });
+  const projectPm = team.find((r) => r.department_name === 'Project Manager')?.responsible ?? null;
+
   const pickedIds = useMemo(() => new Set(picked.map((p) => p.id)), [picked]);
 
   const filtered = useMemo(() => {
@@ -201,6 +220,10 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
 
   const title = useMemo(() => composeTitle(picked), [picked]);
 
+  // A modal: focus stays inside, Escape closes, the title names it.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus(dialogRef, open, onClose);
   if (!open) return null;
 
   const missing: string[] = [];
@@ -312,7 +335,7 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           }
         }
         if (refused.length > 0) {
-          toast.error(`Could not attach ${refused.join(', ')}. Add it on the Mother plant tab.`);
+          toast.error(plantText('mp.attachFailed', motherPlant.name).replace('{x}', refused.join(', ')));
         }
       }
       onClose();
@@ -342,10 +365,11 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
     });
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold">{t('start.title')}</h2>
+          <h2 id={titleId} className="text-lg font-semibold">{t('start.title')}</h2>
           <button
             className="text-slate-400 hover:text-slate-200 text-xl leading-none"
             onClick={onClose}
@@ -529,6 +553,14 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
           <p className="mt-1 text-xs text-slate-500">{t('start.titleAuto')}</p>
         </div>
 
+        {/* Default lead — info only; nobody picks it here (spec §16). */}
+        {projectPm && (
+          <p data-testid="start-default-lead" className="mb-4 text-xs text-slate-400">
+            {t('start.defaultLead')}: <span className="text-slate-200">{projectPm.name}</span>{' '}
+            <span className="text-slate-500">({t('start.projectPm')})</span>
+          </p>
+        )}
+
         {/* Reason */}
         <div className="mb-6">
           <label htmlFor="sc-reason" className="flex items-baseline gap-2 text-sm text-slate-300 mb-1">
@@ -601,9 +633,9 @@ export default function StartChangeModal({ open, onClose, prefill }: StartChange
                   }}
                 />
                 <span>
-                  <span className="text-slate-100">Change from mother plant</span>
+                  <span className="text-slate-100">{plantText('mp.startOption', null)}</span>
                   <span className="block text-xs text-slate-500">
-                    Engineered and sold by the mother plant; we inform the team and take over their timing.
+                    {plantText('mp.startHint', null)}
                   </span>
                 </span>
               </label>

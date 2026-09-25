@@ -135,7 +135,10 @@ export function issueSteps(i: IssueOut): Step[] {
     ['route', 'Route', decided ? 'done' : ended ? 'skipped' : 'todo'],
     ['fixing', 'Fixing',
       decided && !fixRoute ? 'skipped'
-        : ['revalidation'].includes(i.status) || (ended && fixRoute) || (fixRoute && actionsDone) ? 'done' : 'todo'],
+        // A failed re-check sends the issue back to fixing with its actions
+        // still ticked: the status wins over the checklist then.
+        : ['revalidation'].includes(i.status) || (ended && fixRoute)
+          || (fixRoute && actionsDone && i.status !== 'fixing') ? 'done' : 'todo'],
     ['revalidation', 'Re-validation',
       decided && !fixRoute ? 'skipped' : ended ? (i.status === 'closed' ? 'done' : 'skipped') : 'todo'],
     ['closed', i.status === 'accepted' ? 'Accepted' : i.status === 'transferred' ? 'Transferred' : 'Closed',

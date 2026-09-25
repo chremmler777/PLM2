@@ -20,6 +20,7 @@ import type { ChangeTask } from '../types/change';
 import { projectLabel } from '../lib/project';
 import { toast } from 'sonner';
 import FormPanel from '../forms/FormPanel';
+import IntakeSection from '../components/intake/IntakeSection';
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -550,6 +551,8 @@ export default function MyTasksPage() {
       <EscalationsCard />
 
       <TaskList />
+
+      <IntakeSection />
 
       <SepItemsSection />
 

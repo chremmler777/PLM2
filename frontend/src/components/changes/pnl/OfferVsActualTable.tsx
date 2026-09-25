@@ -1,6 +1,7 @@
 import { formatDate, formatMoney } from '../../../lib/format'
 import type { OfferVsActual, OvaLine } from '../../../types/pnl'
 import { TONE_CLASS, varianceTone } from './variance'
+import { plantText } from '../../../lib/plantName'
 
 const money = (v: number | null | undefined, cur?: string) =>
   v === null || v === undefined || !Number.isFinite(v) ? '-' : formatMoney(v, cur)
@@ -56,7 +57,7 @@ export default function OfferVsActualTable({ data }: { data: OfferVsActual }) {
         <span className="text-xs text-slate-400 uppercase tracking-wide">Offer vs actual</span>
         <span className="text-xs text-slate-500">
           {/* Mother plant (spec §14): no offer basis, actual local costs only. */}
-          {data.basis === 'none' ? 'No plan: change from the mother plant, actual local costs only' : <>
+          {data.basis === 'none' ? plantText('mp.pnlBasis', data.mother_plant_name) : <>
           Plan from the {BASIS_LABEL[data.basis] ?? data.basis}
           {data.offer_version
             ? (data.basis === 'costing' ? `, revenue from offer v${data.offer_version}` : ` v${data.offer_version}`)

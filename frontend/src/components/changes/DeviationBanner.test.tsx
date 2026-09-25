@@ -107,4 +107,26 @@ describe('ReasonDialog', () => {
     rerender(<ReasonDialog open title="t" label="l" onSubmit={() => {}} onClose={() => {}} />);
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
   });
+
+  it('offers no deviation for a hard-rule refusal, only for a soft guard', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="scoping"
+          blockedReason="Cannot recall: assessment work has already started"
+          seq={1} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    await screen.findByText(/Cannot recall/);
+    await waitFor(() => expect(changesApi.listDeviations).toHaveBeenCalled());
+    expect(screen.queryByText('Request deviation')).toBeNull();
+    rerender(
+      <QueryClientProvider client={qc}>
+        <DeviationBanner changeId={7} blockedTo="in_assessment"
+          blockedReason="No impacted items added yet. An approved deviation is required to proceed."
+          seq={2} onRetry={() => {}} onClose={() => {}} />
+      </QueryClientProvider>
+    );
+    expect(await screen.findByText('Request deviation')).toBeDefined();
+  });
 });

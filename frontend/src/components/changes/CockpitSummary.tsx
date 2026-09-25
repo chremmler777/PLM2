@@ -9,6 +9,7 @@ import { StageResponsibleBadge } from './StageResponsibleBadge'
 import type { WaitState } from '../../lib/waitStates'
 import { formatDate } from '../../lib/format'
 import { isIssueActionKind, issueTabFor } from '../../lib/issueTabs'
+import { plantText } from '../../lib/plantName'
 
 interface Props {
   change: ChangeDetail
@@ -81,7 +82,7 @@ export type NextStep =
 export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_relevant' | 'customer_response'
   | 'pm_signed_by' | 'quality_signed_by' | 'timing_validated_at' | 'internal_approved_at'>
   & Partial<Pick<ChangeDetail, 'origin' | 'info_sent_at' | 'plan_published_at' | 'rejection_sent_at'
-    | 'costing_pending_department_ids'>>,
+    | 'costing_pending_department_ids' | 'impact_confirmed_at' | 'mother_plant_name'>>,
   assessment?: StageAssessment | null): NextStep[] {
   const s = change.status
   // The assessment round (spec §16 P1 6/8): no primary while departments are
@@ -122,6 +123,17 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
   // Capture: kick off scoping, or reject outright (the customer withdrew
   // before anyone met). Sales, PM, the lead and admin; `may` hides it from
   // everyone else.
+  // Engineering review (spec §17): Development locks the impact, the
+  // departments answer; the answers release it (or Development escalates).
+  if (change.origin === 'engineering_review') {
+    if (s === 'scoping') {
+      return change.impact_confirmed_at
+        ? [{ kind: 'go', key: 'review', label: 'Answer the review', tab: 'review' }]
+        : [{ kind: 'go', key: 'lock-impact', label: 'Lock the impacted set (Development)', tab: 'impacted' }]
+    }
+    if (s === 'captured') return [{ kind: 'advance', to: 'scoping' }]
+    return []
+  }
   if (s === 'captured' && change.origin !== 'mother_plant') {
     return [
       { kind: 'advance', to: 'scoping' },
@@ -142,7 +154,7 @@ export function nextStepFor(change: Pick<ChangeDetail, 'status' | 'customer_rele
     }
     if (s === 'approved' && change.timing_validated_at && !change.plan_published_at) {
       return [
-        { kind: 'go', key: 'inform-mother', label: 'Inform the mother plant', tab: 'timing' },
+        { kind: 'go', key: 'inform-mother', label: plantText('mp.inform', change.mother_plant_name), tab: 'timing' },
         { kind: 'advance', to: 'in_implementation', label: t('cockpit.startImplementation') },
       ]
     }
@@ -254,7 +266,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
 
   // Same names as the tab bar.
   // Old names (commercial, implementation) resolve to the tab for the stage.
-  const tabName = (tb: string) => changeTabLabel(tb, change.customer_relevant, change.status)
+  const tabName = (tb: string) => changeTabLabel(tb, change.customer_relevant, change.status, change.mother_plant_name)
 
   const gateRow = (g: Gate, blocking: boolean) => {
     // In words: "Release gate not decided yet", "Release gate answered No".
@@ -323,12 +335,12 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
           // Until approval makes it the release deadline, the SOP is a fact.
           <span data-testid="mother-plant-sop"
             className="inline-flex items-center rounded-full border border-purple-700/60 bg-purple-950/40 px-2 py-0.5 text-xs text-purple-200">
-            SOP {formatDate(change.mother_plant_sop)}
+            {plantText('mp.sop', change.mother_plant_name)} {formatDate(change.mother_plant_sop)}
           </span>
         ) : null}
         {motherPlant && (
           <p data-testid="mother-plant-origin" className="mt-2 text-xs text-purple-300">
-            From the mother plant: {change.mother_plant_name ?? '-'}
+            {plantText('mp.from', change.mother_plant_name)}
             {change.mother_plant_ref ? ` · ${change.mother_plant_ref}` : ''}
           </p>
         )}
@@ -404,7 +416,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             <ul className="mt-1 list-disc list-inside text-amber-100/80">
               {kickoffMissing.map((m) => <li key={m}>{m}</li>)}
             </ul>
-            <p className="mt-1 text-slate-400">{t('kickoff.soft')}</p>
+            <p className="mt-1 text-slate-400">{t(motherPlant ? 'kickoff.hard' : 'kickoff.soft')}</p>
           </div>
         )}
         {change.status === 'captured' && kickoffMissing.length === 0 && (
@@ -412,7 +424,7 @@ export default function CockpitSummary({ change, gates, pendingDeviations, impl,
             ✓ {t('kickoff.ready')}
           </p>
         )}
-        {DECIDED_BY_MEETING.includes(change.status) && !motherPlant ? (
+        {DECIDED_BY_MEETING.includes(change.status) && !motherPlant && change.origin !== 'engineering_review' ? (
           // The decision lives in the meeting record, not on a button here.
           <button
             className="text-left text-sm text-slate-300 hover:text-slate-100 underline decoration-dotted underline-offset-2"

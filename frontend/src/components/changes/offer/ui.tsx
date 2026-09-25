@@ -1,5 +1,5 @@
 /** Small controls the offer and release workspaces share. */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type TextareaHTMLAttributes } from 'react'
 import { inputCls, parseNum, sectionLabel } from './offerFormat'
 
 const restFmt = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 4 })
@@ -12,7 +12,10 @@ const editNum = (v: number | null | undefined): string =>
 
 /**
  * A number input that keeps what is typed ("12," mid-entry) and reports a
- * parsed number (comma or dot decimals) or null for empty.
+ * parsed number (comma or dot decimals) or null for empty. Focus selects the
+ * whole value, so typing replaces it rather than appending to it; while the
+ * typed text reads differently from the number it stands for ("12,50",
+ * "1.5") the parsed value is shown next to it.
  */
 export function NumField({
   value, onChange, disabled, className = '', ariaLabel, testId, placeholder, step,
@@ -20,6 +23,7 @@ export function NumField({
   value: number | null | undefined
   onChange: (v: number | null) => void
   disabled?: boolean
+  /** Sizes the field (w-28, w-full, ...). */
   className?: string
   ariaLabel: string
   testId?: string
@@ -28,25 +32,47 @@ export function NumField({
 }) {
   const [text, setText] = useState(shownNum(value))
   const [focused, setFocused] = useState(false)
-  const invalid = text.trim() !== '' && parseNum(text) === null
+  const inputRef = useRef<HTMLInputElement>(null)
+  // The click that focused the field must not drop the selection again.
+  const keepSelection = useRef(false)
+  const previewId = useId()
+  const parsed = parseNum(text)
+  const invalid = text.trim() !== '' && parsed === null
+  const preview = focused && parsed !== null && shownNum(parsed) !== text.trim() ? shownNum(parsed) : null
   // Formatted (de-DE grouping) at rest; while typing the text stays as typed.
   useEffect(() => {
     if (!focused) setText(shownNum(value))
   }, [value, focused])
+  // Select everything once the edit text is in place (after the focus render).
+  useLayoutEffect(() => {
+    if (focused && inputRef.current === document.activeElement) inputRef.current?.select()
+  }, [focused])
   return (
-    <input type="text" inputMode="decimal" aria-label={ariaLabel} data-testid={testId}
-      disabled={disabled} placeholder={placeholder} data-step={step}
-      aria-invalid={invalid || undefined}
-      title={invalid ? 'Not a number. Use a comma for decimals, e.g. 1.234,50' : undefined}
-      value={text}
-      onFocus={() => { setFocused(true); setText(editNum(value)) }}
-      onBlur={() => setFocused(false)}
-      onChange={(e) => {
-        setText(e.target.value)
-        const n = parseNum(e.target.value)
-        if (n !== null || e.target.value.trim() === '') onChange(n)
-      }}
-      className={`${inputCls} text-right tabular-nums ${invalid ? '!border-rose-500' : ''} ${className}`} />
+    <span className={`relative inline-block align-middle ${className}`}>
+      <input ref={inputRef} type="text" inputMode="decimal" aria-label={ariaLabel} data-testid={testId}
+        disabled={disabled} placeholder={placeholder} data-step={step}
+        aria-invalid={invalid || undefined}
+        aria-describedby={preview ? previewId : undefined}
+        title={invalid ? 'Not a number. Use a comma for decimals, e.g. 1.234,50' : undefined}
+        value={text}
+        onMouseDown={() => { keepSelection.current = document.activeElement !== inputRef.current }}
+        onFocus={() => { setFocused(true); setText(editNum(value)) }}
+        onMouseUp={(e) => { if (keepSelection.current) { e.preventDefault(); keepSelection.current = false } }}
+        onBlur={() => { keepSelection.current = false; setFocused(false) }}
+        onChange={(e) => {
+          keepSelection.current = false
+          setText(e.target.value)
+          const n = parseNum(e.target.value)
+          if (n !== null || e.target.value.trim() === '') onChange(n)
+        }}
+        className={`${inputCls} w-full text-right tabular-nums ${invalid ? '!border-rose-500' : ''}`} />
+      {preview && (
+        <span id={previewId} data-testid={testId ? `${testId}-preview` : undefined} aria-live="polite"
+          className="pointer-events-none absolute right-0 top-full z-10 mt-0.5 whitespace-nowrap rounded bg-slate-800 px-1.5 py-0.5 text-[11px] tabular-nums text-sky-200 shadow">
+          = {preview}
+        </span>
+      )}
+    </span>
   )
 }
 

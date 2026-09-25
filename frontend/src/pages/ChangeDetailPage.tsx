@@ -10,7 +10,7 @@ import AssessmentBuckets from '../components/changes/AssessmentBuckets';
 import { resolveWaitStates, earlyStageWaits, deriveAssessmentState } from '../lib/waitStates';
 import LeadPicker from '../components/changes/LeadPicker';
 import { mayTransition, endStateOf, stoppedAtFrom } from '../lib/transitionRights';
-import { changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
+import { assessmentVerdictLabel, changeTypeLabel, verdictLabel, plural } from '../lib/humanLabels';
 import D1MasterPanel from '../components/changes/D1MasterPanel';
 import SummationView from '../components/changes/SummationView';
 import CostingBuckets from '../components/changes/CostingBuckets';
@@ -33,6 +33,8 @@ import { releaseOpenByIssues } from '../lib/issueTabs';
 import ScopingPanel from '../components/changes/ScopingPanel';
 import ChangeAttachments from '../components/changes/ChangeAttachments';
 import MotherPlantTab from '../components/changes/motherPlant/MotherPlantTab';
+import ReviewTab from '../components/changes/review/ReviewTab';
+import { intakeKeys, intakesApi } from '../api/intakes';
 import CustomerMailLog from '../components/changes/CustomerMailLog';
 import { PriorityEditor } from '../components/changes/PriorityEditor';
 import AuditTimeline from '../components/changes/AuditTimeline';
@@ -68,6 +70,8 @@ const CANCELLABLE: string[] = [
 const defaultTabFor = (status: string, origin?: string | null): Tab =>
   // Mother plant (spec §14): scoping is informing the team, on its own tab.
   origin === 'mother_plant' && status === 'scoping' ? 'mother'
+  // Engineering review (spec §17): the review is the work, and the record.
+  : origin === 'engineering_review' ? 'review'
   : STATUS_ACTIVE_TAB[status as ChangeStatus] ?? (status === 'closed' ? 'release' : 'overview');
 const phaseIndex = (s: string) => CHANGE_STATUS_ORDER.indexOf(s as ChangeStatus);
 const isTabLocked = (status: string, tb: Tab): boolean => {
@@ -206,6 +210,14 @@ export default function ChangeDetailPage() {
     queryKey: ['change', changeId, 'concerns'],
     queryFn: () => changesApi.listConcerns(changeId),
   });
+  // Spec §17: a change from an intake may carry an engineering review (its
+  // own track, or escalated: the answers stay as the scoping input).
+  const { data: review } = useQuery({
+    queryKey: intakeKeys.review(changeId),
+    queryFn: () => intakesApi.review(changeId),
+    enabled: !!change && (change.origin === 'engineering_review' || !!change.from_intake),
+  });
+  const hasReview = !!review && (review.is_review || review.answers.length > 0);
   const { data: myActions } = useQuery({
     queryKey: ['change-my-actions', changeId],
     queryFn: () => changesApi.myActions(changeId),
@@ -404,11 +416,23 @@ export default function ChangeDetailPage() {
       case 'signoff': return ((!change.pm_signed_by && canSignPm) || (!change.quality_signed_by && canSignQuality))
         ? null : 'Needs the Project Manager and Quality';
       case 'internal-approval': return canApproveInternalCosts ? null : 'Needs the Project Manager';
-      case 'validate-timing': return canEditPlan || canPublishTiming ? null
-        : 'Needs the Project Manager, Scheduling or Sales';
+      case 'validate-timing': {
+        if (!(canEditPlan || canPublishTiming)) return 'Needs the Project Manager, Scheduling or Sales';
+        // The Timing tab holds its "Validate timing" until every team has
+        // confirmed: the cockpit does not offer a step the tab refuses.
+        const waiting = (planFeedback?.required ?? []).filter((r) => !(r.verdict === 'confirmed' && !r.stale));
+        if (planFeedback && !planFeedback.validated_at && (!planFeedback.all_confirmed || waiting.length > 0)) {
+          return waiting.length > 0
+            ? `Waiting for ${waiting.map((r) => r.department_name).join(', ')} to confirm the timing`
+            : 'Waiting for every team to confirm the timing';
+        }
+        return null;
+      }
       case 'info-send':
       case 'inform-mother': return canRunMotherPlant ? null : 'Needs the Project Manager or the change lead';
-      case 'to:approved': return !motherPlant || canRunMotherPlant ? null
+      // The backend's can_transition already judged the hop (rights and the
+      // hard blockers); the client mirror only stands in without it.
+      case 'to:approved': return stage?.can_transition || !motherPlant || canRunMotherPlant ? null
         : 'Needs the Project Manager or the change lead';
       case 'to:released':
       case 'to:closed': return canManageRelease ? null : 'Needs the Project Manager or the change lead';
@@ -442,6 +466,9 @@ export default function ChangeDetailPage() {
         open: kickoffMissing,
         allClear: t('kickoff.ready'),
         confirmLabel: t('confirm.kickoffGo'),
+        // A change from the other plant has no deviation path at kickoff:
+        // the hand-over waits until nothing is missing.
+        holdWhileOpen: motherPlant,
       };
     }
     if (change.status === 'in_assessment' && confirmTo === 'scoping') {
@@ -449,6 +476,8 @@ export default function ChangeDetailPage() {
         to: confirmTo, title: t('next.backToScoping'),
         consequence: t('confirm.recallBody'),
         open: [], confirmLabel: t('next.backToScoping'),
+        // Throwing the round away is answered for: the reason is on the record.
+        reason: { label: t('confirm.recallReason'), placeholder: t('confirm.recallReasonHint') },
       };
     }
     if (change.status === 'in_assessment' && confirmTo === 'costing') {
@@ -459,8 +488,13 @@ export default function ChangeDetailPage() {
         open: (a?.waiting_on ?? []).map((d) => `${deptLabel(d)}: ${t('confirm.notAnswered')}`),
         allClear: t('confirm.allAnswered'),
         info: [
-          ...(a?.verdicts ?? []).map((v) => `${deptLabel(v)}: ${v.verdict_label ?? verdictLabel(v.verdict)}`
-            + (v.open_risks ? `, ${plural(v.open_risks, 'open risk')}` : '')),
+          ...(a?.verdicts ?? []).map((v) => {
+            // "Not impacted" is stored as feasible: say what was answered.
+            const row = change.assessments.find((x) => x.department_id === v.department_id
+              && x.verdict === v.verdict && x.details?.impacted === false);
+            return `${deptLabel(v)}: ${row ? assessmentVerdictLabel(row) : v.verdict_label ?? verdictLabel(v.verdict)}`
+              + (v.open_risks ? `, ${plural(v.open_risks, 'open risk')}` : '');
+          }),
           ...(a?.open_risks ?? []).map((r) => `${t('confirm.risk')} ${r.department_name ?? ''}: `
             + `${r.risk_type_label ?? r.risk_type ?? ''}${r.severity ? ` (${r.severity})` : ''}, ${r.note}`),
           ...(a?.override === 'approved' ? [t('confirm.overrideApproved')] : []),
@@ -620,7 +654,17 @@ export default function ChangeDetailPage() {
       />
       <TransitionConfirmDialog confirm={confirm} busy={transition.isPending}
         onClose={() => setConfirmTo(null)}
-        onConfirm={() => { const to = confirmTo!; setConfirmTo(null); transition.mutate({ to }); }} />
+        onConfirm={(reason) => {
+          const to = confirmTo!; setConfirmTo(null);
+          transition.mutate(reason ? { to, reason } : { to });
+        }}>
+        {motherPlant && change.status === 'captured' && confirmTo === 'scoping'
+          && !change.description?.trim() && (canEditDescription || canRunMotherPlant) && (
+          <div data-testid="kickoff-description" className="mt-3 text-sm">
+            <DescriptionEditor change={change} canEdit />
+          </div>
+        )}
+      </TransitionConfirmDialog>
       <ReasonDialog
         open={overrideOpen}
         title={t('next.override')}
@@ -676,7 +720,7 @@ export default function ChangeDetailPage() {
       />
 
       <div className="border-b border-slate-700 flex items-center gap-4 text-sm mb-4">
-        {everydayTabsFor(change.origin).map((tb) => {
+        {everydayTabsFor(change.origin, hasReview).map((tb) => {
           const locked = tabLocked(tb);
           const isActivePhase = !locked && !stopped
             && activeTabsFor(change.status, change.customer_relevant, change.origin).includes(tb);
@@ -703,7 +747,7 @@ export default function ChangeDetailPage() {
                   className="w-1.5 h-1.5 rounded-full bg-lime-400 ring-1 ring-lime-300/50"
                   aria-label={t('tab.openWork')} />
               )}
-              {changeTabLabel(tb, change.customer_relevant, change.status)}
+              {changeTabLabel(tb, change.customer_relevant, change.status, change.mother_plant_name)}
             </button>
           );
         })}
@@ -765,6 +809,10 @@ export default function ChangeDetailPage() {
           quoted={stage?.impact_edit_needs_reason
             ?? ['quoted', 'approved', 'in_implementation', 'in_validation', 'released'].includes(change.status)}
           onChanged={() => qc.invalidateQueries({ queryKey: ['change', changeId] })} />
+      )}
+
+      {effectiveTab === 'review' && (hasReview || change.origin === 'engineering_review') && (
+        <ReviewTab change={change} onGoImpact={() => setTab('impacted')} />
       )}
 
       {effectiveTab === 'mother' && motherPlant && (

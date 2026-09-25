@@ -95,6 +95,20 @@ describe('AssessmentSubmitForm checklist gate', () => {
   })
 })
 
+describe('Packaging: only visible questions count', () => {
+  afterEach(cleanup)
+
+  it('counts the one open first question, not the hidden checklist rows', async () => {
+    render(wrap(<AssessmentSubmitForm changeId={7} departmentId={6}
+      departmentName="Packaging Engineer" showEffort={false} onDone={() => {}} />))
+    await waitFor(() => expect(assessmentChecklist).toHaveBeenCalled())
+    await screen.findByTestId('questionnaire-first')
+    expect(screen.getByTestId('check-open-jump').textContent).toBe(t('check.openQuestionsOne'))
+    fireEvent.click(screen.getByTestId('pkg-impacted-no'))
+    expect(screen.queryByTestId('check-open-jump')).toBeNull()
+  })
+})
+
 describe('AssessmentSubmitForm without a loaded checklist', () => {
   afterEach(cleanup)
 

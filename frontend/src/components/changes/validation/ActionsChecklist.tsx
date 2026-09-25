@@ -9,6 +9,7 @@ import { daysUntil, formatDate, todayIso } from '../../../lib/format'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import type { IssueViewer } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import DateInput from '../../gantt/DateInput'
 
 export const mayTick = (a: IssueActionOut, v: IssueViewer) =>
   a.status === 'open' && (a.can_done ?? (!!v.canManage || !!v.isAdmin
@@ -94,8 +95,8 @@ export default function ActionsChecklist({ changeId, issue, viewer, canAdd, depa
             <option value="">Department</option>
             {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          <input type="date" aria-label="Due date" min={todayIso()} value={due}
-            onChange={(e) => setDue(e.target.value)} className={inputCls} />
+          <DateInput aria-label="Due date" min={todayIso()} value={due} commitOnChange
+            onChange={setDue} className={`${inputCls} w-32`} />
           <button type="button" data-testid={`issue-action-save-${issue.id}`}
             disabled={!text.trim() || add.isPending} onClick={() => add.mutate(undefined)}
             className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50">Add</button>

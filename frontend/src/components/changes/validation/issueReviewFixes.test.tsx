@@ -18,7 +18,7 @@ import EscalationBadge from './EscalationBadge'
 import { customerDecisionBlocked } from './CustomerDecisionForm'
 import { mayDeleteIssueFile } from './IssueDropzone'
 import { issuePatch } from './IssueEditForm'
-import { needsAck, statusChipLabel } from './issueModel'
+import { issueSteps, needsAck, statusChipLabel } from './issueModel'
 import { errDetail } from './useIssueMutation'
 import CockpitSummary from '../CockpitSummary'
 import TransitionConfirmDialog from '../TransitionConfirmDialog'
@@ -316,6 +316,21 @@ describe('follow-ups: recheck, add_action, acts after close', () => {
     expect(screen.getByTestId('issue-action-text-11')).toBeDefined()
   })
 
+  it('a new fix action takes its due date as dd.mm.yyyy text, sent as ISO', async () => {
+    card(issue({
+      status: 'fixing', route: 'internal_rework', actions: [],
+      next_acts: ['add_action', 'edit'], primary_act: 'add_action',
+    }), { canManage: true })
+    fireEvent.click(screen.getByTestId('issue-primary-11'))
+    fireEvent.change(screen.getByTestId('issue-action-text-11'), { target: { value: 'Rework slide' } })
+    const due = screen.getByLabelText('Due date') as HTMLInputElement
+    expect(due.type).toBe('text')
+    fireEvent.change(due, { target: { value: '05.10.2030' } })
+    fireEvent.click(screen.getByTestId('issue-action-save-11'))
+    await waitFor(() => expect(validationIssuesApi.addAction).toHaveBeenCalledWith(7, 11,
+      expect.objectContaining({ description: 'Rework slide', due_date: '2030-10-05' })))
+  })
+
   it('primary_act null means no primary button, even with a non-quiet act listed', () => {
     card(issue({ next_acts: ['cost', 'edit'], primary_act: null }))
     expect(screen.queryByTestId('issue-primary-11')).toBeNull()
@@ -335,6 +350,37 @@ describe('follow-ups: recheck, add_action, acts after close', () => {
     card(issue({ status: 'closed', cost_set: true, cost_bearer: 'customer', next_acts: [], extra_acts: ['quote_fix'] }),
       { isSales: true })
     expect(screen.getByTestId('issue-primary-11').getAttribute('data-act')).toBe('quote_fix')
+  })
+
+  it('in implementation a fixed issue names the re-check step instead of a button', () => {
+    card(issue({ status: 'revalidation', route: 'internal_rework',
+      actions: [{ id: 1, description: 'Rework slide', status: 'done' }],
+      next_acts: ['escalate', 'edit'], primary_act: null }), { canManage: true },
+    { changeStatus: 'in_implementation' })
+    expect(screen.queryByTestId('issue-primary-11')).toBeNull()
+    expect(screen.getByTestId('issue-recheck-waits-11').textContent).toContain('back in validation')
+  })
+
+  it('a failed re-check refreshes the card: the note closes and fixing is current again', () => {
+    const row = document.createElement('div')
+    row.setAttribute('data-testid', 'validation-check-4-part_measured')
+    document.body.appendChild(row)
+    const base = { route: 'internal_rework' as const, check_key: 'part_measured', check_department_id: 4,
+      actions: [{ id: 1, description: 'Rework slide', status: 'done' as const }] }
+    const qc = new QueryClient()
+    const ui = (i: IssueOut) => (
+      <MemoryRouter><QueryClientProvider client={qc}>
+        <IssueCard changeId={7} changeStatus="in_validation" issue={i} viewer={{ canManage: true }} departments={departments} />
+      </QueryClientProvider></MemoryRouter>)
+    const { rerender } = render(ui(issue({ ...base, status: 'revalidation',
+      next_acts: ['recheck', 'edit'], primary_act: 'recheck' })))
+    fireEvent.click(screen.getByTestId('issue-primary-11'))
+    expect(screen.getByTestId('issue-recheck-11')).toBeDefined()
+    const failed = issue({ ...base, status: 'fixing', next_acts: ['add_action', 'edit'], primary_act: 'add_action' })
+    rerender(ui(failed))
+    expect(screen.queryByTestId('issue-recheck-11')).toBeNull()
+    expect(issueSteps(failed).find((st) => st.state === 'current')?.key).toBe('fixing')
+    row.remove()
   })
 
   it('the new My Actions kinds are issue acts', () => {

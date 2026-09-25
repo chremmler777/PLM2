@@ -155,6 +155,20 @@ describe('route dialog', () => {
     })))
   })
 
+  it('the fix action due date is typed dd.mm.yyyy (no native picker) and sent as ISO', async () => {
+    open()
+    fireEvent.click(screen.getByTestId('route-option-internal_rework'))
+    fireEvent.change(screen.getByTestId('route-reason'), { target: { value: 'Slide worn' } })
+    fireEvent.change(screen.getByTestId('route-action-0'), { target: { value: 'Rework slide' } })
+    const due = screen.getByLabelText('Due date') as HTMLInputElement
+    expect(due.type).toBe('text')
+    fireEvent.change(due, { target: { value: '05.10.2030' } })
+    fireEvent.click(screen.getByTestId('route-submit'))
+    await waitFor(() => expect(validationIssuesApi.route).toHaveBeenCalledWith(7, 11, expect.objectContaining({
+      actions: [{ description: 'Rework slide', department_id: 4, due_date: '2030-10-05' }],
+    })))
+  })
+
   it('no loop back warning when the change is already in implementation', () => {
     expect(routeConsequences('design_change', ready, 'in_implementation').loopBack).toBeNull()
     expect(routeConsequences('design_change', ready, 'in_validation').loopBack).toMatch(/VI-2: Tool cannot run/)

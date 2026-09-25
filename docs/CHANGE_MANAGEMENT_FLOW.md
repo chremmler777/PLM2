@@ -667,6 +667,43 @@ default **KTX Weissenburg (WUG)**, second **KTX Solingen**, list in
   the customer publish; escalation L3 informs the mother-plant contact via
   the PM. P&L: actual local costs only (basis `none`).
 
+### Revision intake and the engineering review (spec §17, built)
+
+Every new customer index is captured and triaged: `revision_intakes`
+(migration 096). A new major arriving through a gated path (customer package
+with a `batch_id`, customer data, the upload dialog's "next customer data",
+promote) is **pending**: status `in_review`, `parts.active_revision_id` not
+moved, the BOM tree and the viewer fall back past it. Import scripts
+(WinCarat, Brose, the 1994 resets) call `receive_customer_data` without an
+`intake_source` and bypass the gate.
+- **Triage** (Development, acts-as aware, admin), alone, route + reason
+  (required for `administrative` and for any route other than the suggested
+  one). Suggested: first data on an RFQ part `administrative`; official data
+  or a series part `full_ecr`; else `engineering_review`.
+  - `full_ecr`: a new customer change in `captured`, lead item = the part,
+    the pending index as the item's `resulting_revision_id` (the ECN spawn
+    skips it).
+  - `attach_ecr`: the same link on an open change of the project; refused
+    from `in_validation` on.
+  - `engineering_review`: origin `engineering_review`, starts at `scoping`,
+    lead = the decider. Development locks the impact; the lock asks
+    Development, Packaging Engineer (articles) and the owners of the served
+    objects (`ChangeService.served_objects`: tools, stations/EOAT, gauges).
+    Each answers "no impact" / "impact" (note required). All "no impact":
+    the index is activated, the change `released` and `closed`. Any impact:
+    Development escalates (audited) to a full customer ECR in scoping; the
+    answers stay on its Review tab. No other status hop is allowed.
+  - `administrative`: activated now.
+- **Activation** is one helper (`RevisionIntakeService.activate`), shared
+  with `ChangeService.release`: pointer, `approved`, `supersedes`, and a
+  promotion's "approved / siblings rejected" happen only now.
+- **Superseding**: a newer index for a part with a pending one archives the
+  old one (intake `superseded`), unless the pending one is linked to a live
+  change: then the receive is refused (409) with the change named.
+- Release checklist hints "index updated" and "drawing and 3D data
+  released" from the linked revisions. My Tasks: triage (Development) and
+  open review answers (`GET /v1/intakes/my`).
+
 ### The tab structure (2026-09-25)
 
 Tabs, in order: Overview, Scoping, Impacted, Assessments, Costing, Offer

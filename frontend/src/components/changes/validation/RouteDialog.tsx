@@ -13,6 +13,7 @@ import { Toggle } from '../offer/ui'
 import { inputCls, sectionLabel } from '../offer/offerFormat'
 import { FIX_ROUTES, ROUTE } from './issueModel'
 import { useIssueMutation } from './useIssueMutation'
+import DateInput from '../../gantt/DateInput'
 
 const ORDER: IssueRoute[] = ['internal_rework', 'supplier_rework', 'design_change', 'customer_concession', 'follow_up_change']
 
@@ -187,9 +188,9 @@ export default function RouteDialog({ open, changeId, changeStatus, issue, depar
                     <option value="">Department</option>
                     {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
-                  <input type="date" aria-label="Due date" value={row.due_date}
-                    onChange={(e) => setRows(rows.map((x, j) => j === idx ? { ...x, due_date: e.target.value } : x))}
-                    className={inputCls} />
+                  <DateInput aria-label="Due date" value={row.due_date} commitOnChange
+                    onChange={(iso) => setRows((rs) => rs.map((x, j) => j === idx ? { ...x, due_date: iso } : x))}
+                    className={`${inputCls} w-32`} />
                   {rows.length > 1 && (
                     <button type="button" aria-label="Remove action" onClick={() => setRows(rows.filter((_, j) => j !== idx))}
                       className="px-1 text-slate-500 hover:text-rose-300">✕</button>

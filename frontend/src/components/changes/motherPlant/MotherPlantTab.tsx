@@ -19,6 +19,8 @@ import { changesApi } from '../../../api/changes'
 import { motherPlantApi, motherPlantKey, type MotherPlantState } from '../../../api/motherPlant'
 import { formatDate, formatDateTime } from '../../../lib/format'
 import type { ChangeRequest } from '../../../types/change'
+import { t } from '../../../i18n/cmLabels'
+import { plantText } from '../../../lib/plantName'
 
 const errDetail = (e: unknown): string | undefined =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -44,7 +46,7 @@ export default function MotherPlantTab({ change, departments }: MotherPlantTabPr
     qc.invalidateQueries({ queryKey: ['change-my-actions', id] })
   }
 
-  if (isError) return <p className="text-sm text-red-300">Could not load the mother plant details.</p>
+  if (isError) return <p className="text-sm text-red-300">{plantText('mp.loadError', change.mother_plant_name)}</p>
   if (!state) return <p className="text-sm text-slate-400">Loading…</p>
 
   return (
@@ -74,10 +76,10 @@ function Source({ change, state, onUploaded }: {
   const timingOpen = ['captured', 'scoping'].includes(change.status)
   return (
     <section className={card} data-testid="mother-plant-source">
-      <h3 className="text-xs uppercase tracking-wide text-slate-500">From the mother plant</h3>
+      <h3 className="text-xs uppercase tracking-wide text-slate-500">{plantText('mp.from', state.mother_plant_name)}</h3>
       <dl className="mt-2 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
         <div>
-          <dt className="text-xs text-slate-500">Mother plant</dt>
+          <dt className="text-xs text-slate-500">{t('mp.plantLabel')}</dt>
           <dd className="text-slate-100">{state.mother_plant_name ?? '-'}</dd>
         </div>
         <div>
@@ -112,7 +114,7 @@ function Source({ change, state, onUploaded }: {
           )}
           <label className="mt-2 inline-block cursor-pointer text-xs text-sky-300 hover:underline">
             Add a document
-            <input type="file" className="hidden" aria-label="Add a mother plant document"
+            <input type="file" className="hidden" aria-label={plantText('mp.addDocument', state.mother_plant_name)}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate({ file: f, kind: 'general' }); e.target.value = '' }} />
           </label>
         </div>
@@ -137,7 +139,7 @@ function Source({ change, state, onUploaded }: {
             <label className="mt-2 inline-block cursor-pointer text-xs text-sky-300 hover:underline">
               {state.timing_attachment ? 'Replace the timing file' : 'Attach their timing (.xml)'}
               <input type="file" accept=".xml,application/xml,text/xml" className="hidden"
-                aria-label="Attach the mother plant timing"
+                aria-label={plantText('mp.attachTiming', state.mother_plant_name)}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate({ file: f, kind: 'mother_plant_timing' }); e.target.value = '' }} />
             </label>
           )}
@@ -188,7 +190,7 @@ function InformTeam({ change, state, departments, onDone }: {
       </div>
       <p className="mt-1 text-sm text-slate-300">
         {state.receipts.length === 0
-          ? 'Tell every team that has to act what the mother plant changed. Approval waits until the information is sent.'
+          ? plantText('mp.infoHint', change.mother_plant_name)
           : 'Each informed department confirms "Read and understood". Open confirmations do not hold the change.'}
       </p>
 

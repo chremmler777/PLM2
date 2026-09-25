@@ -15,6 +15,7 @@ import type { IssueOut } from '../types/validationIssue'
 import { isIssueOpen, issueCode } from '../types/validationIssue'
 import { formatDate } from './format'
 import { issueTabFor } from './issueTabs'
+import { plantText } from './plantName'
 
 /** The slice of GET /plan/feedback the waits need. */
 export interface PlanFeedbackLite {
@@ -145,7 +146,7 @@ export function resolveWaitStates(
   change: Pick<ChangeRequest, 'status' | 'customer_relevant' | 'blocked_department_ids'
     | 'rejection_sent_at' | 'costing_pending_department_ids'
     | 'bank_build_mode' | 'plan_published_at' | 'timing_validated_at'>
-    & Partial<Pick<ChangeRequest, 'origin' | 'info_sent_at' | 'info_open_department_ids'>>,
+    & Partial<Pick<ChangeRequest, 'origin' | 'info_sent_at' | 'info_open_department_ids' | 'mother_plant_name'>>,
   concerns: ChangeConcern[] = [],
   departmentName: (id: number) => string = (id) => `#${id}`,
   /** The change's assessment rows — the detail page already holds them. */
@@ -389,7 +390,7 @@ export function resolveWaitStates(
       && (change.timing_validated_at || planFeedback?.validated_at) && !change.plan_published_at) {
       waits.push({
         key: 'mother-inform-timing',
-        text: 'Mother plant not informed of the validated timing yet',
+        text: plantText('mp.notInformed', change.mother_plant_name),
         tab: 'timing',
         info: true,
       })

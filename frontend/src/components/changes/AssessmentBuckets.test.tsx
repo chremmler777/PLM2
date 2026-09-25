@@ -172,6 +172,16 @@ describe('AssessmentBuckets', () => {
     expect(screen.getByTestId('bucket-answer-2').textContent).toContain('needs a new gauge')
   })
 
+  it('reads a "not impacted" answer as Not impacted, not Feasible', async () => {
+    buckets({ canSeeAll: true, change: change({ assessments: [assessment({
+      verdict: 'feasible', status: 'submitted', submitted_at: '2026-08-01T00:00:00',
+      details: { impacted: false } })] }) })
+    expect((await screen.findByTestId('bucket-verdict-2')).getAttribute('aria-label')).toBe(t('pkg.notImpacted'))
+    fireEvent.click(screen.getByTestId('bucket-toggle-2'))
+    expect(screen.getByTestId('bucket-answer-2').textContent).toContain(t('pkg.notImpacted'))
+    expect(screen.getByTestId('bucket-answer-2').textContent).not.toContain('Feasible')
+  })
+
   it('opens a member’s own row on its objects and form, unasked', async () => {
     // A member came here to do their department's work — it should be in front
     // of them, not one click away.

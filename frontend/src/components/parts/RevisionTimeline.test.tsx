@@ -39,6 +39,14 @@ describe('RevisionTimeline', () => {
     expect(screen.getByTestId('major-E1').textContent).toContain('rfq')
   })
 
+  it('marks a customer major pending triage instead of its raw status', () => {
+    const pending = new Map([[3, 'pending triage']])
+    render(<RevisionTimeline revisions={set.map((r) => r.id === 3 ? { ...r, status: 'in_review' } : r)}
+      activeRevisionId={1} pending={pending} {...noop} />)
+    expect(screen.getByTestId('pending-chip-3').textContent).toBe('pending triage')
+    expect(screen.getByTestId('major-E2').textContent).not.toContain('in_review')
+  })
+
   it('offers promote only on draft minors and new-proposal on majors', () => {
     render(<RevisionTimeline revisions={set} {...noop} />)
     fireEvent.click(screen.getByTestId('promote-5'))

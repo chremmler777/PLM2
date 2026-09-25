@@ -9,6 +9,8 @@
  * sends what it holds.
  */
 import DateInput from '../../gantt/DateInput'
+import { t } from '../../../i18n/cmLabels'
+import { plantName } from '../../../lib/plantName'
 
 export interface MotherPlantDraft {
   name: string
@@ -25,7 +27,7 @@ export const emptyMotherPlantDraft = (defaultName: string): MotherPlantDraft => 
 
 /** What still has to be filled in before the change can be created. */
 export const motherPlantMissing = (d: MotherPlantDraft): string[] =>
-  [...(d.name ? [] : ['mother plant']), ...(d.sop ? [] : ['SOP date'])]
+  [...(d.name ? [] : [t('mp.plantMissing')]), ...(d.sop ? [] : ['SOP date'])]
 
 const field = 'w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-sm'
 
@@ -39,12 +41,12 @@ export default function MotherPlantFields({ value, onChange, plants }: {
     <div data-testid="mother-plant-fields"
       className="mb-6 rounded-lg border border-purple-800/60 bg-purple-950/20 p-4 space-y-3">
       <p className="text-xs text-purple-200/80">
-        Engineered and sold by the mother plant: no assessment, no costing, no offer. You inform
+        Engineered and sold by {plantName(value.name)}: no assessment, no costing, no offer. You inform
         the team at scoping and take over their timing.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label htmlFor="sc-mp-name" className="block text-sm text-slate-300 mb-1">Mother plant</label>
+          <label htmlFor="sc-mp-name" className="block text-sm text-slate-300 mb-1">{t('mp.plantLabel')}</label>
           <select id="sc-mp-name" className={field} value={value.name}
             onChange={(e) => set({ name: e.target.value })}>
             {plants.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -59,7 +61,7 @@ export default function MotherPlantFields({ value, onChange, plants }: {
         <div>
           <label htmlFor="sc-mp-sop" className="block text-sm text-slate-300 mb-1">SOP date</label>
           <DateInput id="sc-mp-sop" aria-label="SOP date" value={value.sop}
-            className={field} onChange={(iso) => set({ sop: iso })} placeholder="dd.mm.yyyy" />
+            className={field} onChange={(iso) => set({ sop: iso })} placeholder="dd.mm.yyyy" commitOnChange />
           <p className="mt-1 text-xs text-slate-500">Becomes the release deadline when the change is approved.</p>
         </div>
         <div>

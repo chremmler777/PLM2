@@ -14,6 +14,11 @@ flow with gates, loops, artifacts, P&L touchpoints and the deadline rail.
 
 ```mermaid
 flowchart TD
+    I[intake: new customer index<br/>pending, Development triages] -->|full ECR or attach| A
+    I -->|administrative, reason| IA[index active]
+    I -->|engineering review| IR[lock impact, departments answer]
+    IR -->|all no impact| IC[released + closed, index active]
+    IR -->|impact, Development escalates| B
     A[captured<br/>Sales, PM] -->|kickoff gate, soft| B[scoping<br/>PM + team]
     A -->|reject, reason recorded| X[rejected]
     B -->|needs info| B
@@ -112,6 +117,19 @@ plan is seeded from their MS Project file, else an SOP milestone. Timing as
 usual with an "Inform mother plant" stamp instead of the customer publish;
 escalation L3 informs the mother-plant contact via the PM. P&L: actual local
 costs only. Status: TO BUILD.
+
+### Revision intake and engineering review (spec section 17)
+
+Before Capture: every new customer index (package, customer data, upload,
+promote) is an **intake**; the index stays pending (not active) until
+Development decides the route, alone: **full ECR** (new change, lead item =
+the part), **attach** to an open change (up to implementation),
+**engineering review** (lane R: impact lock, then Development, Packaging
+Engineer and the owners of the serving tools, stations and gauges answer
+"no impact" / "impact"; all "no impact" activates and closes, any impact is
+escalated to a full ECR) or **administrative** (active now, reason
+required). A change's release activates exactly its linked pending index.
+Import scripts bypass the intake. Status: BUILT.
 
 ## Cross-cutting rules
 

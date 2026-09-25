@@ -5,7 +5,8 @@
  * gates that refuse to be bypassed, the loops that send work back, the artifacts
  * each stage owes, the tasks each role receives, the two deadlines running
  * alongside it all, the validation-issue branch with its escalation ladder, and
- * the mother-plant side track. Sources of truth are docs/ECR_PROCESS_MAP.md
+ * the mother-plant side track, and the intake of every new customer index with
+ * its engineering-review lane. Sources of truth are docs/ECR_PROCESS_MAP.md
  * (stages, responsibles, build status), docs/CHANGE_MANAGEMENT_FLOW.md (the
  * enforced mechanics) and docs/superpowers/specs/2026-09-25-ecr-costing-to-close.md
  * (offer, timing, deviations, validation issues, P&L, mother plant). An auditor
@@ -44,6 +45,7 @@ const LINE = '#64748b'   // the main path
 const HARD = '#f87171'   // a gate that cannot be bypassed
 const CROSS = '#22d3ee'  // information carried from one stage into another
 const MP = '#c084fc'     // the mother-plant side track
+const RV = '#2dd4bf'     // the engineering review of a new index (intake)
 
 interface Stage {
   key: string
@@ -60,11 +62,18 @@ interface Stage {
 
 const STAGES: Stage[] = [
   {
+    key: 'intake', name: 'Intake', badge: 'Team', state: 'built',
+    sub: 'New customer index, pending triage', task: 'task: triage index',
+    responsible: 'Development decides the route (admin via acts-as)',
+    artifacts: 'revision intake (source, batch, phase snapshot); pending index (not active); route + reason, audited',
+    what: 'Every new customer index (customer package, customer data, upload, a proposal the customer adopted) is captured as an intake; the index stays pending and the active one is unchanged. Development picks the route alone: full ECR (a new change, lead item = the part), attach to an open change, engineering review (light track, lane R) or administrative (active now, reason required). Suggested: review data before series goes to the engineering review, official data or a series part to a full ECR, first data on an RFQ part to administrative. A newer index supersedes a pending one unless a live change already carries it.',
+  },
+  {
     key: 'captured', name: 'Capture', badge: 'Sales', state: 'built',
     sub: 'Request, attachment, quote-by date', task: 'task: kickoff',
     responsible: 'Sales (can_start_change); PM may start',
-    artifacts: 'kickoff gate (soft, deviation-overridable); quote deadline; origin (customer, internal, mother plant)',
-    what: 'The originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. No meetings here. A request may also be rejected straight from capture with a recorded reason. A change from the mother plant (KTX Weissenburg (WUG) by default, KTX Solingen rarely) is captured with its reference and SOP date and runs in its own side track.',
+    artifacts: 'kickoff gate (soft, deviation-overridable); quote deadline; origin (customer, internal, change from KTX Weissenburg / Solingen)',
+    what: 'The originator enters the request: project, description, documents, one-line reason, cost carrier, required-by date. No meetings here. A request may also be rejected straight from capture with a recorded reason. A change from KTX Weissenburg (the default) or, rarely, KTX Solingen is captured with its reference and SOP date and runs in its own side track.',
   },
   {
     key: 'scoping', name: 'Scoping', badge: 'PM', state: 'built',
@@ -138,7 +147,7 @@ const RULES = [
   'Scoped views everywhere: a department sees its own input only, at assessment AND costing. PM and Sales see all blocks.',
   'Tasks are mandatory: no accept or claim step; submitting names the owner.',
   'Sales owns the customer: mails tracked on the change and filed into each validation issue; escalations to the customer go through Sales.',
-  'Two deadlines, one active: quote-by until quoted (freezes the on-time fact); release-due born at acceptance, internal approval or from the mother-plant SOP, moved only with an audited reason.',
+  'Two deadlines, one active: quote-by until quoted (freezes the on-time fact); release-due born at acceptance, internal approval or from the SOP of KTX Weissenburg / Solingen, moved only with an audited reason.',
   'P&L offer vs doing: planned frozen at acceptance, actuals from implementation on (hours, cost entries, issue costs by bearer), compared at release.',
   'The detailed plan leads from approval on: after the baseline every date move is a deviation with a reason.',
   'Release is refused while a validation issue is open; each issue carries an escalation level: L1 department, L2 project, L3 management and customer.',
@@ -149,9 +158,9 @@ const BUILD_ORDER = [
   'Validation issues: raise from a failed check, containment, root cause, route, customer decision, escalation ladder (in build).',
   'Recovery group in the Gantt for a fix route, with the new customer timing when it passes the release deadline (in build).',
   'P&L offer vs doing: actual cost entries, offer-vs-actual table, P&L page columns (in build).',
-  'Mother-plant side track: origin, inform-the-team receipts, scoping to approved with the SOP as release deadline (built).',
+  'Side track for a change from KTX Weissenburg / Solingen: origin, inform-the-team receipts, scoping to approved with the SOP as release deadline (built).',
   'Weight estimate at costing compared at validation, delta back to Sales as a quote update (built).',
-  'Revision-level bump validated per customer statement (to build).',
+  'Revision intake: every new customer index triaged by Development, engineering review lane, release activates the linked index (built).',
   'Future tool: resource levelling beyond the Gantt planner.',
 ]
 
@@ -182,8 +191,12 @@ const cx = CX0 + CW / 2
 const lcx = LX + LW / 2
 const rcx = RX + RW / 2
 
+/** The intake row above Capture: every new customer index starts here. */
+const INTAKE_Y = 40
+const INTAKE_SHIFT = 116
+
 /** Every y on the spine, named: the rest of the chart hangs off these. */
-const Y = {
+const Y0 = {
   captured: 40, kickoff: 136, scoping: 212, meeting: 308, impactLock: 422,
   assessment: 498, verdict: 594, costing: 708, costGate: 804, carrier: 880,
   quoting: 994, quoted: 1090, fork: 1186, approved: 1300, confirm: 1396,
@@ -191,6 +204,9 @@ const Y = {
   validation: 1892, checks: 1988, checklist: 2102, lessons: 2198,
   releaseGate: 2440, released: 2516, closed: 2612,
 }
+const Y = Object.fromEntries(
+  Object.entries(Y0).map(([k, v]) => [k, v + INTAKE_SHIFT]),
+) as typeof Y0
 
 const mid = (y: number, h: number) => y + h / 2
 
@@ -205,7 +221,10 @@ const IH = 62              // issue box
 /** The mother-plant swimlane, below the main chart. */
 const LANE_Y = Y.closed + TH + 44
 const LANE_H = 176
-const CHART_H = LANE_Y + LANE_H + 20
+/** The engineering-review swimlane (lane R), below lane M. */
+const RLANE_Y = LANE_Y + LANE_H + 24
+const RLANE_H = 190
+const CHART_H = RLANE_Y + RLANE_H + 20
 
 // --- primitives -----------------------------------------------------------
 
@@ -305,10 +324,10 @@ function Terminal({ x, y, w, name, sub, stroke, testId, dashed }: {
 
 const MARKER: Record<string, string> = {
   [LOOP]: 'url(#arrow-loop)', [CROSS]: 'url(#arrow-cross)', [MP]: 'url(#arrow-mp)',
-  [HARD]: 'url(#arrow-hard)',
+  [HARD]: 'url(#arrow-hard)', [RV]: 'url(#arrow-rv)',
 }
 const LABEL_FILL: Record<string, string> = {
-  [LOOP]: '#fbbf24', [CROSS]: '#67e8f9', [MP]: '#d8b4fe', [HARD]: '#fca5a5',
+  [LOOP]: '#fbbf24', [CROSS]: '#67e8f9', [MP]: '#d8b4fe', [HARD]: '#fca5a5', [RV]: '#5eead4',
 }
 
 function Edge({ d, testId, color = LINE, dashed, both, label, lx, ly, rot, anchor }: {
@@ -408,7 +427,7 @@ function DeadlineRail() {
         strokeWidth={1} />
       <text x={RAIL - 3} y={(relTop + relBottom) / 2} fill="#6ee7b7" fontSize={11}
         textAnchor="middle" transform={`rotate(-90 ${RAIL - 3} ${(relTop + relBottom) / 2})`}>
-        release-due deadline active · acceptance, internal approval or mother-plant SOP → released · moved only by a recorded customer new timing
+        release-due deadline active · acceptance, internal approval or the SOP from KTX Weissenburg / Solingen → released · moved only by a recorded customer new timing
       </text>
     </g>
   )
@@ -448,7 +467,7 @@ const L3_LINES = [
   'L2 not acknowledged in 2 working days',
   'customer requires a fix on a concession',
   'Sales informs the customer (mail filed)',
-  'management notified · mother plant:',
+  'management notified · from KTX Weissenburg / Solingen:',
   'the PM informs its contact instead',
 ]
 const RUNG = { l1: IY.raise, l2: 0, l3: 0 }
@@ -498,7 +517,7 @@ function MotherPlantLane() {
         fill="#130f1f" stroke={MP} strokeWidth={1} strokeDasharray="6 5" />
       <text x={52} y={LANE_Y + 20} fill="#d8b4fe" fontSize={10.5} letterSpacing={1.2}
         fontWeight={600}>
-        LANE M · SIDE TRACK: CHANGE FROM THE MOTHER PLANT (origin mother_plant)
+        LANE M · SIDE TRACK: Change from KTX Weissenburg / Solingen
       </text>
       <text x={PNL_X - 14} y={LANE_Y + 20} fill={STROKE.built} fontSize={10}
         textAnchor="end" data-testid="procmap-mp-state">built</text>
@@ -526,9 +545,62 @@ function MotherPlantLane() {
         sub="main path at Approved (M)" stroke={MP} dashed testId="procmap-mp-join" />
       {[
         'Never: assessment, costing, offer, quote deadline. Open receipts show in Blocked by as information, not a gate.',
-        'Timing as usual (team confirmation, baseline) with an "Inform mother plant" stamp instead of the customer publish. L3 escalation: the PM informs the mother-plant contact. P&L: actual local costs only.',
+        'Timing as usual (team confirmation, baseline) with an "Inform KTX Weissenburg" (or Solingen) stamp instead of the customer publish. L3 escalation: the PM informs the contact there. P&L: actual local costs only.',
       ].map((l, i) => (
         <text key={l} x={58} y={y + NH + 26 + i * 14} fill="#c4b5fd" fontSize={10}>{l}</text>
+      ))}
+    </g>
+  )
+}
+
+/** The engineering review of a new index: lock, answers, activate or escalate. */
+function ReviewLane() {
+  const y = RLANE_Y + 34
+  const bw = 176, gap = 26
+  const xs = [58, 58 + bw + gap, 58 + 2 * (bw + gap)]
+  const dx = xs[2] + bw + gap, dw = 190
+  const tx = dx + dw + gap
+  const m = y + NH / 2
+  const arrow = (x1: number, x2: number, key: string, label?: string) => (
+    <Edge key={key} testId={`procmap-edge-rv-${key}`} color={RV}
+      d={`M ${x1} ${m} L ${x2} ${m}`} label={label} lx={x1 + 6} ly={m - 7} />
+  )
+  return (
+    <g data-testid="procmap-review-lane">
+      <rect x={40} y={RLANE_Y} width={PNL_X - 40} height={RLANE_H} rx={12}
+        fill="#0b1a1a" stroke={RV} strokeWidth={1} strokeDasharray="6 5" />
+      <text x={52} y={RLANE_Y + 20} fill="#5eead4" fontSize={10.5} letterSpacing={1.2}
+        fontWeight={600}>
+        LANE R · ENGINEERING REVIEW OF A NEW INDEX (origin engineering_review)
+      </text>
+      <text x={PNL_X - 14} y={RLANE_Y + 20} fill={STROKE.built} fontSize={10}
+        textAnchor="end" data-testid="procmap-rv-state">built</text>
+      <Box x={xs[0]} y={y} w={bw} h={NH} stroke={RV} badge="Team"
+        name="Triage" sub="Development picks the review"
+        task="change starts at scoping" testId="procmap-rv-triage" />
+      {arrow(xs[0] + bw, xs[1], 'triage-lock')}
+      <Box x={xs[1]} y={y} w={bw} h={NH} stroke={RV} badge="Team"
+        name="Scoping-lite" sub="Development locks the impact"
+        task="task: impact_confirm" testId="procmap-rv-lock" />
+      {arrow(xs[1] + bw, xs[2], 'lock-review')}
+      <Box x={xs[2]} y={y} w={bw} h={NH} stroke={RV} badge="Team"
+        name="Review" sub="serving departments answer"
+        task="task: impact or no impact" testId="procmap-rv-review" />
+      {arrow(xs[2] + bw, dx, 'review-decision')}
+      <Decision x={dx} w={dw} y={m - DH / 2} name="Any impact?"
+        lines={['all answered']} testId="procmap-rv-decision" />
+      {arrow(dx + dw, tx, 'decision-released', 'no')}
+      <Terminal x={tx} y={m - TH / 2} w={PNL_X - 16 - tx} name="Released and closed"
+        sub="index activated, no costing, offer or timing" stroke={RV} testId="procmap-rv-released" />
+      <Edge testId="procmap-edge-rv-escalate" color={RV}
+        d={`M ${dx + dw / 2} ${m + DH / 2} L ${dx + dw / 2} ${m + DH / 2 + 22}`}
+        label="yes: Development escalates to a full ECR (audited), main path at Scoping"
+        lx={dx + dw / 2 + 8} ly={m + DH / 2 + 16} />
+      {[
+        'Asked: Development, Packaging Engineer for articles, and the owners of what serves the part (tools: Tool Engineer, stations and EOAT: Manufacturing Engineer, gauges: APQP).',
+        'A full ECR or an attached change activates exactly its linked pending index at release; the checklist hints "index updated" and "drawing and 3D data released" from it.',
+      ].map((l, i) => (
+        <text key={l} x={58} y={y + NH + 46 + i * 14} fill="#99f6e4" fontSize={10}>{l}</text>
       ))}
     </g>
   )
@@ -564,7 +636,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         role="img" aria-label="ECR process flow" data-testid="procmap-chart">
         <defs>
           {([['arrow', LINE], ['arrow-loop', LOOP], ['arrow-cross', CROSS],
-            ['arrow-mp', MP], ['arrow-hard', HARD]] as const).map(([id, fill]) => (
+            ['arrow-mp', MP], ['arrow-hard', HARD], ['arrow-rv', RV]] as const).map(([id, fill]) => (
             <marker key={id} id={id} viewBox="0 0 10 10" refX="9" refY="5"
               markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill={fill} />
@@ -572,6 +644,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           ))}
         </defs>
 
+        <Phase y={INTAKE_Y - 20} h={NH + 36} label="Intake" color="#2dd4bf" />
         <Phase y={Y.captured - 20} h={(Y.kickoff + GH + 16) - (Y.captured - 20)} label="Capture" />
         <Phase y={Y.scoping - 20} h={(Y.impactLock + GH + 16) - (Y.scoping - 20)} label="Scoping" />
         <Phase y={Y.assessment - 20} h={(Y.verdict + DH + 16) - (Y.assessment - 20)} label="Assessment" />
@@ -586,6 +659,25 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           label="Validation issue VI-n · in build" color="#7dd3fc" />
 
         <DeadlineRail />
+
+        {/* --- intake: every new customer index, triaged by Development ---- */}
+        <Box x={CX0} y={INTAKE_Y} w={CW} h={NH} stroke={STROKE.built} badge="Team"
+          name="Intake: new customer index" sub="pending, active index unchanged"
+          task="task: triage index (Development)" testId="procmap-node-intake" />
+        <Edge testId="procmap-edge-intake-captured"
+          d={`M ${cx} ${INTAKE_Y + NH} L ${cx} ${Y.captured}`}
+          label="full ECR, or attach to an open change" lx={cx + 8} ly={INTAKE_Y + NH + 30} />
+        <Edge testId="procmap-edge-intake-review" color={RV}
+          d={`M ${CX0} ${mid(INTAKE_Y, NH)} L ${LX + LW} ${mid(INTAKE_Y, NH)}`}
+          label="review" lx={LX + LW + 8} ly={mid(INTAKE_Y, NH) - 7} />
+        <Box x={LX} y={INTAKE_Y} w={LW} h={NH} stroke={RV} dashed
+          name="Engineering review" sub="continues in lane R, below"
+          task="E levels before series" testId="procmap-node-intake-review" />
+        <Edge testId="procmap-edge-intake-admin" color={RV}
+          d={`M ${CX0 + CW} ${mid(INTAKE_Y, NH)} L ${RX} ${mid(INTAKE_Y, NH)}`}
+          label="administrative" lx={CX0 + CW + 8} ly={mid(INTAKE_Y, NH) - 7} />
+        <Terminal x={RX} y={mid(INTAKE_Y, NH) - TH / 2} w={RW} name="Active now"
+          sub="reason required, audited" stroke={RV} testId="procmap-node-intake-admin" />
 
         {/* --- the main path, each step carrying the condition it must meet --- */}
         {spine(Y.captured, NH, Y.kickoff, 'captured-kickoff')}
@@ -622,7 +714,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           d={`M ${CX0} ${mid(Y.captured, NH)} L ${LX + LW} ${mid(Y.captured, NH)}`}
           label="origin" lx={LX + LW + 8} ly={mid(Y.captured, NH) - 7} />
         <Box x={LX} y={Y.captured} w={LW} h={NH} stroke={MP} dashed
-          name="Mother plant" sub="continues in lane M, below"
+          name="KTX Weissenburg / Solingen" sub="continues in lane M, below"
           task="skips assessment to offer" testId="procmap-node-mp-origin" />
 
         {/* --- scoping: the meeting decides ----------------------------- */}
@@ -757,7 +849,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           name="Release deadline born" sub="mandatory; quote date freezes on-time fact"
           testId="procmap-node-release-deadline" />
         <Box x={LX} y={Y.approved + 30} w={LW} h={48} stroke={MP} dashed
-          name="From lane M" sub="release date = mother-plant SOP"
+          name="From lane M" sub="release date = their SOP"
           testId="procmap-node-mp-join" />
         <Edge testId="procmap-edge-mp-join" color={MP}
           d={`M ${LX + LW} ${Y.approved + 54} L ${CX0} ${Y.approved + 54}`} />
@@ -774,7 +866,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           testId="procmap-gate-timing" />
         <Box x={CX0} y={Y.publish} w={CW} h={NH} stroke={STROKE.built} badge="Sales"
           name="Publish the plan" sub="to the customer; MS Project / CSV export"
-          task="mother plant: Inform stamp instead" testId="procmap-node-publish-plan" />
+          task="KTX Weissenburg / Solingen: Inform stamp instead" testId="procmap-node-publish-plan" />
 
         {/* --- implementation: tracker, deviations, recovery ------------ */}
         <Box x={LX} y={Y.implementation} w={LW} h={NH} stroke="#94a3b8" badge="Team"
@@ -901,7 +993,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
         </text>
 
         {/* --- the stages themselves, drawn last so they sit on top ----- */}
-        {STAGES.filter((s) => s.key !== 'released').map((s) => (
+        {STAGES.filter((s) => s.key !== 'released' && s.key !== 'intake').map((s) => (
           // Stage keys carry the status vocabulary ("in_assessment"); the
           // coordinate map speaks plain names ("assessment"): strip the prefix
           // or the box lands at NaN and stacks over Capture.
@@ -921,6 +1013,7 @@ function Flowchart({ expanded, onToggle }: { expanded: boolean; onToggle: () => 
           testId="procmap-decision-verdict" />
 
         <MotherPlantLane />
+        <ReviewLane />
       </svg>
     </div>
   )
@@ -977,7 +1070,8 @@ export default function ProcessMapPage() {
         <span className="text-slate-500">Box = stage · diamond = decision · hexagon = gate (red = unbypassable) · stadium = terminal state.</span>
         <span className="text-amber-300/80">Amber = the flow leaving or re-entering the main path, incl. the validation-issue branch.</span>
         <span className="text-cyan-300/80">Cyan = information carried into a later stage, and the P&amp;L line.</span>
-        <span className="text-purple-300/80">Purple dashed = the mother-plant side track (lane M).</span>
+        <span className="text-purple-300/80">Purple dashed = the side track for a change from KTX Weissenburg / Solingen (lane M).</span>
+        <span className="text-teal-300/80">Teal = the intake of a new customer index and its engineering review (lane R).</span>
         <span className="text-slate-500">Badge = who owns it · mono line = the task raised · right gutter = what the stage produces · left rail = which deadline is active.</span>
       </p>
 

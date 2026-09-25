@@ -21,7 +21,7 @@ const wrap = (ui: React.ReactElement) =>
 describe('InformMotherPlant', () => {
   afterEach(cleanup)
 
-  it('stamps "Inform mother plant" after the baseline', async () => {
+  it('stamps "Inform KTX Weissenburg" after the baseline', async () => {
     api.inform.mockResolvedValue({})
     wrap(<InformMotherPlant change={change()} canInform timingValidated />)
     fireEvent.click(screen.getByTestId('timing-inform-mother-button'))
@@ -33,13 +33,13 @@ describe('InformMotherPlant', () => {
     wrap(<InformMotherPlant change={change({ plan_published_at: '2026-09-12T10:00:00', plan_published_by_name: 'Paula PM' })}
       canInform timingValidated />)
     expect(screen.getByTestId('timing-mother-informed').textContent)
-      .toContain('KTX Weissenburg (WUG) informed of the timing 12.09.2026 by Paula PM')
-    expect(screen.getByTestId('timing-inform-mother-button').textContent).toBe('Inform mother plant again')
+      .toContain('KTX Weissenburg informed of the timing 12.09.2026 by Paula PM')
+    expect(screen.getByTestId('timing-inform-mother-button').textContent).toBe('Inform KTX Weissenburg again')
   })
 
   it('without the right, names who does it', () => {
     wrap(<InformMotherPlant change={change()} canInform={false} timingValidated />)
     expect(screen.queryByTestId('timing-inform-mother-button')).toBeNull()
-    expect(screen.getByText('Project Management informs the mother plant.')).toBeDefined()
+    expect(screen.getByText('Project Management informs KTX Weissenburg.')).toBeDefined()
   })
 })

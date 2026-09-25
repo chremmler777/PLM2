@@ -1,4 +1,4 @@
-/** The "Change from mother plant" option of the Start change dialog (spec §14). */
+/** The "Change from KTX Weissenburg / Solingen" option of the Start change dialog (spec §14). */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -31,7 +31,7 @@ function wrap() {
   </MemoryRouter></QueryClientProvider>)
 }
 
-describe('StartChangeModal: change from mother plant', () => {
+describe('StartChangeModal: change from KTX Weissenburg / Solingen', () => {
   beforeEach(() => {
     vi.mocked(changesApi.create).mockClear()
     vi.mocked(changesApi.uploadAttachment).mockClear()
@@ -51,8 +51,8 @@ describe('StartChangeModal: change from mother plant', () => {
     wrap()
     await screen.findByText('20-3450-001-0 - Clip')
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'WUG insert change' } })
-    fireEvent.click(await screen.findByRole('radio', { name: /^Change from mother plant/ }))
-    const plant = screen.getByLabelText('Mother plant') as HTMLSelectElement
+    fireEvent.click(await screen.findByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ }))
+    const plant = screen.getByLabelText('Plant') as HTMLSelectElement
     expect(plant.value).toBe('KTX Weissenburg (WUG)')
     expect([...plant.options].map((o) => o.value)).toEqual(['KTX Weissenburg (WUG)', 'KTX Solingen'])
     // SOP is required
@@ -80,11 +80,41 @@ describe('StartChangeModal: change from mother plant', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/changes/42'))
   })
 
+  it('is a labelled modal that Escape closes', async () => {
+    const onClose = vi.fn()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><MemoryRouter>
+      <StartChangeModal open onClose={onClose} prefill={{ projectId: 1 }} />
+    </MemoryRouter></QueryClientProvider>)
+    const dialog = await screen.findByRole('dialog', { name: /Start change|change/i })
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('the SOP date commits when Tab leaves it from the calendar button', async () => {
+    wrap()
+    await screen.findByText('20-3450-001-0 - Clip')
+    fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'x' } })
+    fireEvent.click(await screen.findByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ }))
+    const create = screen.getByRole('button', { name: /Create change/ }) as HTMLButtonElement
+    const fields = screen.getByTestId('mother-plant-fields')
+    const sop = screen.getByLabelText('SOP date')
+    // A two-digit year is not committed while typing, only when the field is left.
+    fireEvent.change(sop, { target: { value: '01.12.26' } })
+    expect(create.disabled).toBe(true)
+    const calBtn = fields.querySelector('button[aria-label="Open calendar"]') as HTMLButtonElement
+    fireEvent.blur(sop, { relatedTarget: calBtn })
+    fireEvent.blur(calBtn, { relatedTarget: screen.getByLabelText(/Their timing/) })
+    await waitFor(() => expect(create.disabled).toBe(false))
+    expect((sop as HTMLInputElement).value).toBe('01.12.2026')
+  })
+
   it('the customer option still sends a customer change', async () => {
     wrap()
     await screen.findByText('20-3450-001-0 - Clip')
     fireEvent.change(screen.getByLabelText(/Short description/), { target: { value: 'x' } })
-    fireEvent.click(await screen.findByRole('radio', { name: /^Change from mother plant/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ }))
     fireEvent.click(screen.getByRole('radio', { name: /^Customer change/ }))
     expect(screen.queryByTestId('mother-plant-fields')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /Create change/ }))
@@ -97,6 +127,6 @@ describe('StartChangeModal: change from mother plant', () => {
     perms = { can_start_change: true, can_start_mother_plant: false }
     wrap()
     await screen.findByText('20-3450-001-0 - Clip')
-    await waitFor(() => expect(screen.queryByRole('radio', { name: /^Change from mother plant/ })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('radio', { name: /^Change from KTX Weissenburg \/ Solingen/ })).toBeNull())
   })
 })

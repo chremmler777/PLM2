@@ -36,6 +36,9 @@ describe('CustomerPackageDialog', () => {
     fireEvent.change(screen.getByTestId('part-x.stp'), { target: { value: '3' } })
     fireEvent.change(screen.getByTestId('action-x.stp'), { target: { value: 'new_major' } })
     fireEvent.click(screen.getByText('Store package'))
+    // spec §17: the result says the new index waits for triage
+    await waitFor(() => expect(screen.getByTestId('package-result').textContent).toContain('1 new, pending triage'))
+    fireEvent.click(screen.getByText('Done'))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const form = post.mock.calls[1][1] as FormData
     const rows = JSON.parse(form.get('rows') as string)

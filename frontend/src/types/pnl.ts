@@ -132,6 +132,8 @@ export interface OfferVsActual {
   change_id: number;
   currency: string;
   basis: PnlBasis;
+  /** Basis none: the plant the change came from, when the backend names it. */
+  mother_plant_name?: string | null;
   phase: 'plan' | 'actual';
   offer_version: number | null;
   frozen_at: string | null;

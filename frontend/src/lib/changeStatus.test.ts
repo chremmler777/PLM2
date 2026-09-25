@@ -93,3 +93,18 @@ describe('decodeLogValue', () => {
     expect(decodeLogValue(undefined)).toBeNull()
   })
 })
+
+describe('engineering review track (spec §17)', () => {
+  it('shows its own stages, tabs and next statuses', async () => {
+    const m = await import('./changeStatus')
+    expect(m.branchStepOrder(false, 'engineering_review')).toEqual(['captured', 'scoping', 'released', 'closed'])
+    expect(m.everydayTabsFor('engineering_review')).toEqual(['overview', 'impacted', 'review'])
+    expect(m.everydayTabsFor('customer', true)).toContain('review')
+    expect(m.everydayTabsFor('customer')).not.toContain('review')
+    expect(m.nextStatusesFor('scoping', 'engineering_review')).toEqual(['rejected'])
+    expect(m.activeTabsFor('scoping', false, 'engineering_review')).toEqual(['review'])
+    expect(m.resolveChangeTab('costing', 'scoping', 'engineering_review')).toBe('review')
+    expect(m.resolveChangeTab('review', 'scoping', 'customer')).toBe('review')
+    expect(m.changeTabLabel('review')).toBe('Review')
+  })
+})

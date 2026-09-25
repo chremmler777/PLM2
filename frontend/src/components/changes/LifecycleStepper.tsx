@@ -50,6 +50,9 @@ export default function LifecycleStepper({
           ? t('tab.scopingHandoff')
           // Mother plant: no meeting decides, the PM informs the team.
           : origin === 'mother_plant' && s === 'scoping' ? 'Lock the impact, inform the team'
+          // Engineering review (spec §17): lock the impact, departments answer.
+          : origin === 'engineering_review' && s === 'scoping' ? 'Lock the impact, departments answer'
+          : origin === 'engineering_review' && s === 'released' ? 'Every answer "no impact": index active'
           : t(`stepper.hint.${s}`)
         const stoppedHere = !!end && i === stopIdx
         const cls = end
@@ -64,7 +67,8 @@ export default function LifecycleStepper({
           <div key={s} className="flex items-center gap-1">
             <div className="flex flex-col items-center">
               <span title={hint} data-testid={`step-${s}`}
-                className={`px-2 py-1 rounded-full ${cls}`}>{stepperLabel(s)}</span>
+                className={`px-2 py-1 rounded-full ${cls}`}>
+                {origin === 'engineering_review' && s === 'scoping' ? 'Impact and review' : stepperLabel(s)}</span>
               {/* Who owns the stage, shown on the stage node itself. */}
               <StageResponsibleBadge status={s} />
               {!offPath && !end && i === idx && (

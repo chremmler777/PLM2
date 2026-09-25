@@ -184,7 +184,7 @@ describe('ProcessMapPage', () => {
       .toBe('#f87171')
     expect(screen.getByTestId('procmap-edge-mp-origin').getAttribute('marker-end'))
       .toBe('url(#arrow-mp)')
-    expect(screen.getByTestId('procmap-node-mp-join').textContent).toContain('mother-plant SOP')
+    expect(screen.getByTestId('procmap-node-mp-join').textContent).toContain('their SOP')
     // The side track is built now.
     expect(screen.getByTestId('procmap-mp-state').textContent).toBe('built')
     expect(lane).not.toContain('to build')
@@ -252,7 +252,7 @@ describe('ProcessMapPage', () => {
     wrap()
     expect(screen.getByTestId('procmap-role-in_assessment').textContent)
       .toBe('Routed departments (Sales exempt)')
-    expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(10)
+    expect(screen.getByTestId('procmap-table').querySelectorAll('tbody tr')).toHaveLength(11)
     expect(screen.getByTestId('procmap-rules').querySelectorAll('li')).toHaveLength(8)
     expect(screen.getByTestId('procmap-build-order').querySelectorAll('li')).toHaveLength(7)
   })
@@ -276,5 +276,18 @@ describe('ProcessMapPage', () => {
     for (const word of ['Angebot', 'Erfassung', 'Bewertung', 'Umsetzung', 'Prozess']) {
       expect(text).not.toContain(word)
     }
+  })
+
+  it('starts with the intake of a new customer index and draws the review lane', () => {
+    wrap()
+    expect(screen.getByTestId('procmap-node-intake').textContent).toContain('Intake: new customer index')
+    expect(screen.getByTestId('procmap-node-intake-review').textContent).toContain('Engineering review')
+    expect(screen.getByTestId('procmap-node-intake-admin').textContent).toContain('Active now')
+    const lane = screen.getByTestId('procmap-review-lane')
+    expect(lane.textContent).toContain('LANE R')
+    expect(screen.getByTestId('procmap-rv-decision').textContent).toContain('Any impact?')
+    expect(screen.getByTestId('procmap-rv-released').textContent).toContain('Released and closed')
+    expect(lane.textContent).toContain('escalates to a full ECR')
+    expect(screen.getByTestId('procmap-detail-intake').textContent).toContain('Development picks the route alone')
   })
 })

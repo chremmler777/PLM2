@@ -271,7 +271,16 @@ export default function AssessmentSubmitForm({
         className="bg-sky-600 hover:bg-sky-500 text-white font-semibold px-4 py-1.5 rounded-lg text-sm disabled:opacity-50">
         {notImpacted ? t('pkg.submitNotImpacted') : t('assessment.submit')}
       </button>
-      {!checklistDone && progress.firstOpen && (
+      {/* Only what is on screen counts: while the first question is open the
+          checklist below it is not shown, so it is the one thing unanswered. */}
+      {questionnaireOpen && (
+        <button type="button" data-testid="check-open-jump"
+          className="ml-2 text-xs text-amber-300 underline decoration-dotted underline-offset-2"
+          onClick={() => document.querySelector<HTMLInputElement>('[name="pkg-impacted"]')?.focus()}>
+          {t('check.openQuestionsOne')}
+        </button>
+      )}
+      {!questionnaireOpen && !checklistDone && progress.firstOpen && (
         <button type="button" data-testid="check-open-jump"
           className="ml-2 text-xs text-amber-300 underline decoration-dotted underline-offset-2"
           onClick={() => {

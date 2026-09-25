@@ -1397,3 +1397,43 @@ actions are audited as "<backup> for <main>". Table project_responsibles
 (unique project + department), migration 097, API GET/PUT
 /projects/{id}/team (PM members or admin), "Project team" card on the
 project page.
+
+### 17b. As built (2026-09-25)
+- **Migration 096** `revision_intakes` (part, project, revision unique,
+  source `package|customer_data|upload|promote`, batch_id, received_at/by,
+  status `pending|decided|superseded`, revision_phase + part_phase snapshot,
+  suggested_route, route, reason, decided_by/at, change_id,
+  promoted_from_revision_id, activated_at/by, escalated_at/by,
+  superseded_by_id) and `change_review_answers` (change, department unique,
+  answer `no_impact|impact`, note, answered_by/at). Pending = an intake with
+  `activated_at` null and status not superseded (`waiting_revision_ids()`).
+- **Gate**: `RevisionService.receive_customer_data(..., intake_source,
+  batch_id, promoted_from_revision_id)`; no source = scripts, active at once.
+  Callers: package confirm (`package`, one uuid batch per confirm),
+  `POST /parts/{id}/revisions/customer-data` (`source` in the body:
+  `customer_data` default, `upload` from the UploadDialog), promote
+  (`promote`, side effects at activation via `RevisionService.apply_promotion`).
+- **Reason rule**: required for `administrative` and whenever the route is
+  not the suggested one; optional otherwise.
+- **Re-triage**: an intake decided onto a change that died (cancelled, or
+  rejected/closed without release) needs triage again; the same test lets a
+  newer index supersede it.
+- **attach_ecr**: refused when the part already carries another resulting
+  revision in that change. In scoping the item goes through
+  `add_impacted_item` (resets the impact lock); later it is added directly
+  and, in implementation, its check workflow starts.
+- **Engineering review**: lead = the Development decider; created at
+  `scoping` (captured -> scoping logged). The impact lock seeds the answers
+  (re-lock adds missing departments, drops unanswered ones no longer
+  concerned). Admin may answer; otherwise members of the asked department.
+  Escalation: origin -> `customer`, `customer_relevant` true, intake
+  `escalated_at`; allowed with an impact, or without one with a note.
+  `review_refusal` blocks every other status hop (transition and the button
+  offer).
+- **API**: `GET /v1/intakes` (part_id, project_id, status, change_id,
+  waiting), `GET /v1/intakes/my`, `GET /v1/intakes/{id}`,
+  `POST /v1/intakes/{id}/decide`; `GET /v1/changes/{id}/review`,
+  `POST .../review/answers`, `POST .../review/escalate`. `ChangeResponse`
+  carries `from_intake`; project structure carries `intake_pending` per
+  article and revision; package preview rows carry `current_pending` and
+  `pending_note`, the confirm answer `pending_count` and `batch_id`.

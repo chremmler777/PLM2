@@ -48,11 +48,13 @@ describe('mother-plant flow helpers', () => {
     expect(nextStatusesFor('scoping', 'customer')).toEqual(['in_assessment', 'rejected'])
   })
 
-  it('replaces Assessments, Costing and Offer with one Mother plant tab', () => {
+  it('replaces Assessments, Costing and Offer with one tab named after the plant', () => {
     expect(everydayTabsFor('mother_plant')).toEqual(
       ['overview', 'scoping', 'impacted', 'mother', 'timing', 'release'])
     expect(everydayTabsFor('customer')).not.toContain('mother')
-    expect(changeTabLabel('mother')).toBe('Mother plant')
+    expect(changeTabLabel('mother', false, 'scoping', 'KTX Weissenburg (WUG)')).toBe('KTX Weissenburg')
+    expect(changeTabLabel('mother', false, 'scoping', 'KTX Solingen')).toBe('KTX Solingen')
+    expect(changeTabLabel('mother')).toBe('KTX Weissenburg / Solingen')
     for (const old of ['assessments', 'costing', 'offer', 'commercial']) {
       expect(resolveChangeTab(old, 'approved', 'mother_plant')).toBe('mother')
     }
@@ -68,7 +70,7 @@ describe('mother-plant flow helpers', () => {
       { kind: 'advance', to: 'approved' }])
   })
 
-  it('cockpit: after the baseline, inform the mother plant (no customer publish)', () => {
+  it('cockpit: after the baseline, inform the plant by name (no customer publish)', () => {
     const steps = nextStepFor(change({ status: 'approved', timing_validated_at: '2026-09-10T00:00:00' }))
     expect(steps[0]).toMatchObject({ kind: 'go', key: 'inform-mother', tab: 'timing' })
     expect(steps[1]).toMatchObject({ kind: 'advance', to: 'in_implementation' })
@@ -85,8 +87,8 @@ describe('mother-plant flow helpers', () => {
     </QueryClientProvider>)
     fireEvent.click(screen.getByTestId('next-info-send'))
     expect(onGo).toHaveBeenCalledWith('mother')
-    expect(screen.getByTestId('mother-plant-sop').textContent).toBe('SOP 01.12.2026')
-    expect(screen.getByTestId('mother-plant-origin').textContent).toContain('KTX Weissenburg (WUG) · WUG-4711')
+    expect(screen.getByTestId('mother-plant-sop').textContent).toBe('SOP from KTX Weissenburg 01.12.2026')
+    expect(screen.getByTestId('mother-plant-origin').textContent).toBe('From KTX Weissenburg · WUG-4711')
   })
 
   it('Blocked by: team not informed (a gate), open receipts (info), timing not told', () => {

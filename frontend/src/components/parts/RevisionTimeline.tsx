@@ -26,9 +26,12 @@ interface Props {
   onPromote(rev: Revision): void;
   onReject(id: number): void;
   onUnreject(id: number): void;
+  /** Spec §17: customer majors still waiting for Development's triage (or
+   *  for the change that activates them), with what they wait on. */
+  pending?: Map<number, string>;
 }
 
-export default function RevisionTimeline({ revisions, activeRevisionId, onNewProposal, onPromote, onReject, onUnreject }: Props) {
+export default function RevisionTimeline({ revisions, activeRevisionId, onNewProposal, onPromote, onReject, onUnreject, pending }: Props) {
   const groups = groupByMajor(revisions);
   if (groups.length === 0) {
     return <p className="text-slate-400 text-center py-8">No customer data yet.</p>;
@@ -47,7 +50,14 @@ export default function RevisionTimeline({ revisions, activeRevisionId, onNewPro
                 </Badge>
                 <Badge>{major.part_phase_at_receipt}</Badge>
                 {activeRevisionId === major.id && <Badge tone="bg-emerald-900/40 text-emerald-300">active</Badge>}
-                <Badge tone={statusColor[major.status] ?? ''}>{major.status}</Badge>
+                {pending?.has(major.id) ? (
+                  <span data-testid={`pending-chip-${major.id}`} title={pending.get(major.id)}
+                    className="text-xs px-2 py-0.5 rounded-full bg-amber-900/50 text-amber-200 ring-1 ring-amber-700/60">
+                    {pending.get(major.id)}
+                  </span>
+                ) : (
+                  <Badge tone={statusColor[major.status] ?? ''}>{major.status === 'in_review' ? 'in review' : major.status}</Badge>
+                )}
               </div>
               {major.summary && <p className="text-sm text-slate-300">{major.summary}</p>}
               <p className="text-xs text-slate-500">

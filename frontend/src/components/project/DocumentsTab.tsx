@@ -73,8 +73,9 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
       return res.data;
     },
     onSuccess: (data, { partId }) => {
-      toast.success(`Recorded ${data.revision_name}`);
+      toast.success(`Recorded ${data.revision_name}, pending triage`);
       setCustomerDataFor(null);
+      queryClient.invalidateQueries({ queryKey: ['intakes'] });
       queryClient.invalidateQueries({ queryKey: ['part-revisions', partId] });
       queryClient.invalidateQueries({ queryKey: ['parts', projectId] });
       queryClient.invalidateQueries({ queryKey: ['project-structure', projectId] });
@@ -174,7 +175,7 @@ export default function DocumentsTab({ projectId, project, parts, structure, sel
           officialOnly={(partRevisions ?? []).some((r) => r.phase === 'official')}
           onClose={() => setPackageFor(null)}
           onDone={(r) => {
-            toast.success(`Stored ${r.created.length} new, kept ${r.kept.length}`);
+            toast.success(`${r.created.length} new, pending triage; kept ${r.kept.length}`);
             setPackageFor(null);
             queryClient.invalidateQueries({ queryKey: ['part-revisions', packageFor] });
             queryClient.invalidateQueries({ queryKey: ['parts', projectId] });

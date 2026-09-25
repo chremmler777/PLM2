@@ -1,4 +1,5 @@
 import { CHANGE_STATUS_ORDER, type ChangeStatus, type GateKey } from '../types/change'
+import { plantName } from './plantName'
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   captured: 'Captured', scoping: 'Scoping', in_assessment: 'In Assessment', costing: 'Costing',
@@ -77,9 +78,19 @@ export const MOTHER_PLANT_STEP_ORDER: ChangeStatus[] = [
   'captured', 'scoping', 'approved', 'in_implementation', 'in_validation', 'released', 'closed',
 ]
 
+/**
+ * Engineering review (spec §17): the light track of a new customer index.
+ * Development locks the impact, the serving departments answer; all "no
+ * impact" releases and closes it, any impact is escalated to a full ECR.
+ */
+export const REVIEW_STEP_ORDER: ChangeStatus[] = ['captured', 'scoping', 'released', 'closed']
+export const isEngineeringReview = (origin?: string | null): boolean => origin === 'engineering_review'
+
 /** NEXT_STATUS for one change: the mother-plant side track leaves scoping for approved. */
 export function nextStatusesFor(status: ChangeStatus, origin?: string | null): ChangeStatus[] {
   if (origin === 'mother_plant' && status === 'scoping') return ['approved', 'rejected']
+  // The review's answers release it; no status button moves it on.
+  if (isEngineeringReview(origin) && status === 'scoping') return ['rejected']
   return NEXT_STATUS[status] ?? []
 }
 
@@ -90,6 +101,7 @@ export function nextStatusesFor(status: ChangeStatus, origin?: string | null): C
 export function branchStepOrder(customerRelevant?: boolean, origin?: string | null): ChangeStatus[] {
   // The mother-plant side track (spec §14) shows only the stages it uses.
   if (origin === 'mother_plant') return MOTHER_PLANT_STEP_ORDER
+  if (isEngineeringReview(origin)) return REVIEW_STEP_ORDER
   return !customerRelevant
     // An internal change is never offered, so neither quoting step applies.
     ? CHANGE_STATUS_ORDER.filter((s) => s !== 'quoting' && s !== 'quoted')
@@ -134,7 +146,7 @@ export const stepperLabel = (s: ChangeStatus): string => STEPPER_LABELS[s] ?? ST
  */
 export type ChangeTab =
   | 'overview' | 'scoping' | 'impacted' | 'assessments'
-  | 'costing' | 'offer' | 'mother' | 'timing' | 'release' | 'd1' | 'audit'
+  | 'costing' | 'offer' | 'mother' | 'review' | 'timing' | 'release' | 'd1' | 'audit'
 
 export const EVERYDAY_TABS: ChangeTab[] = [
   'overview', 'scoping', 'impacted', 'assessments', 'costing', 'offer', 'timing', 'release',
@@ -143,15 +155,24 @@ export const EVERYDAY_TABS: ChangeTab[] = [
 export const MOTHER_PLANT_TABS: ChangeTab[] = [
   'overview', 'scoping', 'impacted', 'mother', 'timing', 'release',
 ]
-export const everydayTabsFor = (origin?: string | null): ChangeTab[] =>
-  origin === 'mother_plant' ? MOTHER_PLANT_TABS : EVERYDAY_TABS
+/** Engineering review (spec §17): no assessment, costing, offer or timing. */
+export const REVIEW_TABS: ChangeTab[] = ['overview', 'impacted', 'review']
+/** The everyday tabs of a change; `hasReview` keeps the Review tab on a
+ *  review escalated to a full ECR (its answers are the scoping input). */
+export const everydayTabsFor = (origin?: string | null, hasReview = false): ChangeTab[] => {
+  if (origin === 'mother_plant') return MOTHER_PLANT_TABS
+  if (isEngineeringReview(origin)) return REVIEW_TABS
+  if (hasReview) return ['overview', 'scoping', 'impacted', 'review', ...EVERYDAY_TABS.slice(3)]
+  return EVERYDAY_TABS
+}
 export const GOVERNANCE_TABS: ChangeTab[] = ['d1', 'audit']
-export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, 'mother', ...GOVERNANCE_TABS]
+export const ALL_TABS: ChangeTab[] = [...EVERYDAY_TABS, 'mother', 'review', ...GOVERNANCE_TABS]
 
 /** Each phase-bound tab opens when the change reaches its phase. */
 export const TAB_UNLOCK_STATUS: Partial<Record<ChangeTab, ChangeStatus>> = {
   scoping: 'scoping',
   impacted: 'scoping',
+  review: 'scoping',
   assessments: 'in_assessment',
   costing: 'costing',
   // The quote plan can be prepared while costing still runs.
@@ -179,6 +200,7 @@ export function activeTabsFor(status: string, customerRelevant?: boolean | null,
   origin?: string | null): ChangeTab[] {
   // Mother plant: scoping is informing the team, worked on its own tab.
   if (origin === 'mother_plant' && status === 'scoping') return ['mother']
+  if (isEngineeringReview(origin)) return status === 'scoping' ? ['review'] : []
   const tab = STATUS_ACTIVE_TAB[status as ChangeStatus]
   if (!tab) return []
   if (status === 'costing' && !customerRelevant) return ['costing', 'offer']
@@ -200,6 +222,10 @@ export function resolveChangeTab(raw: string | null | undefined, status: string,
   if (origin === 'mother_plant'
     && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting'].includes(raw)) return 'mother'
   if (origin !== 'mother_plant' && raw === 'mother') return null
+  // An engineering review has no assessment, costing, offer or timing.
+  if (isEngineeringReview(origin)
+    && ['assessments', 'costing', 'offer', 'commercial', 'quote', 'quoting', 'timing',
+      'implementation', 'release', 'validation'].includes(raw)) return 'review'
   if (raw === 'commercial') return status === 'costing' ? 'costing' : 'offer'
   if (raw === 'implementation') return RELEASE_STAGE.includes(status) ? 'release' : 'timing'
   if (raw === 'quote' || raw === 'quoting') return 'offer'
@@ -208,7 +234,9 @@ export function resolveChangeTab(raw: string | null | undefined, status: string,
 }
 
 /** Display name of a tab (also for the aliases). */
-export function changeTabLabel(raw: string, customerRelevant?: boolean | null, status = ''): string {
+export function changeTabLabel(raw: string, customerRelevant?: boolean | null, status = '',
+  /** The plant a mother-plant change came from: names its tab. */
+  plant?: string | null): string {
   const tb = resolveChangeTab(raw, status) ?? raw
   switch (tb) {
     case 'overview': return 'Overview'
@@ -217,7 +245,8 @@ export function changeTabLabel(raw: string, customerRelevant?: boolean | null, s
     case 'assessments': return 'Assessments'
     case 'costing': return 'Costing'
     case 'offer': return customerRelevant ? 'Offer' : 'Approval'
-    case 'mother': return 'Mother plant'
+    case 'mother': return plantName(plant)
+    case 'review': return 'Review'
     case 'timing': return 'Timing'
     case 'release': return 'Release'
     case 'd1': return 'D1'

@@ -18,7 +18,7 @@ import AttachmentDropzone from './AttachmentDropzone'
 import { AttachmentRow } from './AttachmentRow'
 import { impactedCount, impactsOf, choiceLabel } from './departmentForms/ActivityChecklist'
 import BucketErrorBoundary from './BucketErrorBoundary'
-import { verdictLabel, plural } from '../../lib/humanLabels'
+import { assessmentVerdictLabel, plural } from '../../lib/humanLabels'
 import { assessmentProgress, deriveAssessmentState } from '../../lib/waitStates'
 import { t } from '../../i18n/cmLabels'
 import { formatDate } from '../../lib/format'
@@ -334,7 +334,7 @@ export default function AssessmentBuckets({
               {a?.verdict && a.verdict !== 'pending' && (
                 <span data-testid={`bucket-verdict-${row.id}`}
                   className={`text-sm flex-shrink-0 ${VERDICT_TONE[a.verdict] ?? ''}`}
-                  title={verdictLabel(a.verdict)} aria-label={verdictLabel(a.verdict)}>
+                  title={assessmentVerdictLabel(a)} aria-label={assessmentVerdictLabel(a)}>
                   {VERDICT_ICON[a.verdict] ?? ''}
                 </span>
               )}
@@ -398,7 +398,7 @@ export default function AssessmentBuckets({
                     <p className="text-[11px] uppercase tracking-wide text-slate-500">
                       {t('bucket.answer')}
                     </p>
-                    <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{verdictLabel(a!.verdict)}</p>
+                    <p className={VERDICT_TONE[a!.verdict] ?? 'text-slate-200'}>{assessmentVerdictLabel(a)}</p>
                     {a!.conditions && <p className="text-slate-300">{a!.conditions}</p>}
                     {a!.notes && <p className="text-slate-400 whitespace-pre-wrap">{a!.notes}</p>}
                   </div>

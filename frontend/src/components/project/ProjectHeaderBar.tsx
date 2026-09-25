@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import MilestoneStrip from '../MilestoneStrip';
 import StartChangeButton from '../changes/StartChangeButton';
 import { CustomerNamingSelect } from './CustomerNamingSelect';
+import { ProjectTeamCard } from './ProjectTeamCard';
 import { CUSTOMER_NAMING_LABELS, type Project } from './projectTypes';
 
 export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: {
@@ -76,6 +77,9 @@ export default function ProjectHeaderBar({ project, onStartChange, onAddPart }: 
             </button>
             <div className="px-3 py-2">
               <CustomerNamingSelect projectId={project.id} value={project.customer_naming ?? null} />
+            </div>
+            <div className="px-3 pt-2 pb-2 border-t border-slate-700">
+              <ProjectTeamCard projectId={project.id} />
             </div>
             <div className="px-3 pt-2 pb-1 border-t border-slate-700">
               <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Timing gates</p>

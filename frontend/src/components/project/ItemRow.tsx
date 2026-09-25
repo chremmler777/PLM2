@@ -189,6 +189,12 @@ export default function ItemRow(props: ItemRowProps) {
                   {activeRevision && (
                     <RevisionLabel testId={`row-rev-${part.id}`} name={activeRevision.revision_name} index={activeRevision.customer_index} />
                   )}
+                  {article?.intake_pending && (
+                    <span data-testid={`row-intake-${part.id}`} title="A new customer index is pending triage"
+                      className="rounded-full bg-amber-900/50 px-1.5 text-amber-200 ring-1 ring-amber-700/60">
+                      {article.revisions.find((r) => r.intake_pending)?.revision_name ?? 'new'} pending
+                    </span>
+                  )}
                   {activeRevision && phase && <span className="text-slate-600" aria-hidden="true">·</span>}
                   {phase && <span data-testid={`row-phase-${part.id}`}>{phase}</span>}
                 </span>
@@ -241,6 +247,7 @@ export default function ItemRow(props: ItemRowProps) {
                 <button key={r.id} type="button" data-testid={`tree-rev-${r.id}`} onClick={() => onSelectRevision?.(part.id, r.id)}
                   className={`px-1.5 py-0.5 rounded ${r.parent_revision_id ? 'bg-amber-900/40 text-amber-200' : 'bg-slate-700 text-slate-200'} ${r.is_active ? 'font-semibold' : ''}`}>
                   <RevisionLabel name={r.revision_name} index={r.customer_index} />{r.parent_revision_id ? ' proposal' : ''}{r.is_active ? ' ●' : ''}
+                  {r.intake_pending && <span data-testid={`tree-rev-pending-${r.id}`} className="ml-1 text-amber-300">pending triage</span>}
                 </button>
               ))}
             </div>

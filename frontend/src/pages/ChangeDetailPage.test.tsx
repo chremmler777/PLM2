@@ -124,7 +124,7 @@ vi.mock('../components/changes/LifecycleStepper', () => ({ default: () => <div>m
 // F10/finding 6: `needs` is a plain function prop — CockpitSummary itself is
 // mocked out (its own tests cover rendering), so it's exercised here by
 // probing it for the keys these tests care about.
-const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval'] as const
+const NEEDS_PROBE_KEYS = ['signoff', 'internal-approval', 'validate-timing'] as const
 vi.mock('../components/changes/CockpitSummary', () => ({
   default: ({ waits = [], needs, onAdvance }: {
     waits?: { key: string; text: string }[]
@@ -138,6 +138,7 @@ vi.mock('../components/changes/CockpitSummary', () => ({
       ))}
       {/* Drives the confirm dialogs the same way the real advance buttons would. */}
       <button type="button" onClick={() => onAdvance?.('in_validation')}>mock-advance-in_validation</button>
+      <button type="button" onClick={() => onAdvance?.('scoping')}>mock-advance-scoping</button>
     </div>
   ),
 }))
@@ -886,6 +887,43 @@ describe('ChangeDetailPage confirm and cancel (F4, F6)', () => {
     await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(1, 'closed', { to: 'closed' }))
   })
 
+  it('takes a change back to scoping only with a reason, and sends it', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    change.status = 'in_assessment' as ChangeDetail['status']
+    vi.mocked(changesApi.transition).mockClear()
+    wrap('/changes/1')
+    fireEvent.click(await screen.findByText('mock-advance-scoping'))
+    const dialog = await screen.findByTestId('confirm-scoping')
+    expect(dialog.getAttribute('aria-modal')).toBe('true')
+    const go = screen.getByTestId('confirm-go') as HTMLButtonElement
+    expect(go.disabled).toBe(true)
+    fireEvent.change(screen.getByTestId('confirm-reason'), { target: { value: '  Scope needs the carrier too ' } })
+    expect(go.disabled).toBe(false)
+    fireEvent.click(go)
+    await waitFor(() => expect(changesApi.transition).toHaveBeenCalledWith(
+      1, 'scoping', { to: 'scoping', reason: 'Scope needs the carrier too' }))
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+  })
+
+  it('holds the mother-plant hand-over while anything is missing and takes the description inline', async () => {
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    const c = change as unknown as Record<string, unknown>
+    change.status = 'captured' as ChangeDetail['status']
+    c.origin = 'mother_plant'
+    try {
+      wrap('/changes/1')
+      fireEvent.click(await screen.findByText('mock-advance-scoping'))
+      await screen.findByTestId('confirm-scoping')
+      expect((screen.getByTestId('confirm-go') as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByTestId('confirm-open').textContent).toContain(t('kickoff.description'))
+      expect(screen.getByTestId('kickoff-description')).toBeTruthy()
+      expect(screen.getByTestId('kickoff-description').querySelector('[data-testid="description-input"]')).toBeTruthy()
+    } finally {
+      delete c.origin
+      authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    }
+  })
+
   it('offers no Cancel once the change is released or closed', async () => {
     authState.current = { isAdmin: true, role: 'admin', userId: 99 }
     change.status = 'released' as ChangeDetail['status']
@@ -953,6 +991,36 @@ describe('ChangeDetailPage needs("signoff") gates only the missing side (finding
     vi.mocked(changesApi.myActions).mockResolvedValue({ actions: [], memberships: [5] } as never)
     wrap('/changes/1')
     expect((await screen.findByTestId('needs-signoff')).textContent).toBe('Needs the Project Manager and Quality')
+  })
+})
+
+describe('ChangeDetailPage validate-timing step follows the Timing tab', () => {
+  afterEach(() => {
+    cleanup()
+    change.status = 'in_assessment' as ChangeDetail['status']
+    authState.current = { isAdmin: false, role: 'engineer', userId: null }
+    vi.mocked(planApi.feedback).mockResolvedValue({ revision: 1, required: [], all_confirmed: true, validated_at: null, validated_by_name: null } as never)
+  })
+
+  it('is held while a team has not confirmed, like the tab button', async () => {
+    change.status = 'approved' as ChangeDetail['status']
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    vi.mocked(planApi.feedback).mockResolvedValue({ revision: 1, all_confirmed: false, validated_at: null,
+      validated_by_name: null, required: [
+        { department_id: 4, department_name: 'APQP', verdict: null, stale: false },
+        { department_id: 5, department_name: 'Tool Engineer', verdict: 'confirmed', stale: false },
+      ] } as never)
+    wrap('/changes/1')
+    await waitFor(() => expect(screen.getByTestId('needs-validate-timing').textContent)
+      .toBe('Waiting for APQP to confirm the timing'))
+  })
+
+  it('is offered once every team confirmed', async () => {
+    change.status = 'approved' as ChangeDetail['status']
+    authState.current = { isAdmin: true, role: 'admin', userId: 99 }
+    wrap('/changes/1')
+    await waitFor(() => expect(planApi.feedback).toHaveBeenCalled())
+    expect((await screen.findByTestId('needs-validate-timing')).textContent).toBe('allowed')
   })
 })
 
