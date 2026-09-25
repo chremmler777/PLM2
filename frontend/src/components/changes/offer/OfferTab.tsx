@@ -112,7 +112,7 @@ function PdfButton({ changeId, offerId, testId = 'offer-preview-pdf' }: {
 
 function OfferHeader({
   change, offer, latestSent, canWrite, onSend, onNewVersion, creating, warnings, stale, sendBlocked, sending,
-  onDiscard, discarding, sendReasons = [],
+  onDiscard, discarding, sendReasons = [], sendWarnings = [],
 }: {
   change: ChangeDetail
   offer: OfferOut
@@ -132,6 +132,8 @@ function OfferHeader({
   discarding?: boolean
   /** What still stops the send, in words; the button waits for all of them. */
   sendReasons?: string[]
+  /** Worth a look before sending, but no reason to hold the send. */
+  sendWarnings?: string[]
 }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const tot = offer.totals
@@ -243,6 +245,17 @@ function OfferHeader({
           ))}
         </div>
       )}
+      {canWrite && offer.status === 'draft' && sendWarnings.length > 0 && (
+        <div data-testid="offer-send-warnings"
+          className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-amber-200">
+          <span className="font-medium">Check before sending:</span>
+          {sendWarnings.map((r) => (
+            <span key={r} className="inline-flex items-center gap-1">
+              <CircleAlert aria-hidden="true" size={12} className="shrink-0 text-amber-300" />{r}
+            </span>
+          ))}
+        </div>
+      )}
       {warnings.length > 0 && (
         <ul data-testid="offer-warnings" className="mt-3 flex flex-wrap gap-1.5">
           {warnings.map((w, i) => (
@@ -340,15 +353,22 @@ function OfferWorkspace({ props, offers, offer }: {
   }
   const nav = NAV.filter((n) => n.id !== 'offer-negotiation' || showNegotiation)
   const errorsOf: Partial<Record<SectionId, number>> = { 'offer-timing': planErrors }
-  // What the backend would refuse, or what would go out wrong, said before the
-  // click (the backend still checks the same on send).
+  const acceptedOffer = offers.find((o) => o.id === change.accepted_offer_id)
+    ?? offers.find((o) => o.status === 'accepted')
+  // What stops the send, said before the click. The backend refuses a closed
+  // offer, a zero total and an empty quote plan with the timing included;
+  // quote-plan errors are held here as well (the backend is to refuse them too).
   const sendReasons = [
+    ...(closed ? [acceptedOffer
+      ? `The customer accepted v${acceptedOffer.version}: the offer is closed`
+      : 'The customer accepted the quote: the offer is closed'] : []),
     ...((offer.totals.total_one_time ?? 0) <= 0 ? ['The offer total is zero (Price)'] : []),
-    ...(!data.recipient?.company?.trim() ? ['The recipient company is empty (Document)'] : []),
     ...(timingIncluded && plan && !planHasTasks(plan)
       ? ['The quote plan is empty: plan it or leave the timing out (Timing)'] : []),
     ...(planErrors > 0 ? [`The quote plan has ${errorsText(planErrors)} (Timing)`] : []),
   ]
+  // Sent as it is, but most likely not what was meant: said, not blocked.
+  const sendWarnings = !data.recipient?.company?.trim() ? ['The recipient company is empty (Document)'] : []
 
   return (
     <div className="space-y-4">
@@ -359,9 +379,10 @@ function OfferWorkspace({ props, offers, offer }: {
         sending={preparingSend}
         onSend={() => { void openSend() }}
         sendReasons={sendReasons}
+        sendWarnings={sendWarnings}
         onNewVersion={canWrite && !hasDraft && !closed && change.status === 'quoted' ? () => newVersion.mutate() : undefined}
         creating={newVersion.isPending}
-        onDiscard={editable ? () => discard.mutateAsync() : undefined}
+        onDiscard={canWrite && offer.status === 'draft' ? () => discard.mutateAsync() : undefined}
         discarding={discard.isPending} />
 
       <nav data-testid="offer-nav"

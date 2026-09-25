@@ -903,7 +903,9 @@ function EffortRow({
       inFlight.current = false
       let q = queued.current
       queued.current = null
-      if (q?.hours && hoursRef.current === sentHours.current) {
+      // A queued hours commit that matches what the server now holds has
+      // nothing to say, also after a position-only save (nothing sent then).
+      if (q?.hours && num(hoursRef.current) === savedHours.current) {
         q = 'labour_position' in q ? { labour_position: q.labour_position } : null
       }
       if (q) run(q)

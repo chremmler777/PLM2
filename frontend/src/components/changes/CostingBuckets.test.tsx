@@ -158,6 +158,27 @@ describe('CostingBuckets', () => {
     expect(note.textContent).toContain('Nothing is costed yet: the total is 0.00 USD')
   })
 
+  it('counts money booked only in another currency as costed', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...summation, currency: 'EUR',
+      by_department: summation.by_department.map((d) => ({ ...d, one_time_internal: 0, one_time_external: 0 })),
+      totals: { ...summation.totals, one_time_internal: 0, one_time_external: 0, grand_total: 0 },
+      totals_by_currency: { USD: { one_time_internal: 0, one_time_external: 700,
+        lifecycle_internal: 0, lifecycle_external: 0, grand_total: 700 } },
+      mixed_currency: true,
+      by_department_plant: [{ department_id: 2, plant_id: 1, currency: 'USD', one_time_internal: 0,
+        one_time_external: 500, lifecycle_internal: 0, lifecycle_external: 0 }],
+      positions_by_department: [{ department_id: 4, position_cost: 0, hours: 0, hours_cost: 0, machine_hours: 0,
+        trials: 0, position_count: 1, unrated_hours: false, unpriced_count: 0,
+        positions: [{ position_id: 1, label: 'Tool', kind: 'external', cost: 200, currency: 'USD',
+          line_value: null, rate: null }] }],
+    } as never)
+    buckets({ canSeeAll: true })
+    await waitFor(() => expect(screen.getByTestId('costing-state-2').textContent).toBe(t('costing.filled')))
+    expect(screen.getByTestId('costing-state-4').textContent).toBe(t('costing.filled'))
+    expect(screen.queryByTestId('costing-readiness')).toBeNull()
+  })
+
   it('stays quiet once every department has costed, and outside costing', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue({
       ...summation,

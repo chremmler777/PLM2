@@ -49,6 +49,19 @@ describe('QuoteBasis', () => {
     expect(screen.getByText(t('quote.basisHint'))).toBeTruthy()
   })
 
+  it('counts money booked only in another currency as costed', async () => {
+    vi.mocked(changesApi.getSummation).mockResolvedValue({
+      ...SUMMATION, currency: 'EUR',
+      totals: { ...SUMMATION.totals, grand_total: 0 },
+      totals_by_currency: { USD: { one_time_internal: 0, one_time_external: 1200,
+        lifecycle_internal: 0, lifecycle_external: 0, grand_total: 1200 } },
+    } as never)
+    wrap()
+    await waitFor(() => expect(screen.getByTestId('quote-basis-total-USD').textContent).toContain('1,200.00 USD'))
+    expect(screen.getByTestId('quote-basis-total').textContent).toBe('0.00 EUR')
+    expect(screen.queryByText('nothing costed yet')).toBeNull()
+  })
+
   it('leaves out the time block when the change costs no production time', async () => {
     vi.mocked(changesApi.getSummation).mockResolvedValue(SUMMATION as never)
     wrap()

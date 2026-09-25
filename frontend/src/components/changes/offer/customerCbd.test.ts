@@ -13,6 +13,13 @@ describe('customerCbd rounds like the PDF (Python round)', () => {
     expect(r2(12345.675)).toBe(12345.67) // stored as 12345.67499...
     expect(r2(3)).toBe(3)
     expect(r2(0.1 + 0.2)).toBe(0.3)
+    // Past 2^53 cents: one decimal parse, as Python's round (values from CPython).
+    expect(r2(1e14 + 0.03125)).toBe(100000000000000.03)
+    expect(r2(-(1e14 + 0.03125))).toBe(-100000000000000.03)
+    expect(r2(1e14 + 0.09375)).toBe(100000000000000.1)
+    expect(r2(1e14 + 0.109375)).toBe(100000000000000.11)
+    expect(r2(1e14 + 0.125)).toBe(100000000000000.12) // exact tie, to even
+    expect(r2(1e14 + 0.375)).toBe(100000000000000.38) // exact tie, to even
   })
 
   it('spreads a hidden amount to the same cents as offer_pdf.spread_cbd', () => {

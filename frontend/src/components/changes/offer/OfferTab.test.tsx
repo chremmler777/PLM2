@@ -392,14 +392,30 @@ describe('OfferTab', () => {
     vi.mocked(planApi.get).mockResolvedValue({ tasks: [{ id: 1 }], summary: { duration_days: 60 } } as never)
   })
 
-  it('does not send an offer without a recipient company, and says so', async () => {
+  it('warns about an empty recipient company but still lets the offer go', async () => {
     const o = offer()
     o.data.recipient = { company: '' }
     vi.mocked(changeOfferApi.list).mockResolvedValue([o])
     renderTab(props())
     const send = await screen.findByTestId('offer-send') as HTMLButtonElement
+    expect(send.disabled).toBe(false)
+    expect(screen.queryByTestId('offer-send-reasons')).toBeNull()
+    expect(screen.getByTestId('offer-send-warnings').textContent).toContain('recipient company is empty')
+  })
+
+  it('a draft left over after the customer accepted cannot be sent, but can be discarded', async () => {
+    const v1 = offer({ id: 10, version: 1, status: 'accepted' })
+    const v2 = offer({ id: 11, version: 2, status: 'draft' })
+    vi.mocked(changeOfferApi.list).mockResolvedValue([v2, v1])
+    vi.mocked(changeOfferApi.discard).mockResolvedValue(undefined)
+    renderTab(props({ change: change({ status: 'approved', customer_response: 'accepted', accepted_offer_id: 10 }) }))
+    const send = await screen.findByTestId('offer-send') as HTMLButtonElement
     expect(send.disabled).toBe(true)
-    expect(screen.getByTestId('offer-send-reasons').textContent).toContain('recipient company is empty')
+    expect(screen.getByTestId('offer-send-reasons').textContent)
+      .toContain('The customer accepted v1: the offer is closed')
+    fireEvent.click(screen.getByTestId('offer-discard'))
+    fireEvent.click(within(await screen.findByTestId('offer-discard-confirm')).getByTestId('confirm-ok'))
+    await waitFor(() => expect(changeOfferApi.discard).toHaveBeenCalledWith(7, 11))
   })
 
   it('shows no result against internal cost before anything is costed', async () => {

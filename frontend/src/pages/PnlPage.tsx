@@ -180,8 +180,11 @@ function SummaryBlock({ block, currency, heading, rows }: {
   rows: PnlRow[]
 }) {
   const t = block.totals;
-  const running = rows.some(runningRow);
-  const realizedRunning = rows.some((r) => r.realized && runningRow(r));
+  // Only the rows the tiles sum (backend _agg: priced, same currency) can
+  // make the figures provisional.
+  const summed = rows.filter((r) => r.offer_revenue != null && !r.currency_mismatch);
+  const running = summed.some(runningRow);
+  const realizedRunning = summed.some((r) => r.realized && runningRow(r));
   const notes = [
     (t.mismatch_count ?? 0) > 0
       && `${t.mismatch_count} change${t.mismatch_count === 1 ? '' : 's'} with the revenue in another currency: no margin, not in the sums`,

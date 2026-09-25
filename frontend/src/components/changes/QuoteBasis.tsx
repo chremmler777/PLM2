@@ -33,7 +33,11 @@ export default function QuoteBasis({
   const minutes = (data.lifecycle_minutes_by_plant ?? []).filter((m) => m.minutes_per_part !== 0)
   const totalMinutes = data.total_minutes_per_part ?? 0
   const leadDays = data.max_lead_time_days ?? 0
-  const nothingCosted = Math.abs(data.totals.grand_total) < 0.005
+  // Other currencies are booked only into totals_by_currency (never converted,
+  // never added): shown beside the total, and costed money all the same.
+  const otherTotals = Object.entries(data.totals_by_currency ?? {})
+    .filter(([c, g]) => c !== data.currency && Math.abs(g.grand_total ?? 0) >= 0.005)
+  const nothingCosted = Math.abs(data.totals.grand_total) < 0.005 && otherTotals.length === 0
   // Only the worst still-open risks travel to the offer. A 3 that nobody could
   // close is a technical judgement Sales owes the customer — a 2, or one that was
   // settled, is internal history and would only dilute the list.
@@ -52,6 +56,11 @@ export default function QuoteBasis({
               ? formatMoney(data.totals.grand_total, data.currency)
               : formatNumber(data.totals.grand_total, { min: 2, max: 2 })}
         </span>
+        {otherTotals.map(([c, g]) => (
+          <span key={c} data-testid={`quote-basis-total-${c}`} className="tabular-nums text-slate-100">
+            <span aria-hidden="true" className="mr-2 text-slate-500">·</span>{formatMoney(g.grand_total, c)}
+          </span>
+        ))}
         {nothingCosted && <span className="text-xs text-slate-500">nothing costed yet</span>}
       </p>
       {(minutes.length > 0 || totalMinutes !== 0) && (

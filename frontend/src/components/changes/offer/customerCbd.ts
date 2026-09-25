@@ -49,7 +49,9 @@ export function r2(v: number): number {
   let q = scaled / den
   const twice = (scaled % den) * 2n
   if (twice > den || (twice === den && q % 2n === 1n)) q += 1n
-  const out = Number(q) / 100
+  // Parse the decimal once: Number(q) / 100 rounds twice, which is off by a
+  // unit in the last place once q passes 2^53 (|v| from about 9e13).
+  const out = Number(`${q}e-2`)
   return v < 0 ? -out : out
 }
 

@@ -4,7 +4,7 @@ import { actualCostsApi } from '../../../api/actualCosts'
 import { changesApi } from '../../../api/changes'
 import { X } from 'lucide-react'
 import {
-  NUMBER_INPUT_HINT, formatCalendarDate, formatMoney, readNumberInput, todayIso,
+  NUMBER_INPUT_HINT, NUMBER_INPUT_INVALID, formatCalendarDate, formatMoney, readNumberInput, todayIso,
 } from '../../../lib/format'
 import { apiErrorMessage } from '../../../lib/apiError'
 import ConfirmDialog from '../../common/ConfirmDialog'
@@ -86,7 +86,8 @@ export default function ActualCostsPanel({ changeId, departments = [] }: {
     ? Object.entries(data.totals_by_currency)
     : [...data.items.reduce((m, c) => m.set(curOf(c), (m.get(curOf(c)) ?? 0) + c.amount), new Map<string, number>())]
   const amountOk = amountRead.value !== null && amountRead.value > 0
-  const amountHint = amountRead.error ? NUMBER_INPUT_HINT
+  const amountHint = amountRead.error === 'invalid' ? NUMBER_INPUT_INVALID
+    : amountRead.error === 'ambiguous' ? NUMBER_INPUT_HINT
     : amountRead.value !== null && amountRead.value <= 0 ? 'The amount must be more than 0' : null
   // An actual cost is booked when it happened: never ahead of today.
   const future = !!costDate && costDate > todayIso()

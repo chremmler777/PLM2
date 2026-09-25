@@ -20,7 +20,7 @@ import CostPositions from './CostPositions'
 import CostingSheetBar from './CostingSheetBar'
 import { t } from '../../i18n/cmLabels'
 import { formatDays, formatMoney, formatNumber } from '../../lib/format'
-import type { ChangeDetail, Summation } from '../../types/change'
+import type { ChangeDetail, DeptRollup, Summation } from '../../types/change'
 
 function LeadTimeField({ changeId, departmentId, initial }: {
   changeId: number; departmentId: number; initial: number | null | undefined
@@ -92,6 +92,25 @@ export default function CostingBuckets({
     return row.one_time_internal + row.one_time_external
       + row.lifecycle_internal + row.lifecycle_external
   }
+  // Money in another currency than the costing's is booked only into
+  // totals_by_currency (backend _book), never into by_department: look for it
+  // in the department's plant cells and positions, which carry their currency.
+  const deptForeignMoney = (id: number) => {
+    if (!summation) return false
+    const cur = summation.currency
+    const cells = (summation as Summation & { by_department_plant?: (DeptRollup & { plant_id: number })[] })
+      .by_department_plant ?? []
+    return cells.some((c) => c.department_id === id && !!c.currency && c.currency !== cur
+      && (c.one_time_internal || c.one_time_external || c.lifecycle_internal || c.lifecycle_external))
+      || (summation.positions_by_department ?? []).some((d) => d.department_id === id
+        && d.positions.some((p) => !!p.currency && p.currency !== cur && (!!p.cost || !!p.line_value)))
+  }
+  /** Costed at all, in any currency; null when the figures are not ours to read. */
+  const deptCosted = (id: number): boolean | null => {
+    const tot = deptTotal(id)
+    if (tot == null) return deptForeignMoney(id) ? true : null
+    return tot !== 0 || deptForeignMoney(id)
+  }
   const leadTimeOf = (id: number) =>
     summation?.lead_time_by_department?.find((d) => d.department_id === id)?.lead_time_days
       ?? change.assessments.find((a) => a.department_id === id)?.lead_time_impact_days
@@ -115,14 +134,14 @@ export default function CostingBuckets({
   // money in it is not a basis for a quote. Said here, where it can be fixed.
   const unbooked = canSeeAll && summation
     ? rows.filter((a) => {
-      const tot = deptTotal(a.department_id)
-      const priced = tot != null && tot !== 0
+      const priced = deptCosted(a.department_id) === true
       const unpriced = (summation.unpriced_lines ?? []).some((l) => l.department_id === a.department_id)
       return !priced && !unpriced
     }).map((a) => deptName(a.department_id))
     : []
   const nothingCosted = !!summation && canSeeAll && change.status === 'costing'
     && Math.abs(summation.totals?.grand_total ?? 0) < 0.005
+    && Object.values(summation.totals_by_currency ?? {}).every((g) => Math.abs(g.grand_total ?? 0) < 0.005)
     && (summation.unpriced_lines ?? []).length === 0
 
   // An ordinary member gets their own bucket and nothing else — not even a
@@ -154,7 +173,7 @@ export default function CostingBuckets({
         const isMine = myDepartmentIds.includes(id)
         const expanded = openDept === id
         const total = deptTotal(id)
-        const filled = total != null ? total !== 0 : null
+        const filled = deptCosted(id)
         // Entered, but no cost sheet rate: not "Empty" (the department did
         // its part), and not a price either.
         const noRate = !filled && (summation?.unpriced_lines ?? []).some((l) => l.department_id === id)

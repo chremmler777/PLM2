@@ -285,6 +285,19 @@ describe('PnlPage', () => {
     expect(screen.queryByText(/^forecast, to date/)).toBeNull()
   })
 
+  it('a running change the sums leave out (unpriced or other currency) makes no forecast tile', async () => {
+    changesMock.mockResolvedValueOnce({ rows: [
+      { ...rowsFixture[0], change_id: 35, change_number: 'CR-35', status: 'closed', realized: true },
+      { ...rowsFixture[0], change_id: 36, change_number: 'CR-36', status: 'in_implementation', realized: true,
+        offer_revenue: null },
+      { ...rowsFixture[0], change_id: 37, change_number: 'CR-37', status: 'in_implementation', realized: true,
+        currency_mismatch: true },
+    ] })
+    renderPage()
+    await screen.findByText('CR-35')
+    expect(screen.queryByText('Actual margin (forecast)')).toBeNull()
+  })
+
   it('shows an engineering review as unpriced by design, not "price pending"', async () => {
     changesMock.mockResolvedValueOnce({ rows: [
       { ...rowsFixture[1], change_id: 34, change_number: 'CR-34', origin: 'engineering_review' },

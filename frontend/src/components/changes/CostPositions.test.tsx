@@ -159,6 +159,26 @@ describe('CostPositions', () => {
     expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(2)
   })
 
+  it('an unchanged hours commit during a position-only save sends nothing more (review)', async () => {
+    let resolve!: (v: unknown) => void
+    vi.mocked(changesApi.updateCostPosition).mockImplementationOnce(
+      () => new Promise((r) => { resolve = r }) as never)
+    positions()
+    await waitFor(() => expect(
+      (screen.getByTestId('costpos-effort-internal_effort-2') as HTMLInputElement).value,
+    ).toBe('12'))
+    fireEvent.change(screen.getByTestId('costpos-effort-position-internal_effort-2'),
+      { target: { value: 'Engineer' } })
+    await waitFor(() => expect(changesApi.updateCostPosition)
+      .toHaveBeenCalledWith(7, 10, { labour_position: 'Engineer' }))
+    // Leaving the untouched hours field while that save is out.
+    fireEvent.blur(screen.getByTestId('costpos-effort-internal_effort-2'))
+    const listed = vi.mocked(changesApi.listCostPositions).mock.calls.length
+    resolve({})
+    await waitFor(() => expect(vi.mocked(changesApi.listCostPositions).mock.calls.length).toBeGreaterThan(listed))
+    expect(changesApi.updateCostPosition).toHaveBeenCalledTimes(1)
+  })
+
   it('after a create, queued and later changes go out as edits of the new position (review)', async () => {
     let resolveCreate!: (v: unknown) => void
     let resolveEdit!: (v: unknown) => void
